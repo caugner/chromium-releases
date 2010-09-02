@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,14 @@
 
 #include "build/build_config.h"
 
-#if defined(OS_LINUX)
+#if defined(USE_X11)
 #include <gtk/gtk.h>
+#elif defined(OS_MACOSX)
+#include <CoreFoundation/CoreFoundation.h>
 #endif
+
+#include <string>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
@@ -27,8 +32,9 @@
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
 
-#if defined(OS_MACOSX)
-#include <CoreFoundation/CoreFoundation.h>
+#if defined(USE_X11)
+#include "app/x11_util.h"
+#elif defined(OS_MACOSX)
 #include "app/l10n_util.h"
 #include "base/mac_util.h"
 #include "base/scoped_cftyperef.h"
@@ -79,6 +85,8 @@ PluginThread::PluginThread()
       free(argv[i]);
     }
   }
+
+  x11_util::SetX11ErrorHandlers();
 #endif
 
   PatchNPNFunctions();
@@ -94,7 +102,7 @@ PluginThread::PluginThread()
     plugin->NP_Initialize();
 
 #if defined(OS_MACOSX)
-    scoped_cftyperef<CFStringRef> plugin_name(base::SysWideToCFStringRef(
+    scoped_cftyperef<CFStringRef> plugin_name(base::SysUTF16ToCFStringRef(
         plugin->plugin_info().name));
     scoped_cftyperef<CFStringRef> app_name(base::SysUTF16ToCFStringRef(
         l10n_util::GetStringUTF16(IDS_SHORT_PLUGIN_APP_NAME)));
@@ -135,10 +143,6 @@ void PluginThread::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginProcessMsg_PluginMessage, OnPluginMessage)
     IPC_MESSAGE_HANDLER(PluginProcessMsg_NotifyRenderersOfPendingShutdown,
                         OnNotifyRenderersOfPendingShutdown)
-#if defined(OS_MACOSX)
-  IPC_MESSAGE_HANDLER(PluginProcessMsg_PluginFocusNotify,
-                      OnPluginFocusNotify)
-#endif
   IPC_END_MESSAGE_MAP()
 }
 
@@ -177,21 +181,6 @@ void PluginThread::OnNotifyRenderersOfPendingShutdown() {
   PluginChannel::NotifyRenderersOfPendingShutdown();
 }
 
-#if defined(OS_MACOSX)
-void PluginThread::OnPluginFocusNotify(uint32 instance_id) {
-  WebPluginDelegateImpl* focused_instance =
-      reinterpret_cast<WebPluginDelegateImpl*>(instance_id);
-  std::set<WebPluginDelegateImpl*> active_delegates =
-      WebPluginDelegateImpl::GetActiveDelegates();
-  for (std::set<WebPluginDelegateImpl*>::iterator iter =
-           active_delegates.begin();
-       iter != active_delegates.end(); iter++) {
-    WebPluginDelegateImpl* instance = *iter;
-    instance->FocusChanged(instance == focused_instance);
-  }
-}
-#endif
-
 namespace webkit_glue {
 
 #if defined(OS_WIN)
@@ -226,15 +215,7 @@ bool GetPluginFinderURL(std::string* plugin_finder_url) {
 }
 
 bool IsDefaultPluginEnabled() {
-#if defined(OS_WIN)
   return true;
-#elif defined(OS_LINUX)
-  // http://code.google.com/p/chromium/issues/detail?id=10952
-  return false;
-#elif defined(OS_MACOSX)
-  // http://code.google.com/p/chromium/issues/detail?id=17392
-  return false;
-#endif
 }
 
 // Dispatch the resolve proxy resquest to the right code, depending on which
@@ -259,4 +240,4 @@ bool FindProxyForUrl(const GURL& url, std::string* proxy_list) {
   return true;
 }
 
-} // namespace webkit_glue
+}  // namespace webkit_glue

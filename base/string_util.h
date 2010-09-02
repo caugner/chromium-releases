@@ -164,6 +164,12 @@ bool TrimString(const std::string& input,
                 const char trim_chars[],
                 std::string* output);
 
+// Truncates a string to the nearest UTF-8 character that will leave
+// the string less than or equal to the specified byte size.
+void TruncateUTF8ToByteSize(const std::string& input,
+                            const size_t byte_size,
+                            std::string* output);
+
 // Trims any whitespace from either end of the input string.  Returns where
 // whitespace was found.
 // The non-wide version has two functions:
@@ -595,6 +601,9 @@ size_t Tokenize(const string16& str,
 size_t Tokenize(const std::string& str,
                 const std::string& delimiters,
                 std::vector<std::string>* tokens);
+size_t Tokenize(const base::StringPiece& str,
+                const base::StringPiece& delimiters,
+                std::vector<base::StringPiece>* tokens);
 
 // Does the opposite of SplitString().
 std::wstring JoinString(const std::vector<std::wstring>& parts, wchar_t s);

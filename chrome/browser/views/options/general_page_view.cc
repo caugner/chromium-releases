@@ -6,34 +6,27 @@
 
 #include "app/combobox_model.h"
 #include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/callback.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_list.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/custom_home_pages_table_model.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
-#include "chrome/browser/favicon_service.h"
-#include "chrome/browser/history/history.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/session_startup_pref.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/views/keyword_editor_view.h"
+#include "chrome/browser/views/options/managed_prefs_banner_view.h"
 #include "chrome/browser/views/options/options_group_view.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
-#include "gfx/codec/png_codec.h"
-#include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "net/base/net_util.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "views/controls/button/radio_button.h"
 #include "views/controls/label.h"
 #include "views/controls/table/table_view.h"
@@ -43,229 +36,18 @@
 
 namespace {
 
-static const int kStartupRadioGroup = 1;
-static const int kHomePageRadioGroup = 2;
-static const SkColor kDefaultBrowserLabelColor = SkColorSetRGB(0, 135, 0);
-static const SkColor kNotDefaultBrowserLabelColor = SkColorSetRGB(135, 0, 0);
+// All the options pages are in the same view hierarchy. This means we need to
+// make sure group identifiers don't collide across different pages.
+const int kStartupRadioGroup = 101;
+const int kHomePageRadioGroup = 102;
+const SkColor kDefaultBrowserLabelColor = SkColorSetRGB(0, 135, 0);
+const SkColor kNotDefaultBrowserLabelColor = SkColorSetRGB(135, 0, 0);
+const int kHomePageTextfieldWidthChars = 40;
 
-std::wstring GetNewTabUIURLString() {
-  return UTF8ToWide(chrome::kChromeUINewTabURL);
+bool IsNewTabUIURLString(const GURL& url) {
+  return url == GURL(chrome::kChromeUINewTabURL);
 }
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// CustomHomePagesTableModel
-
-// CustomHomePagesTableModel is the model for the TableView showing the list
-// of pages the user wants opened on startup.
-
-class CustomHomePagesTableModel : public TableModel {
- public:
-  explicit CustomHomePagesTableModel(Profile* profile);
-  virtual ~CustomHomePagesTableModel() {}
-
-  // Sets the set of urls that this model contains.
-  void SetURLs(const std::vector<GURL>& urls);
-
-  // Adds an entry at the specified index.
-  void Add(int index, const GURL& url);
-
-  // Removes the entry at the specified index.
-  void Remove(int index);
-
-  // Returns the set of urls this model contains.
-  std::vector<GURL> GetURLs();
-
-  // TableModel overrides:
-  virtual int RowCount();
-  virtual std::wstring GetText(int row, int column_id);
-  virtual SkBitmap GetIcon(int row);
-  virtual void SetObserver(TableModelObserver* observer);
-
- private:
-  // Each item in the model is represented as an Entry. Entry stores the URL
-  // and favicon of the page.
-  struct Entry {
-    Entry() : fav_icon_handle(0) {}
-
-    // URL of the page.
-    GURL url;
-
-    // Icon for the page.
-    SkBitmap icon;
-
-    // If non-zero, indicates we're loading the favicon for the page.
-    FaviconService::Handle fav_icon_handle;
-  };
-
-  static void InitClass();
-
-  // Loads the favicon for the specified entry.
-  void LoadFavIcon(Entry* entry);
-
-  // Callback from history service. Updates the icon of the Entry whose
-  // fav_icon_handle matches handle and notifies the observer of the change.
-  void OnGotFavIcon(FaviconService::Handle handle,
-                    bool know_fav_icon,
-                    scoped_refptr<RefCountedMemory> image_data,
-                    bool is_expired,
-                    GURL icon_url);
-
-  // Returns the entry whose fav_icon_handle matches handle and sets entry_index
-  // to the index of the entry.
-  Entry* GetEntryByLoadHandle(FaviconService::Handle handle, int* entry_index);
-
-  // Set of entries we're showing.
-  std::vector<Entry> entries_;
-
-  // Default icon to show when one can't be found for the URL.
-  static SkBitmap default_favicon_;
-
-  // Profile used to load icons.
-  Profile* profile_;
-
-  TableModelObserver* observer_;
-
-  // Used in loading favicons.
-  CancelableRequestConsumer fav_icon_consumer_;
-
-  DISALLOW_COPY_AND_ASSIGN(CustomHomePagesTableModel);
-};
-
-// static
-SkBitmap CustomHomePagesTableModel::default_favicon_;
-
-CustomHomePagesTableModel::CustomHomePagesTableModel(Profile* profile)
-    : profile_(profile),
-      observer_(NULL) {
-  InitClass();
-}
-
-void CustomHomePagesTableModel::SetURLs(const std::vector<GURL>& urls) {
-  entries_.resize(urls.size());
-  for (size_t i = 0; i < urls.size(); ++i) {
-    entries_[i].url = urls[i];
-    LoadFavIcon(&(entries_[i]));
-  }
-  // Complete change, so tell the view to just rebuild itself.
-  if (observer_)
-    observer_->OnModelChanged();
-}
-
-void CustomHomePagesTableModel::Add(int index, const GURL& url) {
-  DCHECK(index >= 0 && index <= RowCount());
-  entries_.insert(entries_.begin() + static_cast<size_t>(index), Entry());
-  entries_[index].url = url;
-  if (observer_)
-    observer_->OnItemsAdded(index, 1);
-}
-
-void CustomHomePagesTableModel::Remove(int index) {
-  DCHECK(index >= 0 && index < RowCount());
-  Entry* entry = &(entries_[index]);
-  if (entry->fav_icon_handle) {
-    // Pending load request, cancel it now so we don't deref a bogus pointer
-    // when we get loaded notification.
-    FaviconService* favicon_service =
-        profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
-    if (favicon_service)
-      favicon_service->CancelRequest(entry->fav_icon_handle);
-  }
-  entries_.erase(entries_.begin() + static_cast<size_t>(index));
-  if (observer_)
-    observer_->OnItemsRemoved(index, 1);
-}
-
-std::vector<GURL> CustomHomePagesTableModel::GetURLs() {
-  std::vector<GURL> urls(entries_.size());
-  for (size_t i = 0; i < entries_.size(); ++i)
-    urls[i] = entries_[i].url;
-  return urls;
-}
-
-int CustomHomePagesTableModel::RowCount() {
-  return static_cast<int>(entries_.size());
-}
-
-std::wstring CustomHomePagesTableModel::GetText(int row, int column_id) {
-  DCHECK(column_id == 0);
-  DCHECK(row >= 0 && row < RowCount());
-  std::wstring languages =
-      profile_->GetPrefs()->GetString(prefs::kAcceptLanguages);
-  // No need to force URL to have LTR directionality because the custom home
-  // pages control is created using LTR directionality.
-  return net::FormatUrl(entries_[row].url, languages);
-}
-
-SkBitmap CustomHomePagesTableModel::GetIcon(int row) {
-  DCHECK(row >= 0 && row < RowCount());
-  if (!entries_[row].icon.isNull())
-    return entries_[row].icon;
-  return default_favicon_;
-}
-
-void CustomHomePagesTableModel::SetObserver(TableModelObserver* observer) {
-  observer_ = observer;
-}
-
-void CustomHomePagesTableModel::InitClass() {
-  static bool initialized = false;
-  if (!initialized) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    default_favicon_ = *rb.GetBitmapNamed(IDR_DEFAULT_FAVICON);
-    initialized = true;
-  }
-}
-
-void CustomHomePagesTableModel::LoadFavIcon(Entry* entry) {
-  FaviconService* favicon_service =
-      profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
-  if (!favicon_service)
-    return;
-  entry->fav_icon_handle = favicon_service->GetFaviconForURL(
-      entry->url, &fav_icon_consumer_,
-      NewCallback(this, &CustomHomePagesTableModel::OnGotFavIcon));
-}
-
-void CustomHomePagesTableModel::OnGotFavIcon(
-    FaviconService::Handle handle,
-    bool know_fav_icon,
-    scoped_refptr<RefCountedMemory> image_data,
-    bool is_expired,
-    GURL icon_url) {
-  int entry_index;
-  Entry* entry = GetEntryByLoadHandle(handle, &entry_index);
-  DCHECK(entry);
-  entry->fav_icon_handle = 0;
-  if (know_fav_icon && image_data.get() && image_data->size()) {
-    int width, height;
-    std::vector<unsigned char> decoded_data;
-    if (gfx::PNGCodec::Decode(image_data->front(),
-                              image_data->size(),
-                              gfx::PNGCodec::FORMAT_BGRA, &decoded_data,
-                              &width, &height)) {
-      entry->icon.setConfig(SkBitmap::kARGB_8888_Config, width, height);
-      entry->icon.allocPixels();
-      memcpy(entry->icon.getPixels(), &decoded_data.front(),
-             width * height * 4);
-      if (observer_)
-        observer_->OnItemsChanged(static_cast<int>(entry_index), 1);
-    }
-  }
-}
-
-CustomHomePagesTableModel::Entry*
-    CustomHomePagesTableModel::GetEntryByLoadHandle(
-    FaviconService::Handle handle,
-    int* index) {
-  for (size_t i = 0; i < entries_.size(); ++i) {
-    if (entries_[i].fav_icon_handle == handle) {
-      *index = static_cast<int>(i);
-      return &entries_[i];
-    }
-  }
-  return NULL;
-}
+}  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
 // SearchEngineListModel
@@ -454,12 +236,12 @@ void GeneralPageView::ButtonPressed(
   } else if (sender == homepage_use_newtab_radio_) {
     UserMetricsRecordAction(UserMetricsAction("Options_Homepage_UseNewTab"),
                             profile()->GetPrefs());
-    SetHomepage(GetNewTabUIURLString());
+    UpdateHomepagePrefs();
     EnableHomepageURLField(false);
   } else if (sender == homepage_use_url_radio_) {
     UserMetricsRecordAction(UserMetricsAction("Options_Homepage_UseURL"),
                             profile()->GetPrefs());
-    SetHomepage(homepage_use_url_textfield_->text());
+    UpdateHomepagePrefs();
     EnableHomepageURLField(true);
   } else if (sender == homepage_show_home_button_checkbox_) {
     bool show_button = homepage_show_home_button_checkbox_->checked();
@@ -505,13 +287,7 @@ void GeneralPageView::ItemChanged(views::Combobox* combobox,
 void GeneralPageView::ContentsChanged(views::Textfield* sender,
                                       const std::wstring& new_contents) {
   if (sender == homepage_use_url_textfield_) {
-    // If the text field contains a valid URL, sync it to prefs. We run it
-    // through the fixer upper to allow input like "google.com" to be converted
-    // to something valid ("http://google.com").
-    std::string url_string = URLFixerUpper::FixupURL(
-        UTF16ToUTF8(homepage_use_url_textfield_->text()), std::string());
-    if (GURL(url_string).is_valid())
-      SetHomepage(UTF8ToWide(url_string));
+    UpdateHomepagePrefs();
   }
 }
 
@@ -535,6 +311,11 @@ void GeneralPageView::InitControlLayout() {
   ColumnSet* column_set = layout->AddColumnSet(single_column_view_set_id);
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::USE_PREF, 0, 0);
+
+  layout->StartRow(0, single_column_view_set_id);
+  layout->AddView(
+      new ManagedPrefsBannerView(profile()->GetPrefs(), OPTIONS_PAGE_GENERAL));
+
   layout->StartRow(0, single_column_view_set_id);
   InitStartupGroup();
   layout->AddView(startup_group_);
@@ -603,20 +384,26 @@ void GeneralPageView::NotifyPrefChanged(const std::wstring* pref_name) {
     startup_custom_pages_table_model_->SetURLs(startup_pref.urls);
   }
 
-  if (!pref_name || *pref_name == prefs::kHomePageIsNewTabPage) {
-    if (new_tab_page_is_home_page_.GetValue()) {
-      homepage_use_newtab_radio_->SetChecked(true);
-      EnableHomepageURLField(false);
-    } else {
-      homepage_use_url_radio_->SetChecked(true);
-      EnableHomepageURLField(true);
-    }
-  }
-
-  if (!pref_name || *pref_name == prefs::kHomePage) {
-    bool enabled = homepage_.GetValue() != GetNewTabUIURLString();
-    if (enabled)
-      homepage_use_url_textfield_->SetText(homepage_.GetValue());
+  if (!pref_name ||
+      *pref_name == prefs::kHomePageIsNewTabPage ||
+      *pref_name == prefs::kHomePage) {
+    bool new_tab_page_is_home_page_managed =
+        new_tab_page_is_home_page_.IsManaged();
+    bool homepage_managed = homepage_.IsManaged();
+    bool homepage_url_is_new_tab =
+        IsNewTabUIURLString(GURL(homepage_.GetValue()));
+    bool homepage_is_new_tab = homepage_url_is_new_tab ||
+        new_tab_page_is_home_page_.GetValue();
+    // If HomepageIsNewTab is managed or
+    // Homepage is 'chrome://newtab' and managed, disable the radios.
+    bool disable_homepage_choice_buttons =
+        new_tab_page_is_home_page_managed ||
+        homepage_managed && homepage_url_is_new_tab;
+    if (!homepage_url_is_new_tab)
+      homepage_use_url_textfield_->SetText(UTF8ToWide(homepage_.GetValue()));
+    UpdateHomepageIsNewTabRadio(
+        homepage_is_new_tab, !disable_homepage_choice_buttons);
+    EnableHomepageURLField(!homepage_is_new_tab);
   }
 
   if (!pref_name || *pref_name == prefs::kShowHomeButton) {
@@ -628,24 +415,6 @@ void GeneralPageView::NotifyPrefChanged(const std::wstring* pref_name) {
 void GeneralPageView::HighlightGroup(OptionsGroup highlight_group) {
   if (highlight_group == OPTIONS_GROUP_DEFAULT_SEARCH)
     default_search_group_->SetHighlighted(true);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// GeneralPageView, views::View overrides:
-
-void GeneralPageView::Layout() {
-  // We need to Layout twice - once to get the width of the contents box...
-  View::Layout();
-  startup_last_session_radio_->SetBounds(
-      0, 0, startup_group_->GetContentsWidth(), 0);
-  homepage_use_newtab_radio_->SetBounds(
-      0, 0, homepage_group_->GetContentsWidth(), 0);
-  homepage_show_home_button_checkbox_->SetBounds(
-      0, 0, homepage_group_->GetContentsWidth(), 0);
-  default_browser_status_label_->SetBounds(
-      0, 0, default_browser_group_->GetContentsWidth(), 0);
-  // ... and twice to get the height of multi-line items correct.
-  View::Layout();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -715,8 +484,6 @@ void GeneralPageView::InitStartupGroup() {
   startup_custom_pages_table_ = new views::TableView(
       startup_custom_pages_table_model_.get(), columns,
       views::ICON_AND_TEXT, false, false, true);
-  // URLs are inherently left-to-right, so do not mirror the table.
-  startup_custom_pages_table_->EnableUIMirroringForRTLLanguages(false);
   startup_custom_pages_table_->SetObserver(this);
 
   using views::GridLayout;
@@ -743,14 +510,16 @@ void GeneralPageView::InitStartupGroup() {
   layout->AddView(startup_homepage_radio_);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   layout->StartRow(0, single_column_view_set_id);
-  layout->AddView(startup_last_session_radio_);
+  layout->AddView(startup_last_session_radio_, 1, 1,
+                  GridLayout::FILL, GridLayout::LEADING);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(startup_custom_radio_);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 
   layout->StartRow(0, double_column_view_set_id);
-  layout->AddView(startup_custom_pages_table_);
+  layout->AddView(startup_custom_pages_table_, 1, 1,
+                  GridLayout::FILL, GridLayout::FILL);
 
   views::View* button_stack = new views::View;
   GridLayout* button_stack_layout = new GridLayout(button_stack);
@@ -789,6 +558,8 @@ void GeneralPageView::InitHomepageGroup() {
   homepage_use_url_radio_->set_listener(this);
   homepage_use_url_textfield_ = new views::Textfield;
   homepage_use_url_textfield_->SetController(this);
+  homepage_use_url_textfield_->set_default_width_in_chars(
+      kHomePageTextfieldWidthChars);
   homepage_show_home_button_checkbox_ = new views::Checkbox(
       l10n_util::GetString(IDS_OPTIONS_HOMEPAGE_SHOW_BUTTON));
   homepage_show_home_button_checkbox_->set_listener(this);
@@ -815,14 +586,16 @@ void GeneralPageView::InitHomepageGroup() {
                         GridLayout::USE_PREF, 0, 0);
 
   layout->StartRow(0, single_column_view_set_id);
-  layout->AddView(homepage_use_newtab_radio_);
+  layout->AddView(homepage_use_newtab_radio_, 1, 1,
+                  GridLayout::FILL, GridLayout::LEADING);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   layout->StartRow(0, double_column_view_set_id);
   layout->AddView(homepage_use_url_radio_);
   layout->AddView(homepage_use_url_textfield_);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   layout->StartRow(0, single_column_view_set_id);
-  layout->AddView(homepage_show_home_button_checkbox_);
+  layout->AddView(homepage_show_home_button_checkbox_, 1, 1,
+                  GridLayout::FILL, GridLayout::LEADING);
 
   homepage_group_ = new OptionsGroupView(
       contents, l10n_util::GetString(IDS_OPTIONS_HOMEPAGE_GROUP_NAME),
@@ -888,7 +661,8 @@ void GeneralPageView::InitDefaultBrowserGroup() {
                         GridLayout::USE_PREF, 0, 0);
 
   layout->StartRow(0, single_column_view_set_id);
-  layout->AddView(default_browser_status_label_);
+  layout->AddView(default_browser_status_label_, 1, 1,
+                  GridLayout::FILL, GridLayout::LEADING);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(default_browser_use_as_default_button_);
@@ -942,27 +716,7 @@ void GeneralPageView::RemoveURLsFromStartupURLs() {
 }
 
 void GeneralPageView::SetStartupURLToCurrentPage() {
-  // Remove the current entries.
-  while (startup_custom_pages_table_model_->RowCount())
-    startup_custom_pages_table_model_->Remove(0);
-
-  // And add all entries for all open browsers with our profile.
-  int add_index = 0;
-  for (BrowserList::const_iterator browser_i = BrowserList::begin();
-       browser_i != BrowserList::end(); ++browser_i) {
-    Browser* browser = *browser_i;
-    if (browser->profile() != profile())
-      continue;  // Only want entries for open profile.
-
-    for (int tab_index = 0; tab_index < browser->tab_count(); ++tab_index) {
-      TabContents* tab = browser->GetTabContentsAt(tab_index);
-      if (tab->ShouldDisplayURL()) {
-        const GURL url = browser->GetTabContentsAt(tab_index)->GetURL();
-        if (!url.is_empty())
-          startup_custom_pages_table_model_->Add(add_index++, url);
-      }
-    }
-  }
+  startup_custom_pages_table_model_->SetToCurrentlyOpenPages();
 
   SaveStartupPref();
 }
@@ -989,13 +743,46 @@ void GeneralPageView::AddBookmark(UrlPicker* dialog,
   SaveStartupPref();
 }
 
-void GeneralPageView::SetHomepage(const std::wstring& homepage) {
-  if (homepage.empty() || homepage == GetNewTabUIURLString()) {
-    new_tab_page_is_home_page_.SetValue(true);
+void GeneralPageView::UpdateHomepagePrefs() {
+  // If the text field contains a valid URL, sync it to prefs. We run it
+  // through the fixer upper to allow input like "google.com" to be converted
+  // to something valid ("http://google.com"). If the field contains an
+  // empty or null-host URL, a blank homepage is synced to prefs.
+  const GURL& homepage =
+    URLFixerUpper::FixupURL(
+       UTF16ToUTF8(homepage_use_url_textfield_->text()), std::string());
+  bool new_tab_page_is_home_page = homepage_use_newtab_radio_->checked();
+  if (IsNewTabUIURLString(homepage)) {  // 'chrome://newtab/'
+    // This should be handled differently than invalid URLs.
+    // When the control arrives here, then |homepage| contains
+    // 'chrome://newtab/', and the homepage preference contains the previous
+    // valid content of the textfield (fixed up), most likely
+    // 'chrome://newta/'. This has to be cleared, because keeping it makes no
+    // sense to the user.
+    new_tab_page_is_home_page = true;
+    homepage_.SetValueIfNotManaged(std::string());
+  } else if (!homepage.is_valid()) {
+    new_tab_page_is_home_page = true;
+    // The URL is invalid either with a host (e.g. http://chr%mium.org)
+    // or without a host (e.g. http://). In case there is a host, then
+    // the URL is not cleared, saving a fragment of the URL to the
+    // preferences (e.g. http://chr in case the characters of the above example
+    // were typed by the user one by one).
+    // See bug 40996.
+    if (!homepage.has_host())
+      homepage_.SetValueIfNotManaged(std::string());
   } else {
-    new_tab_page_is_home_page_.SetValue(false);
-    homepage_.SetValue(homepage);
+    homepage_.SetValueIfNotManaged(homepage.spec());
   }
+  new_tab_page_is_home_page_.SetValueIfNotManaged(new_tab_page_is_home_page);
+}
+
+void GeneralPageView::UpdateHomepageIsNewTabRadio(bool homepage_is_new_tab,
+                                                  bool enabled) {
+  homepage_use_newtab_radio_->SetChecked(homepage_is_new_tab);
+  homepage_use_url_radio_->SetChecked(!homepage_is_new_tab);
+  homepage_use_newtab_radio_->SetEnabled(enabled);
+  homepage_use_url_radio_->SetEnabled(enabled);
 }
 
 void GeneralPageView::OnSelectionChanged() {
@@ -1004,13 +791,11 @@ void GeneralPageView::OnSelectionChanged() {
 }
 
 void GeneralPageView::EnableHomepageURLField(bool enabled) {
-  if (enabled) {
-    homepage_use_url_textfield_->SetEnabled(true);
-    homepage_use_url_textfield_->SetReadOnly(false);
-  } else {
-    homepage_use_url_textfield_->SetEnabled(false);
-    homepage_use_url_textfield_->SetReadOnly(true);
+  if (homepage_.IsManaged()) {
+    enabled = false;
   }
+  homepage_use_url_textfield_->SetEnabled(enabled);
+  homepage_use_url_textfield_->SetReadOnly(!enabled);
 }
 
 void GeneralPageView::SetDefaultSearchProvider() {

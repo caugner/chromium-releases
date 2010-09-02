@@ -7,6 +7,7 @@
 #include "app/theme_provider.h"
 #include "base/basictypes.h"
 #include "base/scoped_nsobject.h"
+#include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #import "chrome/browser/cocoa/bookmark_bar_constants.h"
 #import "chrome/browser/cocoa/bookmark_bar_controller.h"
@@ -25,18 +26,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
-
-// Add a redirect to make testing easier.
-@interface BookmarkBarController(MakeTestingEasier)
-- (IBAction)openBookmarkFolderFromButton:(id)sender;
-@end
-
-@implementation BookmarkBarController(MakeTestingEasier)
-- (IBAction)openBookmarkFolderFromButton:(id)sender {
-  [[self folderTarget] openBookmarkFolderFromButton:sender];
-}
-@end
-
 
 // Just like a BookmarkBarController but openURL: is stubbed out.
 @interface BookmarkBarControllerNoOpen : BookmarkBarController {
@@ -64,7 +53,7 @@
  @private
   NSSize cellSize_;
 }
-@property(readonly) NSSize cellSize;
+@property (nonatomic, readonly) NSSize cellSize;
 @end
 
 @implementation CellWithDesiredSize
@@ -85,7 +74,7 @@
  @private
   int toggles_;
 }
-@property (readonly) int toggles;
+@property (nonatomic, readonly) int toggles;
 @end
 
 @implementation BookmarkBarControllerTogglePong
@@ -103,8 +92,8 @@
   BOOL windowWillCloseReceived_;
   BOOL windowDidResignKeyReceived_;
 }
-@property(readonly) BOOL windowWillCloseReceived;
-@property(readonly) BOOL windowDidResignKeyReceived;
+@property (nonatomic, readonly) BOOL windowWillCloseReceived;
+@property (nonatomic, readonly) BOOL windowDidResignKeyReceived;
 @end
 
 @implementation BookmarkBarControllerNotificationPong
@@ -126,7 +115,7 @@
 @interface BookmarkBarControllerOpenAllPong : BookmarkBarControllerNoOpen {
   WindowOpenDisposition dispositionDetected_;
 }
-@property WindowOpenDisposition dispositionDetected;
+@property (nonatomic) WindowOpenDisposition dispositionDetected;
 @end
 
 @implementation BookmarkBarControllerOpenAllPong
@@ -136,6 +125,43 @@
 - (void)openAll:(const BookmarkNode*)node
     disposition:(WindowOpenDisposition)disposition {
   [self setDispositionDetected:disposition];
+}
+
+@end
+
+// Just like a BookmarkBarController but intercedes when providing
+// pasteboard drag data.
+@interface BookmarkBarControllerDragData : BookmarkBarController {
+  const BookmarkNode* dragDataNode_;  // Weak
+}
+- (void)setDragDataNode:(const BookmarkNode*)node;
+@end
+
+@implementation BookmarkBarControllerDragData
+
+- (id)initWithBrowser:(Browser*)browser
+         initialWidth:(CGFloat)initialWidth
+             delegate:(id<BookmarkBarControllerDelegate>)delegate
+       resizeDelegate:(id<ViewResizer>)resizeDelegate {
+  if ((self = [super initWithBrowser:browser
+                        initialWidth:initialWidth
+                            delegate:delegate
+                      resizeDelegate:resizeDelegate])) {
+    dragDataNode_ = NULL;
+  }
+  return self;
+}
+
+- (void)setDragDataNode:(const BookmarkNode*)node {
+  dragDataNode_ = node;
+}
+
+- (std::vector<const BookmarkNode*>)retrieveBookmarkDragDataNodes {
+  std::vector<const BookmarkNode*> dragDataNodes;
+  if(dragDataNode_) {
+    dragDataNodes.push_back(dragDataNode_);
+  }
+  return dragDataNodes;
 }
 
 @end
@@ -171,6 +197,54 @@ class FakeTheme : public ThemeProvider {
 };
 
 
+@interface FakeDragInfo : NSObject {
+ @public
+  NSPoint dropLocation_;
+  NSDragOperation sourceMask_;
+}
+@property (nonatomic, assign) NSPoint dropLocation;
+- (void)setDraggingSourceOperationMask:(NSDragOperation)mask;
+@end
+
+@implementation FakeDragInfo
+
+@synthesize dropLocation = dropLocation_;
+
+- (id)init {
+  if ((self = [super init])) {
+    dropLocation_ = NSZeroPoint;
+    sourceMask_ = NSDragOperationMove;
+  }
+  return self;
+}
+
+// NSDraggingInfo protocol functions.
+
+- (id)draggingPasteboard {
+  return self;
+}
+
+- (id)draggingSource {
+  return self;
+}
+
+- (NSDragOperation)draggingSourceOperationMask {
+  return sourceMask_;
+}
+
+- (NSPoint)draggingLocation {
+  return dropLocation_;
+}
+
+// Other functions.
+
+- (void)setDraggingSourceOperationMask:(NSDragOperation)mask {
+  sourceMask_ = mask;
+}
+
+@end
+
+
 namespace {
 
 class BookmarkBarControllerTestBase : public CocoaTest {
@@ -178,19 +252,12 @@ class BookmarkBarControllerTestBase : public CocoaTest {
   BrowserTestHelper helper_;
   scoped_nsobject<NSView> parent_view_;
   scoped_nsobject<ViewResizerPong> resizeDelegate_;
-  scoped_nsobject<BookmarkBarController> bar_;
 
   BookmarkBarControllerTestBase() {
     resizeDelegate_.reset([[ViewResizerPong alloc] init]);
     NSRect parent_frame = NSMakeRect(0, 0, 800, 50);
     parent_view_.reset([[NSView alloc] initWithFrame:parent_frame]);
     [parent_view_ setHidden:YES];
-    bar_.reset([[BookmarkBarController alloc]
-                initWithBrowser:helper_.browser()
-                   initialWidth:NSWidth(parent_frame)
-                       delegate:nil
-                 resizeDelegate:resizeDelegate_.get()]);
-    InstallAndToggleBar(bar_.get());
   }
 
   void InstallAndToggleBar(BookmarkBarController* bar) {
@@ -221,6 +288,7 @@ class BookmarkBarControllerTest : public BookmarkBarControllerTestBase {
   scoped_nsobject<BookmarkMenu> menu_;
   scoped_nsobject<NSMenuItem> menu_item_;
   scoped_nsobject<NSButtonCell> cell_;
+  scoped_nsobject<BookmarkBarControllerNoOpen> bar_;
 
   BookmarkBarControllerTest() {
     bar_.reset(
@@ -434,7 +502,7 @@ TEST_F(BookmarkBarControllerTest, FrameChangeNotification) {
 // bookmark, and comes back when we delete the bookmark.
 TEST_F(BookmarkBarControllerTest, NoItemContainerGoesAway) {
   BookmarkModel* model = helper_.profile()->GetBookmarkModel();
-  const BookmarkNode* parent = model->GetBookmarkBarNode();
+  const BookmarkNode* bar = model->GetBookmarkBarNode();
 
   [bar_ loaded:model];
   BookmarkBarView* view = [bar_ buttonView];
@@ -443,17 +511,31 @@ TEST_F(BookmarkBarControllerTest, NoItemContainerGoesAway) {
   DCHECK(noItemContainer);
 
   EXPECT_FALSE([noItemContainer isHidden]);
-  const BookmarkNode* node = model->AddURL(parent, parent->GetChildCount(),
+  const BookmarkNode* node = model->AddURL(bar, bar->GetChildCount(),
                                            L"title",
                                            GURL("http://www.google.com"));
   EXPECT_TRUE([noItemContainer isHidden]);
-  model->Remove(parent, parent->IndexOfChild(node));
+  model->Remove(bar, bar->IndexOfChild(node));
+  EXPECT_FALSE([noItemContainer isHidden]);
+
+  // Now try it using a bookmark from the Other Bookmarks.
+  const BookmarkNode* otherBookmarks = model->other_node();
+  node = model->AddURL(otherBookmarks, otherBookmarks->GetChildCount(),
+                       L"TheOther",
+                       GURL("http://www.other.com"));
+  EXPECT_FALSE([noItemContainer isHidden]);
+  // Move it from Other Bookmarks to the bar.
+  model->Move(node, bar, 0);
+  EXPECT_TRUE([noItemContainer isHidden]);
+  // Move it back to Other Bookmarks from the bar.
+  model->Move(node, otherBookmarks, 0);
   EXPECT_FALSE([noItemContainer isHidden]);
 }
 
 // Confirm off the side button only enabled when reasonable.
 TEST_F(BookmarkBarControllerTest, OffTheSideButtonHidden) {
   BookmarkModel* model = helper_.profile()->GetBookmarkModel();
+  [bar_ setIgnoreAnimations:YES];
 
   [bar_ loaded:model];
   EXPECT_TRUE([bar_ offTheSideButtonIsHidden]);
@@ -478,6 +560,9 @@ TEST_F(BookmarkBarControllerTest, OffTheSideButtonHidden) {
   NSButton* offTheSideButton = [bar_ offTheSideButton];
   // Open "off the side" menu.
   [bar_ openBookmarkFolderFromButton:offTheSideButton];
+  BookmarkBarFolderController* bbfc = [bar_ folderController];
+  EXPECT_TRUE(bbfc);
+  [bbfc setIgnoreAnimations:YES];
   while (parent->GetChildCount()) {
     // We've completed the job so we're done.
     if ([bar_ offTheSideButtonIsHidden])
@@ -490,6 +575,56 @@ TEST_F(BookmarkBarControllerTest, OffTheSideButtonHidden) {
       EXPECT_FALSE([bar_ folderController]);
     } else {
       EXPECT_TRUE([bar_ folderController]);
+    }
+  }
+}
+
+// http://crbug.com/46175 is a crash when deleting bookmarks from the
+// off-the-side menu while it is open.  This test tries to bang hard
+// in this area to reproduce the crash.
+TEST_F(BookmarkBarControllerTest, DeleteFromOffTheSideWhileItIsOpen) {
+  BookmarkModel* model = helper_.profile()->GetBookmarkModel();
+  [bar_ setIgnoreAnimations:YES];
+  [bar_ loaded:model];
+
+  // Add a lot of bookmarks (per the bug).
+  const BookmarkNode* parent = model->GetBookmarkBarNode();
+  for (int i = 0; i < 100; i++) {
+    std::ostringstream title;
+    title << "super duper wide title " << i;
+    model->AddURL(parent, parent->GetChildCount(),
+                  ASCIIToWide(title.str().c_str()),
+                  GURL("http://superfriends.hall-of-justice.edu"));
+  }
+  EXPECT_FALSE([bar_ offTheSideButtonIsHidden]);
+
+  // Open "off the side" menu.
+  NSButton* offTheSideButton = [bar_ offTheSideButton];
+  [bar_ openBookmarkFolderFromButton:offTheSideButton];
+  BookmarkBarFolderController* bbfc = [bar_ folderController];
+  EXPECT_TRUE(bbfc);
+  [bbfc setIgnoreAnimations:YES];
+
+  // Start deleting items; try and delete randomish ones in case it
+  // makes a difference.
+  int indices[] = { 2, 4, 5, 1, 7, 9, 2, 0, 10, 9 };
+  while (parent->GetChildCount()) {
+    for (unsigned int i = 0; i < arraysize(indices); i++) {
+      if (indices[i] < parent->GetChildCount()) {
+        // First we mouse-enter the button to make things harder.
+        NSArray* buttons = [bbfc buttons];
+        for (BookmarkButton* button in buttons) {
+          if ([button bookmarkNode] == parent->GetChild(indices[i])) {
+            [bbfc mouseEnteredButton:button event:nil];
+            break;
+          }
+        }
+        // Then we remove the node.  This triggers the button to get
+        // deleted.
+        model->Remove(parent, indices[i]);
+        // Force visual update which is otherwise delayed.
+        [[bbfc window] displayIfNeeded];
+      }
     }
   }
 }
@@ -613,9 +748,7 @@ TEST_F(BookmarkBarControllerTest, OpenBookmarkFromMenus) {
   WindowOpenDisposition dispositions[] = { NEW_FOREGROUND_TAB,
                                            NEW_WINDOW,
                                            OFF_THE_RECORD };
-  for (unsigned int i = 0;
-       i < sizeof(dispositions)/sizeof(dispositions[0]);
-       i++) {
+  for (unsigned int i = 0; i < arraysize(dispositions); i++) {
     GURL gurl(urls[i]);
     [bar_ performSelector:selectors[i]
                withObject:ItemForBookmarkBarMenu(gurl)];
@@ -863,7 +996,7 @@ TEST_F(BookmarkBarControllerTest, BookmarkButtonSizing) {
   EXPECT_GT([buttons count], 0u);
   for (NSButton* button in buttons) {
     EXPECT_FLOAT_EQ(
-        bookmarks::kBookmarkBarHeight - 2 *
+        (bookmarks::kBookmarkBarHeight + bookmarks::kVisualHeightOffset) - 2 *
                     bookmarks::kBookmarkVerticalPadding,
         [button frame].size.height);
   }
@@ -874,7 +1007,7 @@ TEST_F(BookmarkBarControllerTest, DropBookmarks) {
     "http://qwantz.com",
     "http://xkcd.com",
     "javascript:alert('lolwut')",
-    "/tmp/local-file.txt"  // As if dragged from the desktop.
+    "file://localhost/tmp/local-file.txt"  // As if dragged from the desktop.
   };
   std::wstring titles[] = {
     std::wstring(L"Philosophoraptor"),
@@ -1023,7 +1156,8 @@ TEST_F(BookmarkBarControllerTest, TestDragButton) {
   model->AddURL(folder, 0, L"already", GURL("http://www.google.com"));
   EXPECT_EQ(arraysize(titles) + 1, [[bar_ buttons] count]);
   EXPECT_EQ(1, folder->GetChildCount());
-  x = [[[bar_ buttons] objectAtIndex:0] frame].size.width / 2;
+  x = NSMidX([[[bar_ buttons] objectAtIndex:0] frame]);
+  x += [[bar_ view] frame].origin.x;
   std::wstring title = [[[bar_ buttons] objectAtIndex:2]
                          bookmarkNode]->GetTitle();
   [bar_ dragButton:[[bar_ buttons] objectAtIndex:2]
@@ -1135,27 +1269,6 @@ TEST_F(BookmarkBarControllerTest, TestFolders) {
   folder = model->AddGroup(parent, parent->GetChildCount(), L"empty");
 
   EXPECT_EQ([[bar_ buttons] count], 2U);
-  BookmarkButton* button = [[bar_ buttons] objectAtIndex:0];  // full one
-
-  EXPECT_FALSE([bar_ folderController]);
-  [bar_ openBookmarkFolderFromButton:button];
-  BookmarkBarFolderController* bbfc = [bar_ folderController];
-  EXPECT_TRUE(bbfc);
-
-  // Make sure a 2nd open on the same button closes things.
-  [bar_ openBookmarkFolderFromButton:button];
-  EXPECT_FALSE([bar_ folderController]);
-
-  // Next open is a different button.
-  [bar_ openBookmarkFolderFromButton:[[bar_ buttons] objectAtIndex:1]];
-  EXPECT_TRUE([bar_ folderController]);
-  EXPECT_NE(bbfc, [bar_ folderController]);
-
-  // Finally confirm a close removes the folder controller.
-  [bar_ closeBookmarkFolder:nil];
-  EXPECT_FALSE([bar_ folderController]);
-
-  // Next part of the test: similar actions but with mouseEntered/mouseExited.
 
   // First confirm mouseEntered does nothing if "menus" aren't active.
   NSEvent* event = test_event_utils::MakeMouseEvent(NSOtherMouseUp, 0);
@@ -1164,7 +1277,7 @@ TEST_F(BookmarkBarControllerTest, TestFolders) {
 
   // Make one active.  Entering it is now a no-op.
   [bar_ openBookmarkFolderFromButton:[[bar_ buttons] objectAtIndex:0]];
-  bbfc = [bar_ folderController];
+  BookmarkBarFolderController* bbfc = [bar_ folderController];
   EXPECT_TRUE(bbfc);
   [bar_ mouseEnteredButton:[[bar_ buttons] objectAtIndex:0] event:event];
   EXPECT_EQ(bbfc, [bar_ folderController]);
@@ -1181,6 +1294,75 @@ TEST_F(BookmarkBarControllerTest, TestFolders) {
   [bar_ closeBookmarkFolder:nil];
 }
 
+// Verify that the folder menu presentation properly tracks mouse movements
+// over the bar. Until there is a click no folder menus should show. After a
+// click on a folder folder menus should show until another click on a folder
+// button, and a click outside the bar and its folder menus.
+TEST_F(BookmarkBarControllerTest, TestFolderButtons) {
+  BookmarkModel& model(*helper_.profile()->GetBookmarkModel());
+  const BookmarkNode* root = model.GetBookmarkBarNode();
+  const std::wstring model_string(L"1b 2f:[ 2f1b 2f2b ] 3b 4f:[ 4f1b 4f2b ] ");
+  model_test_utils::AddNodesFromModelString(model, root, model_string);
+
+  // Validate initial model and that we do not have a folder controller.
+  std::wstring actualModelString = model_test_utils::ModelStringFromNode(root);
+  EXPECT_EQ(model_string, actualModelString);
+  EXPECT_FALSE([bar_ folderController]);
+
+  // Add a real bookmark so we can click on it.
+  const BookmarkNode* folder = root->GetChild(3);
+  model.AddURL(folder, folder->GetChildCount(), L"CLICK ME",
+               GURL("http://www.google.com/"));
+
+  // Click on a folder button.
+  BookmarkButton* button = [bar_ buttonWithTitleEqualTo:@"4f"];
+  EXPECT_TRUE(button);
+  [bar_ openBookmarkFolderFromButton:button];
+  BookmarkBarFolderController* bbfc = [bar_ folderController];
+  EXPECT_TRUE(bbfc);
+
+  // Make sure a 2nd click on the same button closes things.
+  [bar_ openBookmarkFolderFromButton:button];
+  EXPECT_FALSE([bar_ folderController]);
+
+  // Next open is a different button.
+  button = [bar_ buttonWithTitleEqualTo:@"2f"];
+  EXPECT_TRUE(button);
+  [bar_ openBookmarkFolderFromButton:button];
+  EXPECT_TRUE([bar_ folderController]);
+
+  // Mouse over a non-folder button and confirm controller has gone away.
+  button = [bar_ buttonWithTitleEqualTo:@"1b"];
+  EXPECT_TRUE(button);
+  NSEvent* event = test_event_utils::MouseEventAtPoint([button center],
+                                                       NSMouseMoved, 0);
+  [bar_ mouseEnteredButton:button event:event];
+  EXPECT_FALSE([bar_ folderController]);
+
+  // Mouse over the original folder and confirm a new controller.
+  button = [bar_ buttonWithTitleEqualTo:@"2f"];
+  EXPECT_TRUE(button);
+  [bar_ mouseEnteredButton:button event:event];
+  BookmarkBarFolderController* oldBBFC = [bar_ folderController];
+  EXPECT_TRUE(oldBBFC);
+
+  // 'Jump' over to a different folder and confirm a new controller.
+  button = [bar_ buttonWithTitleEqualTo:@"4f"];
+  EXPECT_TRUE(button);
+  [bar_ mouseEnteredButton:button event:event];
+  BookmarkBarFolderController* newBBFC = [bar_ folderController];
+  EXPECT_TRUE(newBBFC);
+  EXPECT_NE(oldBBFC, newBBFC);
+
+  // A click on a real bookmark should close and stop tracking the folder menus.
+  BookmarkButton* bookmarkButton = [newBBFC buttonWithTitleEqualTo:@"CLICK ME"];
+  EXPECT_TRUE(bookmarkButton);
+  [newBBFC openBookmark:bookmarkButton];
+  EXPECT_FALSE([bar_ folderController]);
+  [bar_ mouseEnteredButton:button event:event];
+  EXPECT_FALSE([bar_ folderController]);
+}
+
 // Make sure the "off the side" folder looks like a bookmark folder
 // but only contains "off the side" items.
 TEST_F(BookmarkBarControllerTest, OffTheSideFolder) {
@@ -1195,6 +1377,11 @@ TEST_F(BookmarkBarControllerTest, OffTheSideFolder) {
     model->AddURL(parent, parent->GetChildCount(),
                   L"medium-size-title", GURL("http://framma-lamma.com"));
   }
+  // Add a couple more so we can delete one and make sure its button goes away.
+  model->AddURL(parent, parent->GetChildCount(),
+                L"DELETE_ME", GURL("http://ashton-tate.com"));
+  model->AddURL(parent, parent->GetChildCount(),
+                L"medium-size-title", GURL("http://framma-lamma.com"));
 
   // Should no longer be hidden.
   EXPECT_FALSE([bar_ offTheSideButtonIsHidden]);
@@ -1218,6 +1405,13 @@ TEST_F(BookmarkBarControllerTest, OffTheSideFolder) {
       }
     }
   }
+
+  // Delete a bookmark in the off-the-side and verify it's gone.
+  BookmarkButton* button = [bbfc buttonWithTitleEqualTo:@"DELETE_ME"];
+  EXPECT_TRUE(button);
+  model->Remove(parent, parent->GetChildCount() - 2);
+  button = [bbfc buttonWithTitleEqualTo:@"DELETE_ME"];
+  EXPECT_FALSE(button);
 }
 
 TEST_F(BookmarkBarControllerTest, EventToExitCheck) {
@@ -1271,8 +1465,9 @@ TEST_F(BookmarkBarControllerTest, DropDestination) {
   // Confirm "right in the center" (give or take a pixel) is a match,
   // and confirm "just barely in the button" is not.  Anything more
   // specific seems likely to be tweaked.
+  CGFloat viewFrameXOffset = [[bar_ view] frame].origin.x;
   for (BookmarkButton* button in [bar_ buttons]) {
-    CGFloat x = NSMidX([button frame]);
+    CGFloat x = NSMidX([button frame]) + viewFrameXOffset;
     // Somewhere near the center: a match
     EXPECT_EQ(button,
               [bar_ buttonForDroppingOnAtPoint:NSMakePoint(x-1, 10)]);
@@ -1281,10 +1476,10 @@ TEST_F(BookmarkBarControllerTest, DropDestination) {
     EXPECT_FALSE([bar_ shouldShowIndicatorShownForPoint:NSMakePoint(x, 10)]);;
 
     // On the very edges: NOT a match
-    x = NSMinX([button frame]);
+    x = NSMinX([button frame]) + viewFrameXOffset;
     EXPECT_NE(button,
               [bar_ buttonForDroppingOnAtPoint:NSMakePoint(x, 9)]);
-    x = NSMaxX([button frame]);
+    x = NSMaxX([button frame]) + viewFrameXOffset;
     EXPECT_NE(button,
               [bar_ buttonForDroppingOnAtPoint:NSMakePoint(x, 11)]);
   }
@@ -1441,6 +1636,25 @@ TEST_F(BookmarkBarControllerTest, MoveRemoveAddButtons) {
   EXPECT_EQ(oldDisplayedButtons, [bar_ displayedButtonCount]);
 }
 
+TEST_F(BookmarkBarControllerTest, ShrinkOrHideView) {
+  NSRect viewFrame = NSMakeRect(0.0, 0.0, 500.0, 50.0);
+  NSView* view = [[[NSView alloc] initWithFrame:viewFrame] autorelease];
+  EXPECT_FALSE([view isHidden]);
+  [bar_ shrinkOrHideView:view forMaxX:500.0];
+  EXPECT_EQ(500.0, NSWidth([view frame]));
+  EXPECT_FALSE([view isHidden]);
+  [bar_ shrinkOrHideView:view forMaxX:450.0];
+  EXPECT_EQ(450.0, NSWidth([view frame]));
+  EXPECT_FALSE([view isHidden]);
+  [bar_ shrinkOrHideView:view forMaxX:40.0];
+  EXPECT_EQ(40.0, NSWidth([view frame]));
+  EXPECT_FALSE([view isHidden]);
+  [bar_ shrinkOrHideView:view forMaxX:31.0];
+  EXPECT_EQ(31.0, NSWidth([view frame]));
+  EXPECT_FALSE([view isHidden]);
+  [bar_ shrinkOrHideView:view forMaxX:29.0];
+  EXPECT_TRUE([view isHidden]);
+}
 
 class BookmarkBarControllerOpenAllTest : public BookmarkBarControllerTest {
 public:
@@ -1484,8 +1698,6 @@ TEST_F(BookmarkBarControllerOpenAllTest, OpenAllBookmarks) {
       (BookmarkBarControllerOpenAllPong*)bar_.get();
   EXPECT_EQ([specialBar dispositionDetected], NEW_FOREGROUND_TAB);
 
-  std::cout << "OPEN_ALL_BOOKMARKS C" << std::endl;
-
   // Now try an OpenAll... from a folder node.
   [specialBar setDispositionDetected:IGNORE_ACTION]; // Reset
   [bar_ openAllBookmarks:ItemForBookmarkBarMenu(folder_)];
@@ -1499,8 +1711,6 @@ TEST_F(BookmarkBarControllerOpenAllTest, OpenAllNewWindow) {
       (BookmarkBarControllerOpenAllPong*)bar_.get();
   EXPECT_EQ([specialBar dispositionDetected], NEW_WINDOW);
 
-  std::cout << "OPEN_ALL_BOOKMARKS C" << std::endl;
-
   // Now try an OpenAll... from a folder node.
   [specialBar setDispositionDetected:IGNORE_ACTION]; // Reset
   [bar_ openAllBookmarksNewWindow:ItemForBookmarkBarMenu(folder_)];
@@ -1513,8 +1723,6 @@ TEST_F(BookmarkBarControllerOpenAllTest, OpenAllIncognito) {
   BookmarkBarControllerOpenAllPong* specialBar =
   (BookmarkBarControllerOpenAllPong*)bar_.get();
   EXPECT_EQ([specialBar dispositionDetected], OFF_THE_RECORD);
-
-  std::cout << "OPEN_ALL_BOOKMARKS C" << std::endl;
 
   // Now try an OpenAll... from a folder node.
   [specialBar setDispositionDetected:IGNORE_ACTION]; // Reset
@@ -1613,7 +1821,15 @@ TEST_F(BookmarkBarControllerNotificationTest, DeregistersForNotifications) {
 
 class BookmarkBarControllerDragDropTest : public BookmarkBarControllerTestBase {
  public:
+  scoped_nsobject<BookmarkBarControllerDragData> bar_;
+
   BookmarkBarControllerDragDropTest() {
+    bar_.reset(
+               [[BookmarkBarControllerDragData alloc]
+                initWithBrowser:helper_.browser()
+                   initialWidth:NSWidth([parent_view_ frame])
+                       delegate:nil
+                 resizeDelegate:resizeDelegate_.get()]);
     InstallAndToggleBar(bar_.get());
   }
 };
@@ -1633,7 +1849,7 @@ TEST_F(BookmarkBarControllerDragDropTest, DragMoveBarBookmarkToOffTheSide) {
   std::wstring actualModelString = model_test_utils::ModelStringFromNode(root);
   EXPECT_EQ(model_string, actualModelString);
 
-  // Insure that the off-the-side is showing.
+  // Insure that the off-the-side is not showing.
   ASSERT_FALSE([bar_ offTheSideButtonIsHidden]);
 
   // Remember how many buttons are showing and are available.
@@ -1649,7 +1865,8 @@ TEST_F(BookmarkBarControllerDragDropTest, DragMoveBarBookmarkToOffTheSide) {
   EXPECT_TRUE(otsController);
   NSWindow* toWindow = [otsController window];
   EXPECT_TRUE(toWindow);
-  BookmarkButton* draggedButton = [bar_ buttonWithTitleEqualTo:@"3bWithLongName"];
+  BookmarkButton* draggedButton =
+      [bar_ buttonWithTitleEqualTo:@"3bWithLongName"];
   ASSERT_TRUE(draggedButton);
   int oldOTSCount = (int)[[otsController buttons] count];
   EXPECT_EQ(oldOTSCount, oldChildCount - oldDisplayedButtons);
@@ -1669,6 +1886,98 @@ TEST_F(BookmarkBarControllerDragDropTest, DragMoveBarBookmarkToOffTheSide) {
   EXPECT_EQ(newOTSCount, newChildCount - newDisplayedButtons);
 }
 
+TEST_F(BookmarkBarControllerDragDropTest, DragBookmarkData) {
+  BookmarkModel& model(*helper_.profile()->GetBookmarkModel());
+  const BookmarkNode* root = model.GetBookmarkBarNode();
+  const std::wstring model_string(L"1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
+                                  "2f3b ] 3b 4b ");
+  model_test_utils::AddNodesFromModelString(model, root, model_string);
+  const BookmarkNode* other = model.other_node();
+  const std::wstring other_string(L"O1b O2b O3f:[ O3f1b O3f2f ] "
+                                  "O4f:[ O4f1b O4f2f ] 05b ");
+  model_test_utils::AddNodesFromModelString(model, other, other_string);
+
+  // Validate initial model.
+  std::wstring actual = model_test_utils::ModelStringFromNode(root);
+  EXPECT_EQ(model_string, actual);
+  actual = model_test_utils::ModelStringFromNode(other);
+  EXPECT_EQ(other_string, actual);
+
+  // Remember the little ones.
+  int oldChildCount = root->GetChildCount();
+
+  BookmarkButton* targetButton = [bar_ buttonWithTitleEqualTo:@"3b"];
+  ASSERT_TRUE(targetButton);
+
+  // Gen up some dragging data.
+  const BookmarkNode* newNode = other->GetChild(2);
+  [bar_ setDragDataNode:newNode];
+  scoped_nsobject<FakeDragInfo> dragInfo([[FakeDragInfo alloc] init]);
+  [dragInfo setDropLocation:[targetButton center]];
+  [bar_ dragBookmarkData:(id<NSDraggingInfo>)dragInfo.get()];
+
+  // There should one more button in the bar.
+  int newChildCount = root->GetChildCount();
+  EXPECT_EQ(oldChildCount + 1, newChildCount);
+  // Verify the model.
+  const std::wstring expected(L"1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
+                              "2f3b ] O3f:[ O3f1b O3f2f ] 3b 4b ");
+  actual = model_test_utils::ModelStringFromNode(root);
+  EXPECT_EQ(expected, actual);
+  oldChildCount = newChildCount;
+
+  // Now do it over a folder button.
+  targetButton = [bar_ buttonWithTitleEqualTo:@"2f"];
+  ASSERT_TRUE(targetButton);
+  NSPoint targetPoint = [targetButton center];
+  newNode = other->GetChild(2);  // Should be O4f.
+  EXPECT_EQ(newNode->GetTitle(), L"O4f");
+  [bar_ setDragDataNode:newNode];
+  [dragInfo setDropLocation:targetPoint];
+  [bar_ dragBookmarkData:(id<NSDraggingInfo>)dragInfo.get()];
+
+  newChildCount = root->GetChildCount();
+  EXPECT_EQ(oldChildCount, newChildCount);
+  // Verify the model.
+  const std::wstring expected1(L"1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
+                               "2f3b O4f:[ O4f1b O4f2f ] ] O3f:[ O3f1b O3f2f ] "
+                               "3b 4b ");
+  actual = model_test_utils::ModelStringFromNode(root);
+  EXPECT_EQ(expected1, actual);
+}
+
+TEST_F(BookmarkBarControllerDragDropTest, AddURLs) {
+  BookmarkModel& model(*helper_.profile()->GetBookmarkModel());
+  const BookmarkNode* root = model.GetBookmarkBarNode();
+  const std::wstring model_string(L"1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
+                                  "2f3b ] 3b 4b ");
+  model_test_utils::AddNodesFromModelString(model, root, model_string);
+
+  // Validate initial model.
+  std::wstring actual = model_test_utils::ModelStringFromNode(root);
+  EXPECT_EQ(model_string, actual);
+
+  // Remember the children.
+  int oldChildCount = root->GetChildCount();
+
+  BookmarkButton* targetButton = [bar_ buttonWithTitleEqualTo:@"3b"];
+  ASSERT_TRUE(targetButton);
+
+  NSArray* urls = [NSArray arrayWithObjects: @"http://www.a.com/",
+                   @"http://www.b.com/", nil];
+  NSArray* titles = [NSArray arrayWithObjects: @"SiteA", @"SiteB", nil];
+  [bar_ addURLs:urls withTitles:titles at:[targetButton center]];
+
+  // There should two more nodes in the bar.
+  int newChildCount = root->GetChildCount();
+  EXPECT_EQ(oldChildCount + 2, newChildCount);
+  // Verify the model.
+  const std::wstring expected(L"1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
+                              "2f3b ] SiteA SiteB 3b 4b ");
+  actual = model_test_utils::ModelStringFromNode(root);
+  EXPECT_EQ(expected, actual);
+}
+
 TEST_F(BookmarkBarControllerDragDropTest, ControllerForNode) {
   BookmarkModel& model(*helper_.profile()->GetBookmarkModel());
   const BookmarkNode* root = model.GetBookmarkBarNode();
@@ -1683,6 +1992,38 @@ TEST_F(BookmarkBarControllerDragDropTest, ControllerForNode) {
   const void* expectedController = bar_;
   const void* actualController = [bar_ controllerForNode:root];
   EXPECT_EQ(expectedController, actualController);
+}
+
+TEST_F(BookmarkBarControllerDragDropTest, DropPositionIndicator) {
+  BookmarkModel& model(*helper_.profile()->GetBookmarkModel());
+  const BookmarkNode* root = model.GetBookmarkBarNode();
+  const std::wstring model_string(L"1b 2f:[ 2f1b 2f2b 2f3b ] 3b 4b ");
+  model_test_utils::AddNodesFromModelString(model, root, model_string);
+
+  // Validate initial model.
+  std::wstring actualModel = model_test_utils::ModelStringFromNode(root);
+  EXPECT_EQ(model_string, actualModel);
+
+  // Test a series of points starting at the right edge of the bar.
+  BookmarkButton* targetButton = [bar_ buttonWithTitleEqualTo:@"1b"];
+  ASSERT_TRUE(targetButton);
+  NSPoint targetPoint = [targetButton left];
+  const CGFloat xDelta = 0.5 * bookmarks::kBookmarkHorizontalPadding;
+  const CGFloat baseOffset = targetPoint.x;
+  CGFloat expected = xDelta;
+  CGFloat actual = [bar_ indicatorPosForDragToPoint:targetPoint];
+  EXPECT_CGFLOAT_EQ(expected, actual);
+  targetButton = [bar_ buttonWithTitleEqualTo:@"2f"];
+  actual = [bar_ indicatorPosForDragToPoint:[targetButton right]];
+  targetButton = [bar_ buttonWithTitleEqualTo:@"3b"];
+  expected = [targetButton left].x - baseOffset + xDelta;
+  EXPECT_CGFLOAT_EQ(expected, actual);
+  targetButton = [bar_ buttonWithTitleEqualTo:@"4b"];
+  targetPoint = [targetButton right];
+  targetPoint.x += 100;  // Somewhere off to the right.
+  expected = NSMaxX([targetButton frame]) + xDelta;
+  actual = [bar_ indicatorPosForDragToPoint:targetPoint];
+  EXPECT_CGFLOAT_EQ(expected, actual);
 }
 
 }  // namespace

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/browser_about_handler.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/tracked_objects.h"
+#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
@@ -28,20 +30,20 @@
 #include "chrome/browser/google_service_auth_error.h"
 #include "chrome/browser/memory_details.h"
 #include "chrome/browser/metrics/histogram_synchronizer.h"
-#include "chrome/browser/net/dns_global.h"
+#include "chrome/browser/net/predictor_api.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/common/about_handler.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/jstemplate_builder.h"
-#include "chrome/common/platform_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/renderer/about_handler.h"
 #include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -54,11 +56,16 @@
 
 #if defined(OS_WIN)
 #include "chrome/browser/views/about_ipc_dialog.h"
-#include "chrome/browser/views/about_network_dialog.h"
 #elif defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/cros/syslogs_library.h"
 #include "chrome/browser/chromeos/version_loader.h"
+#include "chrome/browser/zygote_host_linux.h"
 #elif defined(OS_MACOSX)
 #include "chrome/browser/cocoa/about_ipc_dialog.h"
+#elif defined(OS_LINUX)
+#include "chrome/browser/zygote_host_linux.h"
 #endif
 
 #if defined(USE_TCMALLOC)
@@ -80,7 +87,10 @@ void AboutTcmallocRendererCallback(base::ProcessId pid, std::string output) {
 namespace {
 
 // The (alphabetized) paths used for the about pages.
+// Note: Keep these in sync with url_constants.h
+const char kAppCacheInternalsPath[] = "appcache-internals";
 const char kCreditsPath[] = "credits";
+const char kCachePath[] = "view-http-cache";
 const char kDnsPath[] = "dns";
 const char kHistogramsPath[] = "histograms";
 const char kMemoryRedirectPath[] = "memory-redirect";
@@ -91,14 +101,50 @@ const char kTasksPath[] = "tasks";
 const char kTcmallocPath[] = "tcmalloc";
 const char kTermsPath[] = "terms";
 const char kVersionPath[] = "version";
+const char kAboutPath[] = "about";
+// Not about:* pages, but included to make about:about look nicer
+const char kNetInternalsPath[] = "net-internals";
+const char kPluginsPath[] = "plugins";
 
 #if defined(OS_LINUX)
 const char kLinuxProxyConfigPath[] = "linux-proxy-config";
+const char kSandboxPath[] = "sandbox";
 #endif
 
 #if defined(OS_CHROMEOS)
+const char kNetworkPath[] = "network";
 const char kOSCreditsPath[] = "os-credits";
+const char kRegisterProductPath[] = "register";
+const char kSysPath[] = "system";
 #endif
+
+// Add path here to be included in about:about
+const char *kAllAboutPaths[] = {
+  kAppCacheInternalsPath,
+  kCachePath,
+  kCreditsPath,
+  kDnsPath,
+  kHistogramsPath,
+  kMemoryPath,
+  kNetInternalsPath,
+  kPluginsPath,
+  kStatsPath,
+  kSyncPath,
+  kTasksPath,
+  kTcmallocPath,
+  kTermsPath,
+  kVersionPath,
+#if defined(OS_LINUX)
+  kLinuxProxyConfigPath,
+  kSandboxPath,
+#endif
+#if defined(OS_CHROMEOS)
+  kNetworkPath,
+  kOSCreditsPath,
+  kRegisterProductPath,
+  kSysPath,
+#endif
+  };
 
 // Points to the singleton AboutSource object, if any.
 ChromeURLDataManager::DataSource* about_source = NULL;
@@ -198,21 +244,45 @@ class ChromeOSAboutVersionHandler {
 
 // Individual about handlers ---------------------------------------------------
 
-std::string AboutCredits() {
-  static const std::string credits_html =
-      ResourceBundle::GetSharedInstance().GetDataResource(
-          IDR_CREDITS_HTML);
-
-  return credits_html;
+std::string AboutAbout() {
+  std::string html;
+  html.append("<html><head><title>About Pages</title></head><body>\n");
+  html.append("<h2>List of About pages</h2><ul>\n");
+  for (size_t i = 0; i < arraysize(kAllAboutPaths); i++) {
+    if (kAllAboutPaths[i] == kNetInternalsPath ||
+        kAllAboutPaths[i] == kPluginsPath ||
+        kAllAboutPaths[i] == kCachePath ||
+        kAllAboutPaths[i] == kAppCacheInternalsPath)
+      html.append("<li><a href='chrome://");
+    else
+      html.append("<li><a href='chrome://about/");
+    html.append(kAllAboutPaths[i]);
+    html.append("/'>about:");
+    html.append(kAllAboutPaths[i]);
+    html.append("</a>\n");
+  }
+  const char *debug[] = { "crash", "hang", "shorthang" };
+  html.append("</ul><h2>For Debug</h2>");
+  html.append("</ul><p>The following pages are for debugging purposes only. "
+              "Because they crash or hang the renderer, they're not linked "
+              "directly; you can type them into the address bar if you need "
+              "them.</p><ul>");
+  for (size_t i = 0; i < arraysize(debug); i++) {
+    html.append("<li>");
+    html.append("about:");
+    html.append(debug[i]);
+    html.append("\n");
+  }
+  html.append("</ul></body></html>");
+  return html;
 }
 
 #if defined(OS_CHROMEOS)
-std::string AboutOSCredits() {
-  static const std::string os_credits_html =
-      ResourceBundle::GetSharedInstance().GetDataResource(
-          IDR_OS_CREDITS_HTML);
-
-  return os_credits_html;
+std::string AboutNetwork(const std::string& query) {
+  int refresh;
+  StringToInt(query, &refresh);
+  return chromeos::CrosLibrary::Get()->GetNetworkLibrary()->
+      GetHtmlInfo(refresh);
 }
 #endif
 
@@ -245,7 +315,7 @@ class AboutDnsHandler : public base::RefCountedThreadSafe<AboutDnsHandler> {
     DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
     std::string data;
-    chrome_browser_net::DnsPrefetchGetHtmlInfo(&data);
+    chrome_browser_net::PredictorGetHtmlInfo(&data);
 
     ChromeThread::PostTask(
         ChromeThread::UI, FROM_HERE,
@@ -367,7 +437,7 @@ std::string AboutStats() {
     std::string full_name = table->GetRowName(index);
     if (full_name.length() == 0)
       break;
-    DCHECK(full_name[1] == ':');
+    DCHECK_EQ(':', full_name[1]);
     char counter_type = full_name[0];
     std::string name = full_name.substr(2);
 
@@ -457,27 +527,98 @@ std::string AboutLinuxProxyConfig() {
   data.append("<!DOCTYPE HTML>\n");
   data.append("<html><head><meta charset=\"utf-8\"><title>");
   data.append(l10n_util::GetStringUTF8(IDS_ABOUT_LINUX_PROXY_CONFIG_TITLE));
-  data.append("</title></head><body>\n");
-  data.append(l10n_util::GetStringFUTF8(IDS_ABOUT_LINUX_PROXY_CONFIG_BODY,
-              l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+  data.append("</title>");
+  data.append("<style>body { max-width: 70ex; padding: 2ex 5ex; }</style>");
+  data.append("</head><body>\n");
+  FilePath binary = CommandLine::ForCurrentProcess()->GetProgram();
+  data.append(l10n_util::GetStringFUTF8(
+                  IDS_ABOUT_LINUX_PROXY_CONFIG_BODY,
+                  l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
+                  ASCIIToUTF16(binary.BaseName().value())));
+  data.append("</body></html>\n");
+  return data;
+}
+
+void AboutSandboxRow(std::string* data, const std::string& prefix, int name_id,
+                     bool good) {
+  data->append("<tr><td>");
+  data->append(prefix);
+  data->append(l10n_util::GetStringUTF8(name_id));
+  if (good) {
+    data->append("</td><td style=\"color: green;\">");
+    data->append(
+        l10n_util::GetStringUTF8(IDS_CONFIRM_MESSAGEBOX_YES_BUTTON_LABEL));
+  } else {
+    data->append("</td><td style=\"color: red;\">");
+    data->append(
+        l10n_util::GetStringUTF8(IDS_CONFIRM_MESSAGEBOX_NO_BUTTON_LABEL));
+  }
+  data->append("</td></tr>");
+}
+
+std::string AboutSandbox() {
+  std::string data;
+  data.append("<!DOCTYPE HTML>\n");
+  data.append("<html><head><meta charset=\"utf-8\"><title>");
+  data.append(l10n_util::GetStringUTF8(IDS_ABOUT_SANDBOX_TITLE));
+  data.append("</title>");
+  data.append("</head><body>\n");
+  data.append("<h1>");
+  data.append(l10n_util::GetStringUTF8(IDS_ABOUT_SANDBOX_TITLE));
+  data.append("</h1>");
+
+  const int status = Singleton<ZygoteHost>()->sandbox_status();
+
+  data.append("<table>");
+
+  AboutSandboxRow(&data, "", IDS_ABOUT_SANDBOX_SUID_SANDBOX,
+                  status & ZygoteHost::kSandboxSUID);
+  if (status & ZygoteHost::kSandboxPIDNS) {
+    AboutSandboxRow(&data, "&nbsp;&nbsp;", IDS_ABOUT_SANDBOX_PID_NAMESPACES,
+                    status & ZygoteHost::kSandboxPIDNS);
+    AboutSandboxRow(&data, "&nbsp;&nbsp;", IDS_ABOUT_SANDBOX_NET_NAMESPACES,
+                    status & ZygoteHost::kSandboxNetNS);
+  }
+  AboutSandboxRow(&data, "", IDS_ABOUT_SANDBOX_SECCOMP_SANDBOX,
+                  status & ZygoteHost::kSandboxSeccomp);
+
+  data.append("</table>");
+
+  bool good = ((status & ZygoteHost::kSandboxSUID) &&
+               (status & ZygoteHost::kSandboxPIDNS)) ||
+              (status & ZygoteHost::kSandboxSeccomp);
+  if (good) {
+    data.append("<p style=\"color: green\">");
+    data.append(l10n_util::GetStringUTF8(IDS_ABOUT_SANDBOX_OK));
+  } else {
+    data.append("<p style=\"color: red\">");
+    data.append(l10n_util::GetStringUTF8(IDS_ABOUT_SANDBOX_BAD));
+  }
+  data.append("</p>");
+
   data.append("</body></html>\n");
   return data;
 }
 #endif
 
-std::string AboutTerms() {
-  static const std::string terms_html =
-      ResourceBundle::GetSharedInstance().GetDataResource(
-          IDR_TERMS_HTML);
+#if defined(OS_CHROMEOS)
+std::string AboutRegisterProduct() {
+  static const base::StringPiece register_html(
+      ResourceBundle::GetSharedInstance().GetRawDataResource(
+          IDR_HOST_REGISTRATION_PAGE_HTML));
 
-  return terms_html;
+  // TODO(nkostylev): Embed registration form URL from startup manifest.
+  // http://crosbug.com/4645.
+
+  return register_html.as_string();
 }
+#endif
 
 std::string AboutVersion(DictionaryValue* localized_strings) {
   localized_strings->SetString(L"title",
       l10n_util::GetString(IDS_ABOUT_VERSION_TITLE));
   scoped_ptr<FileVersionInfo> version_info(
-      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+      chrome_app::GetChromeVersionInfo());
   if (version_info == NULL) {
     DLOG(ERROR) << "Unable to create FileVersionInfo object";
     return std::string();
@@ -530,8 +671,8 @@ std::string AboutVersion(DictionaryValue* localized_strings) {
   localized_strings->SetString(L"command_line", command_line);
 #endif
 
-  static const std::string version_html(
-      ResourceBundle::GetSharedInstance().GetDataResource(
+  base::StringPiece version_html(
+      ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_ABOUT_VERSION_HTML));
 
   return jstemplate_builder::GetTemplatesHtml(
@@ -620,6 +761,28 @@ std::string AboutSync() {
     AddBoolSyncDetail(details, L"Invalid Store", full_status.invalid_store);
     AddIntSyncDetail(details, L"Max Consecutive Errors",
                      full_status.max_consecutive_errors);
+
+    if (service->unrecoverable_error_detected()) {
+      strings.Set(L"unrecoverable_error_detected", new FundamentalValue(true));
+      strings.SetString(L"unrecoverable_error_message",
+                        service->unrecoverable_error_message());
+      tracked_objects::Location loc(service->unrecoverable_error_location());
+      std::string location_str;
+      loc.Write(true, true, &location_str);
+      strings.SetString(L"unrecoverable_error_location", location_str);
+    }
+
+    browser_sync::ModelSafeRoutingInfo routes;
+    service->backend()->GetModelSafeRoutingInfo(&routes);
+    ListValue* routing_info = new ListValue();
+    strings.Set(L"routing_info", routing_info);
+    browser_sync::ModelSafeRoutingInfo::const_iterator it = routes.begin();
+    for (; it != routes.end(); ++it) {
+      DictionaryValue* val = new DictionaryValue;
+      val->SetString(L"model_type", ModelTypeToString(it->first));
+      val->SetString(L"group", ModelSafeGroupToString(it->second));
+      routing_info->Append(val);
+    }
   }
 
   static const base::StringPiece sync_html(
@@ -629,6 +792,35 @@ std::string AboutSync() {
   return jstemplate_builder::GetTemplateHtml(
       sync_html, &strings , "t" /* template root node id */);
 }
+
+#if defined(OS_CHROMEOS)
+std::string AboutSys() {
+  DictionaryValue strings;
+  chromeos::SyslogsLibrary* syslogs_lib =
+      chromeos::CrosLibrary::Get()->GetSyslogsLibrary();
+  scoped_ptr<chromeos::LogDictionaryType> sys_info_;
+  if (syslogs_lib)
+    sys_info_.reset(syslogs_lib->GetSyslogs(new FilePath()));
+  if (sys_info_.get()) {
+     ListValue* details = new ListValue();
+     strings.Set(L"details", details);
+     chromeos::LogDictionaryType::iterator it;
+
+     for (it = sys_info_.get()->begin(); it != sys_info_.get()->end(); ++it) {
+       DictionaryValue* val = new DictionaryValue;
+       val->SetString(L"stat_name", (*it).first);
+       val->SetString(L"stat_value", (*it).second);
+       details->Append(val);
+     }
+  }
+  static const base::StringPiece sys_html(
+        ResourceBundle::GetSharedInstance().GetRawDataResource(
+        IDR_ABOUT_SYS_HTML));
+
+  return jstemplate_builder::GetTemplateHtml(
+        sys_html, &strings , "t" /* template root node id */);
+}
+#endif
 
 // AboutSource -----------------------------------------------------------------
 
@@ -692,19 +884,34 @@ void AboutSource::StartDataRequest(const std::string& path_raw,
     response = AboutVersion(&value);
 #endif
   } else if (path == kCreditsPath) {
-    response = AboutCredits();
+    response = ResourceBundle::GetSharedInstance().GetRawDataResource(
+        IDR_CREDITS_HTML).as_string();
+  } else if (path == kAboutPath) {
+    response = AboutAbout();
 #if defined(OS_CHROMEOS)
   } else if (path == kOSCreditsPath) {
-    response = AboutOSCredits();
+    response = ResourceBundle::GetSharedInstance().GetRawDataResource(
+        IDR_OS_CREDITS_HTML).as_string();
+  } else if (path == kNetworkPath) {
+    response = AboutNetwork(info);
 #endif
   } else if (path == kTermsPath) {
-    response = AboutTerms();
+    response = ResourceBundle::GetSharedInstance().GetRawDataResource(
+        IDR_TERMS_HTML).as_string();
 #if defined(OS_LINUX)
   } else if (path == kLinuxProxyConfigPath) {
     response = AboutLinuxProxyConfig();
+  } else if (path == kSandboxPath) {
+    response = AboutSandbox();
 #endif
   } else if (path == kSyncPath) {
     response = AboutSync();
+#if defined(OS_CHROMEOS)
+  } else if (path == kSysPath) {
+    response = AboutSys();
+  } else if (path == kRegisterProductPath) {
+    response = AboutRegisterProduct();
+#endif
   }
 
   FinishDataRequest(response, request_id);
@@ -822,6 +1029,8 @@ void AboutMemoryHandler::OnDetailsAvailable() {
   root.Set(L"child_data", child_data);
 
   ProcessData process = browser_processes[0];  // Chrome is the first browser.
+  root.SetString(L"current_browser_name", process.name);
+
   for (size_t index = 0; index < process.processes.size(); index++) {
     if (process.processes[index].type == ChildProcessInfo::BROWSER_PROCESS)
       BindProcessMetrics(browser_data, &process.processes[index]);
@@ -904,10 +1113,9 @@ bool WillHandleBrowserAboutURL(GURL* url, Profile* profile) {
   if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutBlankURL))
     return false;
 
-  // Rewrite about:cache/* URLs to chrome://net-internals/view-cache/*
+  // Rewrite about:cache/* URLs to chrome://view-http-cache/*
   if (StartsWithAboutSpecifier(*url, chrome::kAboutCacheURL)) {
-    *url = RemapAboutURL(chrome::kNetworkViewCacheURL + std::string("/"),
-                         *url);
+    *url = RemapAboutURL(chrome::kNetworkViewCacheURL, *url);
     return true;
   }
 
@@ -939,7 +1147,7 @@ bool WillHandleBrowserAboutURL(GURL* url, Profile* profile) {
 
   // There are a few about: URLs that we hand over to the renderer. If the
   // renderer wants them, don't do any rewriting.
-  if (AboutHandler::WillHandle(*url))
+  if (chrome_about_handler::WillHandle(*url))
     return false;
 
   // Anything else requires our special handler, make sure its initialized.
@@ -970,19 +1178,10 @@ bool WillHandleBrowserAboutURL(GURL* url, Profile* profile) {
 // This function gets called with the fixed-up chrome: URLs, so we have to
 // compare against those instead of "about:blah".
 bool HandleNonNavigationAboutURL(const GURL& url) {
-  // About:network and IPC and currently buggy, so we disable it for official
-  // builds.
+  // about:ipc is currently buggy, so we disable it for official builds.
 #if !defined(OFFICIAL_BUILD)
 
-#if defined(OS_WIN)
-  if (LowerCaseEqualsASCII(url.spec(), chrome::kChromeUINetworkURL)) {
-    // Run the dialog. This will re-use the existing one if it's already up.
-    AboutNetworkDialog::RunDialog();
-    return true;
-  }
-#endif
-
-#if (defined(OS_MAC) || defined(OS_WIN)) && defined(IPC_MESSAGE_LOG_ENABLED)
+#if (defined(OS_MACOSX) || defined(OS_WIN)) && defined(IPC_MESSAGE_LOG_ENABLED)
   if (LowerCaseEqualsASCII(url.spec(), chrome::kChromeUIIPCURL)) {
     // Run the dialog. This will re-use the existing one if it's already up.
     AboutIPCDialog::RunDialog();

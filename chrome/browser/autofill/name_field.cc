@@ -4,6 +4,7 @@
 
 #include "chrome/browser/autofill/name_field.h"
 
+#include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "chrome/browser/autofill/autofill_type.h"
 
@@ -28,7 +29,7 @@ FullNameField* FullNameField::Parse(
   // for example, Travelocity_Edit travel profile.html contains a field
   // "Travel Profile Name".
   const string16 name_match =
-      ASCIIToUTF16("^name|full name|fullname|your name|customer name");
+      ASCIIToUTF16("^name|full *name|your name|customer name");
   if (ParseText(iter, name_match, &field))
     return new FullNameField(field);
 
@@ -39,23 +40,23 @@ FirstLastNameField* FirstLastNameField::Parse1(
     std::vector<AutoFillField*>::const_iterator* iter) {
   // Some pages (e.g. Overstock_comBilling.html, SmithsonianCheckout.html)
   // have the label "Name" followed by two or three text fields.
-  FirstLastNameField v;
+  scoped_ptr<FirstLastNameField> v(new FirstLastNameField);
   std::vector<AutoFillField*>::const_iterator q = *iter;
 
   AutoFillField* next;
-  if (ParseText(&q, ASCIIToUTF16("^name"), &v.first_name_) &&
+  if (ParseText(&q, ASCIIToUTF16("^name"), &v->first_name_) &&
       ParseEmptyText(&q, &next)) {
-    if (ParseEmptyText(&q, &v.last_name_)) {
+    if (ParseEmptyText(&q, &v->last_name_)) {
       // There are three name fields; assume that the middle one is a
       // middle initial (it is, at least, on SmithsonianCheckout.html).
-      v.middle_name_ = next;
-      v.middle_initial_ = true;
+      v->middle_name_ = next;
+      v->middle_initial_ = true;
     } else {  // only two name fields
-      v.last_name_ = next;
+      v->last_name_ = next;
     }
 
     *iter = q;
-    return new FirstLastNameField(v);
+    return v.release();
   }
 
   return NULL;
@@ -63,7 +64,7 @@ FirstLastNameField* FirstLastNameField::Parse1(
 
 FirstLastNameField* FirstLastNameField::Parse2(
     std::vector<AutoFillField*>::const_iterator* iter) {
-  FirstLastNameField v;
+  scoped_ptr<FirstLastNameField> v(new FirstLastNameField);
   std::vector<AutoFillField*>::const_iterator q = *iter;
 
   // A fair number of pages use the names "fname" and "lname" for naming
@@ -74,9 +75,9 @@ FirstLastNameField* FirstLastNameField::Parse2(
   // so we match "initials" here (and just fill in a first name there,
   // American-style).
   // The ".*first$" matches fields ending in "first" (example in sample8.html).
-  if (!ParseText(&q,
-                 ASCIIToUTF16("first name|firstname|initials|fname|.*first$"),
-                 &v.first_name_))
+  string16 match =
+      ASCIIToUTF16("first *name|first_name|initials|fname|.*first$");
+  if (!ParseText(&q, match, &v->first_name_))
     return NULL;
 
   // We check for a middle initial before checking for a middle name
@@ -84,41 +85,40 @@ FirstLastNameField* FirstLastNameField::Parse2(
   // as both (the label text is "MI" and the element name is
   // "txtmiddlename"); such a field probably actually represents a
   // middle initial.
-  if (ParseText(&q,
-                ASCIIToUTF16("^mi$|middle initial|middleinitial|m.i."),
-                &v.middle_name_)) {
-    v.middle_initial_ = true;
+  match = ASCIIToUTF16("^mi$|middle initial|middleinitial|m.i.");
+  if (ParseText(&q, match, &v->middle_name_)) {
+    v->middle_initial_ = true;
   } else {
-    ParseText(&q, ASCIIToUTF16("middle name|mname"), &v.middle_name_);
+    match = ASCIIToUTF16("middle *name|mname");
+    ParseText(&q, match, &v->middle_name_);
   }
 
   // The ".*last$" matches fields ending in "last" (example in sample8.html).
-  if (!ParseText(&q,
-                 ASCIIToUTF16("last name|lastname|lname|surname|.*last$"),
-                 &v.last_name_))
+  match = ASCIIToUTF16("last *name|last_name|lname|surname|.*last$");
+  if (!ParseText(&q, match, &v->last_name_))
     return NULL;
 
   *iter = q;
-  return new FirstLastNameField(v);
+  return v.release();
 }
 
 FirstLastNameField* FirstLastNameField::ParseEcmlName(
     std::vector<AutoFillField*>::const_iterator* iter) {
-  FirstLastNameField field;
+  scoped_ptr<FirstLastNameField> field(new FirstLastNameField);
   std::vector<AutoFillField*>::const_iterator q = *iter;
 
   string16 pattern = GetEcmlPattern(kEcmlShipToFirstName,
                                     kEcmlBillToFirstName, '|');
-  if (!ParseText(&q, pattern, &field.first_name_))
+  if (!ParseText(&q, pattern, &field->first_name_))
     return NULL;
 
   pattern = GetEcmlPattern(kEcmlShipToMiddleName, kEcmlBillToMiddleName, '|');
-  ParseText(&q, pattern, &field.middle_name_);
+  ParseText(&q, pattern, &field->middle_name_);
 
   pattern = GetEcmlPattern(kEcmlShipToLastName, kEcmlBillToLastName, '|');
-  if (ParseText(&q, pattern, &field.last_name_)) {
+  if (ParseText(&q, pattern, &field->last_name_)) {
     *iter = q;
-    return new FirstLastNameField(field);
+    return field.release();
   }
 
   return NULL;
@@ -158,10 +158,3 @@ FirstLastNameField::FirstLastNameField()
       middle_initial_(false) {
 }
 
-FirstLastNameField::FirstLastNameField(const FirstLastNameField& field)
-    : NameField(),
-      first_name_(field.first_name_),
-      middle_name_(field.middle_name_),
-      last_name_(field.last_name_),
-      middle_initial_(field.middle_initial_) {
-}

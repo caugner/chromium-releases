@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/histogram.h"
 #include "base/rand_util.h"
 #include "base/sha2.h"
 #include "base/stl_util-inl.h"
@@ -17,14 +18,16 @@
 #include "base/time.h"
 #include "base/thread.h"
 #include "base/version.h"
+#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/utility_process_host.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_error_reporter.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
@@ -44,11 +47,6 @@ using base::TimeDelta;
 using prefs::kExtensionBlacklistUpdateVersion;
 using prefs::kLastExtensionsUpdateCheck;
 using prefs::kNextExtensionsUpdateCheck;
-
-// The default URL to fall back to if an extension doesn't have an
-// update URL.
-const char kDefaultUpdateURL[] =
-    "http://clients2.google.com/service/update2/crx";
 
 // NOTE: HTTPS is used here to ensure the response from omaha can be trusted.
 // The response contains a url for fetching the blacklist and a hash value
@@ -164,16 +162,20 @@ void ManifestFetchesBuilder::AddExtension(const Extension& extension) {
   AddExtensionData(extension.location(),
                    extension.id(),
                    *extension.version(),
-                   extension.converted_from_user_script(),
-                   extension.IsTheme(),
+                   extension.is_theme(),
                    extension.update_url());
 }
 
 void ManifestFetchesBuilder::AddPendingExtension(
     const std::string& id,
     const PendingExtensionInfo& info) {
-  AddExtensionData(Extension::INTERNAL, id, info.version,
-                   false, info.is_theme, info.update_url);
+  // Use a zero version to ensure that a pending extension will always
+  // be updated, and thus installed (assuming all extensions have
+  // non-zero versions).
+  scoped_ptr<Version> version(
+      Version::GetVersionFromString("0.0.0.0"));
+  AddExtensionData(Extension::INTERNAL, id, *version,
+                   info.is_theme, info.update_url);
 }
 
 void ManifestFetchesBuilder::ReportStats() const {
@@ -207,7 +209,6 @@ void ManifestFetchesBuilder::AddExtensionData(
     Extension::Location location,
     const std::string& id,
     const Version& version,
-    bool converted_from_user_script,
     bool is_theme,
     GURL update_url) {
   // Only internal and external extensions can be autoupdated.
@@ -229,18 +230,14 @@ void ManifestFetchesBuilder::AddExtensionData(
     return;
   }
 
-  // Skip extensions with empty update URLs converted from user
-  // scripts.
-  if (converted_from_user_script && update_url.is_empty()) {
-    return;
-  }
-
   if (update_url.DomainIs("google.com")) {
     url_stats_.google_url_count++;
   } else if (update_url.is_empty()) {
     url_stats_.no_url_count++;
     // Fill in default update URL.
-    update_url = GURL(kDefaultUpdateURL);
+    //
+    // TODO(akalin): Figure out if we should use the HTTPS version.
+    update_url = GURL(extension_urls::kGalleryUpdateHttpUrl);
   } else {
     url_stats_.other_url_count++;
   }
@@ -257,7 +254,8 @@ void ManifestFetchesBuilder::AddExtensionData(
       fetches_.find(update_url);
 
   // Find or create a ManifestFetchData to add this extension to.
-  int ping_days = CalculatePingDays(service_->LastPingDay(id));
+  int ping_days =
+      CalculatePingDays(service_->extension_prefs()->LastPingDay(id));
   while (existing_iter != fetches_.end()) {
     if (existing_iter->second->AddExtension(id, version.GetString(),
                                             ping_days)) {
@@ -299,20 +297,12 @@ class ExtensionUpdaterFileHandler
       return;
     }
 
-    // The ExtensionUpdater is now responsible for cleaning up the temp file
-    // from disk.
+    // The ExtensionUpdater now owns the temp file.
     ChromeThread::PostTask(
         ChromeThread::UI, FROM_HERE,
         NewRunnableMethod(
             updater.get(), &ExtensionUpdater::OnCRXFileWritten, extension_id,
             path, download_url));
-  }
-
-  void DeleteFile(const FilePath& path) {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
-    if (!file_util::Delete(path, false)) {
-      LOG(WARNING) << "Failed to delete temp file " << path.value();
-    }
   }
 
  private:
@@ -352,7 +342,7 @@ static void EnsureInt64PrefRegistered(PrefService* prefs,
 
 static void EnsureBlacklistVersionPrefRegistered(PrefService* prefs) {
   if (!prefs->FindPreference(kExtensionBlacklistUpdateVersion))
-    prefs->RegisterStringPref(kExtensionBlacklistUpdateVersion, L"0");
+    prefs->RegisterStringPref(kExtensionBlacklistUpdateVersion, "0");
 }
 
 // The overall goal here is to balance keeping clients up to date while
@@ -553,9 +543,9 @@ void ExtensionUpdater::HandleManifestResults(
       bool did_ping = fetch_data.DidPing(*i);
       if (did_ping) {
         if (*i == kBlacklistAppID) {
-          service_->SetBlacklistLastPingDay(daystart);
+          service_->extension_prefs()->SetBlacklistLastPingDay(daystart);
         } else if (service_->GetExtensionById(*i, true) != NULL) {
-          service_->SetLastPingDay(*i, daystart);
+          service_->extension_prefs()->SetLastPingDay(*i, daystart);
         }
       }
     }
@@ -582,7 +572,7 @@ void ExtensionUpdater::ProcessBlacklist(const std::string& data) {
 
   // Update the pref value for blacklist version
   prefs_->SetString(kExtensionBlacklistUpdateVersion,
-    ASCIIToWide(current_extension_fetch_.version));
+                    current_extension_fetch_.version);
   prefs_->ScheduleSavePersistentPrefs();
 }
 
@@ -591,7 +581,7 @@ void ExtensionUpdater::OnCRXFetchComplete(const GURL& url,
                                           int response_code,
                                           const std::string& data) {
   if (status.status() == URLRequestStatus::SUCCESS &&
-             response_code == 200) {
+      response_code == 200) {
     if (current_extension_fetch_.id == kBlacklistAppID) {
       ProcessBlacklist(data);
     } else {
@@ -625,17 +615,11 @@ void ExtensionUpdater::OnCRXFetchComplete(const GURL& url,
 void ExtensionUpdater::OnCRXFileWritten(const std::string& id,
                                         const FilePath& path,
                                         const GURL& download_url) {
+  // The ExtensionsService is now responsible for cleaning up the temp file
+  // at |path|.
   service_->UpdateExtension(id, path, download_url);
 }
 
-void ExtensionUpdater::OnExtensionInstallFinished(const FilePath& path,
-                                                  Extension* extension) {
-  // Have the file_handler_ delete the temp file on the file I/O thread.
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
-      NewRunnableMethod(
-          file_handler_.get(), &ExtensionUpdaterFileHandler::DeleteFile, path));
-}
 
 void ExtensionUpdater::ScheduleNextCheck(const TimeDelta& target_delay) {
   DCHECK(!timer_.IsRunning());
@@ -704,10 +688,10 @@ void ExtensionUpdater::CheckNow() {
   if (blacklist_checks_enabled_ && service_->HasInstalledExtensions()) {
     ManifestFetchData* blacklist_fetch =
         new ManifestFetchData(GURL(kBlacklistUpdateUrl));
-    std::wstring version = prefs_->GetString(kExtensionBlacklistUpdateVersion);
-    int ping_days = CalculatePingDays(service_->BlacklistLastPingDay());
-    blacklist_fetch->AddExtension(kBlacklistAppID, WideToASCII(version),
-                                  ping_days);
+    std::string version = prefs_->GetString(kExtensionBlacklistUpdateVersion);
+    int ping_days =
+        CalculatePingDays(service_->extension_prefs()->BlacklistLastPingDay());
+    blacklist_fetch->AddExtension(kBlacklistAppID, version, ping_days);
     StartUpdateCheck(blacklist_fetch);
   }
 
@@ -727,14 +711,7 @@ void ExtensionUpdater::CheckNow() {
 bool ExtensionUpdater::GetExistingVersion(const std::string& id,
                                           std::string* version) {
   if (id == kBlacklistAppID) {
-    *version =
-      WideToASCII(prefs_->GetString(kExtensionBlacklistUpdateVersion));
-    return true;
-  }
-  PendingExtensionMap::const_iterator it =
-      service_->pending_extensions().find(id);
-  if (it != service_->pending_extensions().end()) {
-    *version = it->second.version.GetString();
+    *version = prefs_->GetString(kExtensionBlacklistUpdateVersion);
     return true;
   }
   Extension* extension = service_->GetExtensionById(id, false);
@@ -760,20 +737,24 @@ std::vector<int> ExtensionUpdater::DetermineUpdates(
     if (!fetch_data.Includes(update->extension_id))
       continue;
 
-    std::string version;
-    if (!GetExistingVersion(update->extension_id, &version))
-      continue;
+    if (service_->pending_extensions().find(update->extension_id) ==
+        service_->pending_extensions().end()) {
+      // If we're not installing pending extension, and the update
+      // version is the same or older than what's already installed,
+      // we don't want it.
+      std::string version;
+      if (!GetExistingVersion(update->extension_id, &version))
+        continue;
 
-    // If the update version is the same or older than what's already installed,
-    // we don't want it.
-    scoped_ptr<Version> existing_version(
-        Version::GetVersionFromString(version));
-    scoped_ptr<Version> update_version(
-        Version::GetVersionFromString(update->version));
+      scoped_ptr<Version> existing_version(
+          Version::GetVersionFromString(version));
+      scoped_ptr<Version> update_version(
+          Version::GetVersionFromString(update->version));
 
-    if (!update_version.get() ||
-        update_version->CompareTo(*(existing_version.get())) <= 0) {
-      continue;
+      if (!update_version.get() ||
+          update_version->CompareTo(*(existing_version.get())) <= 0) {
+        continue;
+      }
     }
 
     // If the update specifies a browser minimum version, do we qualify?
@@ -781,10 +762,10 @@ std::vector<int> ExtensionUpdater::DetermineUpdates(
       // First determine the browser version if we haven't already.
       if (!browser_version.get()) {
         scoped_ptr<FileVersionInfo> version_info(
-          FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+            chrome_app::GetChromeVersionInfo());
         if (version_info.get()) {
           browser_version.reset(Version::GetVersionFromString(
-            version_info->product_version()));
+              version_info->product_version()));
         }
       }
       scoped_ptr<Version> browser_min_version(

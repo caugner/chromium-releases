@@ -98,8 +98,8 @@ void SearchProvider::Start(const AutocompleteInput& input,
     // User typed "?" alone.  Give them a placeholder result indicating what
     // this syntax does.
     if (default_provider) {
-      AutocompleteMatch match(this, 0, false,
-                              AutocompleteMatch::SEARCH_WHAT_YOU_TYPED);
+      AutocompleteMatch match;
+      match.provider = this;
       match.contents.assign(l10n_util::GetString(IDS_EMPTY_KEYWORD_VALUE));
       match.contents_class.push_back(
           ACMatchClassification(0, ACMatchClassification::NONE));
@@ -328,7 +328,7 @@ void SearchProvider::ScheduleHistoryQuery(TemplateURL::IDType search_id,
       profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
   HistoryService::Handle request_handle =
       history_service->GetMostRecentKeywordSearchTerms(
-          search_id, text, static_cast<int>(max_matches()),
+          search_id, WideToUTF16(text), static_cast<int>(kMaxMatches),
           &history_request_consumer_,
           NewCallback(this,
                       &SearchProvider::OnGotMostRecentKeywordSearchTerms));
@@ -368,9 +368,9 @@ URLFetcher* SearchProvider::CreateSuggestFetcher(int id,
   const TemplateURLRef* const suggestions_url = provider.suggestions_url();
   DCHECK(suggestions_url->SupportsReplacement());
   URLFetcher* fetcher = URLFetcher::Create(id,
-      GURL(WideToUTF8(suggestions_url->ReplaceSearchTerms(
-          provider, text, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-          std::wstring()))),
+      GURL(suggestions_url->ReplaceSearchTerms(
+           provider, text, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
+           std::wstring())),
       URLFetcher::GET, this);
   fetcher->set_request_context(profile_->GetRequestContext());
   fetcher->Start();
@@ -440,21 +440,20 @@ bool SearchProvider::ParseSuggestResults(Value* root_val,
       NavigationResults& navigation_results =
           is_keyword ? keyword_navigation_results_ :
                        default_navigation_results_;
-      if ((navigation_results.size() < max_matches()) &&
+      if ((navigation_results.size() < kMaxMatches) &&
           description_list && description_list->Get(i, &site_val) &&
           site_val->IsType(Value::TYPE_STRING) &&
           site_val->GetAsString(&site_name)) {
         // We can't blindly trust the URL coming from the server to be valid.
-        GURL result_url =
-            GURL(URLFixerUpper::FixupURL(WideToUTF8(suggestion_str),
-                                         std::string()));
+        GURL result_url(URLFixerUpper::FixupURL(WideToUTF8(suggestion_str),
+                                                std::string()));
         if (result_url.is_valid())
           navigation_results.push_back(NavigationResult(result_url, site_name));
       }
     } else {
       // TODO(kochi): Currently we treat a calculator result as a query, but it
       // is better to have better presentation for caluculator results.
-      if (suggest_results->size() < max_matches())
+      if (suggest_results->size() < kMaxMatches)
         suggest_results->push_back(suggestion_str);
     }
   }
@@ -499,7 +498,7 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
   AddNavigationResultsToMatches(keyword_navigation_results_, true);
   AddNavigationResultsToMatches(default_navigation_results_, false);
 
-  const size_t max_total_matches = max_matches() + 1;  // 1 for "what you typed"
+  const size_t max_total_matches = kMaxMatches + 1;  // 1 for "what you typed"
   std::partial_sort(matches_.begin(),
       matches_.begin() + std::min(max_total_matches, matches_.size()),
       matches_.end(), &AutocompleteMatch::MoreRelevant);
@@ -538,7 +537,8 @@ void SearchProvider::AddHistoryResultsToMap(const HistoryResults& results,
                                             MatchMap* map) {
   for (HistoryResults::const_iterator i(results.begin()); i != results.end();
        ++i) {
-    AddMatchToMap(i->term, CalculateRelevanceForHistory(i->time, is_keyword),
+    AddMatchToMap(UTF16ToWide(i->term),
+                  CalculateRelevanceForHistory(i->time, is_keyword),
                   AutocompleteMatch::SEARCH_HISTORY, did_not_accept_suggestion,
                   is_keyword, map);
   }
@@ -702,9 +702,10 @@ void SearchProvider::AddMatchToMap(const std::wstring& query_string,
   const TemplateURLRef* const search_url = provider.url();
   DCHECK(search_url->SupportsReplacement());
   match.destination_url =
-      GURL(WideToUTF8(search_url->ReplaceSearchTerms(provider, query_string,
-                                                     accepted_suggestion,
-                                                     input_text)));
+      GURL(search_url->ReplaceSearchTerms(provider,
+                                          query_string,
+                                          accepted_suggestion,
+                                          input_text));
 
   // Search results don't look like URLs.
   match.transition =
@@ -737,10 +738,8 @@ AutocompleteMatch SearchProvider::NavigationToMatch(
   AutocompleteMatch match(this, relevance, false,
                           AutocompleteMatch::NAVSUGGEST);
   match.destination_url = navigation.url;
-  match.contents = StringForURLDisplay(navigation.url, true);
-  if (!url_util::FindAndCompareScheme(WideToUTF8(input_text),
-                                      chrome::kHttpScheme, NULL))
-    TrimHttpPrefix(&match.contents);
+  match.contents =
+      StringForURLDisplay(navigation.url, true, !HasHTTPScheme(input_text));
   AutocompleteMatch::ClassifyMatchInString(input_text, match.contents,
                                            ACMatchClassification::URL,
                                            &match.contents_class);
@@ -755,7 +754,9 @@ AutocompleteMatch SearchProvider::NavigationToMatch(
   // suggestion, non-Search results will suddenly appear.
   if (input_.type() == AutocompleteInput::FORCED_QUERY)
     match.fill_into_edit.assign(L"?");
-  match.fill_into_edit.append(match.contents);
+  match.fill_into_edit.append(
+      AutocompleteInput::FormattedStringWithEquivalentMeaning(navigation.url,
+                                                              match.contents));
   // TODO(pkasting): http://b/1112879 These should perhaps be
   // inline-autocompletable?
 

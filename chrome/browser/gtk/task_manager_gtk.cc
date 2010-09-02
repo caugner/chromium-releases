@@ -316,7 +316,7 @@ void TaskManagerGtk::OnItemsChanged(int start, int length) {
 }
 
 void TaskManagerGtk::OnItemsAdded(int start, int length) {
-  AutoReset autoreset(&ignore_selection_changed_, true);
+  AutoReset<bool> autoreset(&ignore_selection_changed_, true);
 
   GtkTreeIter iter;
   if (start == 0) {
@@ -341,18 +341,25 @@ void TaskManagerGtk::OnItemsAdded(int start, int length) {
 }
 
 void TaskManagerGtk::OnItemsRemoved(int start, int length) {
-  AutoReset autoreset(&ignore_selection_changed_, true);
+  {
+    AutoReset<bool> autoreset(&ignore_selection_changed_, true);
 
-  GtkTreeIter iter;
-  gtk_tree_model_iter_nth_child(GTK_TREE_MODEL(process_list_), &iter,
-                                NULL, start);
+    GtkTreeIter iter;
+    gtk_tree_model_iter_nth_child(GTK_TREE_MODEL(process_list_), &iter,
+                                  NULL, start);
 
-  for (int i = 0; i < length; i++) {
-    // |iter| is moved to the next valid node when the current node is removed.
-    gtk_list_store_remove(process_list_, &iter);
+    for (int i = 0; i < length; i++) {
+      // |iter| is moved to the next valid node when the current node is
+      // removed.
+      gtk_list_store_remove(process_list_, &iter);
+    }
+
+    process_count_ -= length;
   }
 
-  process_count_ -= length;
+  // It is possible that we have removed the current selection; run selection
+  // changed to detect that case.
+  OnSelectionChanged(gtk_tree_view_get_selection(GTK_TREE_VIEW(treeview_)));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -362,7 +369,7 @@ void TaskManagerGtk::OnItemsRemoved(int start, int length) {
 void TaskManagerGtk::Show() {
   if (instance_) {
     // If there's a Task manager window open already, just activate it.
-    gtk_window_present(GTK_WINDOW(instance_->dialog_));
+    gtk_util::PresentWindow(instance_->dialog_, 0);
   } else {
     instance_ = new TaskManagerGtk;
     instance_->model_->StartUpdating();
@@ -384,11 +391,6 @@ void TaskManagerGtk::Init() {
   // metacity.
   gtk_window_set_type_hint(GTK_WINDOW(dialog_), GDK_WINDOW_TYPE_HINT_NORMAL);
 
-  // The response button should not be sensitive when the dialog is first opened
-  // because the selection is initially empty.
-  gtk_dialog_set_response_sensitive(GTK_DIALOG(dialog_),
-                                    kTaskManagerResponseKill, FALSE);
-
   if (CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kPurgeMemoryButton)) {
     gtk_dialog_add_button(GTK_DIALOG(dialog_),
@@ -399,6 +401,11 @@ void TaskManagerGtk::Init() {
   gtk_dialog_add_button(GTK_DIALOG(dialog_),
       l10n_util::GetStringUTF8(IDS_TASK_MANAGER_KILL).c_str(),
       kTaskManagerResponseKill);
+
+  // The response button should not be sensitive when the dialog is first opened
+  // because the selection is initially empty.
+  gtk_dialog_set_response_sensitive(GTK_DIALOG(dialog_),
+                                    kTaskManagerResponseKill, FALSE);
 
   GtkWidget* link = gtk_chrome_link_button_new(
       l10n_util::GetStringUTF8(IDS_TASK_MANAGER_ABOUT_MEMORY_LINK).c_str());
@@ -416,10 +423,10 @@ void TaskManagerGtk::Init() {
                       gtk_util::kContentAreaSpacing);
 
   destroy_handler_id_ = g_signal_connect(dialog_, "destroy",
-                                         G_CALLBACK(OnDestroy), this);
-  g_signal_connect(dialog_, "response", G_CALLBACK(OnResponse), this);
+                                         G_CALLBACK(OnDestroyThunk), this);
+  g_signal_connect(dialog_, "response", G_CALLBACK(OnResponseThunk), this);
   g_signal_connect(dialog_, "button-release-event",
-                   G_CALLBACK(OnButtonReleaseEvent), this);
+                   G_CALLBACK(OnButtonReleaseEventThunk), this);
   gtk_widget_add_events(dialog_,
                         GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
 
@@ -435,7 +442,7 @@ void TaskManagerGtk::Init() {
   CreateTaskManagerTreeview();
   gtk_tree_view_set_headers_clickable(GTK_TREE_VIEW(treeview_), TRUE);
   g_signal_connect(treeview_, "button-press-event",
-                   G_CALLBACK(OnButtonPressEvent), this);
+                   G_CALLBACK(OnButtonPressEventThunk), this);
   gtk_widget_add_events(treeview_,
                         GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
 
@@ -449,7 +456,7 @@ void TaskManagerGtk::Init() {
   gtk_container_add(GTK_CONTAINER(scrolled), treeview_);
 
   SetInitialDialogSize();
-  gtk_widget_show_all(dialog_);
+  gtk_util::ShowDialog(dialog_);
 
   model_->AddObserver(this);
 }
@@ -458,7 +465,7 @@ void TaskManagerGtk::SetInitialDialogSize() {
   // Hook up to the realize event so we can size the page column to the
   // size of the leftover space after packing the other columns.
   g_signal_connect(treeview_, "realize",
-                   G_CALLBACK(OnTreeViewRealize), this);
+                   G_CALLBACK(OnTreeViewRealizeThunk), this);
   // If we previously saved the dialog's bounds, use them.
   if (g_browser_process->local_state()) {
     const DictionaryValue* placement_pref =
@@ -489,7 +496,7 @@ void TaskManagerGtk::ConnectAccelerators() {
 
   gtk_accel_group_connect(accel_group_,
                           GDK_w, GDK_CONTROL_MASK, GtkAccelFlags(0),
-                          g_cclosure_new(G_CALLBACK(OnGtkAccelerator),
+                          g_cclosure_new(G_CALLBACK(OnGtkAcceleratorThunk),
                                          this, NULL));
 }
 
@@ -511,6 +518,9 @@ void TaskManagerGtk::CreateTaskManagerTreeview() {
   gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(process_list_sort_),
                                   kTaskManagerPrivateMem,
                                   ComparePrivateMemory, this, NULL);
+  gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(process_list_sort_),
+                                  kTaskManagerJavaScriptMemory,
+                                  CompareV8Memory, this, NULL);
   gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(process_list_sort_),
                                   kTaskManagerCPU,
                                   CompareCPU, this, NULL);
@@ -617,7 +627,8 @@ std::string TaskManagerGtk::GetModelText(int row, int col_id) {
       return WideToUTF8(model_->GetResourceGoatsTeleported(row));
 
     default:
-      return WideToUTF8(model_->GetResourceStatsValue(row, col_id));
+      NOTREACHED();
+      return std::string();
   }
 }
 
@@ -763,49 +774,41 @@ gint TaskManagerGtk::CompareImpl(GtkTreeModel* model, GtkTreeIter* a,
   }
 }
 
-// static
-void TaskManagerGtk::OnDestroy(GtkDialog* dialog,
-                               TaskManagerGtk* task_manager) {
+void TaskManagerGtk::OnDestroy(GtkWidget* dialog) {
   instance_ = NULL;
-  delete task_manager;
+  delete this;
 }
 
-// static
-void TaskManagerGtk::OnResponse(GtkDialog* dialog, gint response_id,
-                                TaskManagerGtk* task_manager) {
+void TaskManagerGtk::OnResponse(GtkWidget* dialog, gint response_id) {
   if (response_id == GTK_RESPONSE_DELETE_EVENT) {
     // Store the dialog's size so we can restore it the next time it's opened.
     if (g_browser_process->local_state()) {
-      gint x = 0, y = 0, width = 1, height = 1;
-      gtk_window_get_position(GTK_WINDOW(dialog), &x, &y);
-      gtk_window_get_size(GTK_WINDOW(dialog), &width, &height);
+      gfx::Rect dialog_bounds = gtk_util::GetDialogBounds(GTK_WIDGET(dialog));
 
       DictionaryValue* placement_pref =
           g_browser_process->local_state()->GetMutableDictionary(
               prefs::kTaskManagerWindowPlacement);
       // Note that we store left/top for consistency with Windows, but that we
       // *don't* restore them.
-      placement_pref->SetInteger(L"left", x);
-      placement_pref->SetInteger(L"top", y);
-      placement_pref->SetInteger(L"right", x + width);
-      placement_pref->SetInteger(L"bottom", y + height);
+      placement_pref->SetInteger(L"left", dialog_bounds.x());
+      placement_pref->SetInteger(L"top", dialog_bounds.y());
+      placement_pref->SetInteger(L"right", dialog_bounds.right());
+      placement_pref->SetInteger(L"bottom", dialog_bounds.bottom());
       placement_pref->SetBoolean(L"maximized", false);
     }
 
     instance_ = NULL;
-    delete task_manager;
+    delete this;
   } else if (response_id == kTaskManagerResponseKill) {
-    task_manager->KillSelectedProcesses();
+    KillSelectedProcesses();
   } else if (response_id == kTaskManagerAboutMemoryLink) {
-    task_manager->OnLinkActivated();
+    OnLinkActivated();
   } else if (response_id == kTaskManagerPurgeMemory) {
     MemoryPurger::PurgeAll();
   }
 }
 
-// static
-void TaskManagerGtk::OnTreeViewRealize(GtkTreeView* treeview,
-                                       TaskManagerGtk* task_manager) {
+void TaskManagerGtk::OnTreeViewRealize(GtkTreeView* treeview) {
   // Four columns show by default: the page column, the memory column, the
   // CPU column, and the network column. Initially we set the page column to
   // take all the extra space, with the other columns being sized to fit the
@@ -837,7 +840,7 @@ void TaskManagerGtk::OnTreeViewRealize(GtkTreeView* treeview,
 void TaskManagerGtk::OnSelectionChanged(GtkTreeSelection* selection) {
   if (ignore_selection_changed_)
     return;
-  AutoReset autoreset(&ignore_selection_changed_, true);
+  AutoReset<bool> autoreset(&ignore_selection_changed_, true);
 
   // The set of groups that should be selected.
   std::set<std::pair<int, int> > ranges;
@@ -860,13 +863,15 @@ void TaskManagerGtk::OnSelectionChanged(GtkTreeSelection* selection) {
 
   for (std::set<std::pair<int, int> >::iterator iter = ranges.begin();
        iter != ranges.end(); ++iter) {
-    GtkTreePath* start_path =
-        gtk_tree_path_new_from_indices(iter->first, -1);
-    GtkTreePath* end_path =
-        gtk_tree_path_new_from_indices(iter->first + iter->second - 1, -1);
-    gtk_tree_selection_select_range(selection, start_path, end_path);
-    gtk_tree_path_free(start_path);
-    gtk_tree_path_free(end_path);
+    for (int i = 0; i < iter->second; ++i) {
+      GtkTreePath* child_path = gtk_tree_path_new_from_indices(iter->first + i,
+                                                               -1);
+      GtkTreePath* sort_path = gtk_tree_model_sort_convert_child_path_to_path(
+        GTK_TREE_MODEL_SORT(process_list_sort_), child_path);
+      gtk_tree_selection_select_path(selection, sort_path);
+      gtk_tree_path_free(child_path);
+      gtk_tree_path_free(sort_path);
+    }
   }
 
   bool sensitive = (paths != NULL) && !selection_contains_browser_process;
@@ -874,37 +879,30 @@ void TaskManagerGtk::OnSelectionChanged(GtkTreeSelection* selection) {
                                     kTaskManagerResponseKill, sensitive);
 }
 
-// static
 gboolean TaskManagerGtk::OnButtonPressEvent(GtkWidget* widget,
-                                            GdkEventButton* event,
-                                            TaskManagerGtk* task_manager) {
+                                            GdkEventButton* event) {
   if (event->type == GDK_2BUTTON_PRESS)
-    task_manager->ActivateFocusedTab();
+    ActivateFocusedTab();
 
   return FALSE;
 }
 
-// static
 gboolean TaskManagerGtk::OnButtonReleaseEvent(GtkWidget* widget,
-                                              GdkEventButton* event,
-                                              TaskManagerGtk* task_manager) {
+                                              GdkEventButton* event) {
   if (event->button == 3)
-    task_manager->ShowContextMenu();
+    ShowContextMenu();
 
   return FALSE;
 }
 
-// static
 gboolean TaskManagerGtk::OnGtkAccelerator(GtkAccelGroup* accel_group,
                                           GObject* acceleratable,
                                           guint keyval,
-                                          GdkModifierType modifier,
-                                          TaskManagerGtk* task_manager) {
+                                          GdkModifierType modifier) {
   if (keyval == GDK_w && modifier == GDK_CONTROL_MASK) {
     // The GTK_RESPONSE_DELETE_EVENT response must be sent before the widget
     // is destroyed.  The deleted object will receive gtk signals otherwise.
-    gtk_dialog_response(GTK_DIALOG(task_manager->dialog_),
-                        GTK_RESPONSE_DELETE_EVENT);
+    gtk_dialog_response(GTK_DIALOG(dialog_), GTK_RESPONSE_DELETE_EVENT);
   }
 
   return TRUE;

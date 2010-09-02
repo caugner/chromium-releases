@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,7 +73,7 @@ class SessionFileReader {
   // Number of available bytes; relative to buffer_position_.
   size_t available_count_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(SessionFileReader);
+  DISALLOW_COPY_AND_ASSIGN(SessionFileReader);
 };
 
 bool SessionFileReader::Read(BaseSessionService::SessionType type,
@@ -352,7 +352,7 @@ void SessionBackend::ResetFile() {
 
 net::FileStream* SessionBackend::OpenAndWriteHeader(const FilePath& path) {
   DCHECK(!path.empty());
-  net::FileStream* file = new net::FileStream();
+  scoped_ptr<net::FileStream> file(new net::FileStream());
   file->Open(path, base::PLATFORM_FILE_CREATE_ALWAYS |
              base::PLATFORM_FILE_WRITE | base::PLATFORM_FILE_EXCLUSIVE_WRITE |
              base::PLATFORM_FILE_EXCLUSIVE_READ);
@@ -365,7 +365,7 @@ net::FileStream* SessionBackend::OpenAndWriteHeader(const FilePath& path) {
                           sizeof(header), NULL);
   if (wrote != sizeof_header())
     return NULL;
-  return file;
+  return file.release();
 }
 
 FilePath SessionBackend::GetLastSessionPath() {

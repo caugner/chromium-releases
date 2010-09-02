@@ -29,6 +29,7 @@ class AutoFillProfile : public FormGroup {
   // FormGroup implementation:
   virtual void GetPossibleFieldTypes(const string16& text,
                                      FieldTypeSet* possible_types) const;
+  virtual void GetAvailableFieldTypes(FieldTypeSet* available_types) const;
   virtual string16 GetFieldText(const AutoFillType& type) const;
   // Returns true if the info matches the profile data corresponding to type.
   // If the type is UNKNOWN_TYPE then info will be matched against all of the
@@ -41,11 +42,6 @@ class AutoFillProfile : public FormGroup {
   // for deleting profile when they are done with it.
   virtual FormGroup* Clone() const;
   virtual const string16& Label() const { return label_; }
-
-  // NOTE: callers must write the profile to the WebDB after changing the value
-  // of use_billing_address.
-  void set_use_billing_address(bool use);
-  bool use_billing_address() const { return use_billing_address_; }
 
   void set_unique_id(int id) { unique_id_ = id; }
   int unique_id() const { return unique_id_; }
@@ -60,28 +56,53 @@ class AutoFillProfile : public FormGroup {
   // The form of the string is governed by generated resources.
   string16 PreviewSummary() const;
 
+  // Adjusts the labels according to profile data.
+  // Labels contain minimal different combination of:
+  // 1. Full name.
+  // 2. Address.
+  // 3. E-mail.
+  // 4. Phone.
+  // 5. Fax.
+  // 6. Company name.
+  // Profile labels are changed accordingly to these rules.
+  // Returns true if any of the profiles were updated.
+  // This function is useful if you want to adjust unique labels for all
+  // profiles. For non permanent situations (selection of profile, when user
+  // started typing in the field, for example) use CreateInferredLabels().
+  static bool AdjustInferredLabels(std::vector<AutoFillProfile*>* profiles);
+
+  // Created inferred labels for |profiles|, according to the rules above and
+  // stores them in |created_labels|. |minimal_fields_shown| minimal number of
+  // fields that need to be shown for the label. |exclude_field| is excluded
+  // from the label.
+  static void CreateInferredLabels(
+      const std::vector<AutoFillProfile*>* profiles,
+      std::vector<string16>* created_labels,
+      size_t minimal_fields_shown,
+      AutoFillFieldType exclude_field);
   // For use in STL containers.
   void operator=(const AutoFillProfile&);
 
-  // Used by tests.
-  // TODO(jhawkins): Move these to private and add the test as a friend.
+  // For WebData and Sync.
   bool operator==(const AutoFillProfile& profile) const;
-  bool operator!=(const AutoFillProfile& profile) const;
+  virtual bool operator!=(const AutoFillProfile& profile) const;
   void set_label(const string16& label) { label_ = label; }
 
  private:
-  Address* GetBillingAddress();
   Address* GetHomeAddress();
+
+  // Builds inferred label, includes first non-empty field at the beginning,
+  // even if it matches for all.
+  // |included_fields| - array of the fields, that needs to be included in this
+  // label.
+  string16 ConstructInferredLabel(
+      const std::vector<AutoFillFieldType>* included_fields) const;
 
   // The label presented to the user when selecting a profile.
   string16 label_;
 
   // The unique ID of this profile.
   int unique_id_;
-
-  // If true, the billing address will be used for the home address.  Correlates
-  // with the "Use billing address" option on some billing forms.
-  bool use_billing_address_;
 
   // Personal information for this profile.
   FormGroupMap personal_info_;

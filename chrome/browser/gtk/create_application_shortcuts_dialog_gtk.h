@@ -12,8 +12,8 @@
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/shell_integration.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 
+typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkWindow GtkWindow;
 
@@ -40,6 +40,9 @@ class CreateApplicationShortcutsDialogGtk
   CHROMEGTK_CALLBACK_1(CreateApplicationShortcutsDialogGtk, void,
                        OnErrorDialogResponse, int);
 
+  CHROMEGTK_CALLBACK_0(CreateApplicationShortcutsDialogGtk, void,
+                       OnToggleCheckbox);
+
   void CreateDesktopShortcut(
       const ShellIntegration::ShortcutInfo& shortcut_info);
   void ShowErrorDialog();
@@ -51,14 +54,11 @@ class CreateApplicationShortcutsDialogGtk
   // TabContents for which the shortcut will be created.
   TabContents* tab_contents_;
 
-  // Target URL of the shortcut.
-  GURL url_;
+  // ShortcutInfo for the new shortcut.
+  ShellIntegration::ShortcutInfo shortcut_info_;
 
-  // Visible title of the shortcut.
-  string16 title_;
-
-  // The favicon of the tab contents, used to set the icon on the desktop.
-  SkBitmap favicon_;
+  // Image associated with the site.
+  GdkPixbuf* favicon_pixbuf_;
 
   // Dialog box that allows the user to create an application shortcut.
   GtkWidget* create_dialog_;

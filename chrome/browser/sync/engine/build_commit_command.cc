@@ -19,7 +19,6 @@
 using std::set;
 using std::string;
 using std::vector;
-using syncable::ExtendedAttribute;
 using syncable::IS_DEL;
 using syncable::Id;
 using syncable::MutableEntry;
@@ -93,6 +92,8 @@ void BuildCommitCommand::ExecuteImpl(SyncSession* session) {
   commit_message->set_cache_guid(
       session->write_transaction()->directory()->cache_guid());
   AddExtensionsActivityToMessage(session, commit_message);
+  SyncerProtoUtil::AddRequestBirthday(
+      session->write_transaction()->directory(), &message);
 
   const vector<Id>& commit_ids = session->status_controller()->commit_ids();
   for (size_t i = 0; i < commit_ids.size(); i++) {
@@ -112,6 +113,7 @@ void BuildCommitCommand::ExecuteImpl(SyncSession* session) {
 
     string name = meta_entry.Get(syncable::NON_UNIQUE_NAME);
     CHECK(!name.empty());  // Make sure this isn't an update.
+    TruncateUTF8ToByteSize(name, 255, &name);
     sync_entry->set_name(name);
 
     // Set the non_unique_name.  If we do, the server ignores
@@ -125,8 +127,8 @@ void BuildCommitCommand::ExecuteImpl(SyncSession* session) {
           meta_entry.Get(syncable::UNIQUE_CLIENT_TAG));
     }
 
-    // Deleted items with negative parent ids can be a problem so we set the
-    // parent to 0. (TODO(sync): Still true in protocol?).
+    // Deleted items with server-unknown parent ids can be a problem so we set
+    // the parent to 0. (TODO(sync): Still true in protocol?).
     Id new_parent_id;
     if (meta_entry.Get(syncable::IS_DEL) &&
         !meta_entry.Get(syncable::PARENT_ID).ServerKnows()) {
@@ -135,12 +137,12 @@ void BuildCommitCommand::ExecuteImpl(SyncSession* session) {
       new_parent_id = meta_entry.Get(syncable::PARENT_ID);
     }
     sync_entry->set_parent_id(new_parent_id);
-    // TODO(sync): Investigate all places that think transactional commits
-    // actually exist.
-    //
-    // This is the only logic we'll need when transactional commits are moved
-    // to the server. If our parent has changes, send up the old one so the
-    // server can correctly deal with multiple parents.
+
+    // If our parent has changed, send up the old one so the server
+    // can correctly deal with multiple parents.
+    // TODO(nick): With the server keeping track of the primary sync parent,
+    // it should not be necessary to provide the old_parent_id: the version
+    // number should suffice.
     if (new_parent_id != meta_entry.Get(syncable::SERVER_PARENT_ID) &&
         0 != meta_entry.Get(syncable::BASE_VERSION) &&
         syncable::CHANGES_VERSION != meta_entry.Get(syncable::BASE_VERSION)) {
@@ -149,33 +151,21 @@ void BuildCommitCommand::ExecuteImpl(SyncSession* session) {
 
     int64 version = meta_entry.Get(syncable::BASE_VERSION);
     if (syncable::CHANGES_VERSION == version || 0 == version) {
-      // If this CHECK triggers during unit testing, check that we haven't
-      // altered an item that's an unapplied update.
-      CHECK(!id.ServerKnows()) << meta_entry;
+      // Undeletions are only supported for items that have a client tag.
+      DCHECK(!id.ServerKnows() ||
+             !meta_entry.Get(syncable::UNIQUE_CLIENT_TAG).empty())
+          << meta_entry;
+
+      // Version 0 means to create or undelete an object.
       sync_entry->set_version(0);
     } else {
-      CHECK(id.ServerKnows()) << meta_entry;
+      DCHECK(id.ServerKnows()) << meta_entry;
       sync_entry->set_version(meta_entry.Get(syncable::BASE_VERSION));
     }
     sync_entry->set_ctime(ClientTimeToServerTime(
         meta_entry.Get(syncable::CTIME)));
     sync_entry->set_mtime(ClientTimeToServerTime(
         meta_entry.Get(syncable::MTIME)));
-
-    set<ExtendedAttribute> extended_attributes;
-    meta_entry.GetAllExtendedAttributes(
-        session->write_transaction(), &extended_attributes);
-    set<ExtendedAttribute>::iterator iter;
-    sync_pb::ExtendedAttributes* mutable_extended_attributes =
-        sync_entry->mutable_extended_attributes();
-    for (iter = extended_attributes.begin(); iter != extended_attributes.end();
-        ++iter) {
-      sync_pb::ExtendedAttributes_ExtendedAttribute *extended_attribute =
-          mutable_extended_attributes->add_extendedattribute();
-      extended_attribute->set_key(iter->key());
-      SyncerProtoUtil::CopyBlobIntoProtoBytes(iter->value(),
-          extended_attribute->mutable_value());
-    }
 
     // Deletion is final on the server, let's move things and then delete them.
     if (meta_entry.Get(IS_DEL)) {

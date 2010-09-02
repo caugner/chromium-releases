@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,11 @@
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/renderer_host/render_view_host_delegate.h"
+#include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/window_sizer.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_service.h"
@@ -22,9 +26,7 @@
 #include "gfx/point.h"
 
 #if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/render_view_host_delegate.h"
-#include "chrome/browser/renderer_host/render_widget_host_view.h"
+#include "chrome/browser/views/bubble_border.h"
 #include "chrome/browser/views/extensions/extension_popup.h"
 #include "views/view.h"
 #include "views/focus/focus_manager.h"
@@ -42,6 +44,8 @@ namespace {
 const char kBadAnchorArgument[] = "Invalid anchor argument.";
 const char kInvalidURLError[] = "Invalid URL.";
 const char kNotAnExtension[] = "Not an extension view.";
+const char kPopupsDisallowed[] =
+    "Popups are only supported from toolstrip or tab-contents views.";
 
 // Keys.
 const wchar_t kUrlKey[] = L"url";
@@ -55,6 +59,35 @@ const wchar_t kBorderStyleKey[] = L"borderStyle";
 
 // chrome enumeration values
 const char kRectangleChrome[] = "rectangle";
+
+#if defined(TOOLKIT_VIEWS)
+// Returns an updated arrow location, conditioned on the type of intersection
+// between the popup window, and the screen.  |location| is the current position
+// of the arrow on the popup.  |intersection| is the rect representing the
+// intersection between the popup view and its working screen.  |popup_rect|
+// is the rect of the popup window in screen space coordinates.
+// The returned location will be horizontally or vertically inverted based on
+// if the popup has been clipped horizontally or vertically.
+BubbleBorder::ArrowLocation ToggleArrowLocation(
+    BubbleBorder::ArrowLocation location, const gfx::Rect& intersection,
+    const gfx::Rect& popup_rect) {
+  // If the popup has been clipped horizontally, flip the right-left position
+  // of the arrow.
+  if (intersection.right() != popup_rect.right() ||
+      intersection.x() != popup_rect.x()) {
+    location = BubbleBorder::horizontal_mirror(location);
+  }
+
+  // If the popup has been clipped vertically, flip the bottom-top position
+  // of the arrow.
+  if (intersection.y() != popup_rect.y() ||
+      intersection.bottom() != popup_rect.bottom()) {
+    location = BubbleBorder::vertical_mirror(location);
+  }
+
+  return location;
+}
+#endif  // TOOLKIT_VIEWS
 
 };  // namespace
 
@@ -70,7 +103,8 @@ const char kRectangleChrome[] = "rectangle";
 // containing view or any of *its* children.
 class ExtensionPopupHost : public ExtensionPopup::Observer,
                            public views::WidgetFocusChangeListener,
-                           public base::RefCounted<ExtensionPopupHost> {
+                           public base::RefCounted<ExtensionPopupHost>,
+                           public NotificationObserver {
  public:
   explicit ExtensionPopupHost(ExtensionFunctionDispatcher* dispatcher)
       : dispatcher_(dispatcher), popup_(NULL) {
@@ -85,21 +119,42 @@ class ExtensionPopupHost : public ExtensionPopup::Observer,
 
   void set_popup(ExtensionPopup* popup) {
     popup_ = popup;
+
+    // Now that a popup has been assigned, listen for subsequent popups being
+    // created in the same extension - we want to disallow more than one
+    // concurrently displayed popup windows.
+    registrar_.Add(
+        this,
+        NotificationType::EXTENSION_HOST_CREATED,
+        Source<ExtensionProcessManager>(
+            dispatcher_->profile()->GetExtensionProcessManager()));
+
+    registrar_.Add(
+        this,
+        NotificationType::RENDER_VIEW_HOST_WILL_CLOSE_RENDER_VIEW,
+        Source<RenderViewHost>(dispatcher_->render_view_host()));
+
+    registrar_.Add(
+        this,
+        NotificationType::EXTENSION_FUNCTION_DISPATCHER_DESTROYED,
+        Source<Profile>(dispatcher_->profile()));
   }
 
-  // Overriden from ExtensionPopup::Observer
-  virtual void ExtensionPopupClosed(ExtensionPopup* popup) {
+  // Overridden from ExtensionPopup::Observer
+  virtual void ExtensionPopupIsClosing(ExtensionPopup* popup) {
     // Unregister the automation resource routing registered upon host
     // creation.
     AutomationResourceRoutingDelegate* router =
         GetRoutingFromDispatcher(dispatcher_);
     if (router)
       router->UnregisterRenderViewHost(popup_->host()->render_view_host());
+  }
 
-    // The OnPopupClosed event should be sent later to give the popup time to
-    // complete closing.
-    MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &ExtensionPopupHost::DispatchPopupClosedEvent));
+  virtual void ExtensionPopupClosed(void* popup_token) {
+    if (popup_ == popup_token) {
+      popup_ = NULL;
+      DispatchPopupClosedEvent();
+    }
   }
 
   virtual void ExtensionHostCreated(ExtensionHost* host) {
@@ -112,16 +167,62 @@ class ExtensionPopupHost : public ExtensionPopup::Observer,
       router->RegisterRenderViewHost(host->render_view_host());
   }
 
+  virtual void ExtensionPopupResized(ExtensionPopup* popup) {
+    // Reposition the location of the arrow on the popup so that the popup
+    // better fits on the working monitor.
+    gfx::Rect popup_rect = popup->GetOuterBounds();
+    if (popup_rect.IsEmpty())
+      return;
+
+    scoped_ptr<WindowSizer::MonitorInfoProvider> monitor_provider(
+        WindowSizer::CreateDefaultMonitorInfoProvider());
+    gfx::Rect monitor_bounds(
+        monitor_provider->GetMonitorWorkAreaMatching(popup_rect));
+    gfx::Rect intersection = monitor_bounds.Intersect(popup_rect);
+
+    // If the popup is totally out of the bounds of the monitor, then toggling
+    // the arrow location will not result in an un-clipped window.
+    if (intersection.IsEmpty())
+      return;
+
+    if (!intersection.Equals(popup_rect)) {
+      // The popup was clipped by the monitor.  Toggle the arrow position
+      // to see if that improves visibility.  Note:  The assignment and
+      // re-assignment of the arrow-position will not trigger an intermittent
+      // display.
+      BubbleBorder::ArrowLocation previous_location = popup->arrow_position();
+      BubbleBorder::ArrowLocation flipped_location = ToggleArrowLocation(
+          previous_location, intersection, popup_rect);
+      popup->SetArrowPosition(flipped_location);
+
+      // Double check that toggling the position actually improved the
+      // situation - the popup will be contained entirely in its working monitor
+      // bounds.
+      gfx::Rect flipped_bounds = popup->GetOuterBounds();
+      gfx::Rect updated_monitor_bounds =
+          monitor_provider->GetMonitorWorkAreaMatching(flipped_bounds);
+      if (!updated_monitor_bounds.Contains(flipped_bounds))
+        popup->SetArrowPosition(previous_location);
+    }
+  }
+
   virtual void DispatchPopupClosedEvent() {
-    PopupEventRouter::OnPopupClosed(
-        dispatcher_->profile(), dispatcher_->render_view_host()->routing_id());
-    dispatcher_ = NULL;
+    if (dispatcher_) {
+      PopupEventRouter::OnPopupClosed(
+          dispatcher_->profile(),
+          dispatcher_->render_view_host()->routing_id());
+      dispatcher_ = NULL;
+    }
     Release();  // Balanced in ctor.
   }
 
-  // Overriden from views::WidgetFocusChangeListener
+  // Overridden from views::WidgetFocusChangeListener
   virtual void NativeFocusWillChange(gfx::NativeView focused_before,
                                      gfx::NativeView focused_now) {
+    // If the popup doesn't exist, then do nothing.
+    if (!popup_)
+      return;
+
     // If no view is to be focused, then Chrome was deactivated, so hide the
     // popup.
     if (focused_now) {
@@ -130,10 +231,13 @@ class ExtensionPopupHost : public ExtensionPopup::Observer,
 
       // If the widget hosting the popup contains the newly focused view, then
       // don't dismiss the pop-up.
-      views::Widget* popup_root_widget = popup_->host()->view()->GetWidget();
-      if (popup_root_widget &&
-          popup_root_widget->ContainsNativeView(focused_now))
-        return;
+      ExtensionView* view = popup_->host()->view();
+      if (view) {
+        views::Widget* popup_root_widget = view->GetWidget();
+        if (popup_root_widget &&
+            popup_root_widget->ContainsNativeView(focused_now))
+          return;
+      }
 
       // If the widget or RenderWidgetHostView hosting the extension that
       // launched the pop-up is receiving focus, then don't dismiss the popup.
@@ -156,6 +260,45 @@ class ExtensionPopupHost : public ExtensionPopup::Observer,
         &ExtensionPopup::Close));
   }
 
+  // Overridden from NotificationObserver
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) {
+    if (NotificationType::EXTENSION_HOST_CREATED == type) {
+      Details<ExtensionHost> details_host(details);
+      // Disallow multiple pop-ups from the same extension, by closing
+      // the presently opened popup during construction of any new popups.
+      if (ViewType::EXTENSION_POPUP == details_host->GetRenderViewType() &&
+          popup_->host()->extension() == details_host->extension() &&
+          Details<ExtensionHost>(popup_->host()) != details) {
+        popup_->Close();
+      }
+    } else if (NotificationType::RENDER_VIEW_HOST_WILL_CLOSE_RENDER_VIEW ==
+        type) {
+      if (Source<RenderViewHost>(dispatcher_->render_view_host()) == source) {
+        // If the parent render view is about to be closed, signal closure
+        // of the popup.
+        popup_->Close();
+      }
+    } else if (NotificationType::EXTENSION_FUNCTION_DISPATCHER_DESTROYED ==
+        type) {
+      // Popups should not outlive the dispatchers that launched them.
+      // Normally, long-lived popups will be dismissed in response to the
+      // RENDER_VIEW_WILL_CLOSE_BY_RENDER_VIEW_HOST message.  Unfortunately,
+      // if the hosting view invokes window.close(), there is no communication
+      // back to the browser until the entire view has been torn down, at which
+      // time the dispatcher will be invoked.
+      // Note:  The onClosed event will not be fired, but because the hosting
+      // view has already been torn down, it is already too late to process it.
+      // TODO(twiz):  Add a communication path between the renderer and browser
+      // for RenderView closure notifications initiatied within the renderer.
+      if (Details<ExtensionFunctionDispatcher>(dispatcher_) == details) {
+        dispatcher_ = NULL;
+        popup_->Close();
+      }
+    }
+  }
+
  private:
   // Returns the AutomationResourceRoutingDelegate interface for |dispatcher|.
   static AutomationResourceRoutingDelegate*
@@ -176,6 +319,8 @@ class ExtensionPopupHost : public ExtensionPopup::Observer,
 
   // A pointer to the popup.
   ExtensionPopup* popup_;
+
+  NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionPopupHost);
 };
@@ -211,14 +356,21 @@ void PopupShowFunction::Run() {
 }
 
 bool PopupShowFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_LIST));
-  const ListValue* args = args_as_list();
+  // Popups may only be displayed from TAB_CONTENTS and EXTENSION_TOOLSTRIP
+  // views.
+  ViewType::Type view_type =
+      dispatcher()->render_view_host()->delegate()->GetRenderViewType();
+  if (ViewType::EXTENSION_TOOLSTRIP != view_type &&
+      ViewType::TAB_CONTENTS != view_type) {
+    error_ = kPopupsDisallowed;
+    return false;
+  }
 
   std::string url_string;
-  EXTENSION_FUNCTION_VALIDATE(args->GetString(0, &url_string));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &url_string));
 
   DictionaryValue* show_details = NULL;
-  EXTENSION_FUNCTION_VALIDATE(args->GetDictionary(1, &show_details));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(1, &show_details));
 
   DictionaryValue* dom_anchor = NULL;
   EXTENSION_FUNCTION_VALIDATE(show_details->GetDictionary(kDomAnchorKey,
@@ -272,7 +424,6 @@ bool PopupShowFunction::RunImpl() {
     return false;
   }
 
-#if defined(TOOLKIT_VIEWS)
   gfx::Point origin(dom_left, dom_top);
   if (!dispatcher()->render_view_host()->view()) {
     error_ = kNotAnExtension;
@@ -284,14 +435,6 @@ bool PopupShowFunction::RunImpl() {
   origin.Offset(content_bounds.x(), content_bounds.y());
   gfx::Rect rect(origin.x(), origin.y(), dom_width, dom_height);
 
-  // Pop-up from extension views (ExtensionShelf, etc.), and drop-down when
-  // in a TabContents view.
-  ViewType::Type view_type =
-      dispatcher()->render_view_host()->delegate()->GetRenderViewType();
-  BubbleBorder::ArrowLocation arrow_location =
-      view_type == ViewType::TAB_CONTENTS ?
-          BubbleBorder::TOP_LEFT : BubbleBorder::BOTTOM_LEFT;
-
   // Get the correct native window to pass to ExtensionPopup.
   // ExtensionFunctionDispatcher::Delegate may provide a custom implementation
   // of this.
@@ -299,6 +442,13 @@ bool PopupShowFunction::RunImpl() {
       dispatcher()->delegate()->GetCustomFrameNativeWindow();
   if (!window)
     window = GetCurrentBrowser()->window()->GetNativeHandle();
+
+#if defined(TOOLKIT_VIEWS)
+  // Pop-up from extension views (ExtensionShelf, etc.), and drop-down when
+  // in a TabContents view.
+  BubbleBorder::ArrowLocation arrow_location =
+      view_type == ViewType::TAB_CONTENTS ?
+          BubbleBorder::TOP_LEFT : BubbleBorder::BOTTOM_LEFT;
 
   // ExtensionPopupHost manages it's own lifetime.
   ExtensionPopupHost* popup_host = new ExtensionPopupHost(dispatcher());
@@ -329,6 +479,8 @@ void PopupShowFunction::Observe(NotificationType type,
          type == NotificationType::EXTENSION_HOST_DESTROYED);
   DCHECK(popup_ != NULL);
 
+  // Wait for notification that the popup view is ready (and onload has been
+  // called), before completing the API call.
   if (popup_ && type == NotificationType::EXTENSION_POPUP_VIEW_READY &&
       Details<ExtensionHost>(popup_->host()) == details) {
     SendResponse(true);
@@ -353,5 +505,6 @@ void PopupEventRouter::OnPopupClosed(Profile* profile,
   profile->GetExtensionMessageService()->DispatchEventToRenderers(
       full_event_name,
       base::JSONWriter::kEmptyArray,
-      profile->IsOffTheRecord());
+      profile->IsOffTheRecord(),
+      GURL());
 }

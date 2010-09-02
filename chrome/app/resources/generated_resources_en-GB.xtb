@@ -138,7 +138,6 @@
 <translation id="1486408090387743835"><ph name="PRODUCT_NAME"/> now has <ph name="BEGIN_LINK"/>extensions<ph name="END_LINK"/> and <ph name="BEGIN_BUTTON"/>bookmark sync<ph name="END_BUTTON"/>.</translation>
 <translation id="4422347585044846479">Edit bookmark for this page</translation>
 <translation id="8546306075665861288">Image cache</translation>
-<translation id="3899346049825960202">Linux Proxy Configuration Help</translation>
 <translation id="1399076603473531278">Login details are out of date.</translation>
 <translation id="3391060940042023865">The following plug-in has crashed: <ph name="PLUGIN_NAME"/></translation>
 <translation id="5197255632782567636">Internet</translation>
@@ -148,20 +147,6 @@
 <translation id="1556537182262721003">Could not move extension directory into profile.</translation>
 <translation id="5866557323934807206">Clear these settings for future visits</translation>
 <translation id="6370820475163108109"><ph name="ORGANIZATION_NAME"/> (<ph name="DOMAIN_NAME"/>)</translation>
-<translation id="763276826334024854">When running <ph name="PRODUCT_NAME"/> under a supported Desktop Environment, the system proxy settings will be used.  However, either your system is not supported or there was a problem while launching your system configuration.  You may use the following environment variables to configure your proxy:
-        <ph name="BEGIN_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>auto_proxy<ph name="END_CODE"/><ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST"/>
-            <ph name="BEGIN_LIST_ITEM"/>Defined and empty → autodetect<ph name="END_LIST_ITEM"/>
-            <ph name="BEGIN_LIST_ITEM"/>Non-empty → specifies autoconfig URL<ph name="END_LIST_ITEM"/>
-          <ph name="END_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>all_proxy<ph name="END_CODE"/>: proxy server to use for all types<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>http_proxy<ph name="END_CODE"/>: HTTP proxy server<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>https_proxy<ph name="END_CODE"/>: HTTPS proxy server<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>ftp_proxy<ph name="END_CODE"/>: FTP proxy server<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>SOCKS_SERVER<ph name="END_CODE"/>: SOCKS proxy server (defaults to SOCKS v4, also specify SOCKS_VERSION=5 to use SOCKS v5)<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>no_proxy<ph name="END_CODE"/>: comma-separated list of hosts or patterns to bypass proxying<ph name="END_LIST_ITEM"/>
-        <ph name="END_LIST"/></translation>
 <translation id="2933933591993394296">Bookmark sync has been disabled on this computer. If you uninstall <ph name="NAME_OF_EXTENSION"/>, you can re-enable Bookmark Sync by choosing &quot;Set up sync...&quot; in the Tools menu.</translation>
 <translation id="8820817407110198400">Bookmarks</translation>
 <translation id="5191625995327478163">&amp;Language Settings...</translation>
@@ -169,7 +154,6 @@
 <translation id="5585645215698205895">&amp;Down</translation>
 <translation id="6596816719288285829">IP Address</translation>
 <translation id="1674989413181946727">Computer-wide SSL settings:</translation>
-<translation id="1452199478873730826">Flikr</translation>
 <translation id="8703575177326907206">Your connection to <ph name="DOMAIN"/> is not encrypted.</translation>
 <translation id="4197577448076628265">This extension will have access to your browsing history and private data on <ph name="HOST"/>.</translation>
 <translation id="1644574205037202324">History</translation>
@@ -339,7 +323,6 @@
 <translation id="348620396154188443">Allow all sites to show desktop notifications</translation>
 <translation id="8214489666383623925">Open File...</translation>
 <translation id="5230160809118287008">Goats Teleported</translation>
-<translation id="5296476177639202243">No bookmarks match the query '<ph name="SEARCH_TEXT"/>'.</translation>
 <translation id="4495419450179050807">Don't show on this page</translation>
 <translation id="939736085109172342">New folder</translation>
 <translation id="4933484234309072027">embedded on <ph name="URL"/></translation>
@@ -379,7 +362,6 @@
 <translation id="1684861821302948641">Kill pages</translation>
 <translation id="6802031077390104172"><ph name="USAGE"/> (<ph name="OID"/>)</translation>
 <translation id="857089571609443760">Sync is malfunctioning because too many requests are being sent to the server. <ph name="NAME_OF_EXTENSION"/> seems to be making too many changes to your bookmarks.</translation>
-<translation id="5965640700983474726">Type to search</translation>
 <translation id="40334469106837974">Change page layout</translation>
 <translation id="2142570832281562688">Enter a Profile Name</translation>
 <translation id="5904714272463161824">&amp;Report bug or broken website...</translation>
@@ -397,7 +379,6 @@
 <translation id="2620436844016719705">System</translation>
 <translation id="5362741141255528695">Select private key file.</translation>
 <translation id="7012108905414904806">However, this page includes other resources which are not secure. These resources can be viewed by other users while in transit and can be modified by an attacker so as to change the look or behaviour of the page.</translation>
-<translation id="644318894204114995">Confirm Run in Incognito</translation>
 <translation id="7226140659422399856">Browser Crash... Go Boom</translation>
 <translation id="4515911410595374805">Some of the elements on this page came from an unverified source and were not displayed.</translation>
 <translation id="1195447618553298278">Unknown error.</translation>
@@ -406,7 +387,6 @@
 <translation id="6610600335992778838">Wifi</translation>
 <translation id="1087119889335281750">&amp;No spelling suggestions</translation>
 <translation id="5228309736894624122">SSL protocol error.</translation>
-<translation id="718141787353053227">Page Setup...</translation>
 <translation id="5076340679995252485">&amp;Paste</translation>
 <translation id="5097982659374947325">Accept Cookies Only from Sites I Visit</translation>
 <translation id="14171126816530869">The identity of <ph name="ORGANIZATION"/> at <ph name="LOCALITY"/> has been verified by <ph name="ISSUER"/>.</translation>
@@ -433,7 +413,6 @@
 <translation id="6786747875388722282">Extensions</translation>
 <translation id="9053965862400494292">An error occurred while trying to set up sync.</translation>
 <translation id="4636930964841734540">Info</translation>
-<translation id="2815500128677761940">Bookmark bar</translation>
 <translation id="4571852245489094179">Import Bookmarks and Settings</translation>
 <translation id="6514771739083339959">Homepage:</translation>
 <translation id="4421917670248123270">Close and cancel downloads</translation>
@@ -496,7 +475,6 @@
 <translation id="8425492902634685834">Pin to Task Bar</translation>
 <translation id="3234408098842461169">Down Arrow</translation>
 <translation id="825608351287166772">Certificates have a validity period, much like any identity document (such as a passport) that you may have. The certificate presented to your browser is not yet valid. When a certificate is outside of its validity period, certain information about the status of the certificate (whether it has been revoked and should no longer be trusted) is not required to be maintained. As such, it is not possible to verify that this certificate is trustworthy. You should not proceed.</translation>
-<translation id="8786172108436160456">Allow <ph name="EXTENSION_NAME"/> to run in incognito?</translation>
 <translation id="5209518306177824490">SHA-1 Fingerprint</translation>
 <translation id="7154150278819212687">This extension will have access to your browsing history.</translation>
 <translation id="1553538517812678578">unlimited</translation>
@@ -507,13 +485,11 @@
 <translation id="4874539263382920044">Title must contain at least one character</translation>
 <translation id="2963998720451829125"><ph name="NAME_OF_EXTENSION"/> has been disabled. If you stop syncing your bookmarks, you can re-enable this extension on the extensions page, accessible through the Tools menu.</translation>
 <translation id="7344633671344536647">Browsing data:</translation>
-<translation id="2332311077028912338">Are you sure that you want to allow this extension to run in incognito? <ph name="PRODUCT_NAME"/> cannot prevent this extension from recording your browsing data.</translation>
 <translation id="4250680216510889253">No</translation>
 <translation id="6291953229176937411">&amp;Show in Finder</translation>
 <translation id="7905536804357499080">Use Current</translation>
 <translation id="8933960630081805351">&amp;Show in Finder</translation>
 <translation id="3041612393474885105">Certificate Information</translation>
-<translation id="7378810950367401542">/</translation>
 <translation id="3733127536501031542">SSL Server with Step-up</translation>
 <translation id="954586097957006897">Last name</translation>
 <translation id="5849941564644911027"><ph name="PRODUCT_NAME"/> will now import your bookmarks and other settings from <ph name="DEF_BROWSER"/> and create shortcuts on your computer.</translation>
@@ -568,7 +544,6 @@
 <translation id="39964277676607559">Could not load JavaScript '<ph name="RELATIVE_PATH"/>' for content script.</translation>
 <translation id="4378551569595875038">Connecting...</translation>
 <translation id="7029809446516969842">Passwords</translation>
-<translation id="8211437954284917092">Enter a query in the text field above to search your bookmarks.</translation>
 <translation id="4528378725264562960">(Running)</translation>
 <translation id="5958418293370246440"><ph name="SAVED_FILES"/> / <ph name="TOTAL_FILES"/> files</translation>
 <translation id="2350172092385603347">Localisation used, but default_locale wasn't specified in the manifest.</translation>
@@ -617,7 +592,6 @@
 <translation id="149347756975725155">Could not load extension icon '<ph name="ICON"/>'.</translation>
 <translation id="3675321783533846350">Set up a proxy to connect to the network.</translation>
 <translation id="1572103024875503863"><ph name="NUMBER_MANY"/> days</translation>
-<translation id="181952314179848438">This extension needs access to:</translation>
 <translation id="8453184121293348016">No revocation mechanism found</translation>
 <translation id="3481915276125965083">The following pop-ups were blocked on this page:</translation>
 <translation id="3468298837301810372">Label</translation>
@@ -646,7 +620,6 @@
 <translation id="7965010376480416255">Shared Memory</translation>
 <translation id="6248988683584659830">Search settings</translation>
 <translation id="7053983685419859001">Block</translation>
-<translation id="3425080561288944889">Are you sure that you want to remove '<ph name="BOOKMARK_TITLE"/>'?</translation>
 <translation id="2727712005121231835">Actual Size</translation>
 <translation id="8887733174653581061">Always on top</translation>
 <translation id="610886263749567451">JavaScript Alert</translation>
@@ -743,7 +716,6 @@
 <translation id="7629827748548208700">Tab: <ph name="TAB_NAME"/></translation>
 <translation id="8449008133205184768">Paste and Match Style</translation>
 <translation id="8028993641010258682">Size</translation>
-<translation id="1383876407941801731">Search</translation>
 <translation id="8398877366907290961">Proceed anyway</translation>
 <translation id="6974053822202609517">Right to Left</translation>
 <translation id="290414493736480793">Acknowledgements</translation>
@@ -810,14 +782,12 @@
 <translation id="5552632479093547648">Malware and phishing Detected!</translation>
 <translation id="4988273303304146523"><ph name="NUMBER_DEFAULT"/> days ago</translation>
 <translation id="1588343679702972132">This site has requested that you identify yourself with a certificate:</translation>
-<translation id="7211994749225247711">Delete...</translation>
 <translation id="2819994928625218237">&amp;No Spelling Suggestions</translation>
 <translation id="4316305410440790958">Open Frame in New &amp;Tab</translation>
 <translation id="9142623379911037913">Allow <ph name="SITE"/> to show desktop notifications?</translation>
 <translation id="4196320913210960460">You can manage your installed extensions by clicking Extensions in the Tools menu.</translation>
 <translation id="9118804773997839291">Below is a list of all the unsafe elements for the page. Click the Diagnostic link for more information on the thread for a specific element.</translation>
 <translation id="7754704193130578113">Ask where to save each file before downloading</translation>
-<translation id="8155199869035534942">Delete selected item</translation>
 <translation id="2497284189126895209">All Files</translation>
 <translation id="5360606537916580043">Last day</translation>
 <translation id="1682548588986054654">New Incognito Window</translation>
@@ -970,7 +940,6 @@
 <translation id="7136984461011502314">Welcome to <ph name="PRODUCT_NAME"/></translation>
 <translation id="1594030484168838125">Choose</translation>
 <translation id="204497730941176055">Microsoft Certificate Template Name</translation>
-<translation id="4002066346123236978">Title</translation>
 <translation id="4087089424473531098">Created the extension:
 
 <ph name="EXTENSION_FILE"/></translation>
@@ -1053,7 +1022,6 @@
 <translation id="4608500690299898628">&amp;Find...</translation>
 <translation id="3574305903863751447"><ph name="CITY"/>, <ph name="STATE"/> <ph name="COUNTRY"/></translation>
 <translation id="8724859055372736596">&amp;Show in Folder</translation>
-<translation id="5446294780224829982">Hangul IME:</translation>
 <translation id="5554489410841842733">This icon will be visible when the extension can act on the current page.</translation>
 <translation id="4862642413395066333">Signing OCSP Responses</translation>
 <translation id="4756388243121344051">&amp;History</translation>
@@ -1075,7 +1043,6 @@
 <translation id="7631887513477658702">&amp;Always Open Files of This Type</translation>
 <translation id="8627795981664801467">Secure connections only</translation>
 <translation id="3921544830490870178">Plug-in Settings:</translation>
-<translation id="1387703718616631293">Allow this extension to run in incognito</translation>
 <translation id="2190355936436201913">(empty)</translation>
 <translation id="5868426874618963178">Send source of current page</translation>
 <translation id="5818003990515275822">Korean</translation>
@@ -1107,7 +1074,6 @@
 <translation id="8565745688101278215"><ph name="FIRSTNAME"/><ph name="SEPARATOR"/><ph name="LASTNAME"/></translation>
 <translation id="3927932062596804919">Deny</translation>
 <translation id="6484929352454160200">A new version of <ph name="PRODUCT_NAME"/> is available</translation>
-<translation id="7035824132811506448">Recently Added</translation>
 <translation id="5827266244928330802">Safari</translation>
 <translation id="778881183694837592">Required field cannot be left blank</translation>
 <translation id="6820686453637990663">CVC</translation>
@@ -1170,8 +1136,6 @@
 <translation id="2356070529366658676">Ask</translation>
 <translation id="5731247495086897348">Pa&amp;ste and Go</translation>
 <translation id="3413103074007669042">This page contains some insecure content</translation>
-<translation id="3866320199958134961">Less than <ph name="MINUTES"/>.
-        Please connect charger.</translation>
 <translation id="7635741716790924709">Address line 1</translation>
 <translation id="5285267187067365830">Install plug-in...</translation>
 <translation id="1166212789817575481">Close Tabs to the Right</translation>
@@ -1314,7 +1278,6 @@
 <translation id="1474307029659222435">Open frame in new &amp;window</translation>
 <translation id="1522474541175464402">Certificate Authority Key ID</translation>
 <translation id="5976160379964388480">Others</translation>
-<translation id="3527085408025491307">Folder</translation>
 <translation id="3413808618118019351">&amp;Import Bookmarks &amp;&amp; Settings...</translation>
 <translation id="2635276683026132559">Signing</translation>
 <translation id="4835836146030131423">Error signing in.</translation>
@@ -1363,7 +1326,6 @@
 <translation id="4701488924964507374"><ph name="SENTENCE1"/> <ph name="SENTENCE2"/></translation>
 <translation id="1163931534039071049">&amp;View frame source</translation>
 <translation id="7564847347806291057">End process</translation>
-<translation id="7851589172948533362">Verified by <ph name="ISSUER"/></translation>
 <translation id="7063412606254013905">Learn more about phishing scams.</translation>
 <translation id="307767688111441685">Page looks odd</translation>
 <translation id="5295309862264981122">Confirm Navigation</translation>
@@ -1482,7 +1444,6 @@
 <translation id="4910619056351738551">Here are some suggestions:</translation>
 <translation id="5489059749897101717">&amp;Show Spelling Panel</translation>
 <translation id="1232569758102978740">Untitled</translation>
-<translation id="1851547963021150172">Perform an action on the selected item</translation>
 <translation id="4362187533051781987">City/Town</translation>
 <translation id="9149866541089851383">Edit...</translation>
 <translation id="7000311294523403548">Untitled Web Page</translation>

@@ -17,6 +17,8 @@
 typedef struct _GtkWidget GtkWidget;
 
 class GtkThemeProvider;
+class GURL;
+class Profile;
 struct RendererPreferences;  // from common/renderer_preferences.h
 
 namespace event_utils {
@@ -108,6 +110,10 @@ void RemoveAllChildren(GtkWidget* container);
 // Force the font size of the widget to |size_pixels|.
 void ForceFontSizePixels(GtkWidget* widget, double size_pixels);
 
+// Undoes the effects of a previous ForceFontSizePixels() call. Safe to call
+// even if ForceFontSizePixels() was never called.
+void UndoForceFontSize(GtkWidget* widget);
+
 // Gets the position of a gtk widget in screen coordinates.
 gfx::Point GetWidgetScreenPosition(GtkWidget* widget);
 
@@ -130,10 +136,6 @@ void InitRCStyles();
 // (e.g. buttons). Returns the vbox that widget was packed in.
 GtkWidget* CenterWidgetInHBox(GtkWidget* hbox, GtkWidget* widget,
                               bool pack_at_end, int padding);
-
-// Change windows accelerator style to GTK style. (GTK uses _ for
-// accelerators.  Windows uses & with && as an escape for &.)
-std::string ConvertAcceleratorsFromWindowsStyle(const std::string& label);
 
 // Returns true if the screen is composited, false otherwise.
 bool IsScreenComposited();
@@ -259,6 +261,47 @@ bool GrabAllInput(GtkWidget* widget);
 // Returns a rectangle that represents the widget's bounds. The rectangle it
 // returns is the same as widget->allocation, but anchored at (0, 0).
 gfx::Rect WidgetBounds(GtkWidget* widget);
+
+// Update the timestamp for the given window. This is usually the time of the
+// last user event, but on rare occasions we wish to update it despite not
+// receiving a user event.
+void SetWMLastUserActionTime(GtkWindow* window);
+
+// The current system time, using the format expected by the X server, but not
+// retrieved from the X server. NOTE: You should almost never need to use this
+// function, instead using the timestamp from the latest GDK event.
+guint32 XTimeNow();
+
+// Uses the autocomplete controller for |profile| to convert the contents of the
+// PRIMARY selection to a parsed URL. Returns true and sets |url| on success,
+// otherwise returns false.
+bool URLFromPrimarySelection(Profile* profile, GURL* url);
+
+// Set the colormap of the given window to rgba to allow transparency.
+bool AddWindowAlphaChannel(GtkWidget* window);
+
+// Wrappers to show a GtkDialog. On Linux, it merely calls gtk_widget_show_all.
+// On ChromeOs, it calls ShowNativeDialog which hosts the its vbox
+// in a view based Window.
+void ShowDialog(GtkWidget* dialog);
+void ShowDialogWithLocalizedSize(GtkWidget* dialog,
+                                 int width_id,
+                                 int height_id,
+                                 bool resizeable);
+void ShowModalDialogWithMinLocalizedWidth(GtkWidget* dialog,
+                                          int width_id);
+
+// Wrapper to present a window. On Linux, it just calls gtk_window_present or
+// gtk_window_present_with_time for non-zero timestamp. For ChromeOS, it first
+// finds the host window of the dialog contents and then present it.
+void PresentWindow(GtkWidget* window, int timestamp);
+
+// Get real window for given dialog. On ChromeOS, this gives the native dialog
+// host window. On Linux, it merely returns the passed in dialog.
+GtkWindow* GetDialogWindow(GtkWidget* dialog);
+
+// Gets dialog window bounds.
+gfx::Rect GetDialogBounds(GtkWidget* dialog);
 
 }  // namespace gtk_util
 

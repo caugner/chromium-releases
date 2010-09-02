@@ -5,6 +5,8 @@
 #ifndef VIEWS_ACCESSIBILITY_ACCESSIBILITY_TYPES_H_
 #define VIEWS_ACCESSIBILITY_ACCESSIBILITY_TYPES_H_
 
+#include "base/basictypes.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // AccessibilityTypes
@@ -15,7 +17,6 @@
 ////////////////////////////////////////////////////////////////////////////////
 class AccessibilityTypes {
  public:
-   
 
   // This defines states of the supported accessibility roles in our
   // Views (e.g. used in View::GetAccessibleState). Any interface using roles
@@ -24,10 +25,19 @@ class AccessibilityTypes {
   typedef uint32 State;
   enum StateFlag {
     STATE_CHECKED     = 1 << 0,
-    STATE_HASPOPUP    = 1 << 1,
-    STATE_LINKED      = 1 << 2,
-    STATE_PROTECTED   = 1 << 3,
-    STATE_READONLY    = 1 << 4
+    STATE_COLLAPSED   = 1 << 1,
+    STATE_DEFAULT     = 1 << 2,
+    STATE_EXPANDED    = 1 << 3,
+    STATE_HASPOPUP    = 1 << 4,
+    STATE_HOTTRACKED  = 1 << 5,
+    STATE_INVISIBLE   = 1 << 6,
+    STATE_LINKED      = 1 << 7,
+    STATE_OFFSCREEN   = 1 << 8,
+    STATE_PRESSED     = 1 << 9,
+    STATE_PROTECTED   = 1 << 10,
+    STATE_READONLY    = 1 << 11,
+    STATE_SELECTED    = 1 << 12,
+    STATE_UNAVAILABLE = 1 << 13
   };
 
   // This defines an enumeration of the supported accessibility roles in our
@@ -41,6 +51,7 @@ class AccessibilityTypes {
     ROLE_CHECKBUTTON,
     ROLE_CLIENT,
     ROLE_COMBOBOX,
+    ROLE_DIALOG,
     ROLE_GRAPHIC,
     ROLE_GROUPING,
     ROLE_LINK,
@@ -53,6 +64,7 @@ class AccessibilityTypes {
     ROLE_PANE,
     ROLE_PROGRESSBAR,
     ROLE_PUSHBUTTON,
+    ROLE_RADIOBUTTON,
     ROLE_SCROLLBAR,
     ROLE_SEPARATOR,
     ROLE_STATICTEXT,
@@ -60,6 +72,18 @@ class AccessibilityTypes {
     ROLE_TITLEBAR,
     ROLE_TOOLBAR,
     ROLE_WINDOW
+  };
+
+  // This defines an enumeration of the supported accessibility events in our
+  // Views (e.g. used in View::NotifyAccessibilityEvent). Any interface using
+  // events must provide a conversion to its own events (see e.g.
+  // ViewAccessibility::MSAAEvent).
+  enum Event {
+    EVENT_FOCUS,
+    EVENT_MENUSTART,
+    EVENT_MENUEND,
+    EVENT_MENUPOPUPSTART,
+    EVENT_MENUPOPUPEND
   };
 
  private:

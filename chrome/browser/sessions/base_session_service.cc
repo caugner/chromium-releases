@@ -180,7 +180,7 @@ SessionCommand* BaseSessionService::CreateUpdateTabNavigationCommand(
   return new SessionCommand(command_id, pickle);
 }
 
-SessionCommand* BaseSessionService::CreateSetTabAppExtensionIDCommand(
+SessionCommand* BaseSessionService::CreateSetTabExtensionAppIDCommand(
     SessionID::id_type command_id,
     SessionID::id_type tab_id,
     const std::string& extension_id) {
@@ -229,21 +229,21 @@ bool BaseSessionService::RestoreUpdateTabNavigationCommand(
       navigation->referrer_ = GURL(referrer_spec);
   }
 
-  navigation->url_ = GURL(url_spec);
+  navigation->virtual_url_ = GURL(url_spec);
   return true;
 }
 
-bool BaseSessionService::RestoreSetTabAppExtensionIDCommand(
+bool BaseSessionService::RestoreSetTabExtensionAppIDCommand(
     const SessionCommand& command,
     SessionID::id_type* tab_id,
-    std::string* app_extension_id) {
+    std::string* extension_app_id) {
   scoped_ptr<Pickle> pickle(command.PayloadAsPickle());
   if (!pickle.get())
     return false;
 
   void* iterator = NULL;
   return pickle->ReadInt(&iterator, tab_id) &&
-      pickle->ReadString(&iterator, app_extension_id);
+      pickle->ReadString(&iterator, extension_app_id);
 }
 
 bool BaseSessionService::ShouldTrackEntry(const NavigationEntry& entry) {
@@ -251,7 +251,7 @@ bool BaseSessionService::ShouldTrackEntry(const NavigationEntry& entry) {
 }
 
 bool BaseSessionService::ShouldTrackEntry(const TabNavigation& navigation) {
-  return navigation.url().is_valid();
+  return navigation.virtual_url().is_valid();
 }
 
 BaseSessionService::Handle BaseSessionService::ScheduleGetLastSessionCommands(

@@ -45,10 +45,15 @@ namespace net {
 //=====================+==========================================+
 
 
+//static
+bool HttpAuthHandlerDigest::fixed_cnonce_ = false;
+
 // static
 std::string HttpAuthHandlerDigest::GenerateNonce() {
   // This is how mozilla generates their cnonce -- a 16 digit hex string.
   static const char domain[] = "0123456789abcdef";
+  if (fixed_cnonce_)
+    return std::string(domain);
   std::string cnonce;
   cnonce.reserve(16);
   for (int i = 0; i < 16; ++i)
@@ -80,51 +85,34 @@ std::string HttpAuthHandlerDigest::AlgorithmToString(int algorithm) {
   }
 }
 
-int HttpAuthHandlerDigest::GenerateAuthToken(
-    const std::wstring& username,
-    const std::wstring& password,
+int HttpAuthHandlerDigest::GenerateAuthTokenImpl(
+    const std::wstring* username,
+    const std::wstring* password,
     const HttpRequestInfo* request,
-    const ProxyInfo* proxy,
+    CompletionCallback* callback,
     std::string* auth_token) {
   // Generate a random client nonce.
   std::string cnonce = GenerateNonce();
-
-  // The nonce-count should be incremented after re-use per the spec.
-  // This may not be possible when there are multiple connections to the
-  // server though:
-  // https://bugzilla.mozilla.org/show_bug.cgi?id=114451
-  int nonce_count = ++nonce_count_;
 
   // Extract the request method and path -- the meaning of 'path' is overloaded
   // in certain cases, to be a hostname.
   std::string method;
   std::string path;
-  GetRequestMethodAndPath(request, proxy, &method, &path);
+  GetRequestMethodAndPath(request, &method, &path);
 
   *auth_token = AssembleCredentials(method, path,
                                     // TODO(eroman): is this the right encoding?
-                                    WideToUTF8(username),
-                                    WideToUTF8(password),
-                                    cnonce, nonce_count);
+                                    WideToUTF8(*username),
+                                    WideToUTF8(*password),
+                                    cnonce, nonce_count_);
   return OK;
-}
-
-int HttpAuthHandlerDigest::GenerateDefaultAuthToken(
-    const HttpRequestInfo* request,
-    const ProxyInfo* proxy,
-    std::string* auth_token) {
-  NOTREACHED();
-  LOG(ERROR) << ErrorToString(ERR_NOT_IMPLEMENTED);
-  return ERR_NOT_IMPLEMENTED;
 }
 
 void HttpAuthHandlerDigest::GetRequestMethodAndPath(
     const HttpRequestInfo* request,
-    const ProxyInfo* proxy,
     std::string* method,
     std::string* path) const {
   DCHECK(request);
-  DCHECK(proxy);
 
   const GURL& url = request->url;
 
@@ -172,7 +160,7 @@ std::string HttpAuthHandlerDigest::AssembleCredentials(
   std::string nc = StringPrintf("%08x", nonce_count);
 
   std::string authorization = std::string("Digest username=") +
-      HttpUtil::Quote(username);
+                              HttpUtil::Quote(username);
   authorization += ", realm=" + HttpUtil::Quote(realm_);
   authorization += ", nonce=" + HttpUtil::Quote(nonce_);
   authorization += ", uri=" + HttpUtil::Quote(path);
@@ -305,11 +293,15 @@ int HttpAuthHandlerDigest::Factory::CreateAuthHandler(
     HttpAuth::ChallengeTokenizer* challenge,
     HttpAuth::Target target,
     const GURL& origin,
-    scoped_refptr<HttpAuthHandler>* handler) {
+    CreateReason reason,
+    int digest_nonce_count,
+    const BoundNetLog& net_log,
+    scoped_ptr<HttpAuthHandler>* handler) {
   // TODO(cbentzel): Move towards model of parsing in the factory
   //                 method and only constructing when valid.
-  scoped_refptr<HttpAuthHandler> tmp_handler(new HttpAuthHandlerDigest());
-  if (!tmp_handler->InitFromChallenge(challenge, target, origin))
+  scoped_ptr<HttpAuthHandler> tmp_handler(
+      new HttpAuthHandlerDigest(digest_nonce_count));
+  if (!tmp_handler->InitFromChallenge(challenge, target, origin, net_log))
     return ERR_INVALID_RESPONSE;
   handler->swap(tmp_handler);
   return OK;

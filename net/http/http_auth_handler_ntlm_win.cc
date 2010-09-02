@@ -22,7 +22,7 @@ namespace net {
 
 HttpAuthHandlerNTLM::HttpAuthHandlerNTLM(
     SSPILibrary* sspi_library, ULONG max_token_length,
-    const URLSecurityManager* url_security_manager)
+    URLSecurityManager* url_security_manager)
     : auth_sspi_(sspi_library, "NTLM", NTLMSP_NAME, max_token_length),
       url_security_manager_(url_security_manager) {
 }
@@ -47,24 +47,11 @@ bool HttpAuthHandlerNTLM::AllowsDefaultCredentials() {
   return url_security_manager_->CanUseDefaultCredentials(origin_);
 }
 
-int HttpAuthHandlerNTLM::GenerateDefaultAuthToken(
-    const HttpRequestInfo* request,
-    const ProxyInfo* proxy,
-    std::string* auth_token) {
-  return auth_sspi_.GenerateAuthToken(
-      NULL,  // username
-      NULL,  // password
-      CreateSPN(origin_),
-      request,
-      proxy,
-      auth_token);
-}
-
 HttpAuthHandlerNTLM::Factory::Factory()
-  : max_token_length_(0),
-    first_creation_(true),
-    is_unsupported_(false),
-    sspi_library_(SSPILibrary::GetDefault()) {
+    : max_token_length_(0),
+      first_creation_(true),
+      is_unsupported_(false),
+      sspi_library_(SSPILibrary::GetDefault()) {
 }
 
 HttpAuthHandlerNTLM::Factory::~Factory() {
@@ -74,8 +61,11 @@ int HttpAuthHandlerNTLM::Factory::CreateAuthHandler(
     HttpAuth::ChallengeTokenizer* challenge,
     HttpAuth::Target target,
     const GURL& origin,
-    scoped_refptr<HttpAuthHandler>* handler) {
-  if (is_unsupported_)
+    CreateReason reason,
+    int digest_nonce_count,
+    const BoundNetLog& net_log,
+    scoped_ptr<HttpAuthHandler>* handler) {
+  if (is_unsupported_ || reason == CREATE_PREEMPTIVE)
     return ERR_UNSUPPORTED_AUTH_SCHEME;
   if (max_token_length_ == 0) {
     int rv = DetermineMaxTokenLength(sspi_library_, NTLMSP_NAME,
@@ -87,10 +77,10 @@ int HttpAuthHandlerNTLM::Factory::CreateAuthHandler(
   }
   // TODO(cbentzel): Move towards model of parsing in the factory
   //                 method and only constructing when valid.
-  scoped_refptr<HttpAuthHandler> tmp_handler(
+  scoped_ptr<HttpAuthHandler> tmp_handler(
       new HttpAuthHandlerNTLM(sspi_library_, max_token_length_,
                               url_security_manager()));
-  if (!tmp_handler->InitFromChallenge(challenge, target, origin))
+  if (!tmp_handler->InitFromChallenge(challenge, target, origin, net_log))
     return ERR_INVALID_RESPONSE;
   handler->swap(tmp_handler);
   return OK;

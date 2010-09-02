@@ -10,7 +10,6 @@
 #include "chrome/browser/views/bookmark_bar_view.h"
 #include "chrome/browser/views/download_shelf_view.h"
 #include "chrome/browser/views/extensions/extension_shelf.h"
-#include "chrome/browser/views/frame/browser_extender.h"
 #include "chrome/browser/views/frame/browser_frame.h"
 #include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/browser/views/tabs/side_tab_strip.h"
@@ -30,12 +29,11 @@ namespace {
 const int kTabShadowSize = 2;
 // The vertical overlap between the TabStrip and the Toolbar.
 const int kToolbarTabStripVerticalOverlap = 3;
-// The horizontal overlap between the SideTabStrip the other contents of the
-// BrowserView.
-const int kBrowserViewTabStripHorizontalOverlap = 4;
 // An offset distance between certain toolbars and the toolbar that preceded
 // them in layout.
 const int kSeparationLineHeight = 1;
+// Spacing between extension app icon and title.
+const int kExtensionAppIconTitleSpacing = 4;
 
 }  // namespace
 
@@ -43,7 +41,9 @@ const int kSeparationLineHeight = 1;
 // BrowserViewLayout, public:
 
 BrowserViewLayout::BrowserViewLayout()
-    : tabstrip_(NULL),
+    : extension_app_icon_(NULL),
+      extension_app_title_(NULL),
+      tabstrip_(NULL),
       toolbar_(NULL),
       contents_split_(NULL),
       contents_container_(NULL),
@@ -114,7 +114,7 @@ gfx::Rect BrowserViewLayout::GetFindBarBoundingBox() const {
   // the vertical scroll bar.
   int scrollbar_width = gfx::scrollbar_size();
   bounding_box.set_width(std::max(0, bounding_box.width() - scrollbar_width));
-  if (browser_view_->UILayoutIsRightToLeft())
+  if (base::i18n::IsRTL())
     bounding_box.set_x(bounding_box.x() + scrollbar_width);
 
   return bounding_box;
@@ -206,6 +206,8 @@ void BrowserViewLayout::Installed(views::View* host) {
   extension_shelf_ = NULL;
   active_bookmark_bar_ = NULL;
   tabstrip_ = NULL;
+  extension_app_icon_ = NULL;
+  extension_app_title_ = NULL;
   browser_view_ = static_cast<BrowserView*>(host);
 }
 
@@ -235,6 +237,12 @@ void BrowserViewLayout::ViewAdded(views::View* host, views::View* view) {
     case VIEW_ID_TAB_STRIP:
       tabstrip_ = static_cast<BaseTabStrip*>(view);
       break;
+    case VIEW_ID_EXTENSION_APP_ICON:
+      extension_app_icon_ = static_cast<views::ImageView*>(view);
+      break;
+    case VIEW_ID_EXTENSION_APP_TITLE:
+      extension_app_title_ = static_cast<views::Label*>(view);
+      break;
   }
 }
 
@@ -248,6 +256,7 @@ void BrowserViewLayout::ViewRemoved(views::View* host, views::View* view) {
 
 void BrowserViewLayout::Layout(views::View* host) {
   vertical_layout_rect_ = browser_view_->GetLocalBounds(true);
+  LayoutExtensionAppIconAndTitle();
   int top = LayoutTabStrip();
   top = LayoutToolbar(top);
   top = LayoutBookmarkAndInfoBars(top);
@@ -276,6 +285,26 @@ gfx::Size BrowserViewLayout::GetPreferredSize(views::View* host) {
 //////////////////////////////////////////////////////////////////////////////
 // BrowserViewLayout, private:
 
+void BrowserViewLayout::LayoutExtensionAppIconAndTitle() {
+  if (browser_view_->browser()->type() != Browser::TYPE_EXTENSION_APP)
+    return;
+
+  extension_app_icon_->SetVisible(true);
+  extension_app_icon_->SetBounds(0, 0, Extension::EXTENSION_ICON_SMALL,
+                                 Extension::EXTENSION_ICON_SMALL);
+
+  extension_app_title_->SetVisible(true);
+
+  // Position the title vertically centered with the icon and slightly to its
+  // right.
+  extension_app_title_->SetX(
+      extension_app_icon_->x() + extension_app_icon_->width() +
+      kExtensionAppIconTitleSpacing);
+  extension_app_title_->SetY(
+      extension_app_icon_->y() +
+      ((extension_app_icon_->height() - extension_app_title_->height()) / 2));
+}
+
 int BrowserViewLayout::LayoutTabStrip() {
   if (!browser_view_->IsTabStripVisible()) {
     tabstrip_->SetVisible(false);
@@ -285,9 +314,9 @@ int BrowserViewLayout::LayoutTabStrip() {
   gfx::Rect layout_bounds =
       browser_view_->frame()->GetBoundsForTabStrip(tabstrip_);
 
-  if (browser_view_->UsingSideTabs()) {
+  if (browser_view_->UseVerticalTabs()) {
     vertical_layout_rect_.Inset(
-        layout_bounds.right() - kBrowserViewTabStripHorizontalOverlap, 0, 0, 0);
+        layout_bounds.width(), 0, 0, 0);
   } else {
     gfx::Rect toolbar_bounds = browser_view_->GetToolbarBounds();
     tabstrip_->SetBackgroundOffset(
@@ -301,21 +330,28 @@ int BrowserViewLayout::LayoutTabStrip() {
   layout_bounds.set_origin(tabstrip_origin);
   tabstrip_->SetVisible(true);
   tabstrip_->SetBounds(layout_bounds);
-  return browser_view_->UsingSideTabs() ? 0 : layout_bounds.bottom();
+  return browser_view_->UseVerticalTabs() ?
+      layout_bounds.y() : layout_bounds.bottom();
 }
 
 int BrowserViewLayout::LayoutToolbar(int top) {
   int browser_view_width = vertical_layout_rect_.width();
   bool visible = browser_view_->IsToolbarVisible();
   toolbar_->location_bar()->SetFocusable(visible);
-  int y = 0;
-  if (!browser_view_->UsingSideTabs()) {
-    y = top -
-      ((visible && browser_view_->IsTabStripVisible())
-       ? kToolbarTabStripVerticalOverlap : 0);
+  int y = top;
+  if (!browser_view_->UseVerticalTabs()) {
+    y -= ((visible && browser_view_->IsTabStripVisible()) ?
+          kToolbarTabStripVerticalOverlap : 0);
   }
-  int height = visible ? toolbar_->GetPreferredSize().height() : 0;
-  toolbar_->SetVisible(visible);
+
+  int height = 0;
+  if (visible) {
+    height = toolbar_->GetPreferredSize().height();
+    toolbar_->SetVisible(true);
+  } else {
+    toolbar_->SetVisible(false);
+  }
+
   toolbar_->SetBounds(vertical_layout_rect_.x(), y, browser_view_width, height);
   return y + height;
 }

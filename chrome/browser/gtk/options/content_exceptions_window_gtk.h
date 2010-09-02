@@ -26,6 +26,7 @@ class ContentExceptionsWindowGtk : public gtk_tree::TableAdapter::Delegate,
  public:
   static void ShowExceptionsWindow(GtkWindow* window,
                                    HostContentSettingsMap* map,
+                                   HostContentSettingsMap* off_the_record_map,
                                    ContentSettingsType content_type);
 
   ~ContentExceptionsWindowGtk();
@@ -37,6 +38,7 @@ class ContentExceptionsWindowGtk : public gtk_tree::TableAdapter::Delegate,
   virtual void AcceptExceptionEdit(
       const HostContentSettingsMap::Pattern& pattern,
       ContentSetting setting,
+      bool is_off_the_record,
       int index,
       bool is_new);
 
@@ -45,11 +47,13 @@ class ContentExceptionsWindowGtk : public gtk_tree::TableAdapter::Delegate,
   enum {
     COL_PATTERN,
     COL_ACTION,
+    COL_OTR,
     COL_COUNT
   };
 
   ContentExceptionsWindowGtk(GtkWindow* parent,
                              HostContentSettingsMap* map,
+                             HostContentSettingsMap* off_the_record_map,
                              ContentSettingsType type);
 
   // Updates which buttons are enabled.
@@ -65,6 +69,10 @@ class ContentExceptionsWindowGtk : public gtk_tree::TableAdapter::Delegate,
   // was set to in the constructor).
   std::string GetWindowTitle() const;
 
+  // Gets the selected indicies in the two list stores. Indicies are returned
+  // in <list_store_, sort_list_store_> order.
+  void GetSelectedModelIndices(std::set<std::pair<int, int> >* indices);
+
   // GTK Callbacks
   CHROMEGTK_CALLBACK_2(ContentExceptionsWindowGtk, void,
                        OnTreeViewRowActivate, GtkTreePath*, GtkTreeViewColumn*);
@@ -72,12 +80,20 @@ class ContentExceptionsWindowGtk : public gtk_tree::TableAdapter::Delegate,
   CHROMEGTK_CALLBACK_0(ContentExceptionsWindowGtk, void,
                        OnTreeSelectionChanged);
 
-  // The list presented in |treeview_|; a gobject instead of a C++ object.
+  // The list presented in |treeview_|. Separate from |list_store_|, the list
+  // that backs |sort_model_|. This separation comes so the user can sort the
+  // data on screen without changing the underlying |list_store_|.
+  GtkTreeModel* sort_list_store_;
+
+  // The backing to |sort_list_store_|. Doesn't change when sorted.
   GtkListStore* list_store_;
 
   // The C++, views-ish, cross-platform model class that actually contains the
   // gold standard data.
   scoped_ptr<ContentExceptionsTableModel> model_;
+
+  // True if we also show exceptions from an OTR profile.
+  bool allow_off_the_record_;
 
   // The adapter that ferries data back and forth between |model_| and
   // |list_store_| whenever either of them change.
@@ -96,6 +112,8 @@ class ContentExceptionsWindowGtk : public gtk_tree::TableAdapter::Delegate,
   GtkWidget* edit_button_;
   GtkWidget* remove_button_;
   GtkWidget* remove_all_button_;
+
+  friend class ContentExceptionsWindowGtkUnittest;
 };
 
 #endif  // CHROME_BROWSER_GTK_OPTIONS_CONTENT_EXCEPTIONS_WINDOW_GTK_H_

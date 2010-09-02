@@ -6,8 +6,11 @@
 
 #include "base/file_path.h"
 #include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/pref_service.h"
+#include "chrome/browser/pref_value_store.h"
+#include "chrome/common/json_pref_store.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -49,7 +52,8 @@ TEST_F(NewTabUITest, NTPHasThumbnails) {
       action_max_timeout_ms()));
 }
 
-TEST_F(NewTabUITest, ChromeInternalLoadsNTP) {
+// Fails about ~5% of the time on all platforms. http://crbug.com/45001
+TEST_F(NewTabUITest, FLAKY_ChromeInternalLoadsNTP) {
   scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(window.get());
 
@@ -70,24 +74,27 @@ TEST_F(NewTabUITest, ChromeInternalLoadsNTP) {
 }
 
 TEST_F(NewTabUITest, UpdateUserPrefsVersion) {
-  PrefService prefs((FilePath()));
+  // PrefService with JSON user-pref file only, no enforced or advised prefs.
+  FilePath user_prefs = FilePath();
+  scoped_ptr<PrefService> prefs(
+      PrefService::CreateUserPrefService(user_prefs));
 
   // Does the migration
-  NewTabUI::RegisterUserPrefs(&prefs);
+  NewTabUI::RegisterUserPrefs(prefs.get());
 
   ASSERT_EQ(NewTabUI::current_pref_version(),
-            prefs.GetInteger(prefs::kNTPPrefVersion));
+            prefs->GetInteger(prefs::kNTPPrefVersion));
 
   // Reset the version
-  prefs.ClearPref(prefs::kNTPPrefVersion);
-  ASSERT_EQ(0, prefs.GetInteger(prefs::kNTPPrefVersion));
+  prefs->ClearPref(prefs::kNTPPrefVersion);
+  ASSERT_EQ(0, prefs->GetInteger(prefs::kNTPPrefVersion));
 
-  bool migrated = NewTabUI::UpdateUserPrefsVersion(&prefs);
+  bool migrated = NewTabUI::UpdateUserPrefsVersion(prefs.get());
   ASSERT_TRUE(migrated);
   ASSERT_EQ(NewTabUI::current_pref_version(),
-            prefs.GetInteger(prefs::kNTPPrefVersion));
+            prefs->GetInteger(prefs::kNTPPrefVersion));
 
-  migrated = NewTabUI::UpdateUserPrefsVersion(&prefs);
+  migrated = NewTabUI::UpdateUserPrefsVersion(prefs.get());
   ASSERT_FALSE(migrated);
 }
 
@@ -146,7 +153,7 @@ TEST_F(NewTabUITest, HomePageLink) {
     L"window.domAutomationController.send("
     L"(function() {"
     L"  var el = document.querySelector('#notification');"
-    L"  return hasClass(el, 'show');"
+    L"  return el.classList.contains('show');"
     L"})()"
     L")",
     &has_class));
@@ -154,6 +161,7 @@ TEST_F(NewTabUITest, HomePageLink) {
 
   bool is_home_page;
   ASSERT_TRUE(browser->GetBooleanPreference(prefs::kHomePageIsNewTabPage,
-              &is_home_page));
+                                            &is_home_page));
   ASSERT_TRUE(is_home_page);
 }
+

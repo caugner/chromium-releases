@@ -21,7 +21,14 @@ const wchar_t kDocRoot[] = L"chrome/test/data";
 
 typedef UITest RepostFormWarningTest;
 
-TEST_F(RepostFormWarningTest, TestDoubleReload) {
+#if defined(OS_WIN)
+// http://crbug.com/47228
+#define MAYBE_TestDoubleReload FLAKY_TestDoubleReload
+#else
+#define MAYBE_TestDoubleReload TestDoubleReload
+#endif
+
+TEST_F(RepostFormWarningTest, MAYBE_TestDoubleReload) {
   scoped_refptr<HTTPTestServer> server =
       HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
@@ -32,7 +39,7 @@ TEST_F(RepostFormWarningTest, TestDoubleReload) {
   ASSERT_TRUE(tab.get());
 
   // Load a form.
-  ASSERT_TRUE(tab->NavigateToURL(server->TestServerPageW(L"files/form.html")));
+  ASSERT_TRUE(tab->NavigateToURL(server->TestServerPage("files/form.html")));
   // Submit it.
   ASSERT_TRUE(tab->NavigateToURL(GURL(
       "javascript:document.getElementById('form').submit()")));
@@ -42,10 +49,17 @@ TEST_F(RepostFormWarningTest, TestDoubleReload) {
   tab->ReloadAsync();
 
   // Navigate away from the page (this is when the test usually crashes).
-  ASSERT_TRUE(tab->NavigateToURL(server->TestServerPageW(L"bar")));
+  ASSERT_TRUE(tab->NavigateToURL(server->TestServerPage("bar")));
 }
 
-TEST_F(RepostFormWarningTest, TestLoginAfterRepost) {
+#if defined(OS_WIN)
+// http://crbug.com/47228
+#define MAYBE_TestLoginAfterRepost FLAKY_TestLoginAfterRepost
+#else
+#define MAYBE_TestLoginAfterRepost TestLoginAfterRepost
+#endif
+
+TEST_F(RepostFormWarningTest, MAYBE_TestLoginAfterRepost) {
   scoped_refptr<HTTPTestServer> server =
   HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
@@ -56,7 +70,7 @@ TEST_F(RepostFormWarningTest, TestLoginAfterRepost) {
   ASSERT_TRUE(tab.get());
 
   // Load a form.
-  ASSERT_TRUE(tab->NavigateToURL(server->TestServerPageW(L"files/form.html")));
+  ASSERT_TRUE(tab->NavigateToURL(server->TestServerPage("files/form.html")));
   // Submit it.
   ASSERT_TRUE(tab->NavigateToURL(GURL(
       "javascript:document.getElementById('form').submit()")));
@@ -66,11 +80,11 @@ TEST_F(RepostFormWarningTest, TestLoginAfterRepost) {
 
   // Navigate to a page that requires authentication, bringing up another
   // tab-modal sheet.
-  ASSERT_TRUE(tab->NavigateToURL(server->TestServerPageW(L"auth-basic")));
+  ASSERT_TRUE(tab->NavigateToURL(server->TestServerPage("auth-basic")));
 
   // Try to reload it again.
   tab->ReloadAsync();
 
   // Navigate away from the page.
-  ASSERT_TRUE(tab->NavigateToURL(server->TestServerPageW(L"bar")));
+  ASSERT_TRUE(tab->NavigateToURL(server->TestServerPage("bar")));
 }

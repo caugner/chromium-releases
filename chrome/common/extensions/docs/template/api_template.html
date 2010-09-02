@@ -18,6 +18,7 @@
                 <div style="display:inline">
                   (
                     <span class="optional" jsdisplay="optional">optional</span>
+                    <span class="enum" jsdisplay="enum">enumerated</span>
                     <span id="typeTemplate">
                       <span jsdisplay="getTypeRef($this)">
                         <a jsvalues=".href: getTypeRefPage($this) + '#type-' + getTypeRef($this)" jscontent="getTypeRef($this)"> Type</a>
@@ -27,6 +28,7 @@
                           array of <span jsselect="items"><span transclude="typeTemplate"></span></span>
                         </span>
                         <span jsdisplay="!isArray($this)" jscontent="getTypeName($this)">paramType</span>
+                        <span jsdisplay="!isArray($this) && enum" jscontent="getEnumValues(enum, type);"></span>
                       </span>
                     </span>
                   )
@@ -40,6 +42,15 @@
           <dd jsdisplay="$this.description"
               jsvalues=".innerHTML:$this.description">
             Description of this parameter from the json schema.
+          </dd>
+          <dd jsdisplay="$this.min_version">
+            This parameter was added in version
+            <b><span jscontent="$this.min_version"></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
           </dd>
 
           <!-- OBJECT PROPERTIES -->
@@ -122,6 +133,7 @@
               <li>Browser UI
                 <ul>
                   <li><a href="browserAction.html">Browser Actions</a></li>
+                  <li><a href="contextMenus.html">Context Menus</a></li>
                   <li><a href="notifications.html">Desktop Notifications</a></li>
                   <li><a href="options.html">Options Pages</a></li>
                   <li><a href="override.html">Override Pages</a></li>
@@ -132,6 +144,7 @@
               <li>Browser Interaction
                 <ul>
                   <li><a href="bookmarks.html">Bookmarks</a></li>
+                  <li><a href="cookies.html">Cookies</a></li>
                   <li><a href="events.html">Events</a></li>
                   <li><a href="history.html">History</a></li>
                   <li><a href="tabs.html">Tabs</a></li>
@@ -144,6 +157,7 @@
                   <li><a href="background_pages.html">Background Pages</a></li>
                   <li><a href="content_scripts.html">Content Scripts</a></li>
                   <li><a href="xhr.html">Cross-Origin XHR</a></li>
+                  <li><a href="idle.html">Idle</a></li>
                   <li><a href="i18n.html">Internationalization</a></li>
                   <li><a href="messaging.html">Message Passing</a></li>
                   <li><a href="npapi.html">NPAPI Plugins</a></li>
@@ -340,6 +354,13 @@
                   </div>
                 </div>
 
+                <!-- MIN_VERSION -->
+                <p jsdisplay="min_version" >
+                  This function was added in version <b><span jscontent="$this.min_version"></span></b>.
+                  If you require this function, the manifest key
+                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+                  can ensure that your extension won't be run in an earlier browser version.
+                </p>
               </div> <!-- /description -->
 
             </div>  <!-- /apiItem -->
@@ -385,11 +406,11 @@
 
           <!-- TYPES -->
           <div jsdisplay="types && types.length > 0" class="apiGroup">
-            <a name="types.sort(sortByName)"></a>
+            <a name="types"></a>
             <h3 id="types">Types</h3>
 
             <!-- iterates over all types -->
-            <div jsselect="types" class="apiItem">
+            <div jsselect="types.sort(sortByName)" class="apiItem">
               <a jsvalues=".name:'type-' + id"></a>
               <h4 jscontent="id">type name</h4>
 

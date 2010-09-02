@@ -13,6 +13,7 @@
 #include "chrome/common/content_settings_types.h"
 #include "chrome/common/translate_errors.h"
 #include "chrome/common/view_types.h"
+#include "chrome/common/window_container_type.h"
 #include "net/base/load_states.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDragOperation.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
@@ -25,6 +26,7 @@ class BookmarkNode;
 struct ContextMenuParams;
 class FilePath;
 class GURL;
+class ListValue;
 struct NativeWebKeyboardEvent;
 class NavigationEntry;
 class OSExchangeData;
@@ -37,9 +39,9 @@ class ResourceRequestDetails;
 class SkBitmap;
 class TabContents;
 struct ThumbnailScore;
-class Value;
 struct ViewHostMsg_DidPrintPage_Params;
 struct ViewHostMsg_FrameNavigate_Params;
+struct ViewHostMsg_GetSearchProviderInstallState_Params;
 struct ViewHostMsg_RunFileChooser_Params;
 struct WebDropData;
 class WebKeyboardEvent;
@@ -88,12 +90,21 @@ class RenderViewHostDelegate {
     // The page is trying to open a new page (e.g. a popup window). The
     // window should be created associated with the given route, but it should
     // not be shown yet. That should happen in response to ShowCreatedWindow.
+    // |window_container_type| describes the type of RenderViewHost container
+    // that is requested -- in particular, the window.open call may have
+    // specified 'background' and 'persistent' in the feature string.
+    //
+    // The passed |frame_name| parameter is the name parameter that was passed
+    // to window.open(), and will be empty if none was passed.
     //
     // Note: this is not called "CreateWindow" because that will clash with
     // the Windows function which is actually a #define.
     //
     // NOTE: this takes ownership of @modal_dialog_event
-    virtual void CreateNewWindow(int route_id) = 0;
+    virtual void CreateNewWindow(
+        int route_id,
+        WindowContainerType window_container_type,
+        const string16& frame_name) = 0;
 
     // The page is trying to open a new widget (e.g. a select popup). The
     // widget should be created associated with the given route, but it should
@@ -195,7 +206,7 @@ class RenderViewHostDelegate {
    public:
     // Notification the user has made a gesture while focus was on the
     // page. This is used to avoid uninitiated user downloads (aka carpet
-    // bombing), see DownloadRequestManager for details.
+    // bombing), see DownloadRequestLimiter for details.
     virtual void OnUserGesture() = 0;
 
     // A find operation in the current page completed.
@@ -232,8 +243,9 @@ class RenderViewHostDelegate {
     virtual void OnPageContents(const GURL& url,
                                 int renderer_process_id,
                                 int32 page_id,
-                                const std::wstring& contents,
-                                const std::string& language) = 0;
+                                const string16& contents,
+                                const std::string& language,
+                                bool page_translatable) = 0;
 
     // Notification that the page has been translated.
     virtual void OnPageTranslated(int32 page_id,
@@ -296,10 +308,48 @@ class RenderViewHostDelegate {
 
     // Notification that a document has been loaded in a frame.
     virtual void DocumentLoadedInFrame() = 0;
+  };
 
+  // ContentSettings------------------------------------------------------------
+  // Interface for content settings related events.
+
+  class ContentSettings {
+   public:
     // Called when content in the current page was blocked due to the user's
     // content settings.
     virtual void OnContentBlocked(ContentSettingsType type) = 0;
+
+    // Called when a specific cookie in the current page was accessed.
+    // |blocked_by_policy| should be true, if the cookie was blocked due to the
+    // user's content settings. In that case, this function should invoke
+    // OnContentBlocked.
+    virtual void OnCookieAccessed(const GURL& url,
+                                  const std::string& cookie_line,
+                                  bool blocked_by_policy) = 0;
+
+    // Called when a specific local storage area in the current page was
+    // accessed. If access was blocked due to the user's content settings,
+    // |blocked_by_policy| should be true, and this function should invoke
+    // OnContentBlocked.
+    virtual void OnLocalStorageAccessed(const GURL& url,
+                                        bool blocked_by_policy) = 0;
+
+    // Called when a specific Web database in the current page was accessed. If
+    // access was blocked due to the user's content settings,
+    // |blocked_by_policy| should eb true, and this function should invoke
+    // OnContentBlocked.
+    virtual void OnWebDatabaseAccessed(const GURL& url,
+                                       const string16& name,
+                                       const string16& display_name,
+                                       unsigned long estimated_size,
+                                       bool blocked_by_policy) = 0;
+
+    // Called when a specific appcache in the current page was accessed. If
+    // access was blocked due to the user's content settings,
+    // |blocked_by_policy| should eb true, and this function should invoke
+    // OnContentBlocked.
+    virtual void OnAppCacheAccessed(const GURL& manifest_url,
+                                    bool blocked_by_policy) = 0;
 
     // Called when geolocation permission was set in a frame on the current
     // page.
@@ -410,18 +460,26 @@ class RenderViewHostDelegate {
 
     // Called to retrieve a list of AutoFill suggestions from the web database
     // given the name of the field and what the user has already typed in the
-    // field.  Returns true to indicate that
+    // field. |form_autofilled| is true if the form containing |field| has any
+    // auto-filled fields. Returns true to indicate that
     // RenderViewHost::AutoFillSuggestionsReturned has been called.
     virtual bool GetAutoFillSuggestions(
-        int query_id, const webkit_glue::FormField& field) = 0;
+        int query_id,
+        bool form_autofilled,
+        const webkit_glue::FormField& field) = 0;
 
     // Called to fill the FormData object with AutoFill profile information that
-    // matches the |value|, |label| key.  Returns true to indicate that
+    // matches the |value|, |unique_id| key. Returns true to indicate that
     // RenderViewHost::AutoFillFormDataFilled has been called.
     virtual bool FillAutoFillFormData(int query_id,
                                       const webkit_glue::FormData& form,
                                       const string16& value,
-                                      const string16& label) = 0;
+                                      const string16& label,
+                                      int unique_id) = 0;
+
+    // Called when the user selects the 'AutoFill Options...' suggestions in the
+    // AutoFill popup.
+    virtual void ShowAutoFillDialog() = 0;
   };
 
   // BookmarkDrag --------------------------------------------------------------
@@ -443,6 +501,7 @@ class RenderViewHostDelegate {
   virtual RendererManagement* GetRendererManagementDelegate();
   virtual BrowserIntegration* GetBrowserIntegrationDelegate();
   virtual Resource* GetResourceDelegate();
+  virtual ContentSettings* GetContentSettingsDelegate();
   virtual Save* GetSaveDelegate();
   virtual Printing* GetPrintingDelegate();
   virtual FavIcon* GetFavIconDelegate();
@@ -510,8 +569,11 @@ class RenderViewHostDelegate {
                                const SkBitmap& bitmap,
                                const ThumbnailScore& score) {}
 
-  // Inspector settings were changes and should be persisted.
-  virtual void UpdateInspectorSettings(const std::string& raw_settings) {}
+  // Inspector setting was changed and should be persisted.
+  virtual void UpdateInspectorSetting(const std::string& key,
+                                      const std::string& value) {}
+
+  virtual void ClearInspectorSettings() {}
 
   // The page is trying to close the RenderView's representation in the client.
   virtual void Close(RenderViewHost* render_view_host) {}
@@ -531,6 +593,10 @@ class RenderViewHostDelegate {
   // the document has finished parsing.
   virtual void DocumentAvailableInMainFrame(RenderViewHost* render_view_host) {}
 
+  // The onload handler in the RenderView's main frame has completed.
+  virtual void DocumentOnLoadCompletedInMainFrame(
+      RenderViewHost* render_view_host) {}
+
   // The page wants to open a URL with the specified disposition.
   virtual void RequestOpenURL(const GURL& url,
                               const GURL& referrer,
@@ -544,7 +610,7 @@ class RenderViewHostDelegate {
   // A message was sent from HTML-based UI.
   // By default we ignore such messages.
   virtual void ProcessDOMUIMessage(const std::string& message,
-                                   const Value* content,
+                                   const ListValue* content,
                                    const GURL& source_url,
                                    int request_id,
                                    bool has_callback) {}
@@ -576,13 +642,22 @@ class RenderViewHostDelegate {
                                    IPC::Message* reply_msg) {}
 
   // Password forms have been detected in the page.
-  virtual void PasswordFormsSeen(
+  virtual void PasswordFormsFound(
       const std::vector<webkit_glue::PasswordForm>& forms) {}
+
+  // On initial layout, password forms are known to be visible on the page.
+  virtual void PasswordFormsVisible(
+      const std::vector<webkit_glue::PasswordForm>& visible_forms) {}
 
   // Notification that the page has an OpenSearch description document.
   virtual void PageHasOSDD(RenderViewHost* render_view_host,
                            int32 page_id, const GURL& doc_url,
                            bool autodetected) {}
+
+  // Returns the install state of the search provider url (not installed,
+  // installed, default).
+  virtual ViewHostMsg_GetSearchProviderInstallState_Params
+      GetSearchProviderInstallState(const GURL& url);
 
   // |url| is assigned to a server that can provide alternate error pages.  If
   // the returned URL is empty, the default error page built into WebKit will
@@ -605,11 +680,6 @@ class RenderViewHostDelegate {
 
   // Notification from the renderer that JS runs out of memory.
   virtual void OnJSOutOfMemory() {}
-
-  // Returns true if this this object can be blurred through a javascript
-  // obj.blur() call. ConstrainedWindows shouldn't be able to be blurred, but
-  // generally most other windows will be.
-  virtual bool CanBlur() const;
 
   // Return the rect where to display the resize corner, if any, otherwise
   // an empty rect.

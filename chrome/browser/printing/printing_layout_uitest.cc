@@ -80,15 +80,15 @@ class PrintingLayoutTest : public PrintingTest<UITest> {
     if (GenerateFiles()) {
       // Copy the .emf and generate an .png.
       file_util::CopyFile(test_result, emf);
-      Image emf_content(emf.value());
+      Image emf_content(emf);
       emf_content.SaveToPng(png);
       // Saving is always fine.
       return 0;
     } else {
       // File compare between test and result.
-      Image emf_content(emf.value());
-      Image test_content(test_result.value());
-      Image png_content(png.value());
+      Image emf_content(emf);
+      Image test_content(test_result);
+      Image png_content(png);
       double diff_emf = emf_content.PercentageDifferent(test_content);
 
       EXPECT_EQ(0., diff_emf) << verification_name <<
@@ -282,8 +282,8 @@ class DismissTheWindow : public base::DelegateSimpleThread::Delegate {
 
 }  // namespace
 
-// This test is disable because it fails. See bug 1353559.
-TEST_F(PrintingLayoutTextTest, DISABLED_Complex) {
+// Fails, see http://crbug.com/7721.
+TEST_F(PrintingLayoutTextTest, FAILS_Complex) {
   if (IsTestCaseDisabled())
     return;
 
@@ -304,19 +304,19 @@ TEST_F(PrintingLayoutTextTest, DISABLED_Complex) {
 }
 
 struct TestPool {
-  const wchar_t* source;
+  const char* source;
   const wchar_t* result;
 };
 
 const TestPool kTestPool[] = {
   // ImagesB&W
-  L"files/printing/test2.html", L"test2",
+  "files/printing/test2.html", L"test2",
   // ImagesTransparent
-  L"files/printing/test3.html", L"test3",
+  "files/printing/test3.html", L"test3",
   // ImageColor
-  L"files/printing/test4.html", L"test4",
+  "files/printing/test4.html", L"test4",
   // TODO(maruel):  http://b/1171450 Transparent overlays are drawn opaque
-  // L"files/printing/test5.html", L"test5",
+  // "files/printing/test5.html", L"test5",
 };
 
 // TODO(maruel:)  http://code.google.com/p/chromium/issues/detail?id=7721
@@ -334,7 +334,7 @@ TEST_F(PrintingLayoutTestHidden, DISABLED_ManyTimes) {
     if (i)
       CleanupDumpDirectory();
     const TestPool& test = kTestPool[i % arraysize(kTestPool)];
-    NavigateToURL(server->TestServerPageW(test.source));
+    NavigateToURL(server->TestServerPage(test.source));
     base::DelegateSimpleThread close_printdlg_thread1(&dismisser,
                                                       "close_printdlg_thread");
     EXPECT_EQ(NULL, FindDialogWindow(dismisser.owner_process()));

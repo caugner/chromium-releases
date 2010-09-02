@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "app/surface/transport_dib.h"
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
 #include "base/shared_memory.h"
@@ -18,12 +19,13 @@
 #include "gfx/size.h"
 #include "ipc/ipc_channel.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCompositionCommand.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebTextDirection.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebTextInputType.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebWidgetClient.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/webcursor.h"
 
 class RenderThreadBase;
@@ -91,6 +93,7 @@ class RenderWidget : public IPC::Channel::Listener,
   virtual WebKit::WebRect windowResizerRect();
   virtual WebKit::WebRect rootWindowRect();
   virtual WebKit::WebScreenInfo screenInfo();
+  virtual void resetInputMethod();
 
   // Called when a plugin is moved.  These events are queued up and sent with
   // the next paint or scroll message to the host.
@@ -155,11 +158,17 @@ class RenderWidget : public IPC::Channel::Listener,
   void OnHandleInputEvent(const IPC::Message& message);
   void OnMouseCaptureLost();
   virtual void OnSetFocus(bool enable);
-  void OnImeSetInputMode(bool is_active);
-  void OnImeSetComposition(WebKit::WebCompositionCommand command,
-                           int cursor_position,
-                           int target_start, int target_end,
-                           const string16& ime_string);
+  void OnSetInputMethodActive(bool is_active);
+  void OnImeSetComposition(
+      const string16& text,
+      const std::vector<WebKit::WebCompositionUnderline>& underlines,
+      int selection_start,
+      int selection_end);
+  void OnImeConfirmComposition();
+  void OnMsgPaintAtSize(const TransportDIB::Handle& dib_id,
+                        int tag,
+                        const gfx::Size& page_size,
+                        const gfx::Size& desired_size);
   void OnMsgRepaint(const gfx::Size& size_to_paint);
   void OnSetTextDirection(WebKit::WebTextDirection direction);
 
@@ -188,12 +197,9 @@ class RenderWidget : public IPC::Channel::Listener,
   void set_next_paint_is_restore_ack();
   void set_next_paint_is_repaint_ack();
 
-  // Called when a renderer process moves an input focus or updates the
-  // position of its caret.
-  // This function compares them with the previous values, and send them to
-  // the browser process only if they are updated.
-  // The browser process moves IME windows and context.
-  void UpdateIME();
+  // Checks if the input method state and caret position have been changed.
+  // If they are changed, the new value will be sent to the browser process.
+  void UpdateInputMethod();
 
   // Tells the renderer it does not have focus. Used to prevent us from getting
   // the focus on our own when the browser did not focus us.
@@ -281,24 +287,14 @@ class RenderWidget : public IPC::Channel::Listener,
   // be sent, except for a Close.
   bool closing_;
 
-  // Represents whether or not the IME of a browser process is active.
-  bool ime_is_active_;
+  // Indicates if an input method is active in the browser process.
+  bool input_method_is_active_;
 
-  // Represents the status of the selected edit control sent to a browser
-  // process last time.
-  // When a renderer process finishes rendering a region, it retrieves:
-  //   * The identifier of the selected edit control;
-  //   * Whether or not the selected edit control requires IME, and;
-  //   * The position of the caret (or cursor).
-  // If the above values is updated, a renderer process sends an IPC message
-  // to a browser process. A browser process uses these values to
-  // activate/deactivate IME and set the position of IME windows.
-  bool ime_control_enable_ime_;
-  int ime_control_x_;
-  int ime_control_y_;
-  bool ime_control_new_state_;
-  bool ime_control_updated_;
-  bool ime_control_busy_;
+  // Stores the current text input type of |webwidget_|.
+  WebKit::WebTextInputType text_input_type_;
+
+  // Stores the current caret bounds of input focus.
+  WebKit::WebRect caret_bounds_;
 
   // The kind of popup this widget represents, NONE if not a popup.
   WebKit::WebPopupType popup_type_;
@@ -321,6 +317,9 @@ class RenderWidget : public IPC::Channel::Listener,
 
   // Indicates if the next sequence of Char events should be suppressed or not.
   bool suppress_next_char_events_;
+
+  // Set to true if painting to the window is handled by the GPU process.
+  bool is_gpu_rendering_active_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

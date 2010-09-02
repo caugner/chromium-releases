@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
@@ -165,7 +166,7 @@ gfx::Size DownloadShelfView::GetPreferredSize() {
     prefsize.Enlarge(kDownloadPadding, 0);
   }
   prefsize.Enlarge(0, kTopBottomPadding + kTopBottomPadding);
-  if (shelf_animation_->IsAnimating()) {
+  if (shelf_animation_->is_animating()) {
     prefsize.set_height(static_cast<int>(
         static_cast<double>(prefsize.height()) *
                             shelf_animation_->GetCurrentValue()));
@@ -252,7 +253,7 @@ void DownloadShelfView::Layout() {
 
     // Figure out width of item.
     int item_width = view_size.width();
-    if (new_item_animation_->IsAnimating() && ri == download_views_.rbegin()) {
+    if (new_item_animation_->is_animating() && ri == download_views_.rbegin()) {
        item_width = static_cast<int>(static_cast<double>(view_size.width()) *
                      new_item_animation_->GetCurrentValue());
     }

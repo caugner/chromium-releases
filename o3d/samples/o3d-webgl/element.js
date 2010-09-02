@@ -32,7 +32,7 @@
 
 /**
  * An Element manages DrawElements for classes inherited from Element.
- * 
+ *
  * @param {!o3d.Material} opt_material The Material used by this Element.
  * @param {!o3d.BoundingBox} opt_boundingBox The BoundingBox used by this
  *     Element for culling.
@@ -46,76 +46,87 @@
 o3d.Element =
     function(opt_material, opt_boundingBox, opt_zSortPoint, opt_cull) {
   o3d.ParamObject.call(this);
+
+  /**
+   * The Material for this element.
+   * @type {o3d.Material}
+   */
   this.material = opt_material;
+
+  /**
+   * The BoundingBox for this element. If culling is on this bounding
+   * box will be tested against the view frustum of any draw context
+   * used to render this Element.
+   * @type {o3d.BoundingBox}
+   */
   this.boundingBox = opt_boundingBox ||
       new o3d.BoundingBox([-1, -1, -1], [1, 1, 1]);
+
+  /**
+   * The z sort point for this element. If this Element is drawn by a DrawPass
+   * that is set to sort by z order this value will be multiplied by the
+   * worldViewProjection matrix to compute a z value to sort by.
+   * @type {o3d.Point3}
+   */
   this.zSortPoint = opt_zSortPoint || [0, 0, 0];
+
+  /**
+   * The priority for this element. Used to sort if this Element is drawn by a
+   * DrawPass that is set to sort by priority.
+   * @type {number}
+   */
+  this.priority = 0;
+
+  /**
+   * The cull settings for this element. If true this Element will be
+   * culled by the bounding box above compared to the view frustum it
+   * is being rendered with.
+   *
+   * @type {boolean}
+   */
   this.cull = opt_cull || false;
+
+  /**
+   * The current owner of this Draw Element. Pass in null to stop
+   * being owned.
+   *
+   * Note: Elements are referenced by the Pack they are created in and
+   * their owner. If the Element is removed from its Pack, then
+   * setting the owner to null will free the Element. Or, visa versa,
+   * if you set the Element's owner to null then removing it from its
+   * Pack will free the Element.
+   *
+   * @type {o3d.Element}
+   */
+  this.owner_ = null;
+
+  /**
+   * Gets all the DrawElements under this Element.
+   *
+   * Each access to this field gets the entire list so it is best to get it
+   * just once. For example:
+   *
+   * var drawElements = element.drawElements;
+   * for (var i = 0; i < drawElements.length; i++) {
+   *   var drawElement = drawElements[i];
+   * }
+   *
+   *
+   * Note that modifications to this array [e.g. push()] will not affect
+   * the underlying Element, while modifications to the members of the array.
+   * will affect them.
+   *
+   * @type {!Array.<!o3d.DrawElement>}
+   */
   this.drawElements = [];
 };
 o3d.inherit('Element', 'ParamObject');
 
-
-/**
- * The Material for this element.
- * @type {o3d.Material}
- */
-o3d.Element.prototype.material = null;
-
-
-
-/**
- * The BoundingBox for this element. If culling is on this bounding box will be
- * tested against the view frustum of any draw context used to render this
- * Element.
- * @type {o3d.BoundingBox}
- */
-o3d.Element.prototype.boundingBox = null;
-
-
-
-/**
- * The z sort point for this element. If this Element is drawn by a DrawPass
- * that is set to sort by z order this value will be multiplied by the
- * worldViewProjection matrix to compute a z value to sort by.
- * @type {o3d.Point3}
- */
-o3d.Element.prototype.zSortPoint = [0, 0, 0];
-
-
-
-/**
- * The priority for this element. Used to sort if this Element is drawn by a
- * DrawPass that is set to sort by priority.
- * @type {number}
- */
-o3d.Element.prototype.priority = 0;
-
-
-
-/**
- * The cull settings for this element. If true this Element will be culled
- * by the bounding box above compared to the view frustum it is being rendered
- * with.
- * 
- * @type {boolean}
- */
-o3d.Element.prototype.cull = false;
-
-
-
-/**
- * The current owner of this Draw Element. Pass in null to stop being owned.
- * 
- * Note: Elements are referenced by the Pack they are created in and their
- * owner. If the Element is removed from its Pack, then setting the owner
- * to null will free the Element. Or, visa versa, if you set the
- * Element's owner to null then removing it from its Pack will free the
- * Element.
- * 
- * @type {o3d.Element}
- */
-o3d.Element.prototype.owner_ = null;
+o3d.ParamObject.setUpO3DParam_(o3d.Element, 'material', 'ParamMaterial');
+o3d.ParamObject.setUpO3DParam_(o3d.Element, 'boundingBox', 'ParamBoundingBox');
+o3d.ParamObject.setUpO3DParam_(o3d.Element, 'zSortPoint', 'ParamFloat3');
+o3d.ParamObject.setUpO3DParam_(o3d.Element, 'priority', 'ParamFloat');
+o3d.ParamObject.setUpO3DParam_(o3d.Element, 'cull', 'ParamBoolean');
 
 o3d.Element.prototype.__defineSetter__('owner',
     function(o) {
@@ -125,52 +136,29 @@ o3d.Element.prototype.__defineSetter__('owner',
 );
 
 o3d.Element.prototype.__defineGetter__('owner',
-    function(o) {
+    function() {
       return this.owner_;
     }
 );
-
-
-
-/**
- * Gets all the DrawElements under this Element.
- * 
- * Each access to this field gets the entire list so it is best to get it
- * just once. For example:
- * 
- * var drawElements = element.drawElements;
- * for (var i = 0; i < drawElements.length; i++) {
- *   var drawElement = drawElements[i];
- * }
- * 
- * 
- * Note that modifications to this array [e.g. push()] will not affect
- * the underlying Element, while modifications to the members of the array.
- * will affect them.
- * 
- * @type {!Array.<!o3d.DrawElement>}
- */
-o3d.Element.prototype.drawElements = [];
-
-
 
 /**
  * Creates a DrawElement for this Element. Note that unlike
  * Shape.createDrawElements and Transform.createDrawElements this one will
  * create more than one element for the same material.
- * 
+ *
  * @param {!o3d.Pack} pack pack used to manage created DrawElement.
- * @param {!o3d.Material} material material to use for DrawElement. If you
- *     pass null it will use the material on this Element. This allows you
- *     to easily setup the default (just draw as is) by passing null or
- *     setup a shadow pass by passing in a shadow material.
+ * @param {!o3d.Material} material material to use for DrawElement.
+ *     Note: When a DrawElement with a material of null is rendered, the
+ *     material on the corresponding Element will get used instead.
+ *     This allows you to easily setup the default (just draw as is) by passing
+ *     null or setup a shadow pass by passing in a shadow material.
  * @return {!o3d.DrawElement} The created draw element.
  */
 o3d.Element.prototype.createDrawElement =
     function(pack, material) {
-  drawElement = new o3d.DrawElement();
+  drawElement = pack.createObject('DrawElement');
   drawElement.owner = this;
-  drawElement.material = material || this.material;
+  drawElement.material = material;
   this.drawElements.push(drawElement);
   return drawElement;
 };

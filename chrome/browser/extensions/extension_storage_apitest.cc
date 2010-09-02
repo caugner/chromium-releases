@@ -4,10 +4,13 @@
 
 #include "chrome/browser/extensions/extension_apitest.h"
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Storage) {
-  ASSERT_TRUE(RunExtensionTest("storage")) << message_;
-}
+#if defined(OS_LINUX) || defined(OS_MACOSX)
+// See http://crbug.com/42943.
+#define MAYBE_Storage FLAKY_Storage
+#else
+#define MAYBE_Storage Storage
+#endif
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Cookies) {
-  ASSERT_TRUE(RunExtensionTest("cookies")) << message_;
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_Storage) {
+  ASSERT_TRUE(RunExtensionTest("storage")) << message_;
 }

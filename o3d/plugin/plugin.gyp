@@ -60,8 +60,9 @@
     'plugin_domain_whitelist%': '',
   },
   'includes': [
+    '../build/branding.gypi',
     '../build/common.gypi',
-    'branding.gypi',
+    '../build/version.gypi',
   ],
   'target_defaults': {
     'include_dirs': [
@@ -70,11 +71,11 @@
       '../../<(gtestdir)',
     ],
     'defines': [
-      'O3D_PLUGIN_DESCRIPTION="<!(python version_info.py --set_name="<(plugin_name)" --set_npapi_mimetype="<(plugin_npapi_mimetype)" --description)"',
+      'O3D_PLUGIN_DESCRIPTION="<!(python version_info.py --set_name="<(plugin_name)" --set_version="<(plugin_version)" --set_npapi_mimetype="<(plugin_npapi_mimetype)" --description)"',
       'O3D_PLUGIN_NPAPI_FILENAME="<(plugin_npapi_filename)"',
       'O3D_PLUGIN_NPAPI_MIMETYPE="<(plugin_npapi_mimetype)"',
       'O3D_PLUGIN_NAME="<(plugin_name)"',
-      'O3D_PLUGIN_VERSION="<!(python version_info.py --version)"',
+      'O3D_PLUGIN_VERSION="<(plugin_version)"',
       'O3D_PLUGIN_INSTALLDIR_CSIDL=<(plugin_installdir_csidl)',
       'O3D_PLUGIN_VENDOR_DIRECTORY="<(plugin_vendor_directory)"',
       'O3D_PLUGIN_PRODUCT_DIRECTORY="<(plugin_product_directory)"',
@@ -99,6 +100,30 @@
         # repackaging.
         'plugin_rpath%'         : '/opt/google/o3d/lib',      # empty => none
         'plugin_env_vars_file%' : '/opt/google/o3d/envvars',  # empty => none
+        'conditions' : [
+          ['renderer == "gl"',
+            {
+              'as_needed_ldflags': [
+                # The Cg libs use three other libraries without linking to them,
+                # which breaks --as-needed, so we have to specify them here before
+                # the --as-needed flag.
+                '-lGL',       # Used by libCgGL
+                '-lpthread',  # Used by libCg
+                '-lm',        # Used by libCg
+                # GYP dumps all static and shared libraries into one archive group
+                # on the command line in arbitrary order, which breaks
+                # --as-needed, so we have to specify the out-of-order ones before
+                # the --as-needed flag.
+                '-lCgGL',
+                '-lGLEW',
+                '-ldl',      # Used by breakpad
+                '-lrt',
+              ]
+            }, {
+              'as_needed_ldflags': []
+            }
+          ],
+        ]
       },
       'target_name': '<(plugin_npapi_filename)',
       'type': 'loadable_module',
@@ -138,7 +163,17 @@
           {
             'mac_bundle': 1,
             'product_extension': 'plugin',
-            'product_name': 'O3D',
+            'conditions': [
+              ['"<(plugin_npapi_filename)" == "npo3dautoplugin"',
+                {
+                  # The unbranded Mac plugin's name is a special case.
+                  'product_name': 'O3D',
+                },
+                {
+                  'product_name': '<(plugin_npapi_filename)',
+                },
+              ],
+            ],
             'dependencies': [
               '../../breakpad/breakpad.gyp:breakpad',
             ],
@@ -150,7 +185,12 @@
             ],
             'sources': [
               'mac/config_mac.mm',
+              'mac/fullscreen_window_mac.h',
+              'mac/fullscreen_window_mac.mm',
+              'mac/o3d_layer.mm',
               'mac/o3d_plugin.r',
+              'mac/overlay_window_mac.h',
+              'mac/overlay_window_mac.mm',
               'mac/plugin_logging-mac.mm',
               'mac/plugin_mac.h',
               'mac/plugin_mac.mm',
@@ -168,6 +208,7 @@
             ],
             'link_settings': {
               'libraries': [
+                '$(SDKROOT)/System/Library/Frameworks/QuartzCore.framework',
                 '$(SDKROOT)/System/Library/Frameworks/Cocoa.framework',
                 '$(SDKROOT)/System/Library/Frameworks/Carbon.framework',
                 '$(SDKROOT)/System/Library/Frameworks/AGL.framework',
@@ -199,13 +240,25 @@
                   'copy_frameworks_path': 'mac/plugin_copy_frameworks.sh',
                 },
                 'postbuild_name': 'Copy Frameworks',
-                'action': ['<(copy_frameworks_path)'],
+                'conditions': [
+                  ['"<(plugin_npapi_filename)" == "npo3dautoplugin"',
+                    {
+                      # The unbranded Mac plugin's name is a special case.
+                      'action': ['<(copy_frameworks_path)', 'O3D'],
+                    },
+                    {
+                      'action': ['<(copy_frameworks_path)',
+                                 '<(plugin_npapi_filename)'],
+                    },
+                  ],
+                ],
               },
               {
                 'postbuild_name': 'Process Resource File',
                 'action': ['python',
                   'version_info.py',
                   '--set_name=<(plugin_name)',
+                  '--set_version=<(plugin_version)',
                   '--set_npapi_mimetype=<(plugin_npapi_mimetype)',
                   'mac/o3d_plugin.r',
                   '${BUILT_PRODUCTS_DIR}/O3D.r',
@@ -213,10 +266,26 @@
               },
               {
                 'postbuild_name': 'Compile Resource File',
-                'action': ['/usr/bin/Rez',
-                  '-o',
-                  '${BUILT_PRODUCTS_DIR}/O3D.plugin/Contents/Resources/O3D.rsrc',
-                  '${BUILT_PRODUCTS_DIR}/O3D.r',
+                'conditions': [
+                  ['"<(plugin_npapi_filename)" == "npo3dautoplugin"',
+                    {
+                      # The unbranded Mac plugin's name is a special case.
+                      'action': ['/usr/bin/Rez',
+                        '-useDF',
+                        '-o',
+                        '${BUILT_PRODUCTS_DIR}/O3D.plugin/Contents/Resources/O3D.rsrc',
+                        '${BUILT_PRODUCTS_DIR}/O3D.r',
+                      ],
+                    },
+                    {
+                      'action': ['/usr/bin/Rez',
+                        '-useDF',
+                        '-o',
+                        '${BUILT_PRODUCTS_DIR}/<(plugin_npapi_filename).plugin/Contents/Resources/<(plugin_npapi_filename).rsrc',
+                        '${BUILT_PRODUCTS_DIR}/O3D.r',
+                      ],
+                    },
+                  ],
                 ],
               },
             ],
@@ -224,6 +293,10 @@
         ],
         ['OS == "linux"',
           {
+            'dependencies': [
+              '../../breakpad/breakpad.gyp:breakpad_client',
+              '../breakpad/breakpad.gyp:o3dBreakpad',
+            ],
             'sources': [
               'linux/config.cc',
               'linux/envvars.cc',
@@ -233,19 +306,7 @@
               '-Wl,-znodelete',
               '-Wl,--gc-sections',
               '<!@(pkg-config --libs-only-L xt)',
-              # The Cg libs use three other libraries without linking to them,
-              # which breaks --as-needed, so we have to specify them here before
-              # the --as-needed flag.
-              '-lGL',       # Used by libCgGL
-              '-lpthread',  # Used by libCg
-              '-lm',        # Used by libCg
-              # GYP dumps all static and shared libraries into one archive group
-              # on the command line in arbitrary order, which breaks
-              # --as-needed, so we have to specify the out-of-order ones before
-              # the --as-needed flag.
-              '-lCgGL',
-              '-lGLEW',
-              '-lrt',
+              '<(as_needed_ldflags)',
               # Directs the linker to only generate dependencies on libraries
               # that we actually use. Must come last.
               '-Wl,--as-needed',
@@ -276,12 +337,16 @@
             'dependencies': [
               '../breakpad/breakpad.gyp:o3dBreakpad',
             ],
+            'include_dirs': [
+              # So that o3dPlugin.rc can find resource.h.
+              'win',
+            ],
             'sources': [
               'win/config.cc',
               'win/logger_main.cc',
               'win/main_win.cc',
-              'win/o3dPlugin.def',
-              'win/o3dPlugin.rc',
+              '<(SHARED_INTERMEDIATE_DIR)/plugin/o3dPlugin.def',
+              '<(SHARED_INTERMEDIATE_DIR)/plugin/o3dPlugin.rc',
               'win/plugin_logging-win32.cc',
               'win/resource.h',
               'win/update_lock.cc',
@@ -360,7 +425,17 @@
                 {
                   'mac_bundle': 1,
                   'product_extension': 'plugin',
-                  'product_name': 'O3D',
+                  'conditions': [
+                    ['"<(plugin_npapi_filename)" == "npo3dautoplugin"',
+                      {
+                        # The unbranded Mac plugin's name is a special case.
+                        'product_name': 'O3D',
+                      },
+                      {
+                        'product_name': '<(plugin_npapi_filename)',
+                      },
+                    ],
+                  ],
                   'dependencies': [
                     '../../breakpad/breakpad.gyp:breakpad',
                   ],
@@ -443,12 +518,16 @@
                   'dependencies': [
                     '../breakpad/breakpad.gyp:o3dBreakpad',
                   ],
+                  'include_dirs': [
+                    # So that o3dPlugin.rc can find resource.h.
+                    'win',
+                  ],
                   'sources': [
                     'win/config.cc',
                     'win/logger_main.cc',
                     'win/main_win.cc',
-                    'win/o3dPlugin.def',
-                    'win/o3dPlugin.rc',
+                    '<(SHARED_INTERMEDIATE_DIR)/plugin/o3dPlugin.def',
+                    '<(SHARED_INTERMEDIATE_DIR)/plugin/o3dPlugin.rc',
                     'win/plugin_logging-win32.cc',
                     'win/resource.h',
                     'win/update_lock.cc',
@@ -526,15 +605,16 @@
                         'win/o3dPlugin.rc_template',
                       ],
                       'outputs': [
-                        'win/o3dPlugin.rc'
+                        '<(SHARED_INTERMEDIATE_DIR)/plugin/o3dPlugin.rc'
                       ],
                       'action': ['python',
                         'version_info.py',
                         '--set_name=<(plugin_name)',
+                        '--set_version=<(plugin_version)',
                         '--set_npapi_filename=<(plugin_npapi_filename)',
                         '--set_npapi_mimetype=<(plugin_npapi_mimetype)',
                         'win/o3dPlugin.rc_template',
-                        'win/o3dPlugin.rc'],
+                        '<(SHARED_INTERMEDIATE_DIR)/plugin/o3dPlugin.rc'],
                     },
                   ],
                   ['OS=="mac"',
@@ -545,12 +625,32 @@
                       'outputs': [
                         '<(SHARED_INTERMEDIATE_DIR)/plugin/Info.plist',
                       ],
-                      'action': ['python',
-                        'version_info.py',
-                        '--set_name=<(plugin_name)',
-                        '--set_npapi_mimetype=<(plugin_npapi_mimetype)',
-                        'mac/Info.plist',
-                        '<(SHARED_INTERMEDIATE_DIR)/plugin/Info.plist',
+                      'conditions': [
+                        ['"<(plugin_npapi_filename)" == "npo3dautoplugin"',
+                          {
+                            # The unbranded Mac plugin's name is a special case.
+                            'action': ['python',
+                              'version_info.py',
+                              '--set_name=<(plugin_name)',
+                              '--set_version=<(plugin_version)',
+                              '--set_npapi_filename=O3D',
+                              '--set_npapi_mimetype=<(plugin_npapi_mimetype)',
+                              'mac/Info.plist',
+                              '<(SHARED_INTERMEDIATE_DIR)/plugin/Info.plist',
+                            ],
+                          },
+                          {
+                            'action': ['python',
+                              'version_info.py',
+                              '--set_name=<(plugin_name)',
+                              '--set_version=<(plugin_version)',
+                              '--set_npapi_filename=<(plugin_npapi_filename)',
+                              '--set_npapi_mimetype=<(plugin_npapi_mimetype)',
+                              'mac/Info.plist',
+                              '<(SHARED_INTERMEDIATE_DIR)/plugin/Info.plist',
+                            ],
+                          },
+                        ],
                       ],
                     },
                   ],
@@ -568,13 +668,13 @@
                         'win/o3dPlugin.def_template',
                       ],
                       'outputs': [
-                        'win/o3dPlugin.def',
+                        '<(SHARED_INTERMEDIATE_DIR)/plugin/o3dPlugin.def',
                       ],
                       'action': ['python',
                         'version_info.py',
                         '--set_npapi_filename=<(plugin_npapi_filename)',
                         'win/o3dPlugin.def_template',
-                        'win/o3dPlugin.def'],
+                        '<(SHARED_INTERMEDIATE_DIR)/plugin/o3dPlugin.def'],
                     },
                   ],
                 },
@@ -598,10 +698,11 @@
                   'npapi_host_control/win/host_control.rgs_template',
                 ],
                 'outputs': [
-                  'npapi_host_control/win/host_control.rgs',
+                  '<(SHARED_INTERMEDIATE_DIR)/plugin/host_control.rgs',
                 ],
                 'action': ['python',
                   'version_info.py',
+                  '--set_version=<(plugin_version)',
                   '--set_activex_hostcontrol_clsid=' +
                       '<(plugin_activex_hostcontrol_clsid)',
                   '--set_activex_typelib_clsid=<(plugin_activex_typelib_clsid)',
@@ -609,7 +710,7 @@
                       '<(plugin_activex_hostcontrol_name)',
                   '--set_activex_typelib_name=<(plugin_activex_typelib_name)',
                   'npapi_host_control/win/host_control.rgs_template',
-                  'npapi_host_control/win/host_control.rgs',
+                  '<(SHARED_INTERMEDIATE_DIR)/plugin/host_control.rgs',
                 ],
               },
             ],
@@ -625,10 +726,11 @@
                   'npapi_host_control/win/npapi_host_control.idl_template',
                 ],
                 'outputs': [
-                  'npapi_host_control/win/npapi_host_control.idl',
+                  '<(SHARED_INTERMEDIATE_DIR)/plugin/npapi_host_control.idl',
                 ],
                 'action': ['python',
                   'version_info.py',
+                  '--set_version=<(plugin_version)',
                   '--set_activex_hostcontrol_clsid=' +
                       '<(plugin_activex_hostcontrol_clsid)',
                   '--set_activex_typelib_clsid=<(plugin_activex_typelib_clsid)',
@@ -636,7 +738,7 @@
                       '<(plugin_activex_hostcontrol_name)',
                   '--set_activex_typelib_name=<(plugin_activex_typelib_name)',
                   'npapi_host_control/win/npapi_host_control.idl_template',
-                  'npapi_host_control/win/npapi_host_control.idl',
+                  '<(SHARED_INTERMEDIATE_DIR)/plugin/npapi_host_control.idl',
                 ],
               },
             ],
@@ -650,6 +752,8 @@
             ],
             'include_dirs': [
               '<(INTERMEDIATE_DIR)',
+              # So that npapi_host_control.rc can find host_control.rgs.
+              '<(SHARED_INTERMEDIATE_DIR)/plugin',
             ],
             'sources': [
               '<(INTERMEDIATE_DIR)/npapi_host_control_i.c',
@@ -665,7 +769,7 @@
               'npapi_host_control/win/np_plugin_proxy.cc',
               'npapi_host_control/win/np_plugin_proxy.h',
               'npapi_host_control/win/npapi_host_control.cc',
-              'npapi_host_control/win/npapi_host_control.idl',
+              '<(SHARED_INTERMEDIATE_DIR)/plugin/npapi_host_control.idl',
               'npapi_host_control/win/npapi_host_control.rc',
               'npapi_host_control/win/precompile.h',
               'npapi_host_control/win/resource.h',

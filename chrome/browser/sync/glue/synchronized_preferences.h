@@ -28,7 +28,6 @@ static const wchar_t* kSynchronizedPreferences[] = {
   // Options dialog: Personal Stuff tab.
   prefs::kPasswordManagerEnabled,
   prefs::kAutoFillEnabled,
-  prefs::kAutoFillInfoBarShown,
   prefs::kUseCustomChromeFrame,
 
   // Options dialog: Under the hood -> Content Settings -> Cookies.
@@ -46,6 +45,9 @@ static const wchar_t* kSynchronizedPreferences[] = {
   prefs::kGeolocationContentSettings,
   prefs::kGeolocationDefaultContentSetting,
 
+  // Options dialog: under the hood -> Content Settings -> Notifications.
+  prefs::kDesktopNotificationDefaultContentSetting,
+
   // Options dialog: Under the hood -> Clear browsing data.
   //  All working but no live update.
   prefs::kDeleteBrowsingHistory,
@@ -62,7 +64,11 @@ static const wchar_t* kSynchronizedPreferences[] = {
   // Options dialog: Under the hood -> Change font and language settings.
   //   Serif, San Serif, Fixed font settings not synced.
   prefs::kDefaultCharset,
+  // There is no dialog to modify the kAcceptLanguages list on OSX, so
+  // don't sync it.
+#if !defined(OS_MACOSX)
   prefs::kAcceptLanguages,
+#endif
   prefs::kEnableSpellCheck,
   // Spell checker language not synced.
   prefs::kApplicationLocale,
@@ -81,23 +87,74 @@ static const wchar_t* kSynchronizedPreferences[] = {
   prefs::kExtensionsUIDeveloperMode,  // no live update
 
   // Document menu -> Zoom.
-  prefs::kPerHostZoomLevels,
+  //   prefs::kPerHostZoomLevels creates bad UX when synced, see
+  //   http://crbug.com/47359.
 
   // Document menu -> Encoding -> Auto Detect.
   prefs::kWebKitUsesUniversalDetector,
 
   // Autofill dialog.
   prefs::kAutoFillAuxiliaryProfilesEnabled,
-  prefs::kAutoFillDefaultProfile,
 
   // Translate preferences.
   TranslatePrefs::kPrefTranslateLanguageBlacklist,
   TranslatePrefs::kPrefTranslateSiteBlacklist,
   TranslatePrefs::kPrefTranslateWhitelists,
+  TranslatePrefs::kPrefTranslateDeniedCount,
+  TranslatePrefs::kPrefTranslateAcceptedCount,
 
   // Desktop notification permissions.
   prefs::kDesktopNotificationAllowedOrigins,
   prefs::kDesktopNotificationDeniedOrigins,
+
+  // Cookie prompt dialog.
+  prefs::kCookiePromptExpanded,
+
+#if defined(OS_CHROMEOS)
+  // IME prefs
+  prefs::kLanguageHangulKeyboard,
+  prefs::kLanguagePinyinAutoCommit,
+  prefs::kLanguagePinyinCommaPeriodPage,
+  prefs::kLanguagePinyinCorrectPinyin,
+  prefs::kLanguagePinyinDoublePinyin,
+  prefs::kLanguagePinyinFuzzyPinyin,
+  prefs::kLanguagePinyinInitChinese,
+  prefs::kLanguagePinyinInitFull,
+  prefs::kLanguagePinyinInitFullPunct,
+  prefs::kLanguagePinyinInitSimplifiedChinese,
+  prefs::kLanguagePinyinMinusEqualPage,
+  prefs::kLanguagePinyinShiftSelectCandidate,
+  prefs::kLanguagePinyinTradCandidate,
+  prefs::kLanguagePreloadEngines,
+  // TODO(yusukes): Add prefs for ibus-mozc (Japanese input method).
+  //   prefs::kLanguageMozcPreeditMethod,
+  //   prefs::kLanguageMozcSessionKeymap,
+  //   prefs::kLanguageMozcPunctuationMethod,
+  //   prefs::kLanguageMozcSymbolMethod,
+  //   prefs::kLanguageMozcSpaceCharacterForm;
+  //   prefs::kLanguageMozcHistoryLearningLevel;
+  //   prefs::kLanguageMozcSelectionShortcut;
+  //   prefs::kLanguageMozcShiftKeyModeSwitch;
+  //   prefs::kLanguageMozcNumpadCharacterForm;
+  //   prefs::kLanguageMozcIncognitoMode,
+  //   prefs::kLanguageMozcUseAutoImeTurnOff,
+  //   prefs::kLanguageMozcUseDateConversion,
+  //   prefs::kLanguageMozcUseSingleKanjiConversion,
+  //   prefs::kLanguageMozcUseSymbolConversion,
+  //   prefs::kLanguageMozcUseNumberConversion,
+  //   prefs::kLanguageMozcUseHistorySuggest,
+  //   prefs::kLanguageMozcUseDictionarySuggest,
+  //   prefs::kLanguageMozcSuggestionsSize
+  //
+  // We don't sync the following IME prefs since they are not user-configurable
+  // (yet):
+  //   prefs::kLanguageHotkeyNextEngineInMenu,
+  //   prefs::kLanguageHotkeyPreviousEngine,
+  //   prefs::kLanguagePinyinDoublePinyinSchema,
+  //   prefs::kLanguagePinyinLookupTablePageSize,
+  //
+  // We don't sync prefs::kLanguageCurrentInputMethod and PreviousInputMethod.
+#endif
 };
 
 }  // namespace browser_sync

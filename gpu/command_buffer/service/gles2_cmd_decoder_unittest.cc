@@ -2,17 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/gfx/gl/gl_mock.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
-#include "gpu/command_buffer/service/gl_mock.h"
+#include "gpu/command_buffer/common/id_allocator.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_unittest_base.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/program_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using ::gles2::MockGLInterface;
+using ::gfx::MockGLInterface;
 using ::testing::_;
 using ::testing::DoAll;
 using ::testing::InSequence;
@@ -44,10 +45,38 @@ class GLES2DecoderWithShaderTest : public GLES2DecoderWithShaderTestBase {
   GLES2DecoderWithShaderTest()
       : GLES2DecoderWithShaderTestBase() {
   }
+
+  void AddExpectationsForSimulatedAttrib0(
+      GLsizei num_vertices, GLuint buffer_id) {
+#if !defined(GLES2_GPU_SERVICE_BACKEND_NATIVE_GLES2)
+    EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER, kServiceAttrib0BufferId))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, BufferData(GL_ARRAY_BUFFER,
+                                 num_vertices * sizeof(GLfloat) * 4,
+                                 _, GL_DYNAMIC_DRAW))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, VertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, NULL))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER, 0))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, VertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, NULL))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER, buffer_id))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+#endif  // !GLES2_GPU_SERVICE_BACKEND_NATIVE_GLES2
 };
 
 TEST_F(GLES2DecoderWithShaderTest, DrawArraysNoAttributesSucceeds) {
   SetupTexture();
+  AddExpectationsForSimulatedAttrib0(kNumVertices, 0);
+
   EXPECT_CALL(*gl_, DrawArrays(GL_TRIANGLES, 0, kNumVertices))
       .Times(1)
       .RetiresOnSaturation();
@@ -63,6 +92,7 @@ TEST_F(GLES2DecoderWithShaderTest, DrawArraysBadTextureUsesBlack) {
   // this should trigger replacing with black textures before rendering.
   DoTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 3, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                0, 0);
+  AddExpectationsForSimulatedAttrib0(kNumVertices, 0);
   {
     InSequence sequence;
     EXPECT_CALL(*gl_, ActiveTexture(GL_TEXTURE0))
@@ -105,6 +135,7 @@ TEST_F(GLES2DecoderWithShaderTest, DrawArraysValidAttributesSucceeds) {
   SetupTexture();
   SetupVertexBuffer();
   DoVertexAttribPointer(1, 2, GL_FLOAT, 0, 0);
+  AddExpectationsForSimulatedAttrib0(kNumVertices, kServiceBufferId);
 
   EXPECT_CALL(*gl_, DrawArrays(GL_TRIANGLES, 0, kNumVertices))
       .Times(1)
@@ -199,6 +230,7 @@ TEST_F(GLES2DecoderWithShaderTest, DrawArraysInvalidCountFails) {
 TEST_F(GLES2DecoderWithShaderTest, DrawElementsNoAttributesSucceeds) {
   SetupTexture();
   SetupIndexBuffer();
+  AddExpectationsForSimulatedAttrib0(kMaxValidIndex + 1, 0);
   EXPECT_CALL(*gl_, DrawElements(GL_TRIANGLES, kValidIndexRangeCount,
                                  GL_UNSIGNED_SHORT,
                                  BufferOffset(kValidIndexRangeStart * 2)))
@@ -224,11 +256,25 @@ TEST_F(GLES2DecoderWithShaderTest, DrawElementsMissingAttributesFails) {
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
 }
 
+TEST_F(GLES2DecoderWithShaderTest, DrawElementsExtraAttributesFails) {
+  SetupIndexBuffer();
+  DoEnableVertexAttribArray(6);
+
+  EXPECT_CALL(*gl_, DrawElements(_, _, _, _))
+      .Times(0);
+  DrawElements cmd;
+  cmd.Init(GL_TRIANGLES, kValidIndexRangeCount, GL_UNSIGNED_SHORT,
+           kValidIndexRangeStart * 2);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+}
+
 TEST_F(GLES2DecoderWithShaderTest, DrawElementsValidAttributesSucceeds) {
   SetupTexture();
   SetupVertexBuffer();
   SetupIndexBuffer();
   DoVertexAttribPointer(1, 2, GL_FLOAT, 0, 0);
+  AddExpectationsForSimulatedAttrib0(kMaxValidIndex + 1, kServiceBufferId);
 
   EXPECT_CALL(*gl_, DrawElements(GL_TRIANGLES, kValidIndexRangeCount,
                                  GL_UNSIGNED_SHORT,
@@ -443,12 +489,14 @@ TEST_F(GLES2DecoderWithShaderTest, GetUniformivBadProgramFails) {
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
   // Valid id that is not a program. The GL spec requires a different error for
   // this case.
+#if GLES2_TEST_SHADER_VS_PROGRAM_IDS
   result->size = kInitialResult;
-  cmd.Init(client_texture_id_, kUniform2Location,
+  cmd.Init(client_shader_id_, kUniform2Location,
            kSharedMemoryId, kSharedMemoryOffset);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(0U, result->size);
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+#endif  // GLES2_TEST_SHADER_VS_PROGRAM_IDS
   // Unlinked program
   EXPECT_CALL(*gl_, CreateProgram())
       .Times(1)
@@ -536,12 +584,14 @@ TEST_F(GLES2DecoderWithShaderTest, GetUniformfvBadProgramFails) {
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
   // Valid id that is not a program. The GL spec requires a different error for
   // this case.
+#if GLES2_TEST_SHADER_VS_PROGRAM_IDS
   result->size = kInitialResult;
-  cmd.Init(client_texture_id_, kUniform2Location,
+  cmd.Init(client_shader_id_, kUniform2Location,
            kSharedMemoryId, kSharedMemoryOffset);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(0U, result->size);
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+#endif  // GLES2_TEST_SHADER_VS_PROGRAM_IDS
   // Unlinked program
   EXPECT_CALL(*gl_, CreateProgram())
       .Times(1)
@@ -740,12 +790,14 @@ TEST_F(GLES2DecoderWithShaderTest, GetActiveUniformBadProgramFails) {
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(0, result->success);
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+#if GLES2_TEST_SHADER_VS_PROGRAM_IDS
   result->success = 0;
-  cmd.Init(client_texture_id_, kUniformIndex, kBucketId,
+  cmd.Init(client_shader_id_, kUniformIndex, kBucketId,
            shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(0, result->success);
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+#endif  // GLES2_TEST_SHADER_VS_PROGRAM_IDS
 }
 
 TEST_F(GLES2DecoderWithShaderTest, GetActiveUniformBadIndexFails) {
@@ -818,12 +870,14 @@ TEST_F(GLES2DecoderWithShaderTest, GetActiveAttribBadProgramFails) {
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(0, result->success);
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+#if GLES2_TEST_SHADER_VS_PROGRAM_IDS
   result->success = 0;
-  cmd.Init(client_texture_id_, kAttribIndex, kBucketId,
+  cmd.Init(client_shader_id_, kAttribIndex, kBucketId,
            shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(0, result->success);
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+#endif  // GLES2_TEST_SHADER_VS_PROGRAM_IDS
 }
 
 TEST_F(GLES2DecoderWithShaderTest, GetActiveAttribBadIndexFails) {
@@ -852,9 +906,49 @@ TEST_F(GLES2DecoderWithShaderTest, GetActiveAttribBadSharedMemoryFails) {
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
 }
 
+TEST_F(GLES2DecoderWithShaderTest, GetShaderInfoLogValidArgs) {
+  const char* kInfo = "hello";
+  const uint32 kBucketId = 123;
+  CompileShader compile_cmd;
+  GetShaderInfoLog cmd;
+  EXPECT_CALL(*gl_, ShaderSource(kServiceShaderId, 1, _, _));
+  EXPECT_CALL(*gl_, CompileShader(kServiceShaderId));
+  EXPECT_CALL(*gl_, GetShaderiv(kServiceShaderId, GL_COMPILE_STATUS, _))
+      .WillOnce(SetArgumentPointee<2>(GL_FALSE))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, GetShaderiv(kServiceShaderId, GL_INFO_LOG_LENGTH, _))
+      .WillOnce(SetArgumentPointee<2>(strlen(kInfo) + 1))
+      .RetiresOnSaturation();
+  EXPECT_CALL(
+      *gl_, GetShaderInfoLog(kServiceShaderId, strlen(kInfo) + 1, _, _))
+      .WillOnce(DoAll(SetArgumentPointee<2>(strlen(kInfo)),
+                      SetArrayArgument<3>(kInfo, kInfo + strlen(kInfo) + 1)));
+  compile_cmd.Init(client_shader_id_);
+  cmd.Init(client_shader_id_, kBucketId);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(compile_cmd));
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  CommonDecoder::Bucket* bucket = decoder_->GetBucket(kBucketId);
+  ASSERT_TRUE(bucket != NULL);
+  EXPECT_EQ(strlen(kInfo) + 1, bucket->size());
+  EXPECT_EQ(0, memcmp(bucket->GetData(0, bucket->size()), kInfo,
+                      bucket->size()));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_F(GLES2DecoderWithShaderTest, GetShaderInfoLogInvalidArgs) {
+  const uint32 kBucketId = 123;
+  GetShaderInfoLog cmd;
+  cmd.Init(kInvalidClientId, kBucketId);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+
 TEST_F(GLES2DecoderTest, CompileShaderValidArgs) {
   EXPECT_CALL(*gl_, ShaderSource(kServiceShaderId, 1, _, _));
   EXPECT_CALL(*gl_, CompileShader(kServiceShaderId));
+  EXPECT_CALL(*gl_, GetShaderiv(kServiceShaderId, GL_COMPILE_STATUS, _))
+      .WillOnce(SetArgumentPointee<2>(GL_TRUE))
+      .RetiresOnSaturation();
   CompileShader cmd;
   cmd.Init(client_shader_id_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
@@ -865,9 +959,11 @@ TEST_F(GLES2DecoderTest, CompileShaderInvalidArgs) {
   cmd.Init(kInvalidClientId);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
-  cmd.Init(client_texture_id_);
+#if GLES2_TEST_SHADER_VS_PROGRAM_IDS
+  cmd.Init(client_program_id_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+#endif  // GLES2_TEST_SHADER_VS_PROGRAM_IDS
 }
 
 TEST_F(GLES2DecoderTest, ShaderSourceAndGetShaderSourceValidArgs) {
@@ -899,10 +995,12 @@ TEST_F(GLES2DecoderTest, ShaderSourceInvalidArgs) {
            kSharedMemoryId, kSharedMemoryOffset, kSourceSize);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
-  cmd.Init(client_texture_id_,
+#if GLES2_TEST_SHADER_VS_PROGRAM_IDS
+  cmd.Init(client_program_id_,
            kSharedMemoryId, kSharedMemoryOffset, kSourceSize);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+#endif  // GLES2_TEST_SHADER_VS_PROGRAM_IDS
   cmd.Init(client_shader_id_,
            kInvalidSharedMemoryId, kSharedMemoryOffset, kSourceSize);
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
@@ -942,9 +1040,11 @@ TEST_F(GLES2DecoderTest, ShaderSourceImmediateInvalidArgs) {
   memcpy(GetImmediateDataAs<void*>(&cmd), kSource, kSourceSize);
   EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(cmd, kSourceSize));
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
-  cmd.Init(client_texture_id_, kSourceSize);
+#if GLES2_TEST_SHADER_VS_PROGRAM_IDS
+  cmd.Init(client_program_id_, kSourceSize);
   EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(cmd, kSourceSize));
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+#endif  // GLES2_TEST_SHADER_VS_PROGRAM_IDS
 }
 
 TEST_F(GLES2DecoderTest, ShaderSourceBucketAndGetShaderSourceValidArgs) {
@@ -998,7 +1098,7 @@ TEST_F(GLES2DecoderTest, GenerateMipmapWrongFormatsFails) {
 
 TEST_F(GLES2DecoderWithShaderTest, Uniform1iValidArgs) {
   EXPECT_CALL(*gl_, Uniform1i(kUniform1Location, 2));
-  SpecializedSetup<Uniform1i, 0>();
+  SpecializedSetup<Uniform1i, 0>(true);
   Uniform1i cmd;
   cmd.Init(kUniform1Location, 2);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
@@ -1009,7 +1109,7 @@ TEST_F(GLES2DecoderWithShaderTest, Uniform1ivValidArgs) {
       *gl_, Uniform1iv(
           kUniform1Location, 2,
           reinterpret_cast<const GLint*>(shared_memory_address_)));
-  SpecializedSetup<Uniform1iv, 0>();
+  SpecializedSetup<Uniform1iv, 0>(true);
   Uniform1iv cmd;
   cmd.Init(kUniform1Location, 2, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
@@ -1017,7 +1117,7 @@ TEST_F(GLES2DecoderWithShaderTest, Uniform1ivValidArgs) {
 
 TEST_F(GLES2DecoderWithShaderTest, Uniform1ivInvalidArgs2_0) {
   EXPECT_CALL(*gl_, Uniform1iv(_, _, _)).Times(0);
-  SpecializedSetup<Uniform1iv, 0>();
+  SpecializedSetup<Uniform1iv, 0>(false);
   Uniform1iv cmd;
   cmd.Init(kUniform1Location, 2, kInvalidSharedMemoryId, 0);
   EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
@@ -1025,7 +1125,7 @@ TEST_F(GLES2DecoderWithShaderTest, Uniform1ivInvalidArgs2_0) {
 
 TEST_F(GLES2DecoderWithShaderTest, Uniform1ivInvalidArgs2_1) {
   EXPECT_CALL(*gl_, Uniform1iv(_, _, _)).Times(0);
-  SpecializedSetup<Uniform1iv, 0>();
+  SpecializedSetup<Uniform1iv, 0>(false);
   Uniform1iv cmd;
   cmd.Init(kUniform1Location, 2, shared_memory_id_, kInvalidSharedMemoryOffset);
   EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
@@ -1037,7 +1137,7 @@ TEST_F(GLES2DecoderWithShaderTest, Uniform1ivImmediateValidArgs) {
       *gl_,
       Uniform1iv(kUniform1Location, 2,
           reinterpret_cast<GLint*>(ImmediateDataAddress(&cmd))));
-  SpecializedSetup<Uniform1ivImmediate, 0>();
+  SpecializedSetup<Uniform1ivImmediate, 0>(true);
   GLint temp[1 * 2] = { 0, };
   cmd.Init(kUniform1Location, 2, &temp[0]);
   EXPECT_EQ(error::kNoError,
@@ -1049,6 +1149,7 @@ TEST_F(GLES2DecoderWithShaderTest, BindBufferToDifferentTargetFails) {
   DoBindBuffer(GL_ARRAY_BUFFER, client_buffer_id_, kServiceBufferId);
   // Attempt to rebind to GL_ELEMENT_ARRAY_BUFFER
   // NOTE: Real GLES2 does not have this restriction but WebGL and we do.
+  // This can be restriction can be removed at runtime.
   EXPECT_CALL(*gl_, BindBuffer(_, _))
       .Times(0);
   BindBuffer cmd;
@@ -1059,16 +1160,16 @@ TEST_F(GLES2DecoderWithShaderTest, BindBufferToDifferentTargetFails) {
 
 TEST_F(GLES2DecoderTest, ActiveTextureValidArgs) {
   EXPECT_CALL(*gl_, ActiveTexture(GL_TEXTURE1));
-  SpecializedSetup<ActiveTexture, 0>();
+  SpecializedSetup<ActiveTexture, 0>(true);
   ActiveTexture cmd;
   cmd.Init(GL_TEXTURE1);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
-TEST_F(GLES2DecoderTest, ActiveTextureInalidArgs) {
+TEST_F(GLES2DecoderTest, ActiveTextureInvalidArgs) {
   EXPECT_CALL(*gl_, ActiveTexture(_)).Times(0);
-  SpecializedSetup<ActiveTexture, 0>();
+  SpecializedSetup<ActiveTexture, 0>(false);
   ActiveTexture cmd;
   cmd.Init(GL_TEXTURE0 - 1);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
@@ -1370,6 +1471,8 @@ TEST_F(GLES2DecoderTest, ReadPixels) {
     29, 28, 23, 22, 21, 22, 21, 29, 28, 23, 22, 21, 22, 21, 28,
     31, 34, 39, 37, 32, 37, 32, 31, 34, 39, 37, 32, 37, 32, 34,
   };
+
+  context_->SetSize(gfx::Size(INT_MAX, INT_MAX));
 
   ReadPixelsEmulator emu(
       kWidth, kHeight, kBytesPerPixel, kSrcPixels, kPackAlignment);
@@ -1882,6 +1985,178 @@ TEST_F(GLES2DecoderWithShaderTest, GetUniformLocationBucketInvalidArgs) {
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
   cmd.Init(client_program_id_, kBucketId,
            kSharedMemoryId, kInvalidSharedMemoryOffset);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+}
+
+TEST_F(GLES2DecoderWithShaderTest, GetMaxValueInBuffer) {
+  SetupIndexBuffer();
+  GetMaxValueInBuffer::Result* result =
+      static_cast<GetMaxValueInBuffer::Result*>(shared_memory_address_);
+  *result = 0;
+
+  GetMaxValueInBuffer cmd;
+  cmd.Init(client_element_buffer_id_, kValidIndexRangeCount, GL_UNSIGNED_SHORT,
+           kValidIndexRangeStart * 2, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(7u, *result);
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  cmd.Init(client_element_buffer_id_, kValidIndexRangeCount + 1,
+           GL_UNSIGNED_SHORT,
+           kValidIndexRangeStart * 2, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(100u, *result);
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  cmd.Init(kInvalidClientId, kValidIndexRangeCount,
+           GL_UNSIGNED_SHORT,
+           kValidIndexRangeStart * 2, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+  cmd.Init(client_element_buffer_id_, kOutOfRangeIndexRangeEnd,
+           GL_UNSIGNED_SHORT,
+           kValidIndexRangeStart * 2, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+  cmd.Init(client_element_buffer_id_, kValidIndexRangeCount + 1,
+           GL_UNSIGNED_SHORT,
+           kOutOfRangeIndexRangeEnd * 2, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+  cmd.Init(client_element_buffer_id_, kValidIndexRangeCount + 1,
+           GL_UNSIGNED_SHORT,
+           kValidIndexRangeStart * 2, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  cmd.Init(client_buffer_id_, kValidIndexRangeCount + 1,
+           GL_UNSIGNED_SHORT,
+           kValidIndexRangeStart * 2, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+  cmd.Init(client_element_buffer_id_, kValidIndexRangeCount + 1,
+           GL_UNSIGNED_SHORT,
+           kValidIndexRangeStart * 2,
+           kInvalidSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+  cmd.Init(client_element_buffer_id_, kValidIndexRangeCount + 1,
+           GL_UNSIGNED_SHORT,
+           kValidIndexRangeStart * 2,
+           kSharedMemoryId, kInvalidSharedMemoryOffset);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+}
+
+TEST_F(GLES2DecoderTest, SharedIds) {
+  GenSharedIds gen_cmd;
+  RegisterSharedIds reg_cmd;
+  DeleteSharedIds del_cmd;
+
+  const GLuint kNamespaceId = id_namespaces::kTextures;
+  const GLuint kExpectedId1 = 1;
+  const GLuint kExpectedId2 = 2;
+  const GLuint kExpectedId3 = 4;
+  const GLuint kRegisterId = 3;
+  GLuint* ids = GetSharedMemoryAs<GLuint*>();
+  gen_cmd.Init(kNamespaceId, 0, 2, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(gen_cmd));
+  IdAllocator* id_allocator = GetIdAllocator(kNamespaceId);
+  ASSERT_TRUE(id_allocator != NULL);
+  // This check is implementation dependant but it's kind of hard to check
+  // otherwise.
+  EXPECT_EQ(kExpectedId1, ids[0]);
+  EXPECT_EQ(kExpectedId2, ids[1]);
+  EXPECT_TRUE(id_allocator->InUse(kExpectedId1));
+  EXPECT_TRUE(id_allocator->InUse(kExpectedId2));
+  EXPECT_FALSE(id_allocator->InUse(kRegisterId));
+  EXPECT_FALSE(id_allocator->InUse(kExpectedId3));
+
+  ClearSharedMemory();
+  ids[0] = kRegisterId;
+  reg_cmd.Init(kNamespaceId, 1, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(reg_cmd));
+  EXPECT_TRUE(id_allocator->InUse(kExpectedId1));
+  EXPECT_TRUE(id_allocator->InUse(kExpectedId2));
+  EXPECT_TRUE(id_allocator->InUse(kRegisterId));
+  EXPECT_FALSE(id_allocator->InUse(kExpectedId3));
+
+  ClearSharedMemory();
+  gen_cmd.Init(kNamespaceId, 0, 1, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(gen_cmd));
+  EXPECT_EQ(kExpectedId3, ids[0]);
+  EXPECT_TRUE(id_allocator->InUse(kExpectedId1));
+  EXPECT_TRUE(id_allocator->InUse(kExpectedId2));
+  EXPECT_TRUE(id_allocator->InUse(kRegisterId));
+  EXPECT_TRUE(id_allocator->InUse(kExpectedId3));
+
+  ClearSharedMemory();
+  ids[0] = kExpectedId1;
+  ids[1] = kRegisterId;
+  del_cmd.Init(kNamespaceId, 2, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(del_cmd));
+  EXPECT_FALSE(id_allocator->InUse(kExpectedId1));
+  EXPECT_TRUE(id_allocator->InUse(kExpectedId2));
+  EXPECT_FALSE(id_allocator->InUse(kRegisterId));
+  EXPECT_TRUE(id_allocator->InUse(kExpectedId3));
+
+  ClearSharedMemory();
+  ids[0] = kExpectedId3;
+  ids[1] = kExpectedId2;
+  del_cmd.Init(kNamespaceId, 2, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(del_cmd));
+  EXPECT_FALSE(id_allocator->InUse(kExpectedId1));
+  EXPECT_FALSE(id_allocator->InUse(kExpectedId2));
+  EXPECT_FALSE(id_allocator->InUse(kRegisterId));
+  EXPECT_FALSE(id_allocator->InUse(kExpectedId3));
+
+  // Check passing in an id_offset.
+  ClearSharedMemory();
+  const GLuint kOffset = 0xABCDEF;
+  gen_cmd.Init(kNamespaceId, kOffset, 2, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(gen_cmd));
+  EXPECT_EQ(kOffset, ids[0]);
+  EXPECT_EQ(kOffset + 1, ids[1]);
+}
+
+TEST_F(GLES2DecoderTest, GenSharedIdsBadArgs) {
+  const GLuint kNamespaceId = id_namespaces::kTextures;
+  GenSharedIds cmd;
+  cmd.Init(kNamespaceId, 0, -1, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+  cmd.Init(kNamespaceId, 0, 1, kInvalidSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+  cmd.Init(kNamespaceId, 0, 1, kSharedMemoryId, kInvalidSharedMemoryOffset);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+}
+
+TEST_F(GLES2DecoderTest, RegisterSharedIdsBadArgs) {
+  const GLuint kNamespaceId = id_namespaces::kTextures;
+  RegisterSharedIds cmd;
+  cmd.Init(kNamespaceId, -1, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+  cmd.Init(kNamespaceId, 1, kInvalidSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+  cmd.Init(kNamespaceId, 1, kSharedMemoryId, kInvalidSharedMemoryOffset);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+}
+
+TEST_F(GLES2DecoderTest, RegisterSharedIdsDuplicateIds) {
+  const GLuint kNamespaceId = id_namespaces::kTextures;
+  const GLuint kRegisterId = 3;
+  RegisterSharedIds cmd;
+  GLuint* ids = GetSharedMemoryAs<GLuint*>();
+  ids[0] = kRegisterId;
+  cmd.Init(kNamespaceId, 1, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  cmd.Init(kNamespaceId, 1, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+
+TEST_F(GLES2DecoderTest, DeleteSharedIdsBadArgs) {
+  const GLuint kNamespaceId = id_namespaces::kTextures;
+  DeleteSharedIds cmd;
+  cmd.Init(kNamespaceId, -1, kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+  cmd.Init(kNamespaceId, 1, kInvalidSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+  cmd.Init(kNamespaceId, 1, kSharedMemoryId, kInvalidSharedMemoryOffset);
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
 }
 

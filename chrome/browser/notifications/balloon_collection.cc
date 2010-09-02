@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/stl_util-inl.h"
 #include "chrome/browser/notifications/balloon.h"
+#include "chrome/browser/notifications/balloon_host.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/window_sizer.h"
 #include "gfx/rect.h"
@@ -21,6 +22,10 @@ const double kPercentBalloonFillFactor = 0.7;
 // Allow at least this number of balloons on the screen.
 const int kMinAllowedBalloonCount = 2;
 
+// Delay from the mouse leaving the balloon collection before
+// there is a relayout, in milliseconds.
+const int kRepositionDelay = 300;
+
 }  // namespace
 
 // static
@@ -31,7 +36,12 @@ BalloonCollectionImpl::Layout::Placement
     BalloonCollectionImpl::Layout::placement_ =
         Layout::VERTICALLY_FROM_BOTTOM_RIGHT;
 
-BalloonCollectionImpl::BalloonCollectionImpl() {
+BalloonCollectionImpl::BalloonCollectionImpl()
+#if USE_OFFSETS
+    : ALLOW_THIS_IN_INITIALIZER_LIST(reposition_factory_(this)),
+      added_as_message_loop_observer_(false)
+#endif
+{
 }
 
 BalloonCollectionImpl::~BalloonCollectionImpl() {
@@ -41,9 +51,20 @@ BalloonCollectionImpl::~BalloonCollectionImpl() {
 void BalloonCollectionImpl::Add(const Notification& notification,
                                 Profile* profile) {
   Balloon* new_balloon = MakeBalloon(notification, profile);
+  // The +1 on width is necessary because width is fixed on notifications,
+  // so since we always have the max size, we would always hit the scrollbar
+  // condition.  We are only interested in comparing height to maximum.
+  new_balloon->set_min_scrollbar_size(gfx::Size(1 + layout_.max_balloon_width(),
+                                                layout_.max_balloon_height()));
+  new_balloon->SetPosition(layout_.OffScreenLocation(), false);
+  new_balloon->Show();
+#if USE_OFFSETS
+  if (balloons_.size() > 0)
+    new_balloon->set_offset(balloons_[balloons_.size() - 1]->offset());
+#endif
+
   balloons_.push_back(new_balloon);
   PositionBalloons(false);
-  new_balloon->Show();
 
   // There may be no listener in a unit test.
   if (space_change_listener_)
@@ -79,24 +100,8 @@ bool BalloonCollectionImpl::HasSpace() const {
 
 void BalloonCollectionImpl::ResizeBalloon(Balloon* balloon,
                                           const gfx::Size& size) {
-  // restrict to the min & max sizes
-  gfx::Size real_size(
-      std::max(Layout::min_balloon_width(),
-          std::min(Layout::max_balloon_width(), size.width())),
-      std::max(Layout::min_balloon_height(),
-          std::min(Layout::max_balloon_height(), size.height())));
-
-  // Don't allow balloons to shrink.  This avoids flickering
-  // on Mac OS which sometimes rapidly reports alternating sizes.  Special
-  // case for setting the minimum value.
-  gfx::Size old_size = balloon->content_size();
-  if (real_size.width() > old_size.width() ||
-      real_size.height() > old_size.height() ||
-      real_size == gfx::Size(Layout::min_balloon_width(),
-                             Layout::min_balloon_height())) {
-    balloon->set_content_size(real_size);
-    PositionBalloons(true);
-  }
+  balloon->set_content_size(Layout::ConstrainToSizeLimits(size));
+  PositionBalloons(true);
 }
 
 void BalloonCollectionImpl::DisplayChanged() {
@@ -107,12 +112,38 @@ void BalloonCollectionImpl::DisplayChanged() {
 void BalloonCollectionImpl::OnBalloonClosed(Balloon* source) {
   // We want to free the balloon when finished.
   scoped_ptr<Balloon> closed(source);
-  for (Balloons::iterator it = balloons_.begin(); it != balloons_.end(); ++it) {
+  Balloons::iterator it = balloons_.begin();
+
+#if USE_OFFSETS
+  gfx::Point offset;
+  bool apply_offset = false;
+  while (it != balloons_.end()) {
+    if (*it == source) {
+      it = balloons_.erase(it);
+      if (it != balloons_.end()) {
+        apply_offset = true;
+        offset.set_y((source)->offset().y() - (*it)->offset().y() +
+            (*it)->content_size().height() - source->content_size().height());
+      }
+    } else {
+      if (apply_offset)
+        (*it)->add_offset(offset);
+      ++it;
+    }
+  }
+  // Start listening for UI events so we cancel the offset when the mouse
+  // leaves the balloon area.
+  if (apply_offset)
+    AddMessageLoopObserver();
+#else
+  for (; it != balloons_.end(); ++it) {
     if (*it == source) {
       balloons_.erase(it);
       break;
     }
   }
+#endif
+
   PositionBalloons(true);
 
   // There may be no listener in a unit test.
@@ -128,6 +159,51 @@ void BalloonCollectionImpl::PositionBalloons(bool reposition) {
   }
 }
 
+#if USE_OFFSETS
+void BalloonCollectionImpl::AddMessageLoopObserver() {
+  if (!added_as_message_loop_observer_) {
+    MessageLoopForUI::current()->AddObserver(this);
+    added_as_message_loop_observer_ = true;
+  }
+}
+
+void BalloonCollectionImpl::RemoveMessageLoopObserver() {
+  if (added_as_message_loop_observer_) {
+    MessageLoopForUI::current()->RemoveObserver(this);
+    added_as_message_loop_observer_ = false;
+  }
+}
+
+void BalloonCollectionImpl::CancelOffsets() {
+  reposition_factory_.RevokeAll();
+
+  // Unhook from listening to all UI events.
+  RemoveMessageLoopObserver();
+
+  for (Balloons::iterator it = balloons_.begin(); it != balloons_.end(); ++it)
+    (*it)->set_offset(gfx::Point(0, 0));
+
+  PositionBalloons(true);
+}
+
+void BalloonCollectionImpl::HandleMouseMoveEvent() {
+  if (!IsCursorInBalloonCollection()) {
+    // Mouse has left the region.  Schedule a reposition after
+    // a short delay.
+    if (reposition_factory_.empty()) {
+      MessageLoop::current()->PostDelayedTask(
+          FROM_HERE,
+          reposition_factory_.NewRunnableMethod(
+              &BalloonCollectionImpl::CancelOffsets),
+          kRepositionDelay);
+    }
+  } else {
+    // Mouse moved back into the region.  Cancel the reposition.
+    reposition_factory_.RevokeAll();
+  }
+}
+#endif
+
 BalloonCollectionImpl::Layout::Layout() {
   RefreshSystemMetrics();
 }
@@ -137,11 +213,6 @@ void BalloonCollectionImpl::Layout::GetMaxLinearSize(int* max_balloon_size,
   DCHECK(max_balloon_size && total_size);
 
   switch (placement_) {
-    case HORIZONTALLY_FROM_BOTTOM_LEFT:
-    case HORIZONTALLY_FROM_BOTTOM_RIGHT:
-      *total_size = work_area_.width();
-      *max_balloon_size = max_balloon_width();
-      break;
     case VERTICALLY_FROM_TOP_RIGHT:
     case VERTICALLY_FROM_BOTTOM_RIGHT:
       *total_size = work_area_.height();
@@ -157,14 +228,6 @@ gfx::Point BalloonCollectionImpl::Layout::GetLayoutOrigin() const {
   int x = 0;
   int y = 0;
   switch (placement_) {
-    case HORIZONTALLY_FROM_BOTTOM_LEFT:
-      x = work_area_.x() + HorizontalEdgeMargin();
-      y = work_area_.bottom() - VerticalEdgeMargin();
-      break;
-    case HORIZONTALLY_FROM_BOTTOM_RIGHT:
-      x = work_area_.right() - HorizontalEdgeMargin();
-      y = work_area_.bottom() - VerticalEdgeMargin();
-      break;
     case VERTICALLY_FROM_TOP_RIGHT:
       x = work_area_.right() - HorizontalEdgeMargin();
       y = work_area_.y() + VerticalEdgeMargin();
@@ -188,18 +251,6 @@ gfx::Point BalloonCollectionImpl::Layout::NextPosition(
   int x = 0;
   int y = 0;
   switch (placement_) {
-    case HORIZONTALLY_FROM_BOTTOM_LEFT:
-      x = position_iterator->x();
-      y = position_iterator->y() - balloon_size.height();
-      position_iterator->set_x(position_iterator->x() + balloon_size.width() +
-                               InterBalloonMargin());
-      break;
-    case HORIZONTALLY_FROM_BOTTOM_RIGHT:
-      position_iterator->set_x(position_iterator->x() - balloon_size.width() -
-                               InterBalloonMargin());
-      x = position_iterator->x();
-      y = position_iterator->y() - balloon_size.height();
-      break;
     case VERTICALLY_FROM_TOP_RIGHT:
       x = position_iterator->x() - balloon_size.width();
       y = position_iterator->y();
@@ -217,6 +268,36 @@ gfx::Point BalloonCollectionImpl::Layout::NextPosition(
       break;
   }
   return gfx::Point(x, y);
+}
+
+gfx::Point BalloonCollectionImpl::Layout::OffScreenLocation() const {
+  int x = 0;
+  int y = 0;
+  switch (placement_) {
+    case VERTICALLY_FROM_TOP_RIGHT:
+      x = work_area_.right() - kBalloonMaxWidth - HorizontalEdgeMargin();
+      y = work_area_.y() + kBalloonMaxHeight + VerticalEdgeMargin();
+      break;
+    case VERTICALLY_FROM_BOTTOM_RIGHT:
+      x = work_area_.right() - kBalloonMaxWidth - HorizontalEdgeMargin();
+      y = work_area_.bottom() + kBalloonMaxHeight + VerticalEdgeMargin();
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+  return gfx::Point(x, y);
+}
+
+// static
+gfx::Size BalloonCollectionImpl::Layout::ConstrainToSizeLimits(
+    const gfx::Size& size) {
+  // restrict to the min & max sizes
+  return gfx::Size(
+      std::max(min_balloon_width(),
+               std::min(max_balloon_width(), size.width())),
+      std::max(min_balloon_height(),
+               std::min(max_balloon_height(), size.height())));
 }
 
 bool BalloonCollectionImpl::Layout::RefreshSystemMetrics() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,15 +14,9 @@ SyncResourceHandler::SyncResourceHandler(
       receiver_(receiver),
       result_message_(result_message) {
   result_.final_url = url;
-  result_.filter_policy = FilterPolicy::DONT_FILTER;
 }
 
 SyncResourceHandler::~SyncResourceHandler() {
-  if (!result_message_)
-    return;
-
-  result_message_->set_reply_error();
-  receiver_->Send(result_message_);
 }
 
 bool SyncResourceHandler::OnUploadProgress(int request_id,
@@ -91,4 +85,10 @@ bool SyncResourceHandler::OnResponseCompleted(
 }
 
 void SyncResourceHandler::OnRequestClosed() {
+  if (!result_message_)
+    return;
+
+  result_message_->set_reply_error();
+  receiver_->Send(result_message_);
+  receiver_ = NULL;  // URLRequest is gone, and perhaps also the receiver.
 }

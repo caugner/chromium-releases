@@ -5,125 +5,134 @@
 #ifndef CHROME_BROWSER_VIEWS_TABS_TAB_H_
 #define CHROME_BROWSER_VIEWS_TABS_TAB_H_
 
-#include "chrome/browser/tabs/tab_strip_model.h"
-#include "chrome/browser/views/tabs/tab_renderer.h"
+#include <string>
 
-namespace gfx {
-class Path;
-class Point;
-}
+#include "base/scoped_ptr.h"
+#include "chrome/browser/views/tabs/base_tab.h"
+#include "gfx/point.h"
+
+class MultiAnimation;
+class SlideAnimation;
 
 ///////////////////////////////////////////////////////////////////////////////
 //
-// Tab
+// TabRenderer
 //
-//  A subclass of TabRenderer that represents an individual Tab in a TabStrip.
+//  A View that renders a Tab, either in a TabStrip or in a DraggedTabView.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class Tab : public TabRenderer,
-            public views::ContextMenuController {
+class Tab : public BaseTab {
  public:
-  static const std::string kTabClassName;
+  // The menu button's class name.
+  static const char kViewClassName[];
 
-  // An interface implemented by an object that can help this Tab complete
-  // various actions. The index parameter is the index of this Tab in the
-  // TabRenderer::Model.
-  class TabDelegate {
-   public:
-    // Returns true if the specified Tab is selected.
-    virtual bool IsTabSelected(const Tab* tab) const = 0;
-
-    // Returns true if the specified Tab is pinned.
-    virtual bool IsTabPinned(const Tab* tab) const = 0;
-
-    // Selects the specified Tab.
-    virtual void SelectTab(Tab* tab) = 0;
-
-    // Closes the specified Tab.
-    virtual void CloseTab(Tab* tab) = 0;
-
-    // Returns true if the specified command is enabled for the specified Tab.
-    virtual bool IsCommandEnabledForTab(
-        TabStripModel::ContextMenuCommand command_id, const Tab* tab) const = 0;
-
-    // Executes the specified command for the specified Tab.
-    virtual void ExecuteCommandForTab(
-        TabStripModel::ContextMenuCommand command_id, Tab* tab) = 0;
-
-    // Starts/Stops highlighting the tabs that will be affected by the
-    // specified command for the specified Tab.
-    virtual void StartHighlightTabsForCommand(
-        TabStripModel::ContextMenuCommand command_id, Tab* tab) = 0;
-    virtual void StopHighlightTabsForCommand(
-        TabStripModel::ContextMenuCommand command_id, Tab* tab) = 0;
-    virtual void StopAllHighlighting() = 0;
-
-    // Potentially starts a drag for the specified Tab.
-    virtual void MaybeStartDrag(Tab* tab, const views::MouseEvent& event) = 0;
-
-    // Continues dragging a Tab.
-    virtual void ContinueDrag(const views::MouseEvent& event) = 0;
-
-    // Ends dragging a Tab. |canceled| is true if the drag was aborted in a way
-    // other than the user releasing the mouse. Returns whether the tab has been
-    // destroyed.
-    virtual bool EndDrag(bool canceled) = 0;
-
-    // Returns true if the associated TabStrip's delegate supports tab moving or
-    // detaching. Used by the Frame to determine if dragging on the Tab
-    // itself should move the window in cases where there's only one
-    // non drag-able Tab.
-    virtual bool HasAvailableDragActions() const = 0;
-  };
-
-  explicit Tab(TabDelegate* delegate);
+  explicit Tab(TabController* controller);
   virtual ~Tab();
 
-  // Access the delegate.
-  TabDelegate* delegate() const { return delegate_; }
+  // Start/stop the mini-tab title animation.
+  void StartMiniTabTitleAnimation();
+  void StopMiniTabTitleAnimation();
 
-  // Used to set/check whether this Tab is being animated closed.
-  void set_closing(bool closing) { closing_ = closing; }
-  bool closing() const { return closing_; }
+  // Set the background offset used to match the image in the inactive tab
+  // to the frame image.
+  void SetBackgroundOffset(const gfx::Point& offset) {
+    background_offset_ = offset;
+  }
 
-  // TabRenderer overrides:
-  virtual bool IsSelected() const;
+  // Paints the icon. Most of the time you'll want to invoke Paint directly, but
+  // in certain situations this invoked outside of Paint.
+  void PaintIcon(gfx::Canvas* canvas);
+
+  // Returns the minimum possible size of a single unselected Tab.
+  static gfx::Size GetMinimumUnselectedSize();
+  // Returns the minimum possible size of a selected Tab. Selected tabs must
+  // always show a close button and have a larger minimum size than unselected
+  // tabs.
+  static gfx::Size GetMinimumSelectedSize();
+  // Returns the preferred size of a single Tab, assuming space is
+  // available.
+  static gfx::Size GetStandardSize();
+
+  // Returns the width for mini-tabs. Mini-tabs always have this width.
+  static int GetMiniWidth();
+
+  // Loads the images to be used for the tab background.
+  static void LoadTabImages();
+
+ protected:
+  virtual const gfx::Rect& title_bounds() const { return title_bounds_; }
+
+  // BaseTab overrides:
+  virtual void DataChanged(const TabRendererData& old);
 
  private:
-  // views::View overrides:
+  // Overridden from views::View:
+  virtual void Paint(gfx::Canvas* canvas);
+  virtual void Layout();
+  virtual void ThemeChanged();
+  virtual std::string GetClassName() const { return kViewClassName; }
   virtual bool HasHitTestMask() const;
-  virtual void GetHitTestMask(gfx::Path* mask) const;
-  virtual bool OnMousePressed(const views::MouseEvent& event);
-  virtual bool OnMouseDragged(const views::MouseEvent& event);
-  virtual void OnMouseReleased(const views::MouseEvent& event,
-                               bool canceled);
-  virtual bool GetTooltipText(const gfx::Point& p, std::wstring* tooltip);
+  virtual void GetHitTestMask(gfx::Path* path) const;
   virtual bool GetTooltipTextOrigin(const gfx::Point& p, gfx::Point* origin);
-  virtual std::string GetClassName() const { return kTabClassName; }
-  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
 
-  // views::ContextMenuController overrides:
-  virtual void ShowContextMenu(views::View* source,
-                               const gfx::Point& p,
-                               bool is_mouse_gesture);
+  // Paint various portions of the Tab
+  void PaintTabBackground(gfx::Canvas* canvas);
+  void PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas);
+  void PaintInactiveTabBackground(gfx::Canvas* canvas);
+  void PaintActiveTabBackground(gfx::Canvas* canvas);
 
-  // views::ButtonListener overrides:
-  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
+  // Returns the number of favicon-size elements that can fit in the tab's
+  // current size.
+  int IconCapacity() const;
 
-  // Creates a path that contains the clickable region of the tab's visual
-  // representation. Used by GetViewForPoint for hit-testing.
-  void MakePathForTab(gfx::Path* path) const;
+  // Returns whether the Tab should display a favicon.
+  bool ShouldShowIcon() const;
 
-  // An instance of a delegate object that can perform various actions based on
-  // user gestures.
-  TabDelegate* delegate_;
+  // Returns whether the Tab should display a close button.
+  bool ShouldShowCloseBox() const;
 
-  // True if the tab is being animated closed.
-  bool closing_;
+  // Gets the throb value for the tab. When a tab is not selected the
+  // active background is drawn at |GetThrobValue()|%. This is used for hover,
+  // mini tab title change and pulsing.
+  double GetThrobValue();
 
-  // If non-null it means we're showing a menu for the tab.
-  class TabContextMenuContents;
-  scoped_ptr<TabContextMenuContents> context_menu_contents_;
+  // The bounds of various sections of the display.
+  gfx::Rect favicon_bounds_;
+  gfx::Rect title_bounds_;
+
+  // The offset used to paint the inactive background image.
+  gfx::Point background_offset_;
+
+  // Hover animation.
+  scoped_ptr<SlideAnimation> hover_animation_;
+
+  // Animation used when the title of an inactive mini tab changes.
+  scoped_ptr<MultiAnimation> mini_title_animation_;
+
+  struct TabImage {
+    SkBitmap* image_l;
+    SkBitmap* image_c;
+    SkBitmap* image_r;
+    int l_width;
+    int r_width;
+    int y_offset;
+  };
+  static TabImage tab_active;
+  static TabImage tab_inactive;
+  static TabImage tab_alpha;
+
+  // Whether we're showing the icon. It is cached so that we can detect when it
+  // changes and layout appropriately.
+  bool showing_icon_;
+
+  // Whether we are showing the close button. It is cached so that we can
+  // detect when it changes and layout appropriately.
+  bool showing_close_button_;
+
+  // The current color of the close button.
+  SkColor close_button_color_;
+
+  static bool initialized_;
 
   DISALLOW_COPY_AND_ASSIGN(Tab);
 };

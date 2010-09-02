@@ -35,14 +35,13 @@ class ConstrainedWindowMac;
 @class GTMWindowSheetController;
 @class IncognitoImageView;
 @class InfoBarContainerController;
-class LocationBar;
+class LocationBarViewMac;
 class StatusBubbleMac;
 class TabContents;
 @class TabStripController;
 class TabStripModelObserverBridge;
 @class TabStripView;
 @class ToolbarController;
-@class TitlebarController;
 
 
 @interface BrowserWindowController :
@@ -60,7 +59,6 @@ class TabStripModelObserverBridge;
   scoped_ptr<TabStripModelObserverBridge> tabObserver_;
   scoped_ptr<BrowserWindowCocoa> windowShim_;
   scoped_nsobject<ToolbarController> toolbarController_;
-  scoped_nsobject<TitlebarController> titlebarController_;
   scoped_nsobject<TabStripController> tabStripController_;
   scoped_nsobject<FindBarCocoaController> findBarCocoaController_;
   scoped_nsobject<InfoBarContainerController> infoBarContainerController_;
@@ -155,7 +153,7 @@ class TabStripModelObserverBridge;
 - (StatusBubbleMac*)statusBubble;
 
 // Access the C++ bridge object representing the location bar.
-- (LocationBar*)locationBarBridge;
+- (LocationBarViewMac*)locationBarBridge;
 
 // Updates the toolbar (and transitively the location bar) with the states of
 // the specified |tab|.  If |shouldRestore| is true, we're switching
@@ -172,7 +170,9 @@ class TabStripModelObserverBridge;
 - (NSRect)selectedTabGrowBoxRect;
 
 // Called to tell the selected tab to update its loading state.
-- (void)setIsLoading:(BOOL)isLoading;
+// |force| is set if the update is due to changing tabs, as opposed to
+// the page-load finishing.  See comment in reload_button.h.
+- (void)setIsLoading:(BOOL)isLoading force:(BOOL)force;
 
 // Brings this controller's window to the front.
 - (void)activate;
@@ -245,7 +245,17 @@ class TabStripModelObserverBridge;
 - (NSPoint)themePatternPhase;
 
 // Return the point to which a bubble window's arrow should point.
-- (NSPoint)pointForBubbleArrowTip;
+- (NSPoint)bookmarkBubblePoint;
+
+// Call when the user changes the tab strip display mode, enabling or
+// disabling vertical tabs for this browser. Re-flows the contents of the
+// browser.
+- (void)toggleTabStripDisplayMode;
+
+// Called when the Add Search Engine dialog is closed.
+- (void)sheetDidEnd:(NSWindow*)sheet
+         returnCode:(NSInteger)code
+            context:(void*)context;
 
 @end  // @interface BrowserWindowController
 
@@ -351,9 +361,6 @@ class TabStripModelObserverBridge;
 
 // Return an autoreleased NSWindow suitable for fullscreen use.
 - (NSWindow*)createFullscreenWindow;
-
-// Return a point suitable for the topRight for a bookmark bubble.
-- (NSPoint)pointForBubbleArrowTip;
 
 // Resets any saved state about window growth (due to showing the bookmark bar
 // or the download shelf), so that future shrinking will occur from the bottom.

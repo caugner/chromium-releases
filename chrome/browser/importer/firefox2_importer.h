@@ -8,9 +8,9 @@
 #include <set>
 
 #include "base/file_path.h"
+#include "base/gtest_prod_util.h"
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/importer/importer_data_types.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class TemplateURL;
 
@@ -49,8 +49,8 @@ class Firefox2Importer : public Importer {
       std::vector<history::ImportedFavIconUsage>* favicons);
 
  private:
-  FRIEND_TEST(FirefoxImporterTest, Firefox2BookmarkParse);
-  FRIEND_TEST(FirefoxImporterTest, Firefox2CookesParse);
+  FRIEND_TEST_ALL_PREFIXES(FirefoxImporterTest, Firefox2BookmarkParse);
+  FRIEND_TEST_ALL_PREFIXES(FirefoxImporterTest, Firefox2CookesParse);
 
   virtual ~Firefox2Importer();
 
@@ -124,7 +124,7 @@ class Firefox2Importer : public Importer {
   // If true, we only parse the bookmarks.html file specified as source_path_.
   bool parsing_bookmarks_html_file_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(Firefox2Importer);
+  DISALLOW_COPY_AND_ASSIGN(Firefox2Importer);
 };
 
 #endif  // CHROME_BROWSER_IMPORTER_FIREFOX2_IMPORTER_H_

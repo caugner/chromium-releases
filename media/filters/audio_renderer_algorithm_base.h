@@ -28,7 +28,7 @@
 #include "base/callback.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "media/base/buffer_queue.h"
+#include "media/base/seekable_buffer.h"
 
 namespace media {
 
@@ -57,7 +57,8 @@ class AudioRendererAlgorithmBase {
   // Clears |queue_|.
   virtual void FlushBuffers();
 
-  // Returns the time of the next byte in our data.
+  // Returns the time of the next byte in our data or
+  // StreamSample::kInvalidTimestamp if current time is unknown.
   virtual base::TimeDelta GetTime();
 
   // Enqueues a buffer. It is called from the owner of the algorithm after a
@@ -107,7 +108,7 @@ class AudioRendererAlgorithmBase {
   scoped_ptr<RequestReadCallback> request_read_callback_;
 
   // Queued audio data.
-  BufferQueue queue_;
+  SeekableBuffer queue_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererAlgorithmBase);
 };

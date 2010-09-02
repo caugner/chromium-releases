@@ -7,10 +7,16 @@
 #include "app/l10n_util.h"
 #include "gfx/canvas.h"
 #include "grit/app_strings.h"
+#include "views/controls/button/text_button.h"
+#include "views/controls/button/menu_button.h"
 #include "views/controls/menu/menu_config.h"
 #include "views/controls/menu/menu_controller.h"
 #include "views/controls/menu/menu_separator.h"
 #include "views/controls/menu/submenu_view.h"
+
+#if defined(OS_WIN)
+#include "base/win_util.h"
+#endif
 
 namespace views {
 
@@ -24,8 +30,8 @@ namespace {
 
 class EmptyMenuMenuItem : public MenuItemView {
  public:
-  explicit EmptyMenuMenuItem(MenuItemView* parent) :
-      MenuItemView(parent, 0, NORMAL) {
+  explicit EmptyMenuMenuItem(MenuItemView* parent)
+      : MenuItemView(parent, 0, NORMAL) {
     SetTitle(l10n_util::GetString(IDS_APP_MENU_EMPTY_SUBMENU));
     // Set this so that we're not identified as a normal menu item.
     SetID(kEmptyMenuItemViewID);
@@ -38,17 +44,17 @@ class EmptyMenuMenuItem : public MenuItemView {
 
 }  // namespace
 
+// Padding between child views.
+static const int kChildXPadding = 8;
+
 // MenuItemView ---------------------------------------------------------------
 
-//  static
+// static
 const int MenuItemView::kMenuItemViewID = 1001;
 
 // static
 const int MenuItemView::kEmptyMenuItemViewID =
     MenuItemView::kMenuItemViewID + 1;
-
-// static
-bool MenuItemView::allow_task_nesting_during_run_ = false;
 
 // static
 int MenuItemView::label_start_;
@@ -59,7 +65,18 @@ int MenuItemView::item_right_margin_;
 // static
 int MenuItemView::pref_menu_height_;
 
-MenuItemView::MenuItemView(MenuDelegate* delegate) {
+MenuItemView::MenuItemView(MenuDelegate* delegate)
+    : delegate_(delegate),
+      controller_(NULL),
+      canceled_(false),
+      parent_menu_item_(NULL),
+      type_(SUBMENU),
+      selected_(false),
+      command_(0),
+      submenu_(NULL),
+      has_mnemonics_(false),
+      show_mnemonics_(false),
+      has_icons_(false) {
   // NOTE: don't check the delegate for NULL, UpdateMenuPartSizes supplies a
   // NULL delegate.
   Init(NULL, 0, SUBMENU, delegate);
@@ -84,13 +101,38 @@ bool MenuItemView::GetAccessibleRole(AccessibilityTypes::Role* role) {
   return true;
 }
 
+bool MenuItemView::GetAccessibleState(AccessibilityTypes::State* state) {
+  *state = 0;
+
+  switch (GetType()) {
+    case SUBMENU:
+      *state |= AccessibilityTypes::STATE_HASPOPUP;
+    case CHECKBOX:
+    case RADIO:
+      *state |= GetDelegate()->IsItemChecked(GetCommand()) ?
+          AccessibilityTypes::STATE_CHECKED : 0;
+    case NORMAL:
+    case SEPARATOR:
+      // No additional accessibility states currently for these menu states.
+      break;
+  }
+  return true;
+}
+
 void MenuItemView::RunMenuAt(gfx::NativeWindow parent,
                              MenuButton* button,
                              const gfx::Rect& bounds,
                              AnchorPosition anchor,
                              bool has_mnemonics) {
-  PrepareForRun(has_mnemonics);
-
+  // Show mnemonics if the button has focus or alt is pressed.
+  bool show_mnemonics = button ? button->HasFocus() : false;
+#if defined(OS_WIN)
+  // We don't currently need this on gtk as showing the menu gives focus to the
+  // button first.
+  if (!show_mnemonics)
+    show_mnemonics = win_util::IsAltPressed();
+#endif
+  PrepareForRun(has_mnemonics, show_mnemonics);
   int mouse_event_flags;
 
   MenuController* controller = MenuController::GetActiveInstance();
@@ -98,7 +140,7 @@ void MenuItemView::RunMenuAt(gfx::NativeWindow parent,
     // A menu is already showing, but it isn't a blocking menu. Cancel it.
     // We can get here during drag and drop if the user right clicks on the
     // menu quickly after the drop.
-    controller->Cancel(true);
+    controller->Cancel(MenuController::EXIT_ALL);
     controller = NULL;
   }
   bool owns_controller = false;
@@ -140,12 +182,12 @@ void MenuItemView::RunMenuAt(gfx::NativeWindow parent,
 void MenuItemView::RunMenuForDropAt(gfx::NativeWindow parent,
                                     const gfx::Rect& bounds,
                                     AnchorPosition anchor) {
-  PrepareForRun(false);
+  PrepareForRun(false, false);
 
   // If there is a menu, hide it so that only one menu is shown during dnd.
   MenuController* current_controller = MenuController::GetActiveInstance();
   if (current_controller) {
-    current_controller->Cancel(true);
+    current_controller->Cancel(MenuController::EXIT_ALL);
   }
 
   // Always create a new controller for non-blocking.
@@ -160,14 +202,61 @@ void MenuItemView::RunMenuForDropAt(gfx::NativeWindow parent,
 void MenuItemView::Cancel() {
   if (controller_ && !canceled_) {
     canceled_ = true;
-    controller_->Cancel(true);
+    controller_->Cancel(MenuController::EXIT_ALL);
   }
+}
+
+MenuItemView* MenuItemView::AppendMenuItemImpl(int item_id,
+                                               const std::wstring& label,
+                                               const SkBitmap& icon,
+                                               Type type) {
+  if (!submenu_)
+    CreateSubmenu();
+  if (type == SEPARATOR) {
+    submenu_->AddChildView(new MenuSeparator());
+    return NULL;
+  }
+  MenuItemView* item = new MenuItemView(this, item_id, type);
+  if (label.empty() && GetDelegate())
+    item->SetTitle(GetDelegate()->GetLabel(item_id));
+  else
+    item->SetTitle(label);
+  item->SetIcon(icon);
+  if (type == SUBMENU)
+    item->CreateSubmenu();
+  submenu_->AddChildView(item);
+  return item;
 }
 
 SubmenuView* MenuItemView::CreateSubmenu() {
   if (!submenu_)
     submenu_ = new SubmenuView(this);
   return submenu_;
+}
+
+void MenuItemView::SetTitle(const std::wstring& title) {
+  title_ = title;
+  std::wstring accessible_title(title);
+
+  // Filter out the "&" for accessibility clients.
+  size_t index = 0;
+  while ((index = accessible_title.find(L"&", index)) != std::wstring::npos &&
+         index + 1 < accessible_title.length()) {
+    accessible_title.replace(index, accessible_title.length() - index,
+                             accessible_title.substr(index + 1));
+
+    // Special case for "&&" (escaped for "&").
+    if (accessible_title[index] == '&')
+      ++index;
+  }
+
+  if (!GetAcceleratorText().empty()) {
+    std::wstring accelerator_text(L" ");
+    accelerator_text.append(GetAcceleratorText());
+    accessible_title.append(accelerator_text);
+  }
+
+  SetAccessibleName(accessible_title);
 }
 
 void MenuItemView::SetSelected(bool selected) {
@@ -217,7 +306,7 @@ MenuItemView* MenuItemView::GetRootMenuItem() {
 }
 
 wchar_t MenuItemView::GetMnemonic() {
-  if (!has_mnemonics_)
+  if (!GetRootMenuItem()->has_mnemonics_)
     return 0;
 
   const std::wstring& title = GetTitle();
@@ -225,8 +314,10 @@ wchar_t MenuItemView::GetMnemonic() {
   do {
     index = title.find('&', index);
     if (index != std::wstring::npos) {
-      if (index + 1 != title.size() && title[index + 1] != '&')
-        return title[index + 1];
+      if (index + 1 != title.size() && title[index + 1] != '&') {
+        wchar_t char_array[1] = { title[index + 1] };
+        return l10n_util::ToLower(char_array)[0];
+      }
       index++;
     }
   } while (index != std::wstring::npos);
@@ -272,9 +363,40 @@ void MenuItemView::ChildrenChanged() {
   }
 }
 
+void MenuItemView::Layout() {
+  int child_count = GetChildViewCount();
+  if (child_count == 0)
+    return;
+
+  // Child views are layed out right aligned and given the full height. To right
+  // align start with the last view and progress to the first.
+  for (int i = child_count - 1, x = width() - item_right_margin_; i >= 0; --i) {
+    View* child = GetChildViewAt(i);
+    int width = child->GetPreferredSize().width();
+    child->SetBounds(x - width, 0, width, height());
+    x -= width - kChildXPadding;
+  }
+}
+
+int MenuItemView::GetAcceleratorTextWidth() {
+  std::wstring text = GetAcceleratorText();
+  return text.empty() ? 0 : MenuConfig::instance().font.GetStringWidth(text);
+}
+
 MenuItemView::MenuItemView(MenuItemView* parent,
                            int command,
-                           MenuItemView::Type type) {
+                           MenuItemView::Type type)
+    : delegate_(NULL),
+      controller_(NULL),
+      canceled_(false),
+      parent_menu_item_(parent),
+      type_(type),
+      selected_(false),
+      command_(command),
+      submenu_(NULL),
+      has_mnemonics_(false),
+      show_mnemonics_(false),
+      has_icons_(false) {
   Init(parent, command, type, NULL);
 }
 
@@ -316,6 +438,7 @@ void MenuItemView::Init(MenuItemView* parent,
   selected_ = false;
   command_ = command;
   submenu_ = NULL;
+  show_mnemonics_ = false;
   // Assign our ID, this allows SubmenuItemView to find MenuItemViews.
   SetID(kMenuItemViewID);
   has_icons_ = false;
@@ -323,28 +446,6 @@ void MenuItemView::Init(MenuItemView* parent,
   MenuDelegate* root_delegate = GetDelegate();
   if (root_delegate)
     SetEnabled(root_delegate->IsCommandEnabled(command));
-}
-
-MenuItemView* MenuItemView::AppendMenuItemInternal(int item_id,
-                                                   const std::wstring& label,
-                                                   const SkBitmap& icon,
-                                                   Type type) {
-  if (!submenu_)
-    CreateSubmenu();
-  if (type == SEPARATOR) {
-    submenu_->AddChildView(new MenuSeparator());
-    return NULL;
-  }
-  MenuItemView* item = new MenuItemView(this, item_id, type);
-  if (label.empty() && GetDelegate())
-    item->SetTitle(GetDelegate()->GetLabel(item_id));
-  else
-    item->SetTitle(label);
-  item->SetIcon(icon);
-  if (type == SUBMENU)
-    item->CreateSubmenu();
-  submenu_->AddChildView(item);
-  return item;
 }
 
 void MenuItemView::DropMenuClosed(bool notify_delegate) {
@@ -364,7 +465,7 @@ void MenuItemView::DropMenuClosed(bool notify_delegate) {
   // WARNING: its possible the delegate deleted us at this point.
 }
 
-void MenuItemView::PrepareForRun(bool has_mnemonics) {
+void MenuItemView::PrepareForRun(bool has_mnemonics, bool show_mnemonics) {
   // Currently we only support showing the root.
   DCHECK(!parent_menu_item_);
 
@@ -374,6 +475,7 @@ void MenuItemView::PrepareForRun(bool has_mnemonics) {
   canceled_ = false;
 
   has_mnemonics_ = has_mnemonics;
+  show_mnemonics_ = has_mnemonics && show_mnemonics;
 
   AddEmptyMenus();
 
@@ -386,16 +488,18 @@ void MenuItemView::PrepareForRun(bool has_mnemonics) {
 
 int MenuItemView::GetDrawStringFlags() {
   int flags = 0;
-  if (UILayoutIsRightToLeft())
+  if (base::i18n::IsRTL())
     flags |= gfx::Canvas::TEXT_ALIGN_RIGHT;
   else
     flags |= gfx::Canvas::TEXT_ALIGN_LEFT;
 
   if (has_mnemonics_) {
-    if (MenuConfig::instance().show_mnemonics)
+    if (MenuConfig::instance().show_mnemonics ||
+        GetRootMenuItem()->show_mnemonics_) {
       flags |= gfx::Canvas::SHOW_PREFIX;
-    else
+    } else {
       flags |= gfx::Canvas::HIDE_PREFIX;
+    }
   }
   return flags;
 }
@@ -434,6 +538,30 @@ void MenuItemView::AdjustBoundsForRTLUI(gfx::Rect* rect) const {
   rect->set_x(MirroredLeftPointForRect(*rect));
 }
 
+void MenuItemView::PaintAccelerator(gfx::Canvas* canvas) {
+  std::wstring accel_text = GetAcceleratorText();
+  if (accel_text.empty())
+    return;
+
+  const gfx::Font& font = MenuConfig::instance().font;
+  int available_height = height() - GetTopMargin() - GetBottomMargin();
+  int max_accel_width =
+      parent_menu_item_->GetSubmenu()->max_accelerator_width();
+  gfx::Rect accel_bounds(width() - item_right_margin_ - max_accel_width,
+                         GetTopMargin(), max_accel_width, available_height);
+  accel_bounds.set_x(MirroredLeftPointForRect(accel_bounds));
+  int flags = GetRootMenuItem()->GetDrawStringFlags() |
+      gfx::Canvas::TEXT_VALIGN_MIDDLE;
+  flags &= ~(gfx::Canvas::TEXT_ALIGN_RIGHT | gfx::Canvas::TEXT_ALIGN_LEFT);
+  if (base::i18n::IsRTL())
+    flags |= gfx::Canvas::TEXT_ALIGN_LEFT;
+  else
+    flags |= gfx::Canvas::TEXT_ALIGN_RIGHT;
+  canvas->DrawStringInt(
+      accel_text, font, TextButton::kDisabledColor, accel_bounds.x(),
+      accel_bounds.y(), accel_bounds.width(), accel_bounds.height(),
+      flags);
+}
 
 void MenuItemView::DestroyAllMenuHosts() {
   if (!HasSubmenu())
@@ -458,6 +586,27 @@ int MenuItemView::GetBottomMargin() {
   return root && root->has_icons_
       ? MenuConfig::instance().item_bottom_margin :
         MenuConfig::instance().item_no_icon_bottom_margin;
+}
+
+int MenuItemView::GetChildPreferredWidth() {
+  int child_count = GetChildViewCount();
+  if (child_count == 0)
+    return 0;
+
+  int width = 0;
+  for (int i = 0; i < child_count; ++i) {
+    if (i)
+      width += kChildXPadding;
+    width += GetChildViewAt(i)->GetPreferredSize().width();
+  }
+  return width;
+}
+
+std::wstring MenuItemView::GetAcceleratorText() {
+  Accelerator accelerator;
+  return (GetDelegate() &&
+          GetDelegate()->GetAccelerator(GetCommand(), &accelerator)) ?
+      accelerator.GetShortcutText() : std::wstring();
 }
 
 }  // namespace views

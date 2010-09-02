@@ -67,6 +67,10 @@
   BOOL scrollUpArrowShown_;
   BOOL scrollDownArrowShown_;
 
+  // YES if subfolders should grow to the right (the default).
+  // Direction switches if we'd grow off the screen.
+  BOOL subFolderGrowthToRight_;
+
   // The main view of this window (where the buttons go).
   IBOutlet BookmarkBarFolderView* mainView_;
 
@@ -107,6 +111,10 @@
   // We need to know the size of the vertical scrolling arrows so we
   // can obscure/unobscure them.
   CGFloat verticalScrollArrowHeight_;
+
+  // Set to YES to prevent any node animations. Useful for unit testing so that
+  // incomplete animations do not cause valgrind complaints.
+  BOOL ignoreAnimations_;
 }
 
 // Designated initializer.
@@ -140,6 +148,7 @@
 - (IBAction)addFolder:(id)sender;
 - (IBAction)addPage:(id)sender;
 - (IBAction)editBookmark:(id)sender;
+- (IBAction)openBookmark:(id)sender;
 - (IBAction)openAllBookmarks:(id)sender;
 - (IBAction)openAllBookmarksIncognitoWindow:(id)sender;
 - (IBAction)openAllBookmarksNewWindow:(id)sender;
@@ -147,20 +156,27 @@
 - (IBAction)openBookmarkInNewForegroundTab:(id)sender;
 - (IBAction)openBookmarkInNewWindow:(id)sender;
 
+@property (assign, nonatomic) BOOL subFolderGrowthToRight;
+
 @end
 
 @interface BookmarkBarFolderController(TestingAPI)
 - (NSView*)mainView;
-- (NSPoint)windowTopLeft;
+- (NSPoint)windowTopLeftForWidth:(int)windowWidth;
 - (NSArray*)buttons;
 - (BookmarkBarFolderController*)folderController;
 - (id)folderTarget;
 - (void)configureWindowLevel;
 - (void)performOneScroll:(CGFloat)delta;
+// Set to YES in order to prevent animations.
+- (void)setIgnoreAnimations:(BOOL)ignore;
 
 // Return YES if we can scroll up or down.
 - (BOOL)canScrollUp;
 - (BOOL)canScrollDown;
+// Return YES if the scrollable_ flag has been set.
+- (BOOL)scrollable;
 
+- (BookmarkButton*)buttonForDroppingOnAtPoint:(NSPoint)point;
 @end
 

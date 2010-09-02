@@ -1,6 +1,6 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "webkit/glue/webthemeengine_impl_win.h"
 
@@ -86,6 +86,18 @@ void WebThemeEngineImpl::paintScrollbarTrack(
   canvas->endPlatformPaint();
 }
 
+void WebThemeEngineImpl::paintSpinButton(
+    WebCanvas* canvas, int part, int state, int classic_state,
+    const WebRect& rect) {
+  HDC hdc = canvas->beginPlatformPaint();
+
+  RECT native_rect = WebRectToRECT(rect);
+  gfx::NativeTheme::instance()->PaintSpinButton(
+      hdc, part, state, classic_state, &native_rect);
+
+  canvas->endPlatformPaint();
+}
+
 void WebThemeEngineImpl::paintTextField(
     WebCanvas* canvas, int part, int state, int classic_state,
     const WebRect& rect, WebColor color, bool fill_content_area,
@@ -111,6 +123,19 @@ void WebThemeEngineImpl::paintTrackbar(
   gfx::NativeTheme::instance()->PaintTrackbar(
       hdc, part, state, classic_state, &native_rect, canvas);
 
+  canvas->endPlatformPaint();
+}
+
+void WebThemeEngineImpl::paintProgressBar(
+    WebCanvas* canvas, const WebRect& barRect, const WebRect& valueRect,
+    bool determinate, double animatedSeconds)
+{
+  HDC hdc = canvas->beginPlatformPaint();
+  RECT native_bar_rect = WebRectToRECT(barRect);
+  RECT native_value_rect = WebRectToRECT(valueRect);
+  gfx::NativeTheme::instance()->PaintProgressBar(
+      hdc, &native_bar_rect,
+      &native_value_rect, determinate, animatedSeconds, canvas);
   canvas->endPlatformPaint();
 }
 

@@ -15,7 +15,8 @@
     </script>
     <script type="text/javascript" src="js/api_page_generator.js"></script>
     <script type="text/javascript" src="js/bootstrap.js"></script>
-  <title>Formats: Manifest Files - Google Chrome Extensions - Google Code</title></head><body>  <div id="gc-container" class="labs">
+  <title>Formats: Manifest Files - Google Chrome Extensions - Google Code</title></head>
+  <body>  <div id="gc-container" class="labs">
       <div id="devModeWarning">
         You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
       </div>
@@ -35,6 +36,7 @@
                 <div style="display:inline">
                   (
                     <span class="optional">optional</span>
+                    <span class="enum">enumerated</span>
                     <span id="typeTemplate">
                       <span>
                         <a> Type</a>
@@ -44,6 +46,7 @@
                           array of <span><span></span></span>
                         </span>
                         <span>paramType</span>
+                        <span></span>
                       </span>
                     </span>
                   )
@@ -56,6 +59,15 @@
           </dd>
           <dd>
             Description of this parameter from the json schema.
+          </dd>
+          <dd>
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
           </dd>
 
           <!-- OBJECT PROPERTIES -->
@@ -135,6 +147,7 @@
               <li>Browser UI
                 <ul>
                   <li><a href="browserAction.html">Browser Actions</a></li>
+                  <li><a href="contextMenus.html">Context Menus</a></li>
                   <li><a href="notifications.html">Desktop Notifications</a></li>
                   <li><a href="options.html">Options Pages</a></li>
                   <li><a href="override.html">Override Pages</a></li>
@@ -145,6 +158,7 @@
               <li>Browser Interaction
                 <ul>
                   <li><a href="bookmarks.html">Bookmarks</a></li>
+                  <li><a href="cookies.html">Cookies</a></li>
                   <li><a href="events.html">Events</a></li>
                   <li><a href="history.html">History</a></li>
                   <li><a href="tabs.html">Tabs</a></li>
@@ -157,6 +171,7 @@
                   <li><a href="background_pages.html">Background Pages</a></li>
                   <li><a href="content_scripts.html">Content Scripts</a></li>
                   <li><a href="xhr.html">Cross-Origin XHR</a></li>
+                  <li><a href="idle.html">Idle</a></li>
                   <li><a href="i18n.html">Internationalization</a></li>
                   <li><a href="messaging.html">Message Passing</a></li>
                   <li><a href="npapi.html">NPAPI Plugins</a></li>
@@ -508,12 +523,15 @@ The following table lists the permissions an extension can use.
 </tr>
 <tr>
   <td> <em>match pattern</em> </td>
-  <td> Required if the extension makes
-       <a href="xhr.html">cross-origin XMLHttpRequests</a>
-       or
-       <a href="content_scripts.html#pi">programmatically injects
-       JavaScript or CSS</a>
-       into web pages.
+  <td> Specifies a <em>host permission</em>.
+       Required if the extension wants to interact
+       with the code running on pages.
+       Many extension capabilities, such as
+       <a href="xhr.html">cross-origin XMLHttpRequests</a>,
+       <a href="content_scripts.html#pi">programmatically injected
+       content scripts</a>, and <a href="cookies.html">the cookies API</a>
+       require host permissions. For details on the syntax, see
+       <a href="match_patterns.html">Match Patterns</a>.
   </td>
 </tr>
 <tr>
@@ -522,20 +540,46 @@ The following table lists the permissions an extension can use.
        <a href="bookmarks.html">chrome.bookmarks</a> module. </td>
 </tr>
 <tr>
-  <td> "chrome://favicon" </td>
+  <td> "chrome://favicon/" </td>
   <td> Required if the extension uses the
        "chrome://favicon/<em>url</em>" mechanism
        to display the favicon of a page.
        For example, to display the favicon of http://www.google.com/,
-       you declare the "chrome://favicon" permission
+       you declare the "chrome://favicon/" permission
        and use HTML code like this:
        <pre>&lt;img src="chrome://favicon/http://www.google.com/"&gt;</pre>
        </td>
 </tr>
 <tr>
+  <td> "contextMenus" </td>
+  <td> Required if the extension uses the
+       <a href="contextMenus.html">context menus</a> module. </td>
+</tr>
+<tr>
+  <td> "cookies" </td>
+  <td> Required if the extension uses the
+       <a href="cookies.html">chrome.cookies</a> module. </td>
+</tr>
+<tr>
   <td> "experimental" </td>
   <td> Required if the extension uses any
        <a href="http://code.google.com/chrome/extensions/dev/experimental.html">chrome.experimental.* APIs</a>.</td>
+</tr>
+<tr>
+  <td> "geolocation" </td>
+  <td> Allows the extension to use the proposed HTML5
+       <a href="http://dev.w3.org/geo/api/spec-source.html">geolocation API</a>
+       without prompting the user for permission. </td>
+</tr>
+<tr>
+  <td> "history" </td>
+  <td> Required if the extension uses the
+       <a href="history.html">chrome.history</a> module. </td>
+</tr>
+<tr>
+  <td> "idle" </td>
+  <td> Required if the extension uses the
+       <a href="idle.html">chrome.idle</a> module. </td>
 </tr>
 <tr>
   <td> "notifications" </td>
@@ -700,6 +744,13 @@ For more information, see
                   </div>
                 </div>
 
+                <!-- MIN_VERSION -->
+                <p>
+                  This function was added in version <b><span></span></b>.
+                  If you require this function, the manifest key
+                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+                  can ensure that your extension won't be run in an earlier browser version.
+                </p>
               </div> <!-- /description -->
 
             </div>  <!-- /apiItem -->
@@ -744,7 +795,7 @@ For more information, see
 
           <!-- TYPES -->
           <div class="apiGroup">
-            <a name="types.sort(sortByName)"></a>
+            <a name="types"></a>
             <h3 id="types">Types</h3>
 
             <!-- iterates over all types -->

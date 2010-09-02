@@ -10,11 +10,11 @@
 #include "base/compiler_specific.h"
 #include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/views/frame/browser_extender.h"
 #include "chrome/browser/views/frame/browser_frame.h"
 #include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/browser/views/tabs/tab_strip.h"
-#include "gfx/canvas.h"
+#include "chrome/browser/views/toolbar_view.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/font.h"
 #include "gfx/path.h"
 #include "grit/app_resources.h"
@@ -26,6 +26,7 @@
 #include "views/widget/root_view.h"
 #include "views/window/window.h"
 #include "views/window/window_resources.h"
+#include "views/window/window_shape.h"
 
 #if defined(OS_WIN)
 #include "app/win_util.h"
@@ -58,6 +59,8 @@ const int kResizeAreaCornerSize = 16;
 // The titlebar never shrinks too short to show the caption button plus some
 // padding below it.
 const int kCaptionButtonHeightWithPadding = 19;
+// The content left/right images have a shadow built into them.
+const int kContentEdgeShadowThickness = 2;
 // The titlebar has a 2 px 3D edge along the top and bottom.
 const int kTitlebarTopAndBottomEdgeThickness = 2;
 // The icon is inset 2 px from the left frame border.
@@ -89,6 +92,16 @@ const int kNewTabCaptionRestoredSpacing = 5;
 // similar vertical coordinates, we need to reserve a larger, 16 px gap to avoid
 // looking too cluttered.
 const int kNewTabCaptionMaximizedSpacing = 16;
+// How far to indent the tabstrip from the left side of the screen when there
+// is no OTR icon.
+const int kTabStripIndent = 1;
+// Spacing between extension app icon/title and tab strip.
+const int kExtensionAppTabStripLeftSpacing = 10;
+// Padding between the caption and start of vertical tabs.
+const int kVerticalTabPadding = 6;
+// Inset from the top of the toolbar/tabstrip to the shadow. Used only for
+// vertical tabs.
+const int kVerticalTabBorderInset = 3;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -186,13 +199,36 @@ OpaqueBrowserFrameView::~OpaqueBrowserFrameView() {
 
 gfx::Rect OpaqueBrowserFrameView::GetBoundsForTabStrip(
     BaseTabStrip* tabstrip) const {
+  if (browser_view_->UseVerticalTabs()) {
+    gfx::Size ps = tabstrip->GetPreferredSize();
+    return gfx::Rect(NonClientBorderThickness(), NonClientTopBorderHeight(),
+                     ps.width(), browser_view_->height());
+  }
+
+  int tabstrip_y = NonClientTopBorderHeight();
+  if (!frame_->GetWindow()->IsMaximized() &&
+      !frame_->GetWindow()->IsFullscreen()) {
+    tabstrip_y += kNonClientRestoredExtraThickness;
+  }
+
   int tabstrip_x = browser_view_->ShouldShowOffTheRecordAvatar() ?
       (otr_avatar_icon_->bounds().right() + kOTRSideSpacing) :
-      NonClientBorderThickness();
+      NonClientBorderThickness() + kTabStripIndent;
+
   int tabstrip_width = minimize_button_->x() - tabstrip_x -
       (frame_->GetWindow()->IsMaximized() ?
       kNewTabCaptionMaximizedSpacing : kNewTabCaptionRestoredSpacing);
-  return gfx::Rect(tabstrip_x, NonClientTopBorderHeight(),
+
+  if (browser_view_->browser()->type() == Browser::TYPE_EXTENSION_APP) {
+    int tabstrip_offset = browser_view_->extension_app_title()->x() +
+        browser_view_->extension_app_title()->width() +
+        kExtensionAppTabStripLeftSpacing;
+
+    tabstrip_x += tabstrip_offset;
+    tabstrip_width -= tabstrip_offset;
+  }
+
+  return gfx::Rect(tabstrip_x, tabstrip_y,
                    std::max(0, tabstrip_width),
                    tabstrip->GetPreferredHeight());
 }
@@ -221,10 +257,6 @@ gfx::Size OpaqueBrowserFrameView::GetMinimumSize() {
   return min_size;
 }
 
-void OpaqueBrowserFrameView::PaintTabStripShadow(gfx::Canvas* canvas) {
-  // TODO(beng): SIDE tabs.
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // OpaqueBrowserFrameView, views::NonClientFrameView implementation:
 
@@ -234,6 +266,10 @@ gfx::Rect OpaqueBrowserFrameView::GetBoundsForClientView() const {
 
 bool OpaqueBrowserFrameView::AlwaysUseNativeFrame() const {
   return frame_->AlwaysUseNativeFrame();
+}
+
+bool OpaqueBrowserFrameView::AlwaysUseCustomFrame() const {
+  return true;
 }
 
 gfx::Rect OpaqueBrowserFrameView::GetWindowBoundsForClientBounds(
@@ -298,23 +334,7 @@ void OpaqueBrowserFrameView::GetWindowMask(const gfx::Size& size,
   if (frame_->GetWindow()->IsMaximized() || frame_->GetWindow()->IsFullscreen())
     return;
 
-  // Redefine the window visible region for the new size.
-  window_mask->moveTo(0, 3);
-  window_mask->lineTo(1, 2);
-  window_mask->lineTo(1, 1);
-  window_mask->lineTo(2, 1);
-  window_mask->lineTo(3, 0);
-
-  window_mask->lineTo(SkIntToScalar(size.width() - 3), 0);
-  window_mask->lineTo(SkIntToScalar(size.width() - 2), 1);
-  window_mask->lineTo(SkIntToScalar(size.width() - 1), 1);
-  window_mask->lineTo(SkIntToScalar(size.width() - 1), 2);
-  window_mask->lineTo(SkIntToScalar(size.width()), 3);
-
-  window_mask->lineTo(SkIntToScalar(size.width()),
-                      SkIntToScalar(size.height()));
-  window_mask->lineTo(0, SkIntToScalar(size.height()));
-  window_mask->close();
+  views::GetDefaultWindowMask(size, window_mask);
 }
 
 void OpaqueBrowserFrameView::EnableClose(bool enable) {
@@ -341,9 +361,34 @@ void OpaqueBrowserFrameView::Paint(gfx::Canvas* canvas) {
   else
     PaintRestoredFrameBorder(canvas);
   PaintTitleBar(canvas);
-  PaintToolbarBackground(canvas);
+  if (browser_view_->IsToolbarVisible())
+    PaintToolbarBackground(canvas);
   if (!window->IsMaximized())
     PaintRestoredClientEdge(canvas);
+}
+
+void OpaqueBrowserFrameView::PaintChildren(gfx::Canvas* canvas) {
+  if (!browser_view_->UseVerticalTabs() || !otr_avatar_icon_->IsVisible()) {
+    View::PaintChildren(canvas);
+    return;
+  }
+
+  // The otr icon is clipped for side tabs.
+  for (int i = 0, count = GetChildViewCount(); i < count; ++i) {
+    View* child = GetChildViewAt(i);
+    if (!child) {
+      NOTREACHED() << "Should not have a NULL child View for index in bounds";
+      continue;
+    }
+    if (child == otr_avatar_icon_) {
+      canvas->Save();
+      canvas->ClipRectInt(0, 2, width(), otr_avatar_icon_->height() - 10);
+      child->ProcessPaint(canvas);
+      canvas->Restore();
+    } else {
+      child->ProcessPaint(canvas);
+    }
+  }
 }
 
 void OpaqueBrowserFrameView::Layout() {
@@ -360,8 +405,16 @@ bool OpaqueBrowserFrameView::HitTest(const gfx::Point& l) const {
     return in_nonclient;
 
   // Otherwise claim it only if it's in a non-tab portion of the tabstrip.
-  if (l.y() > browser_view_->tabstrip()->bounds().bottom())
+  bool vertical_tabs = browser_view_->UseVerticalTabs();
+  gfx::Rect tabstrip_bounds = browser_view_->tabstrip()->bounds();
+  gfx::Point tabstrip_origin(tabstrip_bounds.origin());
+  View::ConvertPointToView(frame_->GetWindow()->GetClientView(),
+                           this, &tabstrip_origin);
+  tabstrip_bounds.set_origin(tabstrip_origin);
+  if ((!vertical_tabs && l.y() > tabstrip_bounds.bottom()) ||
+      (vertical_tabs && l.x() > tabstrip_bounds.right())) {
     return false;
+  }
 
   // We convert from our parent's coordinates since we assume we fill its bounds
   // completely. We need to do this since we're not a parent of the tabstrip,
@@ -438,12 +491,15 @@ int OpaqueBrowserFrameView::NonClientTopBorderHeight() const {
         TitlebarBottomThickness();
   }
 
+  if (browser_view_->IsTabStripVisible() && browser_view_->UseVerticalTabs()) {
+    return CaptionButtonY() + minimize_button_->GetPreferredSize().height() +
+        kVerticalTabPadding;
+  }
+
   if (browser_view_->IsTabStripVisible() && window->IsMaximized())
     return FrameBorderThickness() - kTabstripTopShadowThickness;
 
-  return FrameBorderThickness() +
-      ((window->IsMaximized() || window->IsFullscreen()) ?
-       0 : kNonClientRestoredExtraThickness);
+  return FrameBorderThickness();
 }
 
 int OpaqueBrowserFrameView::CaptionButtonY() const {
@@ -693,71 +749,120 @@ void OpaqueBrowserFrameView::PaintTitleBar(gfx::Canvas* canvas) {
 }
 
 void OpaqueBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
-  if (!browser_view_->IsToolbarVisible())
-    return;
-
-  gfx::Rect toolbar_bounds(browser_view_->GetToolbarBounds());
+  gfx::Rect toolbar_bounds = GetViewBounds(browser_view_->toolbar(), this);
   if (toolbar_bounds.IsEmpty())
     return;
 
   ThemeProvider* tp = GetThemeProvider();
-  gfx::Point toolbar_origin(toolbar_bounds.origin());
-  View::ConvertPointToView(frame_->GetWindow()->GetClientView(),
-                           this, &toolbar_origin);
-  toolbar_bounds.set_origin(toolbar_origin);
+
+  int x, y, w, h;
+  if (browser_view_->UseVerticalTabs()) {
+    gfx::Rect tabstrip_bounds = GetViewBounds(browser_view_->tabstrip(), this);
+    x = tabstrip_bounds.x();
+    w = toolbar_bounds.right() - x;
+    y = tabstrip_bounds.y() - kVerticalTabBorderInset;
+    h = toolbar_bounds.bottom() - y;
+  } else {
+    x = toolbar_bounds.x();
+    w = toolbar_bounds.width();
+    y = toolbar_bounds.y();
+    h = toolbar_bounds.bottom();
+  }
 
   // Gross hack: We split the toolbar images into two pieces, since sometimes
   // (popup mode) the toolbar isn't tall enough to show the whole image.  The
   // split happens between the top shadow section and the bottom gradient
   // section so that we never break the gradient.
   int split_point = kFrameShadowThickness * 2;
-  int bottom_y = toolbar_bounds.y() + split_point;
-  SkBitmap* toolbar_left =
-      tp->GetBitmapNamed(IDR_CONTENT_TOP_LEFT_CORNER);
-  int bottom_edge_height =
-      std::min(toolbar_left->height(), toolbar_bounds.height()) - split_point;
+  int bottom_y = y + split_point;
+  SkBitmap* toolbar_left = tp->GetBitmapNamed(IDR_CONTENT_TOP_LEFT_CORNER);
+  int bottom_edge_height = std::min(toolbar_left->height(), h) - split_point;
+
+  // Split our canvas out so we can mask out the corners of the toolbar
+  // without masking out the frame.
+  canvas->SaveLayerAlpha(
+      255, gfx::Rect(x - kClientEdgeThickness, y, w + kClientEdgeThickness * 3,
+                     h));
+  canvas->AsCanvasSkia()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
 
   SkColor theme_toolbar_color =
       tp->GetColor(BrowserThemeProvider::COLOR_TOOLBAR);
-  canvas->FillRectInt(theme_toolbar_color, toolbar_bounds.x(), bottom_y,
-                      toolbar_bounds.width(), bottom_edge_height);
+  canvas->FillRectInt(theme_toolbar_color, x, bottom_y, w, bottom_edge_height);
 
   int strip_height = browser_view_->GetTabStripHeight();
   SkBitmap* theme_toolbar = tp->GetBitmapNamed(IDR_THEME_TOOLBAR);
 
   canvas->TileImageInt(*theme_toolbar,
-      toolbar_bounds.x() - kClientEdgeThickness,
+      x - kClientEdgeThickness,
       strip_height - kFrameShadowThickness,
-      toolbar_bounds.x() - kClientEdgeThickness, bottom_y,
-      toolbar_bounds.width() + (2 * kClientEdgeThickness),
+      x - kClientEdgeThickness, bottom_y,
+      w + (2 * kClientEdgeThickness),
       theme_toolbar->height());
 
+  // Draw rounded corners for the tab.
+  SkBitmap* toolbar_left_mask =
+      tp->GetBitmapNamed(IDR_CONTENT_TOP_LEFT_CORNER_MASK);
+  SkBitmap* toolbar_right_mask =
+      tp->GetBitmapNamed(IDR_CONTENT_TOP_RIGHT_CORNER_MASK);
+
+  // We mask out the corners by using the DestinationIn transfer mode,
+  // which keeps the RGB pixels from the destination and the alpha from
+  // the source.
+  SkPaint paint;
+  paint.setXfermodeMode(SkXfermode::kDstIn_Mode);
+
+  // Make the left edge.
+  int left_x = x - kClientEdgeThickness - kContentEdgeShadowThickness;
+  canvas->DrawBitmapInt(*toolbar_left_mask, 0, 0,
+      toolbar_left_mask->width(), split_point,
+      left_x, y,
+      toolbar_left_mask->width(), split_point, false, paint);
+  canvas->DrawBitmapInt(*toolbar_left_mask, 0,
+      toolbar_left_mask->height() - bottom_edge_height,
+      toolbar_left_mask->width(), bottom_edge_height,
+      left_x, bottom_y,
+      toolbar_left_mask->width(), bottom_edge_height, false, paint);
+
+  // Mask the right edge.
+  int right_x = x + w - toolbar_right_mask->width() + kClientEdgeThickness +
+                kContentEdgeShadowThickness;
+  canvas->DrawBitmapInt(*toolbar_right_mask, 0, 0,
+      toolbar_right_mask->width(), split_point, right_x, y,
+      toolbar_right_mask->width(), split_point, false, paint);
+  canvas->DrawBitmapInt(*toolbar_right_mask, 0,
+      toolbar_right_mask->height() - bottom_edge_height,
+      toolbar_right_mask->width(), bottom_edge_height, right_x, bottom_y,
+      toolbar_right_mask->width(), bottom_edge_height, false, paint);
+  canvas->Restore();
+
   canvas->DrawBitmapInt(*toolbar_left, 0, 0, toolbar_left->width(), split_point,
-      toolbar_bounds.x() - toolbar_left->width(), toolbar_bounds.y(),
+      left_x, y,
       toolbar_left->width(), split_point, false);
   canvas->DrawBitmapInt(*toolbar_left, 0,
       toolbar_left->height() - bottom_edge_height, toolbar_left->width(),
-      bottom_edge_height, toolbar_bounds.x() - toolbar_left->width(), bottom_y,
+      bottom_edge_height, left_x, bottom_y,
       toolbar_left->width(), bottom_edge_height, false);
 
   SkBitmap* toolbar_center =
       tp->GetBitmapNamed(IDR_CONTENT_TOP_CENTER);
-  canvas->TileImageInt(*toolbar_center, 0, 0, toolbar_bounds.x(),
-      toolbar_bounds.y(), toolbar_bounds.width(), split_point);
+  canvas->TileImageInt(*toolbar_center, 0, 0, left_x + toolbar_left->width(),
+      y, right_x - (left_x + toolbar_left->width()),
+      split_point);
 
   SkBitmap* toolbar_right = tp->GetBitmapNamed(IDR_CONTENT_TOP_RIGHT_CORNER);
   canvas->DrawBitmapInt(*toolbar_right, 0, 0, toolbar_right->width(),
-      split_point, toolbar_bounds.right(), toolbar_bounds.y(),
+      split_point, right_x, y,
       toolbar_right->width(), split_point, false);
   canvas->DrawBitmapInt(*toolbar_right, 0,
       toolbar_right->height() - bottom_edge_height, toolbar_right->width(),
-      bottom_edge_height, toolbar_bounds.right(), bottom_y,
+      bottom_edge_height, right_x, bottom_y,
       toolbar_right->width(), bottom_edge_height, false);
 
   // Draw the content/toolbar separator.
   canvas->DrawLineInt(ResourceBundle::toolbar_separator_color,
-      toolbar_bounds.x(), toolbar_bounds.bottom() - kClientEdgeThickness,
-      toolbar_bounds.right() - kClientEdgeThickness,
+      MirroredLeftPointForRect(toolbar_bounds),
+      toolbar_bounds.bottom() - kClientEdgeThickness,
+      toolbar_bounds.width() - kClientEdgeThickness,
       toolbar_bounds.bottom() - kClientEdgeThickness);
 }
 
@@ -775,7 +880,9 @@ void OpaqueBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
     client_area_top += browser_view_->GetToolbarBounds().y() +
         std::min(tp->GetBitmapNamed(IDR_CONTENT_TOP_LEFT_CORNER)->height(),
                  toolbar_bounds.height());
-  } else {
+    if (browser_view_->UseVerticalTabs())
+      client_area_top -= kVerticalTabBorderInset;
+  } else if (!browser_view_->IsTabStripVisible()) {
     // The toolbar isn't going to draw a client edge for us, so draw one
     // ourselves.
     SkBitmap* top_left = tp->GetBitmapNamed(IDR_APP_TOP_LEFT);
@@ -847,22 +954,6 @@ void OpaqueBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
 
 void OpaqueBrowserFrameView::LayoutWindowControls() {
   bool is_maximized = frame_->GetWindow()->IsMaximized();
-#if defined(OS_CHROMEOS)
-  minimize_button_->SetVisible(!is_maximized);
-  restore_button_->SetVisible(!is_maximized);
-  maximize_button_->SetVisible(!is_maximized);
-  close_button_->SetVisible(!is_maximized);
-  if (is_maximized) {
-    // Set the bounds of the minimize button so that we don't have to change
-    // other places that rely on the bounds. Put it slightly to the right
-    // of the edge of the view, so that when we remove the spacing it lines
-    // up with the edge.
-    minimize_button_->SetBounds(
-        width() - FrameBorderThickness() + kNewTabCaptionMaximizedSpacing, 0, 0,
-        0);
-    return;
-  }
-#endif
   close_button_->SetImageAlignment(views::ImageButton::ALIGN_LEFT,
                                    views::ImageButton::ALIGN_BOTTOM);
   int caption_y = CaptionButtonY();
@@ -876,6 +967,28 @@ void OpaqueBrowserFrameView::LayoutWindowControls() {
       right_extra_width - close_button_size.width(), caption_y,
       close_button_size.width() + right_extra_width,
       close_button_size.height());
+
+#if defined(OS_CHROMEOS)
+  minimize_button_->SetVisible(!is_maximized);
+  restore_button_->SetVisible(!is_maximized);
+  maximize_button_->SetVisible(!is_maximized);
+
+  if (browser_view_->browser()->type() == Browser::TYPE_DEVTOOLS)
+    close_button_->SetVisible(true);
+  else
+    close_button_->SetVisible(!is_maximized);
+
+  if (is_maximized) {
+    // Set the bounds of the minimize button so that we don't have to change
+    // other places that rely on the bounds. Put it slightly to the right
+    // of the edge of the view, so that when we remove the spacing it lines
+    // up with the edge.
+    minimize_button_->SetBounds(
+        width() - FrameBorderThickness() + kNewTabCaptionMaximizedSpacing, 0, 0,
+        0);
+    return;
+  }
+#endif
 
   // When the window is restored, we show a maximized button; otherwise, we show
   // a restore button.
@@ -930,25 +1043,32 @@ void OpaqueBrowserFrameView::LayoutTitleBar() {
 }
 
 void OpaqueBrowserFrameView::LayoutOTRAvatar() {
-  int top_height = NonClientTopBorderHeight();
-  int tabstrip_height, otr_height;
+  int otr_y = NonClientTopBorderHeight();
+  if (!frame_->GetWindow()->IsMaximized() &&
+      !frame_->GetWindow()->IsFullscreen()) {
+    otr_y += kNonClientRestoredExtraThickness;
+  }
   bool visible = browser_view_->ShouldShowOffTheRecordAvatar();
   gfx::Size preferred_size = otr_avatar_icon_->GetPreferredSize();
+  int otr_height = 0;
   if (browser_view_->IsTabStripVisible()) {
-    tabstrip_height = browser_view_->GetTabStripHeight() - kOTRBottomSpacing;
-    otr_height = frame_->GetWindow()->IsMaximized() ?
-        (tabstrip_height - kOTRMaximizedTopSpacing) :
-        preferred_size.height();
-
+    if (browser_view_->UseVerticalTabs()) {
+      otr_height = preferred_size.height();
+      otr_y = -2;
+    } else {
+      int tabstrip_height =
+          browser_view_->GetTabStripHeight() - kOTRBottomSpacing;
+      otr_height = frame_->GetWindow()->IsMaximized() ?
+          (tabstrip_height - kOTRMaximizedTopSpacing) :
+          preferred_size.height();
+      otr_y += tabstrip_height - otr_height;
+    }
   } else {
-    tabstrip_height = otr_height = 0;
     visible = false;
   }
   otr_avatar_icon_->SetVisible(visible);
-  otr_avatar_icon_->SetBounds(NonClientBorderThickness() + kOTRSideSpacing +
-                              0,
-                              top_height + tabstrip_height - otr_height,
-                              preferred_size.width(), otr_height);
+  otr_avatar_icon_->SetBounds(NonClientBorderThickness() + kOTRSideSpacing,
+                              otr_y, preferred_size.width(), otr_height);
 }
 
 gfx::Rect OpaqueBrowserFrameView::CalculateClientAreaBounds(int width,
@@ -958,4 +1078,15 @@ gfx::Rect OpaqueBrowserFrameView::CalculateClientAreaBounds(int width,
   return gfx::Rect(border_thickness, top_height,
                    std::max(0, width - (2 * border_thickness)),
                    std::max(0, height - top_height - border_thickness));
+}
+
+// static
+gfx::Rect OpaqueBrowserFrameView::GetViewBounds(views::View* src,
+                                                views::View* dst) {
+  gfx::Rect bounds(src->bounds());
+
+  gfx::Point origin_in_dst(bounds.origin());
+  View::ConvertPointToView(src->GetParent(), dst, &origin_in_dst);
+  bounds.set_origin(origin_in_dst);
+  return bounds;
 }

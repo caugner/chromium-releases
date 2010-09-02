@@ -26,16 +26,19 @@ class Widget;
 class ExtensionPopup : public BrowserBubble,
                        public BrowserBubble::Delegate,
                        public NotificationObserver,
-                       public ExtensionView::Container,
-                       public base::RefCounted<ExtensionPopup> {
+                       public ExtensionView::Container {
  public:
   // Observer to ExtensionPopup events.
   class Observer {
    public:
-    // Called when the ExtensionPopup has closed. Note that it
+    // Called when the ExtensionPopup is closing. Note that it
     // is ref-counted, and thus will be released shortly after
     // making this delegate call.
-    virtual void ExtensionPopupClosed(ExtensionPopup* popup) {}
+    virtual void ExtensionPopupIsClosing(ExtensionPopup* popup) {}
+
+    // Called after the ExtensionPopup has been closed and deleted.
+    // |popup_token| is the address of the deleted ExtensionPopup.
+    virtual void ExtensionPopupClosed(void* popup_token) {}
 
     // Called when the ExtensionHost is first created for the pop-up view.
     // Note that this is invoked BEFORE the ExtensionPopup is created, and can
@@ -43,6 +46,11 @@ class ExtensionPopup : public BrowserBubble,
     // into the popup.  An example use is for automation resource routing in
     // Chrome-Frame.  See extension_popup_api.cc.
     virtual void ExtensionHostCreated(ExtensionHost* host) {}
+
+    // Called when the ExtensionPopup is resized.  Note that the popup may have
+    // an empty bounds, if a popup is repositioned before the hosted content
+    // has loaded.
+    virtual void ExtensionPopupResized(ExtensionPopup* popup) {}
   };
 
   enum PopupChrome {
@@ -88,7 +96,7 @@ class ExtensionPopup : public BrowserBubble,
                               Observer* observer);
 
   // Closes the ExtensionPopup (this will cause the delegate
-  // ExtensionPopupClosed to fire.
+  // ExtensionPopupIsClosing and ExtensionPopupClosed to fire.
   void Close();
 
   // Some clients wish to do their own custom focus change management. If this
@@ -99,6 +107,18 @@ class ExtensionPopup : public BrowserBubble,
   }
 
   ExtensionHost* host() const { return extension_host_.get(); }
+
+  // Assigns the arrow location of the popup view, and updates the popup
+  // border widget, if necessary.
+  void SetArrowPosition(BubbleBorder::ArrowLocation arrow_location);
+  BubbleBorder::ArrowLocation arrow_position() const {
+    return anchor_position_;
+  }
+
+  // Gives the desired bounds (in screen coordinates) given the rect to point
+  // to and the size of the contained contents.  Includes all of the
+  // border-chrome surrounding the pop-up as well.
+  gfx::Rect GetOuterBounds() const;
 
   // BrowserBubble overrides.
   virtual void Hide();
@@ -122,6 +142,18 @@ class ExtensionPopup : public BrowserBubble,
   virtual void OnExtensionMouseLeave(ExtensionView* view) { }
   virtual void OnExtensionPreferredSizeChanged(ExtensionView* view);
 
+  // Export the refrence-counted interface required for use as template
+  // arguments for RefCounted.  ExtensionPopup does not inherit from RefCounted
+  // because it must override the behaviour of Release.
+  void AddRef() { instance_lifetime_->AddRef(); }
+  static bool ImplementsThreadSafeReferenceCounting() {
+    return InternalRefCounter::ImplementsThreadSafeReferenceCounting();
+  }
+
+  // Implements the standard RefCounted<T>::Release behaviour, except
+  // signals Observer::ExtensionPopupClosed after final release.
+  void Release();
+
   // The min/max height of popups.
   static const int kMinWidth;
   static const int kMinHeight;
@@ -137,12 +169,6 @@ class ExtensionPopup : public BrowserBubble,
                  bool inspect_with_devtools,
                  PopupChrome chrome,
                  Observer* observer);
-
-  // Gives the desired bounds (in screen coordinates) given the rect to point
-  // to and the size of the contained contents.  Includes all of the
-  // border-chrome surrounding the pop-up as well.
-  gfx::Rect GetOuterBounds(const gfx::Rect& position_relative_to,
-                           const gfx::Size& contents_size) const;
 
   // The area on the screen that the popup should be positioned relative to.
   gfx::Rect relative_to_;
@@ -183,6 +209,13 @@ class ExtensionPopup : public BrowserBubble,
   // If a black-border was requested, we still need this value to determine
   // the position of the pop-up in relation to |relative_to_|.
   BubbleBorder::ArrowLocation anchor_position_;
+
+  // ExtensionPopup's lifetime is managed via reference counting, but it does
+  // not expose the RefCounted interface.  Instead, the lifetime is tied to
+  // this member variable.
+  class InternalRefCounter : public base::RefCounted<InternalRefCounter> {
+  };
+  InternalRefCounter* instance_lifetime_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionPopup);
 };

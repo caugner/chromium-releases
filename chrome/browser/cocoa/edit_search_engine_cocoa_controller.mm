@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 
 namespace {
@@ -120,7 +121,7 @@ void ShiftOriginY(NSView* view, CGFloat amount) {
   DCHECK([self validateFields]);
   std::wstring title = base::SysNSStringToWide([nameField_ stringValue]);
   std::wstring keyword = base::SysNSStringToWide([keywordField_ stringValue]);
-  std::wstring url = base::SysNSStringToWide([urlField_ stringValue]);
+  std::string url = base::SysNSStringToUTF8([urlField_ stringValue]);
   controller_->AcceptAddOrEdit(title, keyword, url);
   [self doClose];
 }
@@ -169,7 +170,7 @@ void ShiftOriginY(NSView* view, CGFloat amount) {
       forImageView:keywordImage_
          textField:keywordField_];
 
-  std::wstring url = base::SysNSStringToWide([urlField_ stringValue]);
+  std::string url = base::SysNSStringToUTF8([urlField_ stringValue]);
   BOOL urlValid = controller_->IsURLValid(url);
   [self setIsValid:urlValid
            toolTip:IDS_SEARCH_ENGINES_INVALID_URL_TT

@@ -5,7 +5,7 @@
 #include "chrome/browser/web_applications/web_app.h"
 
 #if defined(OS_WIN)
-#include <ShellAPI.h>
+#include <shellapi.h>
 #endif  // defined(OS_WIN)
 
 #include <algorithm>
@@ -43,6 +43,7 @@
 
 namespace {
 
+#if defined(OS_WIN)
 const FilePath::CharType kIconChecksumFileExt[] = FILE_PATH_LITERAL(".ico.md5");
 
 // Returns true if |ch| is in visible ASCII range and not one of
@@ -81,12 +82,9 @@ FilePath GetSanitizedFileName(const string16& name) {
     file_name += c;
   }
 
-#if defined(OS_WIN)
   return FilePath(file_name);
-#elif defined(OS_POSIX)
-  return FilePath(UTF16ToUTF8(file_name));
-#endif
 }
+#endif  // defined(OS_WIN)
 
 // Returns relative directory of given web app url.
 FilePath GetWebAppDir(const GURL& url) {
@@ -355,14 +353,14 @@ bool CreateShortcutTask::CreateShortcut() {
     return false;
   }
 
-  std::wstring chrome_exe;
+  FilePath chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
     NOTREACHED();
     return false;
   }
 
   // Working directory.
-  std::wstring chrome_folder = file_util::GetDirectoryFromPath(chrome_exe);
+  FilePath chrome_folder = chrome_exe.DirName();
 
   std::string switches =
      ShellIntegration::GetCommandLineArgumentsCommon(shortcut_info_.url,
@@ -375,7 +373,7 @@ bool CreateShortcutTask::CreateShortcut() {
 
   // Generates app id from web app url and profile path.
   std::wstring app_id = ShellIntegration::GetAppId(
-      web_app::GenerateApplicationNameFromURL(shortcut_info_.url).c_str(),
+      web_app::GenerateApplicationNameFromURL(shortcut_info_.url),
       profile_path_);
 
   FilePath shortcut_to_pin;
@@ -393,9 +391,9 @@ bool CreateShortcutTask::CreateShortcut() {
       download_util::AppendNumberToPath(&shortcut_file, unique_number);
     }
 
-    success &= file_util::CreateShortcutLink(chrome_exe.c_str(),
+    success &= file_util::CreateShortcutLink(chrome_exe.value().c_str(),
         shortcut_file.value().c_str(),
-        chrome_folder.c_str(),
+        chrome_folder.value().c_str(),
         wide_switchs.c_str(),
         shortcut_info_.description.c_str(),
         icon_file.value().c_str(),
@@ -632,7 +630,7 @@ void UpdateShortcutWorker::UpdateShortcutsOnFileThread() {
   if (!shortcut_files_.empty()) {
     // Generates app id from web app url and profile path.
     std::wstring app_id = ShellIntegration::GetAppId(
-        web_app::GenerateApplicationNameFromURL(shortcut_info_.url).c_str(),
+        web_app::GenerateApplicationNameFromURL(shortcut_info_.url),
         profile_path_);
 
     // Sanitize description
@@ -678,11 +676,7 @@ void UpdateShortcutWorker::DeleteMeOnUIThread() {
 #if defined(OS_WIN)
 // Allows UpdateShortcutWorker without adding refcounting. UpdateShortcutWorker
 // manages its own life time and will delete itself when it's done.
-template <>
-struct RunnableMethodTraits<UpdateShortcutWorker> {
-  void RetainCallee(UpdateShortcutWorker* worker) {}
-  void ReleaseCallee(UpdateShortcutWorker* worker) {}
-};
+DISABLE_RUNNABLE_METHOD_REFCOUNT(UpdateShortcutWorker);
 #endif  // defined(OS_WIN)
 
 namespace web_app {
@@ -709,6 +703,7 @@ bool IsValidUrl(const GURL& url) {
       chrome::kFtpScheme,
       chrome::kHttpScheme,
       chrome::kHttpsScheme,
+      chrome::kExtensionScheme,
   };
 
   for (size_t i = 0; i < arraysize(kValidUrlSchemes); ++i) {
@@ -723,6 +718,7 @@ FilePath GetDataDir(const FilePath& profile_path) {
   return profile_path.Append(chrome::kWebAppDirname);
 }
 
+#if defined(TOOLKIT_VIEWS)
 void GetIconsInfo(const webkit_glue::WebApplicationInfo& app_info,
                   IconInfoList* icons) {
   DCHECK(icons);
@@ -737,6 +733,7 @@ void GetIconsInfo(const webkit_glue::WebApplicationInfo& app_info,
 
   std::sort(icons->begin(), icons->end(), &IconPrecedes);
 }
+#endif
 
 void GetShortcutInfoForTab(TabContents* tab_contents,
                            ShellIntegration::ShortcutInfo* info) {

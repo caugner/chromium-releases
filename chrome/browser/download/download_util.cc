@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -22,12 +22,13 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/time_format.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/rect.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -225,7 +226,7 @@ void PaintDownloadProgress(gfx::Canvas* canvas,
     foreground_paint.setShader(shader);
     foreground_paint.setAntiAlias(true);
     shader->unref();
-    canvas->drawPath(path, foreground_paint);
+    canvas->AsCanvasSkia()->drawPath(path, foreground_paint);
     return;
   }
 
@@ -266,17 +267,10 @@ void PaintDownloadComplete(gfx::Canvas* canvas,
   double opacity = sin(animation_progress * PI * kCompleteAnimationCycles +
                    PI/2) / 2 + 0.5;
 
-  SkRect bounds;
-  bounds.set(SkIntToScalar(complete_bounds.x()),
-             SkIntToScalar(complete_bounds.y()),
-             SkIntToScalar(complete_bounds.x() + complete_bounds.width()),
-             SkIntToScalar(complete_bounds.y() + complete_bounds.height()));
-  canvas->saveLayerAlpha(&bounds,
-                         static_cast<int>(255.0 * opacity),
-                         SkCanvas::kARGB_ClipLayer_SaveFlag);
-  canvas->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
+  canvas->SaveLayerAlpha(static_cast<int>(255.0 * opacity), complete_bounds);
+  canvas->AsCanvasSkia()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
   canvas->DrawBitmapInt(*complete, complete_bounds.x(), complete_bounds.y());
-  canvas->restore();
+  canvas->Restore();
 }
 
 // Load a language dependent height so that the dangerous download confirmation
@@ -367,8 +361,7 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
   file_value->SetString(L"file_path", download->full_path().ToWStringHack());
   // Keep file names as LTR.
   std::wstring file_name = download->GetFileName().ToWStringHack();
-  if (base::i18n::IsRTL())
-    base::i18n::WrapStringWithLTRFormatting(&file_name);
+  base::i18n::GetDisplayStringInLTRDirectionality(&file_name);
   file_value->SetString(L"file_name", file_name);
   file_value->SetString(L"url", download->url().spec());
   file_value->SetBoolean(L"otr", download->is_otr());
@@ -498,8 +491,7 @@ void UpdateAppIconDownloadProgress(int download_count,
 // Appends the passed the number between parenthesis the path before the
 // extension.
 void AppendNumberToPath(FilePath* path, int number) {
-  file_util::InsertBeforeExtension(path,
-      StringPrintf(FILE_PATH_LITERAL(" (%d)"), number));
+  *path = path->InsertBeforeExtensionASCII(StringPrintf(" (%d)", number));
 }
 
 // Attempts to find a number that can be appended to that path to make it

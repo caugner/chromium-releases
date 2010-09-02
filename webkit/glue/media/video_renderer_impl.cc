@@ -32,19 +32,12 @@ media::FilterFactory* VideoRendererImpl::CreateFactory(
 // static
 bool VideoRendererImpl::IsMediaFormatSupported(
     const media::MediaFormat& media_format) {
-  int width = 0;
-  int height = 0;
-  return ParseMediaFormat(media_format, &width, &height);
+  return ParseMediaFormat(media_format, NULL, NULL, NULL, NULL);
 }
 
 bool VideoRendererImpl::OnInitialize(media::VideoDecoder* decoder) {
-  int width = 0;
-  int height = 0;
-  if (!ParseMediaFormat(decoder->media_format(), &width, &height))
-    return false;
-
-  video_size_.SetSize(width, height);
-  bitmap_.setConfig(SkBitmap::kARGB_8888_Config, width, height);
+  video_size_.SetSize(width(), height());
+  bitmap_.setConfig(SkBitmap::kARGB_8888_Config, width(), height());
   if (bitmap_.allocPixels(NULL, NULL)) {
     bitmap_.eraseRGB(0x00, 0x00, 0x00);
     return true;
@@ -54,7 +47,11 @@ bool VideoRendererImpl::OnInitialize(media::VideoDecoder* decoder) {
   return false;
 }
 
-void VideoRendererImpl::OnStop() {
+void VideoRendererImpl::OnStop(media::FilterCallback* callback) {
+  if (callback) {
+    callback->Run();
+    delete callback;
+  }
 }
 
 void VideoRendererImpl::OnFrameAvailable() {
@@ -69,7 +66,16 @@ void VideoRendererImpl::Paint(skia::PlatformCanvas* canvas,
                               const gfx::Rect& dest_rect) {
   scoped_refptr<media::VideoFrame> video_frame;
   GetCurrentFrame(&video_frame);
-  if (video_frame) {
+  if (!video_frame) {
+    SkPaint paint;
+    paint.setColor(SK_ColorBLACK);
+    canvas->drawRectCoords(
+        static_cast<float>(dest_rect.x()),
+        static_cast<float>(dest_rect.y()),
+        static_cast<float>(dest_rect.right()),
+        static_cast<float>(dest_rect.bottom()),
+        paint);
+  } else {
     if (CanFastPaint(canvas, dest_rect)) {
       FastPaint(video_frame, canvas, dest_rect);
     } else {
@@ -84,8 +90,9 @@ void VideoRendererImpl::Paint(skia::PlatformCanvas* canvas,
       LOG(INFO) << "pts="
                 << video_frame->GetTimestamp().InMicroseconds();
     }
-    video_frame = NULL;
   }
+
+  PutCurrentFrame(video_frame);
 }
 
 // CanFastPaint is a helper method to determine the conditions for fast
@@ -98,6 +105,24 @@ void VideoRendererImpl::Paint(skia::PlatformCanvas* canvas,
 // Disable the flipping and mirroring checks once we have it.
 bool VideoRendererImpl::CanFastPaint(skia::PlatformCanvas* canvas,
                                      const gfx::Rect& dest_rect) {
+  // Fast paint does not handle opacity value other than 1.0. Hence use slow
+  // paint if opacity is not 1.0. Since alpha = opacity * 0xFF, we check that
+  // alpha != 0xFF.
+  //
+  // Additonal notes: If opacity = 0.0, the chrome display engine does not try
+  // to render the video. So, this method is never called. However, if the
+  // opacity = 0.0001, alpha is again 0, but the display engine tries to render
+  // the video. If we use Fast paint, the video shows up with opacity = 1.0.
+  // Hence we use slow paint also in the case where alpha = 0. It would be ideal
+  // if rendering was never called even for cases where alpha is 0. Created
+  // bug 48090 for this.
+  SkCanvas::LayerIter layer_iter(canvas, false);
+  SkColor sk_color = layer_iter.paint().getColor();
+  SkAlpha sk_alpha = SkColorGetA(sk_color);
+  if (sk_alpha != 0xFF) {
+    return false;
+  }
+
   const SkMatrix& total_matrix = canvas->getTotalMatrix();
   // Perform the following checks here:
   // 1. Check for skewing factors of the transformation matrix. They should be
@@ -127,6 +152,7 @@ bool VideoRendererImpl::CanFastPaint(skia::PlatformCanvas* canvas,
       return true;
     }
   }
+
   return false;
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 class AutocompleteEditModel;
 class AutocompleteEditView;
 class Profile;
+class SkBitmap;
 
 class AutocompletePopupView;
 
@@ -73,15 +74,9 @@ class AutocompletePopupModel : public NotificationObserver {
   // will change the selected line back to the default match and redraw.
   void ResetToDefaultMatch();
 
-  // Returns the URL for the selected match.  If an update is in progress,
-  // "selected" means "default in the latest matches".  If there are no
-  // matches, returns the empty string.
-  //
-  // If |transition_type| is non-NULL, it will be set to the appropriate
-  // transition type for the selected entry (TYPED or GENERATED).
-  //
-  // If |is_history_what_you_typed_match| is non-NULL, it will be set based on
-  // the selected entry's is_history_what_you_typed value.
+  // Copies the selected match into |match|.  If an update is in progress,
+  // "selected" means "default in the latest matches".  If there are no matches,
+  // does not update |match|.
   //
   // If |alternate_nav_url| is non-NULL, it will be set to the alternate
   // navigation URL for |url| if one exists, or left unchanged otherwise.  See
@@ -89,10 +84,8 @@ class AutocompletePopupModel : public NotificationObserver {
   //
   // TODO(pkasting): When manually_selected_match_ moves to the controller, this
   // can move too.
-  GURL URLsForCurrentSelection(
-      PageTransition::Type* transition,
-      bool* is_history_what_you_typed_match,
-      GURL* alternate_nav_url) const;
+  void InfoForCurrentSelection(AutocompleteMatch* match,
+                               GURL* alternate_nav_url) const;
 
   // Gets the selected keyword or keyword hint for the given match.  Returns
   // true if |keyword| represents a keyword hint, or false if |keyword|
@@ -117,6 +110,10 @@ class AutocompletePopupModel : public NotificationObserver {
   // Called when the user hits shift-delete.  This should determine if the item
   // can be removed from history, and if so, remove it and update the popup.
   void TryDeletingCurrentItem();
+
+  // Returns the special icon to use for a given match, or NULL if we should
+  // use a standard style icon.
+  const SkBitmap* GetSpecialIconForMatch(const AutocompleteMatch& match) const;
 
   // The token value for selected_line_, hover_line_ and functions dealing with
   // a "line number" that indicates "no line".

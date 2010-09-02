@@ -236,12 +236,15 @@ The following table lists the permissions an extension can use.
 </tr>
 <tr>
   <td> <em>match pattern</em> </td>
-  <td> Required if the extension makes
-       <a href="xhr.html">cross-origin XMLHttpRequests</a>
-       or
-       <a href="content_scripts.html#pi">programmatically injects
-       JavaScript or CSS</a>
-       into web pages.
+  <td> Specifies a <em>host permission</em>.
+       Required if the extension wants to interact
+       with the code running on pages.
+       Many extension capabilities, such as
+       <a href="xhr.html">cross-origin XMLHttpRequests</a>,
+       <a href="content_scripts.html#pi">programmatically injected
+       content scripts</a>, and <a href="cookies.html">the cookies API</a>
+       require host permissions. For details on the syntax, see
+       <a href="match_patterns.html">Match Patterns</a>.
   </td>
 </tr>
 <tr>
@@ -250,20 +253,46 @@ The following table lists the permissions an extension can use.
        <a href="bookmarks.html">chrome.bookmarks</a> module. </td>
 </tr>
 <tr>
-  <td> "chrome://favicon" </td>
+  <td> "chrome://favicon/" </td>
   <td> Required if the extension uses the
        "chrome://favicon/<em>url</em>" mechanism
        to display the favicon of a page.
        For example, to display the favicon of http://www.google.com/,
-       you declare the "chrome://favicon" permission
+       you declare the "chrome://favicon/" permission
        and use HTML code like this:
        <pre>&lt;img src="chrome://favicon/http://www.google.com/"></pre>
        </td>
 </tr>
 <tr>
+  <td> "contextMenus" </td>
+  <td> Required if the extension uses the
+       <a href="contextMenus.html">context menus</a> module. </td>
+</tr>
+<tr>
+  <td> "cookies" </td>
+  <td> Required if the extension uses the
+       <a href="cookies.html">chrome.cookies</a> module. </td>
+</tr>
+<tr>
   <td> "experimental" </td>
   <td> Required if the extension uses any
        <a href="http://code.google.com/chrome/extensions/dev/experimental.html">chrome.experimental.* APIs</a>.</td>
+</tr>
+<tr>
+  <td> "geolocation" </td>
+  <td> Allows the extension to use the proposed HTML5
+       <a href="http://dev.w3.org/geo/api/spec-source.html">geolocation API</a>
+       without prompting the user for permission. </td>
+</tr>
+<tr>
+  <td> "history" </td>
+  <td> Required if the extension uses the
+       <a href="history.html">chrome.history</a> module. </td>
+</tr>
+<tr>
+  <td> "idle" </td>
+  <td> Required if the extension uses the
+       <a href="idle.html">chrome.idle</a> module. </td>
 </tr>
 <tr>
   <td> "notifications" </td>

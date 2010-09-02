@@ -108,7 +108,7 @@ html[dir=rtl] .icon {
 
 .download.otr > .safe,
 .download.otr > .show-dangerous {
-  background: url(chrome://theme/otr_icon_standalone) no-repeat 100% 100%;
+  background: url(chrome://theme/IDR_OTR_ICON_STANDALONE) no-repeat 100% 100%;
   opacity: .66;
   -webkit-transition: opacity .15s;
 }
@@ -191,7 +191,7 @@ html[dir=rtl] .name {
 }
 
 </style>
-<script src="local_strings.js"></script>
+<script src="shared/js/local_strings.js"></script>
 <script>
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -578,12 +578,17 @@ Download.prototype.update = function(download) {
     }
     showInline(this.controlPause_, this.state_ == Download.States.IN_PROGRESS);
     showInline(this.controlResume_, this.state_ == Download.States.PAUSED);
-    showInline(this.controlCancel_, this.state_ == Download.States.IN_PROGRESS ||
-                                    this.state_ == Download.States.PAUSED);
+    var showCancel = this.state_ == Download.States.IN_PROGRESS ||
+                     this.state_ == Download.States.PAUSED;
+    showInline(this.controlCancel_, showCancel);
+    showInline(this.controlRemove_, !showCancel);
 
     this.nodeSince_.innerHTML = this.since_;
     this.nodeDate_.innerHTML = this.date_;
-    this.nodeURL_.textContent = this.url_;
+    // Don't unnecessarily update the url, as doing so will remove any
+    // text selection the user has started (http://crbug.com/44982).
+    if (this.nodeURL_.textContent != this.url_)
+      this.nodeURL_.textContent = this.url_;
     this.nodeStatus_.innerHTML = this.getStatusText_();
 
     this.danger_.style.display = 'none';
@@ -757,7 +762,7 @@ function downloadUpdated(results) {
 <body onload="load();" i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
 <div class="header">
   <a href="" onclick="setSearch(''); return false;">
-    <img src="../../app/theme/downloads_section.png"
+    <img src="shared/images/downloads_section.png"
          width="67" height="67" class="logo" border="0" /></a>
   <form method="post" action=""
       onsubmit="setSearch(this.term.value); return false;"

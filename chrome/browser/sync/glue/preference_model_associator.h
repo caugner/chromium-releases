@@ -16,6 +16,11 @@
 #include "chrome/browser/sync/unrecoverable_error_handler.h"
 
 class ProfileSyncService;
+class Value;
+
+namespace sync_api {
+class WriteNode;
+}
 
 namespace browser_sync {
 
@@ -30,8 +35,7 @@ class PreferenceModelAssociator
                                             std::wstring> {
  public:
   static syncable::ModelType model_type() { return syncable::PREFERENCES; }
-  PreferenceModelAssociator(ProfileSyncService* sync_service,
-                            UnrecoverableErrorHandler* error_handler);
+  explicit PreferenceModelAssociator(ProfileSyncService* sync_service);
   virtual ~PreferenceModelAssociator();
 
   // Returns the list of preference names that should be monitored for
@@ -52,9 +56,6 @@ class PreferenceModelAssociator
   // Returns whether the sync model has nodes other than the permanent tagged
   // nodes.
   virtual bool SyncModelHasUserCreatedNodes(bool* has_nodes);
-
-  // Returns whether the preference model has any user-defined preferences.
-  virtual bool ChromeModelHasUserCreatedNodes(bool* has_nodes);
 
   virtual void AbortAssociation() {
     // No implementation needed, this associator runs on the main
@@ -87,6 +88,25 @@ class PreferenceModelAssociator
   // |sync_id| with that node's id.
   virtual bool GetSyncIdForTaggedNode(const std::string& tag, int64* sync_id);
 
+  // Merges the value of local_pref into the supplied server_value and
+  // returns the result (caller takes ownership).  If there is a
+  // conflict, the server value always takes precedence.  Note that
+  // only certain preferences will actually be merged, all others will
+  // return a copy of the server value.  See the method's
+  // implementation for details.
+  static Value* MergePreference(const PrefService::Preference& local_pref,
+                                const Value& server_value);
+
+  // Writes the value of pref into the specified node.  Returns true
+  // upon success.
+  static bool WritePreferenceToNode(const std::wstring& name,
+                                    const Value& value,
+                                    sync_api::WriteNode* node);
+
+  // Perform any additional operations that need to happen after a preference
+  // has been updated.
+  void AfterUpdateOperations(const std::wstring& pref_name);
+
  protected:
   // Returns sync service instance.
   ProfileSyncService* sync_service() { return sync_service_; }
@@ -95,8 +115,11 @@ class PreferenceModelAssociator
   typedef std::map<std::wstring, int64> PreferenceNameToSyncIdMap;
   typedef std::map<int64, std::wstring> SyncIdToPreferenceNameMap;
 
+  static Value* MergeListValues(const Value& from_value, const Value& to_value);
+  static Value* MergeDictionaryValues(const Value& from_value,
+                                      const Value& to_value);
+
   ProfileSyncService* sync_service_;
-  UnrecoverableErrorHandler* error_handler_;
   std::set<std::wstring> synced_preferences_;
   int64 preferences_node_id_;
 

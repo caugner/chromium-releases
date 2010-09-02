@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/notification_service.h"
 
 namespace events = extension_event_names;
@@ -22,61 +23,39 @@ namespace tab_keys = extension_tabs_module_constants;
 namespace page_action_keys = extension_page_actions_module_constants;
 
 ExtensionBrowserEventRouter::TabEntry::TabEntry()
-    : state_(ExtensionTabUtil::TAB_COMPLETE),
-      pending_navigate_(false),
+    : complete_waiting_on_load_(false),
       url_() {
-}
-
-ExtensionBrowserEventRouter::TabEntry::TabEntry(const TabContents* contents)
-    : state_(ExtensionTabUtil::TAB_COMPLETE),
-      pending_navigate_(false),
-      url_(contents->GetURL()) {
-  UpdateLoadState(contents);
 }
 
 DictionaryValue* ExtensionBrowserEventRouter::TabEntry::UpdateLoadState(
     const TabContents* contents) {
-  ExtensionTabUtil::TabStatus old_state = state_;
-  state_ = ExtensionTabUtil::GetTabStatus(contents);
-
-  if (old_state == state_)
-    return false;
-
-  if (state_ == ExtensionTabUtil::TAB_LOADING) {
-    // Do not send "loading" state changed now. Wait for navigate so the new
-    // url is available.
-    pending_navigate_ = true;
+  // The tab may go in & out of loading (for instance if iframes navigate).
+  // We only want to respond to the first change from loading to !loading after
+  // the NAV_ENTRY_COMMITTED was fired.
+  if (!complete_waiting_on_load_ || contents->is_loading())
     return NULL;
 
-  } else if (state_ == ExtensionTabUtil::TAB_COMPLETE) {
-    // Send "complete" state change.
-    DictionaryValue* changed_properties = new DictionaryValue();
-    changed_properties->SetString(tab_keys::kStatusKey,
-        tab_keys::kStatusValueComplete);
-    return changed_properties;
-
-  } else {
-    NOTREACHED();
-    return NULL;
-  }
+  // Send "complete" state change.
+  complete_waiting_on_load_ = false;
+  DictionaryValue* changed_properties = new DictionaryValue();
+  changed_properties->SetString(tab_keys::kStatusKey,
+      tab_keys::kStatusValueComplete);
+  return changed_properties;
 }
 
 DictionaryValue* ExtensionBrowserEventRouter::TabEntry::DidNavigate(
     const TabContents* contents) {
-  if (!pending_navigate_)
-    return NULL;
-
+  // Send "loading" state change.
+  complete_waiting_on_load_ = true;
   DictionaryValue* changed_properties = new DictionaryValue();
   changed_properties->SetString(tab_keys::kStatusKey,
       tab_keys::kStatusValueLoading);
 
-  GURL new_url = contents->GetURL();
-  if (new_url != url_) {
-    url_ = new_url;
+  if (contents->GetURL() != url_) {
+    url_ = contents->GetURL();
     changed_properties->SetString(tab_keys::kUrlKey, url_.spec());
   }
 
-  pending_navigate_ = false;
   return changed_properties;
 }
 
@@ -89,7 +68,7 @@ static void DispatchEvent(Profile* profile,
                           const std::string json_args) {
   if (profile->GetExtensionMessageService()) {
     profile->GetExtensionMessageService()->DispatchEventToRenderers(
-        event_name, json_args, profile->IsOffTheRecord());
+        event_name, json_args, profile->IsOffTheRecord(), GURL());
   }
 }
 
@@ -115,11 +94,22 @@ static void DispatchSimpleBrowserEvent(Profile* profile,
   DispatchEvent(profile, event_name, json_args);
 }
 
-void ExtensionBrowserEventRouter::Init() {
+void ExtensionBrowserEventRouter::Init(Profile* profile) {
   if (initialized_)
     return;
-
+  DCHECK(!profile->IsOffTheRecord());
+  profile_ = profile;
   BrowserList::AddObserver(this);
+#if defined(TOOLKIT_VIEWS)
+  views::FocusManager::GetWidgetFocusManager()->AddFocusChangeListener(this);
+#elif defined(TOOLKIT_GTK)
+  ActiveWindowWatcherX::AddObserver(this);
+#elif defined(OS_MACOSX)
+  // Needed for when no suitable window can be passed to an extension as the
+  // currently focused window.
+  registrar_.Add(this, NotificationType::NO_KEY_WINDOW,
+                 NotificationService::AllSources());
+#endif
 
   // Init() can happen after the browser is running, so catch up with any
   // windows that already exist.
@@ -133,7 +123,7 @@ void ExtensionBrowserEventRouter::Init() {
       for (int i = 0; i < browser->tabstrip_model()->count(); ++i) {
         TabContents* contents = browser->tabstrip_model()->GetTabContentsAt(i);
         int tab_id = ExtensionTabUtil::GetTabId(contents);
-        tab_entries_[tab_id] = TabEntry(contents);
+        tab_entries_[tab_id] = TabEntry();
       }
     }
   }
@@ -142,7 +132,8 @@ void ExtensionBrowserEventRouter::Init() {
 }
 
 ExtensionBrowserEventRouter::ExtensionBrowserEventRouter()
-    : initialized_(false) { }
+    : initialized_(false),
+      focused_window_id_(extension_misc::kUnknownWindowId) { }
 
 void ExtensionBrowserEventRouter::OnBrowserAdded(const Browser* browser) {
   RegisterForBrowserNotifications(browser);
@@ -204,10 +195,37 @@ void ExtensionBrowserEventRouter::OnBrowserRemoving(const Browser* browser) {
                              events::kOnWindowRemoved);
 }
 
+#if defined(TOOLKIT_VIEWS)
+void ExtensionBrowserEventRouter::NativeFocusWillChange(
+    gfx::NativeView focused_before,
+    gfx::NativeView focused_now) {
+  if (!focused_now)
+    OnBrowserSetLastActive(NULL);
+}
+#elif defined(TOOLKIT_GTK)
+void ExtensionBrowserEventRouter::ActiveWindowChanged(
+    GdkWindow* active_window) {
+  if (!active_window)
+    OnBrowserSetLastActive(NULL);
+}
+#endif
+
 void ExtensionBrowserEventRouter::OnBrowserSetLastActive(
     const Browser* browser) {
-  DispatchSimpleBrowserEvent(browser->profile(),
-                             ExtensionTabUtil::GetWindowId(browser),
+  int window_id = extension_misc::kUnknownWindowId;
+  if (browser)
+    window_id = ExtensionTabUtil::GetWindowId(browser);
+
+  if (focused_window_id_ == window_id)
+    return;
+
+  focused_window_id_ = window_id;
+  // Note: because we use the default profile when |browser| is NULL, it means
+  // that all extensions hear about the event regardless of whether the browser
+  // that lost focus was OTR or if the extension is OTR-enabled.
+  // See crbug.com/46610.
+  DispatchSimpleBrowserEvent(browser ? browser->profile() : profile_,
+                             focused_window_id_,
                              events::kOnWindowFocusedChanged);
 }
 
@@ -225,7 +243,7 @@ void ExtensionBrowserEventRouter::TabInsertedAt(TabContents* contents,
   // If tab is new, send created event.
   int tab_id = ExtensionTabUtil::GetTabId(contents);
   if (tab_entries_.find(tab_id) == tab_entries_.end()) {
-    tab_entries_[tab_id] = TabEntry(contents);
+    tab_entries_[tab_id] = TabEntry();
 
     TabCreatedAt(contents, index, foreground);
     return;
@@ -384,6 +402,10 @@ void ExtensionBrowserEventRouter::Observe(NotificationType type,
   } else if (type == NotificationType::BROWSER_WINDOW_READY) {
     const Browser* browser = Source<const Browser>(source).ptr();
     OnBrowserWindowReady(browser);
+#if defined(OS_MACOSX)
+  } else if (type == NotificationType::NO_KEY_WINDOW) {
+    OnBrowserSetLastActive(NULL);
+#endif
   } else {
     NOTREACHED();
   }
@@ -441,7 +463,8 @@ void ExtensionBrowserEventRouter::PageActionExecuted(
                                     NULL, NULL, &tab_contents, NULL)) {
     return;
   }
-  std::string event_name = std::string("pageAction/") + extension_id;
+  std::string event_name = ExtensionMessageService::GetPerExtensionEventName(
+      "pageAction.onClicked", extension_id);
   DispatchEventWithTab(profile, event_name.c_str(), tab_contents);
 }
 
@@ -451,6 +474,7 @@ void ExtensionBrowserEventRouter::BrowserActionExecuted(
   int tab_id = 0;
   if (!ExtensionTabUtil::GetDefaultTab(browser, &tab_contents, &tab_id))
     return;
-  std::string event_name = std::string("browserAction/") + extension_id;
+  std::string event_name = ExtensionMessageService::GetPerExtensionEventName(
+      "browserAction.onClicked", extension_id);
   DispatchEventWithTab(profile, event_name.c_str(), tab_contents);
 }

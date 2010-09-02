@@ -10,7 +10,12 @@
 #include <set>
 
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
+#include "chrome/browser/browsing_data_remover.h"
+#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/importer/importer.h"
+#include "chrome/browser/importer/importer_data_types.h"
+#include "chrome/browser/password_manager/password_store.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_type.h"
@@ -21,6 +26,7 @@ class Browser;
 class Extension;
 class ExtensionProcessManager;
 class NavigationController;
+class SavePackage;
 class TabContents;
 
 namespace IPC {
@@ -36,7 +42,18 @@ class InitialLoadObserver : public NotificationObserver {
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
+  // Caller owns the return value and is responsible for deleting it.
+  // Example return value:
+  // {'tabs': [{'start_time_ms': 1, 'stop_time_ms': 2.5},
+  //           {'start_time_ms': 0.5, 'stop_time_ms': 3}]}
+  // stop_time_ms values may be null if WaitForInitialLoads has not finished.
+  // Only includes entries for the |tab_count| tabs we are monitoring.
+  // There is no defined ordering of the return value.
+  DictionaryValue* GetTimingInformation() const;
+
  private:
+  class TabTime;
+  typedef std::map<uintptr_t, TabTime> TabTimeMap;
   typedef std::set<uintptr_t> TabSet;
 
   void ConditionMet();
@@ -45,7 +62,8 @@ class InitialLoadObserver : public NotificationObserver {
 
   AutomationProvider* automation_;
   size_t outstanding_tab_count_;
-  TabSet loading_tabs_;
+  base::TimeTicks init_time_;
+  TabTimeMap loading_tabs_;
   TabSet finished_tabs_;
 
   DISALLOW_COPY_AND_ASSIGN(InitialLoadObserver);
@@ -428,8 +446,6 @@ class DomOperationNotificationObserver : public NotificationObserver {
   DISALLOW_COPY_AND_ASSIGN(DomOperationNotificationObserver);
 };
 
-#if defined(OS_WIN)
-// TODO(port): Enable when printing is ported.
 class DocumentPrintedNotificationObserver : public NotificationObserver {
  public:
   DocumentPrintedNotificationObserver(AutomationProvider* automation,
@@ -447,7 +463,6 @@ class DocumentPrintedNotificationObserver : public NotificationObserver {
 
   DISALLOW_COPY_AND_ASSIGN(DocumentPrintedNotificationObserver);
 };
-#endif  // defined(OS_WIN)
 
 // Collects METRIC_EVENT_DURATION notifications and keep track of the times.
 class MetricEventDurationObserver : public NotificationObserver {
@@ -539,8 +554,8 @@ class AutomationProviderBookmarkModelObserver : BookmarkModelObserver {
 
 // When asked for pending downloads, the DownloadManager places
 // results in a DownloadManager::Observer.
-class AutomationProviderDownloadManagerObserver :
-    public DownloadManager::Observer {
+class AutomationProviderDownloadManagerObserver
+    : public DownloadManager::Observer {
  public:
   AutomationProviderDownloadManagerObserver() : DownloadManager::Observer()  {}
   virtual ~AutomationProviderDownloadManagerObserver() {}
@@ -581,6 +596,118 @@ class AutomationProviderDownloadItemObserver : public DownloadItem::Observer {
   int downloads_;
 
   DISALLOW_COPY_AND_ASSIGN(AutomationProviderDownloadItemObserver);
+};
+
+// Allows the automation provider to wait for history queries to finish.
+class AutomationProviderHistoryObserver {
+ public:
+  AutomationProviderHistoryObserver(
+      AutomationProvider* provider,
+      IPC::Message* reply_message) {
+    provider_ = provider;
+    reply_message_ = reply_message;
+  }
+  ~AutomationProviderHistoryObserver() {}
+  void HistoryQueryComplete(HistoryService::Handle request_handle,
+                            history::QueryResults* results);
+
+ private:
+  AutomationProvider* provider_;
+  IPC::Message* reply_message_;
+};
+
+// Allows the automation provider to wait for import queries to finish.
+class AutomationProviderImportSettingsObserver
+    : public ImporterHost::Observer {
+ public:
+  AutomationProviderImportSettingsObserver(
+      AutomationProvider* provider,
+      IPC::Message* reply_message)
+    : provider_(provider),
+      reply_message_(reply_message) {}
+  void ImportStarted() {}
+  void ImportItemStarted(importer::ImportItem item) {}
+  void ImportItemEnded(importer::ImportItem item) {}
+  void ImportEnded();
+ private:
+  AutomationProvider* provider_;
+  IPC::Message* reply_message_;
+};
+
+// Allows automation provider to wait for getting passwords to finish.
+class AutomationProviderGetPasswordsObserver :
+    public PasswordStoreConsumer {
+ public:
+  AutomationProviderGetPasswordsObserver(
+      AutomationProvider* provider,
+      IPC::Message* reply_message)
+    : provider_(provider),
+      reply_message_(reply_message) {}
+
+  void OnPasswordStoreRequestDone(
+      int handle, const std::vector<webkit_glue::PasswordForm*>& result);
+
+ private:
+  AutomationProvider* provider_;
+  IPC::Message* reply_message_;
+};
+
+// Allows the automation provider to wait for clearing browser data to finish.
+class AutomationProviderBrowsingDataObserver
+    : public BrowsingDataRemover::Observer {
+ public:
+  AutomationProviderBrowsingDataObserver(
+      AutomationProvider* provider,
+      IPC::Message* reply_message)
+    : provider_(provider),
+      reply_message_(reply_message) {}
+  void OnBrowsingDataRemoverDone();
+
+ private:
+  AutomationProvider* provider_;
+  IPC::Message* reply_message_;
+};
+
+// Allows automation provider to wait until page load after selecting an item
+// in the omnibox popup.
+class OmniboxAcceptNotificationObserver : public NotificationObserver {
+ public:
+  OmniboxAcceptNotificationObserver(NavigationController* controller,
+                                 AutomationProvider* automation,
+                                 IPC::Message* reply_message);
+  ~OmniboxAcceptNotificationObserver();
+
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
+ private:
+  NotificationRegistrar registrar_;
+  AutomationProvider* automation_;
+  IPC::Message* reply_message_;
+  NavigationController* controller_;
+
+  DISALLOW_COPY_AND_ASSIGN(OmniboxAcceptNotificationObserver);
+};
+
+// Allows the automation provider to wait for a save package notification.
+class SavePackageNotificationObserver : public NotificationObserver {
+ public:
+  SavePackageNotificationObserver(SavePackage* save_package,
+                                  AutomationProvider* automation,
+                                  IPC::Message* reply_message);
+  virtual ~SavePackageNotificationObserver() {}
+
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
+ private:
+  NotificationRegistrar registrar_;
+  AutomationProvider* automation_;
+  IPC::Message* reply_message_;
+
+  DISALLOW_COPY_AND_ASSIGN(SavePackageNotificationObserver);
 };
 
 #endif  // CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_OBSERVERS_H_

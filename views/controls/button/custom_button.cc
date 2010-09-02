@@ -19,8 +19,8 @@ CustomButton::~CustomButton() {
 }
 
 void CustomButton::SetState(ButtonState state) {
-  if (show_highlighted_ && state != state_) {
-    if (animate_on_state_change_ || !hover_animation_->IsAnimating()) {
+  if (state != state_) {
+    if (animate_on_state_change_ || !hover_animation_->is_animating()) {
       animate_on_state_change_ = true;
       if (state_ == BS_NORMAL && state == BS_HOT) {
         // Button is hovered from a normal state, start hover animation.
@@ -48,12 +48,27 @@ void CustomButton::SetAnimationDuration(int duration) {
   hover_animation_->SetSlideDuration(duration);
 }
 
-void CustomButton::SetShowHighlighted(bool show_highlighted) {
-  show_highlighted_ = show_highlighted;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // CustomButton, View overrides:
+
+bool CustomButton::GetAccessibleState(AccessibilityTypes::State* state) {
+  *state = 0;
+  switch (state_) {
+    case BS_NORMAL:
+      *state = 0;
+    case BS_HOT:
+      *state = AccessibilityTypes::STATE_HOTTRACKED;
+    case BS_PUSHED:
+      *state = AccessibilityTypes::STATE_PRESSED;
+    case BS_DISABLED:
+      *state = AccessibilityTypes::STATE_UNAVAILABLE;
+    case BS_COUNT:
+      // No additional accessibility state set for this button state.
+      break;
+  }
+
+  return true;
+}
 
 void CustomButton::SetEnabled(bool enabled) {
   if (enabled && state_ == BS_DISABLED) {
@@ -78,8 +93,8 @@ CustomButton::CustomButton(ButtonListener* listener)
     : Button(listener),
       state_(BS_NORMAL),
       animate_on_state_change_(true),
-      show_highlighted_(true),
-      triggerable_event_flags_(MouseEvent::EF_LEFT_BUTTON_DOWN) {
+      triggerable_event_flags_(MouseEvent::EF_LEFT_BUTTON_DOWN),
+      request_focus_on_press_(true) {
   hover_animation_.reset(new ThrobAnimation(this));
   hover_animation_->SetSlideDuration(kHoverFadeDurationMs);
 }
@@ -106,7 +121,8 @@ bool CustomButton::OnMousePressed(const MouseEvent& e) {
   if (state_ != BS_DISABLED) {
     if (ShouldEnterPushedState(e) && HitTest(e.location()))
       SetState(BS_PUSHED);
-    RequestFocus();
+    if (request_focus_on_press_)
+      RequestFocus();
   }
   return true;
 }
@@ -217,6 +233,9 @@ void CustomButton::ViewHierarchyChanged(bool is_add, View *parent,
 void CustomButton::SetHotTracked(bool flag) {
   if (state_ != BS_DISABLED)
     SetState(flag ? BS_HOT : BS_NORMAL);
+
+  if (flag)
+    NotifyAccessibilityEvent(AccessibilityTypes::EVENT_FOCUS);
 }
 
 bool CustomButton::IsHotTracked() const {

@@ -16,6 +16,7 @@ namespace views {
 class Combobox;
 class Label;
 class NativeButton;
+class SmoothedThrobber;
 }  // namespace views
 
 namespace chromeos {
@@ -51,7 +52,19 @@ class NetworkSelectionView : public views::View {
   // Shows network connecting status or network selection otherwise.
   void ShowConnectingStatus(bool connecting, const string16& network_id);
 
+  // Sets whether continue control is enabled.
+  void EnableContinue(bool enabled);
+
+ protected:
+  // Overridden from views::View.
+  virtual void ChildPreferredSizeChanged(View* child);
+  virtual void LocaleChanged();
+
  private:
+  // Delete and recreate native controls that
+  // fail to update preferred size after string update.
+  void RecreateNativeControls();
+
   // Updates text on label with currently connecting network.
   void UpdateConnectingNetworkLabel();
 
@@ -59,9 +72,11 @@ class NetworkSelectionView : public views::View {
   views::Combobox* network_combobox_;
   views::MenuButton* languages_menubutton_;
   views::Label* welcome_label_;
+  views::Label* select_language_label_;
   views::Label* select_network_label_;
   views::Label* connecting_network_label_;
-  views::NativeButton* offline_button_;
+  views::NativeButton* continue_button_;
+  views::SmoothedThrobber* throbber_;
 
   // NetworkScreen delegate.
   NetworkScreenDelegate* delegate_;

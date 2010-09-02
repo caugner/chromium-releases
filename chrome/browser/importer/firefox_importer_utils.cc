@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,9 +39,54 @@ class FirefoxURLParameterFilter : public TemplateURLParser::ParameterFilter {
   }
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(FirefoxURLParameterFilter);
+  DISALLOW_COPY_AND_ASSIGN(FirefoxURLParameterFilter);
 };
 }  // namespace
+
+FilePath GetFirefoxProfilePath() {
+  DictionaryValue root;
+  FilePath ini_file = GetProfilesINI();
+  ParseProfileINI(ini_file, &root);
+
+  FilePath source_path;
+  for (int i = 0; ; ++i) {
+    std::string current_profile = StringPrintf("Profile%d", i);
+    if (!root.HasKeyASCII(current_profile)) {
+      // Profiles are continuously numbered. So we exit when we can't
+      // find the i-th one.
+      break;
+    }
+    std::string is_relative;
+    string16 path16;
+    if (root.GetStringASCII(current_profile + ".IsRelative", &is_relative) &&
+        root.GetString(current_profile + ".Path", &path16)) {
+#if defined(OS_WIN)
+      ReplaceSubstringsAfterOffset(
+          &path16, 0, ASCIIToUTF16("/"), ASCIIToUTF16("\\"));
+#endif
+      FilePath path = FilePath::FromWStringHack(UTF16ToWide(path16));
+
+      // IsRelative=1 means the folder path would be relative to the
+      // path of profiles.ini. IsRelative=0 refers to a custom profile
+      // location.
+      if (is_relative == "1") {
+        path = ini_file.DirName().Append(path);
+      }
+
+      // We only import the default profile when multiple profiles exist,
+      // since the other profiles are used mostly by developers for testing.
+      // Otherwise, Profile0 will be imported.
+      std::string is_default;
+      if ((root.GetStringASCII(current_profile + ".Default", &is_default) &&
+           is_default == "1") || i == 0) {
+        // We have found the default profile.
+        return path;
+      }
+    }
+  }
+  return FilePath();
+}
+
 
 bool GetFirefoxVersionAndPathFromProfile(const FilePath& profile_path,
                                          int* version,
@@ -141,7 +186,7 @@ void ParseSearchEnginesFromXMLFiles(const std::vector<FilePath>& xml_files,
                                     std::vector<TemplateURL*>* search_engines) {
   DCHECK(search_engines);
 
-  std::map<std::wstring, TemplateURL*> search_engine_for_url;
+  std::map<std::string, TemplateURL*> search_engine_for_url;
   std::string content;
   // The first XML file represents the default search engine in Firefox 3, so we
   // need to keep it on top of the list.
@@ -155,8 +200,8 @@ void ParseSearchEnginesFromXMLFiles(const std::vector<FilePath>& xml_files,
         reinterpret_cast<const unsigned char*>(content.data()),
         content.length(), &param_filter, template_url) &&
         template_url->url()) {
-      std::wstring url = template_url->url()->url();
-      std::map<std::wstring, TemplateURL*>::iterator iter =
+      std::string url = template_url->url()->url();
+      std::map<std::string, TemplateURL*>::iterator iter =
           search_engine_for_url.find(url);
       if (iter != search_engine_for_url.end()) {
         // We have already found a search engine with the same URL.  We give
@@ -168,7 +213,7 @@ void ParseSearchEnginesFromXMLFiles(const std::vector<FilePath>& xml_files,
       }
       // Give this a keyword to facilitate tab-to-search, if possible.
       template_url->set_keyword(
-              TemplateURLModel::GenerateKeyword(GURL(WideToUTF8(url)), false));
+          TemplateURLModel::GenerateKeyword(GURL(url), false));
       template_url->set_show_in_default_list(true);
       search_engine_for_url[url] = template_url;
       if (!default_turl)
@@ -180,7 +225,7 @@ void ParseSearchEnginesFromXMLFiles(const std::vector<FilePath>& xml_files,
   }
 
   // Put the results in the |search_engines| vector.
-  std::map<std::wstring, TemplateURL*>::iterator t_iter;
+  std::map<std::string, TemplateURL*>::iterator t_iter;
   for (t_iter = search_engine_for_url.begin();
        t_iter != search_engine_for_url.end(); ++t_iter) {
     if (t_iter->second == default_turl)
@@ -330,4 +375,76 @@ bool IsDefaultHomepage(const GURL& homepage, const FilePath& app_path) {
   }
 
   return false;
+}
+
+bool ParsePrefFile(const FilePath& pref_file, DictionaryValue* prefs) {
+  // The string that is before a pref key.
+  const std::string kUserPrefString = "user_pref(\"";
+  std::string contents;
+  if (!file_util::ReadFileToString(pref_file, &contents))
+    return false;
+
+  std::vector<std::string> lines;
+  Tokenize(contents, "\n", &lines);
+
+  for (std::vector<std::string>::const_iterator iter = lines.begin();
+       iter != lines.end(); ++iter) {
+    const std::string& line = *iter;
+    size_t start_key = line.find(kUserPrefString);
+    if (start_key == std::string::npos)
+      continue;  // Could be a comment or a blank line.
+    start_key += kUserPrefString.length();
+    size_t stop_key = line.find('"', start_key);
+    if (stop_key == std::string::npos) {
+      LOG(ERROR) << "Invalid key found in Firefox pref file '" <<
+          pref_file.value() << "' line is '" << line << "'.";
+      continue;
+    }
+    std::string key = line.substr(start_key, stop_key - start_key);
+    size_t start_value = line.find(',', stop_key + 1);
+    if (start_value == std::string::npos) {
+      LOG(ERROR) << "Invalid value found in Firefox pref file '" <<
+          pref_file.value() << "' line is '" << line << "'.";
+      continue;
+    }
+    size_t stop_value = line.find(");", start_value + 1);
+    if (stop_value == std::string::npos) {
+      LOG(ERROR) << "Invalid value found in Firefox pref file '" <<
+          pref_file.value() << "' line is '" << line << "'.";
+      continue;
+    }
+    std::string value = line.substr(start_value + 1,
+                                    stop_value - start_value - 1);
+    TrimWhitespace(value, TRIM_ALL, &value);
+    // Value could be a boolean.
+    bool is_value_true = LowerCaseEqualsASCII(value, "true");
+    if (is_value_true || LowerCaseEqualsASCII(value, "false")) {
+      prefs->SetBoolean(ASCIIToWide(key), is_value_true);
+      continue;
+    }
+
+    // Value could be a string.
+    if (value.size() >= 2U &&
+        value[0] == '"' && value[value.size() - 1] == '"') {
+      value = value.substr(1, value.size() - 2);
+      // ValueString only accept valid UTF-8.  Simply ignore that entry if it is
+      // not UTF-8.
+      if (IsStringUTF8(value))
+        prefs->SetString(ASCIIToWide(key), value);
+      else
+        LOG(INFO) << "Non UTF8 value for key " << key << ", ignored.";
+      continue;
+    }
+
+    // Or value could be an integer.
+    int int_value = 0;
+    if (StringToInt(value, &int_value)) {
+      prefs->SetInteger(ASCIIToWide(key), int_value);
+      continue;
+    }
+
+    LOG(ERROR) << "Invalid value found in Firefox pref file '" <<
+          pref_file.value() << "' value is '" << value << "'.";
+  }
+  return true;
 }

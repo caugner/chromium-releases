@@ -6,11 +6,12 @@
 #define CHROME_BROWSER_UTILITY_PROCESS_HOST_H_
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
 #include "base/task.h"
-#include "chrome/browser/child_process_host.h"
+#include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/common/extensions/update_manifest.h"
 #include "ipc/ipc_channel.h"
@@ -18,11 +19,12 @@
 class CommandLine;
 class DictionaryValue;
 class ListValue;
+class SkBitmap;
 
 // This class acts as the browser-side host to a utility child process.  A
 // utility process is a short-lived sandboxed process that is created to run
 // a specific task.  This class lives solely on the IO thread.
-class UtilityProcessHost : public ChildProcessHost {
+class UtilityProcessHost : public BrowserChildProcessHost {
  public:
   // An interface to be implemented by consumers of the utility process to
   // get results back.  All functions are called on the thread passed along
@@ -63,6 +65,14 @@ class UtilityProcessHost : public ChildProcessHost {
     virtual void OnParseUpdateManifestFailed(
         const std::string& error_message) {}
 
+    // Called when image data was successfully decoded. |decoded_image|
+    // stores the result.
+    virtual void OnDecodeImageSucceeded(
+        const SkBitmap& decoded_image) {}
+
+    // Called when image data decoding failed.
+    virtual void OnDecodeImageFailed() {}
+
    protected:
     friend class base::RefCountedThreadSafe<Client>;
 
@@ -97,6 +107,9 @@ class UtilityProcessHost : public ChildProcessHost {
   // Start parsing an extensions auto-update manifest xml file.
   bool StartUpdateManifestParse(const std::string& xml);
 
+  // Start image decoding.
+  bool StartImageDecoding(const std::vector<unsigned char>& encoded_data);
+
  protected:
   // Allow these methods to be overridden for tests.
   virtual FilePath GetUtilityProcessCmd();
@@ -108,7 +121,7 @@ class UtilityProcessHost : public ChildProcessHost {
   // IPC messages:
   void OnMessageReceived(const IPC::Message& message);
 
-  // ChildProcessHost:
+  // BrowserChildProcessHost:
   virtual void OnProcessCrashed();
   virtual bool CanShutdown() { return true; }
   virtual URLRequestContext* GetRequestContext(

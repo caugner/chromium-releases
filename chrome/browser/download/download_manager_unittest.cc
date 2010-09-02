@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,11 @@
 
 #include "base/string_util.h"
 #include "build/build_config.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/history/download_types.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -24,16 +28,25 @@
 #define TXT_EXT L".txt"
 #define TAR_EXT L".tar"
 #else
-#define JPEG_EXT L""
-#define HTML_EXT L""
-#define TXT_EXT L""
-#define TAR_EXT L""
+#define JPEG_EXT L".jpg"
+#define HTML_EXT L".html"
+#define TXT_EXT L".txt"
+#define TAR_EXT L".tar"
 #endif
 
 class DownloadManagerTest : public testing::Test {
  public:
-  DownloadManagerTest() {
-    download_manager_ = new DownloadManager();
+  DownloadManagerTest()
+      : profile_(new TestingProfile()),
+        download_manager_(new DownloadManager()),
+        ui_thread_(ChromeThread::UI, &message_loop_) {
+    download_manager_->Init(profile_.get());
+  }
+
+  ~DownloadManagerTest() {
+    // profile_ must outlive download_manager_, so we explicitly delete
+    // download_manager_ first.
+    download_manager_.release();
   }
 
   void GetGeneratedFilename(const std::string& content_disposition,
@@ -52,10 +65,12 @@ class DownloadManagerTest : public testing::Test {
   }
 
  protected:
+  scoped_ptr<TestingProfile> profile_;
   scoped_refptr<DownloadManager> download_manager_;
   MessageLoopForUI message_loop_;
+  ChromeThread ui_thread_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(DownloadManagerTest);
+  DISALLOW_COPY_AND_ASSIGN(DownloadManagerTest);
 };
 
 namespace {
@@ -610,3 +625,73 @@ TEST_F(DownloadManagerTest, GetSafeFilename) {
   }
 }
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
+
+namespace {
+
+const struct {
+  const char* url;
+  const char* mime_type;
+  bool save_as;
+  bool prompt_for_download;
+  bool expected_save_as;
+} kStartDownloadCases[] = {
+  { "http://www.foo.com/dont-open.html",
+    "text/html",
+    false,
+    false,
+    false, },
+  { "http://www.foo.com/save-as.html",
+    "text/html",
+    true,
+    false,
+    true, },
+  { "http://www.foo.com/always-prompt.html",
+    "text/html",
+    false,
+    true,
+    true, },
+  { "http://www.foo.com/wrong_mime_extension.user.js",
+    "text/html",
+    false,
+    true,
+    false, },
+  { "http://www.foo.com/extensionless-extension",
+    "application/x-chrome-extension",
+    true,
+    false,
+    true, },
+  { "http://www.foo.com/save-as.pdf",
+    "application/pdf",
+    true,
+    false,
+    true, },
+  { "http://www.foo.com/auto-open.pdf",
+    "application/pdf",
+    false,
+    true,
+    false, },
+};
+
+}  // namespace
+
+TEST_F(DownloadManagerTest, StartDownload) {
+  PrefService* prefs = profile_->GetPrefs();
+  prefs->SetFilePath(prefs::kDownloadDefaultDirectory, FilePath());
+  download_manager_->OpenFilesBasedOnExtension(
+      FilePath(FILE_PATH_LITERAL("example.pdf")), true);
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kStartDownloadCases); ++i) {
+    prefs->SetBoolean(prefs::kPromptForDownload,
+                      kStartDownloadCases[i].prompt_for_download);
+
+    DownloadCreateInfo info;
+    info.prompt_user_for_save_location = kStartDownloadCases[i].save_as;
+    info.url = GURL(kStartDownloadCases[i].url);
+    info.mime_type = kStartDownloadCases[i].mime_type;
+
+    download_manager_->StartDownload(&info);
+
+    EXPECT_EQ(kStartDownloadCases[i].expected_save_as,
+        info.prompt_user_for_save_location);
+  }
+}

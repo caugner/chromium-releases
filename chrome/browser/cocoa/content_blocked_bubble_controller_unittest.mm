@@ -21,7 +21,6 @@ class DummyContentSettingBubbleModel : public ContentSettingBubbleModel {
     RadioGroup radio_group;
     radio_group.default_item = 0;
     radio_group.radio_items.resize(2);
-    radio_group.is_mutable = true;
     set_radio_group(radio_group);
   }
 };
@@ -32,6 +31,9 @@ class ContentBlockedBubbleControllerTest : public CocoaTest {
 // Check that the bubble doesn't crash or leak for any settings type
 TEST_F(ContentBlockedBubbleControllerTest, Init) {
   for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
+    if (i == CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
+      continue;  // Notifications have no bubble.
+
     ContentSettingsType settingsType = static_cast<ContentSettingsType>(i);
 
     scoped_nsobject<NSWindow> parent([[NSWindow alloc]
@@ -50,7 +52,7 @@ TEST_F(ContentBlockedBubbleControllerTest, Init) {
         parentWindow:parent
          anchoredAt:NSMakePoint(50, 20)];
     EXPECT_TRUE(controller != nil);
-    [controller showWindow:nil];
+    EXPECT_TRUE([[controller window] isVisible]);
     [parent.get() close];
   }
 }

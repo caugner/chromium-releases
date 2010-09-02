@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_CHROMEOS_LOGIN_LOGIN_STATUS_CONSUMER_H_
 
 #include <string>
+#include "chrome/common/net/gaia/gaia_auth_consumer.h"
 
 namespace chromeos {
 
@@ -17,7 +18,12 @@ class LoginStatusConsumer {
   virtual ~LoginStatusConsumer() {}
   virtual void OnLoginFailure(const std::string& error) = 0;
   virtual void OnLoginSuccess(const std::string& username,
-                              const std::string& credentials) = 0;
+      const GaiaAuthConsumer::ClientLoginResult& credentials) = 0;
+  virtual void OnOffTheRecordLoginSuccess() {}
+  virtual void OnPasswordChangeDetected(
+      const GaiaAuthConsumer::ClientLoginResult& credentials) {
+    NOTREACHED();
+  };
 };
 
 }  // namespace chromeos

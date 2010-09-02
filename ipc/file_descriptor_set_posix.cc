@@ -4,6 +4,9 @@
 
 #include "ipc/file_descriptor_set_posix.h"
 
+#include <sys/types.h>
+#include <sys/stat.h>
+
 #include "base/eintr_wrapper.h"
 #include "base/logging.h"
 
@@ -27,7 +30,8 @@ FileDescriptorSet::~FileDescriptorSet() {
   for (unsigned i = consumed_descriptor_highwater_;
        i < descriptors_.size(); ++i) {
     if (descriptors_[i].auto_close)
-      HANDLE_EINTR(close(descriptors_[i].fd));
+      if (HANDLE_EINTR(close(descriptors_[i].fd)) < 0)
+        PLOG(ERROR) << "close";
   }
 }
 
@@ -94,11 +98,24 @@ void FileDescriptorSet::GetDescriptors(int* buffer) const {
   }
 }
 
+bool FileDescriptorSet::ContainsDirectoryDescriptor() const {
+  struct stat st;
+
+  for (std::vector<base::FileDescriptor>::const_iterator
+       i = descriptors_.begin(); i != descriptors_.end(); ++i) {
+    if (fstat(i->fd, &st) == 0 && S_ISDIR(st.st_mode))
+      return true;
+  }
+
+  return false;
+}
+
 void FileDescriptorSet::CommitAll() {
   for (std::vector<base::FileDescriptor>::iterator
        i = descriptors_.begin(); i != descriptors_.end(); ++i) {
     if (i->auto_close)
-      HANDLE_EINTR(close(i->fd));
+      if (HANDLE_EINTR(close(i->fd)) < 0)
+        PLOG(ERROR) << "close";
   }
   descriptors_.clear();
   consumed_descriptor_highwater_ = 0;

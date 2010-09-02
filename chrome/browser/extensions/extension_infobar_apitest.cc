@@ -6,17 +6,10 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/common/chrome_switches.h"
 
-#if defined(TOOLKIT_VIEWS)
-#if defined (OS_WIN)
+#if defined(TOOLKIT_VIEWS) || defined(OS_MACOSX)
 #define MAYBE_Infobars Infobars
 #else
-// Flaky on ChromeOS, see http://crbug.com/40141.
-#define MAYBE_Infobars FLAKY_Infobars
-#endif
-
-#else
-// Need to port ExtensionInfoBarDelegate::CreateInfoBar() to other platforms.
-// See http://crbug.com/39916 for details.
+// Need to finish port to Linux. See http://crbug.com/39916 for details.
 #define MAYBE_Infobars DISABLED_Infobars
 #endif
 

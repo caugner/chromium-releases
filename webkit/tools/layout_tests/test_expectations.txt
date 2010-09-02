@@ -5,20 +5,5 @@
 // Only add expectations here to temporarily suppress messages on the bots
 // until the changes can be landed upstream.
 
-// We are occasionally hitting a JS stack overflow exception on Linux in
-// release mode.  This test already fails on Mac and in debug
-// mode on Windows with a JS stack overflow exception.
-//
-//   http://code.google.com/p/v8/issues/detail?id=277
-BUG10457 RELEASE LINUX : fast/js/large-expressions.html = FAIL PASS
-
-BUG39855 SLOW DEBUG : editing/selection/extend-selection.html = PASS
-
-// We reintroduced the ogg seek patch 12_vp3_key_frame_after_flush and need
-// new baselines.
-BUG40619 MAC : media/video-played-collapse.html = PASS FAIL
-BUG40619 : media/video-seek-past-end-playing.html = PASS FAIL TIMEOUT
-BUG40619 : media/video-seeking.html = PASS FAIL TIMEOUT
-
-// Failing a few times, flak dashboard seems to agree.
-BUG41973 MAC : svg/text/text-text-05-t.svg = IMAGE
+// TODO(johnnyg): remove after upstream expectations are rolled
+BUG_JOHNNYG WIN : fast/forms/input-file-directory-upload.html = TEXT

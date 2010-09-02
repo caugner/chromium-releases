@@ -50,7 +50,8 @@ static void SaveSUIDUnsafeEnvironmentVariables() {
 ZygoteHost::ZygoteHost()
     : pid_(-1),
       init_(false),
-      using_suid_sandbox_(false) {
+      using_suid_sandbox_(false),
+      have_read_sandbox_status_word_(false) {
 }
 
 ZygoteHost::~ZygoteHost() {
@@ -188,6 +189,29 @@ void ZygoteHost::Init(const std::string& sandbox_cmd) {
 
   close(fds[1]);
   control_fd_ = fds[0];
+
+  Pickle pickle;
+  pickle.WriteInt(kCmdGetSandboxStatus);
+  std::vector<int> empty_fds;
+  if (!base::SendMsg(control_fd_, pickle.data(), pickle.size(), empty_fds))
+    LOG(FATAL) << "Cannot communicate with zygote";
+  // We don't wait for the reply. We'll read it in ReadReply.
+}
+
+ssize_t ZygoteHost::ReadReply(void* buf, size_t buf_len) {
+  // At startup we send a kCmdGetSandboxStatus request to the zygote, but don't
+  // wait for the reply. Thus, the first time that we read from the zygote, we
+  // get the reply to that request.
+  if (!have_read_sandbox_status_word_) {
+    if (HANDLE_EINTR(read(control_fd_, &sandbox_status_,
+                          sizeof(sandbox_status_))) !=
+        sizeof(sandbox_status_)) {
+      return -1;
+    }
+    have_read_sandbox_status_word_ = true;
+  }
+
+  return HANDLE_EINTR(read(control_fd_, buf, buf_len));
 }
 
 pid_t ZygoteHost::ForkRenderer(
@@ -211,15 +235,50 @@ pid_t ZygoteHost::ForkRenderer(
     fds.push_back(i->second);
   }
 
-  if (!base::SendMsg(control_fd_, pickle.data(), pickle.size(), fds))
-    return base::kNullProcessHandle;
-
   pid_t pid;
-  if (HANDLE_EINTR(read(control_fd_, &pid, sizeof(pid))) != sizeof(pid))
-    return base::kNullProcessHandle;
+  {
+    AutoLock lock(control_lock_);
+    if (!base::SendMsg(control_fd_, pickle.data(), pickle.size(), fds))
+      return base::kNullProcessHandle;
+
+    if (ReadReply(&pid, sizeof(pid)) != sizeof(pid))
+      return base::kNullProcessHandle;
+  }
+
+  // 1) You can't change the oom_adj of a non-dumpable process (EPERM) unless
+  //    you're root. Because of this, we can't set the oom_adj from the browser
+  //    process.
+  //
+  // 2) We can't set the oom_adj before entering the sandbox because the
+  //    zygote is in the sandbox and the zygote is as critical as the browser
+  //    process. Its oom_adj value shouldn't be changed.
+  //
+  // 3) A non-dumpable process can't even change its own oom_adj because it's
+  //    root owned 0644. The sandboxed processes don't even have /proc, but one
+  //    could imagine passing in a descriptor from outside.
+  //
+  // So, in the normal case, we use the SUID binary to change it for us.
+  // However, Fedora (and other SELinux systems) don't like us touching other
+  // process's oom_adj values
+  // (https://bugzilla.redhat.com/show_bug.cgi?id=581256).
+  //
+  // The offical way to get the SELinux mode is selinux_getenforcemode, but I
+  // don't want to add another library to the build as it's sure to cause
+  // problems with other, non-SELinux distros.
+  //
+  // So we just check for /selinux. This isn't foolproof, but it's not bad
+  // and it's easy.
+
+  static bool selinux;
+  static bool selinux_valid = false;
+
+  if (!selinux_valid) {
+    selinux = access("/selinux", X_OK) == 0;
+    selinux_valid = true;
+  }
 
   const int kRendererScore = 5;
-  if (using_suid_sandbox_) {
+  if (using_suid_sandbox_ && !selinux) {
     base::ProcessHandle sandbox_helper_process;
     base::file_handle_mapping_vector dummy_map;
     std::vector<std::string> adj_oom_score_cmdline;
@@ -233,8 +292,9 @@ pid_t ZygoteHost::ForkRenderer(
                         &sandbox_helper_process)) {
       ProcessWatcher::EnsureProcessGetsReaped(sandbox_helper_process);
     }
-  } else {
-    base::AdjustOOMScore(pid, kRendererScore);
+  } else if (!using_suid_sandbox_) {
+    if (!base::AdjustOOMScore(pid, kRendererScore))
+      LOG(ERROR) << "Failed to adjust OOM score of renderer";
   }
 
   return pid;
@@ -247,7 +307,8 @@ void ZygoteHost::EnsureProcessTerminated(pid_t process) {
   pickle.WriteInt(kCmdReap);
   pickle.WriteInt(process);
 
-  HANDLE_EINTR(write(control_fd_, pickle.data(), pickle.size()));
+  if (HANDLE_EINTR(write(control_fd_, pickle.data(), pickle.size())) < 0)
+    PLOG(ERROR) << "write";
 }
 
 bool ZygoteHost::DidProcessCrash(base::ProcessHandle handle,
@@ -257,11 +318,16 @@ bool ZygoteHost::DidProcessCrash(base::ProcessHandle handle,
   pickle.WriteInt(kCmdDidProcessCrash);
   pickle.WriteInt(handle);
 
-  HANDLE_EINTR(write(control_fd_, pickle.data(), pickle.size()));
-
   static const unsigned kMaxMessageLength = 128;
   char buf[kMaxMessageLength];
-  const ssize_t len = HANDLE_EINTR(read(control_fd_, buf, sizeof(buf)));
+  ssize_t len;
+  {
+    AutoLock lock(control_lock_);
+    if (HANDLE_EINTR(write(control_fd_, pickle.data(), pickle.size())) < 0)
+      PLOG(ERROR) << "write";
+
+    len = ReadReply(buf, sizeof(buf));
+  }
 
   if (len == -1) {
     LOG(WARNING) << "Error reading message from zygote: " << errno;

@@ -16,9 +16,9 @@ class HttpNetworkLayerTest : public PlatformTest {
 };
 
 TEST_F(HttpNetworkLayerTest, CreateAndDestroy) {
-  net::HttpNetworkLayer factory(
-      NULL, NULL, new net::MockHostResolver, net::ProxyService::CreateNull(),
-      new net::SSLConfigServiceDefaults, NULL);
+  net::HttpNetworkLayer factory(NULL, new net::MockHostResolver,
+      net::ProxyService::CreateNull(), new net::SSLConfigServiceDefaults, NULL,
+      NULL, NULL);
 
   scoped_ptr<net::HttpTransaction> trans;
   int rv = factory.CreateTransaction(&trans);
@@ -27,9 +27,9 @@ TEST_F(HttpNetworkLayerTest, CreateAndDestroy) {
 }
 
 TEST_F(HttpNetworkLayerTest, Suspend) {
-  net::HttpNetworkLayer factory(
-      NULL, NULL, new net::MockHostResolver, net::ProxyService::CreateNull(),
-      new net::SSLConfigServiceDefaults, NULL);
+  net::HttpNetworkLayer factory(NULL, new net::MockHostResolver,
+      net::ProxyService::CreateNull(), new net::SSLConfigServiceDefaults, NULL,
+      NULL, NULL);
 
   scoped_ptr<net::HttpTransaction> trans;
   int rv = factory.CreateTransaction(&trans);
@@ -67,11 +67,9 @@ TEST_F(HttpNetworkLayerTest, GET) {
                                      data_writes, arraysize(data_reads));
   mock_socket_factory.AddSocketDataProvider(&data);
 
-  net::HttpNetworkLayer factory(&mock_socket_factory, NULL,
-                                new net::MockHostResolver,
-                                net::ProxyService::CreateNull(),
-                                new net::SSLConfigServiceDefaults,
-                                NULL);
+  net::HttpNetworkLayer factory(&mock_socket_factory, new net::MockHostResolver,
+      net::ProxyService::CreateNull(), new net::SSLConfigServiceDefaults, NULL,
+      NULL, NULL);
 
   TestCompletionCallback callback;
 
@@ -82,7 +80,8 @@ TEST_F(HttpNetworkLayerTest, GET) {
   net::HttpRequestInfo request_info;
   request_info.url = GURL("http://www.google.com/");
   request_info.method = "GET";
-  request_info.user_agent = "Foo/1.0";
+  request_info.extra_headers.SetHeader(net::HttpRequestHeaders::kUserAgent,
+                                       "Foo/1.0");
   request_info.load_flags = net::LOAD_NORMAL;
 
   rv = trans->Start(&request_info, &callback, net::BoundNetLog());

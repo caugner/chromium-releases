@@ -25,18 +25,19 @@
       'browser',
       'debugger',
       'chrome_gpu',
+      'profile_import',
       'renderer',
       'syncapi',
       'utility',
-      'profile_import',
       'worker',
+      'service',
       '../printing/printing.gyp:printing',
-      '../webkit/webkit.gyp:inspector_resources',
+      '../third_party/WebKit/WebKit/chromium/WebKit.gyp:inspector_resources',
     ],
     'nacl_win64_dependencies': [
       'common_nacl_win64',
       'common_constants_win64',
-      'installer/installer.gyp:installer_util_nacl_win64',
+      'installer_util_nacl_win64',
     ],
     'allocator_target': '../base/allocator/allocator.gyp:allocator',
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
@@ -53,6 +54,14 @@
       'browser/browser_resources.grd',
       'common/common_resources.grd',
       'renderer/renderer_resources.grd',
+    ],
+    'chrome_extra_resources_grds': [
+      # These resources end up in resources.pak because they are resources
+      # used by internal pages.  Putting them in a spearate pak file makes
+      # it easier for us to reference them internally.
+      'browser/resources/bookmark_manager_resources.grd',
+      'browser/resources/net_internals_resources.grd',
+      'browser/resources/shared_resources.grd'
     ],
     'grit_info_cmd': ['python', '../tools/grit/grit_info.py'],
     'grit_cmd': ['python', '../tools/grit/grit.py'],
@@ -75,8 +84,16 @@
           'NACL_LINUX=1',
           'NACL_OSX=0',
         ],
-        'platform_locale_settings_grd':
-            'app/resources/locale_settings_linux.grd',
+        'conditions': [
+          ['chromeos==1', {
+            'platform_locale_settings_grd':
+                'app/resources/locale_settings_cros.grd',
+          }],
+          ['chromeos!=1', {
+            'platform_locale_settings_grd':
+                'app/resources/locale_settings_linux.grd',
+          }],
+        ],
       },],
       ['OS=="mac"', {
         'tweak_info_plist_path': 'tools/build/mac/tweak_info_plist',
@@ -123,6 +140,8 @@
     'chrome_common.gypi',
     'chrome_dll.gypi',
     'chrome_exe.gypi',
+    'chrome_installer.gypi',
+    'chrome_installer_util.gypi',
     'chrome_renderer.gypi',
     'chrome_tests.gypi',
     'common_constants.gypi',
@@ -224,7 +243,7 @@
           # will always get built before installer_util.
           'type': 'dummy_executable',
           'dependencies': ['../build/win/system.gyp:cygwin',
-                           'installer/installer.gyp:installer_util_strings',],
+                           'installer_util_strings',],
         }, {
           'type': 'none',
         }],
@@ -326,6 +345,9 @@
             ['chromeos==1', {
               'action': ['-D', 'chromeos'],
             }],
+            ['toolkit_views==1', {
+              'action': ['-D', 'toolkit_views'],
+            }],
             ['use_titlecase_in_grd_files==1', {
               'action': ['-D', 'use_titlecase'],
             }],
@@ -400,6 +422,81 @@
       ],
     },
     {
+      'target_name': 'chrome_extra_resources',
+      'type': 'none',
+      'variables': {
+        'chrome_extra_resources_inputs': [
+          '<!@(<(grit_info_cmd) --inputs <(chrome_extra_resources_grds))',
+        ],
+      },
+      'rules': [
+        {
+          'rule_name': 'grit',
+          'extension': 'grd',
+          'variables': {
+            'conditions': [
+              ['branding=="Chrome"', {
+                # TODO(mmoss) The .grd files look for _google_chrome, but for
+                # consistency they should look for GOOGLE_CHROME_BUILD like C++.
+                # Clean this up when Windows moves to gyp.
+                'chrome_build': '_google_chrome',
+                'branded_env': 'CHROMIUM_BUILD=google_chrome',
+              }, {  # else: branding!="Chrome"
+                'chrome_build': '_chromium',
+                'branded_env': 'CHROMIUM_BUILD=chromium',
+              }],
+            ],
+          },
+          'inputs': [
+            '<@(chrome_extra_resources_inputs)',
+          ],
+          'outputs': [
+            '<(grit_out_dir)/grit/<(RULE_INPUT_ROOT).h',
+            '<(grit_out_dir)/<(RULE_INPUT_ROOT).pak',
+            '<(grit_out_dir)/grit/<(RULE_INPUT_ROOT)_map.cc',
+            '<(grit_out_dir)/grit/<(RULE_INPUT_ROOT)_map.h',
+            # TODO(bradnelson): move to something like this instead
+            #'<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(chrome_resources_grds))',
+            # This currently cannot work because gyp only evaluates the
+            # outputs once (rather than per case where the rule applies).
+            # This means you end up with all the outputs from all the grd
+            # files, which angers scons and confuses vstudio.
+            # One alternative would be to turn this into several actions,
+            # but that would be rather verbose.
+          ],
+          'action': ['<@(grit_cmd)', '-i',
+            '<(RULE_INPUT_PATH)',
+            'build', '-o', '<(grit_out_dir)',
+            '-D', '<(chrome_build)',
+            '-E', '<(branded_env)',
+          ],
+          'conditions': [
+            ['chromeos==1', {
+              'action': ['-D', 'chromeos'],
+            }],
+            ['use_titlecase_in_grd_files==1', {
+              'action': ['-D', 'use_titlecase'],
+            }],
+          ],
+          'message': 'Generating resources from <(RULE_INPUT_PATH)',
+        },
+      ],
+      'sources': [
+        '<@(chrome_extra_resources_grds)',
+        '<@(chrome_extra_resources_inputs)',
+      ],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '<(grit_out_dir)',
+        ],
+      },
+      'conditions': [
+        ['OS=="win"', {
+          'dependencies': ['../build/win/system.gyp:cygwin'],
+        }],
+      ],
+    },
+    {
       'target_name': 'default_extensions',
       'type': 'none',
       'msvs_guid': 'DA9BAB64-91DC-419B-AFDE-6FF8C569E83A',
@@ -423,6 +520,7 @@
       'dependencies': [
         'chrome_resources',
         'chrome_strings',
+        '../net/net.gyp:http_listen_socket',
         'theme_resources',
         '../skia/skia.gyp:skia',
         '../third_party/icu/icu.gyp:icui18n',
@@ -437,6 +535,8 @@
         'browser/debugger/debugger_wrapper.cc',
         'browser/debugger/debugger_wrapper.h',
         'browser/debugger/devtools_client_host.h',
+        'browser/debugger/devtools_http_protocol_handler.cc',
+        'browser/debugger/devtools_http_protocol_handler.h',
         'browser/debugger/devtools_manager.cc',
         'browser/debugger/devtools_manager.h',
         'browser/debugger/devtools_protocol_handler.cc',
@@ -448,6 +548,7 @@
         'browser/debugger/devtools_remote_message.h',
         'browser/debugger/devtools_remote_service.cc',
         'browser/debugger/devtools_remote_service.h',
+        'browser/debugger/devtools_toggle_action.h',
         'browser/debugger/devtools_window.cc',
         'browser/debugger/devtools_window.h',
         'browser/debugger/extension_ports_remote_service.cc',
@@ -475,10 +576,9 @@
         '../skia/skia.gyp:skia',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
-        '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/npapi/npapi.gyp:npapi',
         '../third_party/hunspell/hunspell.gyp:hunspell',
-        '../webkit/webkit.gyp:glue',
+        '../webkit/support/webkit_support.gyp:glue',
       ],
       'include_dirs': [
         '<(INTERMEDIATE_DIR)',
@@ -582,6 +682,7 @@
       'type': '<(library)',
       'msvs_guid': 'F10F1ECD-D84D-4C33-8468-9DDFE19F4D8A',
       'dependencies': [
+        '../app/app.gyp:app_base',
         '../base/base.gyp:base',
         'common',
         '../skia/skia.gyp:skia',
@@ -594,6 +695,10 @@
         'gpu/gpu_command_buffer_stub.cc',
         'gpu/gpu_command_buffer_stub.h',
         'gpu/gpu_config.h',
+        'gpu/gpu_info_collector_linux.cc',
+        'gpu/gpu_info_collector_mac.mm',
+        'gpu/gpu_info_collector_win.cc',
+        'gpu/gpu_info_collector.h',
         'gpu/gpu_main.cc',
         'gpu/gpu_process.cc',
         'gpu/gpu_process.h',
@@ -623,9 +728,6 @@
             'gpu/x_util.h',
             'gpu/gpu_video_layer_glx.cc',
             'gpu/gpu_video_layer_glx.h',
-          ],
-          'dependencies': [
-            '../gpu/gpu.gyp:gl_libs',
           ],
         }],
         ['enable_gpu==1', {
@@ -660,6 +762,8 @@
         'worker/worker_main.cc',
         'worker/worker_thread.cc',
         'worker/worker_thread.h',
+        'worker/worker_webapplicationcachehost_impl.cc',
+        'worker/worker_webapplicationcachehost_impl.h',
         'worker/worker_webkitclient_impl.cc',
         'worker/worker_webkitclient_impl.h',
       ],
@@ -686,159 +790,20 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../build/temp_gyp/googleurl.gyp:googleurl',
+        '../jingle/jingle.gyp:notifier',
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/libjingle/libjingle.gyp:libjingle',
         '../third_party/sqlite/sqlite.gyp:sqlite',
+        'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
         'common_constants',
-        'notifier',
+        'common_net',
         'sync',
-        'sync_proto',
-      ],
-    },
-    {
-      # Protobuf compiler / generate rule for sync.proto
-      'target_name': 'sync_proto',
-      'type': 'none',
-      'sources': [
-        'browser/sync/protocol/sync.proto',
-        'browser/sync/protocol/autofill_specifics.proto',
-        'browser/sync/protocol/bookmark_specifics.proto',
-        'browser/sync/protocol/preference_specifics.proto',
-        'browser/sync/protocol/theme_specifics.proto',
-        'browser/sync/protocol/typed_url_specifics.proto',
-      ],
-      'rules': [
-        {
-          'rule_name': 'genproto',
-          'extension': 'proto',
-          'inputs': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
-          ],
-          'variables': {
-            # The protoc compiler requires a proto_path argument with the
-            # directory containing the .proto file.
-            # There's no generator variable that corresponds to this, so fake it.
-            'rule_input_relpath': 'browser/sync/protocol',
-          },
-          'outputs': [
-            '<(protoc_out_dir)/chrome/<(rule_input_relpath)/<(RULE_INPUT_ROOT).pb.h',
-            '<(protoc_out_dir)/chrome/<(rule_input_relpath)/<(RULE_INPUT_ROOT).pb.cc',
-          ],
-          'action': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
-            '--proto_path=./<(rule_input_relpath)',
-            './<(rule_input_relpath)/<(RULE_INPUT_ROOT)<(RULE_INPUT_EXT)',
-            '--cpp_out=<(protoc_out_dir)/chrome/<(rule_input_relpath)',
-          ],
-          'message': 'Generating C++ code from <(RULE_INPUT_PATH)',
-        },
-      ],
-      'dependencies': [
-        '../third_party/protobuf2/protobuf.gyp:protobuf_lite',
-        '../third_party/protobuf2/protobuf.gyp:protoc#host',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(protoc_out_dir)',
-        ]
-      },
-      'export_dependent_settings': [
-        '../third_party/protobuf2/protobuf.gyp:protobuf_lite',
-      ],
-    },
-    {
-      'target_name': 'notifier',
-      'type': '<(library)',
-      'sources': [
-        'browser/sync/notifier/base/async_dns_lookup.cc',
-        'browser/sync/notifier/base/async_dns_lookup.h',
-        'browser/sync/notifier/base/async_network_alive.h',
-        'browser/sync/notifier/base/fastalloc.h',
-        'browser/sync/notifier/base/linux/async_network_alive_linux.cc',
-        'browser/sync/notifier/base/mac/network_status_detector_task_mac.h',
-        'browser/sync/notifier/base/mac/network_status_detector_task_mac.cc',
-        'browser/sync/notifier/base/nethelpers.cc',
-        'browser/sync/notifier/base/nethelpers.h',
-        'browser/sync/notifier/base/network_status_detector_task.cc',
-        'browser/sync/notifier/base/network_status_detector_task.h',
-        'browser/sync/notifier/base/network_status_detector_task_mt.cc',
-        'browser/sync/notifier/base/network_status_detector_task_mt.h',
-        'browser/sync/notifier/base/posix/time_posix.cc',
-        'browser/sync/notifier/base/signal_thread_task.h',
-        'browser/sync/notifier/base/ssl_adapter.h',
-        'browser/sync/notifier/base/ssl_adapter.cc',
-        'browser/sync/notifier/base/static_assert.h',
-        'browser/sync/notifier/base/task_pump.cc',
-        'browser/sync/notifier/base/task_pump.h',
-        'browser/sync/notifier/base/time.cc',
-        'browser/sync/notifier/base/time.h',
-        'browser/sync/notifier/base/timer.cc',
-        'browser/sync/notifier/base/timer.h',
-        'browser/sync/notifier/base/utils.h',
-        'browser/sync/notifier/base/win/async_network_alive_win32.cc',
-        'browser/sync/notifier/base/win/time_win32.cc',
-        'browser/sync/notifier/communicator/auto_reconnect.cc',
-        'browser/sync/notifier/communicator/auto_reconnect.h',
-        'browser/sync/notifier/communicator/connection_options.cc',
-        'browser/sync/notifier/communicator/connection_options.h',
-        'browser/sync/notifier/communicator/connection_settings.cc',
-        'browser/sync/notifier/communicator/connection_settings.h',
-        'browser/sync/notifier/communicator/const_communicator.h',
-        'browser/sync/notifier/communicator/login.cc',
-        'browser/sync/notifier/communicator/login.h',
-        'browser/sync/notifier/communicator/login_failure.cc',
-        'browser/sync/notifier/communicator/login_failure.h',
-        'browser/sync/notifier/communicator/login_settings.cc',
-        'browser/sync/notifier/communicator/login_settings.h',
-        'browser/sync/notifier/communicator/product_info.cc',
-        'browser/sync/notifier/communicator/product_info.h',
-        'browser/sync/notifier/communicator/single_login_attempt.cc',
-        'browser/sync/notifier/communicator/single_login_attempt.h',
-        'browser/sync/notifier/communicator/ssl_socket_adapter.cc',
-        'browser/sync/notifier/communicator/ssl_socket_adapter.h',
-        'browser/sync/notifier/communicator/xmpp_connection_generator.cc',
-        'browser/sync/notifier/communicator/xmpp_connection_generator.h',
-        'browser/sync/notifier/communicator/xmpp_log.cc',
-        'browser/sync/notifier/communicator/xmpp_log.h',
-        'browser/sync/notifier/communicator/xmpp_socket_adapter.cc',
-        'browser/sync/notifier/communicator/xmpp_socket_adapter.h',
-        'browser/sync/notifier/listener/listen_task.cc',
-        'browser/sync/notifier/listener/listen_task.h',
-        'browser/sync/notifier/listener/mediator_thread.h',
-        'browser/sync/notifier/listener/mediator_thread_impl.cc',
-        'browser/sync/notifier/listener/mediator_thread_impl.h',
-        'browser/sync/notifier/listener/mediator_thread_mock.h',
-        'browser/sync/notifier/listener/notification_constants.cc',
-        'browser/sync/notifier/listener/notification_constants.h',
-        'browser/sync/notifier/listener/send_update_task.cc',
-        'browser/sync/notifier/listener/send_update_task.h',
-        'browser/sync/notifier/base/sigslotrepeater.h',
-        'browser/sync/notifier/listener/subscribe_task.cc',
-        'browser/sync/notifier/listener/subscribe_task.h',
-        'browser/sync/notifier/listener/talk_mediator.h',
-        'browser/sync/notifier/listener/talk_mediator_impl.cc',
-        'browser/sync/notifier/listener/talk_mediator_impl.h',
-        'browser/sync/notifier/listener/xml_element_util.cc',
-        'browser/sync/notifier/listener/xml_element_util.h',
-      ],
-      'include_dirs': [
-        '..',
-        '<(protoc_out_dir)',
-      ],
-      'defines' : [
-        '_CRT_SECURE_NO_WARNINGS',
-        '_USE_32BIT_TIME_T',
-        'kXmppProductName="chromium-sync"',
-      ],
-      'dependencies': [
-        '../third_party/expat/expat.gyp:expat',
-        '../third_party/libjingle/libjingle.gyp:libjingle',
-        'sync_proto',
+        'sync_notifier',
       ],
       'conditions': [
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
           'dependencies': [
-            '../build/linux/system.gyp:gtk'
+            '../build/linux/system.gyp:nss'
           ],
         }],
       ],
@@ -849,10 +814,18 @@
       'sources': [
         '<(protoc_out_dir)/chrome/browser/sync/protocol/sync.pb.cc',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/sync.pb.h',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/encryption.pb.cc',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/encryption.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/autofill_specifics.pb.cc',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/autofill_specifics.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/bookmark_specifics.pb.cc',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/bookmark_specifics.pb.h',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/extension_specifics.pb.cc',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/extension_specifics.pb.h',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/nigori_specifics.pb.cc',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/nigori_specifics.pb.h',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/password_specifics.pb.cc',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/password_specifics.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/preference_specifics.pb.cc',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/preference_specifics.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/theme_specifics.pb.cc',
@@ -873,6 +846,8 @@
         'browser/sync/engine/build_commit_command.h',
         'browser/sync/engine/change_reorder_buffer.cc',
         'browser/sync/engine/change_reorder_buffer.h',
+        'browser/sync/engine/cleanup_disabled_types_command.cc',
+        'browser/sync/engine/cleanup_disabled_types_command.h',
         'browser/sync/engine/conflict_resolver.cc',
         'browser/sync/engine/conflict_resolver.h',
         'browser/sync/engine/download_updates_command.cc',
@@ -885,9 +860,6 @@
         'browser/sync/engine/model_changing_syncer_command.h',
         'browser/sync/engine/model_safe_worker.cc',
         'browser/sync/engine/model_safe_worker.h',
-        'browser/sync/engine/net/gaia_authenticator.cc',
-        'browser/sync/engine/net/gaia_authenticator.h',
-        'browser/sync/engine/net/http_return.h',
         'browser/sync/engine/net/server_connection_manager.cc',
         'browser/sync/engine/net/server_connection_manager.h',
         'browser/sync/engine/net/syncapi_server_connection_manager.cc',
@@ -950,22 +922,17 @@
         'browser/sync/syncable/syncable_columns.h',
         'browser/sync/syncable/syncable_id.cc',
         'browser/sync/syncable/syncable_id.h',
-        'browser/sync/util/character_set_converters.h',
-        'browser/sync/util/character_set_converters_posix.cc',
-        'browser/sync/util/character_set_converters_win.cc',
-        'browser/sync/util/closure.h',
+        'browser/sync/util/channel.h',
         'browser/sync/util/crypto_helpers.cc',
         'browser/sync/util/crypto_helpers.h',
+        'browser/sync/util/cryptographer.cc',
+        'browser/sync/util/cryptographer.h',
         'browser/sync/util/dbgq.h',
-        'browser/sync/util/event_sys-inl.h',
-        'browser/sync/util/event_sys.h',
         'browser/sync/util/extensions_activity_monitor.cc',
         'browser/sync/util/extensions_activity_monitor.h',
         'browser/sync/util/fast_dump.h',
         'browser/sync/util/nigori.cc',
         'browser/sync/util/nigori.h',
-        'browser/sync/util/row_iterator.h',
-        'browser/sync/util/signin.h',
         'browser/sync/util/sync_types.h',
         'browser/sync/util/user_settings.cc',
         'browser/sync/util/user_settings.h',
@@ -984,7 +951,10 @@
       'dependencies': [
         '../skia/skia.gyp:skia',
         '../third_party/libjingle/libjingle.gyp:libjingle',
-        'sync_proto',
+        'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
+        # TODO(akalin): Change back to protobuf_lite once it supports
+        # preserving unknown fields.
+        '../third_party/protobuf2/protobuf.gyp:protobuf#target',
       ],
       'conditions': [
         ['OS=="win"', {
@@ -1004,12 +974,143 @@
             ],
           },
         }],
+        ['OS=="linux" and chromeos==1', {
+          'include_dirs': [
+            '<(grit_out_dir)',
+          ],
+        }],
         ['OS=="mac"', {
           'link_settings': {
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/IOKit.framework',
             ],
           },
+        }],
+      ],
+    },
+    # A library for sending and receiving server-issued notifications.
+    {
+      'target_name': 'sync_notifier',
+      'type': '<(library)',
+      'sources': [
+        'browser/sync/notifier/cache_invalidation_packet_handler.cc',
+        'browser/sync/notifier/cache_invalidation_packet_handler.h',
+        'browser/sync/notifier/chrome_invalidation_client.cc',
+        'browser/sync/notifier/chrome_invalidation_client.h',
+        'browser/sync/notifier/chrome_system_resources.cc',
+        'browser/sync/notifier/chrome_system_resources.h',
+        'browser/sync/notifier/invalidation_util.cc',
+        'browser/sync/notifier/invalidation_util.h',
+        'browser/sync/notifier/registration_manager.cc',
+        'browser/sync/notifier/registration_manager.h',
+        'browser/sync/notifier/server_notifier_thread.cc',
+        'browser/sync/notifier/server_notifier_thread.h',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'dependencies': [
+        'sync',
+        '../jingle/jingle.gyp:notifier',
+        '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation',
+      ],
+      # This target exports a hard dependency because it depends on
+      # cacheinvalidation (which itself has hard_dependency set).
+      'hard_dependency': 1,
+      'export_dependent_settings': [
+        '../jingle/jingle.gyp:notifier',
+        '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation',
+      ],
+    },
+    {
+      'target_name': 'service',
+      'type': '<(library)',
+      'msvs_guid': '2DA87614-55C5-4E56-A17E-0CD099786197',
+      'dependencies': [
+        'common',
+        'common_net',
+        '../base/base.gyp:base',
+        '../printing/printing.gyp:printing',
+        '../skia/skia.gyp:skia',
+        '../third_party/libjingle/libjingle.gyp:libjingle',
+      ],
+      'sources': [
+        'service/service_child_process_host.cc',
+        'service/service_child_process_host.h',
+        'service/service_main.cc',
+        'service/service_process.cc',
+        'service/service_process.h',
+        'service/service_utility_process_host.cc',
+        'service/service_utility_process_host.h',
+        'service/cloud_print/cloud_print_consts.cc',
+        'service/cloud_print/cloud_print_consts.h',
+        'service/cloud_print/cloud_print_helpers.cc',
+        'service/cloud_print/cloud_print_helpers.h',
+        'service/cloud_print/cloud_print_proxy.cc',
+        'service/cloud_print/cloud_print_proxy.h',
+        'service/cloud_print/cloud_print_proxy_backend.cc',
+        'service/cloud_print/cloud_print_proxy_backend.h',
+        'service/cloud_print/job_status_updater.cc',
+        'service/cloud_print/job_status_updater.h',
+        'service/cloud_print/print_system_dummy.cc',
+        'service/cloud_print/print_system.h',
+        'service/cloud_print/printer_job_handler.cc',
+        'service/cloud_print/printer_job_handler.h',
+        'service/gaia/service_gaia_authenticator.cc',
+        'service/gaia/service_gaia_authenticator.h',
+        'service/net/service_url_request_context.cc',
+        'service/net/service_url_request_context.h',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'variables': {
+        'conditions': [
+          ['OS=="linux" and chromeos==0 and target_arch!="arm"', {
+            'use_cups%': 1,
+          }, {
+            'use_cups%': 0,
+          }],
+        ],
+      },
+      'conditions': [
+        ['OS=="win"', {
+          'defines': [
+            # CP_PRINT_SYSTEM_AVAILABLE disables default dummy implementation
+            # of cloud print system, and allows to use custom implementaiton.
+            'CP_PRINT_SYSTEM_AVAILABLE',
+          ],
+          'sources': [
+            'service/cloud_print/print_system_win.cc',
+          ],
+        }],
+        ['OS=="linux"', {
+          'dependencies': [
+            '../build/linux/system.gyp:gtk',
+          ],
+        }],
+        ['use_cups==1', {
+          'link_settings': {
+            'libraries': [
+              '-lcups',
+              '-lgcrypt',
+            ],
+          },
+          'defines': [
+            # CP_PRINT_SYSTEM_AVAILABLE disables default dummy implementation
+            # of cloud print system, and allows to use custom implementaiton.
+            'CP_PRINT_SYSTEM_AVAILABLE',
+          ],
+          'sources': [
+            'service/cloud_print/print_system_cups.cc',
+          ],
+        }],
+        ['remoting==1', {
+          'dependencies': [
+            '../remoting/remoting.gyp:chromoting_base',
+            '../remoting/remoting.gyp:chromoting_host',
+            '../remoting/remoting.gyp:chromoting_jingle_glue',
+          ],
         }],
       ],
     },
@@ -1067,7 +1168,7 @@
           'actions': [
             {
               # Generate the InfoPlist.strings file
-              'action_name': 'Generating InfoPlist.strings files',
+              'action_name': 'Generate InfoPlist.strings files',
               'variables': {
                 'tool_path': '<(PRODUCT_DIR)/infoplist_strings_tool',
                 # Unique dir to write to so the [lang].lproj/InfoPlist.strings
@@ -1126,10 +1227,9 @@
             {
               # Modify the Info.plist as needed.  The script explains why this
               # is needed.  This is also done in the chrome and chrome_dll
-              # targets.  In this case, -b0 and -k0 are used because Breakpad
-              # and Keystone keys are never placed into the helper, only into
-              # the framework.  -s0 is used because Subversion keys are only
-              # placed into the main app.
+              # targets.  In this case, -b0, -k0, and -s0 are used because
+              # Breakpad, Keystone, and Subersion keys are never placed into
+              # the helper.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['<(tweak_info_plist_path)',
                          '-b0',
@@ -1148,6 +1248,27 @@
             }],
           ],
         },  # target helper_app
+        {
+          # This produces the app mode loader, but not as a bundle. Chromium
+          # itself is responsible for producing bundles.
+          'target_name': 'app_mode_app',
+          'type': 'executable',
+          'product_name': '<(mac_product_name) App Mode Loader',
+          'sources': [
+            'app/app_mode_loader_mac.mm',
+            'common/app_mode_common_mac.h',
+            'common/app_mode_common_mac.mm',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'link_settings': {
+            'libraries': [
+              '$(SDKROOT)/System/Library/Frameworks/CoreFoundation.framework',
+              '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
+            ],
+          },
+        },  # target app_mode_app
         {
           # Convenience target to build a disk image.
           'target_name': 'build_app_dmg',
@@ -1299,6 +1420,41 @@
             'tools/perf/flush_cache/flush_cache.cc',
           ],
         },
+        {
+          # Mac needs 'process_outputs_as_mac_bundle_resources' to be set,
+          # and the option is only effective when the target type is native
+          # binary. Hence we cannot build the Mac bundle resources here and
+          # the action is duplicated in chrome_dll.gypi.
+          'target_name': 'packed_extra_resources',
+          'type': 'none',
+          'variables': {
+            'repack_path': '../tools/data_pack/repack.py',
+          },
+          'dependencies': [
+            'chrome_extra_resources',
+          ],
+          'actions': [
+            {
+              'action_name': 'repack_resources',
+              'variables': {
+                'pak_inputs': [
+                  '<(grit_out_dir)/bookmark_manager_resources.pak',
+                  '<(grit_out_dir)/net_internals_resources.pak',
+                  '<(grit_out_dir)/shared_resources.pak',
+                ],
+              },
+              'inputs': [
+                '<(repack_path)',
+                '<@(pak_inputs)',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/resources.pak',
+              ],
+              'action': ['python', '<(repack_path)', '<@(_outputs)',
+                         '<@(pak_inputs)'],
+            },
+          ]
+        }
       ],
     },],  # OS!="mac"
     ['OS=="linux"',
@@ -1347,7 +1503,6 @@
           'type': 'none',
           'dependencies': [
             'installer/mini_installer.gyp:*',
-            'installer/installer.gyp:*',
             '../app/app.gyp:*',
             '../base/base.gyp:*',
             '../chrome_frame/chrome_frame.gyp:*',
@@ -1367,13 +1522,14 @@
             '../third_party/icu/icu.gyp:*',
             '../third_party/libjpeg/libjpeg.gyp:*',
             '../third_party/libpng/libpng.gyp:*',
-            '../third_party/libxml/libxml.gyp:*',
             '../third_party/libxslt/libxslt.gyp:*',
             '../third_party/lzma_sdk/lzma_sdk.gyp:*',
             '../third_party/modp_b64/modp_b64.gyp:*',
             '../third_party/npapi/npapi.gyp:*',
+            '../third_party/ppapi/ppapi.gyp:*',
             '../third_party/sqlite/sqlite.gyp:*',
             '../third_party/zlib/zlib.gyp:*',
+            '../webkit/support/webkit_support.gyp:*',
             '../webkit/webkit.gyp:*',
 
             '../build/temp_gyp/googleurl.gyp:*',
@@ -1448,10 +1604,57 @@
           ],
         },
         {
+          'target_name': 'chrome_version_header',
+          'type': 'none',
+          'dependencies': [
+            '../build/util/build_util.gyp:lastchange',
+          ],
+          'actions': [
+            {
+              'action_name': 'version_header',
+              'variables': {
+                'lastchange_path':
+                  '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
+              },
+              'conditions': [
+                [ 'branding == "Chrome"', {
+                  'variables': {
+                     'branding_path': 'app/theme/google_chrome/BRANDING',
+                  },
+                }, { # else branding!="Chrome"
+                  'variables': {
+                     'branding_path': 'app/theme/chromium/BRANDING',
+                  },
+                }],
+              ],
+              'inputs': [
+                '<(version_path)',
+                '<(branding_path)',
+                '<(lastchange_path)',
+                'version.h.in',
+              ],
+              'outputs': [
+                '<(SHARED_INTERMEDIATE_DIR)/version.h',
+              ],
+              'action': [
+                'python',
+                '<(version_py_path)',
+                '-f', '<(version_path)',
+                '-f', '<(branding_path)',
+                '-f', '<(lastchange_path)',
+                'version.h.in',
+                '<@(_outputs)',
+              ],
+              'message': 'Generating version header file: <@(_outputs)',
+            },
+          ],
+        },
+        {
           'target_name': 'automation',
           'type': '<(library)',
           'msvs_guid': '1556EF78-C7E6-43C8-951F-F6B43AC0DD12',
           'dependencies': [
+            'chrome_version_info',
             'theme_resources',
             '../skia/skia.gyp:skia',
             '../testing/gtest.gyp:gtest',
@@ -1471,8 +1674,12 @@
              'test/automation/automation_proxy.h',
              'test/automation/browser_proxy.cc',
              'test/automation/browser_proxy.h',
+             'test/automation/dom_element_proxy.cc',
+             'test/automation/dom_element_proxy.h',
              'test/automation/extension_proxy.cc',
              'test/automation/extension_proxy.h',
+             'test/automation/javascript_execution_controller.cc',
+             'test/automation/javascript_execution_controller.h',
              'test/automation/tab_proxy.cc',
              'test/automation/tab_proxy.h',
              'test/automation/window_proxy.cc',
@@ -1485,7 +1692,7 @@
           'msvs_guid': '89C1C190-A5D1-4EC4-BD6A-67FF2195C7CC',
           'dependencies': [
             'common_constants',
-            'installer/installer.gyp:installer_util',
+            'installer_util',
             '../base/base.gyp:base',
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../breakpad/breakpad.gyp:breakpad_sender',
@@ -1566,6 +1773,7 @@
               'pak_inputs': [
                 '<(grit_out_dir)/browser_resources.pak',
                 '<(grit_out_dir)/common_resources.pak',
+                '<(grit_out_dir)/default_plugin_resources/default_plugin_resources.pak',
                 '<(grit_out_dir)/renderer_resources.pak',
                 '<(grit_out_dir)/theme_resources.pak',
                 '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.pak',

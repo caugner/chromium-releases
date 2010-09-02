@@ -12,12 +12,13 @@
 #include "app/clipboard/clipboard.h"
 #include "app/clipboard/scoped_clipboard_writer.h"
 #include "app/l10n_util.h"
+#include "base/gtk_util.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
-#include "chrome/browser/autocomplete/autocomplete_popup_view_gtk.h"
+#include "chrome/browser/bookmarks/bookmark_drag_data.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/defaults.h"
@@ -28,24 +29,31 @@
 #include "chrome/common/notification_service.h"
 #include "gfx/font.h"
 #include "gfx/gtk_util.h"
+#include "gfx/skia_utils_gtk.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 
 #if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/views/location_bar_view.h"
+#include "chrome/browser/views/autocomplete/autocomplete_popup_contents_view.h"
+#include "chrome/browser/views/location_bar/location_bar_view.h"
 #else
+#include "chrome/browser/autocomplete/autocomplete_popup_view_gtk.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
 #include "chrome/browser/gtk/location_bar_view_gtk.h"
 #endif
 
+using gfx::SkColorToGdkColor;
+
 namespace {
 
-const char kTextBaseColor[] = "#808080";
-const char kSecureSchemeColor[] = "#009614";
-const char kInsecureSchemeColor[] = "#c80000";
+const gchar* kAutocompleteEditViewGtkKey = "__ACE_VIEW_GTK__";
 
-const double kStrikethroughStrokeRed = 210.0 / 256.0;
+const char kTextBaseColor[] = "#808080";
+const char kSecureSchemeColor[] = "#079500";
+const char kSecurityErrorSchemeColor[] = "#a20000";
+
+const double kStrikethroughStrokeRed = 162.0 / 256.0;
 const double kStrikethroughStrokeWidth = 2.0;
 
 size_t GetUTF8Offset(const std::wstring& wide_text, size_t wide_text_offset) {
@@ -104,6 +112,26 @@ void SetEntryStyle() {
       "style \"chrome-location-bar-entry\"");
 }
 
+// Copied from GTK+. Called when we lose the primary selection. This will clear
+// the selection in the text buffer.
+void ClipboardSelectionCleared(GtkClipboard* clipboard,
+                               gpointer data) {
+  GtkTextIter insert;
+  GtkTextIter selection_bound;
+  GtkTextBuffer* buffer = GTK_TEXT_BUFFER(data);
+
+  gtk_text_buffer_get_iter_at_mark(buffer, &insert,
+                                   gtk_text_buffer_get_insert(buffer));
+  gtk_text_buffer_get_iter_at_mark(buffer, &selection_bound,
+                                   gtk_text_buffer_get_selection_bound(buffer));
+
+  if (!gtk_text_iter_equal(&insert, &selection_bound)) {
+    gtk_text_buffer_move_mark(buffer,
+                              gtk_text_buffer_get_selection_bound(buffer),
+                              &insert);
+  }
+}
+
 }  // namespace
 
 AutocompleteEditViewGtk::AutocompleteEditViewGtk(
@@ -112,23 +140,30 @@ AutocompleteEditViewGtk::AutocompleteEditViewGtk(
     Profile* profile,
     CommandUpdater* command_updater,
     bool popup_window_mode,
-    const BubblePositioner* bubble_positioner)
+#if defined(TOOLKIT_VIEWS)
+    const views::View* location_bar)
+#else
+    GtkWidget* location_bar)
+#endif
     : text_view_(NULL),
       tag_table_(NULL),
       text_buffer_(NULL),
       faded_text_tag_(NULL),
       secure_scheme_tag_(NULL),
-      insecure_scheme_tag_(NULL),
+      security_error_scheme_tag_(NULL),
       model_(new AutocompleteEditModel(this, controller, profile)),
-      popup_view_(AutocompletePopupView::CreatePopupView(gfx::Font(), this,
-                                                         model_.get(),
-                                                         profile,
-                                                         bubble_positioner)),
+#if defined(TOOLKIT_VIEWS)
+      popup_view_(new AutocompletePopupContentsView(
+          gfx::Font(), this, model_.get(), profile, location_bar)),
+#else
+      popup_view_(new AutocompletePopupViewGtk(this, model_.get(), profile,
+                                               location_bar)),
+#endif
       controller_(controller),
       toolbar_model_(toolbar_model),
       command_updater_(command_updater),
       popup_window_mode_(popup_window_mode),
-      scheme_security_level_(ToolbarModel::NORMAL),
+      security_level_(ToolbarModel::NONE),
       mark_set_handler_id_(0),
 #if defined(OS_CHROMEOS)
       button_1_pressed_(false),
@@ -181,15 +216,10 @@ void AutocompleteEditViewGtk::Init() {
   // the other objects adds a reference; it doesn't adopt them.
   tag_table_ = gtk_text_tag_table_new();
   text_buffer_ = gtk_text_buffer_new(tag_table_);
+  g_object_set_data(G_OBJECT(text_buffer_), kAutocompleteEditViewGtkKey, this);
   text_view_ = gtk_text_view_new_with_buffer(text_buffer_);
   if (popup_window_mode_)
     gtk_text_view_set_editable(GTK_TEXT_VIEW(text_view_), false);
-
-  // Until we switch to vector graphics, force the font size.
-  gtk_util::ForceFontSizePixels(text_view_,
-      popup_window_mode_ ?
-      browser_defaults::kAutocompleteEditFontPixelSizeInPopup :
-      browser_defaults::kAutocompleteEditFontPixelSize);
 
   // One pixel left margin is necessary to make the cursor visible when UI
   // language direction is LTR but |text_buffer_|'s content direction is RTL.
@@ -211,8 +241,8 @@ void AutocompleteEditViewGtk::Init() {
       NULL, "foreground", kTextBaseColor, NULL);
   secure_scheme_tag_ = gtk_text_buffer_create_tag(text_buffer_,
       NULL, "foreground", kSecureSchemeColor, NULL);
-  insecure_scheme_tag_ = gtk_text_buffer_create_tag(text_buffer_,
-      NULL, "foreground", kInsecureSchemeColor, NULL);
+  security_error_scheme_tag_ = gtk_text_buffer_create_tag(text_buffer_,
+      NULL, "foreground", kSecurityErrorSchemeColor, NULL);
   normal_text_tag_ = gtk_text_buffer_create_tag(text_buffer_,
       NULL, "foreground", "#000000", NULL);
 
@@ -254,14 +284,16 @@ void AutocompleteEditViewGtk::Init() {
                    G_CALLBACK(&HandlePopulatePopupThunk), this);
   mark_set_handler_id_ = g_signal_connect(
       text_buffer_, "mark-set", G_CALLBACK(&HandleMarkSetThunk), this);
+  mark_set_handler_id2_ = g_signal_connect_after(
+      text_buffer_, "mark-set", G_CALLBACK(&HandleMarkSetAfterThunk), this);
   g_signal_connect(text_view_, "drag-data-received",
                    G_CALLBACK(&HandleDragDataReceivedThunk), this);
   g_signal_connect(text_view_, "backspace",
                    G_CALLBACK(&HandleBackSpaceThunk), this);
   g_signal_connect(text_view_, "copy-clipboard",
-                   G_CALLBACK(&HandleCopyOrCutClipboardThunk), this);
+                   G_CALLBACK(&HandleCopyClipboardThunk), this);
   g_signal_connect(text_view_, "cut-clipboard",
-                   G_CALLBACK(&HandleCopyOrCutClipboardThunk), this);
+                   G_CALLBACK(&HandleCutClipboardThunk), this);
   g_signal_connect(text_view_, "paste-clipboard",
                    G_CALLBACK(&HandlePasteClipboardThunk), this);
   g_signal_connect_after(text_view_, "expose-event",
@@ -280,7 +312,7 @@ void AutocompleteEditViewGtk::Init() {
   SetBaseColor();
 #endif
 
-  ViewIDUtil::SetID(widget(), VIEW_ID_AUTOCOMPLETE);
+  ViewIDUtil::SetID(GetNativeView(), VIEW_ID_AUTOCOMPLETE);
 }
 
 void AutocompleteEditViewGtk::SetFocus() {
@@ -314,9 +346,8 @@ void AutocompleteEditViewGtk::SaveStateToTab(TabContents* tab) {
   DCHECK(tab);
   // If any text has been selected, register it as the PRIMARY selection so it
   // can still be pasted via middle-click after the text view is cleared.
-  if (!selected_text_.empty()) {
+  if (!selected_text_.empty())
     SavePrimarySelection(selected_text_);
-  }
   // NOTE: GetStateForTabSwitch may affect GetSelection, so order is important.
   AutocompleteEditModel::State model_state = model_->GetStateForTabSwitch();
   GetStateAccessor()->SetProperty(
@@ -330,15 +361,9 @@ void AutocompleteEditViewGtk::Update(const TabContents* contents) {
       model_->UpdatePermanentText(toolbar_model_->GetText());
 
   ToolbarModel::SecurityLevel security_level =
-        toolbar_model_->GetSchemeSecurityLevel();
-  bool changed_security_level = (security_level != scheme_security_level_);
-  scheme_security_level_ = security_level;
-
-  // TODO(deanm): This doesn't exactly match Windows.  There there is a member
-  // background_color_.  I think we can get away with just the level though.
-  if (changed_security_level) {
-    SetBaseColor();
-  }
+        toolbar_model_->GetSecurityLevel();
+  bool changed_security_level = (security_level != security_level_);
+  security_level_ = security_level;
 
   if (contents) {
     selected_text_.clear();
@@ -371,12 +396,8 @@ void AutocompleteEditViewGtk::OpenURL(const GURL& url,
   if (!url.is_valid())
     return;
 
-  model_->SendOpenNotification(selected_line, keyword);
-
-  if (disposition != NEW_BACKGROUND_TAB)
-    RevertAll();  // Revert the box to its unedited state.
-  controller_->OnAutocompleteAccept(url, disposition, transition,
-                                    alternate_nav_url);
+  model_->OpenURL(url, disposition, transition, alternate_nav_url,
+                  selected_line, keyword);
 }
 
 std::wstring AutocompleteEditViewGtk::GetText() const {
@@ -386,6 +407,17 @@ std::wstring AutocompleteEditViewGtk::GetText() const {
   std::wstring out(UTF8ToWide(utf8));
   g_free(utf8);
   return out;
+}
+
+bool AutocompleteEditViewGtk::IsEditingOrEmpty() const {
+  return model_->user_input_in_progress() ||
+      (gtk_text_buffer_get_char_count(text_buffer_) == 0);
+}
+
+int AutocompleteEditViewGtk::GetIcon() const {
+  return IsEditingOrEmpty() ?
+      AutocompleteMatch::TypeToIcon(model_->CurrentTextType()) :
+      toolbar_model_->GetIcon();
 }
 
 void AutocompleteEditViewGtk::SetUserText(const std::wstring& text,
@@ -578,11 +610,15 @@ void AutocompleteEditViewGtk::SetBaseColor() {
   bool use_gtk = theme_provider_->UseGtkTheme();
 #endif
 
-  // If we're on a secure connection, ignore what the theme wants us to do
-  // and use a yellow background.
-  bool is_secure = (scheme_security_level_ == ToolbarModel::SECURE);
-  if (use_gtk && !is_secure) {
+  if (use_gtk) {
+    gtk_widget_modify_cursor(text_view_, NULL, NULL);
     gtk_widget_modify_base(text_view_, GTK_STATE_NORMAL, NULL);
+    gtk_widget_modify_base(text_view_, GTK_STATE_SELECTED, NULL);
+    gtk_widget_modify_text(text_view_, GTK_STATE_SELECTED, NULL);
+    gtk_widget_modify_base(text_view_, GTK_STATE_ACTIVE, NULL);
+    gtk_widget_modify_text(text_view_, GTK_STATE_ACTIVE, NULL);
+
+    gtk_util::UndoForceFontSize(text_view_);
 
     // Grab the text colors out of the style and set our tags to use them.
     GtkStyle* style = gtk_rc_get_style(text_view_);
@@ -592,20 +628,44 @@ void AutocompleteEditViewGtk::SetBaseColor() {
     GdkColor average_color = gtk_util::AverageColors(
         style->text[GTK_STATE_NORMAL], style->base[GTK_STATE_NORMAL]);
 
-    g_object_set(faded_text_tag_, "foreground-gdk",
-                 &average_color, NULL);
+    g_object_set(faded_text_tag_, "foreground-gdk", &average_color, NULL);
     g_object_set(normal_text_tag_, "foreground-gdk",
                  &style->text[GTK_STATE_NORMAL], NULL);
   } else {
+    const GdkColor* background_color_ptr;
 #if defined(TOOLKIT_VIEWS)
     const GdkColor background_color = gfx::SkColorToGdkColor(
-        LocationBarView::GetColor(is_secure, LocationBarView::BACKGROUND));
-    gtk_widget_modify_base(text_view_, GTK_STATE_NORMAL,
-        &background_color);
+        LocationBarView::GetColor(ToolbarModel::NONE,
+                                  LocationBarView::BACKGROUND));
+    background_color_ptr = &background_color;
 #else
-    gtk_widget_modify_base(text_view_, GTK_STATE_NORMAL,
-        &LocationBarViewGtk::kBackgroundColorByLevel[scheme_security_level_]);
+    background_color_ptr = &LocationBarViewGtk::kBackgroundColor;
 #endif
+    gtk_widget_modify_cursor(text_view_, &gfx::kGdkBlack, &gfx::kGdkGray);
+    gtk_widget_modify_base(text_view_, GTK_STATE_NORMAL, background_color_ptr);
+
+#if !defined(TOOLKIT_VIEWS)
+    // Override the selected colors so we don't leak colors from the current
+    // gtk theme into the chrome-theme.
+    GdkColor c;
+    c = SkColorToGdkColor(theme_provider_->get_active_selection_bg_color());
+    gtk_widget_modify_base(text_view_, GTK_STATE_SELECTED, &c);
+
+    c = SkColorToGdkColor(theme_provider_->get_active_selection_fg_color());
+    gtk_widget_modify_text(text_view_, GTK_STATE_SELECTED, &c);
+
+    c = SkColorToGdkColor(theme_provider_->get_inactive_selection_bg_color());
+    gtk_widget_modify_base(text_view_, GTK_STATE_ACTIVE, &c);
+
+    c = SkColorToGdkColor(theme_provider_->get_inactive_selection_fg_color());
+    gtk_widget_modify_text(text_view_, GTK_STATE_ACTIVE, &c);
+#endif
+
+    // Until we switch to vector graphics, force the font size.
+    gtk_util::ForceFontSizePixels(text_view_,
+        popup_window_mode_ ?
+        browser_defaults::kAutocompleteEditFontPixelSizeInPopup :
+        browser_defaults::kAutocompleteEditFontPixelSize);
 
     g_object_set(faded_text_tag_, "foreground", kTextBaseColor, NULL);
     g_object_set(normal_text_tag_, "foreground", "#000000", NULL);
@@ -981,15 +1041,7 @@ void AutocompleteEditViewGtk::HandleMarkSet(GtkTextBuffer* buffer,
   }
 
   // Get the currently-selected text, if there is any.
-  std::string new_selected_text;
-  GtkTextIter start, end;
-  if (gtk_text_buffer_get_selection_bounds(text_buffer_, &start, &end)) {
-    gchar* text = gtk_text_iter_get_text(&start, &end);
-    size_t text_len = strlen(text);
-    if (text_len)
-      new_selected_text = std::string(text, text_len);
-    g_free(text);
-  }
+  std::string new_selected_text = GetSelectedText();
 
 #if defined(OS_CHROMEOS)
   // If the user just selected some text with the mouse (or at least while the
@@ -1015,6 +1067,14 @@ void AutocompleteEditViewGtk::HandleMarkSet(GtkTextBuffer* buffer,
   }
 
   selected_text_ = new_selected_text;
+}
+
+// Override the primary selection the text buffer has set. This has to happen
+// after the default handler for the "mark-set" signal.
+void AutocompleteEditViewGtk::HandleMarkSetAfter(GtkTextBuffer* buffer,
+                                                 GtkTextIter* location,
+                                                 GtkTextMark* mark) {
+  UpdatePrimarySelectionIfValidURL();
 }
 
 // Just use the default behavior for DnD, except if the drop can be a PasteAndGo
@@ -1125,7 +1185,15 @@ void AutocompleteEditViewGtk::HandleViewMoveFocus(GtkWidget* widget,
   // Propagate the signal so that focus can be moved as normal.
 }
 
-void AutocompleteEditViewGtk::HandleCopyOrCutClipboard(GtkWidget* sender) {
+void AutocompleteEditViewGtk::HandleCopyClipboard(GtkWidget* sender) {
+  HandleCopyOrCutClipboard(true);
+}
+
+void AutocompleteEditViewGtk::HandleCutClipboard(GtkWidget* sender) {
+  HandleCopyOrCutClipboard(false);
+}
+
+void AutocompleteEditViewGtk::HandleCopyOrCutClipboard(bool copy) {
   // On copy or cut, we manually update the PRIMARY selection to contain the
   // highlighted text.  This matches Firefox -- we highlight the URL but don't
   // update PRIMARY on Ctrl-L, so Ctrl-L, Ctrl-C and then middle-click is a
@@ -1138,50 +1206,53 @@ void AutocompleteEditViewGtk::HandleCopyOrCutClipboard(GtkWidget* sender) {
   if (!clipboard)
     return;
 
+  CharRange selection = GetSelection();
   GURL url;
-  if (IsSelectAll() && model_->GetURLForText(GetText(), &url)) {
-    // If the whole control is selected and the selected text is a valid URL,
-    // we assume the user is trying to copy a URL and write this to the
-    // clipboard as a hyperlink.
-    ScopedClipboardWriter scw(g_browser_process->clipboard());
-    string16 text16(WideToUTF16(GetText()));
-    string16 url_spec16(UTF8ToUTF16(url.spec()));
-    if (!model_->user_input_in_progress() &&
-        (url.SchemeIs("http") || url.SchemeIs("https"))) {
-      // If the scheme is http or https and the user isn't editing,
-      // we should copy the true URL instead of the (unescaped) display
-      // string to avoid encoding and escaping issues when pasting this text
-      // elsewhere.
-      scw.WriteText(url_spec16);
-    } else {
-      scw.WriteText(text16);
-    }
+  std::wstring text(UTF8ToWide(GetSelectedText()));
+  bool write_url;
+  model_->AdjustTextForCopy(selection.selection_min(), IsSelectAll(), &text,
+                            &url, &write_url);
 
-    scw.WriteHyperlink(EscapeForHTML(text16), url.spec());
-
-    // Update PRIMARY selection if it is not owned by the text_buffer.
-    if (gtk_clipboard_get_owner(clipboard) != G_OBJECT(text_buffer_)) {
-      std::string utf8_text(UTF16ToUTF8(text16));
-      gtk_clipboard_set_text(clipboard, utf8_text.c_str(), utf8_text.length());
-    }
+  if (write_url) {
+    string16 text16(WideToUTF16(text));
+    BookmarkDragData data;
+    data.ReadFromTuple(url, text16);
+    data.WriteToClipboard(NULL);
 
     // Stop propagating the signal.
-    static guint signal_id =
+    static guint copy_signal_id =
         g_signal_lookup("copy-clipboard", GTK_TYPE_TEXT_VIEW);
-    g_signal_stop_emission(text_view_, signal_id, 0);
-    return;
+    static guint cut_signal_id =
+        g_signal_lookup("cut-clipboard", GTK_TYPE_TEXT_VIEW);
+    g_signal_stop_emission(text_view_,
+                           copy ? copy_signal_id : cut_signal_id,
+                           0);
+
+    if (!copy)
+      gtk_text_buffer_delete_selection(text_buffer_, true, true);
   }
 
-  // Passing gtk_text_buffer_copy_clipboard() a text buffer that already owns
-  // the clipboard that's being updated clears the highlighted text, which we
-  // don't want to do (and it also appears to at least sometimes trigger a
-  // failed G_IS_OBJECT() assertion).
-  if (gtk_clipboard_get_owner(clipboard) == G_OBJECT(text_buffer_))
-    return;
+  OwnPrimarySelection(WideToUTF8(text));
+}
 
-  // We can't just call SavePrimarySelection(); that makes the text view lose
-  // the selection and unhighlight its text.
-  gtk_text_buffer_copy_clipboard(text_buffer_, clipboard);
+void AutocompleteEditViewGtk::OwnPrimarySelection(const std::string& text) {
+  primary_selection_text_ = text;
+
+  GtkTargetList* list = gtk_target_list_new(NULL, 0);
+  gtk_target_list_add_text_targets(list, 0);
+  gint len;
+  GtkTargetEntry* entries = gtk_target_table_new_from_list(list, &len);
+
+  // When |text_buffer_| is destroyed, it will clear the clipboard, hence
+  // we needn't worry about calling gtk_clipboard_clear().
+  gtk_clipboard_set_with_owner(gtk_clipboard_get(GDK_SELECTION_PRIMARY),
+                               entries, len,
+                               ClipboardGetSelectionThunk,
+                               ClipboardSelectionCleared,
+                               G_OBJECT(text_buffer_));
+
+  gtk_target_list_unref(list);
+  gtk_target_table_free(entries, len);
 }
 
 void AutocompleteEditViewGtk::HandlePasteClipboard(GtkWidget* sender) {
@@ -1269,6 +1340,7 @@ void AutocompleteEditViewGtk::StartUpdatingHighlightedText() {
       gtk_text_buffer_remove_selection_clipboard(text_buffer_, clipboard);
   }
   g_signal_handler_block(text_buffer_, mark_set_handler_id_);
+  g_signal_handler_block(text_buffer_, mark_set_handler_id2_);
 }
 
 void AutocompleteEditViewGtk::FinishUpdatingHighlightedText() {
@@ -1280,6 +1352,7 @@ void AutocompleteEditViewGtk::FinishUpdatingHighlightedText() {
       gtk_text_buffer_add_selection_clipboard(text_buffer_, clipboard);
   }
   g_signal_handler_unblock(text_buffer_, mark_set_handler_id_);
+  g_signal_handler_unblock(text_buffer_, mark_set_handler_id2_);
 }
 
 AutocompleteEditViewGtk::CharRange AutocompleteEditViewGtk::GetSelection() {
@@ -1349,22 +1422,23 @@ void AutocompleteEditViewGtk::EmphasizeURLComponents() {
   strikethrough_ = CharRange();
   // Emphasize the scheme for security UI display purposes (if necessary).
   if (!model_->user_input_in_progress() && scheme.is_nonempty() &&
-      (scheme_security_level_ != ToolbarModel::NORMAL)) {
+      (security_level_ != ToolbarModel::NONE)) {
     CharRange scheme_range = CharRange(GetUTF8Offset(text, scheme.begin),
                                        GetUTF8Offset(text, scheme.end()));
     ItersFromCharRange(scheme_range, &start, &end);
 
-    if (scheme_security_level_ == ToolbarModel::SECURE) {
-      gtk_text_buffer_apply_tag(text_buffer_, secure_scheme_tag_,
-                                &start, &end);
-    } else {
+    if (security_level_ == ToolbarModel::SECURITY_ERROR) {
       strikethrough_ = scheme_range;
       // When we draw the strikethrough, we don't want to include the ':' at the
       // end of the scheme.
       strikethrough_.cp_max--;
 
-      gtk_text_buffer_apply_tag(text_buffer_, insecure_scheme_tag_,
+      gtk_text_buffer_apply_tag(text_buffer_, security_error_scheme_tag_,
                                 &start, &end);
+    } else if (security_level_ == ToolbarModel::SECURITY_WARNING) {
+      gtk_text_buffer_apply_tag(text_buffer_, faded_text_tag_, &start, &end);
+    } else {
+      gtk_text_buffer_apply_tag(text_buffer_, secure_scheme_tag_, &start, &end);
     }
   }
 }
@@ -1443,4 +1517,55 @@ void AutocompleteEditViewGtk::HandleWidgetDirectionChanged(
 
 void AutocompleteEditViewGtk::HandleKeymapDirectionChanged(GdkKeymap* sender) {
   AdjustTextJustification();
+}
+
+// static
+void AutocompleteEditViewGtk::ClipboardGetSelectionThunk(
+    GtkClipboard* clipboard,
+    GtkSelectionData* selection_data,
+    guint info,
+    gpointer object) {
+  AutocompleteEditViewGtk* edit_view =
+      reinterpret_cast<AutocompleteEditViewGtk*>(
+          g_object_get_data(G_OBJECT(object), kAutocompleteEditViewGtkKey));
+  edit_view->ClipboardGetSelection(clipboard, selection_data, info);
+}
+
+void AutocompleteEditViewGtk::ClipboardGetSelection(
+    GtkClipboard* clipboard,
+    GtkSelectionData* selection_data,
+    guint info) {
+  gtk_selection_data_set_text(selection_data, primary_selection_text_.c_str(),
+                              primary_selection_text_.size());
+}
+
+std::string AutocompleteEditViewGtk::GetSelectedText() const {
+  GtkTextIter start, end;
+  std::string result;
+  if (gtk_text_buffer_get_selection_bounds(text_buffer_, &start, &end)) {
+    gchar* text = gtk_text_iter_get_text(&start, &end);
+    size_t text_len = strlen(text);
+    if (text_len)
+      result = std::string(text, text_len);
+    g_free(text);
+  }
+  return result;
+}
+
+void AutocompleteEditViewGtk::UpdatePrimarySelectionIfValidURL() {
+  std::wstring text = UTF8ToWide(GetSelectedText());
+
+  if (text.empty())
+    return;
+
+  // Use AdjustTextForCopy to make sure we prefix the text with 'http://'.
+  CharRange selection = GetSelection();
+  GURL url;
+  bool write_url;
+  model_->AdjustTextForCopy(selection.selection_min(), IsSelectAll(), &text,
+                            &url, &write_url);
+  if (write_url) {
+    selected_text_ = WideToUTF8(text);
+    OwnPrimarySelection(selected_text_);
+  }
 }

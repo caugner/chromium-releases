@@ -32,18 +32,15 @@ static const int kMaxNumAttemptsToFindUniqueLabel = 100;
 AutofillModelAssociator::AutofillModelAssociator(
     ProfileSyncService* sync_service,
     WebDatabase* web_database,
-    PersonalDataManager* personal_data,
-    UnrecoverableErrorHandler* error_handler)
+    PersonalDataManager* personal_data)
     : sync_service_(sync_service),
       web_database_(web_database),
       personal_data_(personal_data),
-      error_handler_(error_handler),
       autofill_node_id_(sync_api::kInvalidId),
       abort_association_pending_(false) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
   DCHECK(sync_service_);
   DCHECK(web_database_);
-  DCHECK(error_handler_);
   DCHECK(personal_data_);
 }
 
@@ -380,13 +377,6 @@ bool AutofillModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
   // The sync model has user created nodes if the autofill folder has any
   // children.
   *has_nodes = sync_api::kInvalidId != autofill_node.GetFirstChildId();
-  return true;
-}
-
-bool AutofillModelAssociator::ChromeModelHasUserCreatedNodes(bool* has_nodes) {
-  DCHECK(has_nodes);
-  // Assume the autofill model always have user-created nodes.
-  *has_nodes = true;
   return true;
 }
 

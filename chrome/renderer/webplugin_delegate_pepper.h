@@ -56,7 +56,7 @@ class WebPluginDelegatePepper : public webkit_glue::WebPluginDelegate,
                               const gfx::Rect& clip_rect);
   virtual void Paint(WebKit::WebCanvas* canvas, const gfx::Rect& rect);
   virtual void Print(gfx::NativeDrawingContext context);
-  virtual void SetFocus();
+  virtual void SetFocus(bool focused);
   virtual bool HandleInputEvent(const WebKit::WebInputEvent& event,
                                 WebKit::WebCursorInfo* cursor);
   virtual NPObject* GetPluginScriptableObject();
@@ -80,19 +80,24 @@ class WebPluginDelegatePepper : public webkit_glue::WebPluginDelegate,
       unsigned long resource_id, const GURL& url, int notify_id);
   virtual webkit_glue::WebPluginResourceClient* CreateSeekableResourceClient(
       unsigned long resource_id, int range_request_id);
-  virtual bool SupportsFind();
-  virtual void StartFind(const std::string& search_text,
+  virtual bool StartFind(const string16& search_text,
                          bool case_sensitive,
                          int identifier);
   virtual void SelectFindResult(bool forward);
   virtual void StopFind();
   virtual void NumberOfFindResultsChanged(int total, bool final_result);
   virtual void SelectedFindResultChanged(int index);
-  virtual void Zoom(int factor);
   virtual bool ChooseFile(const char* mime_types,
                           int mode,
                           NPChooseFileCallback callback,
                           void* user_data);
+  virtual NPWidgetExtensions* GetWidgetExtensions();
+  virtual bool SetCursor(NPCursorType type);
+  virtual NPFontExtensions* GetFontExtensions();
+  virtual void SetZoomFactor(float scale, bool text_only);
+  virtual bool HasSelection() const;
+  virtual string16 GetSelectionAsText() const;
+  virtual string16 GetSelectionAsMarkup() const;
 
   // WebPlugin2DDeviceDelegate implementation.
   virtual NPError Device2DQueryCapability(int32 capability, int32* value);
@@ -112,11 +117,6 @@ class WebPluginDelegatePepper : public webkit_glue::WebPluginDelegate,
                                        NPDeviceFlushContextCallbackPtr callback,
                                        void* user_data);
   virtual NPError Device2DDestroyContext(NPDeviceContext2D* context);
-  virtual NPError Device2DThemeGetSize(NPThemeItem item,
-                                       int* width,
-                                       int* height);
-  virtual NPError Device2DThemePaint(NPDeviceContext2D* context,
-                                     NPThemeParams* params);
 
   // WebPlugin3DDeviceDelegate implementation.
   virtual NPError Device3DQueryCapability(int32 capability, int32* value);
@@ -144,6 +144,26 @@ class WebPluginDelegatePepper : public webkit_glue::WebPluginDelegate,
   virtual NPError Device3DMapBuffer(NPDeviceContext3D* context,
                                     int32 id,
                                     NPDeviceBuffer* buffer);
+  virtual NPError Device3DGetNumConfigs(int32* num_configs);
+  virtual NPError Device3DGetConfigAttribs(int32 config,
+                                           int32* attrib_list);
+  virtual NPError Device3DCreateContext(int32 config,
+                                        const int32* attrib_list,
+                                        NPDeviceContext3D** context);
+  virtual NPError Device3DRegisterCallback(
+      NPP id,
+      NPDeviceContext3D* context,
+      int32 callback_type,
+      NPDeviceGenericCallbackPtr callback,
+      void* callback_data);
+  virtual NPError Device3DSynchronizeContext(
+      NPP id,
+      NPDeviceContext3D* context,
+      NPDeviceSynchronizationMode mode,
+      const int32* input_attrib_list,
+      int32* output_attrib_list,
+      NPDeviceSynchronizeContextCallbackPtr callback,
+      void* callback_data);
 
   // WebPluginAudioDeviceDelegate implementation.
   virtual NPError DeviceAudioQueryCapability(int32 capability, int32* value);
@@ -180,6 +200,8 @@ class WebPluginDelegatePepper : public webkit_glue::WebPluginDelegate,
   void RenderViewInitiatedPaint();
   void RenderViewFlushedPaint();
 
+  Graphics2DDeviceContext* GetGraphicsContext(NPDeviceContext2D* context);
+
  private:
   WebPluginDelegatePepper(
       const base::WeakPtr<RenderView>& render_view,
@@ -203,6 +225,8 @@ class WebPluginDelegatePepper : public webkit_glue::WebPluginDelegate,
   bool CalculatePrintedPageDimensions(int page_number,
                                       NPPPrintExtensions* print_extensions,
                                       gfx::Size* page_dimensions);
+  bool VectorPrintPage(int page_number, WebKit::WebCanvas* canvas);
+
   NPPPrintExtensions* GetPrintExtensions();
 
   NPPFindExtensions* GetFindExtensions();
@@ -214,6 +238,12 @@ class WebPluginDelegatePepper : public webkit_glue::WebPluginDelegate,
                             const gfx::Rect& printable_area,
                             WebKit::WebCanvas* canvas);
 #endif  // OS_WIN
+#if defined(OS_MACOSX)
+  // Draws the given kARGB_8888_Config bitmap to the specified canvas starting
+  // at the specified destination rect.
+  void DrawSkBitmapToCanvas(const SkBitmap& bitmap, WebKit::WebCanvas* canvas,
+                            const gfx::Rect& dest_rect, int canvas_height);
+#endif  // OS_MACOSX
 
 #if defined(ENABLE_GPU)
 
@@ -236,6 +266,9 @@ class WebPluginDelegatePepper : public webkit_glue::WebPluginDelegate,
   void SendNestedDelegateGeometryToBrowser(const gfx::Rect& window_rect,
                                            const gfx::Rect& clip_rect);
 
+  // Returns the selection.  If nothing is selected, returns an empty string.
+  // If html is true, it will return a string only if html data is available.
+  string16 GetSelectedText(bool html) const;
 
   base::WeakPtr<RenderView> render_view_;
 
@@ -265,6 +298,25 @@ class WebPluginDelegatePepper : public webkit_glue::WebPluginDelegate,
   // we need to stretch the printed raster bitmap to these dimensions. It is
   // cleared in PrintEnd.
   gfx::Rect current_printable_area_;
+  int current_printer_dpi_;
+#if defined(OS_MACOSX)
+  // On the Mac, when we draw the bitmap to the PDFContext, it seems necessary
+  // to keep the pixels valid until CGContextEndPage is called. We use this
+  // variable to hold on to the pixels.
+  SkBitmap last_printed_page_;
+#endif   // defined(OS_MACOSX)
+#if defined (OS_LINUX)
+  // On Linux, we always send all pages from the renderer to the browser.
+  // So, if the plugin supports printPagesAsPDF we print the entire output
+  // in one shot in the first call to PrintPage.
+  // (This is a temporary hack until we change the WebFrame and WebPlugin print
+  // interfaces).
+  // Specifies the total number of pages to be printed. It it set in PrintBegin.
+  int32 num_pages_;
+  // Specifies whether we have already output all pages. This is used to ignore
+  // subsequent PrintPage requests.
+  bool pdf_output_done_;
+#endif   // defined(OS_LINUX)
 
 #if defined(ENABLE_GPU)
   // The command buffer used to issue commands to the nested GPU plugin.
@@ -281,6 +333,8 @@ class WebPluginDelegatePepper : public webkit_glue::WebPluginDelegate,
   // pointer to the callback specified by the plugin. Will be NULL otherwise.
   NPChooseFileCallback current_choose_file_callback_;
   void* current_choose_file_user_data_;
+
+  scoped_ptr<WebKit::WebCursorInfo> cursor_;
 
   DISALLOW_COPY_AND_ASSIGN(WebPluginDelegatePepper);
 };

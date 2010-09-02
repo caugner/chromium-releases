@@ -20,7 +20,7 @@
 
 namespace net {
 
-class HttpRequestInfo;
+struct HttpRequestInfo;
 class ProxyInfo;
 
 // SSPILibrary is introduced so unit tests can mock the calls to Windows' SSPI
@@ -31,7 +31,7 @@ class ProxyInfo;
 // sensitive code.
 class SSPILibrary {
  public:
-  virtual ~SSPILibrary() {};
+  virtual ~SSPILibrary() {}
 
   virtual SECURITY_STATUS AcquireCredentialsHandle(LPWSTR pszPrincipal,
                                                    LPWSTR pszPackage,
@@ -84,19 +84,17 @@ class HttpAuthSSPI {
 
   bool ParseChallenge(HttpAuth::ChallengeTokenizer* tok);
 
-  // Generates an authentication token.
-  // The return value is an error code. If it's not |OK|, the value of
-  // |*auth_token| is unspecified.
-  // |spn| is the Service Principal Name of the server that the token is
-  // being generated for.
+  // Generates an authentication token for the service specified by the
+  // Service Principal Name |spn| and stores the value in |*auth_token|.
+  // If the return value is not |OK|, then the value of |*auth_token| is
+  // unspecified. ERR_IO_PENDING is not a valid return code.
   // If this is the first round of a multiple round scheme, credentials are
   // obtained using |*username| and |*password|. If |username| and |password|
-  // are NULL, the default credentials are used instead.
+  // are both NULL, the credentials for the currently logged in user are used
+  // instead.
   int GenerateAuthToken(const std::wstring* username,
                         const std::wstring* password,
                         const std::wstring& spn,
-                        const HttpRequestInfo* request,
-                        const ProxyInfo* proxy,
                         std::string* auth_token);
 
  private:
@@ -152,4 +150,3 @@ int DetermineMaxTokenLength(SSPILibrary* library,
 }  // namespace net
 
 #endif  // NET_HTTP_HTTP_AUTH_SSPI_WIN_H_
-

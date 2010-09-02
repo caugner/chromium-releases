@@ -28,10 +28,13 @@
 const char SandboxedExtensionUnpacker::kExtensionHeaderMagic[] = "Cr24";
 
 SandboxedExtensionUnpacker::SandboxedExtensionUnpacker(
-    const FilePath& crx_path, ResourceDispatcherHost* rdh,
+    const FilePath& crx_path,
+    const FilePath& temp_path,
+    ResourceDispatcherHost* rdh,
     SandboxedExtensionUnpackerClient* client)
-      : crx_path_(crx_path), thread_identifier_(ChromeThread::ID_COUNT),
-        rdh_(rdh), client_(client), got_response_(false) {
+    : crx_path_(crx_path), temp_path_(temp_path),
+      thread_identifier_(ChromeThread::ID_COUNT),
+      rdh_(rdh), client_(client), got_response_(false) {
 }
 
 void SandboxedExtensionUnpacker::Start() {
@@ -39,14 +42,34 @@ void SandboxedExtensionUnpacker::Start() {
   // file IO on.
   CHECK(ChromeThread::GetCurrentThreadIdentifier(&thread_identifier_));
 
+  // To understand crbug/35198, allow users who can reproduce the bug
+  // to loosen permissions on the scoped directory.
+  bool loosen_permissions = false;
+#if defined (OS_WIN)
+  loosen_permissions = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kIssue35198Permission);
+  LOG(INFO) << "loosen_permissions = " << loosen_permissions;
+#endif
+
   // Create a temporary directory to work in.
-  if (!temp_dir_.CreateUniqueTempDir()) {
+  if (!temp_dir_.CreateUniqueTempDirUnderPath(temp_path_,
+                                              loosen_permissions)) {
     ReportFailure("Could not create temporary directory.");
     return;
   }
 
   // Initialize the path that will eventually contain the unpacked extension.
-  extension_root_ = temp_dir_.path().AppendASCII("TEMP_INSTALL");
+  extension_root_ = temp_dir_.path().AppendASCII(
+      extension_filenames::kTempExtensionName);
+
+  // To understand crbug/35198, allow users who can reproduce the bug to
+  // create the unpack directory in the browser process.
+  bool crxdir_in_browser = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kIssue35198CrxDirBrowser);
+  LOG(INFO) << "crxdir_in_browser = " << crxdir_in_browser;
+  if (crxdir_in_browser && !file_util::CreateDirectory(extension_root_)) {
+    LOG(ERROR) << "Failed to create directory " << extension_root_.value();
+  }
 
   // Extract the public key and validate the package.
   if (!ValidateSignature())
@@ -59,8 +82,21 @@ void SandboxedExtensionUnpacker::Start() {
     return;
   }
 
-  // If we are supposed to use a subprocess, copy the crx to the temp directory
-  // and kick off the subprocess.
+  // The utility process will have access to the directory passed to
+  // SandboxedExtensionUnpacker.  That directory should not contain a
+  // symlink or NTFS junction, because when the path is used, following
+  // the link will cause file system access outside the sandbox path.
+  FilePath normalized_crx_path;
+  if (!file_util::NormalizeFilePath(temp_crx_path, &normalized_crx_path)) {
+    LOG(ERROR) << "Could not get the normalized path of "
+               << temp_crx_path.value();
+    normalized_crx_path = temp_crx_path;
+  } else {
+    LOG(INFO) << "RealFilePath: from " << temp_crx_path.value()
+              << " to " << normalized_crx_path.value();
+  }
+
+  // If we are supposed to use a subprocess, kick off the subprocess.
   //
   // TODO(asargent) we shouldn't need to do this branch here - instead
   // UtilityProcessHost should handle it for us. (http://crbug.com/19192)
@@ -72,10 +108,10 @@ void SandboxedExtensionUnpacker::Start() {
         NewRunnableMethod(
             this,
             &SandboxedExtensionUnpacker::StartProcessOnIOThread,
-            temp_crx_path));
+            normalized_crx_path));
   } else {
     // Otherwise, unpack the extension in this process.
-    ExtensionUnpacker unpacker(temp_crx_path);
+    ExtensionUnpacker unpacker(normalized_crx_path);
     if (unpacker.Run() && unpacker.DumpImagesToFile() &&
         unpacker.DumpMessageCatalogsToFile()) {
       OnUnpackExtensionSucceeded(*unpacker.parsed_manifest());
@@ -254,20 +290,6 @@ DictionaryValue* SandboxedExtensionUnpacker::RewriteManifestFile(
   scoped_ptr<DictionaryValue> final_manifest(
       static_cast<DictionaryValue*>(manifest.DeepCopy()));
   final_manifest->SetString(extension_manifest_keys::kPublicKey, public_key_);
-
-  // Override the origin if appropriate.
-  bool web_content_enabled = false;
-  if (final_manifest->GetBoolean(extension_manifest_keys::kWebContentEnabled,
-                                 &web_content_enabled) &&
-      web_content_enabled &&
-      web_origin_.is_valid()) {
-    // TODO(erikkay): Finalize origin policy.  This is intentionally loose
-    // until we can test from the gallery.  http://crbug.com/40848.
-    if (!final_manifest->Get(extension_manifest_keys::kWebOrigin, NULL)) {
-      final_manifest->SetString(extension_manifest_keys::kWebOrigin,
-                                web_origin_.spec());
-    }
-  }
 
   std::string manifest_json;
   JSONStringValueSerializer serializer(&manifest_json);

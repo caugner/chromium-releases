@@ -150,14 +150,11 @@ class FilePath {
   // The character used to identify a file extension.
   static const CharType kExtensionSeparator;
 
-  FilePath() {}
-  FilePath(const FilePath& that) : path_(that.path_) {}
-  explicit FilePath(const StringType& path) : path_(path) {}
-
-  FilePath& operator=(const FilePath& that) {
-    path_ = that.path_;
-    return *this;
-  }
+  FilePath();
+  FilePath(const FilePath& that);
+  explicit FilePath(const StringType& path);
+  ~FilePath();
+  FilePath& operator=(const FilePath& that);
 
   bool operator==(const FilePath& that) const;
 
@@ -171,6 +168,8 @@ class FilePath {
   const StringType& value() const { return path_; }
 
   bool empty() const { return path_.empty(); }
+
+  void clear() { path_.clear(); }
 
   // Returns true if |character| is in kSeparators.
   static bool IsSeparator(CharType character);
@@ -302,6 +301,11 @@ class FilePath {
   void WriteToPickle(Pickle* pickle);
   bool ReadFromPickle(Pickle* pickle, void** iter);
 
+#if defined(FILE_PATH_USES_WIN_SEPARATORS)
+  // Normalize all path separators to backslash.
+  FilePath NormalizeWindowsPathSeparators() const;
+#endif
+
   // Compare two strings in the same way the file system does.
   // Note that these always ignore case, even on file systems that are case-
   // sensitive. If case-sensitive comparison is ever needed, add corresponding
@@ -348,11 +352,14 @@ class FilePath {
   StringType path_;
 };
 
-// Macros for string literal initialization of FilePath::CharType[].
+// Macros for string literal initialization of FilePath::CharType[], and for
+// using a FilePath::CharType[] in a printf-style format string.
 #if defined(OS_POSIX)
 #define FILE_PATH_LITERAL(x) x
+#define PRFilePath "s"
 #elif defined(OS_WIN)
 #define FILE_PATH_LITERAL(x) L ## x
+#define PRFilePath "ls"
 #endif  // OS_WIN
 
 // Provide a hash function so that hash_sets and maps can contain FilePath

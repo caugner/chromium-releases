@@ -38,43 +38,41 @@
  * area. The depth range is represented by an array in the format
  * [min Z, max Z]. The depth range provides the mapping of the clip space
  * coordinates into normalized z buffer coordinates.
- * 
+ *
  * @param {o3d.math.Float4} viewport The viewport setting.
  * @param {o3d.math.Float2} depthRange ParamFloat2 The depth range setting.
  * @constructor
  */
 o3d.Viewport = function(opt_viewport, opt_depthRange) {
   o3d.RenderNode.call(this);
+
+  /**
+   * The position and size to set the viewport in
+   * [left, top, width, height] format.
+   *
+   * Note: These values must describe a rectangle that is 100% inside
+   * the client area. In other words, [0.5, 0.0, 1.0, 1.0] would
+   * describe an area that is 1/2 off right side of the screen. That
+   * is an invalid value and will be clipped to [0.5, 0.0, 0.5, 1.0].
+   *
+   * Default = [0.0, 0.0, 1.0, 1.0]. In other words, the full area.
+   *
+   * @type {!Array.<number>}
+   */
   this.viewport = opt_viewport || [0.0, 0.0, 1.0, 1.0];
+
+  /**
+   * The min Z and max Z depth range in [min Z, max Z] format.
+   * Default = [0.0, 1.0].
+   *
+   * @type {!Array.<number>}
+   */
   this.depthRange = opt_depthRange || [0.0, 1.0];
 };
 o3d.inherit('Viewport', 'RenderNode');
 
-
-/**
- * The position and size to set the viewport in
- * [left, top, width, height] format.
- * 
- * Note: These values must describe a rectangle that is 100% inside the client
- * area. In other words, [0.5, 0.0, 1.0, 1.0] would describe an area that is
- * 1/2 off right side of the screen. That is an invalid value and will be
- * clipped to [0.5, 0.0, 0.5, 1.0].
- * 
- * Default = [0.0, 0.0, 1.0, 1.0]. In other words, the full area.
- * 
- * @type {!Array.<number>}
- */
-o3d.Viewport.prototype.viewport = [0.0, 0.0, 1.0, 1.0];
-
-
-/**
- * The min Z and max Z depth range in [min Z, max Z] format.
- * Default = [0.0, 1.0].
- * 
- * @type {!Array.<number>}
- */
-o3d.Viewport.prototype.depthRange = [0.0, 1.0];
-
+o3d.ParamObject.setUpO3DParam_(o3d.Viewport, 'viewport', 'ParamFloat4');
+o3d.ParamObject.setUpO3DParam_(o3d.Viewport, 'depthRange', 'ParamFloat2');
 
 /**
  * Called before the children are rendered.  Sets up a viewport and
@@ -82,7 +80,8 @@ o3d.Viewport.prototype.depthRange = [0.0, 1.0];
  */
 o3d.Viewport.prototype.before = function() {
   var x = this.viewport[0] * this.gl.displayInfo.width;
-  var y = this.viewport[1] * this.gl.displayInfo.height;
+  var y = (1 - this.viewport[1] - this.viewport[3]) *
+      this.gl.displayInfo.height;
   var width = this.viewport[2] * this.gl.displayInfo.width;
   var height = this.viewport[3] * this.gl.displayInfo.height;
 

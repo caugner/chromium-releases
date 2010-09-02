@@ -12,7 +12,6 @@
 #include "base/message_loop.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
-#include "chrome/common/platform_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_shutdown.h"
@@ -22,10 +21,12 @@
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extension_tabs_module_constants.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/in_process_webkit/dom_storage_context.h"
 #include "chrome/browser/in_process_webkit/webkit_context.h"
 #include "chrome/browser/message_box_handler.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -38,6 +39,7 @@
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/common/bindings_policy.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/view_types.h"
@@ -126,11 +128,13 @@ ExtensionHost::ExtensionHost(Extension* extension, SiteInstance* site_instance,
       did_stop_loading_(false),
       document_element_available_(false),
       url_(url),
-      extension_host_type_(host_type) {
+      extension_host_type_(host_type),
+      associated_tab_contents_(NULL) {
   int64 session_storage_namespace_id = profile_->GetWebKitContext()->
       dom_storage_context()->AllocateSessionStorageNamespaceId();
   render_view_host_ = new RenderViewHost(site_instance, this, MSG_ROUTING_NONE,
                                          session_storage_namespace_id);
+  render_view_host_->set_is_extension_process(true);
   render_view_host_->AllowBindings(BindingsPolicy::EXTENSION);
   if (enable_dom_automation_)
     render_view_host_->AllowBindings(BindingsPolicy::DOM_AUTOMATION);
@@ -198,7 +202,8 @@ void ExtensionHost::CreateRenderViewSoon(RenderWidgetHostView* host_view) {
 }
 
 void ExtensionHost::CreateRenderViewNow() {
-  render_view_host_->CreateRenderView(profile_->GetRequestContext());
+  render_view_host_->CreateRenderView(profile_->GetRequestContext(),
+                                      string16());
   NavigateToURL(url_);
   DCHECK(IsRenderViewLive());
 }
@@ -296,11 +301,8 @@ void ExtensionHost::RenderViewGone(RenderViewHost* render_view_host) {
 void ExtensionHost::DidNavigate(RenderViewHost* render_view_host,
     const ViewHostMsg_FrameNavigate_Params& params) {
   // We only care when the outer frame changes.
-  switch (params.transition) {
-    case PageTransition::AUTO_SUBFRAME:
-    case PageTransition::MANUAL_SUBFRAME:
-      return;
-  }
+  if (!PageTransition::IsMainFrame(params.transition))
+    return;
 
   if (!params.url.SchemeIs(chrome::kExtensionScheme)) {
     extension_function_dispatcher_.reset(NULL);
@@ -438,7 +440,9 @@ void ExtensionHost::DocumentAvailableInMainFrame(RenderViewHost* rvh) {
         break;  // No style sheet for other types, at the moment.
     }
   }
+}
 
+void ExtensionHost::DocumentOnLoadCompletedInMainFrame(RenderViewHost* rvh) {
   if (ViewType::EXTENSION_POPUP == GetRenderViewType()) {
     NotificationService::current()->Notify(
         NotificationType::EXTENSION_POPUP_VIEW_READY,
@@ -514,12 +518,20 @@ RendererPreferences ExtensionHost::GetRendererPrefs(Profile* profile) const {
 
 WebPreferences ExtensionHost::GetWebkitPrefs() {
   Profile* profile = render_view_host()->process()->profile();
-  const bool kIsDomUI = true;
   WebPreferences webkit_prefs =
-      RenderViewHostDelegateHelper::GetWebkitPrefs(profile, kIsDomUI);
+      RenderViewHostDelegateHelper::GetWebkitPrefs(profile,
+                                                   false);  // is_dom_ui
+  // Extensions are trusted so we override any user preferences for disabling
+  // javascript or images.
+  webkit_prefs.loads_images_automatically = true;
+  webkit_prefs.javascript_enabled = true;
+
   if (extension_host_type_ == ViewType::EXTENSION_POPUP ||
       extension_host_type_ == ViewType::EXTENSION_INFOBAR)
     webkit_prefs.allow_scripts_to_close_windows = true;
+
+  // TODO(dcheng): incorporate this setting into kClipboardPermission check.
+  webkit_prefs.javascript_can_access_clipboard = true;
 
   // TODO(dcheng): check kClipboardPermission instead once it's implemented.
   if (extension_->HasApiPermission(Extension::kExperimentalPermission))
@@ -528,7 +540,7 @@ WebPreferences ExtensionHost::GetWebkitPrefs() {
 }
 
 void ExtensionHost::ProcessDOMUIMessage(const std::string& message,
-                                        const Value* content,
+                                        const ListValue* content,
                                         const GURL& source_url,
                                         int request_id,
                                         bool has_callback) {
@@ -542,10 +554,18 @@ RenderViewHostDelegate::View* ExtensionHost::GetViewDelegate() {
   return this;
 }
 
-void ExtensionHost::CreateNewWindow(int route_id) {
+void ExtensionHost::CreateNewWindow(
+    int route_id,
+    WindowContainerType window_container_type,
+    const string16& frame_name) {
   delegate_view_helper_.CreateNewWindow(
-      route_id, render_view_host()->process()->profile(),
-      site_instance(), DOMUIFactory::GetDOMUIType(url_), NULL);
+      route_id,
+      render_view_host()->process()->profile(),
+      site_instance(),
+      DOMUIFactory::GetDOMUIType(url_),
+      this,
+      window_container_type,
+      frame_name);
 }
 
 void ExtensionHost::CreateNewWidget(int route_id,
@@ -572,10 +592,7 @@ void ExtensionHost::ShowCreatedWindow(int route_id,
   if (!browser)
     return;
 
-  // TODO(aa): It seems like this means popup windows don't work via
-  // window.open() from ExtensionHost?
-  browser->AddTabContents(contents, disposition, initial_pos,
-                          user_gesture);
+  browser->AddTabContents(contents, disposition, initial_pos, user_gesture);
 }
 
 void ExtensionHost::ShowCreatedWidget(int route_id,
@@ -698,15 +715,15 @@ void ExtensionHost::RenderViewCreated(RenderViewHost* render_view_host) {
       extension_host_type_ == ViewType::EXTENSION_MOLE ||
       extension_host_type_ == ViewType::EXTENSION_POPUP ||
       extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
-    render_view_host->Send(new ViewMsg_EnablePreferredSizeChangedMode(
-        render_view_host->routing_id()));
+    render_view_host->EnablePreferredSizeChangedMode(
+        kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow);
   }
 }
 
 int ExtensionHost::GetBrowserWindowID() const {
   // Hosts not attached to any browser window have an id of -1.  This includes
   // those mentioned below, and background pages.
-  int window_id = -1;
+  int window_id = extension_misc::kUnknownWindowId;
   if (extension_host_type_ == ViewType::EXTENSION_TOOLSTRIP ||
       extension_host_type_ == ViewType::EXTENSION_MOLE ||
       extension_host_type_ == ViewType::EXTENSION_POPUP ||

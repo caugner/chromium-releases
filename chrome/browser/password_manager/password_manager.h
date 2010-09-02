@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,14 @@
 #include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "chrome/browser/login_model.h"
+#include "chrome/browser/password_manager/password_form_manager.h"
 #include "chrome/browser/pref_member.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "webkit/glue/password_form.h"
 #include "webkit/glue/password_form_dom_manager.h"
 
+class PasswordManagerDelegate;
 class PasswordFormManager;
 class PrefService;
-class TabContents;
 
 // Per-tab password manager. Handles creation and management of UI elements,
 // receiving password form data from the renderer and managing the password
@@ -25,14 +25,16 @@ class PasswordManager : public LoginModel {
  public:
   static void RegisterUserPrefs(PrefService* prefs);
 
-  explicit PasswordManager(TabContents* tab_contents);
+  // The delegate passed in is required to outlive the PasswordManager.
+  explicit PasswordManager(PasswordManagerDelegate* delegate);
   ~PasswordManager();
 
   // Called by a PasswordFormManager when it decides a form can be autofilled
   // on the page.
   void Autofill(const webkit_glue::PasswordForm& form_for_autofill,
                 const webkit_glue::PasswordFormMap& best_matches,
-                const webkit_glue::PasswordForm* const preferred_match) const;
+                const webkit_glue::PasswordForm* const preferred_match,
+                bool wait_for_username) const;
 
   // Notification that the user navigated away from the current page.
   // Unless this is a password form submission, for our purposes this
@@ -44,7 +46,11 @@ class PasswordManager : public LoginModel {
   void DidStopLoading();
 
   // Notifies the password manager that password forms were parsed on the page.
-  void PasswordFormsSeen(const std::vector<webkit_glue::PasswordForm>& forms);
+  void PasswordFormsFound(const std::vector<webkit_glue::PasswordForm>& forms);
+
+  // Notifies the password manager which password forms are initially visible.
+  void PasswordFormsVisible(
+       const std::vector<webkit_glue::PasswordForm>& visible_forms);
 
   // When a form is submitted, we prepare to save the password but wait
   // until we decide the user has successfully logged in. This is step 1
@@ -88,8 +94,9 @@ class PasswordManager : public LoginModel {
   // time a user submits a login form and gets to the next page.
   scoped_ptr<PasswordFormManager> provisional_save_manager_;
 
-  // The containing TabContents.
-  TabContents* tab_contents_;
+  // Our delegate for carrying out external operations.  This is typically the
+  // containing TabContents.
+  PasswordManagerDelegate* delegate_;
 
   // The LoginModelObserver (i.e LoginView) requiring autofill.
   LoginModelObserver* observer_;
@@ -98,7 +105,7 @@ class PasswordManager : public LoginModel {
   // passwords or ask you if you want to save passwords).
   BooleanPrefMember password_manager_enabled_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(PasswordManager);
+  DISALLOW_COPY_AND_ASSIGN(PasswordManager);
 };
 
 #endif  // CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_MANAGER_H_

@@ -8,7 +8,7 @@
 #include "base/singleton.h"
 #include "base/ref_counted.h"
 #include "base/values.h"
-#include "chrome/browser/browser.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
@@ -21,6 +21,7 @@
 #include "chrome/browser/extensions/extension_browser_actions_api.h"
 #include "chrome/browser/extensions/extension_clipboard_api.h"
 #include "chrome/browser/extensions/extension_context_menu_api.h"
+#include "chrome/browser/extensions/extension_cookies_api.h"
 #include "chrome/browser/extensions/extension_dom_ui.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/extensions/extension_history_api.h"
@@ -29,11 +30,13 @@
 #include "chrome/browser/extensions/extension_infobar_module.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_metrics_module.h"
+#include "chrome/browser/extensions/extension_omnibox_api.h"
 #include "chrome/browser/extensions/extension_page_actions_module.h"
 #include "chrome/browser/extensions/extension_page_actions_module_constants.h"
 #include "chrome/browser/extensions/extension_popup_api.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_processes_api.h"
+#include "chrome/browser/extensions/extension_rlz_module.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
 #include "chrome/browser/extensions/extension_test_api.h"
@@ -106,6 +109,7 @@ void FactoryRegistry::ResetFunctions() {
 
   // Tabs
   RegisterFunction<GetTabFunction>();
+  RegisterFunction<GetCurrentTabFunction>();
   RegisterFunction<GetSelectedTabFunction>();
   RegisterFunction<GetAllTabsInWindowFunction>();
   RegisterFunction<CreateTabFunction>();
@@ -196,6 +200,21 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<MetricsRecordMediumTimeFunction>();
   RegisterFunction<MetricsRecordLongTimeFunction>();
 
+  // RLZ.
+#if defined(OS_WIN)
+  RegisterFunction<RlzRecordProductEventFunction>();
+  RegisterFunction<RlzGetAccessPointRlzFunction>();
+  RegisterFunction<RlzSendFinancialPingFunction>();
+  RegisterFunction<RlzClearProductStateFunction>();
+#endif
+
+  // Cookies.
+  RegisterFunction<GetCookieFunction>();
+  RegisterFunction<GetAllCookiesFunction>();
+  RegisterFunction<SetCookieFunction>();
+  RegisterFunction<RemoveCookieFunction>();
+  RegisterFunction<GetAllCookieStoresFunction>();
+
   // Test.
   RegisterFunction<ExtensionTestPassFunction>();
   RegisterFunction<ExtensionTestFailFunction>();
@@ -214,7 +233,12 @@ void FactoryRegistry::ResetFunctions() {
 
   // Context Menus.
   RegisterFunction<CreateContextMenuFunction>();
+  RegisterFunction<UpdateContextMenuFunction>();
   RegisterFunction<RemoveContextMenuFunction>();
+  RegisterFunction<RemoveAllContextMenusFunction>();
+
+  // Omnibox.
+  RegisterFunction<OmniboxSendSuggestionsFunction>();
 }
 
 void FactoryRegistry::GetAllNames(std::vector<std::string>* names) {
@@ -261,12 +285,6 @@ void ExtensionFunctionDispatcher::ResetFunctions() {
   FactoryRegistry::instance()->ResetFunctions();
 }
 
-std::set<ExtensionFunctionDispatcher*>*
-    ExtensionFunctionDispatcher::all_instances() {
-  static std::set<ExtensionFunctionDispatcher*> instances;
-  return &instances;
-}
-
 ExtensionFunctionDispatcher* ExtensionFunctionDispatcher::Create(
     RenderViewHost* render_view_host,
     Delegate* delegate,
@@ -296,8 +314,6 @@ ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(
   // TODO(erikkay) should we do something for these errors in Release?
   DCHECK(url.SchemeIs(chrome::kExtensionScheme));
   DCHECK(extension);
-
-  all_instances()->insert(this);
 
   // Notify the ExtensionProcessManager that the view was created.
   ExtensionProcessManager* epm = profile()->GetExtensionProcessManager();
@@ -336,7 +352,6 @@ ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(
 }
 
 ExtensionFunctionDispatcher::~ExtensionFunctionDispatcher() {
-  all_instances()->erase(this);
   peer_->dispatcher_ = NULL;
 
   NotificationService::current()->Notify(
@@ -376,7 +391,7 @@ Browser* ExtensionFunctionDispatcher::GetCurrentBrowser(
 }
 
 void ExtensionFunctionDispatcher::HandleRequest(const std::string& name,
-                                                const Value* args,
+                                                const ListValue* args,
                                                 const GURL& source_url,
                                                 int request_id,
                                                 bool has_callback) {

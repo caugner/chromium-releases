@@ -15,7 +15,8 @@
     </script>
     <script type="text/javascript" src="js/api_page_generator.js"></script>
     <script type="text/javascript" src="js/bootstrap.js"></script>
-  <title>Desktop Notifications - Google Chrome Extensions - Google Code</title></head><body>  <div id="gc-container" class="labs">
+  <title>Desktop Notifications - Google Chrome Extensions - Google Code</title></head>
+  <body>  <div id="gc-container" class="labs">
       <div id="devModeWarning">
         You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
       </div>
@@ -35,6 +36,7 @@
                 <div style="display:inline">
                   (
                     <span class="optional">optional</span>
+                    <span class="enum">enumerated</span>
                     <span id="typeTemplate">
                       <span>
                         <a> Type</a>
@@ -44,6 +46,7 @@
                           array of <span><span></span></span>
                         </span>
                         <span>paramType</span>
+                        <span></span>
                       </span>
                     </span>
                   )
@@ -56,6 +59,15 @@
           </dd>
           <dd>
             Description of this parameter from the json schema.
+          </dd>
+          <dd>
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
           </dd>
 
           <!-- OBJECT PROPERTIES -->
@@ -135,6 +147,7 @@
               <li>Browser UI
                 <ul>
                   <li><a href="browserAction.html">Browser Actions</a></li>
+                  <li><a href="contextMenus.html">Context Menus</a></li>
                   <li class="leftNavSelected">Desktop Notifications</li>
                   <li><a href="options.html">Options Pages</a></li>
                   <li><a href="override.html">Override Pages</a></li>
@@ -145,6 +158,7 @@
               <li>Browser Interaction
                 <ul>
                   <li><a href="bookmarks.html">Bookmarks</a></li>
+                  <li><a href="cookies.html">Cookies</a></li>
                   <li><a href="events.html">Events</a></li>
                   <li><a href="history.html">History</a></li>
                   <li><a href="tabs.html">Tabs</a></li>
@@ -157,6 +171,7 @@
                   <li><a href="background_pages.html">Background Pages</a></li>
                   <li><a href="content_scripts.html">Content Scripts</a></li>
                   <li><a href="xhr.html">Cross-Origin XHR</a></li>
+                  <li><a href="idle.html">Idle</a></li>
                   <li><a href="i18n.html">Internationalization</a></li>
                   <li><a href="messaging.html">Message Passing</a></li>
                   <li><a href="npapi.html">NPAPI Plugins</a></li>
@@ -199,18 +214,39 @@
         <h1 class="page_title">Desktop Notifications</h1>
       </div>
         <!-- TABLE OF CONTENTS -->
-        <div id="toc" style="display: none; ">
+        <div id="toc">
           <h2>Contents</h2>
           <ol>
             <li>
-              <a>h2Name</a>
+              <a href="#manifest">Manifest</a>
               <ol>
-                <li>
+                <li style="display: none; ">
+                  <a>h3Name</a>
+                </li>
+              </ol>
+            </li><li>
+              <a href="#communication">Communicating with other views</a>
+              <ol>
+                <li style="display: none; ">
+                  <a>h3Name</a>
+                </li>
+              </ol>
+            </li><li>
+              <a href="#examples"> Examples </a>
+              <ol>
+                <li style="display: none; ">
+                  <a>h3Name</a>
+                </li>
+              </ol>
+            </li><li>
+              <a href="#api">API</a>
+              <ol>
+                <li style="display: none; ">
                   <a>h3Name</a>
                 </li>
               </ol>
             </li>
-              <li>
+              <li style="display: none; ">
                 <a href="#apiReference">API reference</a>
                 <ol>
                   <li>
@@ -253,6 +289,7 @@
 
         <!-- STATIC CONTENT PLACEHOLDER -->
         <div id="static"><div id="pageData-name" class="pageData">Desktop Notifications</div>
+<div id="pageData-showTOC" class="pageData">true</div>
 
 <!-- BEGIN AUTHORED CONTENT -->
 <p>
@@ -300,37 +337,6 @@ There is no need to call
 <code>webkitNotifications.checkPermission()</code>.
 </p>
 
-<h2 id="api">API</h2>
-
-<p>
-The desktop notification API for extensions
-is the same one that
-is available to normal web pages.
-As the following code shows,
-you first create either a simple text notification
-or an HTML notification,
-and then you show the notification.
-</p>
-
-<pre>// Create a simple text notification:
-var notification = webkitNotifications.createNotification(
-  '48.png',  // icon url - can be relative
-  'Hello!',  // notification title
-  'Lorem ipsum...'  // notification body text
-);
-
-// Or create an HTML notification:
-var notification = webkitNotifications.createHTMLNotification(
-  'notification.html'  // html url - can be relative
-);
-
-// Then show the notification.
-notification.show();
-</pre>
-
-<p>For complete API details,
-see the <a href="http://dev.chromium.org/developers/design-documents/desktop-notifications/api-specification">Desktop notifications draft specification</a>.</p>
-
 <h2 id="communication">Communicating with other views</h2>
 
 <p>
@@ -361,6 +367,44 @@ For other examples
 and for help in viewing the source code,
 see <a href="samples.html">Samples</a>.
 </p>
+
+<p>
+Also see html5rocks.com's
+<a href="http://www.html5rocks.com/tutorials/notifications/quick/">notifications tutorial</a>.
+Ignore the permission-related code;
+it's unnecessary if you declare the "notifications" permission.
+</p>
+
+<h2 id="api">API</h2>
+
+<p>
+The desktop notification API for extensions
+is the same one that
+is available to normal web pages.
+As the following code shows,
+you first create either a simple text notification
+or an HTML notification,
+and then you show the notification.
+</p>
+
+<pre>// Create a simple text notification:
+var notification = webkitNotifications.createNotification(
+  '48.png',  // icon url - can be relative
+  'Hello!',  // notification title
+  'Lorem ipsum...'  // notification body text
+);
+
+// Or create an HTML notification:
+var notification = webkitNotifications.createHTMLNotification(
+  'notification.html'  // html url - can be relative
+);
+
+// Then show the notification.
+notification.show();
+</pre>
+
+<p>For complete API details,
+see the <a href="http://dev.chromium.org/developers/design-documents/desktop-notifications/api-specification">Desktop notifications draft specification</a>.</p>
 
 <!-- END AUTHORED CONTENT -->
 </div>
@@ -451,6 +495,13 @@ see <a href="samples.html">Samples</a>.
                   </div>
                 </div>
 
+                <!-- MIN_VERSION -->
+                <p>
+                  This function was added in version <b><span></span></b>.
+                  If you require this function, the manifest key
+                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+                  can ensure that your extension won't be run in an earlier browser version.
+                </p>
               </div> <!-- /description -->
 
             </div>  <!-- /apiItem -->
@@ -495,7 +546,7 @@ see <a href="samples.html">Samples</a>.
 
           <!-- TYPES -->
           <div class="apiGroup">
-            <a name="types.sort(sortByName)"></a>
+            <a name="types"></a>
             <h3 id="types">Types</h3>
 
             <!-- iterates over all types -->

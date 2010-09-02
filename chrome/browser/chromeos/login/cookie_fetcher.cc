@@ -12,10 +12,10 @@
 #include "chrome/browser/chromeos/login/issue_response_handler.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/net/url_fetcher.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/net/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
 namespace chromeos {
@@ -53,10 +53,7 @@ void CookieFetcher::OnURLFetchComplete(const URLFetcher* source,
 }
 
 void CookieFetcher::DelegateImpl::DoLaunch(Profile* profile) {
-  FilePath user_data_dir;
-  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  if (profile == profile_manager->GetDefaultProfile(user_data_dir)) {
+  if (profile == ProfileManager::GetDefaultProfile()) {
     LoginUtils::DoBrowserLaunch(profile);
   } else {
     LOG(ERROR) <<

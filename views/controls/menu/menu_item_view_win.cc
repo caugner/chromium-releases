@@ -1,15 +1,14 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/controls/menu/menu_item_view.h"
 
-#include <windows.h>
 #include <uxtheme.h>
 #include <Vssym32.h>
 
 #include "app/l10n_util.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/native_theme_win.h"
 #include "grit/app_strings.h"
 #include "views/controls/menu/menu_config.h"
@@ -22,7 +21,8 @@ namespace views {
 gfx::Size MenuItemView::GetPreferredSize() {
   const gfx::Font& font = MenuConfig::instance().font;
   return gfx::Size(
-      font.GetStringWidth(title_) + label_start_ + item_right_margin_,
+      font.GetStringWidth(title_) + label_start_ + item_right_margin_ +
+          GetChildPreferredWidth(),
       font.height() + GetBottomMargin() + GetTopMargin());
 }
 
@@ -30,10 +30,19 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
   const MenuConfig& config = MenuConfig::instance();
   bool render_selection =
       (!for_drag && IsSelected() &&
-       parent_menu_item_->GetSubmenu()->GetShowSelection(this));
+       parent_menu_item_->GetSubmenu()->GetShowSelection(this) &&
+       GetChildViewCount() == 0);
   int state = render_selection ? MPI_HOT :
                                  (IsEnabled() ? MPI_NORMAL : MPI_DISABLED);
-  HDC dc = canvas->beginPlatformPaint();
+  HDC dc = canvas->BeginPlatformPaint();
+  NativeTheme::ControlState control_state;
+
+  if (!IsEnabled()) {
+    control_state = NativeTheme::CONTROL_DISABLED;
+  } else {
+    control_state = render_selection ? NativeTheme::CONTROL_HIGHLIGHTED :
+                                       NativeTheme::CONTROL_NORMAL;
+  }
 
   // The gutter is rendered before the background.
   if (config.render_gutter && !for_drag) {
@@ -56,33 +65,16 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
         &item_rect);
   }
 
-  int icon_x = config.item_left_margin;
   int top_margin = GetTopMargin();
   int bottom_margin = GetBottomMargin();
-  int icon_y = top_margin + (height() - config.item_top_margin -
-                             bottom_margin - config.check_height) / 2;
-  int icon_height = config.check_height;
-  int icon_width = config.check_width;
 
   if (type_ == CHECKBOX && GetDelegate()->IsItemChecked(GetCommand())) {
-    // Draw the check background.
-    gfx::Rect check_bg_bounds(0, 0, icon_x + icon_width, height());
-    const int bg_state = IsEnabled() ? MCB_NORMAL : MCB_DISABLED;
-    AdjustBoundsForRTLUI(&check_bg_bounds);
-    RECT check_bg_rect = check_bg_bounds.ToRECT();
-    NativeTheme::instance()->PaintMenuCheckBackground(
-        NativeTheme::MENU, dc, MENU_POPUPCHECKBACKGROUND, bg_state,
-        &check_bg_rect);
-
-    // And the check.
-    gfx::Rect check_bounds(icon_x, icon_y, icon_width, icon_height);
-    const int check_state = IsEnabled() ? MC_CHECKMARKNORMAL :
-                                          MC_CHECKMARKDISABLED;
-    AdjustBoundsForRTLUI(&check_bounds);
-    RECT check_rect = check_bounds.ToRECT();
-    NativeTheme::instance()->PaintMenuCheck(
-        NativeTheme::MENU, dc, MENU_POPUPCHECK, check_state, &check_rect,
-        render_selection);
+    PaintCheck(dc,
+               IsEnabled() ? MC_CHECKMARKNORMAL : MC_CHECKMARKDISABLED,
+               control_state, config.check_height, config.check_width);
+  } else if (type_ == RADIO && GetDelegate()->IsItemChecked(GetCommand())) {
+    PaintCheck(dc, IsEnabled() ? MC_BULLETNORMAL : MC_BULLETDISABLED,
+               control_state, config.radio_height, config.radio_width);
   }
 
   // Render the foreground.
@@ -93,8 +85,9 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
   SkColor fg_color = NativeTheme::instance()->GetThemeColorWithDefault(
       NativeTheme::MENU, MENU_POPUPITEM, state, TMT_TEXTCOLOR,
       default_sys_color);
-  int width = this->width() - item_right_margin_ - label_start_;
   const gfx::Font& font = MenuConfig::instance().font;
+  int accel_width = parent_menu_item_->GetSubmenu()->max_accelerator_width();
+  int width = this->width() - item_right_margin_ - label_start_ - accel_width;
   gfx::Rect text_bounds(label_start_, top_margin, width, font.height());
   text_bounds.set_x(MirroredLeftPointForRect(text_bounds));
   if (for_drag) {
@@ -102,16 +95,18 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
     // foreground and background colors are for the text to draw the correct
     // halo. Instead, just draw black on white, which will look good in most
     // cases.
-    canvas->DrawStringWithHalo(GetTitle(), font, 0x00000000, 0xFFFFFFFF,
-                               text_bounds.x(), text_bounds.y(),
-                               text_bounds.width(), text_bounds.height(),
-                               GetRootMenuItem()->GetDrawStringFlags());
+    canvas->AsCanvasSkia()->DrawStringWithHalo(
+        GetTitle(), font, 0x00000000, 0xFFFFFFFF, text_bounds.x(),
+        text_bounds.y(), text_bounds.width(), text_bounds.height(),
+        GetRootMenuItem()->GetDrawStringFlags());
   } else {
     canvas->DrawStringInt(GetTitle(), font, fg_color,
                           text_bounds.x(), text_bounds.y(), text_bounds.width(),
                           text_bounds.height(),
                           GetRootMenuItem()->GetDrawStringFlags());
   }
+
+  PaintAccelerator(canvas);
 
   if (icon_.width() > 0) {
     gfx::Rect icon_bounds(config.item_left_margin,
@@ -134,7 +129,7 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
     // locale is RTL) then we should make sure the menu arrow points to the
     // right direction.
     NativeTheme::MenuArrowDirection arrow_direction;
-    if (UILayoutIsRightToLeft())
+    if (base::i18n::IsRTL())
       arrow_direction = NativeTheme::LEFT_POINTING_ARROW;
     else
       arrow_direction = NativeTheme::RIGHT_POINTING_ARROW;
@@ -142,9 +137,36 @@ void MenuItemView::Paint(gfx::Canvas* canvas, bool for_drag) {
     RECT arrow_rect = arrow_bounds.ToRECT();
     NativeTheme::instance()->PaintMenuArrow(
         NativeTheme::MENU, dc, MENU_POPUPSUBMENU, state_id, &arrow_rect,
-        arrow_direction, render_selection);
+        arrow_direction, control_state);
   }
-  canvas->endPlatformPaint();
+  canvas->EndPlatformPaint();
+}
+
+void MenuItemView::PaintCheck(HDC dc,
+                              int state_id,
+                              NativeTheme::ControlState control_state,
+                              int icon_width,
+                              int icon_height) {
+  int top_margin = GetTopMargin();
+  int icon_x = MenuConfig::instance().item_left_margin;
+  int icon_y = top_margin +
+      (height() - top_margin - GetBottomMargin() - icon_height) / 2;
+  // Draw the background.
+  gfx::Rect bg_bounds(0, 0, icon_x + icon_width, height());
+  int bg_state = IsEnabled() ? MCB_NORMAL : MCB_DISABLED;
+  AdjustBoundsForRTLUI(&bg_bounds);
+  RECT bg_rect = bg_bounds.ToRECT();
+  NativeTheme::instance()->PaintMenuCheckBackground(
+      NativeTheme::MENU, dc, MENU_POPUPCHECKBACKGROUND, bg_state,
+      &bg_rect);
+
+  // And the check.
+  gfx::Rect icon_bounds(icon_x / 2, icon_y, icon_width, icon_height);
+  AdjustBoundsForRTLUI(&icon_bounds);
+  RECT icon_rect = icon_bounds.ToRECT();
+  NativeTheme::instance()->PaintMenuCheck(
+      NativeTheme::MENU, dc, MENU_POPUPCHECK, state_id, &icon_rect,
+      control_state);
 }
 
 }  // namespace views

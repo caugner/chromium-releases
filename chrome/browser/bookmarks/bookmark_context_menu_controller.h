@@ -9,7 +9,7 @@
 
 #include "app/menus/simple_menu_model.h"
 #include "base/basictypes.h"
-#include "chrome/browser/bookmarks/bookmark_model_observer.h"
+#include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
 #include "gfx/native_widget_types.h"
 
 class Browser;
@@ -34,53 +34,33 @@ class BookmarkContextMenuControllerDelegate {
 
 // BookmarkContextMenuController creates and manages state for the context menu
 // shown for any bookmark item.
-class BookmarkContextMenuController : public BookmarkModelObserver,
+class BookmarkContextMenuController : public BaseBookmarkModelObserver,
                                       public menus::SimpleMenuModel::Delegate {
  public:
-  // Used to configure what the context menu shows.
-  enum ConfigurationType {
-    BOOKMARK_BAR,
-    BOOKMARK_MANAGER_TABLE,
-    // Used when the source is the table in the bookmark manager and the table
-    // is showing recently bookmarked or searched.
-    BOOKMARK_MANAGER_TABLE_OTHER,
-    BOOKMARK_MANAGER_TREE,
-    BOOKMARK_MANAGER_ORGANIZE_MENU,
-    // Used when the source is the bookmark manager and the table is showing
-    // recently bookmarked or searched.
-    BOOKMARK_MANAGER_ORGANIZE_MENU_OTHER
-  };
-
   // Creates the bookmark context menu.
   // |profile| is used for opening urls as well as enabling 'open incognito'.
   // |browser| is used to determine the PageNavigator and may be null.
   // |navigator| is used if |browser| is null, and is provided for testing.
   // |parent| is the parent for newly created nodes if |selection| is empty.
   // |selection| is the nodes the context menu operates on and may be empty.
-  // |configuration| determines which items to show.
   BookmarkContextMenuController(
       gfx::NativeWindow parent_window,
       BookmarkContextMenuControllerDelegate* delegate,
       Profile* profile,
       PageNavigator* navigator,
       const BookmarkNode* parent,
-      const std::vector<const BookmarkNode*>& selection,
-      ConfigurationType configuration);
+      const std::vector<const BookmarkNode*>& selection);
   virtual ~BookmarkContextMenuController();
 
   void BuildMenu();
 
-  menus::SimpleMenuModel* menu_model() {
-    return menu_model_.get();
-  }
-
+  menus::SimpleMenuModel* menu_model() const { return menu_model_.get(); }
 
   // menus::SimpleMenuModel::Delegate implementation:
   virtual bool IsCommandIdChecked(int command_id) const;
   virtual bool IsCommandIdEnabled(int command_id) const;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      menus::Accelerator* accelerator) {
+  virtual bool GetAcceleratorForCommandId(int command_id,
+                                          menus::Accelerator* accelerator) {
     return false;
   }
   virtual void ExecuteCommand(int command_id);
@@ -99,31 +79,9 @@ class BookmarkContextMenuController : public BookmarkModelObserver,
   // Adds a checkable item to the menu.
   void AddCheckboxItem(int id);
 
-  // BookmarkModelObserver methods. Any change to the model results in closing
-  // the menu.
-  virtual void Loaded(BookmarkModel* model) {}
-  virtual void BookmarkModelBeingDeleted(BookmarkModel* model);
-  virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 const BookmarkNode* old_parent,
-                                 int old_index,
-                                 const BookmarkNode* new_parent,
-                                 int new_index);
-  virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 const BookmarkNode* parent,
-                                 int index);
-  virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   const BookmarkNode* parent,
-                                   int index,
-                                   const BookmarkNode* node);
-  virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   const BookmarkNode* node);
-  virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
-                                         const BookmarkNode* node) {}
-  virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
-                                             const BookmarkNode* node);
-
-  // Invoked from the various bookmark model observer methods. Closes the menu.
-  void ModelChanged();
+  // Overridden from BaseBookmarkModelObserver:
+  // Any change to the model results in closing the menu.
+  virtual void BookmarkModelChanged();
 
   // Returns true if selection_ has at least one bookmark of type url.
   bool HasURLs() const;
@@ -134,7 +92,6 @@ class BookmarkContextMenuController : public BookmarkModelObserver,
   PageNavigator* navigator_;
   const BookmarkNode* parent_;
   std::vector<const BookmarkNode*> selection_;
-  ConfigurationType configuration_;
   BookmarkModel* model_;
   scoped_ptr<menus::SimpleMenuModel> menu_model_;
 

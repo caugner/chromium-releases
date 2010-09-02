@@ -11,23 +11,29 @@
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/appcache/appcache_frontend_proxy.h"
+#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "ipc/ipc_message.h"
 #include "webkit/appcache/appcache_backend_impl.h"
 
 class ChromeAppCacheService;
+class URLRequestContext;
 class URLRequestContextGetter;
 
 // Handles appcache related messages sent to the main browser process from
 // its child processes. There is a distinct host for each child process.
-// Messages are handled on the IO thread. The ResourceMessageFilter creates
-// an instance and delegates calls to it.
+// Messages are handled on the IO thread. The ResourceMessageFilter and
+// WorkerProcessHost create an instance and delegates calls to it.
 class AppCacheDispatcherHost {
  public:
+  // Constructor for use on the IO thread.
+  explicit AppCacheDispatcherHost(
+      URLRequestContext* request_context);
+
+  // Constructor for use on the UI thread.
   explicit AppCacheDispatcherHost(
       URLRequestContextGetter* request_context_getter);
 
-  void Initialize(IPC::Message::Sender* sender, int process_id,
-                  base::ProcessHandle process_handle);
+  void Initialize(ResourceDispatcherHost::Receiver* receiver);
   bool OnMessageReceived(const IPC::Message& msg, bool* msg_is_ok);
 
   int process_id() const { return backend_impl_.process_id(); }
@@ -44,6 +50,9 @@ class AppCacheDispatcherHost {
   void OnSelectCache(int host_id, const GURL& document_url,
                      int64 cache_document_was_loaded_from,
                      const GURL& opt_manifest_url);
+  void OnSelectCacheForWorker(int host_id, int parent_process_id,
+                              int parent_host_id);
+  void OnSelectCacheForSharedWorker(int host_id, int64 appcache_id);
   void OnMarkAsForeignEntry(int host_id, const GURL& document_url,
                             int64 cache_document_was_loaded_from);
   void OnGetStatus(int host_id, IPC::Message* reply_msg);
@@ -61,6 +70,7 @@ class AppCacheDispatcherHost {
 
   // Temporary until Initialize() can be called from the IO thread,
   // which will extract the AppCacheService from the URLRequestContext.
+  scoped_refptr<URLRequestContext> request_context_;
   scoped_refptr<URLRequestContextGetter> request_context_getter_;
 
   // This is only valid once Initialize() has been called.
@@ -69,8 +79,9 @@ class AppCacheDispatcherHost {
   scoped_ptr<appcache::GetStatusCallback> get_status_callback_;
   scoped_ptr<appcache::StartUpdateCallback> start_update_callback_;
   scoped_ptr<appcache::SwapCacheCallback> swap_cache_callback_;
-  base::ProcessHandle process_handle_;
   scoped_ptr<IPC::Message> pending_reply_msg_;
+
+  ResourceDispatcherHost::Receiver* receiver_;
 
   DISALLOW_COPY_AND_ASSIGN(AppCacheDispatcherHost);
 };

@@ -4,26 +4,36 @@
 
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
 
+#include "base/command_line.h"
 #include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/dom_ui/app_launcher_ui.h"
 #include "chrome/browser/dom_ui/bookmarks_ui.h"
 #include "chrome/browser/dom_ui/downloads_ui.h"
 #include "chrome/browser/dom_ui/devtools_ui.h"
-#include "chrome/browser/dom_ui/filebrowse_ui.h"
 #include "chrome/browser/dom_ui/history_ui.h"
+#include "chrome/browser/dom_ui/history2_ui.h"
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
-#include "chrome/browser/dom_ui/mediaplayer_ui.h"
 #include "chrome/browser/dom_ui/net_internals_ui.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
+#include "chrome/browser/dom_ui/options_ui.h"
+#include "chrome/browser/dom_ui/remoting_ui.h"
 #include "chrome/browser/dom_ui/plugins_ui.h"
-#include "chrome/browser/dom_ui/print_ui.h"
+#include "chrome/browser/dom_ui/register_page_ui.h"
+#include "chrome/browser/dom_ui/slideshow_ui.h"
 #include "chrome/browser/extensions/extension_dom_ui.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/extensions_ui.h"
+#include "chrome/browser/printing/print_dialog_cloud.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/dom_ui/filebrowse_ui.h"
+#include "chrome/browser/dom_ui/mediaplayer_ui.h"
+#endif
 
 const DOMUITypeID DOMUIFactory::kNoDOMUI = NULL;
 
@@ -64,11 +74,11 @@ static DOMUIFactoryFunction GetDOMUIFactoryFunction(const GURL& url) {
   if (url.SchemeIs(chrome::kExtensionScheme))
     return &NewDOMUI<ExtensionDOMUI>;
 
-// TODO(mhm) Make sure this ifdef is removed once print is complete.
-#if !defined(GOOGLE_CHROME_BUILD)
-  if (url.SchemeIs(chrome::kPrintScheme))
-    return &NewDOMUI<PrintUI>;
-#endif
+  // All platform builds of Chrome will need to have a cloud printing
+  // dialog as backup.  It's just that on Chrome OS, it's the only
+  // print dialog.
+  if (url.host() == chrome::kCloudPrintResourcesHost)
+    return &NewDOMUI<ExternalHtmlDialogUI>;
 
   // This will get called a lot to check all URLs, so do a quick check of other
   // schemes (gears was handled above) to filter out most URLs.
@@ -76,7 +86,7 @@ static DOMUIFactoryFunction GetDOMUIFactoryFunction(const GURL& url) {
       !url.SchemeIs(chrome::kChromeUIScheme))
     return NULL;
 
-  if (url.host() == chrome::kSyncResourcesHost)
+  if (url.host() == chrome::kChromeUISyncResourcesHost)
     return &NewDOMUI<HtmlDialogUI>;
 
   // Special case the new tab page. In older versions of Chrome, the new tab
@@ -89,8 +99,6 @@ static DOMUIFactoryFunction GetDOMUIFactoryFunction(const GURL& url) {
 
   // We must compare hosts only since some of the DOM UIs append extra stuff
   // after the host name.
-  if (url.host() == chrome::kChromeUIAppsHost)
-    return &NewDOMUI<AppLauncherUI>;
   if (url.host() == chrome::kChromeUIBookmarksHost)
     return &NewDOMUI<BookmarksUI>;
   if (url.host() == chrome::kChromeUIDevToolsHost)
@@ -101,17 +109,39 @@ static DOMUIFactoryFunction GetDOMUIFactoryFunction(const GURL& url) {
     return &NewDOMUI<ExtensionsUI>;
   if (url.host() == chrome::kChromeUIHistoryHost)
     return &NewDOMUI<HistoryUI>;
+  if (url.host() == chrome::kChromeUIHistory2Host)
+    return &NewDOMUI<HistoryUI2>;
   if (url.host() == chrome::kChromeUINetInternalsHost)
     return &NewDOMUI<NetInternalsUI>;
   if (url.host() == chrome::kChromeUIPluginsHost)
     return &NewDOMUI<PluginsUI>;
+#if defined(ENABLE_REMOTING)
+  if (url.host() == chrome::kChromeUIRemotingHost) {
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableChromoting)) {
+      return &NewDOMUI<RemotingUI>;
+    }
+  }
+#endif
 
 #if defined(OS_CHROMEOS)
   if (url.host() == chrome::kChromeUIFileBrowseHost)
     return &NewDOMUI<FileBrowseUI>;
-
   if (url.host() == chrome::kChromeUIMediaplayerHost)
     return &NewDOMUI<MediaplayerUI>;
+  if (url.host() == chrome::kChromeUIRegisterPageHost)
+    return &NewDOMUI<RegisterPageUI>;
+  if (url.host() == chrome::kChromeUISlideshowHost)
+    return &NewDOMUI<SlideshowUI>;
+  if (url.host() == chrome::kChromeUIOptionsHost)
+    return &NewDOMUI<OptionsUI>;
+#else
+  if (url.host() == chrome::kChromeUIOptionsHost) {
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableTabbedOptions)) {
+      return &NewDOMUI<OptionsUI>;
+    }
+  }
 #endif
 
   return NULL;
@@ -127,8 +157,7 @@ DOMUITypeID DOMUIFactory::GetDOMUIType(const GURL& url) {
 bool DOMUIFactory::HasDOMUIScheme(const GURL& url) {
   return url.SchemeIs(chrome::kChromeInternalScheme) ||
          url.SchemeIs(chrome::kChromeUIScheme) ||
-         url.SchemeIs(chrome::kExtensionScheme) ||
-         url.SchemeIs(chrome::kPrintScheme);
+         url.SchemeIs(chrome::kExtensionScheme);
 }
 
 // static
@@ -146,16 +175,40 @@ DOMUI* DOMUIFactory::CreateDOMUIForURL(TabContents* tab_contents,
 }
 
 // static
+void DOMUIFactory::GetFaviconForURL(Profile* profile,
+                                    FaviconService::GetFaviconRequest* request,
+                                    const GURL& page_url) {
+  // All extensions but the bookmark manager get their favicon from the icons
+  // part of the manifest.
+  if (page_url.SchemeIs(chrome::kExtensionScheme) &&
+      page_url.host() != extension_misc::kBookmarkManagerId) {
+    ExtensionDOMUI::GetFaviconForURL(profile, request, page_url);
+  } else {
+    scoped_refptr<RefCountedMemory> icon_data =
+        DOMUIFactory::GetFaviconResourceBytes(profile, page_url);
+    bool know_icon = icon_data.get() != NULL && icon_data->size() > 0;
+    request->ForwardResultAsync(
+        FaviconService::FaviconDataCallback::TupleType(request->handle(),
+            know_icon, icon_data, false, GURL()));
+  }
+}
+
+// static
 RefCountedMemory* DOMUIFactory::GetFaviconResourceBytes(Profile* profile,
                                                         const GURL& page_url) {
-  if (page_url.SchemeIs(chrome::kExtensionScheme))
-    return ExtensionDOMUI::GetFaviconResourceBytes(profile, page_url);
+  // The bookmark manager is a chrome extension, so we have to check for it
+  // before we check for extension scheme.
+  if (page_url.host() == extension_misc::kBookmarkManagerId)
+    return BookmarksUI::GetFaviconResourceBytes();
+
+  // The extension scheme is handled in GetFaviconForURL.
+  if (page_url.SchemeIs(chrome::kExtensionScheme)) {
+    NOTREACHED();
+    return NULL;
+  }
 
   if (!HasDOMUIScheme(page_url))
     return NULL;
-
-  if (page_url.host() == chrome::kChromeUIBookmarksHost)
-    return BookmarksUI::GetFaviconResourceBytes();
 
   if (page_url.host() == chrome::kChromeUIDownloadsHost)
     return DownloadsUI::GetFaviconResourceBytes();
@@ -166,8 +219,19 @@ RefCountedMemory* DOMUIFactory::GetFaviconResourceBytes(Profile* profile,
   if (page_url.host() == chrome::kChromeUIHistoryHost)
     return HistoryUI::GetFaviconResourceBytes();
 
+  if (page_url.host() == chrome::kChromeUIHistory2Host)
+    return HistoryUI2::GetFaviconResourceBytes();
+
+  if (page_url.host() == chrome::kChromeUIOptionsHost)
+    return OptionsUI::GetFaviconResourceBytes();
+
   if (page_url.host() == chrome::kChromeUIPluginsHost)
     return PluginsUI::GetFaviconResourceBytes();
+
+#if defined(ENABLE_REMOTING)
+  if (page_url.host() == chrome::kChromeUIRemotingHost)
+    return RemotingUI::GetFaviconResourceBytes();
+#endif
 
   return NULL;
 }

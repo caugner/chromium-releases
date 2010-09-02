@@ -8,8 +8,10 @@
 // Keys used in JSON representation of extensions.
 namespace extension_manifest_keys {
   extern const wchar_t* kAllFrames;
+  extern const wchar_t* kApp;
   extern const wchar_t* kBackground;
   extern const wchar_t* kBrowserAction;
+  extern const wchar_t* kBrowseURLs;
   extern const wchar_t* kMinimumChromeVersion;
   extern const wchar_t* kChromeURLOverrides;
   extern const wchar_t* kContentScripts;
@@ -23,11 +25,15 @@ namespace extension_manifest_keys {
   extern const wchar_t* kIncludeGlobs;
   extern const wchar_t* kLaunch;
   extern const wchar_t* kLaunchContainer;
+  extern const wchar_t* kLaunchFullscreen;
+  extern const wchar_t* kLaunchHeight;
   extern const wchar_t* kLaunchLocalPath;
+  extern const wchar_t* kLaunchWidth;
   extern const wchar_t* kLaunchWebURL;
   extern const wchar_t* kJs;
   extern const wchar_t* kMatches;
   extern const wchar_t* kName;
+  extern const wchar_t* kOmniboxKeyword;
   extern const wchar_t* kPageActionId;
   extern const wchar_t* kPageAction;
   extern const wchar_t* kPageActions;
@@ -58,11 +64,8 @@ namespace extension_manifest_keys {
   extern const wchar_t* kVersion;
   extern const wchar_t* kUpdateURL;
   extern const wchar_t* kOptionsPage;
-  extern const wchar_t* kWebContent;
-  extern const wchar_t* kWebContentEnabled;
   extern const wchar_t* kWebLaunchUrl;
-  extern const wchar_t* kWebOrigin;
-  extern const wchar_t* kWebPaths;
+  extern const wchar_t* kWebURLs;
 }  // namespace extension_manifest_keys
 
 // Some values expected in manifests.
@@ -83,6 +86,8 @@ namespace extension_manifest_errors {
   extern const char* kChromeVersionTooLow;
   extern const char* kInvalidAllFrames;
   extern const char* kInvalidBackground;
+  extern const char* kInvalidBrowseURL;
+  extern const char* kInvalidBrowseURLs;
   extern const char* kInvalidBrowserAction;
   extern const char* kInvalidChromeURLOverrides;
   extern const char* kInvalidContentScript;
@@ -98,8 +103,13 @@ namespace extension_manifest_errors {
   extern const char* kInvalidJsList;
   extern const char* kInvalidKey;
   extern const char* kInvalidLaunchContainer;
+  extern const char* kInvalidLaunchFullscreen;
+  extern const char* kInvalidLaunchHeight;
+  extern const char* kInvalidLaunchHeightContainer;
   extern const char* kInvalidLaunchLocalPath;
   extern const char* kInvalidLaunchWebURL;
+  extern const char* kInvalidLaunchWidth;
+  extern const char* kInvalidLaunchWidthContainer;
   extern const char* kInvalidManifest;
   extern const char* kInvalidMatchCount;
   extern const char* kInvalidMatch;
@@ -135,10 +145,8 @@ namespace extension_manifest_errors {
   extern const char* kInvalidThemeImages;
   extern const char* kInvalidThemeColors;
   extern const char* kInvalidThemeTints;
-  extern const char* kInvalidWebContentEnabled;
-  extern const char* kInvalidWebOrigin;
-  extern const char* kInvalidWebPaths;
-  extern const char* kInvalidWebPath;
+  extern const char* kInvalidWebURLs;
+  extern const char* kInvalidWebURL;
   extern const char* kOneUISurfaceOnly;
   extern const char* kThemesCannotContainExtensions;
   extern const char* kManifestParseError;
@@ -147,8 +155,8 @@ namespace extension_manifest_errors {
   extern const char* kMultipleOverrides;
   extern const char* kInvalidUpdateURL;
   extern const char* kInvalidDefaultLocale;
-  extern const char* kLaunchContainerWithoutURL;
   extern const char* kLaunchPathAndURLAreExclusive;
+  extern const char* kLaunchURLRequired;
   extern const char* kLocalesNoDefaultLocaleSpecified;
   extern const char* kLocalesNoDefaultMessages;
   extern const char* kLocalesNoValidLocaleNamesListed;
@@ -159,6 +167,8 @@ namespace extension_manifest_errors {
   extern const char* kCannotAccessPage;
   extern const char* kCannotScriptGallery;
   extern const char* kWebContentMustBeEnabled;
+  extern const char* kInvalidOmniboxKeyword;
+  extern const char* kOmniboxExperimental;
 }  // namespace extension_manifest_errors
 
 namespace extension_urls {
@@ -167,10 +177,34 @@ namespace extension_urls {
   extern const char* kGalleryBrowsePrefix;
   extern const char* kGalleryDownloadPrefix;
 
+  // The update urls used by gallery/webstore extensions.
+  extern const char* kGalleryUpdateHttpUrl;
+  extern const char* kGalleryUpdateHttpsUrl;
+
   // Same thing for the "minigallery". The minigallery is the temporary static
   // themes gallery that we put up when we launched themes.
   extern const char* kMiniGalleryBrowsePrefix;
   extern const char* kMiniGalleryDownloadPrefix;
 }  // namespace extension_urls
+
+namespace extension_filenames {
+  // The name of a temporary directory to install an extension into for
+  // validation before finalizing install.
+  extern const char* kTempExtensionName;
+
+  // The file to write our decoded images to, relative to the extension_path.
+  extern const char* kDecodedImagesFilename;
+
+  // The file to write our decoded message catalogs to, relative to the
+  // extension_path.
+  extern const char* kDecodedMessageCatalogsFilename;
+}
+
+namespace extension_misc {
+  const int kUnknownWindowId = -1;
+
+  // The extension id of the bookmark manager.
+  extern const char* kBookmarkManagerId;
+}  // extension_misc
 
 #endif  // CHROME_COMMON_EXTENSIONS_EXTENSION_CONSTANTS_H_

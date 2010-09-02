@@ -22,7 +22,6 @@
 #include "chrome/browser/child_process_security_policy.h"
 #include "chrome/browser/chrome_plugin_browsing_context.h"
 #include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/net/url_request_context_getter.h"
 #include "chrome/browser/net/url_request_tracking.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile.h"
@@ -31,6 +30,7 @@
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
 #include "gfx/native_widget_types.h"
@@ -39,11 +39,6 @@
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
-
-#if defined(OS_WIN)
-#include "app/win_util.h"
-#include "webkit/glue/plugins/plugin_constants_win.h"
-#endif
 
 #if defined(USE_X11)
 #include "gfx/gtk_native_view_id_manager.h"
@@ -290,10 +285,14 @@ void PluginProcessHost::OnMapNativeViewId(gfx::NativeViewId id,
 #endif  // defined(TOOLKIT_USES_GTK)
 
 PluginProcessHost::PluginProcessHost()
-    : ChildProcessHost(
+    : BrowserChildProcessHost(
           PLUGIN_PROCESS,
           PluginService::GetInstance()->resource_dispatcher_host()),
-      ALLOW_THIS_IN_INITIALIZER_LIST(resolve_proxy_msg_helper_(this, NULL)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(resolve_proxy_msg_helper_(this, NULL))
+#if defined(OS_MACOSX)
+      , plugin_cursor_visible_(true)
+#endif
+{
 }
 
 PluginProcessHost::~PluginProcessHost() {
@@ -343,7 +342,8 @@ PluginProcessHost::~PluginProcessHost() {
 bool PluginProcessHost::Init(const WebPluginInfo& info,
                              const std::wstring& locale) {
   info_ = info;
-  set_name(info_.name);
+  set_name(UTF16ToWideHack(info_.name));
+  set_version(UTF16ToWideHack(info_.version));
 
   if (!CreateChannel())
     return false;
@@ -389,6 +389,7 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
     switches::kUseLowFragHeapCrt,
     switches::kEnableStatsTable,
     switches::kEnableGPUPlugin,
+    switches::kUseGL,
 #if defined(OS_CHROMEOS)
     switches::kProfile,
 #endif
@@ -456,7 +457,7 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
 void PluginProcessHost::ForceShutdown() {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   Send(new PluginProcessMsg_NotifyRenderersOfPendingShutdown());
-  ChildProcessHost::ForceShutdown();
+  BrowserChildProcessHost::ForceShutdown();
 }
 
 void PluginProcessHost::OnProcessLaunched() {
@@ -498,8 +499,6 @@ void PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
                         OnPluginShowWindow)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginHideWindow,
                         OnPluginHideWindow)
-    IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginReceivedFocus,
-                        OnPluginReceivedFocus)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginSetCursorVisibility,
                         OnPluginSetCursorVisibility)
 #endif

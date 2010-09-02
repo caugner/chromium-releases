@@ -12,11 +12,16 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebWorkerClient.h"
 
 namespace WebKit {
+class WebApplicationCacheHost;
+class WebApplicationCacheHostClient;
+class WebFrame;
 class WebNotificationPresenter;
 class WebString;
 class WebURL;
 }
 
+// WebWorkers are not functional in test_shell. This class effectively
+// stubs things out.
 class TestWebWorker : public WebKit::WebWorker,
                       public WebKit::WebWorkerClient,
                       public base::RefCounted<TestWebWorker> {
@@ -73,6 +78,16 @@ class TestWebWorker : public WebKit::WebWorker,
   }
   virtual WebKit::WebNotificationPresenter* notificationPresenter() {
     return NULL;
+  }
+  virtual WebKit::WebApplicationCacheHost* createApplicationCacheHost(
+      WebKit::WebApplicationCacheHostClient*) {
+    return NULL;
+  }
+  virtual bool allowDatabase(WebKit::WebFrame* frame,
+                             const WebKit::WebString& name,
+                             const WebKit::WebString& display_name,
+                             unsigned long estimated_size) {
+    return true;
   }
 
  private:

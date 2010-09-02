@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "base/message_loop.h"
 #include "base/shared_memory.h"
 #include "base/string_util.h"
-#include "chrome/common/extensions/extension_message_filter_peer.h"
+#include "chrome/common/extensions/extension_localization_peer.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/security_filter_peer.h"
 #include "net/base/net_errors.h"
@@ -275,7 +275,7 @@ bool ResourceDispatcher::OnMessageReceived(const IPC::Message& message) {
   if (it == pending_requests_.end()) {
     // This might happen for kill()ed requests on the webkit end, so perhaps it
     // shouldn't be a warning...
-    DLOG(WARNING) << "Got response for a nonexistant or finished request";
+    DLOG(WARNING) << "Got response for a nonexistent or finished request";
     // Release resources in the message if it is a data message.
     ReleaseResourcesInDataMessage(message);
     return true;
@@ -309,7 +309,7 @@ void ResourceDispatcher::OnUploadProgress(
   if (it == pending_requests_.end()) {
     // this might happen for kill()ed requests on the webkit end, so perhaps
     // it shouldn't be a warning...
-    DLOG(WARNING) << "Got upload progress for a nonexistant or "
+    DLOG(WARNING) << "Got upload progress for a nonexistent or "
         "finished request";
     return;
   }
@@ -331,40 +331,41 @@ void ResourceDispatcher::OnReceivedResponse(
   if (it == pending_requests_.end()) {
     // This might happen for kill()ed requests on the webkit end, so perhaps it
     // shouldn't be a warning...
-    DLOG(WARNING) << "Got response for a nonexistant or finished request";
+    DLOG(WARNING) << "Got response for a nonexistent or finished request";
     return;
   }
 
   PendingRequestInfo& request_info = it->second;
-  request_info.filter_policy = response_head.filter_policy;
-  webkit_glue::ResourceLoaderBridge::Peer* peer = request_info.peer;
-  webkit_glue::ResourceLoaderBridge::Peer* new_peer = NULL;
-  if (request_info.filter_policy == FilterPolicy::FILTER_EXTENSION_MESSAGES) {
-     new_peer = ExtensionMessageFilterPeer::CreateExtensionMessageFilterPeer(
-        peer,
-        message_sender(),
-        response_head.mime_type,
-        request_info.filter_policy,
-        request_info.url);
-  } else if (request_info.filter_policy != FilterPolicy::DONT_FILTER) {
-    // TODO(jcampan): really pass the loader bridge.
-    new_peer = SecurityFilterPeer::CreateSecurityFilterPeer(
-        NULL,
-        peer,
-        request_info.resource_type,
-        response_head.mime_type,
-        request_info.filter_policy,
-        net::ERR_INSECURE_RESPONSE);
-  }
-
-  if (new_peer) {
-    request_info.peer = new_peer;
-    peer = new_peer;
+  if (response_head.replace_extension_localization_templates) {
+    webkit_glue::ResourceLoaderBridge::Peer* new_peer =
+        ExtensionLocalizationPeer::CreateExtensionLocalizationPeer(
+            request_info.peer, message_sender(), response_head.mime_type,
+            request_info.url);
+    if (new_peer)
+      request_info.peer = new_peer;
   }
 
   RESOURCE_LOG("Dispatching response for " <<
-      peer->GetURLForDebugging().possibly_invalid_spec());
-  peer->OnReceivedResponse(response_head, false);
+      request_info.peer->GetURLForDebugging().possibly_invalid_spec());
+  request_info.peer->OnReceivedResponse(response_head, false);
+}
+
+void ResourceDispatcher::OnReceivedCachedMetadata(
+      int request_id, const std::vector<char>& data) {
+  PendingRequestList::iterator it = pending_requests_.find(request_id);
+  if (it == pending_requests_.end()) {
+    // this might happen for kill()ed requests on the webkit end, so perhaps
+    // it shouldn't be a warning...
+    DLOG(WARNING) << "Got metadata for a nonexistent or finished request";
+    return;
+  }
+
+  if (data.size()) {
+    PendingRequestInfo& request_info = it->second;
+    RESOURCE_LOG("Dispatching " << data.size() << " metadata bytes for " <<
+        request_info.peer->GetURLForDebugging().possibly_invalid_spec());
+    request_info.peer->OnReceivedCachedMetadata(&data.front(), data.size());
+  }
 }
 
 void ResourceDispatcher::OnReceivedData(const IPC::Message& message,
@@ -383,7 +384,7 @@ void ResourceDispatcher::OnReceivedData(const IPC::Message& message,
   if (it == pending_requests_.end()) {
     // this might happen for kill()ed requests on the webkit end, so perhaps
     // it shouldn't be a warning...
-    DLOG(WARNING) << "Got data for a nonexistant or finished request";
+    DLOG(WARNING) << "Got data for a nonexistent or finished request";
     return;
   }
 
@@ -406,7 +407,7 @@ void ResourceDispatcher::OnReceivedRedirect(
   if (it == pending_requests_.end()) {
     // this might happen for kill()ed requests on the webkit end, so perhaps
     // it shouldn't be a warning...
-    DLOG(WARNING) << "Got data for a nonexistant or finished request";
+    DLOG(WARNING) << "Got data for a nonexistent or finished request";
     return;
   }
 
@@ -436,7 +437,7 @@ void ResourceDispatcher::OnRequestComplete(int request_id,
   if (it == pending_requests_.end()) {
     // this might happen for kill()ed requests on the webkit end, so perhaps
     // it shouldn't be a warning...
-    DLOG(WARNING) << "Got 'complete' for a nonexistant or finished request";
+    DLOG(WARNING) << "Got 'complete' for a nonexistent or finished request";
     return;
   }
 
@@ -528,6 +529,8 @@ void ResourceDispatcher::DispatchMessage(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(ResourceDispatcher, message)
     IPC_MESSAGE_HANDLER(ViewMsg_Resource_UploadProgress, OnUploadProgress)
     IPC_MESSAGE_HANDLER(ViewMsg_Resource_ReceivedResponse, OnReceivedResponse)
+    IPC_MESSAGE_HANDLER(
+        ViewMsg_Resource_ReceivedCachedMetadata, OnReceivedCachedMetadata)
     IPC_MESSAGE_HANDLER(ViewMsg_Resource_ReceivedRedirect, OnReceivedRedirect)
     IPC_MESSAGE_HANDLER(ViewMsg_Resource_DataReceived, OnReceivedData)
     IPC_MESSAGE_HANDLER(ViewMsg_Resource_RequestComplete, OnRequestComplete)
@@ -579,6 +582,7 @@ bool ResourceDispatcher::IsResourceDispatcherMessage(
   switch (message.type()) {
     case ViewMsg_Resource_UploadProgress::ID:
     case ViewMsg_Resource_ReceivedResponse::ID:
+    case ViewMsg_Resource_ReceivedCachedMetadata::ID:
     case ViewMsg_Resource_ReceivedRedirect::ID:
     case ViewMsg_Resource_DataReceived::ID:
     case ViewMsg_Resource_RequestComplete::ID:

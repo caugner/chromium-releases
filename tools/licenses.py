@@ -3,21 +3,39 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""
-Utilities for checking and processing licensing information in third_party
+"""Utility for checking and processing licensing information in third_party
 directories.
+
+Usage: licenses.py <command>
+
+Commands:
+  scan     scan third_party directories, verifying that we have licensing info
+  credits  generate about:credits on stdout
+
+(You can also import this as a module.)
 """
 
+import cgi
 import os
+import sys
 
 # Paths from the root of the tree to directories to skip.
 PRUNE_PATHS = set([
+    # Assume for now that breakpad has their licensing in order.
+    "breakpad",
+
     # This is just a tiny vsprops file, presumably written by the googleurl
     # authors.  Not third-party code.
     "googleurl/third_party/icu",
 
+    # Assume for now that native client has their licensing in order.
+    "native_client",
+
     # We don't bundle o3d samples into our resulting binaries.
     "o3d/samples",
+
+    # Not in the public Chromium tree.
+    "third_party/adobe",
 
     # Written as part of Chromium.
     "third_party/fuzzymatch",
@@ -25,6 +43,9 @@ PRUNE_PATHS = set([
     # Two directories that are the same as those in base/third_party.
     "v8/src/third_party/dtoa",
     "v8/src/third_party/valgrind",
+
+    # Same module occurs in base/ and in net/, so skip one of them.
+    "net/third_party/nss",
 ])
 
 # Directories we don't scan through.
@@ -36,13 +57,23 @@ PRUNE_DIRS = ('.svn', '.git',             # VCS metadata
 # can't provide a README.chromium.  Please prefer a README.chromium
 # wherever possible.
 SPECIAL_CASES = {
-    'third_party/ots': {
+    os.path.join('third_party', 'angle'): {
+        "Name": "Almost Native Graphics Layer Engine",
+        "URL": "http://code.google.com/p/angleproject/",
+    },
+    os.path.join('third_party', 'ots'): {
         "Name": "OTS (OpenType Sanitizer)",
         "URL": "http://code.google.com/p/ots/",
     },
-    'third_party/pywebsocket': {
+    os.path.join('third_party', 'pywebsocket'): {
         "Name": "pywebsocket",
         "URL": "http://code.google.com/p/pywebsocket/",
+    },
+    os.path.join('third_party', 'WebKit'): {
+        "Name": "WebKit",
+        "URL": "http://webkit.org/",
+        # Absolute path here is resolved as relative to the source root.
+        "License File": "/webkit/LICENSE",
     },
 }
 
@@ -89,9 +120,14 @@ def ParseDir(path):
 
     # Check that the license file exists.
     for filename in (metadata["License File"], "COPYING"):
-        license_path = os.path.join(path, filename)
+        if filename.startswith('/'):
+            # Absolute-looking paths are relative to the source root
+            # (which is the directory we're run from).
+            license_path = os.path.join(os.getcwd(), filename[1:])
+        else:
+            license_path = os.path.join(path, filename)
         if os.path.exists(license_path):
-            metadata["License File"] = filename
+            metadata["License File"] = license_path
             break
         license_path = None
 
@@ -103,23 +139,6 @@ def ParseDir(path):
                            "with the appropriate path.")
 
     return metadata
-
-
-def ScanThirdPartyDirs(third_party_dirs):
-    """Scan a list of directories and report on any problems we find."""
-    errors = []
-    for path in sorted(third_party_dirs):
-        try:
-            metadata = ParseDir(path)
-        except LicenseError, e:
-            errors.append((path, e.args[0]))
-            continue
-        print path, "OK:", metadata["License File"]
-
-    print
-
-    for path, error in sorted(errors):
-        print path + ": " + error
 
 
 def FindThirdPartyDirs():
@@ -152,7 +171,71 @@ def FindThirdPartyDirs():
 
     return third_party_dirs
 
+def ScanThirdPartyDirs():
+    """Scan a list of directories and report on any problems we find."""
+    third_party_dirs = FindThirdPartyDirs()
+
+    errors = []
+    for path in sorted(third_party_dirs):
+        try:
+            metadata = ParseDir(path)
+        except LicenseError, e:
+            errors.append((path, e.args[0]))
+            continue
+
+    for path, error in sorted(errors):
+        print path + ": " + error
+
+    return len(errors) == 0
+
+def GenerateCredits():
+    """Generate about:credits, dumping the result to stdout."""
+
+    def EvaluateTemplate(template, env, escape=True):
+        """Expand a template with variables like {{foo}} using a
+        dictionary of expansions."""
+        for key, val in env.items():
+            if escape:
+                val = cgi.escape(val)
+            template = template.replace('{{%s}}' % key, val)
+        return template
+
+    third_party_dirs = FindThirdPartyDirs()
+
+    entry_template = open('chrome/browser/resources/about_credits_entry.tmpl',
+                          'rb').read()
+    entries = []
+    for path in sorted(third_party_dirs):
+        try:
+            metadata = ParseDir(path)
+        except LicenseError:
+            print >>sys.stderr, ("WARNING: licensing info for " + path +
+                                 " is incomplete, skipping.")
+            continue
+        env = {
+            'name': metadata['Name'],
+            'url': metadata['URL'],
+            'license': open(metadata['License File'], 'rb').read(),
+        }
+        entries.append(EvaluateTemplate(entry_template, env))
+
+    file_template = open('chrome/browser/resources/about_credits.tmpl',
+                         'rb').read()
+    print "<!-- Generated by licenses.py; do not edit. -->"
+    print EvaluateTemplate(file_template, {'entries': '\n'.join(entries)},
+                           escape=False)
 
 if __name__ == '__main__':
-    third_party_dirs = FindThirdPartyDirs()
-    ScanThirdPartyDirs(third_party_dirs)
+    command = 'help'
+    if len(sys.argv) > 1:
+        command = sys.argv[1]
+
+    if command == 'scan':
+        if not ScanThirdPartyDirs():
+            sys.exit(1)
+    elif command == 'credits':
+        if not GenerateCredits():
+            sys.exit(1)
+    else:
+        print __doc__
+        sys.exit(1)

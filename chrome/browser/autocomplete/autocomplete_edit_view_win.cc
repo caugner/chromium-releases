@@ -31,7 +31,6 @@
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/autocomplete/autocomplete_accessibility.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
-#include "chrome/browser/autocomplete/autocomplete_popup_view.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/command_updater.h"
@@ -41,11 +40,11 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/views/location_bar_view.h"
-#include "chrome/common/gfx/utils.h"
+#include "chrome/browser/views/location_bar/location_bar_view.h"
 #include "chrome/common/notification_service.h"
 #include "googleurl/src/url_util.h"
 #include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "skia/ext/skia_utils_win.h"
@@ -379,6 +378,10 @@ class PaintPatcher {
 
 base::LazyInstance<PaintPatcher> g_paint_patcher(base::LINKER_INITIALIZED);
 
+// twips are a unit of type measurement, and RichEdit controls use them
+// to set offsets.
+const int kTwipsPerInch = 1440;
+
 }  // namespace
 
 AutocompleteEditViewWin::AutocompleteEditViewWin(
@@ -390,17 +393,17 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
     Profile* profile,
     CommandUpdater* command_updater,
     bool popup_window_mode,
-    const BubblePositioner* bubble_positioner)
+    const views::View* location_bar)
     : model_(new AutocompleteEditModel(this, controller, profile)),
-      popup_view_(AutocompletePopupView::CreatePopupView(
-          font, this, model_.get(), profile, bubble_positioner)),
+      popup_view_(new AutocompletePopupContentsView(font, this, model_.get(),
+                                                    profile, location_bar)),
       controller_(controller),
       parent_view_(parent_view),
       toolbar_model_(toolbar_model),
       command_updater_(command_updater),
       popup_window_mode_(popup_window_mode),
       force_hidden_(false),
-      tracking_click_(false),
+      tracking_click_(),
       tracking_double_click_(false),
       double_click_time_(0),
       can_discard_mousemove_(false),
@@ -410,8 +413,9 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
       in_drag_(false),
       initiated_drag_(false),
       drop_highlight_position_(-1),
-      background_color_(0),
-      scheme_security_level_(ToolbarModel::NORMAL),
+      background_color_(skia::SkColorToCOLORREF(LocationBarView::GetColor(
+          ToolbarModel::NONE, LocationBarView::BACKGROUND))),
+      security_level_(ToolbarModel::NONE),
       text_object_model_(NULL) {
   // Dummy call to a function exported by riched20.dll to ensure it sets up an
   // import dependency on the dll.
@@ -437,19 +441,17 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
   SelectObject(dc, font_.hfont());
   TEXTMETRIC tm = {0};
   GetTextMetrics(dc, &tm);
-  font_ascent_ = tm.tmAscent;
   const float kXHeightRatio = 0.7f;  // The ratio of a font's x-height to its
                                      // cap height.  Sadly, Windows doesn't
                                      // provide a true value for a font's
                                      // x-height in its text metrics, so we
                                      // approximate.
-  font_x_height_ = static_cast<int>((static_cast<float>(font_ascent_ -
+  font_x_height_ = static_cast<int>((static_cast<float>(font_.baseline() -
       tm.tmInternalLeading) * kXHeightRatio) + 0.5);
   // The distance from the top of the field to the desired baseline of the
   // rendered text.
   const int kTextBaseline = popup_window_mode_ ? 15 : 18;
-  font_y_adjustment_ = kTextBaseline - font_ascent_;
-  font_descent_ = tm.tmDescent;
+  font_y_adjustment_ = kTextBaseline - font_.baseline();
 
   // Get the number of twips per pixel, which we need below to offset our text
   // by the desired number of pixels.
@@ -461,6 +463,8 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
   cf.dwMask = CFM_OFFSET;
   cf.yOffset = -font_y_adjustment_ * kTwipsPerPixel;
   SetDefaultCharFormat(cf);
+
+  SetBackgroundColor(background_color_);
 
   // By default RichEdit has a drop target. Revoke it so that we can install our
   // own. Revoke takes care of deleting the existing one.
@@ -507,34 +511,32 @@ void AutocompleteEditViewWin::SaveStateToTab(TabContents* tab) {
 
 void AutocompleteEditViewWin::Update(
     const TabContents* tab_for_state_restoring) {
+  // If we're switching to a tab with a collapsed toolbar, bail
+  // now, since we won't be showing the Omnibox anyway, and
+  // executing the code below just results in a flicker before
+  // the toolbar hides.
+  if (tab_for_state_restoring && tab_for_state_restoring->is_app())
+    return;
+
   const bool visibly_changed_permanent_text =
       model_->UpdatePermanentText(toolbar_model_->GetText());
 
   const ToolbarModel::SecurityLevel security_level =
-      toolbar_model_->GetSchemeSecurityLevel();
-  const COLORREF background_color =
-      skia::SkColorToCOLORREF(LocationBarView::GetColor(
-          security_level == ToolbarModel::SECURE, LocationBarView::BACKGROUND));
-  const bool changed_security_level =
-      (security_level != scheme_security_level_);
+      toolbar_model_->GetSecurityLevel();
+  const bool changed_security_level = (security_level != security_level_);
 
   // Bail early when no visible state will actually change (prevents an
   // unnecessary ScopedFreeze, and thus UpdateWindow()).
-  if ((background_color == background_color_) && !changed_security_level &&
-      !visibly_changed_permanent_text && !tab_for_state_restoring)
+  if (!changed_security_level && !visibly_changed_permanent_text &&
+      !tab_for_state_restoring)
     return;
 
-  // Update our local state as desired.  We set scheme_security_level_ here so
-  // it will already be correct before we get to any RevertAll()s below and use
-  // it.
-  ScopedFreeze freeze(this, GetTextObjectModel());
-  if (background_color_ != background_color) {
-    background_color_ = background_color;
-    SetBackgroundColor(background_color_);
-  }
-  scheme_security_level_ = security_level;
+  // Update our local state as desired.  We set security_level_ here so it will
+  // already be correct before we get to any RevertAll()s below and use it.
+  security_level_ = security_level;
 
   // When we're switching to a new tab, restore its state, if any.
+  ScopedFreeze freeze(this, GetTextObjectModel());
   if (tab_for_state_restoring) {
     // Make sure we reset our own state first.  The new tab may not have any
     // saved state, or it may not have had input in progress, in which case we
@@ -592,13 +594,13 @@ void AutocompleteEditViewWin::OpenURL(const GURL& url,
   if (!url.is_valid())
     return;
 
-  model_->SendOpenNotification(selected_line, keyword);
-
+  // When we navigate, we first revert to the unedited state, then if necessary
+  // synchronously change the permanent text to the new URL.  If we don't freeze
+  // here, the user could potentially see a flicker of the current URL before
+  // the new one reappears, which would look glitchy.
   ScopedFreeze freeze(this, GetTextObjectModel());
-  if (disposition != NEW_BACKGROUND_TAB)
-    RevertAll();  // Revert the box to its unedited state
-  controller_->OnAutocompleteAccept(url, disposition, transition,
-                                    alternate_nav_url);
+  model_->OpenURL(url, disposition, transition, alternate_nav_url,
+                  selected_line, keyword);
 }
 
 std::wstring AutocompleteEditViewWin::GetText() const {
@@ -606,6 +608,16 @@ std::wstring AutocompleteEditViewWin::GetText() const {
   std::wstring str;
   GetWindowText(WriteInto(&str, len), len);
   return str;
+}
+
+bool AutocompleteEditViewWin::IsEditingOrEmpty() const {
+  return model_->user_input_in_progress() || (GetTextLength() == 0);
+}
+
+int AutocompleteEditViewWin::GetIcon() const {
+  return IsEditingOrEmpty() ?
+      AutocompleteMatch::TypeToIcon(model_->CurrentTextType()) :
+      toolbar_model_->GetIcon();
 }
 
 void AutocompleteEditViewWin::SetUserText(const std::wstring& text,
@@ -1167,36 +1179,23 @@ void AutocompleteEditViewWin::OnContextMenu(HWND window, const CPoint& point) {
 }
 
 void AutocompleteEditViewWin::OnCopy() {
-  const std::wstring text(GetSelectedText());
+  std::wstring text(GetSelectedText());
   if (text.empty())
     return;
 
+  CHARRANGE sel;
+  GURL url;
+  bool write_url = false;
+  GetSel(sel);
+  // GetSel() doesn't preserve selection direction, so sel.cpMin will always be
+  // the smaller value.
+  model_->AdjustTextForCopy(sel.cpMin, IsSelectAll(), &text, &url, &write_url);
   ScopedClipboardWriter scw(g_browser_process->clipboard());
-  // Check if the user is copying the whole address bar.  If they are, we
-  // assume they are trying to copy a URL and write this to the clipboard as a
-  // hyperlink.
-  if (static_cast<int>(text.length()) >= GetTextLength()) {
-    // The entire control is selected.  Let's see what the user typed.  We
-    // can't use model_->CurrentTextIsURL() or model_->GetDataForURLExport()
-    // because right now the user is probably holding down control to cause the
-    // copy, which will screw up our calculation of the desired_tld.
-    GURL url;
-    if (model_->GetURLForText(text, &url)) {
-      // If the scheme is http or https and the user isn't editing,
-      // we should copy the true URL instead of the (unescaped) display
-      // string to avoid encoding and escaping issues when pasting this text
-      // elsewhere.
-      if ((url.SchemeIs("http") || url.SchemeIs("https")) &&
-          !model_->user_input_in_progress())
-        scw.WriteText(UTF8ToWide(url.spec()));
-      else
-        scw.WriteText(text);
-      scw.WriteBookmark(text, url.spec());
-      scw.WriteHyperlink(EscapeForHTML(text), url.spec());
-      return;
-    }
-  }
   scw.WriteText(text);
+  if (write_url) {
+    scw.WriteBookmark(text, url.spec());
+    scw.WriteHyperlink(EscapeForHTML(text), url.spec());
+  }
 }
 
 void AutocompleteEditViewWin::OnCut() {
@@ -1372,15 +1371,6 @@ void AutocompleteEditViewWin::OnKillFocus(HWND focus_wnd) {
   ScopedFreeze freeze(this, GetTextObjectModel());
   DefWindowProc(WM_KILLFOCUS, reinterpret_cast<WPARAM>(focus_wnd), 0);
 
-  // Hide the "Type to search" hint if necessary.  We do this after calling
-  // DefWindowProc() because processing the resulting IME messages may notify
-  // the controller that input is in progress, which could cause the visible
-  // hints to change.  (I don't know if there's a real scenario where they
-  // actually do change, but this is safest.)
-  if (model_->show_search_hint() ||
-      (model_->is_keyword_hint() && !model_->keyword().empty()))
-    controller_->OnChanged();
-
   // Cancel any user selection and scroll the text back to the beginning of the
   // URL.  We have to do this after calling DefWindowProc() because otherwise
   // an in-progress IME composition will be completed at the new caret position,
@@ -1407,13 +1397,8 @@ void AutocompleteEditViewWin::OnLButtonDblClk(UINT keys, const CPoint& point) {
 }
 
 void AutocompleteEditViewWin::OnLButtonDown(UINT keys, const CPoint& point) {
+  TrackMousePosition(kLeft, point);
   if (gaining_focus_.get()) {
-    // This click is giving us focus, so we need to track how much the mouse
-    // moves to see if it's a drag or just a click. Clicks should select all
-    // the text.
-    tracking_click_ = true;
-    mouse_down_point_ = point;
-
     // When Chrome was already the activated app, we haven't reached
     // OnSetFocus() yet.  When we get there, don't restore the saved selection,
     // since it will just screw up the user's interaction with the edit.
@@ -1463,17 +1448,38 @@ void AutocompleteEditViewWin::OnLButtonUp(UINT keys, const CPoint& point) {
   DefWindowProc(WM_LBUTTONUP, keys,
                 MAKELPARAM(ClipXCoordToVisibleText(point.x, false), point.y));
 
-  // When the user has clicked and released to give us focus, select all.
-  if (tracking_click_ && !win_util::IsDrag(mouse_down_point_, point)) {
-    // Select all in the reverse direction so as not to scroll the caret
-    // into view and shift the contents jarringly.
-    SelectAll(true);
-    possible_drag_ = false;
-  }
+  SelectAllIfNecessary(kLeft, point);
 
-  tracking_click_ = false;
+  tracking_click_[kLeft] = false;
 
-  UpdateDragDone(keys);
+  possible_drag_ = false;
+}
+
+void AutocompleteEditViewWin::OnMButtonDblClk(UINT /*keys*/,
+                                              const CPoint& /*point*/) {
+  gaining_focus_.reset();  // See NOTE in OnMouseActivate().
+
+  // By default, the edit responds to middle-clicks by capturing the mouse and
+  // ignoring all subsequent events until it receives another click (of any of
+  // the left, middle, or right buttons).  This bizarre behavior is not only
+  // useless but can cause the UI to appear unresponsive if a user accidentally
+  // middle-clicks the edit (instead of a tab above it), so we purposefully eat
+  // this message (instead of calling SetMsgHandled(false)) to avoid triggering
+  // this.
+}
+
+void AutocompleteEditViewWin::OnMButtonDown(UINT /*keys*/,
+                                            const CPoint& /*point*/) {
+  tracking_double_click_ = false;
+
+  // See note in OnMButtonDblClk above.
+}
+
+void AutocompleteEditViewWin::OnMButtonUp(UINT /*keys*/,
+                                          const CPoint& /*point*/) {
+  possible_drag_ = false;
+
+  // See note in OnMButtonDblClk above.
 }
 
 LRESULT AutocompleteEditViewWin::OnMouseActivate(HWND window,
@@ -1484,20 +1490,21 @@ LRESULT AutocompleteEditViewWin::OnMouseActivate(HWND window,
   LRESULT result = DefWindowProc(WM_MOUSEACTIVATE,
                                  reinterpret_cast<WPARAM>(window),
                                  MAKELPARAM(hit_test, mouse_message));
-  // Check if we're getting focus from a left click.  We have to do this here
-  // rather than in OnLButtonDown() since in many scenarios OnSetFocus() will be
-  // reached before OnLButtonDown(), preventing us from detecting this properly
+  // Check if we're getting focus from a click.  We have to do this here rather
+  // than in OnXButtonDown() since in many scenarios OnSetFocus() will be
+  // reached before OnXButtonDown(), preventing us from detecting this properly
   // there.  Also in those cases, we need to already know in OnSetFocus() that
   // we should not restore the saved selection.
-  if (!model_->has_focus() && (mouse_message == WM_LBUTTONDOWN) &&
+  if (!model_->has_focus() &&
+      ((mouse_message == WM_LBUTTONDOWN || mouse_message == WM_RBUTTONDOWN)) &&
       (result == MA_ACTIVATE)) {
     DCHECK(!gaining_focus_.get());
     gaining_focus_.reset(new ScopedFreeze(this, GetTextObjectModel()));
-    // NOTE: Despite |mouse_message| being WM_LBUTTONDOWN here, we're not
-    // guaranteed to call OnLButtonDown() later!  Specifically, if this is the
+    // NOTE: Despite |mouse_message| being WM_XBUTTONDOWN here, we're not
+    // guaranteed to call OnXButtonDown() later!  Specifically, if this is the
     // second click of a double click, we'll reach here but later call
-    // OnLButtonDblClk().  Make sure |gaining_focus_| gets reset both places, or
-    // we'll have visual glitchiness and then DCHECK failures.
+    // OnXButtonDblClk().  Make sure |gaining_focus_| gets reset both places,
+    // or we'll have visual glitchiness and then DCHECK failures.
 
     // Don't restore saved selection, it will just screw up our interaction
     // with this edit.
@@ -1514,10 +1521,10 @@ void AutocompleteEditViewWin::OnMouseMove(UINT keys, const CPoint& point) {
     return;
   }
 
-  if (tracking_click_ && !win_util::IsDrag(mouse_down_point_, point))
+  if (tracking_click_[kLeft] && !win_util::IsDrag(click_point_[kLeft], point))
     return;
 
-  tracking_click_ = false;
+  tracking_click_[kLeft] = false;
 
   // Return quickly if this can't change the selection/cursor, so we don't
   // create a ScopedFreeze (and thus do an UpdateWindow()) on every
@@ -1643,25 +1650,6 @@ void AutocompleteEditViewWin::OnPaint(HDC bogus_hdc) {
   edit_hwnd = old_edit_hwnd;
 }
 
-void AutocompleteEditViewWin::OnNonLButtonDown(UINT keys,
-                                               const CPoint& point) {
-  // Interestingly, the edit doesn't seem to cancel triple clicking when the
-  // x-buttons (which usually means "thumb buttons") are pressed, so we only
-  // call this for M and R down.
-  tracking_double_click_ = false;
-
-  OnPossibleDrag(point);
-
-  SetMsgHandled(false);
-}
-
-void AutocompleteEditViewWin::OnNonLButtonUp(UINT keys, const CPoint& point) {
-  UpdateDragDone(keys);
-
-  // Let default handler have a crack at this.
-  SetMsgHandled(false);
-}
-
 void AutocompleteEditViewWin::OnPaste() {
   // Replace the selection if we have something to paste.
   const std::wstring text(GetClipboardText());
@@ -1678,6 +1666,27 @@ void AutocompleteEditViewWin::OnPaste() {
   }
 }
 
+void AutocompleteEditViewWin::OnRButtonDblClk(UINT /*keys*/,
+                                              const CPoint& /*point*/) {
+  gaining_focus_.reset();  // See NOTE in OnMouseActivate().
+  SetMsgHandled(false);
+}
+
+void AutocompleteEditViewWin::OnRButtonDown(UINT /*keys*/,
+                                            const CPoint& point) {
+  TrackMousePosition(kRight, point);
+  tracking_double_click_ = false;
+  possible_drag_ = false;
+  gaining_focus_.reset();
+  SetMsgHandled(false);
+}
+
+void AutocompleteEditViewWin::OnRButtonUp(UINT /*keys*/, const CPoint& point) {
+  SelectAllIfNecessary(kRight, point);
+  tracking_click_[kRight] = false;
+  SetMsgHandled(false);
+}
+
 void AutocompleteEditViewWin::OnSetFocus(HWND focus_wnd) {
   views::FocusManager* focus_manager = parent_view_->GetFocusManager();
   if (focus_manager) {
@@ -1689,12 +1698,6 @@ void AutocompleteEditViewWin::OnSetFocus(HWND focus_wnd) {
   }
 
   model_->OnSetFocus(GetKeyState(VK_CONTROL) < 0);
-
-  // Notify controller if it needs to show hint UI of some kind.
-  ScopedFreeze freeze(this, GetTextObjectModel());
-  if (model_->show_search_hint() ||
-      (model_->is_keyword_hint() && !model_->keyword().empty()))
-    controller_->OnChanged();
 
   // Restore saved selection if available.
   if (saved_selection_for_focus_change_.cpMin != -1) {
@@ -1715,7 +1718,7 @@ LRESULT AutocompleteEditViewWin::OnSetText(const wchar_t* text) {
   // We wouldn't need to do this update anyway, because either we're in the
   // middle of updating the omnibox already or the caller of SetWindowText()
   // is going to update the omnibox next.
-  AutoReset auto_reset_ignore_ime_messages(&ignore_ime_messages_, true);
+  AutoReset<bool> auto_reset_ignore_ime_messages(&ignore_ime_messages_, true);
   return DefWindowProc(WM_SETTEXT, 0, reinterpret_cast<LPARAM>(text));
 }
 
@@ -1755,7 +1758,27 @@ void AutocompleteEditViewWin::HandleKeystroke(UINT message,
                                               UINT flags) {
   ScopedFreeze freeze(this, GetTextObjectModel());
   OnBeforePossibleChange();
-  DefWindowProc(message, key, MAKELPARAM(repeat_count, flags));
+
+  if (key == base::VKEY_HOME || key == base::VKEY_END) {
+    // DefWindowProc() might reset the keyboard layout when it receives a
+    // keydown event for VKEY_HOME or VKEY_END. When the window was created
+    // with WS_EX_LAYOUTRTL and the current keyboard layout is not a RTL one,
+    // if the input text is pure LTR text, the layout changes to the first RTL
+    // keyboard layout in keyboard layout queue; if the input text is
+    // bidirectional text, the layout changes to the keyboard layout of the
+    // first RTL character in input text. When the window was created without
+    // WS_EX_LAYOUTRTL and the current keyboard layout is not a LTR one, if the
+    // input text is pure RTL text, the layout changes to English; if the input
+    // text is bidirectional text, the layout changes to the keyboard layout of
+    // the first LTR character in input text. Such keyboard layout change
+    // behavior is surprising and inconsistent with keyboard behavior
+    // elsewhere, so reset the layout in this case.
+    HKL layout = GetKeyboardLayout(0);
+    DefWindowProc(message, key, MAKELPARAM(repeat_count, flags));
+    ActivateKeyboardLayout(layout, KLF_REORDER);
+  } else {
+    DefWindowProc(message, key, MAKELPARAM(repeat_count, flags));
+  }
 
   // CRichEditCtrl automatically turns on IMF_AUTOKEYBOARD when the user
   // inputs an RTL character, making it difficult for the user to control
@@ -1809,10 +1832,10 @@ bool AutocompleteEditViewWin::OnKeyDownOnlyWritable(TCHAR key,
     // Cut:   Shift-Delete and Ctrl-x are treated as cut.  Ctrl-Shift-Delete and
     //        Ctrl-Shift-x are not treated as cut even though the underlying
     //        CRichTextEdit would treat them as such.
-    // Copy:  Ctrl-c is treated as copy.  Shift-Ctrl-c is not.  (This is handled
-    //        in OnKeyDownAllModes().)
-    // Paste: Shift-Insert and Ctrl-v are tread as paste.  Ctrl-Shift-Insert and
-    //        Ctrl-Shift-v are not.
+    // Copy:  Ctrl-Insert and Ctrl-c is treated as copy.  Shift-Ctrl-c is not.
+    //        (This is handled in OnKeyDownAllModes().)
+    // Paste: Shift-Insert and Ctrl-v are treated as paste.  Ctrl-Shift-Insert
+    //        and Ctrl-Shift-v are not.
     //
     // This behavior matches most, but not all Windows programs, and largely
     // conforms to what users expect.
@@ -1912,15 +1935,16 @@ bool AutocompleteEditViewWin::OnKeyDownOnlyWritable(TCHAR key,
 bool AutocompleteEditViewWin::OnKeyDownAllModes(TCHAR key,
                                                 UINT repeat_count,
                                                 UINT flags) {
-  // See KF_ALTDOWN comment atop OnKeyDownOnlyWriteable().
+  // See KF_ALTDOWN comment atop OnKeyDownOnlyWritable().
 
   switch (key) {
     case VK_CONTROL:
       model_->OnControlKeyChanged(true);
       return false;
 
+    case VK_INSERT:
     case 'C':
-      // See more detailed comments in OnKeyDownOnlyWriteable().
+      // See more detailed comments in OnKeyDownOnlyWritable().
       if ((flags & KF_ALTDOWN) || (GetKeyState(VK_CONTROL) >= 0))
         return false;
       if (GetKeyState(VK_SHIFT) >= 0)
@@ -1995,11 +2019,8 @@ LONG AutocompleteEditViewWin::ClipXCoordToVisibleText(
   // Calculation of the clipped coordinate is more complicated if the paragraph
   // layout is RTL layout, or if there is RTL characters inside the LTR layout
   // paragraph.
-  bool ltr_text_in_ltr_layout = true;
-  if ((pf2.wEffects & PFE_RTLPARA) ||
-      base::i18n::StringContainsStrongRTLChars(GetText())) {
-    ltr_text_in_ltr_layout = false;
-  }
+  const bool ltr_text_in_ltr_layout = !(pf2.wEffects & PFE_RTLPARA) &&
+      !base::i18n::StringContainsStrongRTLChars(GetText());
   const int length = GetTextLength();
   RECT r;
   GetRect(&r);
@@ -2063,11 +2084,11 @@ void AutocompleteEditViewWin::EmphasizeURLComponents() {
   // Set the baseline emphasis.
   CHARFORMAT cf = {0};
   cf.dwMask = CFM_COLOR;
-  const bool is_secure = (scheme_security_level_ == ToolbarModel::SECURE);
   // If we're going to emphasize parts of the text, then the baseline state
   // should be "de-emphasized".  If not, then everything should be rendered in
   // the standard text color.
-  cf.crTextColor = skia::SkColorToCOLORREF(LocationBarView::GetColor(is_secure,
+  cf.crTextColor = skia::SkColorToCOLORREF(LocationBarView::GetColor(
+      security_level_,
       emphasize ? LocationBarView::DEEMPHASIZED_TEXT : LocationBarView::TEXT));
   // NOTE: Don't use SetDefaultCharFormat() instead of the below; that sets the
   // format that will get applied to text added in the future, not to text
@@ -2078,7 +2099,7 @@ void AutocompleteEditViewWin::EmphasizeURLComponents() {
   if (emphasize) {
     // We've found a host name, give it more emphasis.
     cf.crTextColor = skia::SkColorToCOLORREF(LocationBarView::GetColor(
-        is_secure, LocationBarView::TEXT));
+        security_level_, LocationBarView::TEXT));
     SetSelection(host.begin, host.end());
     SetSelectionCharFormat(cf);
   }
@@ -2086,13 +2107,13 @@ void AutocompleteEditViewWin::EmphasizeURLComponents() {
   // Emphasize the scheme for security UI display purposes (if necessary).
   insecure_scheme_component_.reset();
   if (!model_->user_input_in_progress() && scheme.is_nonempty() &&
-      (scheme_security_level_ != ToolbarModel::NORMAL)) {
-    if (!is_secure) {
+      (security_level_ != ToolbarModel::NONE)) {
+    if (security_level_ == ToolbarModel::SECURITY_ERROR) {
       insecure_scheme_component_.begin = scheme.begin;
       insecure_scheme_component_.len = scheme.len;
     }
     cf.crTextColor = skia::SkColorToCOLORREF(LocationBarView::GetColor(
-        is_secure, LocationBarView::SECURITY_TEXT));
+        security_level_, LocationBarView::SECURITY_TEXT));
     SetSelection(scheme.begin, scheme.end());
     SetSelectionCharFormat(cf);
   }
@@ -2133,10 +2154,10 @@ void AutocompleteEditViewWin::DrawSlashForInsecureScheme(
   const int kAdditionalSpaceOutsideFont =
       static_cast<int>(ceil(kStrokeWidthPixels * 1.5f));
   const CRect scheme_rect(PosFromChar(insecure_scheme_component_.begin).x,
-                          font_top + font_ascent_ - font_x_height_ -
+                          font_top + font_.baseline() - font_x_height_ -
                               kAdditionalSpaceOutsideFont,
                           PosFromChar(insecure_scheme_component_.end()).x,
-                          font_top + font_ascent_ +
+                          font_top + font_.baseline() +
                               kAdditionalSpaceOutsideFont);
 
   // Clip to the portion we care about and translate to canvas coordinates
@@ -2158,7 +2179,7 @@ void AutocompleteEditViewWin::DrawSlashForInsecureScheme(
   // Create a canvas as large as |scheme_rect| to do our drawing, and initialize
   // it to fully transparent so any antialiasing will look nice when painted
   // atop the edit.
-  gfx::Canvas canvas(scheme_rect.Width(), scheme_rect.Height(), false);
+  gfx::CanvasSkia canvas(scheme_rect.Width(), scheme_rect.Height(), false);
   canvas.getDevice()->accessBitmap(true).eraseARGB(0, 0, 0, 0);
 
   // Calculate the start and end of the stroke, which are just the lower left
@@ -2186,8 +2207,8 @@ void AutocompleteEditViewWin::DrawSlashForInsecureScheme(
   canvas.save();
   if (selection_rect.isEmpty() ||
       canvas.clipRect(selection_rect, SkRegion::kDifference_Op)) {
-    paint.setColor(LocationBarView::GetColor(false,
-        LocationBarView::SCHEME_STRIKEOUT));
+    paint.setColor(LocationBarView::GetColor(security_level_,
+                                             LocationBarView::SECURITY_TEXT));
     canvas.drawLine(start_point.fX, start_point.fY,
                     end_point.fX, end_point.fY, paint);
   }
@@ -2195,7 +2216,7 @@ void AutocompleteEditViewWin::DrawSlashForInsecureScheme(
 
   // Draw the selected portion of the stroke.
   if (!selection_rect.isEmpty() && canvas.clipRect(selection_rect)) {
-    paint.setColor(LocationBarView::GetColor(false,
+    paint.setColor(LocationBarView::GetColor(security_level_,
                                              LocationBarView::SELECTED_TEXT));
     canvas.drawLine(start_point.fX, start_point.fY,
                     end_point.fX, end_point.fY, paint);
@@ -2217,7 +2238,7 @@ void AutocompleteEditViewWin::DrawDropHighlight(
   const CRect highlight_rect(highlight_x,
                              highlight_y,
                              highlight_x + 1,
-                             highlight_y + font_ascent_ + font_descent_);
+                             highlight_y + font_.height());
 
   // Clip the highlight to the region being painted.
   CRect clip_rect;
@@ -2294,7 +2315,7 @@ ITextDocument* AutocompleteEditViewWin::GetTextObjectModel() const {
 }
 
 void AutocompleteEditViewWin::StartDragIfNecessary(const CPoint& point) {
-  if (initiated_drag_ || !win_util::IsDrag(mouse_down_point_, point))
+  if (initiated_drag_ || !win_util::IsDrag(click_point_[kLeft], point))
     return;
 
   OSExchangeData data;
@@ -2314,19 +2335,27 @@ void AutocompleteEditViewWin::StartDragIfNecessary(const CPoint& point) {
   {
     ScopedFreeze freeze(this, GetTextObjectModel());
     DefWindowProc(WM_LBUTTONUP, 0,
-                  MAKELPARAM(mouse_down_point_.x, mouse_down_point_.y));
+                  MAKELPARAM(click_point_[kLeft].x, click_point_[kLeft].y));
     SetSelectionRange(sel);
   }
 
   const std::wstring start_text(GetText());
-  if (IsSelectAllForRange(sel)) {
-    // All the text is selected, export as URL.
-    GURL url;
+  std::wstring text_to_write(GetSelectedText());
+  GURL url;
+  bool write_url;
+  const bool is_all_selected = IsSelectAllForRange(sel);
+
+  // |sel| was set by GetSelection(), which preserves selection direction, so
+  // sel.cpMin may not be the smaller value.
+  model()->AdjustTextForCopy(std::min(sel.cpMin, sel.cpMax), is_all_selected,
+                             &text_to_write, &url, &write_url);
+
+  if (write_url) {
     std::wstring title;
     SkBitmap favicon;
-    model_->GetDataForURLExport(&url, &title, &favicon);
+    if (is_all_selected)
+      model_->GetDataForURLExport(&url, &title, &favicon);
     drag_utils::SetURLAndDragImage(url, title, favicon, &data);
-    data.SetURL(url, title);
     supported_modes |= DROPEFFECT_LINK;
     UserMetrics::RecordAction(UserMetricsAction("Omnibox_DragURL"),
                               model_->profile());
@@ -2336,11 +2365,11 @@ void AutocompleteEditViewWin::StartDragIfNecessary(const CPoint& point) {
                               model_->profile());
   }
 
-  data.SetString(GetSelectedText());
+  data.SetString(text_to_write);
 
   scoped_refptr<BaseDragSource> drag_source(new BaseDragSource);
   DWORD dropped_mode;
-  AutoReset auto_reset_in_drag(&in_drag_, true);
+  AutoReset<bool> auto_reset_in_drag(&in_drag_, true);
   if (DoDragDrop(OSExchangeDataProviderWin::GetIDataObject(data), drag_source,
                  supported_modes, &dropped_mode) == DRAGDROP_S_DROP) {
     if ((dropped_mode == DROPEFFECT_MOVE) && (start_text == GetText())) {
@@ -2379,14 +2408,14 @@ void AutocompleteEditViewWin::StartDragIfNecessary(const CPoint& point) {
   }
 
   initiated_drag_ = true;
-  tracking_click_ = false;
+  tracking_click_[kLeft] = false;
 }
 
 void AutocompleteEditViewWin::OnPossibleDrag(const CPoint& point) {
   if (possible_drag_)
     return;
 
-  mouse_down_point_ = point;
+  click_point_[kLeft] = point;
   initiated_drag_ = false;
 
   CHARRANGE selection;
@@ -2402,16 +2431,11 @@ void AutocompleteEditViewWin::OnPossibleDrag(const CPoint& point) {
   }
 }
 
-void AutocompleteEditViewWin::UpdateDragDone(UINT keys) {
-  possible_drag_ = (possible_drag_ &&
-                    ((keys & (MK_LBUTTON | MK_MBUTTON | MK_RBUTTON)) != 0));
-}
-
 void AutocompleteEditViewWin::RepaintDropHighlight(int position) {
   if ((position != -1) && (position <= GetTextLength())) {
     const POINT min_loc(PosFromChar(position));
     const RECT highlight_bounds = {min_loc.x - 1, font_y_adjustment_,
-        min_loc.x + 2, font_ascent_ + font_descent_ + font_y_adjustment_};
+        min_loc.x + 2, font_.height() + font_y_adjustment_};
     InvalidateRect(&highlight_bounds, false);
   }
 }
@@ -2441,4 +2465,27 @@ void AutocompleteEditViewWin::BuildContextMenu() {
                                                 IDS_EDIT_SEARCH_ENGINES);
   }
   context_menu_.reset(new views::Menu2(context_menu_contents_.get()));
+}
+
+void AutocompleteEditViewWin::SelectAllIfNecessary(MouseButton button,
+                                                   const CPoint& point) {
+  // When the user has clicked and released to give us focus, select all.
+  if (tracking_click_[button] &&
+      !win_util::IsDrag(click_point_[button], point)) {
+    // Select all in the reverse direction so as not to scroll the caret
+    // into view and shift the contents jarringly.
+    SelectAll(true);
+    possible_drag_ = false;
+  }
+}
+
+void AutocompleteEditViewWin::TrackMousePosition(MouseButton button,
+                                                 const CPoint& point) {
+  if (gaining_focus_.get()) {
+    // This click is giving us focus, so we need to track how much the mouse
+    // moves to see if it's a drag or just a click. Clicks should select all
+    // the text.
+    tracking_click_[button] = true;
+    click_point_[button] = point;
+  }
 }

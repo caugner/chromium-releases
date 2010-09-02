@@ -9,6 +9,7 @@
 #include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
+#include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "net/base/data_url.h"
@@ -20,12 +21,14 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebSecurityPolicy.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLError.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLLoadTiming.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLLoaderClient.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
 #include "webkit/glue/ftp_directory_listing_response_delegate.h"
 #include "webkit/glue/multipart_response_delegate.h"
 #include "webkit/glue/resource_loader_bridge.h"
+#include "webkit/glue/site_isolation_metrics.h"
 #include "webkit/glue/webkit_glue.h"
 
 using base::Time;
@@ -37,6 +40,7 @@ using WebKit::WebSecurityPolicy;
 using WebKit::WebString;
 using WebKit::WebURL;
 using WebKit::WebURLError;
+using WebKit::WebURLLoadTiming;
 using WebKit::WebURLLoader;
 using WebKit::WebURLLoaderClient;
 using WebKit::WebURLRequest;
@@ -124,6 +128,10 @@ ResourceType::Type FromTargetType(WebURLRequest::TargetType type) {
       return ResourceType::OBJECT;
     case WebURLRequest::TargetIsMedia:
       return ResourceType::MEDIA;
+    case WebURLRequest::TargetIsWorker:
+      return ResourceType::WORKER;
+    case WebURLRequest::TargetIsSharedWorker:
+      return ResourceType::SHARED_WORKER;
     default:
       NOTREACHED();
       return ResourceType::SUB_RESOURCE;
@@ -158,13 +166,39 @@ void PopulateURLResponse(
     const ResourceLoaderBridge::ResponseInfo& info,
     WebURLResponse* response) {
   response->setURL(url);
+  response->setResponseTime(info.response_time.ToDoubleT());
   response->setMIMEType(WebString::fromUTF8(info.mime_type));
   response->setTextEncodingName(WebString::fromUTF8(info.charset));
   response->setExpectedContentLength(info.content_length);
   response->setSecurityInfo(info.security_info);
   response->setAppCacheID(info.appcache_id);
   response->setAppCacheManifestURL(info.appcache_manifest_url);
+  response->setWasCached(!info.load_timing.base_time.is_null() &&
+      info.response_time < info.load_timing.base_time);
   response->setWasFetchedViaSPDY(info.was_fetched_via_spdy);
+  response->setWasNpnNegotiated(info.was_npn_negotiated);
+  response->setWasAlternateProtocolAvailable(
+      info.was_alternate_protocol_available);
+  response->setWasFetchedViaProxy(info.was_fetched_via_proxy);
+  response->setConnectionID(info.connection_id);
+  response->setConnectionReused(info.connection_reused);
+
+  WebURLLoadTiming timing;
+  timing.initialize();
+  const ResourceLoaderBridge::LoadTimingInfo& timing_info = info.load_timing;
+  timing.setRequestTime(timing_info.base_time.ToDoubleT());
+  timing.setProxyStart(timing_info.proxy_start);
+  timing.setProxyEnd(timing_info.proxy_end);
+  timing.setDNSStart(timing_info.dns_start);
+  timing.setDNSEnd(timing_info.dns_end);
+  timing.setConnectStart(timing_info.connect_start);
+  timing.setConnectEnd(timing_info.connect_end);
+  timing.setSSLStart(timing_info.ssl_start);
+  timing.setSSLEnd(timing_info.ssl_end);
+  timing.setSendStart(timing_info.send_start);
+  timing.setSendEnd(timing_info.send_end);
+  timing.setReceiveHeadersEnd(timing_info.receive_headers_end);
+  response->setLoadTiming(timing);
 
   const net::HttpResponseHeaders* headers = info.headers;
   if (!headers)
@@ -227,6 +261,7 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
   virtual void OnReceivedResponse(
       const ResourceLoaderBridge::ResponseInfo& info, bool content_filtered);
   virtual void OnReceivedData(const char* data, int len);
+  virtual void OnReceivedCachedMetadata(const char* data, int len);
   virtual void OnCompletedRequest(
       const URLRequestStatus& status, const std::string& security_info);
   virtual GURL GetURLForDebugging() const;
@@ -243,6 +278,9 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
   scoped_ptr<ResourceLoaderBridge> bridge_;
   scoped_ptr<FtpDirectoryListingResponseDelegate> ftp_listing_delegate_;
   scoped_ptr<MultipartResponseDelegate> multipart_delegate_;
+
+  // TODO(japhet): Storing this is a temporary hack for site isolation logging.
+  WebURL response_url_;
 };
 
 WebURLLoaderImpl::Context::Context(WebURLLoaderImpl* loader)
@@ -317,6 +355,8 @@ void WebURLLoaderImpl::Context::Start(
 
   if (request.reportUploadProgress())
     load_flags |= net::LOAD_ENABLE_UPLOAD_PROGRESS;
+  if (request.reportLoadTiming())
+    load_flags |= net::LOAD_ENABLE_LOAD_TIMING;
 
   if (!request.allowCookies() || !request.allowStoredCredentials()) {
     load_flags |= net::LOAD_DO_NOT_SAVE_COOKIES;
@@ -501,11 +541,16 @@ void WebURLLoaderImpl::Context::OnReceivedResponse(
     ftp_listing_delegate_.reset(
         new FtpDirectoryListingResponseDelegate(client_, loader_, response));
   }
+
+  response_url_ = response.url();
 }
 
 void WebURLLoaderImpl::Context::OnReceivedData(const char* data, int len) {
   if (!client_)
     return;
+
+  // Temporary logging, see site_isolation_metrics.h/cc.
+  SiteIsolationMetrics::SniffCrossOriginHTML(response_url_, data, len);
 
   if (ftp_listing_delegate_.get()) {
     // The FTP listing delegate will make the appropriate calls to
@@ -518,6 +563,12 @@ void WebURLLoaderImpl::Context::OnReceivedData(const char* data, int len) {
   } else {
     client_->didReceiveData(loader_, data, len);
   }
+}
+
+void WebURLLoaderImpl::Context::OnReceivedCachedMetadata(
+    const char* data, int len) {
+  if (client_)
+    client_->didReceiveCachedMetadata(loader_, data, len);
 }
 
 void WebURLLoaderImpl::Context::OnCompletedRequest(
@@ -553,6 +604,9 @@ void WebURLLoaderImpl::Context::OnCompletedRequest(
       client_->didFinishLoading(loader_);
     }
   }
+
+  // Temporary logging, see site_isolation_metrics.h/cc
+  SiteIsolationMetrics::RemoveCompletedResponse(response_url_);
 
   // We are done with the bridge now, and so we need to release the reference
   // to ourselves that we took on behalf of the bridge.  This may cause our

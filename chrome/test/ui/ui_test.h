@@ -350,11 +350,6 @@ class UITestBase {
     full_memory_dump_ = value;
   }
 
-  static bool use_existing_browser() { return default_use_existing_browser_; }
-  static void set_use_existing_browser(bool value) {
-    default_use_existing_browser_ = value;
-  }
-
   static bool dump_histograms_on_exit() { return dump_histograms_on_exit_; }
   static void set_dump_histograms_on_exit(bool value) {
     dump_histograms_on_exit_ = value;
@@ -429,6 +424,11 @@ class UITestBase {
     ui_test_name_ = name;
   }
 
+  // Fetch the state which determines whether the profile will be cleared on
+  // next startup.
+  bool get_clear_profile() const {
+    return clear_profile_;
+  }
   // Sets clear_profile_. Should be called before launching browser to have
   // any effect.
   void set_clear_profile(bool clear_profile) {
@@ -574,8 +574,6 @@ class UITestBase {
   bool include_testing_id_;             // Should we supply the testing channel
                                         // id on the command line? Default is
                                         // true.
-  bool use_existing_browser_;           // Duplicate of the static version.
-                                        // Default value comes from static.
   bool enable_file_cookies_;            // Enable file cookies, default is true.
   ProfileType profile_type_;            // Are we using a profile with a
                                         // complex theme?
@@ -585,7 +583,6 @@ class UITestBase {
 
  private:
   bool LaunchBrowserHelper(const CommandLine& arguments,
-                           bool use_existing_browser,
                            bool wait,
                            base::ProcessHandle* process);
 
@@ -602,8 +599,6 @@ class UITestBase {
                                         // during crash.
   static bool show_error_dialogs_;      // If true, a user is paying attention
                                         // to the test, so show error dialogs.
-  static bool default_use_existing_browser_;  // The test connects to an already
-                                              // running browser instance.
   static bool dump_histograms_on_exit_;  // Include histograms in log on exit.
   static bool enable_dcheck_;           // Enable dchecks in release mode.
   static bool silent_dump_on_dcheck_;   // Dump process memory on dcheck without

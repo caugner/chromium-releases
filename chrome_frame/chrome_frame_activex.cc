@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "base/scoped_bstr_win.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
+#include "base/trace_event.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -112,6 +113,7 @@ HHOOK InstallLocalWindowHook(HWND window) {
 
 ChromeFrameActivex::ChromeFrameActivex()
     : chrome_wndproc_hook_(NULL) {
+  TRACE_EVENT_BEGIN("chromeframe.createactivex", this, "");
 }
 
 HRESULT ChromeFrameActivex::FinalConstruct() {
@@ -126,11 +128,11 @@ HRESULT ChromeFrameActivex::FinalConstruct() {
 
 ChromeFrameActivex::~ChromeFrameActivex() {
   // We expect these to be released during a call to SetClientSite(NULL).
-  DCHECK_EQ(0, onmessage_.size());
-  DCHECK_EQ(0, onloaderror_.size());
-  DCHECK_EQ(0, onload_.size());
-  DCHECK_EQ(0, onreadystatechanged_.size());
-  DCHECK_EQ(0, onextensionready_.size());
+  DCHECK_EQ(0u, onmessage_.size());
+  DCHECK_EQ(0u, onloaderror_.size());
+  DCHECK_EQ(0u, onload_.size());
+  DCHECK_EQ(0u, onreadystatechanged_.size());
+  DCHECK_EQ(0u, onextensionready_.size());
 
   if (chrome_wndproc_hook_) {
     BOOL unhook_success = ::UnhookWindowsHookEx(chrome_wndproc_hook_);
@@ -139,6 +141,8 @@ ChromeFrameActivex::~ChromeFrameActivex() {
 
   // ChromeFramePlugin::Uninitialize()
   Base::Uninitialize();
+
+  TRACE_EVENT_END("chromeframe.createactivex", this, "");
 }
 
 LRESULT ChromeFrameActivex::OnCreate(UINT message, WPARAM wparam, LPARAM lparam,
@@ -266,7 +270,7 @@ void ChromeFrameActivex::OnGetEnabledExtensionsComplete(
   for (size_t i = 0; i < extension_directories.size(); ++i) {
     LONG index = static_cast<LONG>(i);
     ::SafeArrayPutElement(sa, &index, reinterpret_cast<void*>(
-        CComBSTR(extension_directories[i].ToWStringHack().c_str()).Detach()));
+        CComBSTR(extension_directories[i].value().c_str()).Detach()));
   }
 
   Fire_ongetenabledextensionscomplete(sa);
@@ -361,7 +365,7 @@ STDMETHODIMP ChromeFrameActivex::Load(IPropertyBag* bag, IErrorLog* error_log) {
   return hr;
 }
 
-const wchar_t g_activex_mixed_content_error[] = {
+const wchar_t g_activex_insecure_content_error[] = {
     L"data:text/html,<html><body><b>ChromeFrame Security Error<br><br>"
     L"Cannot navigate to HTTP url when document URL is HTTPS</body></html>"};
 
@@ -370,7 +374,7 @@ STDMETHODIMP ChromeFrameActivex::put_src(BSTR src) {
   if (document_url.SchemeIsSecure()) {
     GURL source_url(src);
     if (!source_url.SchemeIsSecure()) {
-      Base::put_src(ScopedBstr(g_activex_mixed_content_error));
+      Base::put_src(ScopedBstr(g_activex_insecure_content_error));
       return E_ACCESSDENIED;
     }
   }
@@ -448,10 +452,16 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
         profile_name.assign(profile_name_arg, profile_name_arg.Length());
     }
 
+    std::string utf8_url;
+    if (url_.Length()) {
+      WideToUTF8(url_, url_.Length(), &utf8_url);
+    }
+
     url_fetcher_.set_frame_busting(!is_privileged_);
     automation_client_->SetUrlFetcher(&url_fetcher_);
     if (!InitializeAutomation(profile_name, chrome_extra_arguments,
-                              IsIEInPrivate(), true)) {
+                              IsIEInPrivate(), true, GURL(utf8_url),
+                              GURL())) {
       return E_FAIL;
     }
   }

@@ -21,6 +21,7 @@ namespace {
 const int kDefaultPollingIntervalMilliseconds = 10 * 1000;  // 10s
 const int kNoChangePollingIntervalMilliseconds = 2 * 60 * 1000;  // 2 mins
 const int kTwoNoChangePollingIntervalMilliseconds = 10 * 60 * 1000;  // 10 mins
+const int kNoWifiPollingIntervalMilliseconds = 20 * 1000; // 20s
 
 const char kNetworkManagerServiceName[] = "org.freedesktop.NetworkManager";
 const char kNetworkManagerPath[] = "/org/freedesktop/NetworkManager";
@@ -148,10 +149,6 @@ bool NetworkManagerWlanApi::Init() {
   // Chrome DLL init code handles initializing the thread system, so rather than
   // get caught up with that nonsense here, lets just assert our requirement.
   CHECK(g_thread_supported());
-
-  // We should likely do this higher up too, the docs say it must only be done
-  // once but there's no way to know if it already was or not.
-  dbus_g_thread_init();
 
   // Get a connection to the session bus.
   connection_ = dbus_g_bus_get(DBUS_BUS_SYSTEM, &error_);
@@ -375,6 +372,7 @@ WifiDataProviderLinux::NewWlanApi() {
 PollingPolicyInterface* WifiDataProviderLinux::NewPollingPolicy() {
   return new GenericPollingPolicy<kDefaultPollingIntervalMilliseconds,
                                   kNoChangePollingIntervalMilliseconds,
-                                  kTwoNoChangePollingIntervalMilliseconds>;
+                                  kTwoNoChangePollingIntervalMilliseconds,
+                                  kNoWifiPollingIntervalMilliseconds>;
 }
 

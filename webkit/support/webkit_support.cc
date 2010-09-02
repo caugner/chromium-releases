@@ -5,6 +5,7 @@
 #include "webkit/support/webkit_support.h"
 
 #include "base/at_exit.h"
+#include "base/command_line.h"
 #include "base/debug_util.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -12,18 +13,24 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
+#include "base/string_piece.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/weak_ptr.h"
+#include "grit/webkit_chromium_resources.h"
 #include "net/base/net_util.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPluginParams.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/glue/media/buffered_data_source.h"
 #include "webkit/glue/media/media_resource_loader_bridge_factory.h"
 #include "webkit/glue/media/simple_data_source.h"
 #include "webkit/glue/media/video_renderer_impl.h"
+#include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/plugins/webplugin_impl.h"
 #include "webkit/glue/plugins/webplugin_page_delegate.h"
+#include "webkit/glue/plugins/webplugininfo.h"
+#include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webkitclient_impl.h"
 #include "webkit/glue/webmediaplayer_impl.h"
 #include "webkit/support/platform_support.h"
@@ -32,6 +39,7 @@
 #include "webkit/tools/test_shell/simple_database_system.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 
+using WebKit::WebCString;
 using WebKit::WebFrame;
 using WebKit::WebMediaPlayerClient;
 using WebKit::WebPlugin;
@@ -43,19 +51,35 @@ namespace {
 
 class TestEnvironment {
  public:
-  explicit TestEnvironment() {}
+  explicit TestEnvironment(bool unit_test_mode) {
+    if (!unit_test_mode)
+      at_exit_manager_.reset(new base::AtExitManager);
+    main_message_loop_.reset(new MessageLoopForUI);
+    // TestWebKitClient must be instantiated after the MessageLoopForUI.
+    webkit_client_.reset(new TestWebKitClient(unit_test_mode));
+  }
 
   ~TestEnvironment() {
     SimpleResourceLoaderBridge::Shutdown();
   }
 
-  WebKit::WebKitClient* webkit_client() { return &webkit_client_; }
+  TestWebKitClient* webkit_client() { return webkit_client_.get(); }
+
+#if defined(OS_WIN)
+  void set_theme_engine(WebKit::WebThemeEngine* engine) {
+    DCHECK(webkit_client_ != 0);
+    webkit_client_->SetThemeEngine(engine);
+  }
+
+  WebKit::WebThemeEngine* theme_engine() {
+    return webkit_client_->themeEngine();
+  }
+#endif
 
  private:
-  base::AtExitManager at_exit_manager_;
-  MessageLoopForUI main_message_loop_;
-  // TestWebKitClient must be instantiated after the MessageLoopForUI.
-  TestWebKitClient webkit_client_;
+  scoped_ptr<base::AtExitManager> at_exit_manager_;
+  scoped_ptr<MessageLoopForUI> main_message_loop_;
+  scoped_ptr<TestWebKitClient> webkit_client_;
 };
 
 class WebPluginImplWithPageDelegate
@@ -64,13 +88,27 @@ class WebPluginImplWithPageDelegate
       public webkit_glue::WebPluginImpl {
  public:
   WebPluginImplWithPageDelegate(WebFrame* frame,
-                                const WebPluginParams& params)
+                                const WebPluginParams& params,
+                                const FilePath& path,
+                                const std::string& mime_type)
       : webkit_support::TestWebPluginPageDelegate(),
-        webkit_glue::WebPluginImpl(frame, params, AsWeakPtr()) {}
+        webkit_glue::WebPluginImpl(
+            frame, params, path, mime_type, AsWeakPtr()) {}
   virtual ~WebPluginImplWithPageDelegate() {}
  private:
   DISALLOW_COPY_AND_ASSIGN(WebPluginImplWithPageDelegate);
 };
+
+FilePath GetWebKitRootDirFilePath() {
+  FilePath basePath;
+  PathService::Get(base::DIR_SOURCE_ROOT, &basePath);
+  if (file_util::PathExists(basePath.Append(FILE_PATH_LITERAL("chrome")))) {
+    return basePath.Append(FILE_PATH_LITERAL("third_party/WebKit"));
+  } else {
+    // WebKit/WebKit/chromium/ -> WebKit/
+    return basePath.Append(FILE_PATH_LITERAL("../.."));
+  }
+}
 
 }  // namespace
 
@@ -78,13 +116,40 @@ namespace webkit_support {
 
 static TestEnvironment* test_environment;
 
-void SetUpTestEnvironment() {
+static void SetUpTestEnvironmentImpl(bool unit_test_mode) {
   base::EnableTerminationOnHeapCorruption();
-  // Load ICU data tables
-  icu_util::Initialize();
-  BeforeInitialize();
-  test_environment = new TestEnvironment;
-  AfterIniitalize();
+
+  // Initialize the singleton CommandLine with fixed values.  Some code refer to
+  // CommandLine::ForCurrentProcess().  We don't use the actual command-line
+  // arguments of DRT to avoid unexpected behavior change.
+  //
+  // webkit/glue/webmediaplayer_impl.cc checks --enable-openmax.
+  // webkit/glue/plugin/plugin_list_posix.cc checks --debug-plugin-loading.
+  // webkit/glue/plugin/plugin_list_win.cc checks --old-wmp.
+  // If DRT needs these flags, specify them in the following kFixedArguments.
+  const char* kFixedArguments[] = {"DumpRenderTree"};
+  CommandLine::Init(arraysize(kFixedArguments), kFixedArguments);
+
+  webkit_support::BeforeInitialize();
+  webkit_support::test_environment = new TestEnvironment(unit_test_mode);
+  webkit_support::AfterInitialize();
+  if (!unit_test_mode) {
+    // Load ICU data tables.  This has to run after TestEnvironment is created
+    // because on Linux, we need base::AtExitManager.
+    icu_util::Initialize();
+  }
+}
+
+void SetUpTestEnvironment(bool unit_test_mode) {
+  SetUpTestEnvironment();
+}
+
+void SetUpTestEnvironment() {
+  SetUpTestEnvironmentImpl(false);
+}
+
+void SetUpTestEnvironmentForUnitTests() {
+  SetUpTestEnvironmentImpl(true);
 }
 
 void TearDownTestEnvironment() {
@@ -106,7 +171,20 @@ WebKit::WebKitClient* GetWebKitClient() {
 
 WebPlugin* CreateWebPlugin(WebFrame* frame,
                            const WebPluginParams& params) {
-  return new WebPluginImplWithPageDelegate(frame, params);
+  const bool kAllowWildcard = true;
+  WebPluginInfo info;
+  std::string actual_mime_type;
+  if (!NPAPI::PluginList::Singleton()->GetPluginInfo(
+          params.url, params.mimeType.utf8(), kAllowWildcard, &info,
+          &actual_mime_type) || !info.enabled) {
+    return NULL;
+  }
+
+  if (actual_mime_type.empty())
+    actual_mime_type = params.mimeType.utf8();
+
+  return new WebPluginImplWithPageDelegate(
+      frame, params, info.path, actual_mime_type);
 }
 
 WebKit::WebMediaPlayer* CreateMediaPlayer(WebFrame* frame,
@@ -140,6 +218,36 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(WebFrame* frame,
   return new webkit_glue::WebMediaPlayerImpl(
       client, factory,
       new webkit_glue::VideoRendererImpl::FactoryFactory(false));
+}
+
+WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
+    WebFrame*, WebKit::WebApplicationCacheHostClient* client) {
+  return SimpleAppCacheSystem::CreateApplicationCacheHost(client);
+}
+
+WebKit::WebString GetWebKitRootDir() {
+  FilePath path = GetWebKitRootDirFilePath();
+  return WebKit::WebString::fromUTF8(WideToUTF8(path.ToWStringHack()).c_str());
+}
+
+void RegisterMockedURL(const WebKit::WebURL& url,
+                     const WebKit::WebURLResponse& response,
+                     const WebKit::WebString& file_path) {
+  test_environment->webkit_client()->url_loader_factory()->
+      RegisterURL(url, response, file_path);
+}
+
+void UnregisterMockedURL(const WebKit::WebURL& url) {
+  test_environment->webkit_client()->url_loader_factory()->UnregisterURL(url);
+}
+
+void UnregisterAllMockedURLs() {
+  test_environment->webkit_client()->url_loader_factory()->UnregisterAllURLs();
+}
+
+void ServeAsynchronousMockedRequests() {
+  test_environment->webkit_client()->url_loader_factory()->
+      ServeAsynchronousRequests();
 }
 
 // Wrapper for debug_util
@@ -214,14 +322,9 @@ WebURL RewriteLayoutTestsURL(const std::string& utf8_url) {
   if (utf8_url.compare(0, kPrefixLen, kPrefix, kPrefixLen))
     return WebURL(GURL(utf8_url));
 
-  FilePath sourcePath;
-  PathService::Get(base::DIR_SOURCE_ROOT, &sourcePath);
-  FilePath replacePath
-      = sourcePath.Append(FILE_PATH_LITERAL("third_party/WebKit/LayoutTests/"));
-  if (!file_util::PathExists(replacePath)) {
-      replacePath = sourcePath.Append(FILE_PATH_LITERAL("../../LayoutTests/"));
-      DCHECK(file_util::PathExists(replacePath));
-  }
+  FilePath replacePath =
+      GetWebKitRootDirFilePath().Append(FILE_PATH_LITERAL("LayoutTests/"));
+  CHECK(file_util::PathExists(replacePath));
 #if defined(OS_WIN)
   std::string utf8_path = WideToUTF8(replacePath.value());
 #else
@@ -231,6 +334,12 @@ WebURL RewriteLayoutTestsURL(const std::string& utf8_url) {
   std::string newUrl = std::string("file://") + utf8_path
       + utf8_url.substr(kPrefixLen);
   return WebURL(GURL(newUrl));
+}
+
+bool SetCurrentDirectoryForFileURL(const WebKit::WebURL& fileUrl) {
+  FilePath localPath;
+  return net::FileURLToFilePath(fileUrl, &localPath)
+      && file_util::SetCurrentDirectory(localPath.DirName());
 }
 
 // Bridge for SimpleDatabaseSystem
@@ -247,6 +356,50 @@ void ClearAllDatabases() {
 
 void SetAcceptAllCookies(bool accept) {
   SimpleResourceLoaderBridge::SetAcceptAllCookies(accept);
+}
+
+// Theme engine
+#if defined(OS_WIN)
+
+void SetThemeEngine(WebKit::WebThemeEngine* engine) {
+  DCHECK(test_environment);
+  test_environment->set_theme_engine(engine);
+}
+
+WebKit::WebThemeEngine* GetThemeEngine() {
+  DCHECK(test_environment);
+  return test_environment->theme_engine();
+}
+
+#endif
+
+// DevTools
+WebCString GetDevToolsInjectedScriptSource() {
+  base::StringPiece injectJSWebkit = webkit_glue::GetDataResource(
+      IDR_DEVTOOLS_INJECT_WEBKIT_JS);
+  return WebCString(injectJSWebkit.as_string().c_str());
+}
+
+WebCString GetDevToolsInjectedScriptDispatcherSource() {
+  base::StringPiece injectDispatchJS = webkit_glue::GetDataResource(
+      IDR_DEVTOOLS_INJECT_DISPATCH_JS);
+  return WebCString(injectDispatchJS.as_string().c_str());
+}
+
+WebCString GetDevToolsDebuggerScriptSource() {
+  base::StringPiece debuggerScriptJS = webkit_glue::GetDataResource(
+      IDR_DEVTOOLS_DEBUGGER_SCRIPT_JS);
+  return WebCString(debuggerScriptJS.as_string().c_str());
+}
+
+WebURL GetDevToolsPathAsURL() {
+  FilePath dirExe;
+  if (!webkit_glue::GetExeDirectory(&dirExe)) {
+      DCHECK(false);
+      return WebURL();
+  }
+  FilePath devToolsPath = dirExe.AppendASCII("resources/inspector/devtools.html");
+  return net::FilePathToFileURL(devToolsPath);
 }
 
 }  // namespace webkit_support

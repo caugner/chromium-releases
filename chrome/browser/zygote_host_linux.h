@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/global_descriptors_posix.h"
+#include "base/lock.h"
 #include "base/process.h"
 
 template<typename Type>
@@ -43,20 +44,46 @@ class ZygoteHost {
     kCmdFork = 0,             // Fork off a new renderer.
     kCmdReap = 1,             // Reap a renderer child.
     kCmdDidProcessCrash = 2,  // Check if child process crashed.
+    kCmdGetSandboxStatus = 3, // Read a bitmask of kSandbox*
+  };
+
+  // These form a bitmask which describes the conditions of the sandbox that
+  // the zygote finds itself in.
+  enum {
+    kSandboxSUID = 1 << 0,  // SUID sandbox active
+    kSandboxPIDNS = 1 << 1,  // SUID sandbox is using the PID namespace
+    kSandboxNetNS = 1 << 2,  // SUID sandbox is using the network namespace
+    kSandboxSeccomp = 1 << 3,  // seccomp sandbox active.
   };
 
   pid_t pid() const { return pid_; }
+
+  // Returns an int which is a bitmask of kSandbox* values. Only valid after
+  // the first render has been forked.
+  int sandbox_status() const {
+    if (have_read_sandbox_status_word_)
+      return sandbox_status_;
+    return 0;
+  }
 
  private:
   friend struct DefaultSingletonTraits<ZygoteHost>;
   ZygoteHost();
   ~ZygoteHost();
 
+  ssize_t ReadReply(void* buf, size_t buflen);
+
   int control_fd_;  // the socket to the zygote
+  // A lock protecting all communication with the zygote. This lock must be
+  // acquired before sending a command and released after the result has been
+  // received.
+  Lock control_lock_;
   pid_t pid_;
   bool init_;
   bool using_suid_sandbox_;
   std::string sandbox_binary_;
+  bool have_read_sandbox_status_word_;
+  int sandbox_status_;
 };
 
 #endif  // CHROME_BROWSER_ZYGOTE_HOST_LINUX_H_

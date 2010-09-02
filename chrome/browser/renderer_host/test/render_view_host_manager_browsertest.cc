@@ -4,6 +4,7 @@
 
 #include "chrome/browser/browser.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -14,7 +15,6 @@
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
-#include "chrome/common/extensions/extension_error_reporter.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/net_util.h"
@@ -38,8 +38,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
       HTTPSTestServer::CreateGoodServer(kDocRoot);
 
   // Load a page with links that open in a new window.
-  ui_test_utils::NavigateToURL(browser(), http_server->TestServerPageW(
-      L"files/click-noreferrer-links.html"));
+  ui_test_utils::NavigateToURL(browser(), http_server->TestServerPage(
+      "files/click-noreferrer-links.html"));
 
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
@@ -81,8 +81,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
       HTTPSTestServer::CreateGoodServer(kDocRoot);
 
   // Load a page with links that open in a new window.
-  ui_test_utils::NavigateToURL(browser(), http_server->TestServerPageW(
-      L"files/click-noreferrer-links.html"));
+  ui_test_utils::NavigateToURL(browser(), http_server->TestServerPage(
+      "files/click-noreferrer-links.html"));
 
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
@@ -124,8 +124,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
       HTTPSTestServer::CreateGoodServer(kDocRoot);
 
   // Load a page with links that open in a new window.
-  ui_test_utils::NavigateToURL(browser(), http_server->TestServerPageW(
-      L"files/click-noreferrer-links.html"));
+  ui_test_utils::NavigateToURL(browser(), http_server->TestServerPage(
+      "files/click-noreferrer-links.html"));
 
   // Get the original SiteInstance for later comparison.
   scoped_refptr<SiteInstance> orig_site_instance(
@@ -155,10 +155,17 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   EXPECT_EQ(orig_site_instance, noref_site_instance);
 }
 
+// Hangs flakily in Win, http://crbug.com/45040.
+#if defined(OS_WIN)
+#define MAYBE_ChromeURLAfterDownload DISABLED_ChromeURLAfterDownload
+#else
+#defne MAYBE_ChromeURLAfterDownload ChromeURLAfterDownload
+#endif  // defined(OS_WIN)
+
 // Test for crbug.com/14505. This tests that chrome:// urls are still functional
 // after download of a file while viewing another chrome://.
 IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
-                       DISABLED_ChromeURLAfterDownload) {
+                       MAYBE_ChromeURLAfterDownload) {
   GURL downloads_url("chrome://downloads");
   GURL extensions_url("chrome://extensions");
   FilePath zip_download;

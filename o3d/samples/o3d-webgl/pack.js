@@ -73,6 +73,7 @@ o3d.inherit('Pack', 'NamedObject');
  */
 o3d.Pack.prototype.destroy = function() {
   this.objects_ = [];
+  this.client.removePack(this);
 };
 
 
@@ -171,12 +172,13 @@ o3d.Pack.prototype.removeObject =
  */
 o3d.Pack.prototype.createObject =
     function(type_name) {
-  var foo = o3d.global.o3d[type_name];
+  var foo = o3d.global.o3d[o3d.filterTypeName_(type_name)];
   if (typeof foo != 'function') {
     throw 'cannot find type in o3d namespace: ' + type_name
   }
   var object = new foo();
   object.gl = this.gl;
+  object.clientId = o3d.Client.nextId++;
   this.objects_.push(object);
   return object;
 };
@@ -201,27 +203,7 @@ o3d.Pack.prototype.createObject =
 o3d.Pack.prototype.createTexture2D =
     function(width, height, format, levels, enable_render_surfaces) {
   var texture = this.createObject('Texture2D');
-  texture.width = width;
-  texture.height = height;
-  texture.levels = levels;
-  texture.texture_ = this.gl.createTexture();
-
-  if (width != undefined && height != undefined) {
-    this.gl.bindTexture(this.gl.TEXTURE_2D, texture.texture_);
-    this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, width, height,
-        0, this.gl.RGBA, this.gl.UNSIGNED_BYTE, null);
-  }
-
-  this.gl.bindTexture(this.gl.TEXTURE_2D, texture.texture_);
-  this.gl.texParameteri(this.gl.TEXTURE_2D,
-    this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
-  this.gl.texParameteri(this.gl.TEXTURE_2D,
-    this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
-  this.gl.texParameteri(this.gl.TEXTURE_2D,
-    this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
-  this.gl.texParameteri(this.gl.TEXTURE_2D,
-    this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
-
+  texture.init_(width, height, format, levels, enable_render_surfaces);
   return texture;
 };
 
@@ -232,18 +214,20 @@ o3d.Pack.prototype.createTexture2D =
  * Note:  If enable_render_surfaces is true, then the dimensions must be a
  * power of two.
  *
- * @param {number} edge_length The edge of the texture area in texels
+ * @param {number} edgeLength The edge of the texture area in texels
  *     (max = 2048)
  * @param {o3d.Texture.Format} format The memory format of each texel.
  * @param {number} levels The number of mipmap levels.   Use zero to create
  *     the compelete mipmap chain.
- * @param {boolean} enable_render_surfaces If true, the texture object
+ * @param {boolean} enableRenderSurfaces If true, the texture object
  *     will expose RenderSurface objects through GetRenderSurface(...).
  * @return {!o3d.TextureCUBE}  The TextureCUBE object.
  */
 o3d.Pack.prototype.createTextureCUBE =
-    function(edge_length, format, levels, enable_render_surfaces) {
-  o3d.notImplemented();
+    function(edgeLength, format, levels, enableRenderSurfaces) {
+  var textureCube = this.createObject('TextureCUBE');
+  textureCube.init_(edgeLength, format, levels, enableRenderSurfaces);
+  return textureCube;
 };
 
 
@@ -280,9 +264,7 @@ o3d.Pack.prototype.createDepthStencilSurface =
  */
 o3d.Pack.prototype.getObjects =
     function(name, class_type_name) {
-  if (class_type_name.substr(0, 4) == 'o3d.') {
-    class_type_name = class_type_name.substr(4);
-  }
+  class_type_name = o3d.filterTypeName_(class_type_name);
 
   var found = [];
 
@@ -312,9 +294,7 @@ o3d.Pack.prototype.getObjects =
  */
 o3d.Pack.prototype.getObjectsByClassName =
     function(class_type_name) {
-  if (class_type_name.substr(0, 4) == 'o3d.') {
-    class_type_name = class_type_name.substr(4);
-  }
+  class_type_name = o3d.filterTypeName_(class_type_name);
 
   var found = [];
 
@@ -361,6 +341,14 @@ o3d.Pack.prototype.createFileRequest =
   return this.createObject('FileRequest');
 };
 
+/**
+ * Creates an ArchiveRequest so we can stream in assets from an archive.
+ * @return {!o3d.ArchiveRequest}  an ArchiveRequest
+ */
+o3d.Pack.prototype.createArchiveRequest =
+    function() {
+  return this.createObject('ArchiveRequest');
+};
 
 /**
  * Create Bitmaps from RawData.
@@ -387,16 +375,15 @@ o3d.Pack.prototype.createBitmapsFromRawData =
 
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;
-
-  bitmap.canvas_ = canvas;
   var context = canvas.getContext('2d');
-  // Flip it.
-  context.translate(0, bitmap.height);
-  context.scale(1, -1);
   context.drawImage(raw_data.image_,
       0, 0, bitmap.width, bitmap.height);
 
-  // TODO(petersont): I'm not sure how to get the format.
+  bitmap.canvas_ = canvas;
+  // Most images require a vertical flip.
+  bitmap.flipVerticallyLazily_();
+
+  // TODO(petersont): Find out if any other formats are possible at this point.
   bitmap.format = o3d.Texture.ARGB8;
   bitmap.numMipmaps = 1;
 

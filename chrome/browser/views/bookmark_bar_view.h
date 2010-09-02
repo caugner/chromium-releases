@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_VIEWS_BOOKMARK_BAR_VIEW_H_
 #define CHROME_BROWSER_VIEWS_BOOKMARK_BAR_VIEW_H_
 
+#include <set>
+
 #include "app/slide_animation.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
@@ -48,6 +50,14 @@ class BookmarkBarView : public DetachableToolbarView,
   friend class ShowFolderMenuTask;
 
  public:
+  // Constants used in Browser View, as well as here.
+  // How inset the bookmarks bar is when displayed on the new tab page.
+  static const int kNewtabHorizontalPadding;
+  static const int kNewtabVerticalPadding;
+
+  // Maximum size of buttons on the bookmark bar.
+  static const int kMaxButtonWidth;
+
   // Interface implemented by controllers/views that need to be notified any
   // time the model changes, typically to cancel an operation that is showing
   // data from the model such as a menu. This isn't intended as a general
@@ -152,12 +162,15 @@ class BookmarkBarView : public DetachableToolbarView,
   // True if we're on a page where the bookmarks bar is always visible.
   bool OnNewTabPage() const;
 
+  // True if we're on an extension apps page.
+  bool OnAppsPage() const;
+
   // How much we want the bookmark bar to overlap the toolbar.  If |return_max|
   // is true, we return the maximum overlap rather than the current overlap.
   int GetToolbarOverlap(bool return_max);
 
   // Whether or not we are animating.
-  bool IsAnimating() { return size_animation_->IsAnimating(); }
+  bool is_animating() { return size_animation_->is_animating(); }
 
   // SlideAnimationDelegate implementation.
   void AnimationProgressed(const Animation* animation);
@@ -208,21 +221,18 @@ class BookmarkBarView : public DetachableToolbarView,
   // BookmarkBarInstructionsView::Delegate.
   virtual void ShowImportDialog();
 
-  // Maximum size of buttons on the bookmark bar.
-  static const int kMaxButtonWidth;
-
   // If a button is currently throbbing, it is stopped. If immediate is true
   // the throb stops immediately, otherwise it stops after a couple more
   // throbs.
   void StopThrobbing(bool immediate);
 
+  // Returns the number of buttons corresponding to starred urls/groups. This
+  // is equivalent to the number of children the bookmark bar node from the
+  // bookmark bar model has.
+  int GetBookmarkButtonCount();
+
   // If true we're running tests. This short circuits a couple of animations.
   static bool testing_;
-
-  // Constants used in Browser View, as well as here.
-  // How inset the bookmarks bar is when displayed on the new tab page.
-  static const int kNewtabHorizontalPadding;
-  static const int kNewtabVerticalPadding;
 
  private:
   class ButtonSeparatorView;
@@ -266,11 +276,6 @@ class BookmarkBarView : public DetachableToolbarView,
 
   // Creates the button used when not all bookmark buttons fit.
   views::MenuButton* CreateOverflowButton();
-
-  // Returns the number of buttons corresponding to starred urls/groups. This
-  // is equivalent to the number of children the bookmark bar node from the
-  // bookmark bar model has.
-  int GetBookmarkButtonCount();
 
   // Invoked when the bookmark bar model has finished loading. Creates a button
   // for each of the children of the root node from the model.

@@ -7,8 +7,8 @@
     'chromium_code': 1,
   },
   'includes': [
+    '../build/branding.gypi',
     '../build/common.gypi',
-    '../plugin/branding.gypi',
   ],
   'target_defaults': {
     'include_dirs': [
@@ -64,6 +64,25 @@
               'win/crash_sender_win32.cc',
               '../../<(breakpaddir)/client/windows/sender/crash_report_sender.cc',
             ],
+          },
+        ],
+      },
+    ],
+    ['OS=="linux"',
+      {
+        'targets': [
+          {
+            'target_name': 'o3dBreakpad',
+            'type': 'static_library',
+            'sources': [
+              'linux/breakpad.cc',
+              'linux/breakpad.h',
+            ],
+            'direct_dependent_settings': {
+              'include_dirs': [
+                '../../breakpad/src',
+              ],
+            },
           },
         ],
       },

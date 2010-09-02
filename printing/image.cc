@@ -60,16 +60,15 @@ class DisableFontSmoothing {
 
 namespace printing {
 
-Image::Image(const std::wstring& filename)
+Image::Image(const FilePath& path)
     : row_length_(0),
       ignore_alpha_(true) {
   std::string data;
-  file_util::ReadFileToString(filename, &data);
-  std::wstring ext = file_util::GetFileExtensionFromPath(filename);
+  file_util::ReadFileToString(path, &data);
   bool success = false;
-  if (LowerCaseEqualsASCII(ext, "png")) {
+  if (path.MatchesExtension(FILE_PATH_LITERAL(".png"))) {
     success = LoadPng(data);
-  } else if (LowerCaseEqualsASCII(ext, "emf")) {
+  } else if (path.MatchesExtension(FILE_PATH_LITERAL(".emf"))) {
     success = LoadMetafile(data);
   } else {
     DCHECK(false);
@@ -250,7 +249,8 @@ bool Image::LoadMetafile(const NativeMetafile& metafile) {
                               kCGImageAlphaPremultipliedLast));
     DCHECK(bitmap_context.get());
     metafile.RenderPage(page_number, bitmap_context,
-                        CGRectMake(0, 0, size_.width(), size_.height()));
+                        CGRectMake(0, 0, size_.width(), size_.height()),
+                        true, false, false, false);
   }
 #else
   NOTIMPLEMENTED();

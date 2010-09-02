@@ -7,46 +7,112 @@
 #include "base/compiler_specific.h"
 #include "base/format_macros.h"
 #include "base/string_util.h"
+#include "net/url_request/url_request_netlog_params.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
 typedef PassiveLogCollector::RequestTracker RequestTracker;
-typedef PassiveLogCollector::RequestInfoList RequestInfoList;
+typedef PassiveLogCollector::SourceInfoList SourceInfoList;
+typedef PassiveLogCollector::SocketTracker SocketTracker;
+using net::NetLog;
 
-const net::NetLog::SourceType kSourceType = net::NetLog::SOURCE_NONE;
+const NetLog::SourceType kSourceType = NetLog::SOURCE_NONE;
 
-net::CapturingNetLog::Entry MakeStartLogEntryWithURL(int source_id,
-                                                     const std::string& url) {
-  return net::CapturingNetLog::Entry(
-      net::NetLog::TYPE_URL_REQUEST_START,
+PassiveLogCollector::Entry MakeStartLogEntryWithURL(int source_id,
+                                                    const std::string& url) {
+  return PassiveLogCollector::Entry(
+      0,
+      NetLog::TYPE_URL_REQUEST_START_JOB,
       base::TimeTicks(),
-      net::NetLog::Source(kSourceType, source_id),
-      net::NetLog::PHASE_BEGIN,
-      new net::NetLogStringParameter(url));
+      NetLog::Source(kSourceType, source_id),
+      NetLog::PHASE_BEGIN,
+      new URLRequestStartEventParameters(GURL(url), "GET", 0, net::LOW));
 }
 
-net::CapturingNetLog::Entry MakeStartLogEntry(int source_id) {
+PassiveLogCollector::Entry MakeStartLogEntry(int source_id) {
   return MakeStartLogEntryWithURL(source_id,
                                   StringPrintf("http://req%d", source_id));
 }
 
-net::CapturingNetLog::Entry MakeEndLogEntry(int source_id) {
-  return net::CapturingNetLog::Entry(
-      net::NetLog::TYPE_REQUEST_ALIVE,
+PassiveLogCollector::Entry MakeEndLogEntry(int source_id) {
+  return PassiveLogCollector::Entry(
+      0,
+      NetLog::TYPE_REQUEST_ALIVE,
       base::TimeTicks(),
-      net::NetLog::Source(kSourceType, source_id),
-      net::NetLog::PHASE_END,
+      NetLog::Source(kSourceType, source_id),
+      NetLog::PHASE_END,
       NULL);
+}
+
+void AddStartURLRequestEntries(PassiveLogCollector* collector, uint32 id) {
+  collector->OnAddEntry(NetLog::TYPE_REQUEST_ALIVE, base::TimeTicks(),
+                        NetLog::Source(NetLog::SOURCE_URL_REQUEST, id),
+                        NetLog::PHASE_BEGIN, NULL);
+  collector->OnAddEntry(NetLog::TYPE_URL_REQUEST_START_JOB, base::TimeTicks(),
+                        NetLog::Source(NetLog::SOURCE_URL_REQUEST, id),
+                        NetLog::PHASE_BEGIN, new URLRequestStartEventParameters(
+                            GURL(StringPrintf("http://req%d", id)), "GET", 0,
+                            net::LOW));
+}
+
+void AddEndURLRequestEntries(PassiveLogCollector* collector, uint32 id) {
+  collector->OnAddEntry(NetLog::TYPE_REQUEST_ALIVE, base::TimeTicks(),
+                        NetLog::Source(NetLog::SOURCE_URL_REQUEST, id),
+                        NetLog::PHASE_END, NULL);
+}
+
+std::string GetStringParam(const PassiveLogCollector::Entry& entry) {
+  return static_cast<net::NetLogStringParameter*>(
+      entry.params.get())->value();
+}
+
+bool OrderBySourceID(const PassiveLogCollector::SourceInfo& a,
+                     const PassiveLogCollector::SourceInfo& b) {
+  return a.source_id < b.source_id;
+}
+
+SourceInfoList GetLiveSources(
+    const PassiveLogCollector::SourceTracker& tracker) {
+  SourceInfoList result = tracker.GetAllDeadOrAliveSources(true);
+  std::sort(result.begin(), result.end(), &OrderBySourceID);
+  return result;
+}
+
+SourceInfoList GetDeadSources(
+    const PassiveLogCollector::SourceTracker& tracker) {
+  SourceInfoList result = tracker.GetAllDeadOrAliveSources(false);
+  std::sort(result.begin(), result.end(), &OrderBySourceID);
+  return result;
 }
 
 static const int kMaxNumLoadLogEntries = 1;
 
+}  // namespace
+
+// Test that once the tracker contains a total maximum amount of data
+// (graveyard + live requests), it resets itself to avoid growing unbounded.
+TEST(RequestTrackerTest, DropsAfterMaximumSize) {
+  RequestTracker tracker(NULL);
+
+  // Fill the source tracker with as many sources as it can hold.
+  for (size_t i = 0; i < RequestTracker::kMaxNumSources; ++i)
+    tracker.OnAddEntry(MakeStartLogEntry(i));
+
+  EXPECT_EQ(RequestTracker::kMaxNumSources, GetLiveSources(tracker).size());
+
+  // Add 1 more -- this should cause it to exceed its expected peak, and
+  // therefore reset all of its data.
+  tracker.OnAddEntry(
+      MakeStartLogEntry(1 + RequestTracker::kMaxNumSources));
+
+  EXPECT_EQ(1u, GetLiveSources(tracker).size());
+}
+
 TEST(RequestTrackerTest, BasicBounded) {
   RequestTracker tracker(NULL);
-  EXPECT_FALSE(tracker.IsUnbounded());
-  EXPECT_EQ(0u, tracker.GetLiveRequests().size());
-  EXPECT_EQ(0u, tracker.GetRecentlyDeceased().size());
+  EXPECT_EQ(0u, GetLiveSources(tracker).size());
+  EXPECT_EQ(0u, GetDeadSources(tracker).size());
 
   tracker.OnAddEntry(MakeStartLogEntry(1));
   tracker.OnAddEntry(MakeStartLogEntry(2));
@@ -54,33 +120,32 @@ TEST(RequestTrackerTest, BasicBounded) {
   tracker.OnAddEntry(MakeStartLogEntry(4));
   tracker.OnAddEntry(MakeStartLogEntry(5));
 
-  RequestInfoList live_reqs = tracker.GetLiveRequests();
+  SourceInfoList live_reqs = GetLiveSources(tracker);
 
   ASSERT_EQ(5u, live_reqs.size());
-  EXPECT_EQ("http://req1", live_reqs[0].url);
-  EXPECT_EQ("http://req2", live_reqs[1].url);
-  EXPECT_EQ("http://req3", live_reqs[2].url);
-  EXPECT_EQ("http://req4", live_reqs[3].url);
-  EXPECT_EQ("http://req5", live_reqs[4].url);
+  EXPECT_EQ("http://req1/", live_reqs[0].GetURL());
+  EXPECT_EQ("http://req2/", live_reqs[1].GetURL());
+  EXPECT_EQ("http://req3/", live_reqs[2].GetURL());
+  EXPECT_EQ("http://req4/", live_reqs[3].GetURL());
+  EXPECT_EQ("http://req5/", live_reqs[4].GetURL());
 
   tracker.OnAddEntry(MakeEndLogEntry(1));
   tracker.OnAddEntry(MakeEndLogEntry(5));
   tracker.OnAddEntry(MakeEndLogEntry(3));
 
-  ASSERT_EQ(3u, tracker.GetRecentlyDeceased().size());
+  ASSERT_EQ(3u, GetDeadSources(tracker).size());
 
-  live_reqs = tracker.GetLiveRequests();
+  live_reqs = GetLiveSources(tracker);
 
   ASSERT_EQ(2u, live_reqs.size());
-  EXPECT_EQ("http://req2", live_reqs[0].url);
-  EXPECT_EQ("http://req4", live_reqs[1].url);
+  EXPECT_EQ("http://req2/", live_reqs[0].GetURL());
+  EXPECT_EQ("http://req4/", live_reqs[1].GetURL());
 }
 
 TEST(RequestTrackerTest, GraveyardBounded) {
   RequestTracker tracker(NULL);
-  EXPECT_FALSE(tracker.IsUnbounded());
-  EXPECT_EQ(0u, tracker.GetLiveRequests().size());
-  EXPECT_EQ(0u, tracker.GetRecentlyDeceased().size());
+  EXPECT_EQ(0u, GetLiveSources(tracker).size());
+  EXPECT_EQ(0u, GetDeadSources(tracker).size());
 
   // Add twice as many requests as will fit in the graveyard.
   for (size_t i = 0; i < RequestTracker::kMaxGraveyardSize * 2; ++i) {
@@ -88,46 +153,18 @@ TEST(RequestTrackerTest, GraveyardBounded) {
     tracker.OnAddEntry(MakeEndLogEntry(i));
   }
 
+  EXPECT_EQ(0u, GetLiveSources(tracker).size());
+
   // Check that only the last |kMaxGraveyardSize| requests are in-memory.
 
-  RequestInfoList recent_reqs = tracker.GetRecentlyDeceased();
+  SourceInfoList recent = GetDeadSources(tracker);
 
-  ASSERT_EQ(RequestTracker::kMaxGraveyardSize, recent_reqs.size());
+  ASSERT_EQ(RequestTracker::kMaxGraveyardSize, recent.size());
 
   for (size_t i = 0; i < RequestTracker::kMaxGraveyardSize; ++i) {
     size_t req_number = i + RequestTracker::kMaxGraveyardSize;
-    std::string url = StringPrintf("http://req%" PRIuS, req_number);
-    EXPECT_EQ(url, recent_reqs[i].url);
-  }
-}
-
-TEST(RequestTrackerTest, GraveyardUnbounded) {
-  RequestTracker tracker(NULL);
-  EXPECT_FALSE(tracker.IsUnbounded());
-  EXPECT_EQ(0u, tracker.GetLiveRequests().size());
-  EXPECT_EQ(0u, tracker.GetRecentlyDeceased().size());
-
-  tracker.SetUnbounded(true);
-
-  EXPECT_TRUE(tracker.IsUnbounded());
-
-  // Add twice as many requests as would fit in the bounded graveyard.
-
-  size_t kMaxSize = RequestTracker::kMaxGraveyardSize * 2;
-  for (size_t i = 0; i < kMaxSize; ++i) {
-    tracker.OnAddEntry(MakeStartLogEntry(i));
-    tracker.OnAddEntry(MakeEndLogEntry(i));
-  }
-
-  // Check that all of them got saved.
-
-  RequestInfoList recent_reqs = tracker.GetRecentlyDeceased();
-
-  ASSERT_EQ(kMaxSize, recent_reqs.size());
-
-  for (size_t i = 0; i < kMaxSize; ++i) {
-    std::string url = StringPrintf("http://req%" PRIuS, i);
-    EXPECT_EQ(url, recent_reqs[i].url);
+    std::string url = StringPrintf("http://req%" PRIuS "/", req_number);
+    EXPECT_EQ(url, recent[i].GetURL());
   }
 }
 
@@ -135,7 +172,6 @@ TEST(RequestTrackerTest, GraveyardUnbounded) {
 // requests list (graveyard).
 TEST(RequestTrackerTest, GraveyardIsFiltered) {
   RequestTracker tracker(NULL);
-  EXPECT_FALSE(tracker.IsUnbounded());
 
   // This will be excluded.
   std::string url1 = "chrome://dontcare/";
@@ -152,43 +188,275 @@ TEST(RequestTrackerTest, GraveyardIsFiltered) {
   tracker.OnAddEntry(MakeStartLogEntryWithURL(3, url3));
   tracker.OnAddEntry(MakeEndLogEntry(3));
 
-  ASSERT_EQ(2u, tracker.GetRecentlyDeceased().size());
-  EXPECT_EQ(url2, tracker.GetRecentlyDeceased()[0].url);
-  EXPECT_EQ(url3, tracker.GetRecentlyDeceased()[1].url);
+  ASSERT_EQ(2u, GetDeadSources(tracker).size());
+  EXPECT_EQ(url2, GetDeadSources(tracker)[0].GetURL());
+  EXPECT_EQ(url3, GetDeadSources(tracker)[1].GetURL());
 }
 
-// Convert an unbounded tracker back to being bounded.
-TEST(RequestTrackerTest, ConvertUnboundedToBounded) {
-  RequestTracker tracker(NULL);
-  EXPECT_FALSE(tracker.IsUnbounded());
-  EXPECT_EQ(0u, tracker.GetLiveRequests().size());
-  EXPECT_EQ(0u, tracker.GetRecentlyDeceased().size());
+TEST(SpdySessionTracker, MovesToGraveyard) {
+  PassiveLogCollector::SpdySessionTracker tracker;
+  EXPECT_EQ(0u, GetLiveSources(tracker).size());
+  EXPECT_EQ(0u, GetDeadSources(tracker).size());
 
-  tracker.SetUnbounded(true);
-  EXPECT_TRUE(tracker.IsUnbounded());
+  PassiveLogCollector::Entry begin(
+      0u,
+      NetLog::TYPE_SPDY_SESSION,
+      base::TimeTicks(),
+      NetLog::Source(NetLog::SOURCE_SPDY_SESSION, 1),
+      NetLog::PHASE_BEGIN,
+      NULL);
 
-  // Add twice as many requests as would fit in the bounded graveyard.
+  tracker.OnAddEntry(begin);
+  EXPECT_EQ(1u, GetLiveSources(tracker).size());
+  EXPECT_EQ(0u, GetDeadSources(tracker).size());
 
-  size_t kMaxSize = RequestTracker::kMaxGraveyardSize * 2;
-  for (size_t i = 0; i < kMaxSize; ++i) {
-    tracker.OnAddEntry(MakeStartLogEntry(i));
-    tracker.OnAddEntry(MakeEndLogEntry(i));
-  }
+  PassiveLogCollector::Entry end(
+      0u,
+      NetLog::TYPE_SPDY_SESSION,
+      base::TimeTicks(),
+      NetLog::Source(NetLog::SOURCE_SPDY_SESSION, 1),
+      NetLog::PHASE_END,
+      NULL);
 
-  // Check that all of them got saved.
-  ASSERT_EQ(kMaxSize, tracker.GetRecentlyDeceased().size());
-
-  // Now make the tracker bounded, and add more entries to its graveyard.
-  tracker.SetUnbounded(false);
-
-  kMaxSize = RequestTracker::kMaxGraveyardSize;
-  for (size_t i = kMaxSize; i < 2 * kMaxSize; ++i) {
-    tracker.OnAddEntry(MakeStartLogEntry(i));
-    tracker.OnAddEntry(MakeEndLogEntry(i));
-  }
-
-  // We should only have kMaxGraveyardSize entries now.
-  ASSERT_EQ(kMaxSize, tracker.GetRecentlyDeceased().size());
+  tracker.OnAddEntry(end);
+  EXPECT_EQ(0u, GetLiveSources(tracker).size());
+  EXPECT_EQ(1u, GetDeadSources(tracker).size());
 }
 
-}  // namespace
+// Test that when a SOURCE_SOCKET is connected to a SOURCE_URL_REQUEST
+// (via the TYPE_SOCKET_POOL_BOUND_TO_SOCKET event), it holds a reference
+// to the SOURCE_SOCKET preventing it from getting deleted as long as the
+// SOURCE_URL_REQUEST is still around.
+TEST(PassiveLogCollectorTest, HoldReferenceToDependentSource) {
+  PassiveLogCollector log;
+
+  EXPECT_EQ(0u, GetLiveSources(log.url_request_tracker_).size());
+  EXPECT_EQ(0u, GetLiveSources(log.socket_tracker_).size());
+
+  uint32 next_id = 0;
+  NetLog::Source socket_source(NetLog::SOURCE_SOCKET, next_id++);
+  NetLog::Source url_request_source(NetLog::SOURCE_URL_REQUEST, next_id++);
+
+  // Start a SOURCE_SOCKET.
+  log.OnAddEntry(NetLog::TYPE_SOCKET_ALIVE,
+                 base::TimeTicks(),
+                 socket_source,
+                 NetLog::PHASE_BEGIN,
+                 NULL);
+
+  EXPECT_EQ(0u, GetLiveSources(log.url_request_tracker_).size());
+  EXPECT_EQ(1u, GetLiveSources(log.socket_tracker_).size());
+
+  // Start a SOURCE_URL_REQUEST.
+  log.OnAddEntry(NetLog::TYPE_REQUEST_ALIVE,
+                 base::TimeTicks(),
+                 url_request_source,
+                 NetLog::PHASE_BEGIN,
+                 NULL);
+
+  // Check that there is no association between the SOURCE_URL_REQUEST and the
+  // SOURCE_SOCKET yet.
+  ASSERT_EQ(1u, GetLiveSources(log.url_request_tracker_).size());
+  {
+    PassiveLogCollector::SourceInfo info =
+        GetLiveSources(log.url_request_tracker_)[0];
+    EXPECT_EQ(0, info.reference_count);
+    EXPECT_EQ(0u, info.dependencies.size());
+  }
+  ASSERT_EQ(1u, GetLiveSources(log.socket_tracker_).size());
+  {
+    PassiveLogCollector::SourceInfo info =
+        GetLiveSources(log.socket_tracker_)[0];
+    EXPECT_EQ(0, info.reference_count);
+    EXPECT_EQ(0u, info.dependencies.size());
+  }
+
+  // Associate the SOURCE_SOCKET with the SOURCE_URL_REQUEST.
+  log.OnAddEntry(NetLog::TYPE_SOCKET_POOL_BOUND_TO_SOCKET,
+                 base::TimeTicks(),
+                 url_request_source,
+                 NetLog::PHASE_NONE,
+                 new net::NetLogSourceParameter("x", socket_source));
+
+  // Check that an associate was made -- the SOURCE_URL_REQUEST should have
+  // added a reference to the SOURCE_SOCKET.
+  ASSERT_EQ(1u, GetLiveSources(log.url_request_tracker_).size());
+  {
+    PassiveLogCollector::SourceInfo info =
+        GetLiveSources(log.url_request_tracker_)[0];
+    EXPECT_EQ(0, info.reference_count);
+    EXPECT_EQ(1u, info.dependencies.size());
+    EXPECT_EQ(socket_source.id, info.dependencies[0].id);
+  }
+  ASSERT_EQ(1u, GetLiveSources(log.socket_tracker_).size());
+  {
+    PassiveLogCollector::SourceInfo info =
+        GetLiveSources(log.socket_tracker_)[0];
+    EXPECT_EQ(1, info.reference_count);
+    EXPECT_EQ(0u, info.dependencies.size());
+  }
+
+  // Now end both |source_socket| and |source_url_request|. This sends them
+  // to deletion queue, and they will be deleted once space runs out.
+
+  log.OnAddEntry(NetLog::TYPE_REQUEST_ALIVE,
+                 base::TimeTicks(),
+                 url_request_source,
+                 NetLog::PHASE_END,
+                 NULL);
+
+  log.OnAddEntry(NetLog::TYPE_SOCKET_ALIVE,
+                 base::TimeTicks(),
+                 socket_source,
+                 NetLog::PHASE_END,
+                 NULL);
+
+  // Verify that both sources are in fact dead, and that |source_url_request|
+  // still holds a reference to |source_socket|.
+  ASSERT_EQ(0u, GetLiveSources(log.url_request_tracker_).size());
+  ASSERT_EQ(1u, GetDeadSources(log.url_request_tracker_).size());
+  {
+    PassiveLogCollector::SourceInfo info =
+        GetDeadSources(log.url_request_tracker_)[0];
+    EXPECT_EQ(0, info.reference_count);
+    EXPECT_EQ(1u, info.dependencies.size());
+    EXPECT_EQ(socket_source.id, info.dependencies[0].id);
+  }
+  EXPECT_EQ(0u, GetLiveSources(log.socket_tracker_).size());
+  ASSERT_EQ(1u, GetDeadSources(log.socket_tracker_).size());
+  {
+    PassiveLogCollector::SourceInfo info =
+        GetDeadSources(log.socket_tracker_)[0];
+    EXPECT_EQ(1, info.reference_count);
+    EXPECT_EQ(0u, info.dependencies.size());
+  }
+
+  // Cycle through a bunch of SOURCE_SOCKET -- if it were not referenced, this
+  // loop will have deleted it.
+  for (size_t i = 0; i < SocketTracker::kMaxGraveyardSize; ++i) {
+      log.OnAddEntry(NetLog::TYPE_SOCKET_ALIVE,
+                     base::TimeTicks(),
+                     NetLog::Source(NetLog::SOURCE_SOCKET, next_id++),
+                     NetLog::PHASE_END,
+                     NULL);
+  }
+
+  EXPECT_EQ(0u, GetLiveSources(log.socket_tracker_).size());
+  ASSERT_EQ(SocketTracker::kMaxGraveyardSize + 1,
+            GetDeadSources(log.socket_tracker_).size());
+  {
+    PassiveLogCollector::SourceInfo info =
+        GetDeadSources(log.socket_tracker_)[0];
+    EXPECT_EQ(socket_source.id, info.source_id);
+    EXPECT_EQ(1, info.reference_count);
+    EXPECT_EQ(0u, info.dependencies.size());
+  }
+
+  // Cycle through a bunch of SOURCE_URL_REQUEST -- this will cause
+  // |source_url_request| to be freed, which in turn should release the final
+  // reference to |source_socket| cause it to be freed as well.
+  for (size_t i = 0; i < RequestTracker::kMaxGraveyardSize; ++i) {
+    log.OnAddEntry(NetLog::TYPE_REQUEST_ALIVE,
+                   base::TimeTicks(),
+                   NetLog::Source(NetLog::SOURCE_URL_REQUEST, next_id++),
+                   NetLog::PHASE_END,
+                   NULL);
+  }
+
+  EXPECT_EQ(0u, GetLiveSources(log.url_request_tracker_).size());
+  EXPECT_EQ(RequestTracker::kMaxGraveyardSize,
+            GetDeadSources(log.url_request_tracker_).size());
+
+  EXPECT_EQ(0u, GetLiveSources(log.socket_tracker_).size());
+  EXPECT_EQ(SocketTracker::kMaxGraveyardSize,
+            GetDeadSources(log.socket_tracker_).size());
+}
+
+// Have a URL_REQUEST hold a reference to a SOCKET. Then cause the SOCKET to
+// get evicted (by exceeding maximum sources limit). Now the URL_REQUEST is
+// referencing a non-existant SOCKET. Lastly, evict the URL_REQUEST so it
+// tries to drop all of its references. Make sure that in releasing its
+// non-existant reference it doesn't trip any DCHECKs.
+TEST(PassiveLogCollectorTest, HoldReferenceToDeletedSource) {
+  PassiveLogCollector log;
+
+  EXPECT_EQ(0u, GetLiveSources(log.url_request_tracker_).size());
+  EXPECT_EQ(0u, GetLiveSources(log.socket_tracker_).size());
+
+  uint32 next_id = 0;
+  NetLog::Source socket_source(NetLog::SOURCE_SOCKET, next_id++);
+  NetLog::Source url_request_source(NetLog::SOURCE_URL_REQUEST, next_id++);
+
+  // Start a SOURCE_SOCKET.
+  log.OnAddEntry(NetLog::TYPE_SOCKET_ALIVE,
+                 base::TimeTicks(),
+                 socket_source,
+                 NetLog::PHASE_BEGIN,
+                 NULL);
+
+  EXPECT_EQ(0u, GetLiveSources(log.url_request_tracker_).size());
+  EXPECT_EQ(1u, GetLiveSources(log.socket_tracker_).size());
+
+  // Start a SOURCE_URL_REQUEST.
+  log.OnAddEntry(NetLog::TYPE_REQUEST_ALIVE,
+                 base::TimeTicks(),
+                 url_request_source,
+                 NetLog::PHASE_BEGIN,
+                 NULL);
+
+  // Associate the SOURCE_SOCKET with the SOURCE_URL_REQUEST.
+  log.OnAddEntry(NetLog::TYPE_SOCKET_POOL_BOUND_TO_SOCKET,
+                 base::TimeTicks(),
+                 url_request_source,
+                 NetLog::PHASE_NONE,
+                 new net::NetLogSourceParameter("x", socket_source));
+
+  // Check that an associate was made -- the SOURCE_URL_REQUEST should have
+  // added a reference to the SOURCE_SOCKET.
+  ASSERT_EQ(1u, GetLiveSources(log.url_request_tracker_).size());
+  {
+    PassiveLogCollector::SourceInfo info =
+        GetLiveSources(log.url_request_tracker_)[0];
+    EXPECT_EQ(0, info.reference_count);
+    EXPECT_EQ(1u, info.dependencies.size());
+    EXPECT_EQ(socket_source.id, info.dependencies[0].id);
+  }
+  ASSERT_EQ(1u, GetLiveSources(log.socket_tracker_).size());
+  {
+    PassiveLogCollector::SourceInfo info =
+        GetLiveSources(log.socket_tracker_)[0];
+    EXPECT_EQ(1, info.reference_count);
+    EXPECT_EQ(0u, info.dependencies.size());
+  }
+
+  // Add lots of sources to the socket tracker. This is just enough to cause
+  // the tracker to reach its peak, and reset all of its data as a safeguard.
+  for (size_t i = 0; i < SocketTracker::kMaxNumSources; ++i) {
+    log.OnAddEntry(NetLog::TYPE_SOCKET_ALIVE,
+                   base::TimeTicks(),
+                   NetLog::Source(NetLog::SOURCE_SOCKET, next_id++),
+                   NetLog::PHASE_BEGIN,
+                   NULL);
+  }
+  ASSERT_EQ(1u, GetLiveSources(log.socket_tracker_).size());
+
+  // End the original request. Then saturate the graveyard with enough other
+  // requests to cause it to be deleted. Once that source is deleted, it will
+  // try to give up its reference to the SOCKET. However that socket_id no
+  // longer exists -- should not DCHECK().
+  log.OnAddEntry(NetLog::TYPE_REQUEST_ALIVE,
+                 base::TimeTicks(),
+                 url_request_source,
+                 NetLog::PHASE_END,
+                 NULL);
+  for (size_t i = 0; i < RequestTracker::kMaxGraveyardSize; ++i) {
+    log.OnAddEntry(NetLog::TYPE_REQUEST_ALIVE,
+                   base::TimeTicks(),
+                   NetLog::Source(NetLog::SOURCE_URL_REQUEST, next_id++),
+                   NetLog::PHASE_END,
+                   NULL);
+  }
+  EXPECT_EQ(RequestTracker::kMaxGraveyardSize,
+            GetDeadSources(log.url_request_tracker_).size());
+}
+

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "chrome/browser/tab_contents/security_style.h"
 #include "net/base/x509_certificate.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebConsoleMessage.h"
 
 class NavigationController;
 class SSLHostState;
@@ -31,13 +29,11 @@ class SSLPolicyBackend {
                            const std::wstring& link_text,
                            Task* task);
 
-  // Records that a host is "broken," that is, the origin for that host has been
-  // contaminated with insecure content, either via HTTP or via HTTPS with a
-  // bad certificate.
-  void MarkHostAsBroken(const std::string& host, int pid);
+  // Records that a host has run insecure content.
+  void HostRanInsecureContent(const std::string& host, int pid);
 
-  // Returns whether the specified host was marked as broken.
-  bool DidMarkHostAsBroken(const std::string& host, int pid) const;
+  // Returns whether the specified host ran insecure content.
+  bool DidHostRunInsecureContent(const std::string& host, int pid) const;
 
   // Records that |cert| is permitted to be used for |host| in the future.
   void DenyCertForHost(net::X509Certificate* cert, const std::string& host);
@@ -46,7 +42,7 @@ class SSLPolicyBackend {
   void AllowCertForHost(net::X509Certificate* cert, const std::string& host);
 
   // Queries whether |cert| is allowed or denied for |host|.
-  net::X509Certificate::Policy::Judgment QueryPolicy(
+  net::CertPolicy::Judgment QueryPolicy(
       net::X509Certificate* cert, const std::string& host);
 
   // Shows the pending messages (in info-bars) if any.
@@ -79,9 +75,6 @@ class SSLPolicyBackend {
     std::wstring link_text;
     Task* action;
   };
-
-  // Dispatch NotificationType::SSL_INTERNAL_STATE_CHANGED notification.
-  void DispatchSSLInternalStateChanged();
 
   // The NavigationController that owns this SSLManager.  We are responsible
   // for the security UI of this tab.

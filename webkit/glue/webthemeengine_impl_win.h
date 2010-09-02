@@ -1,11 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef WEBTHEMEENGINE_IMPL_WIN_H_
 #define WEBTHEMEENGINE_IMPL_WIN_H_
 
-#include "third_party/WebKit/WebKit/chromium/public/win/WebThemeEngine.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebThemeEngine.h"
 
 namespace webkit_glue {
 
@@ -27,6 +27,9 @@ class WebThemeEngineImpl : public WebKit::WebThemeEngine {
   virtual void paintScrollbarTrack(
       WebKit::WebCanvas*, int part, int state, int classic_state,
       const WebKit::WebRect&, const WebKit::WebRect& align_rect);
+  virtual void paintSpinButton(
+      WebKit::WebCanvas*, int part, int state, int classic_state,
+      const WebKit::WebRect&);
   virtual void paintTextField(
       WebKit::WebCanvas*, int part, int state, int classic_state,
       const WebKit::WebRect&, WebKit::WebColor, bool fill_content_area,
@@ -34,6 +37,10 @@ class WebThemeEngineImpl : public WebKit::WebThemeEngine {
   virtual void paintTrackbar(
       WebKit::WebCanvas*, int part, int state, int classic_state,
       const WebKit::WebRect&);
+  virtual void paintProgressBar(
+      WebKit::WebCanvas*, const WebKit::WebRect& barRect,
+      const WebKit::WebRect& valueRect, bool determinate,
+      double animatedSeconds);
 };
 
 }  // namespace webkit_glue

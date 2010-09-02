@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,11 +17,11 @@
 #include <string>
 
 #include "app/gtk_signal.h"
+#include "base/gtest_prod_util.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/gtk/gtk_tree.h"
 #include "chrome/browser/pref_member.h"
 #include "chrome/browser/options_page_base.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class LanguageComboboxModel;
 class LanguageOrderTableModel;
@@ -33,9 +33,7 @@ class LanguagesPageGtk
   explicit LanguagesPageGtk(Profile* profile);
   virtual ~LanguagesPageGtk();
 
-  GtkWidget* get_page_widget() const {
-    return page_;
-  }
+  GtkWidget* get_page_widget() const { return page_; }
 
   // gtk_tree::TableAdapter::Delegate implementation.
   virtual void OnAnyModelUpdate();
@@ -63,8 +61,8 @@ class LanguagesPageGtk
   virtual void NotifyPrefChanged(const std::wstring* pref_name);
 
   // Callbacks for accept languages widgets.
-  static void OnSelectionChanged(GtkTreeSelection* selection,
-                                 LanguagesPageGtk* languages_page);
+  CHROMEG_CALLBACK_0(LanguagesPageGtk, void, OnSelectionChanged,
+                     GtkTreeSelection*);
   CHROMEGTK_CALLBACK_0(LanguagesPageGtk, void, OnAddButtonClicked);
   CHROMEGTK_CALLBACK_0(LanguagesPageGtk, void, OnRemoveButtonClicked);
   CHROMEGTK_CALLBACK_0(LanguagesPageGtk, void, OnMoveUpButtonClicked);
@@ -120,12 +118,12 @@ class LanguagesPageGtk
   bool initializing_;
 
   friend class LanguagesPageGtkTest;
-  FRIEND_TEST(LanguagesPageGtkTest, RemoveAcceptLang);
-  FRIEND_TEST(LanguagesPageGtkTest, RemoveMultipleAcceptLang);
-  FRIEND_TEST(LanguagesPageGtkTest, MoveAcceptLang);
-  FRIEND_TEST(LanguagesPageGtkTest, AddAcceptLang);
-  FRIEND_TEST(LanguagesPageGtkTest, EnableSpellChecking);
-  FRIEND_TEST(LanguagesPageGtkTest, DictionaryLanguage);
+  FRIEND_TEST_ALL_PREFIXES(LanguagesPageGtkTest, RemoveAcceptLang);
+  FRIEND_TEST_ALL_PREFIXES(LanguagesPageGtkTest, RemoveMultipleAcceptLang);
+  FRIEND_TEST_ALL_PREFIXES(LanguagesPageGtkTest, MoveAcceptLang);
+  FRIEND_TEST_ALL_PREFIXES(LanguagesPageGtkTest, AddAcceptLang);
+  FRIEND_TEST_ALL_PREFIXES(LanguagesPageGtkTest, EnableSpellChecking);
+  FRIEND_TEST_ALL_PREFIXES(LanguagesPageGtkTest, DictionaryLanguage);
 
   DISALLOW_COPY_AND_ASSIGN(LanguagesPageGtk);
 };

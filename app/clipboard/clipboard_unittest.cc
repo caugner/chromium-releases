@@ -9,6 +9,7 @@
 #include "app/clipboard/clipboard.h"
 #include "app/clipboard/scoped_clipboard_writer.h"
 #include "base/basictypes.h"
+#include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "gfx/size.h"
@@ -238,7 +239,7 @@ TEST_F(ClipboardTest, SharedBitmapTest) {
   ASSERT_TRUE(shared_buf.Map(bytes));
   memcpy(shared_buf.memory(), fake_bitmap, bytes);
   base::SharedMemoryHandle handle_to_share;
-  base::ProcessHandle current_process = NULL;
+  base::ProcessHandle current_process = base::kNullProcessHandle;
 #if defined(OS_WIN)
   current_process = GetCurrentProcess();
 #endif

@@ -48,25 +48,51 @@ void PreferenceChangeProcessor::Observe(NotificationType type,
       pref_service_->FindPreference((*name).c_str());
   DCHECK(preference);
 
+  // TODO(mnissler): Detect preference->IsManaged() state changes here and call
+  // into PreferenceModelAssociator to associate/disassociate sync nodes when
+  // the state changes.
+
+  // Do not pollute sync data with values coming from policy.
+  if (preference->IsManaged())
+    return;
+
   sync_api::WriteTransaction trans(share_handle());
   sync_api::WriteNode node(&trans);
 
+  // Since we don't create sync nodes for preferences that still have
+  // their default values, this changed preference may not have a sync
+  // node yet.  If not, create it.
   int64 sync_id = model_associator_->GetSyncIdFromChromeId(*name);
   if (sync_api::kInvalidId == sync_id) {
-    LOG(ERROR) << "Unexpected notification for: " << *name;
-    error_handler()->OnUnrecoverableError();
-    return;
+    sync_api::ReadNode root(&trans);
+    if (!root.InitByTagLookup(browser_sync::kPreferencesTag)) {
+      error_handler()->OnUnrecoverableError(FROM_HERE, "Can't find root.");
+      return;
+    }
+
+    std::string tag = WideToUTF8(*name);
+    if (!node.InitUniqueByCreation(syncable::PREFERENCES, root, tag)) {
+      error_handler()->OnUnrecoverableError(
+          FROM_HERE,
+          "Failed to create preference sync node.");
+      return;
+    }
+
+    model_associator_->Associate(preference, node.GetId());
   } else {
     if (!node.InitByIdLookup(sync_id)) {
-      LOG(ERROR) << "Preference node lookup failed.";
-      error_handler()->OnUnrecoverableError();
+      error_handler()->OnUnrecoverableError(FROM_HERE,
+                                            "Preference node lookup failed.");
       return;
     }
   }
 
-  if (!WritePreference(&node, *name, preference->GetValue())) {
-    LOG(ERROR) << "Failed to update preference node.";
-    error_handler()->OnUnrecoverableError();
+  if (!PreferenceModelAssociator::WritePreferenceToNode(
+          preference->name(),
+          *preference->GetValue(),
+          &node)) {
+    error_handler()->OnUnrecoverableError(FROM_HERE,
+                                          "Failed to update preference node.");
     return;
   }
 }
@@ -94,8 +120,8 @@ void PreferenceChangeProcessor::ApplyChangesFromSyncModel(
     }
 
     if (!node.InitByIdLookup(changes[i].id)) {
-      LOG(ERROR) << "Preference node lookup failed.";
-      error_handler()->OnUnrecoverableError();
+      error_handler()->OnUnrecoverableError(FROM_HERE,
+                                            "Preference node lookup failed.");
       return;
     }
     DCHECK(syncable::PREFERENCES == node.GetModelType());
@@ -115,41 +141,31 @@ void PreferenceChangeProcessor::ApplyChangesFromSyncModel(
     if (model_associator_->synced_preferences().count(pref_name) == 0)
       continue;
 
+    // Don't try to overwrite preferences controlled by policy.
+    const PrefService::Preference* pref =
+        pref_service_->FindPreference(pref_name);
+    DCHECK(pref);
+    if (pref->IsManaged())
+      continue;
+
     if (sync_api::SyncManager::ChangeRecord::ACTION_DELETE ==
         changes[i].action) {
       pref_service_->ClearPref(pref_name);
     } else {
       pref_service_->Set(pref_name, *value);
-      if (0 == name.compare(prefs::kShowBookmarkBar)) {
-        // If it was the bookmark bar, send an additional notification.
-        NotificationService::current()->Notify(
-            NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
-            Source<PreferenceChangeProcessor>(this),
-            NotificationService::NoDetails());
+
+      // If this is a newly added node, associate.
+      if (sync_api::SyncManager::ChangeRecord::ACTION_ADD ==
+          changes[i].action) {
+        const PrefService::Preference* preference =
+            pref_service_->FindPreference(name.c_str());
+        model_associator_->Associate(preference, changes[i].id);
       }
+
+      model_associator_->AfterUpdateOperations(name);
     }
   }
   StartObserving();
-}
-
-bool PreferenceChangeProcessor::WritePreference(
-    sync_api::WriteNode* node,
-    const std::wstring& name,
-    const Value* value) {
-  std::string serialized;
-  JSONStringValueSerializer json(&serialized);
-  if (!json.Serialize(*value)) {
-    LOG(ERROR) << "Failed to serialize preference value.";
-    error_handler()->OnUnrecoverableError();
-    return false;
-  }
-
-  sync_pb::PreferenceSpecifics preference;
-  preference.set_name(WideToUTF8(name));
-  preference.set_value(serialized);
-  node->SetPreferenceSpecifics(preference);
-  node->SetTitle(name);
-  return true;
 }
 
 Value* PreferenceChangeProcessor::ReadPreference(
@@ -160,9 +176,9 @@ Value* PreferenceChangeProcessor::ReadPreference(
   base::JSONReader reader;
   scoped_ptr<Value> value(reader.JsonToValue(preference.value(), false, false));
   if (!value.get()) {
-    LOG(ERROR) << "Failed to deserialize preference value: "
-               << reader.GetErrorMessage();
-    error_handler()->OnUnrecoverableError();
+    std::string err = "Failed to deserialize preference value: " +
+        reader.GetErrorMessage();
+    error_handler()->OnUnrecoverableError(FROM_HERE, err);
     return NULL;
   }
   *name = UTF8ToWide(preference.name());

@@ -32,6 +32,7 @@
 #include <list>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #if defined(OS_MACOSX)
 #include "base/lazy_instance.h"
 #endif
@@ -50,10 +51,10 @@ typedef std::list<gfx::NativeWindow> WindowList;
 
 struct WebPreferences;
 class AccessibilityController;
-class FilePath;
 class GURL;
 class TestNavigationEntry;
 class TestNavigationController;
+class TestNotificationPresenter;
 class TestShellDevToolsAgent;
 class TestShellDevToolsClient;
 class TestWebViewDelegate;
@@ -74,7 +75,7 @@ public:
       bool dump_pixels;
 
       // Filename we dump pixels to (when pixel testing is enabled).
-      std::wstring pixel_file_name;
+      FilePath pixel_file_name;
       // The md5 hash of the bitmap dump (when pixel testing is enabled).
       std::string pixel_hash;
       // URL of the test.
@@ -91,10 +92,12 @@ public:
     static void CleanupLogging();
 
     // Initialization and clean up of a static member variable.
-    static void InitializeTestShell(bool layout_test_mode);
+    static void InitializeTestShell(bool layout_test_mode, 
+                                    bool allow_external_pages);
     static void ShutdownTestShell();
 
     static bool layout_test_mode() { return layout_test_mode_; }
+    static bool allow_external_pages() { return allow_external_pages_; }
 
     // Called from the destructor to let each platform do any necessary
     // cleanup.
@@ -159,6 +162,9 @@ public:
     EventSendingController* event_sending_controller() {
       return event_sending_controller_.get();
     }
+    TestNotificationPresenter* notification_presenter() {
+      return notification_presenter_.get();
+    }
 
     // Resets the LayoutTestController and EventSendingController.  Should be
     // called before loading a page, since some end-editing event notifications
@@ -196,7 +202,7 @@ public:
     void Reload();
     bool Navigate(const TestNavigationEntry& entry, bool reload);
 
-    bool PromptForSaveFile(const wchar_t* prompt_title, std::wstring* result);
+    bool PromptForSaveFile(const wchar_t* prompt_title, FilePath* result);
     std::wstring GetDocumentText();
     void DumpDocumentText();
     void DumpRenderTree();
@@ -256,7 +262,7 @@ public:
     // Writes the image captured from the given web frame to the given file.
     // The returned string is the ASCII-ized MD5 sum of the image.
     static std::string DumpImage(skia::PlatformCanvas* canvas,
-                                 const std::wstring& file_name,
+                                 const FilePath& path,
                                  const std::string& pixel_hash);
 
     static void ResetWebPreferences();
@@ -318,10 +324,11 @@ public:
       return dev_tools_agent_.get();
     }
 
+    static void disable_html5_parser() { enable_html5_parser_ = false; }
+
 protected:
     void CreateDevToolsClient(TestShellDevToolsAgent* agent);
     bool Initialize(const GURL& starting_url);
-    void InitializeDevToolsAgent(WebKit::WebView* webView);
     bool IsSVGTestURL(const GURL& url);
     void SizeToSVG();
     void SizeToDefault();
@@ -378,6 +385,14 @@ private:
 
     // True when the app is being run using the --layout-tests switch.
     static bool layout_test_mode_;
+  
+    // True when we wish to allow test shell to load external pages like
+    // www.google.com even when in --layout-test mode (used for QA to 
+    // produce images of the rendered page)
+    static bool allow_external_pages_;
+
+    // Whether to use the new HTML5 parsing code.
+    static bool enable_html5_parser_;
 
     // Default timeout in ms for file page loads when in layout test mode.
     static int file_test_timeout_ms_;
@@ -388,6 +403,7 @@ private:
     scoped_ptr<PlainTextController> plain_text_controller_;
     scoped_ptr<TextInputController> text_input_controller_;
     scoped_ptr<TestNavigationController> navigation_controller_;
+    scoped_ptr<TestNotificationPresenter> notification_presenter_;
 
     scoped_ptr<TestWebViewDelegate> delegate_;
     scoped_ptr<TestWebViewDelegate> popup_delegate_;
@@ -427,4 +443,3 @@ private:
 };
 
 #endif  // WEBKIT_TOOLS_TEST_SHELL_TEST_SHELL_H_
-

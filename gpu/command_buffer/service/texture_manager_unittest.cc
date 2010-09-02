@@ -3,7 +3,11 @@
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/texture_manager.h"
+#include "base/scoped_ptr.h"
+#include "app/gfx/gl/gl_mock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using ::testing::Pointee;
 
 namespace gpu {
 namespace gles2 {
@@ -16,16 +20,26 @@ class TextureManagerTest : public testing::Test {
   static const GLint kMaxCubeMapLevels = 4;
 
   TextureManagerTest()
-      : manager_(kMaxTextureSize, kMaxCubeMapTextureSize) {
+      : manager_(false, kMaxTextureSize, kMaxCubeMapTextureSize) {
+  }
+
+  ~TextureManagerTest() {
+    manager_.Destroy(false);
   }
 
  protected:
   virtual void SetUp() {
+    gl_.reset(new ::testing::StrictMock< ::gfx::MockGLInterface>());
+    ::gfx::GLInterface::SetGLInterface(gl_.get());
   }
 
   virtual void TearDown() {
+    ::gfx::GLInterface::SetGLInterface(NULL);
+    gl_.reset();
   }
 
+  // Use StrictMock to make 100% sure we know how GL will be called.
+  scoped_ptr< ::testing::StrictMock< ::gfx::MockGLInterface> > gl_;
   TextureManager manager_;
 };
 
@@ -38,20 +52,44 @@ const GLint TextureManagerTest::kMaxCubeMapLevels;
 #endif
 
 TEST_F(TextureManagerTest, Basic) {
-  const GLuint kTexture1Id = 1;
-  const GLuint kTexture2Id = 2;
+  const GLuint kClient1Id = 1;
+  const GLuint kService1Id = 11;
+  const GLuint kClient2Id = 2;
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
   // Check we can create texture.
-  manager_.CreateTextureInfo(kTexture1Id);
+  manager_.CreateTextureInfo(kClient1Id, kService1Id);
   // Check texture got created.
-  TextureManager::TextureInfo* info1 = manager_.GetTextureInfo(kTexture1Id);
+  TextureManager::TextureInfo* info1 = manager_.GetTextureInfo(kClient1Id);
   ASSERT_TRUE(info1 != NULL);
+  EXPECT_EQ(kService1Id, info1->service_id());
+  GLuint client_id = 0;
+  EXPECT_TRUE(manager_.GetClientId(info1->service_id(), &client_id));
+  EXPECT_EQ(kClient1Id, client_id);
   // Check we get nothing for a non-existent texture.
-  EXPECT_TRUE(manager_.GetTextureInfo(kTexture2Id) == NULL);
+  EXPECT_TRUE(manager_.GetTextureInfo(kClient2Id) == NULL);
   // Check trying to a remove non-existent textures does not crash.
-  manager_.RemoveTextureInfo(kTexture2Id);
+  manager_.RemoveTextureInfo(kClient2Id);
   // Check we can't get the texture after we remove it.
-  manager_.RemoveTextureInfo(kTexture1Id);
-  EXPECT_TRUE(manager_.GetTextureInfo(kTexture1Id) == NULL);
+  manager_.RemoveTextureInfo(kClient1Id);
+  EXPECT_TRUE(manager_.GetTextureInfo(kClient1Id) == NULL);
+}
+
+TEST_F(TextureManagerTest, Destroy) {
+  const GLuint kClient1Id = 1;
+  const GLuint kService1Id = 11;
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
+  // Check we can create texture.
+  manager_.CreateTextureInfo(kClient1Id, kService1Id);
+  // Check texture got created.
+  TextureManager::TextureInfo* info1 = manager_.GetTextureInfo(kClient1Id);
+  ASSERT_TRUE(info1 != NULL);
+  EXPECT_CALL(*gl_, DeleteTextures(1, ::testing::Pointee(kService1Id)))
+      .Times(1)
+      .RetiresOnSaturation();
+  manager_.Destroy(true);
+  // Check that resources got freed.
+  info1 = manager_.GetTextureInfo(kClient1Id);
+  ASSERT_TRUE(info1 == NULL);
 }
 
 TEST_F(TextureManagerTest, MaxValues) {
@@ -114,22 +152,32 @@ class TextureInfoTest : public testing::Test {
   static const GLint kMaxCubeMapTextureSize = 8;
   static const GLint kMax2dLevels = 5;
   static const GLint kMaxCubeMapLevels = 4;
-  static const GLuint kTexture1Id = 1;
+  static const GLuint kClient1Id = 1;
+  static const GLuint kService1Id = 11;
 
   TextureInfoTest()
-      : manager_(kMaxTextureSize, kMaxCubeMapTextureSize) {
+      : manager_(false, kMaxTextureSize, kMaxCubeMapTextureSize) {
+  }
+  ~TextureInfoTest() {
+    manager_.Destroy(false);
   }
 
  protected:
   virtual void SetUp() {
-    manager_.CreateTextureInfo(kTexture1Id);
-    info_ = manager_.GetTextureInfo(kTexture1Id);
+    gl_.reset(new ::testing::StrictMock< ::gfx::MockGLInterface>());
+    ::gfx::GLInterface::SetGLInterface(gl_.get());
+    manager_.CreateTextureInfo(kClient1Id, kService1Id);
+    info_ = manager_.GetTextureInfo(kClient1Id);
     ASSERT_TRUE(info_ != NULL);
   }
 
   virtual void TearDown() {
+    ::gfx::GLInterface::SetGLInterface(NULL);
+    gl_.reset();
   }
 
+  // Use StrictMock to make 100% sure we know how GL will be called.
+  scoped_ptr< ::testing::StrictMock< ::gfx::MockGLInterface> > gl_;
   TextureManager manager_;
   TextureManager::TextureInfo* info_;
 };
@@ -138,152 +186,195 @@ TEST_F(TextureInfoTest, Basic) {
   EXPECT_EQ(0u, info_->target());
   EXPECT_FALSE(info_->texture_complete());
   EXPECT_FALSE(info_->cube_complete());
-  EXPECT_FALSE(info_->CanGenerateMipmaps());
+  EXPECT_FALSE(info_->CanGenerateMipmaps(&manager_));
   EXPECT_FALSE(info_->npot());
-  EXPECT_FALSE(info_->CanRender());
+  EXPECT_FALSE(info_->CanRender(&manager_));
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
 }
 
 TEST_F(TextureInfoTest, POT2D) {
   manager_.SetInfoTarget(info_, GL_TEXTURE_2D);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_2D), info_->target());
   // Check Setting level 0 to POT
-  info_->SetLevelInfo(
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   EXPECT_FALSE(info_->npot());
   EXPECT_FALSE(info_->texture_complete());
-  EXPECT_FALSE(info_->CanRender());
+  EXPECT_FALSE(info_->CanRender(&manager_));
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
   // Set filters to something that will work with a single mip.
-  info_->SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  EXPECT_TRUE(info_->CanRender());
+  manager_.SetParameter(info_, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  EXPECT_TRUE(info_->CanRender(&manager_));
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
   // Set them back.
-  info_->SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  manager_.SetParameter(info_, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
 
-  EXPECT_TRUE(info_->CanGenerateMipmaps());
+  EXPECT_TRUE(info_->CanGenerateMipmaps(&manager_));
   // Make mips.
-  EXPECT_TRUE(info_->MarkMipmapsGenerated());
+  EXPECT_TRUE(manager_.MarkMipmapsGenerated(info_));
   EXPECT_TRUE(info_->texture_complete());
-  EXPECT_TRUE(info_->CanRender());
+  EXPECT_TRUE(info_->CanRender(&manager_));
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
   // Change a mip.
-  info_->SetLevelInfo(
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_2D, 1, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   EXPECT_FALSE(info_->npot());
   EXPECT_FALSE(info_->texture_complete());
-  EXPECT_TRUE(info_->CanGenerateMipmaps());
-  EXPECT_FALSE(info_->CanRender());
+  EXPECT_TRUE(info_->CanGenerateMipmaps(&manager_));
+  EXPECT_FALSE(info_->CanRender(&manager_));
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
   // Set a level past the number of mips that would get generated.
-  info_->SetLevelInfo(
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_2D, 3, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
-  EXPECT_TRUE(info_->CanGenerateMipmaps());
+  EXPECT_TRUE(info_->CanGenerateMipmaps(&manager_));
   // Make mips.
-  EXPECT_TRUE(info_->MarkMipmapsGenerated());
-  EXPECT_FALSE(info_->CanRender());
+  EXPECT_TRUE(manager_.MarkMipmapsGenerated(info_));
+  EXPECT_FALSE(info_->CanRender(&manager_));
   EXPECT_FALSE(info_->texture_complete());
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
 }
 
 TEST_F(TextureInfoTest, NPOT2D) {
   manager_.SetInfoTarget(info_, GL_TEXTURE_2D);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_2D), info_->target());
   // Check Setting level 0 to NPOT
-  info_->SetLevelInfo(
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_2D, 0, GL_RGBA, 4, 5, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   EXPECT_TRUE(info_->npot());
   EXPECT_FALSE(info_->texture_complete());
-  EXPECT_FALSE(info_->CanGenerateMipmaps());
-  EXPECT_FALSE(info_->CanRender());
-  info_->SetParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  EXPECT_FALSE(info_->CanRender());
-  info_->SetParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  EXPECT_FALSE(info_->CanRender());
-  info_->SetParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  EXPECT_TRUE(info_->CanRender());
+  EXPECT_FALSE(info_->CanGenerateMipmaps(&manager_));
+  EXPECT_FALSE(info_->CanRender(&manager_));
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
+  manager_.SetParameter(info_, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  EXPECT_FALSE(info_->CanRender(&manager_));
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
+  manager_.SetParameter(info_, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  EXPECT_FALSE(info_->CanRender(&manager_));
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
+  manager_.SetParameter(info_, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  EXPECT_TRUE(info_->CanRender(&manager_));
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
   // Change it to POT.
-  info_->SetLevelInfo(
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   EXPECT_FALSE(info_->npot());
   EXPECT_FALSE(info_->texture_complete());
-  EXPECT_TRUE(info_->CanGenerateMipmaps());
+  EXPECT_TRUE(info_->CanGenerateMipmaps(&manager_));
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
+}
+
+TEST_F(TextureInfoTest, NPOT2DNPOTOK) {
+  TextureManager manager(true, kMaxTextureSize, kMaxCubeMapTextureSize);
+  manager.CreateTextureInfo(kClient1Id, kService1Id);
+  TextureManager::TextureInfo* info = manager_.GetTextureInfo(kClient1Id);
+  ASSERT_TRUE(info_ != NULL);
+
+  manager.SetInfoTarget(info, GL_TEXTURE_2D);
+  EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_2D), info->target());
+  // Check Setting level 0 to NPOT
+  manager.SetLevelInfo(info,
+      GL_TEXTURE_2D, 0, GL_RGBA, 4, 5, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
+  EXPECT_TRUE(info->npot());
+  EXPECT_FALSE(info->texture_complete());
+  EXPECT_TRUE(info->CanGenerateMipmaps(&manager));
+  EXPECT_FALSE(info->CanRender(&manager));
+  EXPECT_TRUE(manager.HaveUnrenderableTextures());
+  EXPECT_TRUE(manager.MarkMipmapsGenerated(info));
+  EXPECT_TRUE(info->texture_complete());
+  EXPECT_TRUE(info->CanRender(&manager));
+  EXPECT_FALSE(manager.HaveUnrenderableTextures());
+  manager.Destroy(false);
 }
 
 TEST_F(TextureInfoTest, POTCubeMap) {
   manager_.SetInfoTarget(info_, GL_TEXTURE_CUBE_MAP);
   EXPECT_EQ(static_cast<GLenum>(GL_TEXTURE_CUBE_MAP), info_->target());
   // Check Setting level 0 each face to POT
-  info_->SetLevelInfo(
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_CUBE_MAP_POSITIVE_X,
       0, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   EXPECT_FALSE(info_->npot());
   EXPECT_FALSE(info_->texture_complete());
   EXPECT_FALSE(info_->cube_complete());
-  EXPECT_FALSE(info_->CanGenerateMipmaps());
-  EXPECT_FALSE(info_->CanRender());
-  info_->SetLevelInfo(
+  EXPECT_FALSE(info_->CanGenerateMipmaps(&manager_));
+  EXPECT_FALSE(info_->CanRender(&manager_));
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
       0, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   EXPECT_FALSE(info_->npot());
   EXPECT_FALSE(info_->texture_complete());
   EXPECT_FALSE(info_->cube_complete());
-  EXPECT_FALSE(info_->CanGenerateMipmaps());
-  EXPECT_FALSE(info_->CanRender());
-  info_->SetLevelInfo(
+  EXPECT_FALSE(info_->CanGenerateMipmaps(&manager_));
+  EXPECT_FALSE(info_->CanRender(&manager_));
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_CUBE_MAP_POSITIVE_Y,
       0, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   EXPECT_FALSE(info_->npot());
   EXPECT_FALSE(info_->texture_complete());
   EXPECT_FALSE(info_->cube_complete());
-  EXPECT_FALSE(info_->CanGenerateMipmaps());
-  EXPECT_FALSE(info_->CanRender());
-  info_->SetLevelInfo(
+  EXPECT_FALSE(info_->CanGenerateMipmaps(&manager_));
+  EXPECT_FALSE(info_->CanRender(&manager_));
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,
       0, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   EXPECT_FALSE(info_->npot());
   EXPECT_FALSE(info_->texture_complete());
   EXPECT_FALSE(info_->cube_complete());
-  EXPECT_FALSE(info_->CanRender());
-  EXPECT_FALSE(info_->CanGenerateMipmaps());
-  info_->SetLevelInfo(
+  EXPECT_FALSE(info_->CanRender(&manager_));
+  EXPECT_FALSE(info_->CanGenerateMipmaps(&manager_));
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_CUBE_MAP_POSITIVE_Z,
       0, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   EXPECT_FALSE(info_->npot());
   EXPECT_FALSE(info_->texture_complete());
   EXPECT_FALSE(info_->cube_complete());
-  EXPECT_FALSE(info_->CanGenerateMipmaps());
-  EXPECT_FALSE(info_->CanRender());
-  info_->SetLevelInfo(
+  EXPECT_FALSE(info_->CanGenerateMipmaps(&manager_));
+  EXPECT_FALSE(info_->CanRender(&manager_));
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
       0, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   EXPECT_FALSE(info_->npot());
   EXPECT_FALSE(info_->texture_complete());
   EXPECT_TRUE(info_->cube_complete());
-  EXPECT_TRUE(info_->CanGenerateMipmaps());
-  EXPECT_FALSE(info_->CanRender());
+  EXPECT_TRUE(info_->CanGenerateMipmaps(&manager_));
+  EXPECT_FALSE(info_->CanRender(&manager_));
+  EXPECT_TRUE(manager_.HaveUnrenderableTextures());
 
   // Make mips.
-  EXPECT_TRUE(info_->MarkMipmapsGenerated());
+  EXPECT_TRUE(manager_.MarkMipmapsGenerated(info_));
   EXPECT_TRUE(info_->texture_complete());
   EXPECT_TRUE(info_->cube_complete());
+  EXPECT_TRUE(info_->CanRender(&manager_));
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
 
   // Change a mip.
-  info_->SetLevelInfo(
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
       1, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   EXPECT_FALSE(info_->npot());
   EXPECT_FALSE(info_->texture_complete());
   EXPECT_TRUE(info_->cube_complete());
-  EXPECT_TRUE(info_->CanGenerateMipmaps());
+  EXPECT_TRUE(info_->CanGenerateMipmaps(&manager_));
   // Set a level past the number of mips that would get generated.
-  info_->SetLevelInfo(
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
       3, GL_RGBA, 4, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
-  EXPECT_TRUE(info_->CanGenerateMipmaps());
+  EXPECT_TRUE(info_->CanGenerateMipmaps(&manager_));
   // Make mips.
-  EXPECT_TRUE(info_->MarkMipmapsGenerated());
+  EXPECT_TRUE(manager_.MarkMipmapsGenerated(info_));
   EXPECT_FALSE(info_->texture_complete());
   EXPECT_TRUE(info_->cube_complete());
 }
 
 TEST_F(TextureInfoTest, GetLevelSize) {
   manager_.SetInfoTarget(info_, GL_TEXTURE_2D);
-  info_->SetLevelInfo(
+  manager_.SetLevelInfo(info_,
       GL_TEXTURE_2D, 1, GL_RGBA, 4, 5, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   GLsizei width = -1;
   GLsizei height = -1;
@@ -295,7 +386,7 @@ TEST_F(TextureInfoTest, GetLevelSize) {
   EXPECT_TRUE(info_->GetLevelSize(GL_TEXTURE_2D, 1, &width, &height));
   EXPECT_EQ(4, width);
   EXPECT_EQ(5, height);
-  manager_.RemoveTextureInfo(info_->texture_id());
+  manager_.RemoveTextureInfo(kClient1Id);
   EXPECT_FALSE(info_->GetLevelSize(GL_TEXTURE_2D, 1, &width, &height));
 }
 

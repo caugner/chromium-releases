@@ -66,8 +66,6 @@
 #include "core/cross/transform.h"
 
 namespace o3d {
-//#define O3D_PLUGIN_SUPPORT_SET_MAX_FPS
-
 class MessageQueue;
 class Profiler;
 class State;
@@ -261,6 +259,19 @@ class Client {
   //       go.
   void RenderClient(bool send_callback);
 
+  // In some situations (on Mac OS X at least) calling the user's
+  // render callback can cause OS events to be dispatched which cause
+  // the plugin to become reentrant. Detect this at a higher level.
+  bool IsRendering();
+
+  // If Renderer::max_fps has been set in RENDERMODE_CONTINUOUS mode, we don't
+  // draw on each tick but just let new textures drive the rendering. There is
+  // only one exception: if we haven't received any new textures for a while, we
+  // still need to draw in order to trigger rendering callback. Since there
+  // might be some UI depends on rendering callback.
+  // This function determines if this has happened and if we need a draw.
+  bool NeedsContinuousRender();
+
   // Sets the texture to use when a Texture or Sampler is missing while
   // rendering. If you set it to NULL you'll get an error if you try to render
   // something that is missing a needed Texture, Sampler or ParamSampler
@@ -294,6 +305,12 @@ class Client {
   // Returns:
   //   true if message check was ok.
   bool Tick();
+
+  // Indicates whether a call to Tick() is in progress. This is needed
+  // to avoid reentrancy problems on some platforms.
+  bool IsTicking() const {
+    return is_ticking_;
+  }
 
   // Searches in the Client for an object by its id. This function is for
   // Javascript.
@@ -467,10 +484,8 @@ class Client {
   // Render mode.
   RenderMode render_mode_;
 
-#ifdef O3D_PLUGIN_SUPPORT_SET_MAX_FPS
   // Used for rendering control
   bool texture_on_hold_;
-#endif  // O3D_PLUGIN_SUPPORT_SET_MAX_FPS
 
   // Render Callbacks.
   RenderCallbackManager render_callback_manager_;
@@ -495,6 +510,9 @@ class Client {
 
   // Timer for getting the elapsed time between tick updates.
   ElapsedTimeTimer tick_elapsed_time_timer_;
+
+  // Whether a call to Tick() is currently active.
+  bool is_ticking_;
 
   // Used to gather render time from mulitple RenderTree calls.
   float total_time_to_render_;

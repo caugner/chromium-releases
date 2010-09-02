@@ -30,9 +30,9 @@ namespace {
 // Returns a single bookmark node from the argument ID.
 // This returns NULL in case of failure.
 const BookmarkNode* GetNodeFromArguments(BookmarkModel* model,
-    const Value* args) {
+    const ListValue* args) {
   std::string id_string;
-  if (!args->GetAsString(&id_string))
+  if (!args->GetString(0, &id_string))
     return NULL;
   int64 id;
   if (!StringToInt64(id_string, &id))
@@ -42,8 +42,13 @@ const BookmarkNode* GetNodeFromArguments(BookmarkModel* model,
 
 // Gets a vector of bookmark nodes from the argument list of IDs.
 // This returns false in the case of failure.
-bool GetNodesFromArguments(BookmarkModel* model, const ListValue* ids,
+bool GetNodesFromArguments(BookmarkModel* model, const ListValue* args,
     std::vector<const BookmarkNode*>* nodes) {
+
+  ListValue* ids;
+  if (!args->GetList(0, &ids))
+    return false;
+
   size_t count = ids->GetSize();
   if (count == 0)
     return false;
@@ -156,7 +161,7 @@ void ExtensionBookmarkManagerEventRouter::DispatchEvent(const char* event_name,
   std::string json_args;
   base::JSONWriter::Write(args, false, &json_args);
   profile_->GetExtensionMessageService()->DispatchEventToRenderers(
-      event_name, json_args, profile_->IsOffTheRecord());
+      event_name, json_args, profile_->IsOffTheRecord(), GURL());
 }
 
 void ExtensionBookmarkManagerEventRouter::DispatchDragEvent(
@@ -208,7 +213,7 @@ void ExtensionBookmarkManagerEventRouter::ClearBookmarkDragData() {
 bool ClipboardBookmarkManagerFunction::CopyOrCut(bool cut) {
   BookmarkModel* model = profile()->GetBookmarkModel();
   std::vector<const BookmarkNode*> nodes;
-  EXTENSION_FUNCTION_VALIDATE(GetNodesFromArguments(model, args_as_list(),
+  EXTENSION_FUNCTION_VALIDATE(GetNodesFromArguments(model, args_.get(),
                                                     &nodes));
   bookmark_utils::CopyToClipboard(model, nodes, cut);
   return true;
@@ -279,7 +284,6 @@ bool BookmarkManagerGetStringsFunction::RunImpl() {
       l10n_util::GetString(IDS_BOOKMARK_MANAGER_IMPORT_MENU));
   localized_strings->SetString(L"export_menu",
       l10n_util::GetString(IDS_BOOKMARK_MANAGER_EXPORT_MENU));
-
   localized_strings->SetString(L"rename_folder",
       l10n_util::GetString(IDS_BOOKMARK_BAR_RENAME_FOLDER));
   localized_strings->SetString(L"edit",
@@ -320,6 +324,10 @@ bool BookmarkManagerGetStringsFunction::RunImpl() {
       l10n_util::GetString(IDS_BOOKMARK_MANAGER_URL_INPUT_PLACE_HOLDER));
   localized_strings->SetString(L"invalid_url",
       l10n_util::GetString(IDS_BOOKMARK_MANAGER_INVALID_URL));
+  localized_strings->SetString(L"recent",
+      l10n_util::GetString(IDS_BOOKMARK_MANAGER_RECENT));
+  localized_strings->SetString(L"search",
+      l10n_util::GetString(IDS_BOOKMARK_MANAGER_SEARCH));
 
   ChromeURLDataManager::DataSource::SetFontAndTextDirection(localized_strings);
 
@@ -332,7 +340,7 @@ bool StartDragBookmarkManagerFunction::RunImpl() {
   BookmarkModel* model = profile()->GetBookmarkModel();
   std::vector<const BookmarkNode*> nodes;
   EXTENSION_FUNCTION_VALIDATE(
-      GetNodesFromArguments(model, args_as_list(), &nodes));
+      GetNodesFromArguments(model, args_.get(), &nodes));
 
   if (dispatcher()->render_view_host()->delegate()->GetRenderViewType() ==
       ViewType::TAB_CONTENTS) {
@@ -351,16 +359,10 @@ bool StartDragBookmarkManagerFunction::RunImpl() {
 bool DropBookmarkManagerFunction::RunImpl() {
   BookmarkModel* model = profile()->GetBookmarkModel();
 
-  // TODO(arv): The arguments change between a list and a value depending on the
-  // parameters. See http://crbug.com/36301
   int64 id;
   std::string id_string;
-  if (args_->IsType(Value::TYPE_STRING)) {
-    EXTENSION_FUNCTION_VALIDATE(args_->GetAsString(&id_string));
-  } else {
-    EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_LIST));
-    EXTENSION_FUNCTION_VALIDATE(args_as_list()->GetString(0, &id_string));
-  }
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &id_string));
+
   if (!StringToInt64(id_string, &id)) {
     error_ = keys::kInvalidIdError;
     return false;
@@ -373,8 +375,8 @@ bool DropBookmarkManagerFunction::RunImpl() {
   }
 
   int drop_index;
-  if (args_as_list()->GetSize() == 2)
-    EXTENSION_FUNCTION_VALIDATE(args_as_list()->GetInteger(1, &drop_index));
+  if (args_->GetSize() == 2)
+    EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(1, &drop_index));
   else
     drop_index = drop_parent->GetChildCount();
 
@@ -409,9 +411,9 @@ bool GetSubtreeBookmarkManagerFunction::RunImpl() {
   const BookmarkNode* node;
   int64 id;
   std::string id_string;
-  EXTENSION_FUNCTION_VALIDATE(args_as_list()->GetString(0, &id_string));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &id_string));
   bool folders_only;
-  EXTENSION_FUNCTION_VALIDATE(args_as_list()->GetBoolean(1, &folders_only));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(1, &folders_only));
   if (id_string == "") {
     node = model->root_node();
   } else {

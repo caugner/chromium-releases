@@ -46,13 +46,23 @@ void TipsHandler::HandleGetTips(const Value* content) {
   // the tip service starts up.
   PrefService* current_prefs = dom_ui_->GetProfile()->GetPrefs();
   if (current_prefs->HasPrefPath(prefs::kNTPTipsServer)) {
-    std::wstring server = current_prefs->GetString(prefs::kNTPTipsServer);
-    std::wstring locale =
-        ASCIIToWide(g_browser_process->GetApplicationLocale());
+    std::string server = current_prefs->GetString(prefs::kNTPTipsServer);
+    std::string locale = g_browser_process->GetApplicationLocale();
     if (!EndsWith(server, locale, false)) {
       dom_ui_->CallJavascriptFunction(L"tips", list_value);
       return;
     }
+  }
+
+  // If the user has just started using Chrome with a fresh profile, send only
+  // the "Import bookmarks" promo until the user has either seen it five times
+  // or added or imported bookmarks.
+  if (current_prefs->GetInteger(prefs::kNTPPromoViewsRemaining) > 0) {
+    SendTip(WideToUTF8(l10n_util::GetStringF(IDS_IMPORT_BOOKMARKS_PROMO,
+        std::wstring(L"<button class='link'>"),
+        std::wstring(L"</button>"))),
+        L"set_promo_tip", 0);
+    return;
   }
 
   if (tips_cache_ != NULL && !tips_cache_->empty()) {
@@ -65,8 +75,12 @@ void TipsHandler::HandleGetTips(const Value* content) {
         // Check to see whether the home page is set to NTP; if not, add tip
         // to set home page before resetting tip index to 0.
         current_tip_index = 0;
-        if (!dom_ui_->GetProfile()->GetPrefs()->GetBoolean(
-            prefs::kHomePageIsNewTabPage)) {
+        const PrefService::Preference* pref =
+            dom_ui_->GetProfile()->GetPrefs()->FindPreference(
+                prefs::kHomePageIsNewTabPage);
+        bool value;
+        if (pref && !pref->IsManaged() &&
+            pref->GetValue()->GetAsBoolean(&value) && !value) {
           SendTip(WideToUTF8(l10n_util::GetString(
               IDS_NEW_TAB_MAKE_THIS_HOMEPAGE)), L"set_homepage_tip",
               current_tip_index);

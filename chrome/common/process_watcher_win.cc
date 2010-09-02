@@ -4,6 +4,7 @@
 
 #include "chrome/common/process_watcher.h"
 
+#include "base/scoped_ptr.h"
 #include "base/env_var.h"
 #include "base/message_loop.h"
 #include "base/object_watcher.h"
@@ -62,7 +63,7 @@ class TimerExpiredTask : public Task, public base::ObjectWatcher::Delegate {
     // terminates.  We just care that it eventually terminates, and that's what
     // TerminateProcess should do for us. Don't check for the result code since
     // it fails quite often. This should be investigated eventually.
-    TerminateProcess(process_, ResultCodes::HUNG);
+    base::KillProcess(process_, ResultCodes::HUNG, false);
 
     // Now, just cleanup as if the process exited normally.
     OnObjectSignaled(process_);

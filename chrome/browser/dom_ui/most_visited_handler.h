@@ -10,6 +10,7 @@
 
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/dom_ui/dom_ui.h"
+#include "chrome/browser/history/history_types.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
@@ -77,6 +78,12 @@ class MostVisitedHandler : public DOMMessageHandler,
   void OnSegmentUsageAvailable(CancelableRequestProvider::Handle handle,
                                std::vector<PageUsageData*>* data);
 
+  // Sets pages_value_ form a vector of URLs.
+  void SetPagesValue(std::vector<PageUsageData*>* data);
+
+  // Callback for TopSites.
+  void OnMostVisitedURLsAvailable(const history::MostVisitedURLList& data);
+
   // Puts the passed URL in the blacklist (so it does not show as a thumbnail).
   void BlacklistURL(const GURL& url);
 
@@ -91,15 +98,24 @@ class MostVisitedHandler : public DOMMessageHandler,
   void AddPinnedURL(const MostVisitedPage& page, int index);
   void RemovePinnedURL(const GURL& url);
 
+  // Sends pages_value_ to the javascript side to and resets page_value_.
+  void SendPagesValue();
+
   // Returns true if we should treat this as the first run of the new tab page.
   bool IsFirstRun();
 
   static const std::vector<MostVisitedPage>& GetPrePopulatedPages();
 
+  static MostVisitedPage GetChromeStorePage();
+
+  // Whether we have any apps installed.
+  bool HasApps() const;
+
   NotificationRegistrar registrar_;
 
   // Our consumer for the history service.
   CancelableRequestConsumerTSimple<PageUsageData*> cancelable_consumer_;
+  CancelableRequestConsumer topsites_consumer_;
 
   // The most visited URLs, in priority order.
   // Only used for matching up clicks on the page to which most visited entry

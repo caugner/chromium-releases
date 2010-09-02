@@ -29,11 +29,11 @@ void SessionServiceTestHelper::PrepareTabInWindow(const SessionID& window_id,
     service()->SetSelectedTabInWindow(window_id, visual_index);
 }
 
-void SessionServiceTestHelper::SetTabAppExtensionID(
+void SessionServiceTestHelper::SetTabExtensionAppID(
     const SessionID& window_id,
     const SessionID& tab_id,
-    const std::string& app_extension_id) {
-  service()->SetTabAppExtensionID(window_id, tab_id, app_extension_id);
+    const std::string& extension_app_id) {
+  service()->SetTabExtensionAppID(window_id, tab_id, extension_app_id);
 }
 
 // Be sure and null out service to force closing the file.
@@ -69,7 +69,7 @@ void SessionServiceTestHelper::AssertTabEquals(
 void SessionServiceTestHelper::AssertNavigationEquals(
     const TabNavigation& expected,
     const TabNavigation& actual) {
-  EXPECT_TRUE(expected.url() == actual.url());
+  EXPECT_TRUE(expected.virtual_url() == actual.virtual_url());
   EXPECT_EQ(expected.referrer(), actual.referrer());
   EXPECT_EQ(expected.title(), actual.title());
   EXPECT_EQ(expected.state(), actual.state());

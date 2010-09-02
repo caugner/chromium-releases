@@ -81,7 +81,7 @@ LoginHandler::LoginHandler(net::AuthChallengeInfo* auth_info,
   DCHECK(request_) << "LoginHandler constructed with NULL request";
   DCHECK(auth_info_) << "LoginHandler constructed with NULL auth info";
 
-  AddRef();  // matched by ReleaseSoon::ReleaseSoon().
+  AddRef();  // matched by LoginHandler::ReleaseSoon().
 
   ChromeThread::PostTask(
       ChromeThread::UI, FROM_HERE,
@@ -373,7 +373,7 @@ class LoginDialogTask : public Task {
         parent_contents->GetPasswordManager();
     std::vector<PasswordForm> v;
     MakeInputForPasswordManager(&v);
-    password_manager->PasswordFormsSeen(v);
+    password_manager->PasswordFormsFound(v);
     handler_->SetPasswordManager(password_manager);
 
     std::wstring explanation = auth_info_->realm.empty() ?
@@ -388,7 +388,7 @@ class LoginDialogTask : public Task {
 
  private:
   // Helper to create a PasswordForm and stuff it into a vector as input
-  // for PasswordManager::PasswordFormsSeen, the hook into PasswordManager.
+  // for PasswordManager::PasswordFormsFound, the hook into PasswordManager.
   void MakeInputForPasswordManager(
       std::vector<PasswordForm>* password_manager_input) {
     PasswordForm dialog_form;

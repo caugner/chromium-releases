@@ -20,13 +20,13 @@
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/autofill_entry.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_paths.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebInputElement.h"
 #include "webkit/glue/form_field.h"
 #include "webkit/glue/password_form.h"
 
@@ -95,6 +95,9 @@ class WebDatabaseTest : public testing::Test {
   typedef std::set<AutofillEntry, bool (*)(const AutofillEntry&,
     const AutofillEntry&)>::iterator AutofillEntrySetIterator;
   virtual void SetUp() {
+#if defined(OS_MACOSX)
+    Encryptor::UseMockKeychain(true);
+#endif
     PathService::Get(chrome::DIR_TEST_DATA, &file_);
     const std::string test_db = "TestWebDatabase" +
         Int64ToString(base::Time::Now().ToInternalValue()) +
@@ -178,7 +181,7 @@ TEST_F(WebDatabaseTest, Keywords) {
   GURL favicon_url("http://favicon.url/");
   GURL originating_url("http://google.com/");
   template_url.SetFavIconURL(favicon_url);
-  template_url.SetURL(L"http://url/", 0, 0);
+  template_url.SetURL("http://url/", 0, 0);
   template_url.set_safe_for_autoreplace(true);
   template_url.set_show_in_default_list(true);
   template_url.set_originating_url(originating_url);
@@ -254,10 +257,10 @@ TEST_F(WebDatabaseTest, UpdateKeyword) {
   GURL favicon_url("http://favicon.url/");
   GURL originating_url("http://originating.url/");
   template_url.SetFavIconURL(favicon_url);
-  template_url.SetURL(L"http://url/", 0, 0);
+  template_url.SetURL("http://url/", 0, 0);
   template_url.set_safe_for_autoreplace(true);
   template_url.set_show_in_default_list(true);
-  template_url.SetSuggestionsURL(L"url2", 0, 0);
+  template_url.SetSuggestionsURL("url2", 0, 0);
   SetID(1, &template_url);
 
   EXPECT_TRUE(db.AddKeyword(template_url));
@@ -313,7 +316,7 @@ TEST_F(WebDatabaseTest, KeywordWithNoFavicon) {
   TemplateURL template_url;
   template_url.set_short_name(L"short_name");
   template_url.set_keyword(L"keyword");
-  template_url.SetURL(L"http://url/", 0, 0);
+  template_url.SetURL("http://url/", 0, 0);
   template_url.set_safe_for_autoreplace(true);
   SetID(-100, &template_url);
 
@@ -479,7 +482,8 @@ TEST_F(WebDatabaseTest, Autofill) {
       FormField(string16(),
                 ASCIIToUTF16("Name"),
                 ASCIIToUTF16("Superman"),
-                string16()),
+                string16(),
+                0),
       &changes));
   std::vector<string16> v;
   for (int i = 0; i < 5; i++) {
@@ -487,7 +491,8 @@ TEST_F(WebDatabaseTest, Autofill) {
         FormField(string16(),
                   ASCIIToUTF16("Name"),
                   ASCIIToUTF16("Clark Kent"),
-                  string16()),
+                  string16(),
+                  0),
         &changes));
   }
   for (int i = 0; i < 3; i++) {
@@ -495,7 +500,8 @@ TEST_F(WebDatabaseTest, Autofill) {
         FormField(string16(),
                   ASCIIToUTF16("Name"),
                   ASCIIToUTF16("Clark Sutter"),
-                  string16()),
+                  string16(),
+                  0),
         &changes));
   }
   for (int i = 0; i < 2; i++) {
@@ -503,7 +509,8 @@ TEST_F(WebDatabaseTest, Autofill) {
         FormField(string16(),
                   ASCIIToUTF16("Favorite Color"),
                   ASCIIToUTF16("Green"),
-                  string16()),
+                  string16(),
+                  0),
         &changes));
   }
 
@@ -516,7 +523,8 @@ TEST_F(WebDatabaseTest, Autofill) {
       FormField(string16(),
                 ASCIIToUTF16("Name"),
                 ASCIIToUTF16("Clark Kent"),
-                string16()),
+                string16(),
+                0),
       &pair_id, &count));
   EXPECT_EQ(5, count);
   EXPECT_NE(0, pair_id);
@@ -527,7 +535,8 @@ TEST_F(WebDatabaseTest, Autofill) {
       FormField(string16(),
                 ASCIIToUTF16("Name"),
                 ASCIIToUTF16("clark kent"),
-                string16()),
+                string16(),
+                0),
       &pair_id, &count));
   EXPECT_EQ(0, count);
 
@@ -535,7 +544,8 @@ TEST_F(WebDatabaseTest, Autofill) {
       FormField(string16(),
                 ASCIIToUTF16("Favorite Color"),
                 ASCIIToUTF16("Green"),
-                string16()),
+                string16(),
+                0),
       &pair_id, &count));
   EXPECT_EQ(2, count);
 
@@ -599,7 +609,8 @@ TEST_F(WebDatabaseTest, Autofill) {
       FormField(string16(),
                 ASCIIToUTF16("Name"),
                 ASCIIToUTF16("Clark Kent"),
-                string16()),
+                string16(),
+                0),
       &pair_id, &count));
   EXPECT_EQ(0, count);
 
@@ -612,22 +623,26 @@ TEST_F(WebDatabaseTest, Autofill) {
   EXPECT_TRUE(db.AddFormFieldValue(FormField(string16(),
                                              ASCIIToUTF16("blank"),
                                              string16(),
-                                             string16()),
+                                             string16(),
+                                             0),
                                    &changes));
   EXPECT_TRUE(db.AddFormFieldValue(FormField(string16(),
                                              ASCIIToUTF16("blank"),
                                              ASCIIToUTF16(" "),
-                                             string16()),
+                                             string16(),
+                                             0),
                                    &changes));
   EXPECT_TRUE(db.AddFormFieldValue(FormField(string16(),
                                              ASCIIToUTF16("blank"),
                                              ASCIIToUTF16("      "),
-                                             string16()),
+                                             string16(),
+                                             0),
                                    &changes));
   EXPECT_TRUE(db.AddFormFieldValue(FormField(string16(),
                                              ASCIIToUTF16("blank"),
                                              kValue,
-                                             string16()),
+                                             string16(),
+                                             0),
                                    &changes));
 
   // They should be stored normally as the DB layer does not check for empty
@@ -661,14 +676,16 @@ TEST_F(WebDatabaseTest, Autofill_RemoveBetweenChanges) {
       FormField(string16(),
                 ASCIIToUTF16("Name"),
                 ASCIIToUTF16("Superman"),
-                string16()),
+                string16(),
+                0),
       &changes,
       t1));
   EXPECT_TRUE(db.AddFormFieldValueTime(
       FormField(string16(),
                 ASCIIToUTF16("Name"),
                 ASCIIToUTF16("Superman"),
-                string16()),
+                string16(),
+                0),
       &changes,
       t2));
 
@@ -702,7 +719,8 @@ TEST_F(WebDatabaseTest, Autofill_AddChanges) {
       FormField(string16(),
                 ASCIIToUTF16("Name"),
                 ASCIIToUTF16("Superman"),
-                string16()),
+                string16(),
+                0),
       &changes,
       t1));
   ASSERT_EQ(1U, changes.size());
@@ -716,7 +734,8 @@ TEST_F(WebDatabaseTest, Autofill_AddChanges) {
       FormField(string16(),
                 ASCIIToUTF16("Name"),
                 ASCIIToUTF16("Superman"),
-                string16()),
+                string16(),
+                0),
       &changes,
       t2));
   ASSERT_EQ(1U, changes.size());
@@ -738,7 +757,8 @@ TEST_F(WebDatabaseTest, Autofill_UpdateOneWithOneTimestamp) {
   FormField field(string16(),
                   ASCIIToUTF16("foo"),
                   ASCIIToUTF16("bar"),
-                  string16());
+                  string16(),
+                  0);
   int64 pair_id;
   int count;
   ASSERT_TRUE(db.GetIDAndCountOfFormElement(field, &pair_id, &count));
@@ -763,7 +783,8 @@ TEST_F(WebDatabaseTest, Autofill_UpdateOneWithTwoTimestamps) {
   FormField field(string16(),
                   ASCIIToUTF16("foo"),
                   ASCIIToUTF16("bar"),
-                  string16());
+                  string16(),
+                  0);
   int64 pair_id;
   int count;
   ASSERT_TRUE(db.GetIDAndCountOfFormElement(field, &pair_id, &count));
@@ -808,7 +829,8 @@ TEST_F(WebDatabaseTest, Autofill_UpdateTwo) {
   FormField field0(string16(),
                   ASCIIToUTF16("foo"),
                   ASCIIToUTF16("bar0"),
-                  string16());
+                  string16(),
+                  0);
   int64 pair_id;
   int count;
   ASSERT_TRUE(db.GetIDAndCountOfFormElement(field0, &pair_id, &count));
@@ -818,7 +840,8 @@ TEST_F(WebDatabaseTest, Autofill_UpdateTwo) {
   FormField field1(string16(),
                   ASCIIToUTF16("foo"),
                   ASCIIToUTF16("bar1"),
-                  string16());
+                  string16(),
+                  0);
   ASSERT_TRUE(db.GetIDAndCountOfFormElement(field1, &pair_id, &count));
   EXPECT_LE(0, pair_id);
   EXPECT_EQ(2, count);
@@ -834,7 +857,8 @@ TEST_F(WebDatabaseTest, Autofill_UpdateReplace) {
       FormField(string16(),
                 ASCIIToUTF16("Name"),
                 ASCIIToUTF16("Superman"),
-                string16()),
+                string16(),
+                0),
       &changes));
 
   AutofillEntry entry(MakeAutofillEntry("Name", "Superman", 1, 2));
@@ -862,7 +886,8 @@ TEST_F(WebDatabaseTest, Autofill_UpdateDontReplace) {
       FormField(string16(),
                 existing.key().name(),
                 existing.key().value(),
-                string16()),
+                string16(),
+                0),
       &changes,
       t));
   AutofillEntry entry(MakeAutofillEntry("Name", "Clark Kent", 1, 2));
@@ -1156,10 +1181,7 @@ TEST_F(WebDatabaseTest, CreditCard) {
                           ASCIIToUTF16("04"));
   work_creditcard.SetInfo(AutoFillType(CREDIT_CARD_EXP_4_DIGIT_YEAR),
                           ASCIIToUTF16("2013"));
-  work_creditcard.SetInfo(AutoFillType(CREDIT_CARD_VERIFICATION_CODE),
-                          ASCIIToUTF16("987"));
   work_creditcard.set_billing_address(ASCIIToUTF16("Overlook Hotel"));
-  work_creditcard.set_shipping_address(ASCIIToUTF16("Timberline Lodge"));
 
   EXPECT_TRUE(db.AddCreditCard(work_creditcard));
 
@@ -1181,10 +1203,7 @@ TEST_F(WebDatabaseTest, CreditCard) {
                             ASCIIToUTF16("06"));
   target_creditcard.SetInfo(AutoFillType(CREDIT_CARD_EXP_4_DIGIT_YEAR),
                             ASCIIToUTF16("2012"));
-  target_creditcard.SetInfo(AutoFillType(CREDIT_CARD_VERIFICATION_CODE),
-                            ASCIIToUTF16("123"));
   target_creditcard.set_billing_address(ASCIIToUTF16("Overlook Hotel"));
-  target_creditcard.set_shipping_address(string16());
 
   EXPECT_TRUE(db.AddCreditCard(target_creditcard));
   ASSERT_TRUE(db.GetCreditCardForLabel(ASCIIToUTF16("Target"),
@@ -1231,7 +1250,8 @@ TEST_F(WebDatabaseTest, Autofill_GetAllAutofillEntries_OneResult) {
       FormField(string16(),
                 ASCIIToUTF16("Name"),
                 ASCIIToUTF16("Superman"),
-                string16()),
+                string16(),
+                0),
       &changes,
       Time::FromTimeT(start)));
   timestamps1.push_back(Time::FromTimeT(start));
@@ -1274,7 +1294,8 @@ TEST_F(WebDatabaseTest, Autofill_GetAllAutofillEntries_TwoDistinct) {
       FormField(string16(),
                 ASCIIToUTF16("Name"),
                 ASCIIToUTF16("Superman"),
-                string16()),
+                string16(),
+                0),
       &changes,
       Time::FromTimeT(start)));
   timestamps1.push_back(Time::FromTimeT(start));
@@ -1288,7 +1309,8 @@ TEST_F(WebDatabaseTest, Autofill_GetAllAutofillEntries_TwoDistinct) {
       FormField(string16(),
                 ASCIIToUTF16("Name"),
                 ASCIIToUTF16("Clark Kent"),
-                string16()),
+                string16(),
+                0),
       &changes,
       Time::FromTimeT(start)));
   timestamps2.push_back(Time::FromTimeT(start));
@@ -1335,7 +1357,8 @@ TEST_F(WebDatabaseTest, Autofill_GetAllAutofillEntries_TwoSame) {
         FormField(string16(),
                   ASCIIToUTF16("Name"),
                   ASCIIToUTF16("Superman"),
-                  string16()),
+                  string16(),
+                  0),
         &changes,
         Time::FromTimeT(start)));
     timestamps.push_back(Time::FromTimeT(start));

@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "webkit/glue/plugins/webplugin_impl.h"
+
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "gfx/rect.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
 #include "skia/ext/platform_canvas.h"
@@ -35,9 +38,7 @@
 #include "webkit/glue/plugins/plugin_host.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/webplugin_delegate.h"
-#include "webkit/glue/plugins/webplugin_impl.h"
 #include "webkit/glue/plugins/webplugin_page_delegate.h"
-#include "googleurl/src/gurl.h"
 
 using WebKit::WebCanvas;
 using WebKit::WebConsoleMessage;
@@ -109,6 +110,7 @@ class MultiPartResponseClient : public WebURLLoaderClient {
     // as regular resources requested by plugins to prevent reentrancy.
     resource_client_->DidReceiveData(
         data, data_size, byte_range_lower_bound_);
+    byte_range_lower_bound_ += data_size;
   }
 
   virtual void didFinishLoading(WebURLLoader*) {}
@@ -208,11 +210,10 @@ bool WebPluginImpl::initialize(WebPluginContainer* container) {
   if (!page_delegate_)
     return false;
 
-  std::string actual_mime_type;
   WebPluginDelegate* plugin_delegate = page_delegate_->CreatePluginDelegate(
-      plugin_url_, mime_type_, &actual_mime_type);
+      file_path_, mime_type_);
   if (!plugin_delegate)
-    return NULL;
+    return false;
 
   // Set the container before Initialize because the plugin may
   // synchronously call NPN_GetValue to get its container during its
@@ -225,8 +226,6 @@ bool WebPluginImpl::initialize(WebPluginContainer* container) {
     return false;
   }
 
-  if (!actual_mime_type.empty())
-    mime_type_ = actual_mime_type;
   delegate_ = plugin_delegate;
 
   return true;
@@ -242,8 +241,14 @@ NPObject* WebPluginImpl::scriptableObject() {
 }
 
 void WebPluginImpl::paint(WebCanvas* canvas, const WebRect& paint_rect) {
-  if (!delegate_)
+  if (!delegate_ || !container_)
     return;
+
+#if defined(OS_WIN)
+  // Force a geometry update if needed to allow plugins like media player
+  // which defer the initial geometry update to work.
+  container_->reportGeometry();
+#endif  // OS_WIN
 
   // Note that |canvas| is only used when in windowless mode.
   delegate_->Paint(canvas, paint_rect);
@@ -293,13 +298,26 @@ void WebPluginImpl::updateGeometry(
     }
   }
 
-  first_geometry_update_ = false;
+#if defined(OS_WIN)
+  // Don't cache the geometry during the first geometry update. The first
+  // geometry update sequence is received when Widget::setParent is called.
+  // For plugins like media player which have a bug where they only honor
+  // the first geometry update, we have a quirk which ignores the first
+  // geometry update. To ensure that these plugins work correctly in cases
+  // where we receive only one geometry update from webkit, we also force
+  // a geometry update during paint which should go out correctly as the
+  // initial geometry update was not cached.
+  if (!first_geometry_update_)
+    geometry_ = new_geometry;
+#else  // OS_WIN
   geometry_ = new_geometry;
+#endif  // OS_WIN
+  first_geometry_update_ = false;
 }
 
 void WebPluginImpl::updateFocus(bool focused) {
-  if (focused && accepts_input_events_)
-    delegate_->SetFocus();
+  if (accepts_input_events_)
+    delegate_->SetFocus(focused);
 }
 
 void WebPluginImpl::updateVisibility(bool visible) {
@@ -322,6 +340,10 @@ bool WebPluginImpl::acceptsInputEvents() {
 
 bool WebPluginImpl::handleInputEvent(
     const WebInputEvent& event, WebCursorInfo& cursor_info) {
+  // Swallow context menu events in order to suppress the default context menu.
+  if (event.type == WebInputEvent::ContextMenu)
+    return true;
+
   return delegate_->HandleInputEvent(event, &cursor_info);
 }
 
@@ -405,14 +427,61 @@ void WebPluginImpl::printEnd() {
     delegate_->PrintEnd();
 }
 
+bool WebPluginImpl::hasSelection() const {
+  if (!delegate_)
+    return false;
+
+  return delegate_->HasSelection();
+}
+
+WebKit::WebString WebPluginImpl::selectionAsText() const {
+  if (!delegate_)
+    return WebString();
+
+  return delegate_->GetSelectionAsText();
+}
+
+WebKit::WebString WebPluginImpl::selectionAsMarkup() const {
+  if (!delegate_)
+    return WebString();
+
+  return delegate_->GetSelectionAsMarkup();
+}
+
+void WebPluginImpl::setZoomFactor(float scale, bool text_only) {
+  if (delegate_)
+    delegate_->SetZoomFactor(scale, text_only);
+}
+
+bool WebPluginImpl::startFind(const WebKit::WebString& search_text,
+                         bool case_sensitive,
+                         int identifier) {
+  if (!delegate_)
+    return false;
+  return delegate_->StartFind(search_text, case_sensitive, identifier);
+}
+
+void WebPluginImpl::selectFindResult(bool forward) {
+  if (delegate_)
+    delegate_->SelectFindResult(forward);
+}
+
+void WebPluginImpl::stopFind() {
+  if (delegate_)
+    delegate_->StopFind();
+}
+
 
 // -----------------------------------------------------------------------------
 
 WebPluginImpl::WebPluginImpl(
-    WebFrame* webframe, const WebPluginParams& params,
+    WebFrame* webframe,
+    const WebPluginParams& params,
+    const FilePath& file_path,
+    const std::string& mime_type,
     const base::WeakPtr<WebPluginPageDelegate>& page_delegate)
     : windowless_(false),
-      window_(NULL),
+      window_(gfx::kNullPluginWindow),
       accepts_input_events_(false),
       page_delegate_(page_delegate),
       webframe_(webframe),
@@ -422,7 +491,8 @@ WebPluginImpl::WebPluginImpl(
       load_manually_(params.loadManually),
       first_geometry_update_(true),
       ignore_response_error_(false),
-      mime_type_(params.mimeType.utf8()),
+      file_path_(file_path),
+      mime_type_(mime_type),
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
   DCHECK_EQ(params.attributeNames.size(), params.attributeValues.size());
   StringToLowerASCII(&mime_type_);
@@ -473,7 +543,7 @@ void WebPluginImpl::SetWindow(gfx::PluginWindowHandle window) {
 
 void WebPluginImpl::WillDestroyWindow(gfx::PluginWindowHandle window) {
   DCHECK_EQ(window, window_);
-  window_ = NULL;
+  window_ = gfx::kNullPluginWindow;
   if (page_delegate_)
     page_delegate_->WillDestroyPluginWindow(window);
 }
@@ -484,7 +554,7 @@ GURL WebPluginImpl::CompleteURL(const char* url) {
     return GURL();
   }
   // TODO(darin): Is conversion from UTF8 correct here?
-  return webframe_->completeURL(WebString::fromUTF8(url));
+  return webframe_->document().completeURL(WebString::fromUTF8(url));
 }
 
 void WebPluginImpl::CancelResource(unsigned long id) {
@@ -1148,11 +1218,10 @@ bool WebPluginImpl::ReinitializePluginForResponse(
   container_ = container_widget;
   webframe_ = webframe;
 
-  std::string actual_mime_type;
   WebPluginDelegate* plugin_delegate = page_delegate_->CreatePluginDelegate(
-      plugin_url_, mime_type_, &actual_mime_type);
+      file_path_, mime_type_);
 
-  bool ok = plugin_delegate->Initialize(
+  bool ok = plugin_delegate && plugin_delegate->Initialize(
       plugin_url_, arg_names_, arg_values_, this, load_manually_);
 
   if (!ok) {
@@ -1161,7 +1230,6 @@ bool WebPluginImpl::ReinitializePluginForResponse(
     return false;
   }
 
-  mime_type_ = actual_mime_type;
   delegate_ = plugin_delegate;
 
   // Force a geometry update to occur to ensure that the plugin becomes

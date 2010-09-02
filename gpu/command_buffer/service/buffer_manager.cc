@@ -10,34 +10,53 @@
 namespace gpu {
 namespace gles2 {
 
-void BufferManager::CreateBufferInfo(GLuint buffer_id) {
+BufferManager::~BufferManager() {
+  DCHECK(buffer_infos_.empty());
+}
+
+void BufferManager::Destroy(bool have_context) {
+  while (!buffer_infos_.empty()) {
+    if (have_context) {
+      BufferInfo* info = buffer_infos_.begin()->second;
+      if (!info->IsDeleted()) {
+        GLuint service_id = info->service_id();
+        glDeleteBuffersARB(1, &service_id);
+        info->MarkAsDeleted();
+      }
+    }
+    buffer_infos_.erase(buffer_infos_.begin());
+  }
+}
+
+void BufferManager::CreateBufferInfo(GLuint client_id, GLuint service_id) {
   std::pair<BufferInfoMap::iterator, bool> result =
       buffer_infos_.insert(
-          std::make_pair(buffer_id,
-                         BufferInfo::Ref(new BufferInfo(buffer_id))));
+          std::make_pair(client_id,
+                         BufferInfo::Ref(new BufferInfo(service_id))));
   DCHECK(result.second);
 }
 
 BufferManager::BufferInfo* BufferManager::GetBufferInfo(
-    GLuint buffer_id) {
-  BufferInfoMap::iterator it = buffer_infos_.find(buffer_id);
+    GLuint client_id) {
+  BufferInfoMap::iterator it = buffer_infos_.find(client_id);
   return it != buffer_infos_.end() ? it->second : NULL;
 }
 
-void BufferManager::RemoveBufferInfo(GLuint buffer_id) {
-  BufferInfoMap::iterator it = buffer_infos_.find(buffer_id);
+void BufferManager::RemoveBufferInfo(GLuint client_id) {
+  BufferInfoMap::iterator it = buffer_infos_.find(client_id);
   if (it != buffer_infos_.end()) {
     it->second->MarkAsDeleted();
-    buffer_infos_.erase(buffer_id);
+    buffer_infos_.erase(it);
   }
 }
 
-void BufferManager::BufferInfo::SetSize(GLsizeiptr size) {
+void BufferManager::BufferInfo::SetSize(GLsizeiptr size, bool shadow) {
   DCHECK(!IsDeleted());
-  if (size != size_) {
+  if (size != size_ || shadow != shadowed_) {
+    shadowed_ = shadow;
     size_ = size;
     ClearCache();
-    if (target_ == GL_ELEMENT_ARRAY_BUFFER) {
+    if (shadowed_) {
       shadow_.reset(new int8[size]);
       memset(shadow_.get(), 0, size);
     }
@@ -51,7 +70,7 @@ bool BufferManager::BufferInfo::SetRange(
         offset + size > size_) {
     return false;
   }
-  if (target_ == GL_ELEMENT_ARRAY_BUFFER) {
+  if (shadowed_) {
     memcpy(shadow_.get() + offset, data, size);
     ClearCache();
   }
@@ -78,7 +97,6 @@ GLuint GetMaxValue(const void* data, GLuint offset, GLsizei count) {
 
 bool BufferManager::BufferInfo::GetMaxValueForRange(
     GLuint offset, GLsizei count, GLenum type, GLuint* max_value) {
-  DCHECK_EQ(target_, static_cast<GLenum>(GL_ELEMENT_ARRAY_BUFFER));
   DCHECK(!IsDeleted());
   Range range(offset, count, type);
   RangeToMaxValueMap::iterator it = range_set_.find(range);
@@ -101,6 +119,10 @@ bool BufferManager::BufferInfo::GetMaxValueForRange(
     return false;
   }
 
+  if (!shadowed_) {
+    return false;
+  }
+
   // Scan the range for the max value and store
   GLuint max_v = 0;
   switch (type) {
@@ -114,6 +136,13 @@ bool BufferManager::BufferInfo::GetMaxValueForRange(
       }
       max_v = GetMaxValue<uint16>(shadow_.get(), offset, count);
       break;
+    case GL_UNSIGNED_INT:
+      // Check we are not accessing a non aligned address for a 4 byte value.
+      if ((offset & 3) != 0) {
+        return false;
+      }
+      max_v = GetMaxValue<uint32>(shadow_.get(), offset, count);
+      break;
     default:
       NOTREACHED();  // should never get here by validation.
       break;
@@ -121,6 +150,37 @@ bool BufferManager::BufferInfo::GetMaxValueForRange(
   std::pair<RangeToMaxValueMap::iterator, bool> result =
       range_set_.insert(std::make_pair(range, max_v));
   *max_value = max_v;
+  return true;
+}
+
+bool BufferManager::GetClientId(GLuint service_id, GLuint* client_id) const {
+  // This doesn't need to be fast. It's only used during slow queries.
+  for (BufferInfoMap::const_iterator it = buffer_infos_.begin();
+       it != buffer_infos_.end(); ++it) {
+    if (it->second->service_id() == service_id) {
+      *client_id = it->first;
+      return true;
+    }
+  }
+  return false;
+}
+
+void BufferManager::SetSize(BufferManager::BufferInfo* info, GLsizeiptr size) {
+  DCHECK(info);
+  info->SetSize(size,
+                info->target() == GL_ELEMENT_ARRAY_BUFFER ||
+                allow_buffers_on_multiple_targets_);
+}
+
+bool BufferManager::SetTarget(BufferManager::BufferInfo* info, GLenum target) {
+  // Check that we are not trying to bind it to a different target.
+  if (info->target() != 0 && info->target() != target &&
+      !allow_buffers_on_multiple_targets_) {
+    return false;
+  }
+  if (info->target() == 0) {
+    info->set_target(target);
+  }
   return true;
 }
 

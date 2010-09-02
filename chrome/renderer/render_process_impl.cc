@@ -21,8 +21,6 @@
 #include "base/histogram.h"
 #include "base/path_service.h"
 #include "base/sys_info.h"
-// TODO(jar): DNS calls should be renderer specific, not including browser.
-#include "chrome/browser/net/dns_global.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/render_messages.h"
@@ -39,6 +37,8 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac_util.h"
+#elif defined(OS_WIN)
+#include "base/iat_patch.h"
 #endif
 
 namespace {
@@ -68,6 +68,44 @@ bool LaunchNaClProcess(const char* url,
 }  // namespace
 
 //-----------------------------------------------------------------------------
+
+#if defined(OS_WIN)
+
+static iat_patch::IATPatchFunction g_iat_patch_createdca;
+HDC WINAPI CreateDCAPatch(LPCSTR driver_name,
+                          LPCSTR device_name,
+                          LPCSTR output,
+                          const void* init_data) {
+  DCHECK(std::string("DISPLAY") == std::string(driver_name));
+  DCHECK(!device_name);
+  DCHECK(!output);
+  DCHECK(!init_data);
+
+  // CreateDC fails behind the sandbox, but not CreateCompatibleDC.
+  return CreateCompatibleDC(NULL);
+}
+
+static iat_patch::IATPatchFunction g_iat_patch_get_font_data;
+DWORD WINAPI GetFontDataPatch(HDC hdc,
+                              DWORD table,
+                              DWORD offset,
+                              LPVOID buffer,
+                              DWORD length) {
+  int rv = GetFontData(hdc, table, offset, buffer, length);
+  if (rv == GDI_ERROR && hdc) {
+    HFONT font = static_cast<HFONT>(GetCurrentObject(hdc, OBJ_FONT));
+
+    LOGFONT logfont;
+    if (GetObject(font, sizeof(LOGFONT), &logfont)) {
+      std::vector<char> font_data;
+      if (RenderThread::current()->Send(new ViewHostMsg_PreCacheFont(logfont)))
+        rv = GetFontData(hdc, table, offset, buffer, length);
+    }
+  }
+  return rv;
+}
+
+#endif
 
 RenderProcessImpl::RenderProcessImpl()
     : ALLOW_THIS_IN_INITIALIZER_LIST(shared_mem_cache_cleaner_(
@@ -142,20 +180,17 @@ RenderProcessImpl::RenderProcessImpl()
   }
 #endif
 
-  // Load the pdf plugin before the sandbox is turned on.
+#if defined(OS_WIN)
+  // Need to patch a few functions for font loading to work correctly.
   FilePath pdf;
-  if (PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf)) {
-    static scoped_refptr<NPAPI::PluginLib> pdf_lib =
-        NPAPI::PluginLib::CreatePluginLib(pdf);
-    // Actually load the plugin.
-    pdf_lib->NP_Initialize();
-    // Keep an instance around to prevent the plugin unloading after a pdf is
-    // closed.
-    // Don't use scoped_ptr here because then get asserts on process shut down
-    // when running in --single-process.
-    static NPAPI::PluginInstance* instance = pdf_lib->CreateInstance("");
-    instance->plugin_lib();  // Quiet unused variable warnings in gcc.
+  if (PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf) &&
+      file_util::PathExists(pdf)) {
+    g_iat_patch_createdca.Patch(
+        pdf.value().c_str(), "gdi32.dll", "CreateDCA", CreateDCAPatch);
+    g_iat_patch_get_font_data.Patch(
+        pdf.value().c_str(), "gdi32.dll", "GetFontData", GetFontDataPatch);
   }
+#endif
 }
 
 RenderProcessImpl::~RenderProcessImpl() {
@@ -242,7 +277,7 @@ skia::PlatformCanvas* RenderProcessImpl::GetDrawingCanvas(
   if (!GetTransportDIBFromCache(memory, size)) {
     *memory = CreateTransportDIB(size);
     if (!*memory)
-      return false;
+      return NULL;
   }
 
   return (*memory)->GetPlatformCanvas(width, height);

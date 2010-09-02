@@ -219,12 +219,15 @@ bool UrlPicker::AcceleratorPressed(
 void UrlPicker::OnSelectionChanged() {
   int selection = url_table_->FirstSelectedRow();
   if (selection >= 0 && selection < url_table_model_->RowCount()) {
-    std::wstring languages =
-        profile_->GetPrefs()->GetString(prefs::kAcceptLanguages);
-    // Because the url_field_ is user-editable, we set the URL with
-    // username:password and escaped path and query.
+    std::wstring languages = UTF8ToWide(
+        profile_->GetPrefs()->GetString(prefs::kAcceptLanguages));
+    // Because this gets parsed by FixupURL(), it's safe to omit the scheme or
+    // trailing slash, and unescape most characters, but we need to not drop any
+    // username/password, or unescape anything that changes the meaning.
     std::wstring formatted = net::FormatUrl(url_table_model_->GetURL(selection),
-        languages, false, UnescapeRule::NONE, NULL, NULL, NULL);
+        languages,
+        net::kFormatUrlOmitAll & ~net::kFormatUrlOmitUsernamePassword,
+        UnescapeRule::SPACES, NULL, NULL, NULL);
     url_field_->SetText(formatted);
     GetDialogClientView()->UpdateDialogButtons();
   }
@@ -241,6 +244,6 @@ void UrlPicker::OnDoubleClick() {
 }
 
 GURL UrlPicker::GetInputURL() const {
-  return GURL(URLFixerUpper::FixupURL(UTF16ToUTF8(url_field_->text()),
-                                      std::string()));
+  return URLFixerUpper::FixupURL(UTF16ToUTF8(url_field_->text()),
+                                 std::string());
 }

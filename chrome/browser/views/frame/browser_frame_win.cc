@@ -12,6 +12,7 @@
 #include "app/resource_bundle.h"
 #include "app/theme_provider.h"
 #include "app/win_util.h"
+#include "base/win_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_theme_provider.h"
@@ -28,6 +29,9 @@
 // static
 static const int kClientEdgeThickness = 3;
 static const int kTabDragWindowAlpha = 200;
+// We need to offset the DWMFrame into the toolbar so that the blackness
+// doesn't show up on our rounded corners.
+static const int kDWMFrameTopOffset = 3;
 
 // static (Factory method.)
 BrowserFrame* BrowserFrame::Create(BrowserView* browser_view,
@@ -65,11 +69,17 @@ void BrowserFrameWin::Init() {
 BrowserFrameWin::~BrowserFrameWin() {
 }
 
-views::Window* BrowserFrameWin::GetWindow() {
-  return this;
+int BrowserFrameWin::GetTitleBarHeight() {
+  RECT caption = { 0 };
+  if (DwmGetWindowAttribute(GetNativeView(), DWMWA_CAPTION_BUTTON_BOUNDS,
+                            &caption, sizeof(RECT)) == S_OK) {
+    return caption.bottom;
+  }
+  return GetSystemMetrics(SM_CYCAPTION);
 }
 
-void BrowserFrameWin::TabStripCreated(BaseTabStrip* tabstrip) {
+views::Window* BrowserFrameWin::GetWindow() {
+  return this;
 }
 
 int BrowserFrameWin::GetMinimizeButtonOffset() const {
@@ -108,6 +118,9 @@ bool BrowserFrameWin::AlwaysUseNativeFrame() const {
   if (browser_view_->IsBrowserTypePanel())
     return false;
 
+  if (browser_view_->browser()->type() == Browser::TYPE_EXTENSION_APP)
+    return false;
+
   // We don't theme popup or app windows, so regardless of whether or not a
   // theme is active for normal browser windows, we don't want to use the custom
   // frame for popups/apps.
@@ -123,8 +136,10 @@ views::View* BrowserFrameWin::GetFrameView() const {
   return browser_frame_view_;
 }
 
-void BrowserFrameWin::PaintTabStripShadow(gfx::Canvas* canvas) {
-  browser_frame_view_->PaintTabStripShadow(canvas);
+void BrowserFrameWin::TabStripDisplayModeChanged() {
+  GetRootView()->Layout();
+  UpdateDWMFrame();
+  GetRootView()->Layout();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -297,26 +312,16 @@ void BrowserFrameWin::UpdateDWMFrame() {
     // In maximized mode, we only have a titlebar strip of glass, no side/bottom
     // borders.
     if (!browser_view_->IsFullscreen()) {
-      if (browser_view_->UsingSideTabs()) {
-        margins.cxLeftWidth +=
-            GetBoundsForTabStrip(browser_view_->tabstrip()).right();
-        margins.cyTopHeight += GetSystemMetrics(SM_CYSIZEFRAME);
+      if (browser_view_->UseVerticalTabs()) {
+        margins.cyTopHeight = GetTitleBarHeight();
       } else {
         margins.cyTopHeight =
-            GetBoundsForTabStrip(browser_view_->tabstrip()).bottom();
+            GetBoundsForTabStrip(browser_view_->tabstrip()).bottom() +
+            kDWMFrameTopOffset;
       }
     }
   } else {
     // For popup and app windows we want to use the default margins.
   }
   DwmExtendFrameIntoClientArea(GetNativeView(), &margins);
-
-  DWORD window_style = GetWindowLong(GWL_STYLE);
-  if (browser_view_->UsingSideTabs()) {
-    if (window_style & WS_CAPTION)
-      SetWindowLong(GWL_STYLE, window_style & ~WS_CAPTION);
-  } else {
-    if (!(window_style & WS_CAPTION))
-      SetWindowLong(GWL_STYLE, window_style | WS_CAPTION);
-  }
 }

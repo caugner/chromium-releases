@@ -24,6 +24,9 @@ class UserScript {
   // The file extension for standalone user scripts.
   static const char kFileExtension[];
 
+  // The bitmask for valid user script injectable schemes used by URLPattern.
+  static const int kValidUserScriptSchemes;
+
   // Check if a file or URL has the user script file extension.
   static bool HasUserScriptFileExtension(const GURL& url);
   static bool HasUserScriptFileExtension(const FilePath& path);
@@ -102,7 +105,8 @@ class UserScript {
   // Greasemonkey and probably more useful for typical scripts.
   UserScript()
     : run_location_(DOCUMENT_IDLE), emulate_greasemonkey_(false),
-      match_all_frames_(false), incognito_enabled_(false) {
+      match_all_frames_(false), incognito_enabled_(false),
+      allow_file_access_(false) {
   }
 
   const std::string& name_space() const { return name_space_; }
@@ -112,6 +116,11 @@ class UserScript {
 
   const std::string& name() const { return name_; }
   void set_name(const std::string& name) { name_ = name; }
+
+  const std::string& version() const { return version_; }
+  void set_version(const std::string& version) {
+    version_ = version;
+  }
 
   const std::string& description() const { return description_; }
   void set_description(const std::string& description) {
@@ -165,6 +174,9 @@ class UserScript {
   bool is_incognito_enabled() const { return incognito_enabled_; }
   void set_incognito_enabled(bool enabled) { incognito_enabled_ = enabled; }
 
+  bool allow_file_access() const { return allow_file_access_; }
+  void set_allow_file_access(bool allowed) { allow_file_access_ = allowed; }
+
   bool is_standalone() const { return extension_id_.empty(); }
 
   // Returns true if the script should be applied to the specified URL, false
@@ -193,6 +205,10 @@ class UserScript {
 
   // A longer description. Only used when parsing Greasemonkey-style scripts.
   std::string description_;
+
+  // A version number of the script. Only used when parsing Greasemonkey-style
+  // scripts.
+  std::string version_;
 
   // Greasemonkey-style globs that determine pages to inject the script into.
   // These are only used with standalone scripts.
@@ -223,6 +239,9 @@ class UserScript {
 
   // True if the script should be injected into an incognito tab.
   bool incognito_enabled_;
+
+  // True if the user agreed to allow this script access to file URLs.
+  bool allow_file_access_;
 };
 
 typedef std::vector<UserScript> UserScriptList;

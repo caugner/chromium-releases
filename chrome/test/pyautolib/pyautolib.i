@@ -22,6 +22,9 @@
 
 %include "chrome/test/pyautolib/argc_argv.i"
 
+// NOTE: All files included in this file should also be listed under
+//       pyautolib_sources in chrome_tests.gypi.
+
 // Headers that can be swigged directly.
 %include "chrome/app/chrome_dll_resource.h"
 %include "chrome/common/pref_names.h"
@@ -34,6 +37,9 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/pyautolib/pyautolib.h"
 %}
+
+// Handle type uint32 conversions as int
+%apply int { uint32 };
 
 // scoped_refptr
 template <class T>
@@ -87,23 +93,13 @@ class BrowserProxy {
       ActivateTab;
   bool ActivateTab(int tab_index);
 
+  %feature("docstring", "Activate the browser's window and bring it to front.")
+      BringToFront;
+  bool BringToFront();
+
   %feature("docstring", "Get proxy to the tab at the given zero-based index")
       GetTab;
   scoped_refptr<TabProxy> GetTab(int tab_index) const;
-
-  // Prefs
-  %feature("docstring", "Sets the int value of the specified preference. "
-           "Refer chrome/common/pref_names.h for the list of prefs.")
-      SetIntPreference;
-  bool SetIntPreference(const std::wstring& name, int value);
-  %feature("docstring", "Sets the string value of the specified preference. "
-           "Refer chrome/common/pref_names.h for the list of prefs.")
-      SetStringPreference;
-  bool SetStringPreference(const std::wstring& name, const std::wstring& value);
-  %feature("docstring", "Sets the boolean value of the specified preference. "
-           "Refer chrome/common/pref_names.h for the list of prefs.")
-      SetBooleanPreference;
-  bool SetBooleanPreference(const std::wstring& name, bool value);
 };
 
 // TabProxy
@@ -116,6 +112,12 @@ class TabProxy {
   %feature("docstring", "Navigates to a given GURL. "
            "Blocks until the navigation completes. ") NavigateToURL;
   AutomationMsg_NavigationResponseValues NavigateToURL(const GURL& url);
+  %feature("docstring", "Navigates to a given GURL. Blocks until the given "
+           "number of navigations complete.")
+      NavigateToURLBlockUntilNavigationsComplete;
+  AutomationMsg_NavigationResponseValues
+      NavigateToURLBlockUntilNavigationsComplete(
+          const GURL& url, int number_of_navigations);
   %feature("docstring", "Equivalent to hitting the Back button. "
            "Blocks until navigation completes.") GoBack;
   AutomationMsg_NavigationResponseValues GoBack();
@@ -131,6 +133,9 @@ class TabProxy {
            "since it might close the browser.") Close;
   bool Close();
   bool Close(bool wait_until_closed);
+  %feature("docstring", "Blocks until tab is completely restored.")
+      WaitForTabToBeRestored;
+  bool WaitForTabToBeRestored(uint32 timeout_ms);
 
   // HTTP Auth
   %feature("docstring",
@@ -176,6 +181,11 @@ class PyUITestBase {
            "Closes all windows and destroys the browser.") TearDown;
   virtual void TearDown();
 
+  %feature("docstring", "Timeout (in milli secs) for an action. "
+           "This value is also used as default for the WaitUntil() method.")
+      action_max_timeout_ms;
+  int action_max_timeout_ms() const;
+
   %feature("docstring", "Launches the browser and IPC testing server.")
       LaunchBrowserAndServer;
   void LaunchBrowserAndServer();
@@ -183,6 +193,9 @@ class PyUITestBase {
       CloseBrowserAndServer;
   void CloseBrowserAndServer();
 
+  %feature("docstring", "Determine if the profile is set to be cleared on "
+                        "next startup.") get_clear_profile;
+  bool get_clear_profile() const;
   %feature("docstring", "If False, sets the flag so that the profile is "
            "not cleared on next startup. Useful for persisting profile "
            "across restarts. By default the state is True, to clear profile.")
@@ -273,6 +286,10 @@ class PyUITestBase {
   %feature("docstring", "Open a new browser window.") OpenNewBrowserWindow;
   bool OpenNewBrowserWindow(bool show);
 
+  %feature("docstring", "Fetch the number of browser windows. Includes popups.")
+      GetBrowserWindowCount;
+  int GetBrowserWindowCount();
+
   %feature("docstring", "Get the index of the active tab in the given or "
            "first window. Indexes are zero-based.") GetActiveTabIndex;
   int GetActiveTabIndex(int window_index=0);
@@ -296,6 +313,19 @@ class PyUITestBase {
            "Returns True on success.") AppendTab;
   bool AppendTab(const GURL& tab_url, int window_index=0);
 
+  %feature("docstring", "Set the value of the cookie at cookie_url to value "
+           "for the given window index and tab index. "
+           "Returns True on success.") SetCookie;
+  bool SetCookie(const GURL& cookie_url, const std::string& value,
+                 int window_index=0, int tab_index=0);
+
+  %feature("docstring", "Get the value of the cokie at cookie_url for the "
+           "given window index and tab index. "
+           "Returns empty string on error or if there is no value for the "
+           "cookie.") GetCookieVal;
+  std::string GetCookie(const GURL& cookie_url, int window_index=0,
+                        int tab_index=0);
+
   // Misc methods
   %feature("docstring", "Determine if the browser is running. "
            "Returns False if user closed the window or if the browser died")
@@ -304,7 +334,7 @@ class PyUITestBase {
 
   %feature("docstring", "Install an extension from the given file. Returns "
            "True if successfully installed and loaded.") InstallExtension;
-  bool InstallExtension(const FilePath& crx_file);
+  bool InstallExtension(const FilePath& crx_file, bool with_ui);
 
   %feature("docstring", "Get a proxy to the browser window at the given "
                         "zero-based index.") GetBrowserWindow;
@@ -313,9 +343,13 @@ class PyUITestBase {
   // Meta-method
   %feature("docstring", "Send a sync JSON request to Chrome.  "
                         "Returns a JSON dict as a response.  "
-			"Internal method.")
+                        "Internal method.")
       _SendJSONRequest;
   std::string _SendJSONRequest(int window_index, std::string request);
+
+  %feature("docstring", "Resets to the default theme. "
+           "Returns true on success.") ResetToDefaultTheme;
+  bool ResetToDefaultTheme();
 
 };
 

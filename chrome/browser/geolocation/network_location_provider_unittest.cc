@@ -9,7 +9,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/geolocation/fake_access_token_store.h"
-#include "chrome/browser/net/test_url_fetcher_factory.h"
+#include "chrome/common/net/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -33,11 +33,6 @@ class MessageLoopQuitListener
   virtual void LocationUpdateAvailable(LocationProviderBase* provider) {
     EXPECT_EQ(client_message_loop_, MessageLoop::current());
     updated_provider_ = provider;
-    client_message_loop_->Quit();
-  }
-  virtual void MovementDetected(LocationProviderBase* provider) {
-    EXPECT_EQ(client_message_loop_, MessageLoop::current());
-    movement_provider_ = provider;
     client_message_loop_->Quit();
   }
   MessageLoop* client_message_loop_;
@@ -121,7 +116,6 @@ class GeolocationNetworkProviderTest : public testing::Test {
     WifiDataProvider::ResetFactory();
     RadioDataProvider::ResetFactory();
     URLFetcher::set_factory(NULL);
-    base::LeakTracker<URLFetcher>::CheckForLeaks();
   }
 
   LocationProviderBase* CreateProvider(bool set_permission_granted) {
@@ -274,7 +268,7 @@ TEST_F(GeolocationNetworkProviderTest, CreateDestroy) {
 
 TEST_F(GeolocationNetworkProviderTest, StartProvider) {
   scoped_ptr<LocationProviderBase> provider(CreateProvider(true));
-  EXPECT_TRUE(provider->StartProvider());
+  EXPECT_TRUE(provider->StartProvider(false));
   TestURLFetcher* fetcher = get_url_fetcher_and_advance_id();
   ASSERT_TRUE(fetcher != NULL);
 
@@ -302,7 +296,7 @@ TEST_F(GeolocationNetworkProviderTest, MultiRegistrations) {
 
 TEST_F(GeolocationNetworkProviderTest, MultipleWifiScansComplete) {
   scoped_ptr<LocationProviderBase> provider(CreateProvider(true));
-  EXPECT_TRUE(provider->StartProvider());
+  EXPECT_TRUE(provider->StartProvider(false));
 
   TestURLFetcher* fetcher = get_url_fetcher_and_advance_id();
   ASSERT_TRUE(fetcher != NULL);
@@ -412,7 +406,7 @@ TEST_F(GeolocationNetworkProviderTest, NoRequestOnStartupUntilWifiData) {
   MessageLoopQuitListener listener;
   wifi_data_provider_->set_got_data(false);
   scoped_ptr<LocationProviderBase> provider(CreateProvider(true));
-  EXPECT_TRUE(provider->StartProvider());
+  EXPECT_TRUE(provider->StartProvider(false));
   provider->RegisterListener(&listener);
 
   main_message_loop_.RunAllPending();
@@ -428,7 +422,7 @@ TEST_F(GeolocationNetworkProviderTest, NoRequestOnStartupUntilWifiData) {
 TEST_F(GeolocationNetworkProviderTest, NewDataReplacesExistingNetworkRequest) {
   // Send initial request with empty device data
   scoped_ptr<LocationProviderBase> provider(CreateProvider(true));
-  EXPECT_TRUE(provider->StartProvider());
+  EXPECT_TRUE(provider->StartProvider(false));
   TestURLFetcher* fetcher = get_url_fetcher_and_advance_id();
   EXPECT_TRUE(fetcher);
 
@@ -441,7 +435,7 @@ TEST_F(GeolocationNetworkProviderTest, NewDataReplacesExistingNetworkRequest) {
 
 TEST_F(GeolocationNetworkProviderTest, NetworkRequestDeferredForPermission) {
   scoped_ptr<LocationProviderBase> provider(CreateProvider(false));
-  EXPECT_TRUE(provider->StartProvider());
+  EXPECT_TRUE(provider->StartProvider(false));
   TestURLFetcher* fetcher = get_url_fetcher_and_advance_id();
   EXPECT_FALSE(fetcher);
   provider->OnPermissionGranted(GURL(kTestHostUrl));
@@ -460,7 +454,7 @@ TEST_F(GeolocationNetworkProviderTest,
   access_token_store_->access_token_set_[test_server_url_] =
       UTF8ToUTF16(REFERENCE_ACCESS_TOKEN);
   scoped_ptr<LocationProviderBase> provider(CreateProvider(false));
-  EXPECT_TRUE(provider->StartProvider());
+  EXPECT_TRUE(provider->StartProvider(false));
   TestURLFetcher* fetcher = get_url_fetcher_and_advance_id();
   EXPECT_FALSE(fetcher);
 

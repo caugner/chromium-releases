@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,6 +48,10 @@ OptionsGroupView::OptionsGroupView(views::View* contents,
 
   description_label_->SetMultiLine(true);
   description_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+
+  SetAccessibleName(title);
+  contents->SetAccessibleName(title);
+  contents->SetAccessibleRole(AccessibilityTypes::ROLE_GROUPING);
 }
 
 void OptionsGroupView::SetHighlighted(bool highlighted) {
@@ -61,6 +65,11 @@ int OptionsGroupView::GetContentsWidth() const {
 
 ///////////////////////////////////////////////////////////////////////////////
 // OptionsGroupView, views::View overrides:
+
+bool OptionsGroupView::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  *role = AccessibilityTypes::ROLE_GROUPING;
+  return true;
+}
 
 void OptionsGroupView::Paint(gfx::Canvas* canvas) {
   if (highlighted_) {
@@ -110,17 +119,12 @@ void OptionsGroupView::Init() {
 
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   layout->StartRow(0, two_column_layout_id);
-  // We need to do this so that the label can calculate an appropriate
-  // preferred size (width * height) based on this width constraint. Otherwise
-  // Label::GetPreferredSize will return 0,0 as the preferred size.
-  title_label_->SetBounds(0, 0, left_column_width, 0);
-  layout->AddView(title_label_);
+  layout->AddView(title_label_, 1, 1, GridLayout::FILL, GridLayout::LEADING);
   layout->AddView(contents_, 1, 3, GridLayout::FILL, GridLayout::FILL);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
   layout->StartRow(1, two_column_layout_id);
-  // See comment above for title_label_.
-  description_label_->SetBounds(0, 0, left_column_width, 0);
-  layout->AddView(description_label_);
+  layout->AddView(description_label_, 1, 1,
+                  GridLayout::FILL, GridLayout::LEADING);
   layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
 
   if (show_separator_) {

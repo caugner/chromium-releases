@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,7 +53,7 @@ void PossibleURLModel::Reload(Profile *profile) {
         options.end_time - TimeDelta::FromDays(kPossibleURLTimeScope);
     options.max_count = 50;
 
-    hs->QueryHistory(std::wstring(), options, &consumer_,
+    hs->QueryHistory(string16(), options, &consumer_,
         NewCallback(this, &PossibleURLModel::OnHistoryQueryComplete));
   }
 }
@@ -61,15 +61,15 @@ void PossibleURLModel::Reload(Profile *profile) {
 void PossibleURLModel::OnHistoryQueryComplete(HistoryService::Handle h,
                                               history::QueryResults* result) {
   results_.resize(result->size());
-  std::wstring languages = profile_
-      ? profile_->GetPrefs()->GetString(prefs::kAcceptLanguages)
-      : std::wstring();
+  std::wstring languages = profile_ ?
+      UTF8ToWide(profile_->GetPrefs()->GetString(prefs::kAcceptLanguages)) :
+      std::wstring();
   for (size_t i = 0; i < result->size(); ++i) {
     results_[i].url = (*result)[i].url();
     results_[i].index = i;
     results_[i].display_url =
         gfx::SortedDisplayURL((*result)[i].url(), languages);
-    results_[i].title = (*result)[i].title();
+    results_[i].title = UTF16ToWide((*result)[i].title());
   }
 
   // The old version of this code would filter out all but the most recent
@@ -121,13 +121,10 @@ std::wstring PossibleURLModel::GetText(int row, int col_id) {
 
   // TODO(brettw): this should probably pass the GURL up so the URL elider
   // can be used at a higher level when we know the width.
-  const string16& url = results_[row].display_url.display_url();
-  if (!base::i18n::IsRTL())
-    return UTF16ToWideHack(url);
   // Force URL to be LTR.
-  std::wstring localized_url = UTF16ToWideHack(url);
-  base::i18n::WrapStringWithLTRFormatting(&localized_url);
-  return localized_url;
+  std::wstring url(UTF16ToWideHack(results_[row].display_url.display_url()));
+  base::i18n::GetDisplayStringInLTRDirectionality(&url);
+  return url;
 }
 
 SkBitmap PossibleURLModel::GetIcon(int row) {

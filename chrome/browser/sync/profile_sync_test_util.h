@@ -28,6 +28,7 @@
 #include "chrome/browser/sync/unrecoverable_error_handler.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_service.h"
+#include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/test/sync/test_http_bridge_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -36,15 +37,6 @@ ACTION_P(Notify, type) {
   NotificationService::current()->Notify(type,
                                          NotificationService::AllSources(),
                                          NotificationService::NoDetails());
-}
-
-// This action is used to mock out the ProfileSyncFactory
-// CreateDataTypeManager method.  Note that we swap out the supplied
-// SyncBackendHost with a mock since using the live SyncBackendHost in
-// tests does not run the syncer thread and can not properly respond
-// to pause and resume requests.
-ACTION_P(MakeDataTypeManager, backend_mock) {
-  return new browser_sync::DataTypeManagerImpl(backend_mock, arg1);
 }
 
 ACTION(QuitUIMessageLoop) {
@@ -57,16 +49,11 @@ ACTION_P(InvokeTask, task) {
     task->Run();
 }
 
-template <class ModelAssociatorImpl>
-class TestModelAssociator : public ModelAssociatorImpl {
+class TestModelAssociatorHelper {
  public:
-  explicit TestModelAssociator(
-      ProfileSyncService* service,
-      browser_sync::UnrecoverableErrorHandler* error_handler)
-      : ModelAssociatorImpl(service, error_handler) {
-  }
-
-  virtual bool GetSyncIdForTaggedNode(const std::string& tag, int64* sync_id) {
+  template <class ModelAssociatorImpl>
+  bool GetSyncIdForTaggedNode(ModelAssociatorImpl* associator,
+                              const std::string& tag, int64* sync_id) {
     std::wstring tag_wide;
     if (!UTF8ToWide(tag.c_str(), tag.length(), &tag_wide)) {
       NOTREACHED() << "Unable to convert UTF8 to wide for string: " << tag;
@@ -74,7 +61,7 @@ class TestModelAssociator : public ModelAssociatorImpl {
     }
 
     sync_api::WriteTransaction trans(
-        ModelAssociatorImpl::sync_service()->backend()->GetUserShareHandle());
+        associator->sync_service()->backend()->GetUserShareHandle());
     sync_api::ReadNode root(&trans);
     root.InitByRootLookup();
 
@@ -109,41 +96,12 @@ class TestModelAssociator : public ModelAssociatorImpl {
     return true;
   }
 
-  ~TestModelAssociator() {}
+  ~TestModelAssociatorHelper() {}
 };
 
 class ProfileSyncServiceObserverMock : public ProfileSyncServiceObserver {
  public:
   MOCK_METHOD0(OnStateChanged, void());
-};
-
-class TestingProfileSyncService : public ProfileSyncService {
- public:
-  explicit TestingProfileSyncService(ProfileSyncFactory* factory,
-                                     Profile* profile,
-                                     bool bootstrap_sync_authentication)
-      : ProfileSyncService(factory, profile, bootstrap_sync_authentication) {
-    RegisterPreferences();
-    SetSyncSetupCompleted();
-  }
-  virtual ~TestingProfileSyncService() {
-  }
-
-  virtual void InitializeBackend(bool delete_sync_data_folder) {
-    browser_sync::TestHttpBridgeFactory* factory =
-        new browser_sync::TestHttpBridgeFactory();
-    browser_sync::TestHttpBridgeFactory* factory2 =
-        new browser_sync::TestHttpBridgeFactory();
-    backend()->InitializeForTestMode(L"testuser", factory, factory2,
-        delete_sync_data_folder, browser_sync::kDefaultNotificationMethod);
-  }
-
- private:
-  // When testing under ChromiumOS, this method must not return an empty
-  // value value in order for the profile sync service to start.
-  virtual std::string GetLsidForAuthBootstraping() {
-    return "foo";
-  }
 };
 
 class ThreadNotificationService
@@ -196,20 +154,30 @@ class ThreadNotifier :  // NOLINT
         notify_thread_(notify_thread) {}
 
   void Notify(NotificationType type, const NotificationDetails& details) {
+    Notify(type, NotificationService::AllSources(), details);
+  }
+
+  void Notify(NotificationType type,
+              const NotificationSource& source,
+              const NotificationDetails& details) {
     DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
     notify_thread_->message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &ThreadNotifier::NotifyTask, type, details));
+        NewRunnableMethod(this,
+                          &ThreadNotifier::NotifyTask,
+                          type,
+                          source,
+                          details));
     done_event_.Wait();
   }
 
  private:
   friend class base::RefCountedThreadSafe<ThreadNotifier>;
 
-  void NotifyTask(NotificationType type, const NotificationDetails& details) {
-    NotificationService::current()->Notify(type,
-                                           NotificationService::AllSources(),
-                                           details);
+  void NotifyTask(NotificationType type,
+                  const NotificationSource& source,
+                  const NotificationDetails& details) {
+    NotificationService::current()->Notify(type, source, details);
     done_event_.Signal();
   }
 

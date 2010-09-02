@@ -35,9 +35,9 @@ enum {
   TEST_MODE_SYNC_CACHE_START = 1 << 2,
   TEST_MODE_SYNC_CACHE_READ  = 1 << 3,
   TEST_MODE_SYNC_CACHE_WRITE  = 1 << 4,
-  TEST_MODE_SYNC_ALL = TEST_MODE_SYNC_NET_START | TEST_MODE_SYNC_NET_READ |
-                       TEST_MODE_SYNC_CACHE_START | TEST_MODE_SYNC_CACHE_READ |
-                       TEST_MODE_SYNC_CACHE_WRITE
+  TEST_MODE_SYNC_ALL = (TEST_MODE_SYNC_NET_START | TEST_MODE_SYNC_NET_READ |
+                        TEST_MODE_SYNC_CACHE_START | TEST_MODE_SYNC_CACHE_READ |
+                        TEST_MODE_SYNC_CACHE_WRITE)
 };
 
 typedef void (*MockTransactionHandler)(const net::HttpRequestInfo* request,
@@ -97,7 +97,7 @@ class MockHttpRequest : public net::HttpRequestInfo {
   explicit MockHttpRequest(const MockTransaction& t) {
     url = GURL(t.url);
     method = t.method;
-    extra_headers = t.request_headers;
+    extra_headers.AddHeadersFromString(t.request_headers);
     load_flags = t.load_flags;
   }
 };
@@ -291,7 +291,8 @@ class MockNetworkTransaction : public net::HttpTransaction {
   }
 
   virtual net::LoadState GetLoadState() const {
-    NOTREACHED() << "define some mock state transitions";
+    if (data_cursor_)
+      return net::LOAD_STATE_READING_RESPONSE;
     return net::LOAD_STATE_IDLE;
   }
 

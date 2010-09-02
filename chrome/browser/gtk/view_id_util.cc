@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -83,23 +83,14 @@ const char* GetNameFromID(ViewID id) {
     case VIEW_ID_LOCATION_BAR:
       return "chrome-location-bar";
 
-    case VIEW_ID_GO_BUTTON:
-      return "chrome-toolbar-go-button";
-
     case VIEW_ID_BROWSER_ACTION_TOOLBAR:
       return "chrome-toolbar-browser-actions-container";
-
-    case VIEW_ID_PAGE_MENU:
-      return "chrome-page-menu";
 
     case VIEW_ID_APP_MENU:
       return "chrome-app-menu";
 
     case VIEW_ID_AUTOCOMPLETE:
       return "chrome-autocomplete-edit";
-
-    case VIEW_ID_BOOKMARK_MENU:
-      return "chrome-bookmark-menu";
 
     case VIEW_ID_BOOKMARK_BAR:
       return "chrome-bookmark-bar";

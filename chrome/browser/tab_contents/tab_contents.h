@@ -14,8 +14,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
 #include "chrome/browser/download/save_package.h"
@@ -24,21 +24,16 @@
 #include "chrome/browser/find_bar_controller.h"
 #include "chrome/browser/find_notification_details.h"
 #include "chrome/browser/jsmessage_box_client.h"
-#include "chrome/browser/net/url_request_context_getter.h"
-#include "chrome/browser/printing/print_view_manager.h"
+#include "chrome/browser/password_manager/password_manager_delegate.h"
 #include "chrome/browser/shell_dialogs.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/tab_contents/constrained_window.h"
-#include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/language_state.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/page_navigator.h"
 #include "chrome/browser/tab_contents/render_view_host_manager.h"
-#include "chrome/common/content_settings.h"
-#include "chrome/common/content_settings_types.h"
-#include "chrome/common/extensions/url_pattern.h"
-#include "chrome/common/navigation_types.h"
+#include "chrome/browser/tab_contents/tab_specific_content_settings.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/property_bag.h"
 #include "chrome/common/renderer_preferences.h"
@@ -48,7 +43,6 @@
 #include "net/base/load_states.h"
 #include "webkit/glue/dom_operations.h"
 #include "webkit/glue/password_form.h"
-#include "webkit/glue/webpreferences.h"
 
 namespace gfx {
 class Rect;
@@ -63,17 +57,22 @@ namespace base {
 class WaitableEvent;
 }
 
+namespace printing {
+class PrintViewManager;
+}
 
 namespace IPC {
 class Message;
 }
 
+class AutocompleteHistoryManager;
 class AutoFillManager;
 class BlockedPopupContainer;
 class DOMUI;
 class DownloadItem;
 class Extension;
-class AutocompleteHistoryManager;
+class GeolocationSettingsState;
+class InfoBarDelegate;
 class LoadNotificationDetails;
 class OmniboxSearchHint;
 class PasswordManager;
@@ -81,16 +80,19 @@ class PluginInstaller;
 class Profile;
 struct RendererPreferences;
 class RenderViewHost;
+class SiteInstance;
+class SkBitmap;
+class TabContents;
 class TabContentsDelegate;
 class TabContentsFactory;
-class SkBitmap;
-class SiteInstance;
-class TabContents;
 class TabContentsView;
+class URLPattern;
+class URLRequestContextGetter;
 struct ThumbnailScore;
 struct ViewHostMsg_DidPrintPage_Params;
 struct ViewHostMsg_FrameNavigate_Params;
 struct ViewHostMsg_RunFileChooser_Params;
+struct WebPreferences;
 
 // Describes what goes in the main content area of a tab. TabContents is
 // the only type of TabContents, and these should be merged together.
@@ -102,7 +104,9 @@ class TabContents : public PageNavigator,
                     public RenderViewHostManager::Delegate,
                     public SelectFileDialog::Listener,
                     public JavaScriptMessageBoxClient,
-                    public ImageLoadingTracker::Observer {
+                    public ImageLoadingTracker::Observer,
+                    public PasswordManagerDelegate,
+                    public TabSpecificContentSettings::Delegate {
  public:
   // Flags passed to the TabContentsDelegate.NavigationStateChanged to tell it
   // what has changed. Combine them to update more than one thing.
@@ -195,24 +199,22 @@ class TabContents : public PageNavigator,
   // NOTE: this should only be manipulated before the tab is added to a browser.
   // TODO(sky): resolve if this is the right way to identify an app tab. If it
   // is, than this should be passed in the constructor.
-  void SetAppExtension(Extension* extension);
+  void SetExtensionApp(Extension* extension);
 
   // Convenience for setting the app extension by id. This does nothing if
-  // |app_extension_id| is empty, or an extension can't be found given the
+  // |extension_app_id| is empty, or an extension can't be found given the
   // specified id.
-  void SetAppExtensionById(const std::string& app_extension_id);
+  void SetExtensionAppById(const std::string& extension_app_id);
 
-  Extension* app_extension() const { return app_extension_; }
-  bool is_app() const { return app_extension_ != NULL; }
+  Extension* extension_app() const { return extension_app_; }
+  bool is_app() const { return extension_app_ != NULL; }
 
   // If an app extension has been explicitly set for this TabContents its icon
-  // is returned. If an app extension has not been set but there is an
-  // extension whose extent contains the url of the current page it's icon
-  // is returned. Otherwise an empty icon is returned.
+  // is returned.
   //
   // NOTE: the returned icon is larger than 16x16 (it's size is
   // Extension::EXTENSION_ICON_SMALLISH).
-  const SkBitmap& app_extension_icon() const { return app_extension_icon_; }
+  SkBitmap* GetExtensionAppIcon();
 
   // Tab navigation state ------------------------------------------------------
 
@@ -257,18 +259,6 @@ class TabContents : public PageNavigator,
   // space is provided for the favicon, and the favicon is never displayed.
   virtual bool ShouldDisplayFavIcon();
 
-  // Returns whether a particular kind of content has been blocked for this
-  // page.
-  bool IsContentBlocked(ContentSettingsType content_type) const;
-
-  // Returns the map of settings applied per frame that has used the
-  // geolocation API on this page. Note this is a full URL, not redacted to
-  // origin or otherwise.
-  typedef std::map<GURL, ContentSetting> GeolocationContentSettings;
-  const GeolocationContentSettings& geolocation_content_settings() const {
-    return geolocation_content_settings_;
-  }
-
   // Returns a human-readable description the tab's loading state.
   virtual std::wstring GetStatusText() const;
 
@@ -297,6 +287,10 @@ class TabContents : public PageNavigator,
   // Sets an app icon associated with TabContents and fires an INVALIDATE_TITLE
   // navigation state change to trigger repaint of title.
   void SetAppIcon(const SkBitmap& app_icon);
+
+  bool displayed_insecure_content() const {
+    return displayed_insecure_content_;
+  }
 
   // Internal state ------------------------------------------------------------
 
@@ -453,7 +447,7 @@ class TabContents : public PageNavigator,
   // Infobars ------------------------------------------------------------------
 
   // Adds an InfoBar for the specified |delegate|.
-  void AddInfoBar(InfoBarDelegate* delegate);
+  virtual void AddInfoBar(InfoBarDelegate* delegate);
 
   // Removes the InfoBar for the specified |delegate|.
   void RemoveInfoBar(InfoBarDelegate* delegate);
@@ -651,9 +645,7 @@ class TabContents : public PageNavigator,
   void OnCloseStarted();
 
   // Getter/Setters for the url request context to be used for this tab.
-  void set_request_context(URLRequestContextGetter* context) {
-    request_context_ = context;
-  }
+  void set_request_context(URLRequestContextGetter* context);
   URLRequestContextGetter* request_context() const {
     return request_context_.get();
   }
@@ -662,12 +654,24 @@ class TabContents : public PageNavigator,
     return language_state_;
   }
 
+  // Returns true if underlying TabContentsView should accept drag-n-drop.
+  bool ShouldAcceptDragAndDrop() const;
+
   // Creates a duplicate of this TabContents. The returned TabContents is
   // configured such that the renderer has not been loaded (it'll load the first
   // time it is selected).
   // This is intended for use with apps.
   // The caller owns the returned object.
   TabContents* CloneAndMakePhantom();
+
+  // Indicates if this tab was explicitly closed by the user (control-w, close
+  // tab menu item...). This is false for actions that indirectly close the tab,
+  // such as closing the window.  The setter is maintained by TabStripModel, and
+  // the getter only useful from within TAB_CLOSED notification
+  void set_closed_by_user_gesture(bool value) {
+    closed_by_user_gesture_ = value;
+  }
+  bool closed_by_user_gesture() const { return closed_by_user_gesture_; }
 
   // JavaScriptMessageBoxClient ------------------------------------------------
   virtual std::wstring GetMessageBoxTitle(const GURL& frame_url,
@@ -677,8 +681,8 @@ class TabContents : public PageNavigator,
                                   bool success,
                                   const std::wstring& prompt);
   virtual void SetSuppressMessageBoxes(bool suppress_message_boxes);
-  virtual TabContents* AsTabContents() { return this; }
-  virtual ExtensionHost* AsExtensionHost() { return NULL; }
+  virtual TabContents* AsTabContents();
+  virtual ExtensionHost* AsExtensionHost();
 
   // The BookmarkDragDelegate is used to forward bookmark drag and drop events
   // to extensions.
@@ -690,15 +694,26 @@ class TabContents : public PageNavigator,
   virtual void SetBookmarkDragDelegate(
       RenderViewHostDelegate::BookmarkDrag* bookmark_drag);
 
+  // The TabSpecificContentSettings object is used to query the blocked content
+  // state by various UI elements.
+  TabSpecificContentSettings* GetTabSpecificContentSettings() const;
+
+  // PasswordManagerDelegate implementation.
+  virtual void FillPasswordForm(
+      const webkit_glue::PasswordFormFillData& form_data);
+  virtual void AddSavePasswordInfoBar(PasswordFormManager* form_to_save);
+  virtual Profile* GetProfileForPasswordManager();
+  virtual bool DidLastPageLoadEncounterSSLErrors();
+
  private:
   friend class NavigationController;
   // Used to access the child_windows_ (ConstrainedWindowList) for testing
   // automation purposes.
   friend class AutomationProvider;
 
-  FRIEND_TEST(TabContentsTest, NoJSMessageOnInterstitials);
-  FRIEND_TEST(TabContentsTest, UpdateTitle);
-  FRIEND_TEST(TabContentsTest, CrossSiteCantPreemptAfterUnload);
+  FRIEND_TEST_ALL_PREFIXES(TabContentsTest, NoJSMessageOnInterstitials);
+  FRIEND_TEST_ALL_PREFIXES(TabContentsTest, UpdateTitle);
+  FRIEND_TEST_ALL_PREFIXES(TabContentsTest, CrossSiteCantPreemptAfterUnload);
 
   // Temporary until the view/contents separation is complete.
   friend class TabContentsView;
@@ -715,13 +730,6 @@ class TabContents : public PageNavigator,
 
   // TODO(brettw) TestTabContents shouldn't exist!
   friend class TestTabContents;
-
-  // Resets the |content_blocked_| array.
-  void ClearBlockedContentSettings();
-
-  // Resets the |geolocation_settings_| map.
-  void ClearGeolocationContentSettings(
-      const NavigationController::LoadCommittedDetails& details);
 
   // Changes the IsLoading state and notifies delegate as needed
   // |details| is used to provide details on the load that just finished
@@ -813,6 +821,9 @@ class TabContents : public PageNavigator,
   void GenerateKeywordIfNecessary(
       const ViewHostMsg_FrameNavigate_Params& params);
 
+  // ContentBlockedDelegate::Delegate implementation.
+  virtual void OnContentSettingsChange();
+
   // RenderViewHostDelegate ----------------------------------------------------
 
   // RenderViewHostDelegate::BrowserIntegration implementation.
@@ -832,8 +843,9 @@ class TabContents : public PageNavigator,
   virtual void OnPageContents(const GURL& url,
                               int renderer_process_id,
                               int32 page_id,
-                              const std::wstring& contents,
-                              const std::string& language);
+                              const string16& contents,
+                              const std::string& language,
+                              bool page_translatable);
   virtual void OnPageTranslated(int32 page_id,
                                 const std::string& original_lang,
                                 const std::string& translated_lang,
@@ -864,9 +876,6 @@ class TabContents : public PageNavigator,
       const GURL& url,
       bool showing_repost_interstitial);
   virtual void DocumentLoadedInFrame();
-  virtual void OnContentBlocked(ContentSettingsType type);
-  virtual void OnGeolocationPermissionSet(const GURL& requesting_origin,
-                                          bool allowed);
 
   // RenderViewHostDelegate implementation.
   virtual RenderViewHostDelegate::View* GetViewDelegate();
@@ -875,6 +884,7 @@ class TabContents : public PageNavigator,
   virtual RenderViewHostDelegate::BrowserIntegration*
       GetBrowserIntegrationDelegate();
   virtual RenderViewHostDelegate::Resource* GetResourceDelegate();
+  virtual RenderViewHostDelegate::ContentSettings* GetContentSettingsDelegate();
   virtual RenderViewHostDelegate::Save* GetSaveDelegate();
   virtual RenderViewHostDelegate::Printing* GetPrintingDelegate();
   virtual RenderViewHostDelegate::FavIcon* GetFavIconDelegate();
@@ -903,7 +913,9 @@ class TabContents : public PageNavigator,
   virtual void UpdateThumbnail(const GURL& url,
                                const SkBitmap& bitmap,
                                const ThumbnailScore& score);
-  virtual void UpdateInspectorSettings(const std::string& raw_settings);
+  virtual void UpdateInspectorSetting(const std::string& key,
+                                      const std::string& value);
+  virtual void ClearInspectorSettings();
   virtual void Close(RenderViewHost* render_view_host);
   virtual void RequestMove(const gfx::Rect& new_bounds);
   virtual void DidStartLoading();
@@ -913,7 +925,7 @@ class TabContents : public PageNavigator,
   virtual void DomOperationResponse(const std::string& json_string,
                                     int automation_id);
   virtual void ProcessDOMUIMessage(const std::string& message,
-                                   const Value* content,
+                                   const ListValue* content,
                                    const GURL& source_url,
                                    int request_id,
                                    bool has_callback);
@@ -932,10 +944,14 @@ class TabContents : public PageNavigator,
   virtual void ShowModalHTMLDialog(const GURL& url, int width, int height,
                                    const std::string& json_arguments,
                                    IPC::Message* reply_msg);
-  virtual void PasswordFormsSeen(
+  virtual void PasswordFormsFound(
       const std::vector<webkit_glue::PasswordForm>& forms);
+  virtual void PasswordFormsVisible(
+      const std::vector<webkit_glue::PasswordForm>& visible_forms);
   virtual void PageHasOSDD(RenderViewHost* render_view_host,
                            int32 page_id, const GURL& url, bool autodetected);
+  virtual ViewHostMsg_GetSearchProviderInstallState_Params
+      GetSearchProviderInstallState(const GURL& url);
   virtual GURL GetAlternateErrorPageURL() const;
   virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
   virtual WebPreferences GetWebkitPrefs();
@@ -943,7 +959,6 @@ class TabContents : public PageNavigator,
   virtual void OnJSOutOfMemory();
   virtual void OnCrossSiteResponse(int new_render_process_host_id,
                                    int new_request_id);
-  virtual bool CanBlur() const;
   virtual gfx::Rect GetRootWindowResizerRect() const;
   virtual void RendererUnresponsive(RenderViewHost* render_view_host,
                                     bool is_during_unload);
@@ -970,20 +985,12 @@ class TabContents : public PageNavigator,
       bool proceed,
       bool* proceed_to_fire_unload);
   virtual void DidStartLoadingFromRenderManager(
-      RenderViewHost* render_view_host) {
-    DidStartLoading();
-  }
+      RenderViewHost* render_view_host);
   virtual void RenderViewGoneFromRenderManager(
-      RenderViewHost* render_view_host) {
-    RenderViewGone(render_view_host);
-  }
+      RenderViewHost* render_view_host);
   virtual void UpdateRenderViewSizeForRenderManager();
-  virtual void NotifySwappedFromRenderManager() {
-    NotifySwapped();
-  }
-  virtual NavigationController& GetControllerForRenderManager() {
-    return controller();
-  }
+  virtual void NotifySwappedFromRenderManager();
+  virtual NavigationController& GetControllerForRenderManager();
   virtual DOMUI* CreateDOMUIForRenderManager(const GURL& url);
   virtual NavigationEntry* GetLastCommittedNavigationEntryForRenderManager();
 
@@ -1011,10 +1018,7 @@ class TabContents : public PageNavigator,
 
   // Resets app_icon_ and if |extension| is non-null creates a new
   // ImageLoadingTracker to load the extension's image.
-  void UpdateAppExtensionIcon(Extension* extension);
-
-  // Called on every navigation to update app_icon_cache_entry_ as necessary.
-  void UpdateAppExtensionForCurrentPage();
+  void UpdateExtensionAppIcon(Extension* extension);
 
   // ImageLoadingTracker::Observer.
   virtual void OnImageLoaded(SkBitmap* image, ExtensionResource resource,
@@ -1043,7 +1047,7 @@ class TabContents : public PageNavigator,
   NotificationRegistrar registrar_;
 
   // Handles print preview and print job for this contents.
-  printing::PrintViewManager printing_;
+  scoped_ptr<printing::PrintViewManager> printing_;
 
   // SavePackage, lazily created.
   scoped_refptr<SavePackage> save_package_;
@@ -1074,6 +1078,9 @@ class TabContents : public PageNavigator,
 
   // Cached web app icon.
   SkBitmap app_icon_;
+
+  // RenderViewHost::ContentSettingsDelegate.
+  scoped_ptr<TabSpecificContentSettings> content_settings_delegate_;
 
   // Data for loading state ----------------------------------------------------
 
@@ -1127,8 +1134,8 @@ class TabContents : public PageNavigator,
   // TODO(pkasting): Hack to try and fix Linux browser tests.
   bool dont_notify_render_view_;
 
-  // Stores which content setting types actually have blocked content.
-  bool content_blocked_[CONTENT_SETTINGS_NUM_TYPES];
+  // True if this is a secure page which displayed insecure content.
+  bool displayed_insecure_content_;
 
   // Data for shelves and stuff ------------------------------------------------
 
@@ -1178,17 +1185,13 @@ class TabContents : public PageNavigator,
 
   // If non-null this tab is an app tab and this is the extension the tab was
   // created for.
-  Extension* app_extension_;
+  Extension* extension_app_;
 
-  // If app_extension_ is NULL and there is an extension whose extent contains
-  // the current url, this is the extension.
-  Extension* app_extension_for_current_page_;
+  // Icon for extension_app_ (if non-null) or extension_for_current_page_.
+  SkBitmap extension_app_icon_;
 
-  // Icon for app_extension_ (if non-null) or extension_for_current_page_.
-  SkBitmap app_extension_icon_;
-
-  // Used for loading app_extension_icon_.
-  scoped_ptr<ImageLoadingTracker> app_extension_image_loader_;
+  // Used for loading extension_app_icon_.
+  scoped_ptr<ImageLoadingTracker> extension_app_image_loader_;
 
   // Data for misc internal state ----------------------------------------------
 
@@ -1252,8 +1255,8 @@ class TabContents : public PageNavigator,
   // Information about the language the page is in and has been translated to.
   LanguageState language_state_;
 
-  // Maps each frame on this page to its geolocation content settings.
-  GeolocationContentSettings geolocation_content_settings_;
+  // See description above setter.
+  bool closed_by_user_gesture_;
 
   // ---------------------------------------------------------------------------
 

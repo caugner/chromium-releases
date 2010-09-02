@@ -41,9 +41,6 @@ class LocationBar {
   // Accepts the current string of text entered in the location bar.
   virtual void AcceptInput() = 0;
 
-  // Accepts the current input, overriding the disposition.
-  virtual void AcceptInputWithDisposition(WindowOpenDisposition) = 0;
-
   // Focuses the location bar.  Optionally also selects its contents.
   virtual void FocusLocation(bool select_all) = 0;
 
@@ -69,7 +66,15 @@ class LocationBar {
   virtual void Revert() = 0;
 
   // Returns a pointer to the text entry view.
+  virtual const AutocompleteEditView* location_entry() const = 0;
   virtual AutocompleteEditView* location_entry() = 0;
+
+  // Hides the edit field of the location bar if it hasn't already been
+  // force-hidden. The force hidden count is tracked, so calling multiple
+  // times is allowed, you just have to be sure to call PopForceHidden
+  // the same number of times. Currently, this is only needed for Windows.
+  virtual void PushForceHidden() = 0;
+  virtual void PopForceHidden() = 0;
 
   // Returns a pointer to the testing interface.
   virtual LocationBarTesting* GetLocationBarForTesting() = 0;

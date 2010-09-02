@@ -20,7 +20,6 @@
 #include "webkit/glue/plugins/webplugin_file_delegate.h"
 #include "webkit/glue/plugins/webplugin_print_delegate.h"
 
-
 class FilePath;
 class GURL;
 struct NPObject;
@@ -83,9 +82,9 @@ class WebPluginDelegate : public WebPlugin2DDeviceDelegate,
   // Tells the plugin to print itself.
   virtual void Print(gfx::NativeDrawingContext hdc) = 0;
 
-  // Informs the plugin that it now has focus. This is only called in
+  // Informs the plugin that it has gained or lost focus. This is only called in
   // windowless mode.
-  virtual void SetFocus() = 0;
+  virtual void SetFocus(bool focused) = 0;
 
   // For windowless plugins, gives them a user event like mouse/keyboard.
   // Returns whether the event was handled. This is only called in windowsless
@@ -142,18 +141,24 @@ class WebPluginDelegate : public WebPlugin2DDeviceDelegate,
       unsigned long resource_id, int range_request_id) = 0;
 
   // See WebPluginContainerImpl's description of the interface.
-  virtual bool SupportsFind() { return false; }
-  virtual void StartFind(const std::string& search_text,
+  virtual bool StartFind(const string16& search_text,
                          bool case_sensitive,
-                         int identifier) {}
+                         int identifier) { return false; }
   virtual void SelectFindResult(bool forward) {}
   virtual void StopFind() {}
   virtual void NumberOfFindResultsChanged(int total, bool final_result) {}
   virtual void SelectedFindResultChanged(int index) {}
+  virtual NPWidgetExtensions* GetWidgetExtensions() { return NULL; }
+  virtual bool SetCursor(NPCursorType type) { return false; }
+  virtual NPFontExtensions* GetFontExtensions() { return NULL; }
 
   // Used for zooming of full page plugins.  0 means reset, while -1 means zoom
   // out and +1 means zoom in.
-  virtual void Zoom(int factor) {}
+  virtual void SetZoomFactor(float scale, bool text_only) {}
+  // Gets the selected text, if any.
+  virtual bool HasSelection() const { return false; }
+  virtual string16 GetSelectionAsText() const { return string16(); }
+  virtual string16 GetSelectionAsMarkup() const { return string16(); }
 };
 
 }  // namespace webkit_glue

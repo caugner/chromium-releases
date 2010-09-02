@@ -7,17 +7,19 @@
 #include <algorithm>
 
 #include "app/l10n_util_mac.h"
+#include "app/menus/accelerator_cocoa.h"
+#include "app/menus/menu_model.h"
+#include "base/keyboard_codes.h"
 #include "base/mac_util.h"
 #include "base/nsimage_cache_mac.h"
+#include "base/singleton.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/app_menu_model.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
 #include "chrome/browser/browser.h"
+#include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/bubble_positioner.h"
-#import "chrome/browser/cocoa/autocomplete_text_field.h"
-#import "chrome/browser/cocoa/autocomplete_text_field_editor.h"
+#import "chrome/browser/cocoa/accelerators_cocoa.h"
 #import "chrome/browser/cocoa/back_forward_menu_controller.h"
 #import "chrome/browser/cocoa/background_gradient_view.h"
 #import "chrome/browser/cocoa/encoding_menu_controller_delegate_mac.h"
@@ -25,50 +27,52 @@
 #import "chrome/browser/cocoa/extensions/browser_actions_container_view.h"
 #import "chrome/browser/cocoa/extensions/browser_actions_controller.h"
 #import "chrome/browser/cocoa/gradient_button_cell.h"
-#import "chrome/browser/cocoa/location_bar_view_mac.h"
+#import "chrome/browser/cocoa/location_bar/autocomplete_text_field_editor.h"
+#import "chrome/browser/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/cocoa/menu_button.h"
 #import "chrome/browser/cocoa/menu_controller.h"
+#import "chrome/browser/cocoa/reload_button.h"
 #import "chrome/browser/cocoa/toolbar_view.h"
+#import "chrome/browser/cocoa/wrench_menu_controller.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/page_menu_model.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/toolbar_model.h"
+#include "chrome/browser/upgrade_detector.h"
+#include "chrome/browser/wrench_menu_model.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
 #include "gfx/rect.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 
 namespace {
 
 // Names of images in the bundle for buttons.
 NSString* const kBackButtonImageName = @"back_Template.pdf";
 NSString* const kForwardButtonImageName = @"forward_Template.pdf";
-NSString* const kReloadButtonImageName = @"reload_Template.pdf";
+NSString* const kReloadButtonReloadImageName = @"reload_Template.pdf";
+NSString* const kReloadButtonStopImageName = @"stop_Template.pdf";
 NSString* const kHomeButtonImageName = @"home_Template.pdf";
-NSString* const kStarButtonImageName = @"star_Template.pdf";
-NSString* const kStarButtonFillingImageName = @"starred.pdf";
-NSString* const kGoButtonGoImageName = @"go_Template.pdf";
-NSString* const kGoButtonStopImageName = @"stop_Template.pdf";
-NSString* const kPageButtonImageName = @"menu_page_Template.pdf";
-NSString* const kWrenchButtonImageName = @"menu_chrome_Template.pdf";
+NSString* const kWrenchButtonImageName = @"tools_Template.pdf";
 
 // Height of the toolbar in pixels when the bookmark bar is closed.
-const CGFloat kBaseToolbarHeight = 36.0;
-
-// The distance from the 'Go' button to the Browser Actions container in pixels.
-const CGFloat kBrowserActionsContainerLeftPadding = 5.0;
+const CGFloat kBaseToolbarHeight = 35.0;
 
 // The minimum width of the location bar in pixels.
 const CGFloat kMinimumLocationBarWidth = 100.0;
 
 // The duration of any animation that occurs within the toolbar in seconds.
 const CGFloat kAnimationDuration = 0.2;
+
+// The amount of left padding that the wrench menu should have.
+const CGFloat kWrenchMenuLeftPadding = 3.0;
 
 }  // namespace
 
@@ -78,34 +82,15 @@ const CGFloat kAnimationDuration = 0.2;
 - (void)prefChanged:(std::wstring*)prefName;
 - (BackgroundGradientView*)backgroundGradientView;
 - (void)toolbarFrameChanged;
-- (void)pinGoButtonToLeftOfBrowserActionsContainerAndAnimate:(BOOL)animate;
+- (void)pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:(BOOL)animate;
 - (void)maintainMinimumLocationBarWidth;
 - (void)adjustBrowserActionsContainerForNewWindow:(NSNotification*)notification;
 - (void)browserActionsContainerDragged:(NSNotification*)notification;
 - (void)browserActionsContainerDragFinished:(NSNotification*)notification;
 - (void)browserActionsVisibilityChanged:(NSNotification*)notification;
-- (void)adjustLocationAndGoPositionsBy:(CGFloat)dX animate:(BOOL)animate;
+- (void)adjustLocationSizeBy:(CGFloat)dX animate:(BOOL)animate;
+- (void)badgeWrenchMenu;
 @end
-
-namespace {
-
-// A C++ class used to correctly position the omnibox.
-class BubblePositionerMac : public BubblePositioner {
- public:
-  BubblePositionerMac(ToolbarController* controller)
-      : controller_(controller) { }
-  virtual ~BubblePositionerMac() { }
-
-  // BubblePositioner:
-  virtual gfx::Rect GetLocationStackBounds() const {
-    return [controller_ locationStackBounds];
-  }
-
- private:
-  ToolbarController* controller_;  // weak, owns us
-};
-
-}  // namespace
 
 namespace ToolbarControllerInternal {
 
@@ -127,9 +112,21 @@ class MenuDelegate : public menus::SimpleMenuModel::Delegate {
   virtual bool IsCommandIdEnabled(int command_id) const {
     return browser_->command_updater()->IsCommandEnabled(command_id);
   }
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      menus::Accelerator* accelerator) { return false; }
+  virtual bool GetAcceleratorForCommandId(int command_id,
+      menus::Accelerator* accelerator_generic) {
+    // Downcast so that when the copy constructor is invoked below, the key
+    // string gets copied, too.
+    menus::AcceleratorCocoa* out_accelerator =
+        static_cast<menus::AcceleratorCocoa*>(accelerator_generic);
+    AcceleratorsCocoa* keymap = Singleton<AcceleratorsCocoa>::get();
+    const menus::AcceleratorCocoa* accelerator =
+        keymap->GetAcceleratorForCommand(command_id);
+    if (accelerator) {
+      *out_accelerator = *accelerator;
+      return true;
+    }
+    return false;
+  }
   virtual void ExecuteCommand(int command_id) {
     browser_->ExecuteCommand(command_id);
   }
@@ -152,21 +149,31 @@ class MenuDelegate : public menus::SimpleMenuModel::Delegate {
   Browser* browser_;
 };
 
-// A C++ class registered for changes in preferences. Bridges the
-// notification back to the ToolbarController.
-class PrefObserverBridge : public NotificationObserver {
+// A class registered for C++ notifications. This is used to detect changes in
+// preferences and upgrade available notifications. Bridges the notification
+// back to the ToolbarController.
+class NotificationBridge : public NotificationObserver {
  public:
-  explicit PrefObserverBridge(ToolbarController* controller)
-      : controller_(controller) { }
+  explicit NotificationBridge(ToolbarController* controller)
+      : controller_(controller) {
+    registrar_.Add(this, NotificationType::UPGRADE_RECOMMENDED,
+                   NotificationService::AllSources());
+  }
+
   // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
     if (type == NotificationType::PREF_CHANGED)
       [controller_ prefChanged:Details<std::wstring>(details).ptr()];
+    else if (type == NotificationType::UPGRADE_RECOMMENDED)
+      [controller_ badgeWrenchMenu];
   }
+
  private:
   ToolbarController* controller_;  // weak, owns us
+
+  NotificationRegistrar registrar_;
 };
 
 }  // namespace ToolbarControllerInternal
@@ -177,9 +184,10 @@ class PrefObserverBridge : public NotificationObserver {
            commands:(CommandUpdater*)commands
             profile:(Profile*)profile
             browser:(Browser*)browser
-     resizeDelegate:(id<ViewResizer>)resizeDelegate {
-  DCHECK(model && commands && profile);
-  if ((self = [super initWithNibName:@"Toolbar"
+     resizeDelegate:(id<ViewResizer>)resizeDelegate
+       nibFileNamed:(NSString*)nibName {
+  DCHECK(model && commands && profile && [nibName length]);
+  if ((self = [super initWithNibName:nibName
                               bundle:mac_util::MainAppBundle()])) {
     toolbarModel_ = model;
     commands_ = commands;
@@ -199,6 +207,22 @@ class PrefObserverBridge : public NotificationObserver {
   }
   return self;
 }
+
+- (id)initWithModel:(ToolbarModel*)model
+           commands:(CommandUpdater*)commands
+            profile:(Profile*)profile
+            browser:(Browser*)browser
+     resizeDelegate:(id<ViewResizer>)resizeDelegate {
+  if ((self = [self initWithModel:model
+                         commands:commands
+                          profile:profile
+                          browser:browser
+                   resizeDelegate:resizeDelegate
+                     nibFileNamed:@"Toolbar"])) {
+  }
+  return self;
+}
+
 
 - (void)dealloc {
   // Make sure any code in the base class which assumes [self view] is
@@ -223,32 +247,36 @@ class PrefObserverBridge : public NotificationObserver {
   // the xib, we must set them in code.
   [backButton_ setImage:nsimage_cache::ImageNamed(kBackButtonImageName)];
   [forwardButton_ setImage:nsimage_cache::ImageNamed(kForwardButtonImageName)];
-  [reloadButton_ setImage:nsimage_cache::ImageNamed(kReloadButtonImageName)];
+  [reloadButton_
+      setImage:nsimage_cache::ImageNamed(kReloadButtonReloadImageName)];
   [homeButton_ setImage:nsimage_cache::ImageNamed(kHomeButtonImageName)];
-  [starButton_ setImage:nsimage_cache::ImageNamed(kStarButtonImageName)];
-  [goButton_ setImage:nsimage_cache::ImageNamed(kGoButtonGoImageName)];
-  [pageButton_ setImage:nsimage_cache::ImageNamed(kPageButtonImageName)];
   [wrenchButton_ setImage:nsimage_cache::ImageNamed(kWrenchButtonImageName)];
 
-  [pageButton_ setShowsBorderOnlyWhileMouseInside:YES];
+  if (Singleton<UpgradeDetector>::get()->notify_upgrade())
+    [self badgeWrenchMenu];
+
+  [backButton_ setShowsBorderOnlyWhileMouseInside:YES];
+  [forwardButton_ setShowsBorderOnlyWhileMouseInside:YES];
+  [reloadButton_ setShowsBorderOnlyWhileMouseInside:YES];
+  [homeButton_ setShowsBorderOnlyWhileMouseInside:YES];
   [wrenchButton_ setShowsBorderOnlyWhileMouseInside:YES];
 
   [self initCommandStatus:commands_];
-  bubblePositioner_.reset(new BubblePositionerMac(self));
   locationBarView_.reset(new LocationBarViewMac(locationBar_,
-                                                bubblePositioner_.get(),
                                                 commands_, toolbarModel_,
                                                 profile_, browser_));
   [locationBar_ setFont:[NSFont systemFontOfSize:[NSFont systemFontSize]]];
   // Register pref observers for the optional home and page/options buttons
   // and then add them to the toolbar based on those prefs.
-  prefObserver_.reset(new ToolbarControllerInternal::PrefObserverBridge(self));
+  notificationBridge_.reset(
+      new ToolbarControllerInternal::NotificationBridge(self));
   PrefService* prefs = profile_->GetPrefs();
-  showHomeButton_.Init(prefs::kShowHomeButton, prefs, prefObserver_.get());
+  showHomeButton_.Init(prefs::kShowHomeButton, prefs,
+                       notificationBridge_.get());
   showPageOptionButtons_.Init(prefs::kShowPageOptionsButtons, prefs,
-                              prefObserver_.get());
+                              notificationBridge_.get());
   [self showOptionalHomeButton];
-  [self showOptionalPageWrenchButtons];
+  [self installWrenchMenu];
 
   // Create the controllers for the back/forward menus.
   backMenuController_.reset([[BackForwardMenuController alloc]
@@ -280,9 +308,9 @@ class PrefObserverBridge : public NotificationObserver {
   NSView* toolbarView = [self view];
   [toolbarView addTrackingArea:trackingArea_.get()];
 
-  // We want a dynamic tooltip on the go button, so tell the go button to ask
-  // us for the tooltip.
-  [goButton_ addToolTipRect:[goButton_ bounds] owner:self userData:nil];
+  // We want a dynamic tooltip on the reload button, so tell the
+  // reload button to ask us for the tooltip.
+  [reloadButton_ addToolTipRect:[reloadButton_ bounds] owner:self userData:nil];
 
   // If the user has any Browser Actions installed, the container view for them
   // may have to be resized depending on the width of the toolbar frame.
@@ -312,20 +340,8 @@ class PrefObserverBridge : public NotificationObserver {
   [[homeButton_ cell]
       accessibilitySetOverrideValue:description
                        forAttribute:NSAccessibilityDescriptionAttribute];
-  description = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_STAR);
-  [[starButton_ cell]
-      accessibilitySetOverrideValue:description
-                       forAttribute:NSAccessibilityDescriptionAttribute];
   description = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_LOCATION);
   [[locationBar_ cell]
-      accessibilitySetOverrideValue:description
-                       forAttribute:NSAccessibilityDescriptionAttribute];
-  description = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_GO);
-  [[goButton_ cell]
-      accessibilitySetOverrideValue:description
-                       forAttribute:NSAccessibilityDescriptionAttribute];
-  description = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_PAGE);
-  [[pageButton_ cell]
       accessibilitySetOverrideValue:description
                        forAttribute:NSAccessibilityDescriptionAttribute];
   description = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_APP);
@@ -367,7 +383,7 @@ class PrefObserverBridge : public NotificationObserver {
   [self mouseMoved:event];
 }
 
-- (LocationBar*)locationBarBridge {
+- (LocationBarViewMac*)locationBarBridge {
   return locationBarView_.get();
 }
 
@@ -393,9 +409,6 @@ class PrefObserverBridge : public NotificationObserver {
     case IDC_HOME:
       button = homeButton_;
       break;
-    case IDC_BOOKMARK_PAGE:
-      button = starButton_;
-      break;
   }
   [button setEnabled:enabled];
 }
@@ -408,8 +421,6 @@ class PrefObserverBridge : public NotificationObserver {
       setEnabled:commands->IsCommandEnabled(IDC_FORWARD) ? YES : NO];
   [reloadButton_ setEnabled:commands->IsCommandEnabled(IDC_RELOAD) ? YES : NO];
   [homeButton_ setEnabled:commands->IsCommandEnabled(IDC_HOME) ? YES : NO];
-  [starButton_
-      setEnabled:commands->IsCommandEnabled(IDC_BOOKMARK_PAGE) ? YES : NO];
 }
 
 - (void)updateToolbarWithContents:(TabContents*)tab
@@ -424,35 +435,11 @@ class PrefObserverBridge : public NotificationObserver {
 }
 
 - (void)setStarredState:(BOOL)isStarred {
-  NSImage* starImage = nil;
-  NSString* toolTip;
-  if (isStarred) {
-    starImage = nsimage_cache::ImageNamed(kStarButtonFillingImageName);
-    // Cache the string since we'll need it a lot
-    static NSString* starredToolTip =
-        [l10n_util::GetNSStringWithFixup(IDS_TOOLTIP_STARRED) retain];
-    toolTip = starredToolTip;
-  } else {
-    // Cache the string since we'll need it a lot
-    static NSString* starToolTip =
-        [l10n_util::GetNSStringWithFixup(IDS_TOOLTIP_STAR) retain];
-    toolTip = starToolTip;
-  }
-
-  [(GradientButtonCell*)[starButton_ cell] setUnderlayImage:starImage];
-  [starButton_ setToolTip:toolTip];
+  locationBarView_->SetStarred(isStarred ? true : false);
 }
 
-- (void)setIsLoading:(BOOL)isLoading {
-  NSString* imageName = kGoButtonGoImageName;
-  NSInteger tag = IDC_GO;
-  if (isLoading) {
-    imageName = kGoButtonStopImageName;
-    tag = IDC_STOP;
-  }
-  NSImage* stopStartImage = nsimage_cache::ImageNamed(imageName);
-  [goButton_ setImage:stopStartImage];
-  [goButton_ setTag:tag];
+- (void)setIsLoading:(BOOL)isLoading force:(BOOL)force {
+  [reloadButton_ setIsLoading:isLoading force:force];
 }
 
 - (void)setHasToolbar:(BOOL)toolbar hasLocationBar:(BOOL)locBar {
@@ -468,8 +455,7 @@ class PrefObserverBridge : public NotificationObserver {
   [[self view] setHidden:!hasLocationBar_];
 
   // Make location bar not editable when in a pop-up.
-  // TODO(viettrungluu): is this right (all the time)?
-  [locationBar_ setEditable:toolbar];
+  locationBarView_->SetEditable(toolbar);
 }
 
 - (NSView*)view {
@@ -492,7 +478,6 @@ class PrefObserverBridge : public NotificationObserver {
     if (autocompleteTextFieldEditor_.get() == nil) {
       autocompleteTextFieldEditor_.reset(
           [[AutocompleteTextFieldEditor alloc] init]);
-      [autocompleteTextFieldEditor_ setProfile:profile_];
     }
 
     // This needs to be called every time, otherwise notifications
@@ -507,8 +492,8 @@ class PrefObserverBridge : public NotificationObserver {
 // Returns an array of views in the order of the outlets above.
 - (NSArray*)toolbarViews {
   return [NSArray arrayWithObjects:backButton_, forwardButton_, reloadButton_,
-            homeButton_, starButton_, goButton_, pageButton_, wrenchButton_,
-            locationBar_, browserActionsContainerView_, nil];
+             homeButton_, wrenchButton_, locationBar_,
+             browserActionsContainerView_, nil];
 }
 
 // Moves |rect| to the right by |delta|, keeping the right side fixed by
@@ -520,16 +505,6 @@ class PrefObserverBridge : public NotificationObserver {
   return frame;
 }
 
-// Computes the padding between the buttons that should have a separation from
-// the positions in the nib. Since the forward and reload buttons are always
-// visible, we use those buttons as the canonical spacing.
-- (CGFloat)interButtonSpacing {
-  NSRect forwardFrame = [forwardButton_ frame];
-  NSRect reloadFrame = [reloadButton_ frame];
-  DCHECK(NSMinX(reloadFrame) > NSMaxX(forwardFrame));
-  return NSMinX(reloadFrame) - NSMaxX(forwardFrame);
-}
-
 // Show or hide the home button based on the pref.
 - (void)showOptionalHomeButton {
   // Ignore this message if only showing the URL bar.
@@ -539,76 +514,68 @@ class PrefObserverBridge : public NotificationObserver {
   if (hide == [homeButton_ isHidden])
     return;  // Nothing to do, view state matches pref state.
 
-  // Always shift the star and text field by the width of the home button plus
-  // the appropriate gap width. If we're hiding the button, we have to
-  // reverse the direction of the movement (to the left).
-  CGFloat moveX = [self interButtonSpacing] + [homeButton_ frame].size.width;
+  // Always shift the text field by the width of the home button minus one pixel
+  // since the frame edges of each button are right on top of each other. When
+  // hiding the button, reverse the direction of the movement (to the left).
+  CGFloat moveX = [homeButton_ frame].size.width - 1.0;
   if (hide)
     moveX *= -1;  // Reverse the direction of the move.
 
-  [starButton_ setFrame:NSOffsetRect([starButton_ frame], moveX, 0)];
+  [reloadButton_ setFrame:NSOffsetRect([reloadButton_ frame], moveX, 0)];
   [locationBar_ setFrame:[self adjustRect:[locationBar_ frame]
                                  byAmount:moveX]];
   [homeButton_ setHidden:hide];
 }
 
-// Lazily install the menus on the page and wrench buttons. Calling this
-// repeatedly is inexpensive so it can be done every time the buttons are shown.
-- (void)installPageWrenchMenus {
-  if (pageMenuModel_.get())
+// Install the menu wrench buttons. Calling this repeatedly is inexpensive so it
+// can be done every time the buttons are shown.
+- (void)installWrenchMenu {
+  if (wrenchMenuModel_.get())
     return;
   menuDelegate_.reset(new ToolbarControllerInternal::MenuDelegate(browser_));
-  pageMenuModel_.reset(new PageMenuModel(menuDelegate_.get(), browser_));
-  pageMenuController_.reset(
-      [[MenuController alloc] initWithModel:pageMenuModel_.get()
-                     useWithPopUpButtonCell:YES]);
-  [pageButton_ setAttachedMenu:[pageMenuController_ menu]];
 
-  appMenuModel_.reset(new AppMenuModel(menuDelegate_.get(), browser_));
-  appMenuController_.reset(
-      [[MenuController alloc] initWithModel:appMenuModel_.get()
-                     useWithPopUpButtonCell:YES]);
-  [wrenchButton_ setAttachedMenu:[appMenuController_ menu]];
+  wrenchMenuModel_.reset(new WrenchMenuModel(menuDelegate_.get(), browser_));
+  [wrenchMenuController_ setModel:wrenchMenuModel_.get()];
+  [wrenchMenuController_ setUseWithPopUpButtonCell:YES];
+  [wrenchButton_ setAttachedMenu:[wrenchMenuController_ menu]];
 }
 
-// Show or hide the page and wrench buttons based on the pref.
-- (void)showOptionalPageWrenchButtons {
-  // Ignore this message if only showing the URL bar.
-  if (!hasToolbar_)
-    return;
-  DCHECK([pageButton_ isHidden] == [wrenchButton_ isHidden]);
-  BOOL hide = showPageOptionButtons_.GetValue() ? NO : YES;
-  if (!hide)
-    [self installPageWrenchMenus];
-  if (hide == [pageButton_ isHidden])
-    return;  // Nothing to do, view state matches pref state.
+- (WrenchMenuController*)wrenchMenuController {
+  return wrenchMenuController_;
+}
 
-  // Shift the go button and resize the text field by the width of the
-  // page/wrench buttons plus two times the gap width. If we're showing the
-  // buttons, we have to reverse the direction of movement (to the left). Unlike
-  // the home button above, we only ever have to resize the text field, we don't
-  // have to move it.
-  CGFloat moveX = 2 * [self interButtonSpacing] + NSWidth([pageButton_ frame]) +
-      NSWidth([wrenchButton_ frame]);
+- (void)badgeWrenchMenu {
+  // The wrench menu gets an upgrade dot. This gets ugly because we only have a
+  // PNG so we need to position it. TODO(avi): Get a PDF version, one ready for
+  // overlaying. http://crbug.com/49668
+  //
+  // In the Windows version, the ball doesn't actually pulsate, and is always
+  // drawn with the inactive image. Why? (We follow suit, though not on the
+  // weird positioning they do that overlaps the button border.)
+  ThemeProvider* theme_provider = profile_->GetThemeProvider();
+  NSImage* badge = theme_provider->GetNSImageNamed(IDR_UPGRADE_DOT_INACTIVE,
+                                                   true);
 
-  if (!hide)
-    moveX *= -1;  // Reverse the direction of the move.
+  NSImage* wrenchImage = nsimage_cache::ImageNamed(kWrenchButtonImageName);
+  NSSize wrenchImageSize = [wrenchImage size];
 
-  [self adjustLocationAndGoPositionsBy:moveX animate:NO];
-  [browserActionsContainerView_ setFrame:NSOffsetRect(
-      [browserActionsContainerView_ frame], moveX, 0)];
+  scoped_nsobject<NSImage> overlayImage(
+      [[NSImage alloc] initWithSize:wrenchImageSize]);
 
-  [browserActionsContainerView_ setRightBorderShown:!hide];
-  [pageButton_ setHidden:hide];
-  [wrenchButton_ setHidden:hide];
+  [overlayImage lockFocus];
+  [badge drawAtPoint:NSZeroPoint
+            fromRect:NSZeroRect
+           operation:NSCompositeSourceOver
+            fraction:1.0];
+  [overlayImage unlockFocus];
+
+  [[wrenchButton_ cell] setOverlayImage:overlayImage];
 }
 
 - (void)prefChanged:(std::wstring*)prefName {
   if (!prefName) return;
   if (*prefName == prefs::kShowHomeButton) {
     [self showOptionalHomeButton];
-  } else if (*prefName == prefs::kShowPageOptionsButtons) {
-    [self showOptionalPageWrenchButtons];
   }
 }
 
@@ -641,9 +608,7 @@ class PrefObserverBridge : public NotificationObserver {
   CGFloat containerWidth = [browserActionsContainerView_ isHidden] ? 0.0 :
       NSWidth([browserActionsContainerView_ frame]);
   if (containerWidth > 0.0)
-    [self adjustLocationAndGoPositionsBy:(containerWidth * -1) animate:NO];
-  BOOL rightBorderShown = !([pageButton_ isHidden] && [wrenchButton_ isHidden]);
-  [browserActionsContainerView_ setRightBorderShown:rightBorderShown];
+    [self adjustLocationSizeBy:(containerWidth * -1) animate:NO];
 }
 
 - (void)adjustBrowserActionsContainerForNewWindow:
@@ -660,38 +625,35 @@ class PrefObserverBridge : public NotificationObserver {
   locationBarAtMinSize_ = locationBarWidth <= kMinimumLocationBarWidth;
   [browserActionsContainerView_ setCanDragLeft:!locationBarAtMinSize_];
   [browserActionsContainerView_ setGrippyPinned:locationBarAtMinSize_];
-  [self adjustLocationAndGoPositionsBy:
+  [self adjustLocationSizeBy:
       [browserActionsContainerView_ resizeDeltaX] animate:NO];
 }
 
 - (void)browserActionsContainerDragFinished:(NSNotification*)notification {
   [browserActionsController_ resizeContainerAndAnimate:YES];
-  [self pinGoButtonToLeftOfBrowserActionsContainerAndAnimate:YES];
+  [self pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:YES];
 }
 
 - (void)browserActionsVisibilityChanged:(NSNotification*)notification {
-  [self pinGoButtonToLeftOfBrowserActionsContainerAndAnimate:NO];
+  [self pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:NO];
 }
 
-- (void)pinGoButtonToLeftOfBrowserActionsContainerAndAnimate:(BOOL)animate {
-  CGFloat goXPos = [goButton_ frame].origin.x + NSWidth([goButton_ frame]);
-  CGFloat leftPadding;
+- (void)pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:(BOOL)animate {
+  CGFloat locationBarXPos = NSMaxX([locationBar_ frame]);
+  CGFloat leftDistance;
 
   if ([browserActionsContainerView_ isHidden]) {
-    CGFloat edgeXPos = [pageButton_ isHidden] ?
-        NSWidth([[goButton_ window] frame]) : [pageButton_ frame].origin.x;
-    leftPadding = edgeXPos - goXPos;
+    CGFloat edgeXPos = [wrenchButton_ frame].origin.x;
+    leftDistance = edgeXPos - locationBarXPos - kWrenchMenuLeftPadding;
   } else {
     NSRect containerFrame = animate ?
         [browserActionsContainerView_ animationEndFrame] :
         [browserActionsContainerView_ frame];
 
-    leftPadding = containerFrame.origin.x - goXPos;
+    leftDistance = containerFrame.origin.x - locationBarXPos;
   }
-  if (leftPadding != kBrowserActionsContainerLeftPadding) {
-    CGFloat dX = leftPadding - kBrowserActionsContainerLeftPadding;
-    [self adjustLocationAndGoPositionsBy:dX animate:animate];
-  }
+  if (leftDistance != 0.0)
+    [self adjustLocationSizeBy:leftDistance animate:animate];
 }
 
 - (void)maintainMinimumLocationBarWidth {
@@ -699,7 +661,7 @@ class PrefObserverBridge : public NotificationObserver {
   locationBarAtMinSize_ = locationBarWidth <= kMinimumLocationBarWidth;
   if (locationBarAtMinSize_) {
     CGFloat dX = kMinimumLocationBarWidth - locationBarWidth;
-    [self adjustLocationAndGoPositionsBy:dX animate:NO];
+    [self adjustLocationSizeBy:dX animate:NO];
   }
 }
 
@@ -717,8 +679,7 @@ class PrefObserverBridge : public NotificationObserver {
     NSRect containerFrame = [browserActionsContainerView_ frame];
     // Determine how much the container needs to move in case it's overlapping
     // with the location bar.
-    CGFloat dX = ([goButton_ frame].origin.x + NSWidth([goButton_ frame])) -
-        containerFrame.origin.x + kBrowserActionsContainerLeftPadding;
+    CGFloat dX = NSMaxX([locationBar_ frame]) - containerFrame.origin.x;
     containerFrame = NSOffsetRect(containerFrame, dX, 0);
     containerFrame.size.width -= dX;
     [browserActionsContainerView_ setFrame:containerFrame];
@@ -740,37 +701,28 @@ class PrefObserverBridge : public NotificationObserver {
       [browserActionsContainerView_ setGrippyPinned:NO];
     }
     [browserActionsContainerView_ setFrame:containerFrame];
-    [self pinGoButtonToLeftOfBrowserActionsContainerAndAnimate:NO];
+    [self pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:NO];
   }
 }
 
-- (void)adjustLocationAndGoPositionsBy:(CGFloat)dX animate:(BOOL)animate {
-  // Ensure that the 'Go' button is in its proper place.
-  NSRect goFrame = [goButton_ frame];
+- (void)adjustLocationSizeBy:(CGFloat)dX animate:(BOOL)animate {
+  // Ensure that the location bar is in its proper place.
   NSRect locationFrame = [locationBar_ frame];
-  CGFloat rightDelta = (locationFrame.origin.x + NSWidth(locationFrame)) -
-      goFrame.origin.x;
-  if (rightDelta != 0.0)
-    [goButton_ setFrame:NSOffsetRect(goFrame, rightDelta, 0)];
-
-  goFrame = NSOffsetRect([goButton_ frame], dX, 0);
   locationFrame.size.width += dX;
 
   if (!animate) {
-    [goButton_ setFrame:goFrame];
     [locationBar_ setFrame:locationFrame];
     return;
   }
 
   [NSAnimationContext beginGrouping];
   [[NSAnimationContext currentContext] setDuration:kAnimationDuration];
-  [[goButton_ animator] setFrame:goFrame];
   [[locationBar_ animator] setFrame:locationFrame];
   [NSAnimationContext endGrouping];
 }
 
-- (NSRect)starButtonInWindowCoordinates {
-  return [starButton_ convertRect:[starButton_ bounds] toView:nil];
+- (NSPoint)bookmarkBubblePoint {
+  return locationBarView_->GetBookmarkBubblePoint();
 }
 
 - (CGFloat)desiredHeightForCompression:(CGFloat)compressByHeight {
@@ -799,75 +751,10 @@ class PrefObserverBridge : public NotificationObserver {
  stringForToolTip:(NSToolTipTag)tag
             point:(NSPoint)point
          userData:(void*)userData {
-  DCHECK(view == goButton_);
+  DCHECK(view == reloadButton_);
 
-  // Following chrome/browser/views/go_button.cc: GoButton::GetTooltipText()
-
-  // Is it currently 'stop'?
-  if ([goButton_ tag] == IDC_STOP) {
-    return l10n_util::GetNSStringWithFixup(IDS_TOOLTIP_STOP);
-  }
-
-  // It is 'go', so see what it would do...
-
-  // Fetch the EditView and EditModel
-  LocationBar* locationBar = [self locationBarBridge];
-  DCHECK(locationBar);
-  AutocompleteEditView* editView = locationBar->location_entry();
-  DCHECK(editView);
-  AutocompleteEditModel* editModel = editView->model();
-  DCHECK(editModel);
-
-  std::wstring currentText(editView->GetText());
-  if (currentText.empty()) {
-    return nil;
-  }
-  string16 currentText16(WideToUTF16Hack(currentText));
-
-  // It is simply an url it is gonna go to, build the tip with the info.
-  if (editModel->CurrentTextIsURL()) {
-    return l10n_util::GetNSStringF(IDS_TOOLTIP_GO_SITE, currentText16);
-  }
-
-  // Build the tip based on what provide/template it will get.
-  std::wstring keyword(editModel->keyword());
-  TemplateURLModel* template_url_model =
-      editModel->profile()->GetTemplateURLModel();
-  const TemplateURL* provider =
-      (keyword.empty() || editModel->is_keyword_hint()) ?
-      template_url_model->GetDefaultSearchProvider() :
-      template_url_model->GetTemplateURLForKeyword(keyword);
-  if (!provider)
-    return nil;
-  std::wstring shortName(provider->AdjustedShortNameForLocaleDirection());
-  return l10n_util::GetNSStringF(IDS_TOOLTIP_GO_SEARCH,
-                                 WideToUTF16(shortName), currentText16);
-
-}
-
-- (gfx::Rect)locationStackBounds {
-  // The number of pixels from the left or right edges of the location stack to
-  // "just inside the visible borders".  When the omnibox bubble contents are
-  // aligned with this, the visible borders tacked on to the outsides will line
-  // up with the visible borders on the location stack.
-  const int kLocationStackEdgeWidth = 2;
-
-  const NSRect locationFrame = [locationBar_ frame];
-
-  // Expand to include star and go buttons.  Including the widths
-  // rather that calculating from their current placement because this
-  // method can be called while the resize is still rearranging the
-  // views involved.
-  const CGFloat minX = NSMinX(locationFrame) - NSWidth([starButton_ frame]);
-  const CGFloat maxX = NSMaxX(locationFrame) + NSWidth([goButton_ frame]);
-
-  NSRect r = NSMakeRect(minX, NSMinY(locationFrame), maxX - minX,
-                        NSHeight(locationFrame));
-  gfx::Rect stack_bounds(
-      NSRectToCGRect([[self view] convertRect:r toView:nil]));
-  // Inset the bounds to just inside the visible edges (see comment above).
-  stack_bounds.Inset(kLocationStackEdgeWidth, 0);
-  return stack_bounds;
+  return l10n_util::GetNSStringWithFixup(
+      [reloadButton_ tag] == IDC_STOP ? IDS_TOOLTIP_STOP : IDS_TOOLTIP_RELOAD);
 }
 
 // (URLDropTargetController protocol)

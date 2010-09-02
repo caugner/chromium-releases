@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,19 +11,23 @@
 
 #include "gfx/size.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/glue/password_form_dom_manager.h"
 
 namespace WebKit {
+class WebDocument;
+class WebElement;
+class WebString;
 class WebView;
 }
 
 // A collection of operations that access the underlying WebKit DOM directly.
 namespace webkit_glue {
 
+struct PasswordFormFillData;
+
 // Fill matching password forms and trigger autocomplete in the case of multiple
 // matching logins.
 void FillPasswordForm(WebKit::WebView* view,
-                      const PasswordFormDomManager::FillData& data);
+                      const PasswordFormFillData& data);
 
 // Structure for storage the result of getting all savable resource links
 // for current page. The consumer of the SavableResourcesResult is responsible
@@ -47,7 +51,7 @@ struct SavableResourcesResult {
         frames_list(frames_list) { }
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(SavableResourcesResult);
+  DISALLOW_COPY_AND_ASSIGN(SavableResourcesResult);
 };
 
 // Get all savable resource links from current webview, include main frame
@@ -128,6 +132,12 @@ int NumberOfActiveAnimations(WebKit::WebView* view);
 // attribute. Otherwise returns a null WebString.
 WebKit::WebString GetSubResourceLinkFromElement(
     const WebKit::WebElement& element);
+
+// Puts the meta-elements of |document| that have the specified |name| in
+// |meta_elements|.
+void GetMetaElementsWithName(WebKit::WebDocument* document,
+                             const string16& name,
+                             std::vector<WebKit::WebElement>* meta_elements);
 
 }  // namespace webkit_glue
 

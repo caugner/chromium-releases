@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,14 @@
 
 #include "app/app_paths.h"
 #include "app/l10n_util.h"
+#include "base/data_pack.h"
 #include "base/debug_util.h"
 #include "base/file_util.h"
+#include "base/lock.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/resource_util.h"
+#include "base/stl_util-inl.h"
 #include "base/string_piece.h"
 #include "base/win_util.h"
 #include "gfx/font.h"
@@ -31,19 +34,30 @@ DWORD GetDataDllLoadFlags() {
 
 ResourceBundle::~ResourceBundle() {
   FreeImages();
+  UnloadLocaleResources();
+  STLDeleteContainerPointers(data_packs_.begin(),
+                             data_packs_.end());
+  resources_data_ = NULL;
+}
 
+void ResourceBundle::UnloadLocaleResources() {
   if (locale_resources_data_) {
     BOOL rv = FreeLibrary(locale_resources_data_);
     DCHECK(rv);
+    locale_resources_data_ = NULL;
   }
 }
 
-std::string ResourceBundle::LoadResources(const std::wstring& pref_locale) {
+void ResourceBundle::LoadCommonResources() {
   // As a convenience, set resources_data_ to the current resource module.
+  DCHECK(NULL == resources_data_) << "common resources already loaded";
   resources_data_ = _AtlBaseModule.GetResourceInstance();
+}
 
+std::string ResourceBundle::LoadLocaleResources(
+    const std::wstring& pref_locale) {
   DCHECK(NULL == locale_resources_data_) << "locale dll already loaded";
-  std::string app_locale = l10n_util::GetApplicationLocale(pref_locale);
+  const std::string app_locale = l10n_util::GetApplicationLocale(pref_locale);
   const FilePath& locale_path = GetLocaleFilePath(app_locale);
   if (locale_path.value().empty()) {
     // It's possible that there are no locale dlls found, in which case we just
@@ -89,7 +103,7 @@ HICON ResourceBundle::LoadThemeIcon(int icon_id) {
   return ::LoadIcon(resources_data_, MAKEINTRESOURCE(icon_id));
 }
 
-base::StringPiece ResourceBundle::GetRawDataResource(int resource_id) {
+base::StringPiece ResourceBundle::GetRawDataResource(int resource_id) const {
   void* data_ptr;
   size_t data_size;
   if (base::GetDataResourceFromModule(_AtlBaseModule.GetModuleInstance(),
@@ -104,6 +118,13 @@ base::StringPiece ResourceBundle::GetRawDataResource(int resource_id) {
                                              &data_size)) {
     return base::StringPiece(static_cast<const char*>(data_ptr), data_size);
   }
+
+  base::StringPiece data;
+  for (size_t i = 0; i < data_packs_.size(); ++i) {
+    if (data_packs_[i]->GetStringPiece(resource_id, &data))
+      return data;
+  }
+
   return base::StringPiece();
 }
 

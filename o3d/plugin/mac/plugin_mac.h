@@ -43,6 +43,8 @@
 
 namespace o3d {
 
+class DisplayMode;
+
 // RenderTimer maintains an animation timer (nominally running at 60fps)
 //
 // Keeps track of the current NPP instances running in the browser and then
@@ -68,7 +70,6 @@ class RenderTimer {
 };
 
 extern RenderTimer gRenderTimer;
-extern bool gIsChrome;
 
 void InitializeBreakpad();
 void ShutdownBreakpad();
@@ -83,6 +84,7 @@ void ReleaseSafariBrowserWindow(void* browserWindow);
 
 // Some miscellaneous helper functions...
 
+void GetCurrentDisplayMode(DisplayMode *mode);
 
 void CFReleaseIfNotNull(CFTypeRef cf);
 
@@ -94,6 +96,12 @@ void CFReleaseIfNotNull(CFTypeRef cf);
 char* CreatePosixFilePathFromHFSFilePath(const char* hfsPath);
 
 bool HandleMacEvent(EventRecord* the_event, NPP instance);
+
+// initiated_from_browser indicates whether the event came from the
+// browser's window. It will be false if the event originated from the
+// full-screen window.
+bool HandleCocoaEvent(NPP instance, NPCocoaEvent* the_event,
+                      bool initiated_from_browser);
 
 o3d::Event::Button MacOSMouseButtonNumberToO3DButton(int inButton);
 

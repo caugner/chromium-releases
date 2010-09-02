@@ -27,6 +27,7 @@
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/main_function_params.h"
 #include "chrome/common/net/net_resource_provider.h"
+#include "chrome/common/pepper_plugin_registry.h"
 #include "chrome/renderer/renderer_main_platform_delegate.h"
 #include "chrome/renderer/render_process_impl.h"
 #include "chrome/renderer/render_thread.h"
@@ -235,8 +236,7 @@ int RendererMain(const MainFunctionParams& parameters) {
               MessageLoop::TYPE_UI : MessageLoop::TYPE_DEFAULT);
 #endif
 
-  std::wstring app_name = chrome::kBrowserAppName;
-  PlatformThread::SetName(WideToASCII(app_name + L"_RendererMain").c_str());
+  PlatformThread::SetName("CrRendererMain");
 
   SystemMonitor system_monitor;
   HighResolutionTimerManager hi_res_timer_manager;
@@ -262,6 +262,9 @@ int RendererMain(const MainFunctionParams& parameters) {
     bool ret = field_trial.StringAugmentsState(persistent);
     DCHECK(ret);
   }
+
+  // Load pepper plugins before engaging the sandbox.
+  PepperPluginRegistry::GetInstance();
 
   {
 #if !defined(OS_LINUX)

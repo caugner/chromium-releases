@@ -13,6 +13,7 @@
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/renderer_preferences.h"
 #include "webkit/glue/webpreferences.h"
 
@@ -40,6 +41,7 @@ class BalloonHost : public RenderViewHostDelegate,
     // TODO(aa): Should this return the native view of the BalloonView*?
     return NULL;
   }
+  virtual TabContents* associated_tab_contents() { return NULL; }
 
   RenderViewHost* render_view_host() const { return render_view_host_; }
 
@@ -62,7 +64,9 @@ class BalloonHost : public RenderViewHostDelegate,
   virtual void RenderViewGone(RenderViewHost* render_view_host);
   virtual void UpdateTitle(RenderViewHost* render_view_host,
                            int32 page_id, const std::wstring& title) {}
-  virtual int GetBrowserWindowID() const { return -1; }
+  virtual int GetBrowserWindowID() const {
+    return extension_misc::kUnknownWindowId;
+  }
   virtual ViewType::Type GetRenderViewType() const {
     return ViewType::NOTIFICATION;
   }
@@ -70,14 +74,17 @@ class BalloonHost : public RenderViewHostDelegate,
     return this;
   }
   virtual void ProcessDOMUIMessage(const std::string& message,
-                                   const Value* content,
+                                   const ListValue* content,
                                    const GURL& source_url,
                                    int request_id,
                                    bool has_callback);
 
   // RenderViewHostDelegate::View methods. Only the ones for opening new
   // windows are currently implemented.
-  virtual void CreateNewWindow(int route_id);
+  virtual void CreateNewWindow(
+      int route_id,
+      WindowContainerType window_container_type,
+      const string16& frame_name);
   virtual void CreateNewWidget(int route_id, WebKit::WebPopupType popup_type) {}
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
@@ -103,9 +110,7 @@ class BalloonHost : public RenderViewHostDelegate,
   virtual void HandleMouseEvent() {}
   virtual void HandleMouseLeave() {}
   virtual void UpdatePreferredSize(const gfx::Size& pref_size);
-  virtual RendererPreferences GetRendererPrefs(Profile* profile) const {
-    return RendererPreferences();
-  }
+  virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
 
  protected:
   // Must override in platform specific implementations.
@@ -114,8 +119,6 @@ class BalloonHost : public RenderViewHostDelegate,
 
   // Owned pointer to the host for the renderer process.
   RenderViewHost* render_view_host_;
-
-  const Balloon* balloon() const { return balloon_; }
 
  private:
   // Called to send an event that the balloon has been disconnected from

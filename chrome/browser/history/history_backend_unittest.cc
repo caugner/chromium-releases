@@ -7,6 +7,7 @@
 #include "base/path_service.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_notifications.h"
@@ -41,12 +42,13 @@ class HistoryBackendTestDelegate : public HistoryBackend::Delegate {
   virtual void BroadcastNotifications(NotificationType type,
                                       HistoryDetails* details);
   virtual void DBLoaded();
+  virtual void StartTopSitesMigration();
 
  private:
   // Not owned by us.
   HistoryBackendTest* test_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(HistoryBackendTestDelegate);
+  DISALLOW_COPY_AND_ASSIGN(HistoryBackendTestDelegate);
 };
 
 class HistoryBackendTest : public testing::Test {
@@ -165,6 +167,10 @@ void HistoryBackendTestDelegate::DBLoaded() {
   test_->loaded_ = true;
 }
 
+void HistoryBackendTestDelegate::StartTopSitesMigration() {
+  test_->backend_->MigrateThumbnailsDatabase();
+}
+
 TEST_F(HistoryBackendTest, Loaded) {
   ASSERT_TRUE(backend_.get());
   ASSERT_TRUE(loaded_);
@@ -249,10 +255,12 @@ TEST_F(HistoryBackendTest, DeleteAll) {
   // Set full text index for each one.
   backend_->text_database_->AddPageData(row1.url(), row1_id, visit1_id,
                                         row1.last_visit(),
-                                        L"Title 1", L"Body 1");
+                                        UTF8ToUTF16("Title 1"),
+                                        UTF8ToUTF16("Body 1"));
   backend_->text_database_->AddPageData(row2.url(), row2_id, visit2_id,
                                         row2.last_visit(),
-                                        L"Title 2", L"Body 2");
+                                        UTF8ToUTF16("Title 2"),
+                                        UTF8ToUTF16("Body 2"));
 
   // Now finally clear all history.
   backend_->DeleteAllHistory();
@@ -297,7 +305,8 @@ TEST_F(HistoryBackendTest, DeleteAll) {
   // The full text database should have no data.
   std::vector<TextDatabase::Match> text_matches;
   Time first_time_searched;
-  backend_->text_database_->GetTextMatches(L"Body", QueryOptions(),
+  backend_->text_database_->GetTextMatches(UTF8ToUTF16("Body"),
+                                           QueryOptions(),
                                            &text_matches,
                                            &first_time_searched);
   EXPECT_EQ(0U, text_matches.size());
@@ -586,6 +595,12 @@ TEST_F(HistoryBackendTest, StripUsernamePasswordTest) {
 
   // Check if stripped url is stored in database.
   ASSERT_EQ(1U, visits.size());
+}
+
+TEST_F(HistoryBackendTest, DeleteThumbnailsDatabaseTest) {
+  EXPECT_TRUE(backend_->thumbnail_db_->NeedsMigrationToTopSites());
+  backend_->delegate_->StartTopSitesMigration();
+  EXPECT_FALSE(backend_->thumbnail_db_->NeedsMigrationToTopSites());
 }
 
 }  // namespace history

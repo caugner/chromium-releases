@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/platform_thread.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
+#include "base/string16.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 #include "net/base/net_util.h"
@@ -28,9 +29,9 @@ TEST_F(RedirectTest, Server) {
     HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
 
-  GURL final_url = server->TestServerPageW(std::wstring());
-  GURL first_url = server->TestServerPageW(
-      std::wstring(L"server-redirect?") + UTF8ToWide(final_url.spec()));
+  GURL final_url = server->TestServerPage(std::string());
+  GURL first_url = server->TestServerPage(
+      "server-redirect?" + final_url.spec());
 
   NavigateToURL(first_url);
 
@@ -50,9 +51,9 @@ TEST_F(RedirectTest, Client) {
     HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
 
-  GURL final_url = server->TestServerPageW(std::wstring());
-  GURL first_url = server->TestServerPageW(
-      std::wstring(L"client-redirect?") + UTF8ToWide(final_url.spec()));
+  GURL final_url = server->TestServerPage(std::string());
+  GURL first_url = server->TestServerPage(
+      "client-redirect?" + final_url.spec());
 
   // The client redirect appears as two page visits in the browser.
   NavigateToURLBlockUntilNavigationsComplete(first_url, 2);
@@ -84,7 +85,7 @@ TEST_F(RedirectTest, ClientEmptyReferer) {
     HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
 
-  GURL final_url = server->TestServerPageW(std::wstring());
+  GURL final_url = server->TestServerPage(std::string());
   FilePath test_file(test_data_directory_);
   test_file = test_file.AppendASCII("file_client_redirect.html");
   GURL first_url = net::FilePathToFileURL(test_file);
@@ -102,14 +103,15 @@ TEST_F(RedirectTest, ClientEmptyReferer) {
 
 // Tests to make sure a location change when a pending redirect exists isn't
 // flagged as a redirect.
-TEST_F(RedirectTest, DISABLED_ClientCancelled) {
+TEST_F(RedirectTest, ClientCancelled) {
   FilePath first_path(test_data_directory_);
   first_path = first_path.AppendASCII("cancelled_redirect_test.html");
   ASSERT_TRUE(file_util::AbsolutePath(&first_path));
   GURL first_url = net::FilePathToFileURL(first_path);
 
-  // The client redirect appears as two page visits in the browser.
-  NavigateToURLBlockUntilNavigationsComplete(first_url, 2);
+  NavigateToURLBlockUntilNavigationsComplete(first_url, 1);
+
+  NavigateToURL(GURL("javascript:click()")); // User initiated location change.
 
   scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
   ASSERT_TRUE(tab_proxy.get());
@@ -138,20 +140,18 @@ TEST_F(RedirectTest, DISABLED_ClientCancelled) {
 }
 
 // Tests a client->server->server redirect
-// TODO(creis): This is disabled temporarily while I figure out why it is
-// failing.
-TEST_F(RedirectTest, DISABLED_ClientServerServer) {
+TEST_F(RedirectTest, ClientServerServer) {
   scoped_refptr<HTTPTestServer> server =
       HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
 
-  GURL final_url = server->TestServerPageW(std::wstring());
-  GURL next_to_last = server->TestServerPageW(
-      std::wstring(L"server-redirect?") + UTF8ToWide(final_url.spec()));
-  GURL second_url = server->TestServerPageW(
-      std::wstring(L"server-redirect?") + UTF8ToWide(next_to_last.spec()));
-  GURL first_url = server->TestServerPageW(
-      std::wstring(L"client-redirect?") + UTF8ToWide(second_url.spec()));
+  GURL final_url = server->TestServerPage(std::string());
+  GURL next_to_last = server->TestServerPage(
+      "server-redirect?" + final_url.spec());
+  GURL second_url = server->TestServerPage(
+      "server-redirect?" + next_to_last.spec());
+  GURL first_url = server->TestServerPage(
+      "client-redirect?" + second_url.spec());
   std::vector<GURL> redirects;
 
   // We need the sleep for the client redirects, because it appears as two
@@ -181,10 +181,9 @@ TEST_F(RedirectTest, ServerReference) {
 
   const std::string ref("reference");
 
-  GURL final_url = server->TestServerPageW(std::wstring());
-  GURL initial_url = server->TestServerPageW(
-      std::wstring(L"server-redirect?") + UTF8ToWide(final_url.spec()) +
-      L"#" + UTF8ToWide(ref));
+  GURL final_url = server->TestServerPage(std::string());
+  GURL initial_url = server->TestServerPage(
+      "server-redirect?" + final_url.spec() + "#" + ref);
 
   NavigateToURL(initial_url);
 
@@ -197,14 +196,14 @@ TEST_F(RedirectTest, ServerReference) {
 // B) does not take place.
 TEST_F(RedirectTest, NoHttpToFile) {
   scoped_refptr<HTTPTestServer> server =
-    HTTPTestServer::CreateServer(kDocRoot, NULL);
+      HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
   FilePath test_file(test_data_directory_);
   test_file = test_file.AppendASCII("http_to_file.html");
   GURL file_url = net::FilePathToFileURL(test_file);
 
-  GURL initial_url = server->TestServerPageW(
-    std::wstring(L"client-redirect?") + UTF8ToWide(file_url.spec()));
+  GURL initial_url = server->TestServerPage(
+      "client-redirect?" + file_url.spec());
 
   NavigateToURL(initial_url);
   // UITest will check for crashes. We make sure the title doesn't match the
@@ -213,7 +212,7 @@ TEST_F(RedirectTest, NoHttpToFile) {
   ASSERT_TRUE(tab_proxy.get());
   std::wstring actual_title;
   ASSERT_TRUE(tab_proxy->GetTabTitle(&actual_title));
-  EXPECT_NE(L"File!", actual_title);
+  EXPECT_NE("File!", WideToUTF8(actual_title));
 }
 
 // Ensures that non-user initiated location changes (within page) are
@@ -244,6 +243,7 @@ TEST_F(RedirectTest, ClientFragments) {
 // alternatively load the second page from disk, but we would need to start
 // the browser for this testcase with --process-per-tab, and I don't think
 // we can do this at test-case-level granularity at the moment.
+// http://crbug.com/45056
 TEST_F(RedirectTest,
        DISABLED_ClientCancelledByNewNavigationAfterProvisionalLoad) {
   // We want to initiate a second navigation after the provisional load for
@@ -256,10 +256,10 @@ TEST_F(RedirectTest,
     HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
 
-  GURL final_url = server->TestServerPageW(std::wstring(L"files/title2.html"));
-  GURL slow = server->TestServerPageW(std::wstring(L"slow?60"));
-  GURL first_url = server->TestServerPageW(
-      std::wstring(L"client-redirect?") + UTF8ToWide(slow.spec()));
+  GURL final_url = server->TestServerPage("files/title2.html");
+  GURL slow = server->TestServerPage("slow?60");
+  GURL first_url = server->TestServerPage(
+      "client-redirect?" + slow.spec());
   std::vector<GURL> redirects;
 
   NavigateToURL(first_url);
@@ -270,7 +270,7 @@ TEST_F(RedirectTest,
   NavigateToURL(final_url);
 
   std::wstring tab_title;
-  std::wstring final_url_title = L"Title Of Awesomeness";
+  std::wstring final_url_title = UTF8ToWide("Title Of Awesomeness");
   // Wait till the final page has been loaded.
   for (int i = 0; i < 10; ++i) {
     PlatformThread::Sleep(sleep_timeout_ms());

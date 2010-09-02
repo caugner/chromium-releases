@@ -141,7 +141,13 @@ TEST_F(SessionHistoryTest, BasicBackForward) {
 }
 
 // Test that back/forward works when navigating in subframes.
-TEST_F(SessionHistoryTest, FrameBackForward) {
+// Fails on Windows. See crbug.com/TODO
+#if defined(OS_WIN)
+#define MAYBE_FrameBackForward FLAKY_FrameBackForward
+#else
+#define MAYBE_FrameBackForward FrameBackForward
+#endif
+TEST_F(SessionHistoryTest, MAYBE_FrameBackForward) {
   scoped_refptr<HTTPTestServer> server =
       HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
@@ -268,6 +274,7 @@ TEST_F(SessionHistoryTest, FrameFormBackForward) {
 // document state"
 // Test that back/forward preserves POST data and document state when navigating
 // across frames (ie, from frame -> nonframe).
+// Hangs, see http://crbug.com/45058.
 TEST_F(SessionHistoryTest, DISABLED_CrossFrameFormBackForward) {
   scoped_refptr<HTTPTestServer> server =
       HTTPTestServer::CreateServer(kDocRoot, NULL);
@@ -466,7 +473,7 @@ TEST_F(SessionHistoryTest, JavascriptHistory) {
 }
 
 // This test is failing consistently. See http://crbug.com/22560
-TEST_F(SessionHistoryTest, DISABLED_LocationReplace) {
+TEST_F(SessionHistoryTest, FAILS_LocationReplace) {
   // Test that using location.replace doesn't leave the title of the old page
   // visible.
   scoped_refptr<HTTPTestServer> server =
@@ -512,7 +519,7 @@ TEST_F(SessionHistoryTest, LocationChangeInSubframe) {
   EXPECT_EQ(L"Default Title", GetTabTitle());
 }
 
-// http://code.google.com/p/chromium/issues/detail?id=38583
+// Hangs, see http://crbug.com/38583.
 #if defined(OS_WIN)
 #define HistoryLength DISABLED_HistoryLength
 #endif  // defined(OS_WIN)

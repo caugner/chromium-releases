@@ -4,29 +4,46 @@
 
 #include "chrome/browser/dom_ui/net_internals_ui.h"
 
+#include <algorithm>
 #include <sstream>
+#include <string>
+#include <vector>
 
+#include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/file_version_info.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/singleton.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_net_log.h"
-#include "chrome/browser/net/url_request_context_getter.h"
+#include "chrome/browser/net/connection_tester.h"
+#include "chrome/browser/net/passive_log_collector.h"
+#include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/url_constants.h"
+#include "grit/generated_resources.h"
+#include "grit/net_internals_resources.h"
 #include "net/base/escape.h"
 #include "net/base/host_resolver_impl.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/sys_addrinfo.h"
+#include "net/disk_cache/disk_cache.h"
+#include "net/http/http_cache.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 
@@ -49,8 +66,63 @@ net::HostCache* GetHostResolverCache(URLRequestContext* context) {
   return host_resolver_impl->cache();
 }
 
-// TODO(eroman): Bootstrap the net-internals page using the passively logged
-//               data.
+// Returns the disk cache backend for |context| if there is one, or NULL.
+disk_cache::Backend* GetDiskCacheBackend(URLRequestContext* context) {
+  if (!context->http_transaction_factory())
+    return NULL;
+
+  net::HttpCache* http_cache = context->http_transaction_factory()->GetCache();
+  if (!http_cache)
+    return NULL;
+
+  return http_cache->GetCurrentBackend();
+}
+
+// Serializes the specified event to a DictionaryValue.
+Value* EntryToDictionaryValue(net::NetLog::EventType type,
+                              const base::TimeTicks& time,
+                              const net::NetLog::Source& source,
+                              net::NetLog::EventPhase phase,
+                              net::NetLog::EventParameters* params) {
+  DictionaryValue* entry_dict = new DictionaryValue();
+
+  // Set the entry time. (Note that we send it as a string since integers
+  // might overflow).
+  entry_dict->SetString(L"time", TickCountToString(time));
+
+  // Set the entry source.
+  DictionaryValue* source_dict = new DictionaryValue();
+  source_dict->SetInteger(L"id", source.id);
+  source_dict->SetInteger(L"type", static_cast<int>(source.type));
+  entry_dict->Set(L"source", source_dict);
+
+  // Set the event info.
+  entry_dict->SetInteger(L"type", static_cast<int>(type));
+  entry_dict->SetInteger(L"phase", static_cast<int>(phase));
+
+  // Set the event-specific parameters.
+  if (params)
+    entry_dict->Set(L"params", params->ToValue());
+
+  return entry_dict;
+}
+
+Value* ExperimentToValue(const ConnectionTester::Experiment& experiment) {
+  DictionaryValue* dict = new DictionaryValue();
+
+  if (experiment.url.is_valid())
+    dict->SetString(L"url", experiment.url.spec());
+
+  dict->SetStringFromUTF16(
+      L"proxy_settings_experiment",
+      ConnectionTester::ProxySettingsExperimentDescription(
+          experiment.proxy_settings_experiment));
+  dict->SetStringFromUTF16(
+      L"host_resolver_experiment",
+      ConnectionTester::HostResolverExperimentDescription(
+          experiment.host_resolver_experiment));
+  return dict;
+}
 
 class NetInternalsHTMLSource : public ChromeURLDataManager::DataSource {
  public:
@@ -91,7 +163,7 @@ class NetInternalsMessageHandler
   // Executes the javascript function |function_name| in the renderer, passing
   // it the argument |value|.
   void CallJavascriptFunction(const std::wstring& function_name,
-                              const Value& value);
+                              const Value* value);
 
  private:
   class IOThreadImpl;
@@ -109,7 +181,8 @@ class NetInternalsMessageHandler::IOThreadImpl
     : public base::RefCountedThreadSafe<
           NetInternalsMessageHandler::IOThreadImpl,
           ChromeThread::DeleteOnUIThread>,
-      public ChromeNetLog::Observer {
+      public ChromeNetLog::Observer,
+      public ConnectionTester::Delegate {
  public:
   // Type for methods that can be used as MessageHandler callbacks.
   typedef void (IOThreadImpl::*MessageHandler)(const Value*);
@@ -150,13 +223,25 @@ class NetInternalsMessageHandler::IOThreadImpl
   void OnClearBadProxies(const Value* value);
   void OnGetHostResolverCache(const Value* value);
   void OnClearHostResolverCache(const Value* value);
+  void OnGetPassiveLogEntries(const Value* value);
+  void OnStartConnectionTests(const Value* value);
+  void OnGetHttpCacheInfo(const Value* value);
 
   // ChromeNetLog::Observer implementation:
   virtual void OnAddEntry(net::NetLog::EventType type,
                           const base::TimeTicks& time,
                           const net::NetLog::Source& source,
                           net::NetLog::EventPhase phase,
-                          net::NetLog::EventParameters* extra_parameters);
+                          net::NetLog::EventParameters* params);
+
+  // ConnectionTester::Delegate implementation:
+  virtual void OnStartConnectionTestSuite();
+  virtual void OnStartConnectionTestExperiment(
+      const ConnectionTester::Experiment& experiment);
+  virtual void OnCompletedConnectionTestExperiment(
+      const ConnectionTester::Experiment& experiment,
+      int result);
+  virtual void OnCompletedConnectionTestSuite();
 
  private:
   class CallbackHelper;
@@ -177,6 +262,9 @@ class NetInternalsMessageHandler::IOThreadImpl
   IOThread* io_thread_;
 
   scoped_refptr<URLRequestContextGetter> context_getter_;
+
+  // Helper that runs the suite of connection tests.
+  scoped_ptr<ConnectionTester> connection_tester_;
 
   // True if we have attached an observer to the NetLog already.
   bool is_observing_log_;
@@ -229,38 +317,34 @@ NetInternalsHTMLSource::NetInternalsHTMLSource()
 void NetInternalsHTMLSource::StartDataRequest(const std::string& path,
                                               bool is_off_the_record,
                                               int request_id) {
-  // The provided |path| identifies a file in resources/net_internals/.
-  std::string data_string;
-  FilePath file_path;
-  PathService::Get(chrome::DIR_NET_INTERNALS, &file_path);
-  std::string filename;
-
   // The provided "path" may contain a fragment, or query section. We only
   // care about the path itself, and will disregard anything else.
-  filename = GURL(std::string("chrome://net/") + path).path().substr(1);
+  std::string filename =
+      GURL(std::string("chrome://net/") + path).path().substr(1);
 
-  if (filename.empty())
-    filename = "index.html";
-
-  file_path = file_path.AppendASCII(filename);
-
-  if (!file_util::ReadFileToString(file_path, &data_string)) {
-    LOG(WARNING) << "Could not read resource: " << file_path.value();
-    data_string = StringPrintf(
-        "Failed to read file RESOURCES/net_internals/%s",
-        filename.c_str());
+  // The source for the net internals page is flattened during compilation, so
+  // the only resource that should legitimately be requested is the main file.
+  // Note that users can type anything into the address bar, though, so we must
+  // handle arbitrary input.
+  if (filename.empty() || filename == "index.html") {
+    scoped_refptr<RefCountedStaticMemory> bytes(
+        ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
+            IDR_NET_INTERNALS_INDEX_HTML));
+    if (bytes && bytes->front()) {
+      SendResponse(request_id, bytes);
+      return;
+    }
   }
 
+  const std::string data_string("<p style='color:red'>Failed to read resource" +
+      EscapeForHTML(filename) + "</p>");
   scoped_refptr<RefCountedBytes> bytes(new RefCountedBytes);
   bytes->data.resize(data_string.size());
   std::copy(data_string.begin(), data_string.end(), bytes->data.begin());
-
   SendResponse(request_id, bytes);
 }
 
 std::string NetInternalsHTMLSource::GetMimeType(const std::string&) const {
-  // TODO(eroman): This is incorrect -- some of the subresources may be
-  //               css/javascript.
   return "text/html";
 }
 
@@ -291,27 +375,47 @@ DOMMessageHandler* NetInternalsMessageHandler::Attach(DOMUI* dom_ui) {
 void NetInternalsMessageHandler::RegisterMessages() {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
 
-  dom_ui_->RegisterMessageCallback("notifyReady",
+  dom_ui_->RegisterMessageCallback(
+      "notifyReady",
       proxy_->CreateCallback(&IOThreadImpl::OnRendererReady));
-  dom_ui_->RegisterMessageCallback("getProxySettings",
+  dom_ui_->RegisterMessageCallback(
+      "getProxySettings",
       proxy_->CreateCallback(&IOThreadImpl::OnGetProxySettings));
-  dom_ui_->RegisterMessageCallback("reloadProxySettings",
+  dom_ui_->RegisterMessageCallback(
+      "reloadProxySettings",
       proxy_->CreateCallback(&IOThreadImpl::OnReloadProxySettings));
-  dom_ui_->RegisterMessageCallback("getBadProxies",
+  dom_ui_->RegisterMessageCallback(
+      "getBadProxies",
       proxy_->CreateCallback(&IOThreadImpl::OnGetBadProxies));
-  dom_ui_->RegisterMessageCallback("clearBadProxies",
+  dom_ui_->RegisterMessageCallback(
+      "clearBadProxies",
       proxy_->CreateCallback(&IOThreadImpl::OnClearBadProxies));
-  dom_ui_->RegisterMessageCallback("getHostResolverCache",
+  dom_ui_->RegisterMessageCallback(
+      "getHostResolverCache",
       proxy_->CreateCallback(&IOThreadImpl::OnGetHostResolverCache));
-  dom_ui_->RegisterMessageCallback("clearHostResolverCache",
+  dom_ui_->RegisterMessageCallback(
+      "clearHostResolverCache",
       proxy_->CreateCallback(&IOThreadImpl::OnClearHostResolverCache));
+  dom_ui_->RegisterMessageCallback(
+      "getPassiveLogEntries",
+      proxy_->CreateCallback(&IOThreadImpl::OnGetPassiveLogEntries));
+  dom_ui_->RegisterMessageCallback(
+      "startConnectionTests",
+      proxy_->CreateCallback(&IOThreadImpl::OnStartConnectionTests));
+  dom_ui_->RegisterMessageCallback(
+      "getHttpCacheInfo",
+      proxy_->CreateCallback(&IOThreadImpl::OnGetHttpCacheInfo));
 }
 
 void NetInternalsMessageHandler::CallJavascriptFunction(
     const std::wstring& function_name,
-    const Value& value) {
+    const Value* value) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
-  dom_ui_->CallJavascriptFunction(function_name, value);
+  if (value) {
+    dom_ui_->CallJavascriptFunction(function_name, *value);
+  } else {
+    dom_ui_->CallJavascriptFunction(function_name);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -347,6 +451,9 @@ void NetInternalsMessageHandler::IOThreadImpl::Detach() {
   // Unregister with network stack to observe events.
   if (is_observing_log_)
     io_thread_->globals()->net_log->RemoveObserver(this);
+
+  // Cancel any in-progress connection tests.
+  connection_tester_.reset();
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
@@ -375,6 +482,66 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
     CallJavascriptFunction(L"g_browser.receivedLogEventTypeConstants", dict);
   }
 
+  // Tell the javascript about the version of the client and its
+  // command line arguments.
+  {
+    DictionaryValue* dict = new DictionaryValue();
+
+    scoped_ptr<FileVersionInfo> version_info(
+        chrome_app::GetChromeVersionInfo());
+
+    if (version_info == NULL) {
+      DLOG(ERROR) << "Unable to create FileVersionInfo object";
+
+    } else {
+      // We have everything we need to send the right values.
+      dict->SetString(L"version", version_info->file_version());
+      dict->SetString(L"cl", version_info->last_change());
+      dict->SetStringFromUTF16(L"version_mod",
+          platform_util::GetVersionStringModifier());
+
+      if (version_info->is_official_build()) {
+        dict->SetString(L"official",
+            l10n_util::GetString(IDS_ABOUT_VERSION_OFFICIAL));
+      } else {
+        dict->SetString(L"official",
+            l10n_util::GetString(IDS_ABOUT_VERSION_UNOFFICIAL));
+      }
+
+      dict->SetString(L"command_line",
+          CommandLine::ForCurrentProcess()->command_line_string());
+    }
+
+    CallJavascriptFunction(L"g_browser.receivedClientInfo",
+                           dict);
+  }
+
+  // Tell the javascript about the relationship between load flag enums and
+  // their symbolic name.
+  {
+    DictionaryValue* dict = new DictionaryValue();
+
+#define LOAD_FLAG(label, value) \
+    dict->SetInteger(ASCIIToWide(# label), static_cast<int>(value));
+#include "net/base/load_flags_list.h"
+#undef LOAD_FLAG
+
+    CallJavascriptFunction(L"g_browser.receivedLoadFlagConstants", dict);
+  }
+
+  // Tell the javascript about the relationship between net error codes and
+  // their symbolic name.
+  {
+    DictionaryValue* dict = new DictionaryValue();
+
+#define NET_ERROR(label, value) \
+    dict->SetInteger(ASCIIToWide(# label), static_cast<int>(value));
+#include "net/base/net_error_list.h"
+#undef NET_ERROR
+
+    CallJavascriptFunction(L"g_browser.receivedNetErrorConstants", dict);
+  }
+
   // Tell the javascript about the relationship between event phase enums and
   // their symbolic name.
   {
@@ -389,16 +556,12 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
 
   // Tell the javascript about the relationship between source type enums and
   // their symbolic name.
-  // TODO(eroman): Don't duplicate the values, it will never stay up to date!
   {
     DictionaryValue* dict = new DictionaryValue();
 
-    dict->SetInteger(L"NONE", net::NetLog::SOURCE_NONE);
-    dict->SetInteger(L"URL_REQUEST", net::NetLog::SOURCE_URL_REQUEST);
-    dict->SetInteger(L"SOCKET_STREAM", net::NetLog::SOURCE_SOCKET_STREAM);
-    dict->SetInteger(L"INIT_PROXY_RESOLVER",
-                     net::NetLog::SOURCE_INIT_PROXY_RESOLVER);
-    dict->SetInteger(L"CONNECT_JOB", net::NetLog::SOURCE_CONNECT_JOB);
+#define SOURCE_TYPE(label, value) dict->SetInteger(ASCIIToWide(# label), value);
+#include "net/base/net_log_source_type_list.h"
+#undef SOURCE_TYPE
 
     CallJavascriptFunction(L"g_browser.receivedLogSourceTypeConstants", dict);
   }
@@ -428,10 +591,11 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
                                Int64ToString(tick_to_unix_time_ms)));
   }
 
-  // Notify the client of the basic proxy data.
+  OnGetPassiveLogEntries(NULL);
   OnGetProxySettings(NULL);
   OnGetBadProxies(NULL);
   OnGetHostResolverCache(NULL);
+  OnGetHttpCacheInfo(NULL);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetProxySettings(
@@ -541,7 +705,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverCache(
       const struct addrinfo* current_address = entry->addrlist.head();
       while (current_address) {
         address_list->Append(Value::CreateStringValue(
-            net::NetAddressToString(current_address)));
+            net::NetAddressToStringWithPort(current_address)));
         current_address = current_address->ai_next;
       }
       entry_dict->Set(L"addresses", address_list);
@@ -567,37 +731,109 @@ void NetInternalsMessageHandler::IOThreadImpl::OnClearHostResolverCache(
   OnGetHostResolverCache(NULL);
 }
 
+void NetInternalsMessageHandler::IOThreadImpl::OnGetPassiveLogEntries(
+    const Value* value) {
+  ChromeNetLog* net_log = io_thread_->globals()->net_log.get();
+
+  PassiveLogCollector::EntryList passive_entries;
+  net_log->passive_collector()->GetAllCapturedEvents(&passive_entries);
+
+  ListValue* list = new ListValue();
+  for (size_t i = 0; i < passive_entries.size(); ++i) {
+    const PassiveLogCollector::Entry& e = passive_entries[i];
+    list->Append(EntryToDictionaryValue(e.type,
+                                        e.time,
+                                        e.source,
+                                        e.phase,
+                                        e.params));
+  }
+
+  CallJavascriptFunction(L"g_browser.receivedPassiveLogEntries", list);
+}
+
+void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTests(
+    const Value* value) {
+  // |value| should be: [<URL to test>].
+  string16 url_str;
+  if (value && value->GetType() == Value::TYPE_LIST) {
+    const ListValue* list = static_cast<const ListValue*>(value);
+    list->GetStringAsUTF16(0, &url_str);
+  }
+
+  // Try to fix-up the user provided URL into something valid.
+  // For example, turn "www.google.com" into "http://www.google.com".
+  GURL url(URLFixerUpper::FixupURL(UTF16ToUTF8(url_str), std::string()));
+
+  connection_tester_.reset(new ConnectionTester(this));
+  connection_tester_->RunAllTests(url);
+}
+
+void NetInternalsMessageHandler::IOThreadImpl::OnGetHttpCacheInfo(
+    const Value* value) {
+  DictionaryValue* info_dict = new DictionaryValue();
+  DictionaryValue* stats_dict = new DictionaryValue();
+
+  disk_cache::Backend* disk_cache = GetDiskCacheBackend(
+      context_getter_->GetURLRequestContext());
+
+  if (disk_cache) {
+    // Extract the statistics key/value pairs from the backend.
+    std::vector<std::pair<std::string, std::string> > stats;
+    disk_cache->GetStats(&stats);
+    for (size_t i = 0; i < stats.size(); ++i) {
+      stats_dict->Set(ASCIIToWide(stats[i].first),
+                      Value::CreateStringValue(stats[i].second));
+    }
+  }
+
+  info_dict->Set(L"stats", stats_dict);
+
+  CallJavascriptFunction(L"g_browser.receivedHttpCacheInfo", info_dict);
+}
+
 void NetInternalsMessageHandler::IOThreadImpl::OnAddEntry(
     net::NetLog::EventType type,
     const base::TimeTicks& time,
     const net::NetLog::Source& source,
     net::NetLog::EventPhase phase,
-    net::NetLog::EventParameters* extra_parameters) {
+    net::NetLog::EventParameters* params) {
   DCHECK(is_observing_log_);
 
-  // JSONify the NetLog::Entry.
-  // TODO(eroman): Need a better format for this.
-  DictionaryValue* entry_dict = new DictionaryValue();
+  CallJavascriptFunction(
+      L"g_browser.receivedLogEntry",
+      EntryToDictionaryValue(type, time, source, phase, params));
+}
 
-  // Set the entry time. (Note that we send it as a string since integers
-  // might overflow).
-  entry_dict->SetString(L"time", TickCountToString(time));
+void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTestSuite() {
+  CallJavascriptFunction(L"g_browser.receivedStartConnectionTestSuite", NULL);
+}
 
-  // Set the entry source.
-  DictionaryValue* source_dict = new DictionaryValue();
-  source_dict->SetInteger(L"id", source.id);
-  source_dict->SetInteger(L"type", static_cast<int>(source.type));
-  entry_dict->Set(L"source", source_dict);
+void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTestExperiment(
+    const ConnectionTester::Experiment& experiment) {
+  CallJavascriptFunction(
+      L"g_browser.receivedStartConnectionTestExperiment",
+      ExperimentToValue(experiment));
+}
 
-  // Set the event info.
-  entry_dict->SetInteger(L"type", static_cast<int>(type));
-  entry_dict->SetInteger(L"phase", static_cast<int>(phase));
+void
+NetInternalsMessageHandler::IOThreadImpl::OnCompletedConnectionTestExperiment(
+    const ConnectionTester::Experiment& experiment,
+    int result) {
+  DictionaryValue* dict = new DictionaryValue();
 
-  // Set the event-specific parameters.
-  if (extra_parameters)
-    entry_dict->SetString(L"extra_parameters", extra_parameters->ToString());
+  dict->Set(L"experiment", ExperimentToValue(experiment));
+  dict->SetInteger(L"result", result);
 
-  CallJavascriptFunction(L"g_browser.receivedLogEntry", entry_dict);
+  CallJavascriptFunction(
+      L"g_browser.receivedCompletedConnectionTestExperiment",
+      dict);
+}
+
+void
+NetInternalsMessageHandler::IOThreadImpl::OnCompletedConnectionTestSuite() {
+  CallJavascriptFunction(
+      L"g_browser.receivedCompletedConnectionTestSuite",
+      NULL);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::DispatchToMessageHandler(
@@ -614,12 +850,11 @@ void NetInternalsMessageHandler::IOThreadImpl::CallJavascriptFunction(
     if (handler_) {
       // We check |handler_| in case it was deleted on the UI thread earlier
       // while we were running on the IO thread.
-      handler_->CallJavascriptFunction(function_name, *arg);
+      handler_->CallJavascriptFunction(function_name, arg);
     }
     delete arg;
     return;
   }
-
 
   // Otherwise if we were called from the IO thread, bridge the request over to
   // the UI thread.

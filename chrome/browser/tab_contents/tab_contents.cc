@@ -4,6 +4,11 @@
 
 #include "chrome/browser/tab_contents/tab_contents.h"
 
+#if defined(OS_CHROMEOS)
+// For GdkScreen
+#include <gdk/gdk.h>
+#endif  // defined(OS_CHROMEOS)
+
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "app/text_elider.h"
@@ -18,6 +23,7 @@
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/blocked_popup_container.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/cert_store.h"
@@ -28,12 +34,12 @@
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
-#include "chrome/browser/download/download_request_manager.h"
+#include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/external_protocol_handler.h"
 #include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/favicon_service.h"
 #include "chrome/browser/find_bar_state.h"
-#include "chrome/browser/geolocation/geolocation_content_settings_map.h"
 #include "chrome/browser/google_util.h"
 #include "chrome/browser/host_content_settings_map.h"
 #include "chrome/browser/hung_renderer_dialog.h"
@@ -44,8 +50,11 @@
 #include "chrome/browser/modal_html_dialog_delegate.h"
 #include "chrome/browser/omnibox_search_hint.h"
 #include "chrome/browser/password_manager/password_manager.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/plugin_installer.h"
+#include "chrome/browser/popup_blocked_animation.h"
 #include "chrome/browser/pref_service.h"
+#include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -64,32 +73,30 @@
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
-#include "chrome/browser/thumbnail_store.h"
 #include "chrome/browser/translate/page_translated_details.h"
 #include "chrome/common/bindings_policy.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/url_pattern.h"
+#include "chrome/common/navigation_types.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/platform_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/renderer_preferences.h"
 #include "chrome/common/url_constants.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/platform_locale_settings.h"
+#include "grit/theme_resources.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domain.h"
-#include "webkit/glue/password_form.h"
 #include "webkit/glue/webpreferences.h"
-
-#if defined(OS_CHROMEOS)
-// For GdkScreen
-#include <gdk/gdk.h>
-#endif  // defined(OS_CHROMEOS)
 
 // Cross-Site Navigations
 //
@@ -164,6 +171,7 @@ const wchar_t* kPrefsToObserve[] = {
   prefs::kWebKitFixedFontFamily,
   prefs::kWebKitDefaultFontSize,
   prefs::kWebKitDefaultFixedFontSize,
+  prefs::kWebkitTabsToLinks,
   prefs::kDefaultCharset
   // kWebKitStandardFontIsSerif needs to be added
   // if we let users pick which font to use, serif or sans-serif when
@@ -244,7 +252,8 @@ TabContents::TabContents(Profile* profile,
       ALLOW_THIS_IN_INITIALIZER_LIST(render_manager_(this, this)),
       property_bag_(),
       registrar_(),
-      ALLOW_THIS_IN_INITIALIZER_LIST(printing_(*this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(printing_(
+          new printing::PrintViewManager(*this))),
       save_package_(),
       autocomplete_history_manager_(),
       autofill_manager_(),
@@ -268,14 +277,14 @@ TabContents::TabContents(Profile* profile,
       encoding_(),
       blocked_popups_(NULL),
       dont_notify_render_view_(false),
+      displayed_insecure_content_(false),
       infobar_delegates_(),
       find_ui_active_(false),
       find_op_aborted_(false),
       current_find_request_id_(find_request_id_counter_++),
       last_search_case_sensitive_(false),
       last_search_result_(),
-      app_extension_(NULL),
-      app_extension_for_current_page_(NULL),
+      extension_app_(NULL),
       capturing_contents_(false),
       is_being_destroyed_(false),
       notify_disconnection_(false),
@@ -288,10 +297,13 @@ TabContents::TabContents(Profile* profile,
       is_showing_before_unload_dialog_(false),
       renderer_preferences_(),
       opener_dom_ui_type_(DOMUIFactory::kNoDOMUI),
-      language_state_(&controller_) {
-  ClearBlockedContentSettings();
+      language_state_(&controller_),
+      closed_by_user_gesture_(false) {
   renderer_preferences_util::UpdateFromSystemSettings(
       &renderer_preferences_, profile);
+
+  content_settings_delegate_.reset(
+      new TabSpecificContentSettings(this, profile));
 
 #if defined(OS_CHROMEOS)
   // Make sure the thumbnailer is started before starting the render manager.
@@ -427,12 +439,13 @@ void TabContents::RegisterUserPrefs(PrefService* prefs) {
                              pref_defaults.dom_paste_enabled);
   prefs->RegisterBooleanPref(prefs::kWebKitShrinksStandaloneImagesToFit,
                              pref_defaults.shrinks_standalone_images_to_fit);
-  prefs->RegisterStringPref(prefs::kWebKitInspectorSettings,
-                            UTF8ToWide(pref_defaults.inspector_settings));
+  prefs->RegisterDictionaryPref(prefs::kWebKitInspectorSettings);
   prefs->RegisterBooleanPref(prefs::kWebKitTextAreasAreResizable,
                              pref_defaults.text_areas_are_resizable);
   prefs->RegisterBooleanPref(prefs::kWebKitJavaEnabled,
                              pref_defaults.java_enabled);
+  prefs->RegisterBooleanPref(prefs::kWebkitTabsToLinks,
+                             pref_defaults.tabs_to_links);
 
   prefs->RegisterLocalizedStringPref(prefs::kAcceptLanguages,
                                      IDS_ACCEPT_LANGUAGES);
@@ -491,11 +504,11 @@ RenderProcessHost* TabContents::GetRenderProcessHost() const {
   return render_manager_.current_host()->process();
 }
 
-void TabContents::SetAppExtension(Extension* extension) {
+void TabContents::SetExtensionApp(Extension* extension) {
   DCHECK(!extension || extension->GetFullLaunchURL().is_valid());
-  app_extension_ = extension;
+  extension_app_ = extension;
 
-  UpdateAppExtensionIcon(app_extension_);
+  UpdateExtensionAppIcon(extension_app_);
 
   NotificationService::current()->Notify(
       NotificationType::TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED,
@@ -503,17 +516,31 @@ void TabContents::SetAppExtension(Extension* extension) {
       NotificationService::NoDetails());
 }
 
-void TabContents::SetAppExtensionById(const std::string& app_extension_id) {
-  if (app_extension_id.empty())
+void TabContents::SetExtensionAppById(const std::string& extension_app_id) {
+  if (extension_app_id.empty())
     return;
 
   ExtensionsService* extension_service = profile()->GetExtensionsService();
   if (extension_service && extension_service->is_ready()) {
     Extension* extension =
-        extension_service->GetExtensionById(app_extension_id, false);
+        extension_service->GetExtensionById(extension_app_id, false);
     if (extension)
-      SetAppExtension(extension);
+      SetExtensionApp(extension);
   }
+}
+
+SkBitmap* TabContents::GetExtensionAppIcon() {
+  // We don't show the big icons in tabs for TYPE_EXTENSION_APP windows because
+  // for those windows, we already have a big icon in the top-left outside any
+  // tab. Having big tab icons too looks kinda redonk.
+  Browser* browser = delegate_ ? delegate_->GetBrowser() : NULL;
+  if (browser && browser->type() == Browser::TYPE_EXTENSION_APP)
+    return NULL;
+
+  if (extension_app_icon_.empty())
+    return NULL;
+
+  return &extension_app_icon_;
 }
 
 const GURL& TabContents::GetURL() const {
@@ -627,24 +654,6 @@ bool TabContents::ShouldDisplayFavIcon() {
   return true;
 }
 
-bool TabContents::IsContentBlocked(ContentSettingsType content_type) const {
-  if (content_type == CONTENT_SETTINGS_TYPE_POPUPS)
-    return blocked_popups_ != NULL;
-
-  if (content_type == CONTENT_SETTINGS_TYPE_IMAGES ||
-      content_type == CONTENT_SETTINGS_TYPE_JAVASCRIPT ||
-      content_type == CONTENT_SETTINGS_TYPE_PLUGINS ||
-      content_type == CONTENT_SETTINGS_TYPE_COOKIES)
-    return content_blocked_[content_type];
-
-  // TODO(joth): remove once fully implemented.
-  if (content_type == CONTENT_SETTINGS_TYPE_GEOLOCATION)
-    return false;
-
-  NOTREACHED();
-  return false;
-}
-
 std::wstring TabContents::GetStatusText() const {
   if (!is_loading() || load_state_ == net::LOAD_STATE_IDLE)
     return std::wstring();
@@ -652,12 +661,16 @@ std::wstring TabContents::GetStatusText() const {
   switch (load_state_) {
     case net::LOAD_STATE_WAITING_FOR_CACHE:
       return l10n_util::GetString(IDS_LOAD_STATE_WAITING_FOR_CACHE);
+    case net::LOAD_STATE_ESTABLISHING_PROXY_TUNNEL:
+      return l10n_util::GetString(IDS_LOAD_STATE_ESTABLISHING_PROXY_TUNNEL);
     case net::LOAD_STATE_RESOLVING_PROXY_FOR_URL:
       return l10n_util::GetString(IDS_LOAD_STATE_RESOLVING_PROXY_FOR_URL);
     case net::LOAD_STATE_RESOLVING_HOST:
       return l10n_util::GetString(IDS_LOAD_STATE_RESOLVING_HOST);
     case net::LOAD_STATE_CONNECTING:
       return l10n_util::GetString(IDS_LOAD_STATE_CONNECTING);
+    case net::LOAD_STATE_SSL_HANDSHAKE:
+      return l10n_util::GetString(IDS_LOAD_STATE_SSL_HANDSHAKE);
     case net::LOAD_STATE_SENDING_REQUEST:
       if (upload_size_)
         return l10n_util::GetStringF(
@@ -761,6 +774,11 @@ bool TabContents::NavigateToPendingEntry(
   if (!dest_render_view_host)
     return false;  // Unable to create the desired render view host.
 
+  if (delegate_ && delegate_->ShouldEnablePreferredSizeNotifications()) {
+    dest_render_view_host->EnablePreferredSizeChangedMode(
+        kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow);
+  }
+
   // For security, we should never send non-DOM-UI URLs (other than about:blank)
   // to a DOM UI renderer.  Double check that here.
   int enabled_bindings = dest_render_view_host->enabled_bindings();
@@ -809,16 +827,12 @@ bool TabContents::NavigateToPendingEntry(
       favicon_service->SetFaviconOutOfDateForPage(entry.url());
   }
 
-  // The url likely changed, see if there is an extension whose extent contains
-  // the current page.
-  UpdateAppExtensionForCurrentPage();
-
   return true;
 }
 
 void TabContents::Stop() {
   render_manager_.Stop();
-  printing_.Stop();
+  printing_->Stop();
 }
 
 void TabContents::DisassociateFromPopupCount() {
@@ -833,6 +847,8 @@ TabContents* TabContents::Clone() {
                                     SiteInstance::CreateSiteInstance(profile()),
                                     MSG_ROUTING_NONE, this);
   tc->controller().CopyStateFrom(controller_);
+  tc->extension_app_ = extension_app_;
+  tc->extension_app_icon_ = extension_app_icon_;
   return tc;
 }
 
@@ -887,11 +903,13 @@ void TabContents::AddNewContents(TabContents* new_contents,
     if (disposition == NEW_POPUP) {
       // If the popup is bigger than a given factor of the screen, then
       // turn it into a foreground tab (on chrome os only)
+      // Also check for width or height == 0, which would otherwise indicate
+      // a tab sized popup window.
       GdkScreen* screen = gdk_screen_get_default();
       int max_width = gdk_screen_get_width(screen) * kMaxWidthFactor;
       int max_height = gdk_screen_get_height(screen) * kMaxHeightFactor;
-      if (initial_pos.width() > max_width ||
-          initial_pos.height() > max_height) {
+      if (initial_pos.width() > max_width || initial_pos.width() == 0 ||
+          initial_pos.height() > max_height || initial_pos.height() == 0) {
         disposition = NEW_FOREGROUND_TAB;
       }
     }
@@ -926,10 +944,11 @@ bool TabContents::ExecuteCode(int request_id, const std::string& extension_id,
 void TabContents::PopupNotificationVisibilityChanged(bool visible) {
   if (is_being_destroyed_)
     return;
+  content_settings_delegate_->SetPopupsBlocked(visible);
   if (!dont_notify_render_view_)
-    render_view_host()->PopupNotificationVisibilityChanged(visible);
-  if (delegate_)
-    delegate_->OnBlockedContentChange(this);
+    render_view_host()->AllowScriptToClose(!visible);
+  if (visible)
+    PopupBlockedAnimation::Show(this);
 }
 
 gfx::NativeView TabContents::GetContentNativeView() const {
@@ -1116,8 +1135,12 @@ void TabContents::OnStartDownload(DownloadItem* download) {
   // Download in a constrained popup is shown in the tab that opened it.
   TabContents* tab_contents = delegate()->GetConstrainingContents(this);
 
-  if (tab_contents && tab_contents->delegate())
+  if (tab_contents && tab_contents->delegate()) {
     tab_contents->delegate()->OnStartDownload(download);
+    // If the download occurs in a new tab, close it
+    if (controller_.IsInitialNavigation() && (tab_contents == this))
+      delegate()->CloseContents(this);
+  }
 }
 
 void TabContents::WillClose(ConstrainedWindow* window) {
@@ -1201,12 +1224,16 @@ void TabContents::StartFinding(string16 search_string,
 
 void TabContents::StopFinding(
     FindBarController::SelectionAction selection_action) {
-  // When the action is kClearAction, it means the find string has been cleared
-  // by the user, but the UI has not been dismissed.
-  if (selection_action != FindBarController::kClearSelection)
+  if (selection_action == FindBarController::kClearSelection) {
+    // kClearSelection means the find string has been cleared by the user, but
+    // the UI has not been dismissed. In that case we want to clear the
+    // previously remembered search (http://crbug.com/42639).
+    previous_find_text_ = string16();
+  } else {
     find_ui_active_ = false;
-  if (!find_text_.empty())
-    previous_find_text_ = find_text_;
+    if (!find_text_.empty())
+      previous_find_text_ = find_text_;
+  }
   find_text_.clear();
   find_op_aborted_ = true;
   last_search_result_ = FindNotificationDetails();
@@ -1322,12 +1349,26 @@ void TabContents::OnCloseStarted() {
     tab_close_start_time_ = base::TimeTicks::Now();
 }
 
+void TabContents::set_request_context(URLRequestContextGetter* context) {
+  request_context_ = context;
+}
+
+bool TabContents::ShouldAcceptDragAndDrop() const {
+#if defined(OS_CHROMEOS)
+  // ChromeOS panels (pop-ups) do not take drag-n-drop.
+  // See http://crosbug.com/2413
+  return delegate() && !delegate()->IsPopup(const_cast<TabContents*>(this));
+#else
+  return true;
+#endif
+}
+
 TabContents* TabContents::CloneAndMakePhantom() {
   TabNavigation tab_nav;
 
   NavigationEntry* entry = controller().GetActiveEntry();
-  if (app_extension_)
-    tab_nav.set_url(app_extension_->GetFullLaunchURL());
+  if (extension_app_)
+    tab_nav.set_virtual_url(extension_app_->GetFullLaunchURL());
   else if (entry)
     tab_nav.SetFromNavigationEntry(*entry);
 
@@ -1336,39 +1377,13 @@ TabContents* TabContents::CloneAndMakePhantom() {
 
   TabContents* new_contents =
       new TabContents(profile(), NULL, MSG_ROUTING_NONE, NULL);
-  new_contents->SetAppExtension(app_extension_);
+  new_contents->SetExtensionApp(extension_app_);
   new_contents->controller().RestoreFromState(navigations, 0, false);
 
-  if (!app_extension_ && entry)
+  if (!extension_app_ && entry)
     new_contents->controller().GetActiveEntry()->favicon() = entry->favicon();
 
   return new_contents;
-}
-
-// Resets the |content_blocked_| array.
-void TabContents::ClearBlockedContentSettings() {
-  for (size_t i = 0; i < arraysize(content_blocked_); ++i)
-    content_blocked_[i] = false;
-}
-
-// Resets the |geolocation_settings_| map.
-void TabContents::ClearGeolocationContentSettings(
-    const NavigationController::LoadCommittedDetails& details) {
-  if (!geolocation_content_settings_.empty()) {
-    // Clear the geolocation settings only if we're going to a new origin,
-    // or if we're staying at the same origin and its setting is ASK.
-    // This is to prevent clearing the icon by just changing some URL param.
-    // TODO(bulach): refactor this logic into its own class and remove the
-    // duplication from ContentSettingDomainListBubbleModel.
-    if (!details.entry ||
-        details.previous_url.GetOrigin() != details.entry->url().GetOrigin() ||
-        (details.entry->url().is_valid() &&
-         profile()->GetGeolocationContentSettingsMap()->GetContentSetting(
-             details.entry->url(), details.entry->url()) ==
-         CONTENT_SETTING_ASK)) {
-      geolocation_content_settings_.clear();
-    }
-  }
 }
 
 // Notifies the RenderWidgetHost instance about the fact that the page is
@@ -1406,15 +1421,25 @@ void TabContents::SetIsLoading(bool is_loading,
 
 void TabContents::AddPopup(TabContents* new_contents,
                            const gfx::Rect& initial_pos) {
-  GURL url(GetURL());
-  if (url.is_valid() &&
+  // A page can't spawn popups (or do anything else, either) until its load
+  // commits, so when we reach here, the popup was spawned by the
+  // NavigationController's last committed entry, not the active entry.  For
+  // example, if a page opens a popup in an onunload() handler, then the active
+  // entry is the page to be loaded as we navigate away from the unloading
+  // page.  For this reason, we can't use GetURL() to get the opener URL,
+  // because it returns the active entry.
+  NavigationEntry* entry = controller_.GetLastCommittedEntry();
+  GURL creator = entry ? entry->virtual_url() : GURL::EmptyGURL();
+
+  if (creator.is_valid() &&
       profile()->GetHostContentSettingsMap()->GetContentSetting(
-          url, CONTENT_SETTINGS_TYPE_POPUPS) == CONTENT_SETTING_ALLOW) {
+          creator, CONTENT_SETTINGS_TYPE_POPUPS) == CONTENT_SETTING_ALLOW) {
     AddNewContents(new_contents, NEW_POPUP, initial_pos, true);
   } else {
     if (!blocked_popups_)
       blocked_popups_ = new BlockedPopupContainer(this);
     blocked_popups_->AddTabContents(new_contents, initial_pos);
+    content_settings_delegate_->OnContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS);
   }
 }
 
@@ -1551,16 +1576,18 @@ void TabContents::DidNavigateMainFramePostCommit(
 
     // Close blocked popups.
     if (blocked_popups_) {
-      AutoReset auto_reset(&dont_notify_render_view_, true);
+      AutoReset<bool> auto_reset(&dont_notify_render_view_, true);
       blocked_popups_->Destroy();
       blocked_popups_ = NULL;
     }
 
     // Clear "blocked" flags.
-    ClearBlockedContentSettings();
-    ClearGeolocationContentSettings(details);
-    if (delegate_)
-      delegate_->OnBlockedContentChange(this);
+    content_settings_delegate_->ClearBlockedContentSettings();
+    content_settings_delegate_->GeolocationDidNavigate(details);
+
+    // Once the main frame is navigated, we're no longer considered to have
+    // displayed insecure content.
+    displayed_insecure_content_ = false;
   }
 
   // Close constrained windows if necessary.
@@ -1574,10 +1601,6 @@ void TabContents::DidNavigateMainFramePostCommit(
   // Clear the cache of forms in AutoFill.
   if (autofill_manager_.get())
     autofill_manager_->Reset();
-
-  // The url likely changed, see if there is an extension whose extent contains
-  // the current page.
-  UpdateAppExtensionForCurrentPage();
 }
 
 void TabContents::DidNavigateAnyFramePostCommit(
@@ -1694,20 +1717,20 @@ bool TabContents::UpdateTitleForEntry(NavigationEntry* entry,
   // For file URLs without a title, use the pathname instead. In the case of a
   // synthesized title, we don't want the update to count toward the "one set
   // per page of the title to history."
-  std::wstring final_title;
+  string16 final_title;
   bool explicit_set;
   if (entry->url().SchemeIsFile() && title.empty()) {
-    final_title = UTF8ToWide(entry->url().ExtractFileName());
+    final_title = UTF8ToUTF16(entry->url().ExtractFileName());
     explicit_set = false;  // Don't count synthetic titles toward the set limit.
   } else {
-    TrimWhitespace(title, TRIM_ALL, &final_title);
+    TrimWhitespace(WideToUTF16Hack(title), TRIM_ALL, &final_title);
     explicit_set = true;
   }
 
-  if (final_title == UTF16ToWideHack(entry->title()))
+  if (final_title == entry->title())
     return false;  // Nothing changed, don't bother.
 
-  entry->set_title(WideToUTF16Hack(final_title));
+  entry->set_title(final_title);
 
   // Update the history system for this page.
   if (!profile()->IsOffTheRecord() && !received_page_title_) {
@@ -1721,7 +1744,12 @@ bool TabContents::UpdateTitleForEntry(NavigationEntry* entry,
   }
 
   // Lastly, set the title for the view.
-  view_->SetPageTitle(final_title);
+  view_->SetPageTitle(UTF16ToWideHack(final_title));
+
+  NotificationService::current()->Notify(
+      NotificationType::TAB_CONTENTS_TITLE_UPDATED,
+      Source<TabContents>(this),
+      NotificationService::NoDetails());
 
   return true;
 }
@@ -1796,7 +1824,7 @@ void TabContents::GenerateKeywordIfNecessary(
   }
 
   const TemplateURL* current_url;
-  std::wstring url = UTF8ToWide(params.searchable_form_url.spec());
+  GURL url = params.searchable_form_url;
   if (!url_model->CanReplaceKeyword(keyword, url, &current_url))
     return;
 
@@ -1811,7 +1839,7 @@ void TabContents::GenerateKeywordIfNecessary(
   TemplateURL* new_url = new TemplateURL();
   new_url->set_keyword(keyword);
   new_url->set_short_name(keyword);
-  new_url->SetURL(url, 0, 0);
+  new_url->SetURL(url.spec(), 0, 0);
   new_url->add_input_encoding(params.searchable_form_encoding);
   DCHECK(controller_.GetLastCommittedEntry());
   const GURL& favicon_url =
@@ -1832,9 +1860,10 @@ void TabContents::GenerateKeywordIfNecessary(
 
 void TabContents::OnUserGesture() {
   // See comment in RenderViewHostDelegate::OnUserGesture as to why we do this.
-  DownloadRequestManager* drm = g_browser_process->download_request_manager();
-  if (drm)
-    drm->OnUserGesture(this);
+  DownloadRequestLimiter* limiter =
+      g_browser_process->download_request_limiter();
+  if (limiter)
+    limiter->OnUserGesture(this);
   ExternalProtocolHandler::OnUserGesture();
   controller_.OnUserGesture();
 }
@@ -1909,9 +1938,11 @@ void TabContents::OnCrashedPlugin(const FilePath& plugin_path) {
 #else
   NOTIMPLEMENTED() << " convert plugin path to plugin name";
 #endif
+  SkBitmap* crash_icon = ResourceBundle::GetSharedInstance().GetBitmapNamed(
+      IDR_INFOBAR_PLUGIN_CRASHED);
   AddInfoBar(new SimpleAlertInfoBarDelegate(
       this, l10n_util::GetStringF(IDS_PLUGIN_CRASHED_PROMPT, plugin_name),
-      NULL, true));
+      crash_icon, true));
 }
 
 void TabContents::OnCrashedWorker() {
@@ -1932,14 +1963,18 @@ void TabContents::OnDidGetApplicationInfo(
 void TabContents::OnPageContents(const GURL& url,
                                  int renderer_process_id,
                                  int32 page_id,
-                                 const std::wstring& contents,
-                                 const std::string& language) {
+                                 const string16& contents,
+                                 const std::string& language,
+                                 bool page_translatable) {
   // Don't index any https pages. People generally don't want their bank
   // accounts, etc. indexed on their computer, especially since some of these
   // things are not marked cachable.
   // TODO(brettw) we may want to consider more elaborate heuristics such as
   // the cachability of the page. We may also want to consider subframes (this
   // test will still index subframes if the subframe is SSL).
+  // TODO(zelidrag) bug chromium-os:2808 - figure out if we want to reenable
+  // content indexing for chromeos in some future releases.
+#if !defined(OS_CHROMEOS)
   if (!url.SchemeIsSecure()) {
     Profile* p = profile();
     if (p && !p->IsOffTheRecord()) {
@@ -1948,8 +1983,9 @@ void TabContents::OnPageContents(const GURL& url,
         hs->SetPageContents(url, contents);
     }
   }
+#endif
 
-  language_state_.LanguageDetermined(language);
+  language_state_.LanguageDetermined(language, page_translatable);
 
   std::string lang = language;
   NotificationService::current()->Notify(
@@ -2006,10 +2042,11 @@ void TabContents::DidLoadResourceFromMemoryCache(
     const std::string& main_frame_origin,
     const std::string& security_info) {
   // Send out a notification that we loaded a resource from our memory cache.
-  int cert_id = 0, cert_status = 0, security_bits = 0;
+  int cert_id = 0, cert_status = 0, security_bits = 0, connection_status = 0;
   SSLManager::DeserializeSecurityInfo(security_info,
                                       &cert_id, &cert_status,
-                                      &security_bits);
+                                      &security_bits,
+                                      &connection_status);
   LoadFromMemoryCacheDetails details(url, frame_origin, main_frame_origin,
                                      GetRenderProcessHost()->id(), cert_id,
                                      cert_status);
@@ -2021,7 +2058,8 @@ void TabContents::DidLoadResourceFromMemoryCache(
 }
 
 void TabContents::DidDisplayInsecureContent() {
-  controller_.ssl_manager()->DidDisplayInsecureContent();
+  displayed_insecure_content_ = true;
+  SSLManager::NotifySSLInternalStateChanged();
 }
 
 void TabContents::DidRunInsecureContent(const std::string& security_origin) {
@@ -2088,21 +2126,9 @@ void TabContents::DocumentLoadedInFrame() {
   controller_.DocumentLoadedInFrame();
 }
 
-void TabContents::OnContentBlocked(ContentSettingsType type) {
-  // TODO(joth): remove once fully implemented.
-  DCHECK(type != CONTENT_SETTINGS_TYPE_GEOLOCATION);
-  content_blocked_[type] = true;
+void TabContents::OnContentSettingsChange() {
   if (delegate_)
-    delegate_->OnBlockedContentChange(this);
-}
-
-void TabContents::OnGeolocationPermissionSet(const GURL& requesting_origin,
-                                             bool allowed) {
-  geolocation_content_settings_[requesting_origin] =
-      allowed ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK;
-  // TODO(bulach): rename OnBlockedContentChange to OnContentSettingsChange.
-  if (delegate_)
-    delegate_->OnBlockedContentChange(this);
+    delegate_->OnContentSettingsChange(this);
 }
 
 RenderViewHostDelegate::View* TabContents::GetViewDelegate() {
@@ -2123,12 +2149,17 @@ RenderViewHostDelegate::Resource* TabContents::GetResourceDelegate() {
   return this;
 }
 
+RenderViewHostDelegate::ContentSettings*
+TabContents::GetContentSettingsDelegate() {
+  return content_settings_delegate_.get();
+}
+
 RenderViewHostDelegate::Save* TabContents::GetSaveDelegate() {
   return save_package_.get();  // May be NULL, but we can return NULL.
 }
 
 RenderViewHostDelegate::Printing* TabContents::GetPrintingDelegate() {
-  return &printing_;
+  return printing_.get();
 }
 
 RenderViewHostDelegate::FavIcon* TabContents::GetFavIconDelegate() {
@@ -2157,6 +2188,10 @@ RenderViewHostDelegate::BookmarkDrag* TabContents::GetBookmarkDragDelegate() {
 void TabContents::SetBookmarkDragDelegate(
     RenderViewHostDelegate::BookmarkDrag* bookmark_drag) {
   bookmark_drag_ = bookmark_drag;
+}
+
+TabSpecificContentSettings* TabContents::GetTabSpecificContentSettings() const {
+  return content_settings_delegate_.get();
 }
 
 RendererPreferences TabContents::GetRendererPrefs(Profile* profile) const {
@@ -2218,7 +2253,7 @@ void TabContents::RenderViewReady(RenderViewHost* rvh) {
 
 void TabContents::RenderViewGone(RenderViewHost* rvh) {
   // Ask the print preview if this renderer was valuable.
-  if (!printing_.OnRenderViewGone(rvh))
+  if (!printing_->OnRenderViewGone(rvh))
     return;
   if (rvh != render_view_host()) {
     // The pending page's RenderViewHost is gone.
@@ -2366,10 +2401,9 @@ void TabContents::UpdateThumbnail(const GURL& url,
                                   const SkBitmap& bitmap,
                                   const ThumbnailScore& score) {
   // Tell History about this thumbnail
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kThumbnailStore)) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kTopSites)) {
     if (!profile()->IsOffTheRecord())
-      profile()->GetThumbnailStore()->SetPageThumbnail(url, bitmap,
-                                                       score, true);
+      profile()->GetTopSites()->SetPageThumbnail(url, bitmap, score);
   } else {
     HistoryService* hs;
     if (!profile()->IsOffTheRecord() &&
@@ -2379,9 +2413,20 @@ void TabContents::UpdateThumbnail(const GURL& url,
   }
 }
 
-void TabContents::UpdateInspectorSettings(const std::string& raw_settings) {
-  profile()->GetPrefs()->SetString(prefs::kWebKitInspectorSettings,
-                                   UTF8ToWide(raw_settings));
+void TabContents::UpdateInspectorSetting(const std::string& key,
+                                         const std::string& value) {
+  DictionaryValue* inspector_settings =
+      profile()->GetPrefs()->GetMutableDictionary(
+          prefs::kWebKitInspectorSettings);
+  inspector_settings->SetWithoutPathExpansion(UTF8ToWide(key),
+                                              Value::CreateStringValue(value));
+}
+
+void TabContents::ClearInspectorSettings() {
+  DictionaryValue* inspector_settings =
+      profile()->GetPrefs()->GetMutableDictionary(
+          prefs::kWebKitInspectorSettings);
+  inspector_settings->Clear();
 }
 
 void TabContents::Close(RenderViewHost* rvh) {
@@ -2481,7 +2526,7 @@ void TabContents::DomOperationResponse(const std::string& json_string,
 }
 
 void TabContents::ProcessDOMUIMessage(const std::string& message,
-                                      const Value* content,
+                                      const ListValue* content,
                                       const GURL& source_url,
                                       int request_id,
                                       bool has_callback) {
@@ -2523,8 +2568,11 @@ void TabContents::RunFileChooser(
       dialog_type = SelectFileDialog::SELECT_OPEN_FILE;  // Prevent warning.
       NOTREACHED();
   }
+  FilePath default_file_name = params.default_file_name;
+  if (default_file_name.empty())
+    default_file_name = profile()->last_selected_directory();
   select_file_dialog_->SelectFile(dialog_type, params.title,
-                                  params.default_file_name,
+                                  default_file_name,
                                   NULL, 0, FILE_PATH_LITERAL(""),
                                   view_->GetTopLevelNativeWindow(), NULL);
 }
@@ -2586,9 +2634,14 @@ void TabContents::ShowModalHTMLDialog(const GURL& url, int width, int height,
   }
 }
 
-void TabContents::PasswordFormsSeen(
+void TabContents::PasswordFormsFound(
     const std::vector<webkit_glue::PasswordForm>& forms) {
-  GetPasswordManager()->PasswordFormsSeen(forms);
+  GetPasswordManager()->PasswordFormsFound(forms);
+}
+
+void TabContents::PasswordFormsVisible(
+    const std::vector<webkit_glue::PasswordForm>& visible_forms) {
+  GetPasswordManager()->PasswordFormsVisible(visible_forms);
 }
 
 // Checks to see if we should generate a keyword based on the OSDD, and if
@@ -2663,6 +2716,60 @@ void TabContents::PageHasOSDD(RenderViewHost* render_view_host,
       autodetected);
 }
 
+// Indicates if the two inputs have the same security origin.
+// |requested_origin| should only be a security origin (no path, etc.).
+// It is ok if |template_url| is NULL.
+static bool IsSameOrigin(const GURL& requested_origin,
+                         const TemplateURL* template_url) {
+  DCHECK(requested_origin == requested_origin.GetOrigin());
+  return template_url && requested_origin ==
+      TemplateURLModel::GenerateSearchURL(template_url).GetOrigin();
+}
+
+ViewHostMsg_GetSearchProviderInstallState_Params
+    TabContents::GetSearchProviderInstallState(const GURL& requested_host) {
+  // Get the last committed entry since that is the page executing the
+  // javascript as opposed to a page being navigated to. We don't want
+  // to trust the page to tell us the url to avoid using potentially
+  // compromised information.
+  NavigationEntry* entry = controller_.GetLastCommittedEntry();
+  GURL page_origin = entry ? entry->virtual_url().GetOrigin() : GURL();
+  GURL requested_origin = requested_host.GetOrigin();
+  // Do the security check before any others to avoid information leaks.
+  if (page_origin != requested_origin)
+    return ViewHostMsg_GetSearchProviderInstallState_Params::Denied();
+
+  // In incognito mode, no search information is exposed. (This check must be
+  // done after the security check or else a web site can detect that the
+  // user is in incognito mode just by doing a cross origin request.)
+  if (profile()->IsOffTheRecord())
+    return ViewHostMsg_GetSearchProviderInstallState_Params::NotInstalled();
+
+  TemplateURLModel* url_model = profile()->GetTemplateURLModel();
+  if (!url_model)
+    return ViewHostMsg_GetSearchProviderInstallState_Params::NotInstalled();
+  if (!url_model->loaded())
+    url_model->Load();
+
+  // First check to see if the url is the default search provider.
+  if (IsSameOrigin(requested_origin, url_model->GetDefaultSearchProvider())) {
+    return ViewHostMsg_GetSearchProviderInstallState_Params::
+        InstalledAsDefault();
+  }
+
+  // Is the url any search provider?
+  std::vector<const TemplateURL*> urls = url_model->GetTemplateURLs();
+  for (std::vector<const TemplateURL*>::iterator i = urls.begin();
+       i != urls.end(); ++i) {
+    const TemplateURL* template_url = (*i);
+    if (IsSameOrigin(requested_origin, template_url)) {
+      return ViewHostMsg_GetSearchProviderInstallState_Params::
+          InstallButNotDefault();
+    }
+  }
+  return ViewHostMsg_GetSearchProviderInstallState_Params::NotInstalled();
+}
+
 GURL TabContents::GetAlternateErrorPageURL() const {
   GURL url;
   // Disable alternate error pages when in OffTheRecord/Incognito mode.
@@ -2706,10 +2813,6 @@ void TabContents::OnCrossSiteResponse(int new_render_process_host_id,
                                       new_request_id);
 }
 
-bool TabContents::CanBlur() const {
-  return delegate() ? delegate()->CanBlur() : true;
-}
-
 gfx::Rect TabContents::GetRootWindowResizerRect() const {
   if (delegate())
     return delegate()->GetRootWindowResizerRect();
@@ -2750,7 +2853,7 @@ void TabContents::LoadStateChanged(const GURL& url,
   upload_position_ = upload_position;
   upload_size_ = upload_size;
   std::wstring languages =
-      profile()->GetPrefs()->GetString(prefs::kAcceptLanguages);
+      UTF8ToWide(profile()->GetPrefs()->GetString(prefs::kAcceptLanguages));
   std::string host = url.host();
   load_state_host_ =
       net::IDNToUnicode(host.c_str(), host.size(), languages, NULL);
@@ -2780,6 +2883,7 @@ void TabContents::FocusedNodeChanged() {
 
 void TabContents::FileSelected(const FilePath& path,
                                int index, void* params) {
+  profile()->set_last_selected_directory(path.DirName());
   std::vector<FilePath> files;
   files.push_back(path);
   render_view_host()->FilesSelectedInChooser(files);
@@ -2787,6 +2891,8 @@ void TabContents::FileSelected(const FilePath& path,
 
 void TabContents::MultiFilesSelected(const std::vector<FilePath>& files,
                                      void* params) {
+  if (!files.empty())
+    profile()->set_last_selected_directory(files[0].DirName());
   render_view_host()->FilesSelectedInChooser(files);
 }
 
@@ -2803,6 +2909,16 @@ void TabContents::BeforeUnloadFiredFromRenderManager(
     delegate()->BeforeUnloadFired(this, proceed, proceed_to_fire_unload);
 }
 
+void TabContents::DidStartLoadingFromRenderManager(
+      RenderViewHost* render_view_host) {
+  DidStartLoading();
+}
+
+void TabContents::RenderViewGoneFromRenderManager(
+    RenderViewHost* render_view_host) {
+  RenderViewGone(render_view_host);
+}
+
 void TabContents::UpdateRenderViewSizeForRenderManager() {
   // TODO(brettw) this is a hack. See TabContentsView::SizeContents.
   gfx::Size size = view_->GetContainerSize();
@@ -2812,6 +2928,14 @@ void TabContents::UpdateRenderViewSizeForRenderManager() {
   // normal size later so just ignore it.
   if (!size.IsEmpty())
     view_->SizeContents(size);
+}
+
+void TabContents::NotifySwappedFromRenderManager() {
+  NotifySwapped();
+}
+
+NavigationController& TabContents::GetControllerForRenderManager() {
+  return controller();
 }
 
 DOMUI* TabContents::CreateDOMUIForRenderManager(const GURL& url) {
@@ -2825,19 +2949,13 @@ TabContents::GetLastCommittedNavigationEntryForRenderManager() {
 
 bool TabContents::CreateRenderViewForRenderManager(
     RenderViewHost* render_view_host) {
-  // If the pending navigation is to a DOMUI, tell the RenderView about any
-  // bindings it will need enabled.
-  if (render_manager_.pending_dom_ui())
-    render_view_host->AllowBindings(
-        render_manager_.pending_dom_ui()->bindings());
-
   RenderWidgetHostView* rwh_view = view_->CreateViewForWidget(render_view_host);
 
   scoped_refptr<URLRequestContextGetter> request_context = request_context_;
   if (!request_context.get())
     request_context = profile()->GetRequestContext();
 
-  if (!render_view_host->CreateRenderView(request_context))
+  if (!render_view_host->CreateRenderView(request_context, string16()))
     return false;
 
   // Now that the RenderView has been created, we need to tell it its size.
@@ -2911,53 +3029,40 @@ void TabContents::Observe(NotificationType type,
       GURL entry_url;
       if (entry)
         entry_url = entry->url();
-      Source<HostContentSettingsMap> content_settings(source);
       if (settings_details.ptr()->update_all() ||
           settings_details.ptr()->pattern().Matches(entry_url)) {
         render_view_host()->SendContentSettings(entry_url,
-            content_settings.ptr()->GetContentSettings(entry_url));
+            profile()->GetHostContentSettingsMap()->
+                GetContentSettings(entry_url));
       }
       break;
     }
 
-    case NotificationType::EXTENSION_LOADED: {
-      if (!app_extension_ && !app_extension_for_current_page_ &&
-          Source<Profile>(source).ptr() == profile()) {
-        UpdateAppExtensionForCurrentPage();
-        if (app_extension_for_current_page_)
-          NotifyNavigationStateChanged(INVALIDATE_TAB);
-      }
+    case NotificationType::EXTENSION_LOADED:
       break;
-    }
 
     case NotificationType::EXTENSION_UNLOADED:
-    case NotificationType::EXTENSION_UNLOADED_DISABLED: {
-      if (app_extension_for_current_page_ ==
-          Details<Extension>(details).ptr()) {
-        app_extension_for_current_page_ = NULL;
-        UpdateAppExtensionForCurrentPage();
-        NotifyNavigationStateChanged(INVALIDATE_TAB);
-      }
+    case NotificationType::EXTENSION_UNLOADED_DISABLED:
       break;
-    }
 
     default:
       NOTREACHED();
   }
 }
 
-void TabContents::UpdateAppExtensionIcon(Extension* extension) {
-  app_extension_icon_.reset();
+void TabContents::UpdateExtensionAppIcon(Extension* extension) {
+  extension_app_icon_.reset();
+
   if (extension) {
-    app_extension_image_loader_.reset(new ImageLoadingTracker(this));
-    app_extension_image_loader_->LoadImage(
+    extension_app_image_loader_.reset(new ImageLoadingTracker(this));
+    extension_app_image_loader_->LoadImage(
         extension,
         extension->GetIconPath(Extension::EXTENSION_ICON_SMALLISH),
         gfx::Size(Extension::EXTENSION_ICON_SMALLISH,
                   Extension::EXTENSION_ICON_SMALLISH),
         ImageLoadingTracker::CACHE);
   } else {
-    app_extension_image_loader_.reset(NULL);
+    extension_app_image_loader_.reset(NULL);
   }
 }
 
@@ -2971,26 +3076,10 @@ Extension* TabContents::GetExtensionContaining(const GURL& url) {
       extension : extensions_service->GetExtensionByWebExtent(url);
 }
 
-void TabContents::UpdateAppExtensionForCurrentPage() {
-  if (app_extension_) {
-    // Tab has an explicit app extension; nothing to do.
-    return;
-  }
-
-  // Check the current extension before iterating through all extensions.
-  if (app_extension_for_current_page_ &&
-      app_extension_for_current_page_->web_extent().ContainsURL(GetURL())) {
-    return;
-  }
-
-  app_extension_for_current_page_ = GetExtensionContaining(GetURL());
-  UpdateAppExtensionIcon(app_extension_for_current_page_);
-}
-
 void TabContents::OnImageLoaded(SkBitmap* image, ExtensionResource resource,
                                 int index) {
   if (image) {
-    app_extension_icon_ = *image;
+    extension_app_icon_ = *image;
     NotifyNavigationStateChanged(INVALIDATE_TAB);
   }
 }
@@ -3014,10 +3103,9 @@ std::wstring TabContents::GetMessageBoxTitle(const GURL& frame_url,
   // TODO(brettw) it should be easier than this to do the correct language
   // handling without getting the accept language from the profile.
   std::wstring base_address = gfx::ElideUrl(clean_url, gfx::Font(), 0,
-      profile()->GetPrefs()->GetString(prefs::kAcceptLanguages));
+      UTF8ToWide(profile()->GetPrefs()->GetString(prefs::kAcceptLanguages)));
   // Force URL to have LTR directionality.
-  if (base::i18n::IsRTL())
-    base::i18n::WrapStringWithLTRFormatting(&base_address);
+  base::i18n::GetDisplayStringInLTRDirectionality(&base_address);
 
   return l10n_util::GetStringF(
       is_alert ? IDS_JAVASCRIPT_ALERT_TITLE : IDS_JAVASCRIPT_MESSAGEBOX_TITLE,
@@ -3047,6 +3135,14 @@ void TabContents::SetSuppressMessageBoxes(bool suppress_message_boxes) {
   set_suppress_javascript_messages(suppress_message_boxes);
 }
 
+TabContents* TabContents::AsTabContents() {
+  return this;
+}
+
+ExtensionHost* TabContents::AsExtensionHost() {
+  return NULL;
+}
+
 void TabContents::set_encoding(const std::string& encoding) {
   encoding_ = CharacterEncoding::GetCanonicalEncodingNameByAliasName(encoding);
 }
@@ -3054,4 +3150,98 @@ void TabContents::set_encoding(const std::string& encoding) {
 void TabContents::SetAppIcon(const SkBitmap& app_icon) {
   app_icon_ = app_icon;
   NotifyNavigationStateChanged(INVALIDATE_TITLE);
+}
+
+// After a successful *new* login attempt, we take the PasswordFormManager in
+// provisional_save_manager_ and move it to a SavePasswordInfoBarDelegate while
+// the user makes up their mind with the "save password" infobar. Note if the
+// login is one we already know about, the end of the line is
+// provisional_save_manager_ because we just update it on success and so such
+// forms never end up in an infobar.
+class SavePasswordInfoBarDelegate : public ConfirmInfoBarDelegate {
+ public:
+  SavePasswordInfoBarDelegate(TabContents* tab_contents,
+                              PasswordFormManager* form_to_save)
+      : ConfirmInfoBarDelegate(tab_contents),
+        form_to_save_(form_to_save),
+        infobar_response_(kNoResponse) {
+  }
+
+  virtual ~SavePasswordInfoBarDelegate() { }
+
+  // Overridden from ConfirmInfoBarDelegate:
+  virtual void InfoBarClosed() {
+    UMA_HISTOGRAM_ENUMERATION("PasswordManager.InfoBarResponse",
+                              infobar_response_, kNumResponseTypes);
+    delete this;
+  }
+
+  virtual std::wstring GetMessageText() const {
+    return l10n_util::GetString(IDS_PASSWORD_MANAGER_SAVE_PASSWORD_PROMPT);
+  }
+
+  virtual SkBitmap* GetIcon() const {
+    return ResourceBundle::GetSharedInstance().GetBitmapNamed(
+        IDR_INFOBAR_SAVE_PASSWORD);
+  }
+
+  virtual int GetButtons() const {
+    return BUTTON_OK | BUTTON_CANCEL;
+  }
+
+  virtual std::wstring GetButtonLabel(InfoBarButton button) const {
+    if (button == BUTTON_OK)
+      return l10n_util::GetString(IDS_PASSWORD_MANAGER_SAVE_BUTTON);
+    if (button == BUTTON_CANCEL)
+      return l10n_util::GetString(IDS_PASSWORD_MANAGER_BLACKLIST_BUTTON);
+    NOTREACHED();
+    return std::wstring();
+  }
+
+  virtual bool Accept() {
+    DCHECK(form_to_save_.get());
+    form_to_save_->Save();
+    infobar_response_ = kRememberPassword;
+    return true;
+  }
+
+  virtual bool Cancel() {
+    DCHECK(form_to_save_.get());
+    form_to_save_->PermanentlyBlacklist();
+    infobar_response_ = kDontRememberPassword;
+    return true;
+  }
+
+ private:
+  // The PasswordFormManager managing the form we're asking the user about,
+  // and should update as per her decision.
+  scoped_ptr<PasswordFormManager> form_to_save_;
+
+  // Used to track the results we get from the info bar.
+  enum ResponseType {
+    kNoResponse = 0,
+    kRememberPassword,
+    kDontRememberPassword,
+    kNumResponseTypes,
+  };
+  ResponseType infobar_response_;
+
+  DISALLOW_COPY_AND_ASSIGN(SavePasswordInfoBarDelegate);
+};
+
+void TabContents::FillPasswordForm(
+    const webkit_glue::PasswordFormFillData& form_data) {
+  render_view_host()->FillPasswordForm(form_data);
+}
+
+void TabContents::AddSavePasswordInfoBar(PasswordFormManager* form_to_save) {
+  AddInfoBar(new SavePasswordInfoBarDelegate(this, form_to_save));
+}
+
+Profile* TabContents::GetProfileForPasswordManager() {
+  return profile();
+}
+
+bool TabContents::DidLastPageLoadEncounterSSLErrors() {
+  return controller().ssl_manager()->ProcessedSSLErrorFromRequest();
 }

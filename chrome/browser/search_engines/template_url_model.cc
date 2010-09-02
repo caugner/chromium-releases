@@ -1,13 +1,13 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/search_engines/template_url_model.h"
 
-
 #include "app/l10n_util.h"
 #include "base/stl_util-inl.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/google_url_tracker.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_notifications.h"
@@ -16,6 +16,7 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -24,10 +25,10 @@
 using base::Time;
 
 // String in the URL that is replaced by the search term.
-static const wchar_t kSearchTermParameter[] = L"{searchTerms}";
+static const char kSearchTermParameter[] = "{searchTerms}";
 
 // String in Initializer that is replaced with kSearchTermParameter.
-static const wchar_t kTemplateParameter[] = L"%s";
+static const char kTemplateParameter[] = "%s";
 
 // Term used when generating a search url. Use something obscure so that on
 // the rare case the term replaces the URL it's unlikely another keyword would
@@ -109,9 +110,9 @@ void TemplateURLModel::Init(const Initializer* initializers,
     DCHECK(initializers[i].content);
 
     size_t template_position =
-        std::wstring(initializers[i].url).find(kTemplateParameter);
+        std::string(initializers[i].url).find(kTemplateParameter);
     DCHECK(template_position != std::wstring::npos);
-    std::wstring osd_url(initializers[i].url);
+    std::string osd_url(initializers[i].url);
     osd_url.replace(template_position, arraysize(kTemplateParameter) - 1,
                     kSearchTermParameter);
 
@@ -151,7 +152,7 @@ std::wstring TemplateURLModel::GenerateKeyword(const GURL& url,
     return std::wstring();
 
   // Strip "www." off the front of the keyword; otherwise the keyword won't work
-  // properly.  See http://b/issue?id=1205573.
+  // properly.  See http://code.google.com/p/chromium/issues/detail?id=6984 .
   return net::StripWWW(UTF8ToWide(url.host()));
 }
 
@@ -184,20 +185,21 @@ std::wstring TemplateURLModel::CleanUserInputKeyword(
 GURL TemplateURLModel::GenerateSearchURL(const TemplateURL* t_url) {
   DCHECK(t_url);
   const TemplateURLRef* search_ref = t_url->url();
-  if (!search_ref || !search_ref->IsValid())
+  // Extension keywords don't have host-based search URLs.
+  if (!search_ref || !search_ref->IsValid() || t_url->IsExtensionKeyword())
     return GURL();
 
   if (!search_ref->SupportsReplacement())
-    return GURL(WideToUTF8(search_ref->url()));
+    return GURL(search_ref->url());
 
-  return GURL(WideToUTF8(search_ref->ReplaceSearchTerms(
+  return GURL(search_ref->ReplaceSearchTerms(
       *t_url, kReplacementTerm, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-      std::wstring())));
+      std::wstring()));
 }
 
 bool TemplateURLModel::CanReplaceKeyword(
     const std::wstring& keyword,
-    const std::wstring& url,
+    const GURL& url,
     const TemplateURL** template_url_to_replace) {
   DCHECK(!keyword.empty()); // This should only be called for non-empty
                             // keywords. If we need to support empty kewords
@@ -216,9 +218,8 @@ bool TemplateURLModel::CanReplaceKeyword(
   // be replaced. We do this to ensure that if the user assigns a different
   // keyword to a generated TemplateURL, we won't regenerate another keyword for
   // the same host.
-  GURL gurl(WideToUTF8(url));
-  if (gurl.is_valid() && !gurl.host().empty())
-    return CanReplaceKeywordForHost(gurl.host(), template_url_to_replace);
+  if (url.is_valid() && !url.host().empty())
+    return CanReplaceKeywordForHost(url.host(), template_url_to_replace);
   return true;
 }
 
@@ -384,7 +385,8 @@ void TemplateURLModel::SetKeywordSearchTermsForURL(const TemplateURL* t_url,
       profile_->GetHistoryService(Profile::EXPLICIT_ACCESS) : NULL;
   if (!history)
     return;
-  history->SetKeywordSearchTermsForURL(url, t_url->id(), term);
+  history->SetKeywordSearchTermsForURL(url, t_url->id(),
+                                       WideToUTF16Hack(term));
 }
 
 void TemplateURLModel::RemoveFromMaps(const TemplateURL* template_url) {
@@ -433,17 +435,13 @@ void TemplateURLModel::RemoveFromMapsByPointer(
 
 void TemplateURLModel::SetTemplateURLs(
       const std::vector<const TemplateURL*>& urls) {
-  DCHECK(template_urls_.empty()); // This should only be called on load,
-                                  // when we have no TemplateURLs.
-
   // Add mappings for the new items.
   for (TemplateURLVector::const_iterator i = urls.begin(); i != urls.end();
        ++i) {
     next_id_ = std::max(next_id_, (*i)->id());
     AddToMaps(*i);
+    template_urls_.push_back(*i);
   }
-
-  template_urls_ = urls;
 }
 
 std::vector<const TemplateURL*> TemplateURLModel::GetTemplateURLs() const {
@@ -461,7 +459,7 @@ void TemplateURLModel::IncrementUsageCount(const TemplateURL* url) {
 void TemplateURLModel::ResetTemplateURL(const TemplateURL* url,
                                         const std::wstring& title,
                                         const std::wstring& keyword,
-                                        const std::wstring& search_url) {
+                                        const std::string& search_url) {
   DCHECK(url && find(template_urls_.begin(), template_urls_.end(), url) !=
          template_urls_.end());
   RemoveFromMaps(url);
@@ -504,9 +502,9 @@ void TemplateURLModel::SetDefaultSearchProvider(const TemplateURL* url) {
     if (url_ref && url_ref->HasGoogleBaseURLs()) {
       GoogleURLTracker::RequestServerCheck();
 #if defined(OS_WIN)
-      RLZTracker::RecordProductEvent(RLZTracker::CHROME,
-                                     RLZTracker::CHROME_OMNIBOX,
-                                     RLZTracker::SET_TO_GOOGLE);
+      RLZTracker::RecordProductEvent(rlz_lib::CHROME,
+                                     rlz_lib::CHROME_OMNIBOX,
+                                     rlz_lib::SET_TO_GOOGLE);
 #endif
     }
   }
@@ -602,7 +600,7 @@ void TemplateURLModel::OnWebDataServiceRequestDone(
                                                 keyword_result.keywords.end());
 
   const int resource_keyword_version =
-      TemplateURLPrepopulateData::GetDataVersion();
+      TemplateURLPrepopulateData::GetDataVersion(GetPrefs());
   if (keyword_result.builtin_keyword_version != resource_keyword_version) {
     // There should never be duplicate TemplateURLs. We had a bug such that
     // duplicate TemplateURLs existed for one locale. As such we invoke
@@ -674,6 +672,20 @@ void TemplateURLModel::RemoveDuplicatePrepopulateIDs(
   }
 }
 
+std::wstring TemplateURLModel::GetKeywordShortName(const std::wstring& keyword,
+                                                   bool* is_extension_keyword) {
+  const TemplateURL* template_url = GetTemplateURLForKeyword(keyword);
+
+  // TODO(sky): Once LocationBarView adds a listener to the TemplateURLModel
+  // to track changes to the model, this should become a DCHECK.
+  if (template_url) {
+    *is_extension_keyword = template_url->IsExtensionKeyword();
+    return template_url->AdjustedShortNameForLocaleDirection();
+  }
+  *is_extension_keyword = false;
+  return std::wstring();
+}
+
 void TemplateURLModel::Observe(NotificationType type,
                                const NotificationSource& source,
                                const NotificationDetails& details) {
@@ -711,6 +723,14 @@ void TemplateURLModel::NotifyLoaded() {
       NotificationType::TEMPLATE_URL_MODEL_LOADED,
       Source<TemplateURLModel>(this),
       NotificationService::NoDetails());
+
+  for (size_t i = 0; i < pending_extension_ids_.size(); ++i) {
+    Extension* extension = profile_->GetExtensionsService()->
+        GetExtensionById(pending_extension_ids_[i], true);
+    if (extension)
+      RegisterExtensionKeyword(extension);
+  }
+  pending_extension_ids_.clear();
 }
 
 void TemplateURLModel::MergeEnginesFromPrepopulateData() {
@@ -732,6 +752,7 @@ void TemplateURLModel::MergeEnginesFromPrepopulateData() {
 
   std::set<int> updated_ids;
   for (size_t i = 0; i < loaded_urls.size(); ++i) {
+    // We take ownership of |t_url|.
     scoped_ptr<TemplateURL> t_url(loaded_urls[i]);
     int t_url_id = t_url->prepopulate_id();
     if (!t_url_id || updated_ids.count(t_url_id)) {
@@ -745,22 +766,21 @@ void TemplateURLModel::MergeEnginesFromPrepopulateData() {
       const TemplateURL* existing_url = existing_url_iter->second;
       if (!existing_url->safe_for_autoreplace()) {
         // User edited the entry, preserve the keyword and description.
-        loaded_urls[i]->set_safe_for_autoreplace(false);
-        loaded_urls[i]->set_keyword(existing_url->keyword());
-        loaded_urls[i]->set_autogenerate_keyword(
+        t_url->set_safe_for_autoreplace(false);
+        t_url->set_keyword(existing_url->keyword());
+        t_url->set_autogenerate_keyword(
             existing_url->autogenerate_keyword());
-        loaded_urls[i]->set_short_name(existing_url->short_name());
+        t_url->set_short_name(existing_url->short_name());
       }
-      Replace(existing_url, loaded_urls[i]);
+      Replace(existing_url, t_url.release());
       id_to_turl.erase(existing_url_iter);
     } else {
-      Add(loaded_urls[i]);
+      Add(t_url.release());
     }
     if (i == default_search_index && !default_search_provider_)
       SetDefaultSearchProvider(loaded_urls[i]);
 
     updated_ids.insert(t_url_id);
-    t_url.release();
   }
 
   // Remove any prepopulated engines which are no longer in the master list, as
@@ -784,25 +804,25 @@ void TemplateURLModel::SaveDefaultSearchProviderToPrefs(
 
   RegisterPrefs(prefs);
 
-  const std::wstring search_url =
-      (t_url && t_url->url()) ? t_url->url()->url() : std::wstring();
+  const std::string search_url =
+      (t_url && t_url->url()) ? t_url->url()->url() : std::string();
   prefs->SetString(prefs::kDefaultSearchProviderSearchURL, search_url);
 
-  const std::wstring suggest_url =
+  const std::string suggest_url =
       (t_url && t_url->suggestions_url()) ? t_url->suggestions_url()->url() :
-                                            std::wstring();
+                                            std::string();
   prefs->SetString(prefs::kDefaultSearchProviderSuggestURL, suggest_url);
 
-  const std::wstring name =
-      t_url ? t_url->short_name() : std::wstring();
+  const std::string name =
+      t_url ? WideToUTF8(t_url->short_name()) : std::string();
   prefs->SetString(prefs::kDefaultSearchProviderName, name);
 
-  const std::wstring id_string =
-      t_url ? Int64ToWString(t_url->id()) : std::wstring();
+  const std::string id_string =
+      t_url ? Int64ToString(t_url->id()) : std::string();
   prefs->SetString(prefs::kDefaultSearchProviderID, id_string);
 
-  const std::wstring prepopulate_id =
-      t_url ? Int64ToWString(t_url->prepopulate_id()) : std::wstring();
+  const std::string prepopulate_id =
+      t_url ? Int64ToString(t_url->prepopulate_id()) : std::string();
   prefs->SetString(prefs::kDefaultSearchProviderPrepopulateID, prepopulate_id);
 
   prefs->ScheduleSavePersistentPrefs();
@@ -819,9 +839,9 @@ bool TemplateURLModel::LoadDefaultSearchProviderFromPrefs(
   }
   RegisterPrefs(prefs);
 
-  std::wstring suggest_url =
+  std::string suggest_url =
       prefs->GetString(prefs::kDefaultSearchProviderSuggestURL);
-  std::wstring search_url =
+  std::string search_url =
       prefs->GetString(prefs::kDefaultSearchProviderSearchURL);
 
   if (suggest_url.empty() && search_url.empty()) {
@@ -830,11 +850,12 @@ bool TemplateURLModel::LoadDefaultSearchProviderFromPrefs(
     return true;
   }
 
-  std::wstring name = prefs->GetString(prefs::kDefaultSearchProviderName);
+  std::wstring name =
+      UTF8ToWide(prefs->GetString(prefs::kDefaultSearchProviderName));
 
-  std::wstring id_string = prefs->GetString(prefs::kDefaultSearchProviderID);
+  std::string id_string = prefs->GetString(prefs::kDefaultSearchProviderID);
 
-  std::wstring prepopulate_id =
+  std::string prepopulate_id =
       prefs->GetString(prefs::kDefaultSearchProviderPrepopulateID);
 
   *default_provider = new TemplateURL();
@@ -842,10 +863,9 @@ bool TemplateURLModel::LoadDefaultSearchProviderFromPrefs(
   (*default_provider)->SetURL(search_url, 0, 0);
   (*default_provider)->SetSuggestionsURL(suggest_url, 0, 0);
   if (!id_string.empty())
-    (*default_provider)->set_id(StringToInt64(WideToUTF16Hack(id_string)));
+    (*default_provider)->set_id(StringToInt64(id_string));
   if (!prepopulate_id.empty())
-    (*default_provider)->set_prepopulate_id(StringToInt(WideToUTF16Hack(
-        prepopulate_id)));
+    (*default_provider)->set_prepopulate_id(StringToInt(prepopulate_id));
   return true;
 }
 
@@ -853,15 +873,15 @@ void TemplateURLModel::RegisterPrefs(PrefService* prefs) {
   if (prefs->FindPreference(prefs::kDefaultSearchProviderName))
     return;
   prefs->RegisterStringPref(
-      prefs::kDefaultSearchProviderName, std::wstring());
+      prefs::kDefaultSearchProviderName, std::string());
   prefs->RegisterStringPref(
-      prefs::kDefaultSearchProviderID, std::wstring());
+      prefs::kDefaultSearchProviderID, std::string());
   prefs->RegisterStringPref(
-      prefs::kDefaultSearchProviderPrepopulateID, std::wstring());
+      prefs::kDefaultSearchProviderPrepopulateID, std::string());
   prefs->RegisterStringPref(
-      prefs::kDefaultSearchProviderSuggestURL, std::wstring());
+      prefs::kDefaultSearchProviderSuggestURL, std::string());
   prefs->RegisterStringPref(
-      prefs::kDefaultSearchProviderSearchURL, std::wstring());
+      prefs::kDefaultSearchProviderSearchURL, std::string());
 }
 
 bool TemplateURLModel::CanReplaceKeywordForHost(
@@ -1035,4 +1055,54 @@ void TemplateURLModel::GoogleBaseURLChanged() {
     FOR_EACH_OBSERVER(TemplateURLModelObserver, model_observers_,
                       OnTemplateURLModelChanged());
   }
+}
+
+void TemplateURLModel::RegisterExtensionKeyword(Extension* extension) {
+  // TODO(mpcomplete): disable the keyword when the extension is disabled.
+  if (extension->omnibox_keyword().empty())
+    return;
+
+  Load();
+  if (!loaded_) {
+    pending_extension_ids_.push_back(extension->id());
+    return;
+  }
+
+  const TemplateURL* existing_url = GetTemplateURLForExtension(extension);
+  std::wstring keyword = UTF8ToWide(extension->omnibox_keyword());
+
+  TemplateURL* template_url = new TemplateURL;
+  template_url->set_short_name(UTF8ToWide(extension->name()));
+  template_url->set_keyword(keyword);
+  // This URL is not actually used for navigation. It holds the extension's
+  // ID, as well as forcing the TemplateURL to be treated as a search keyword.
+  template_url->SetURL(
+      std::string(chrome::kExtensionScheme) + "://" +
+      extension->id() + "/?q={searchTerms}", 0, 0);
+  template_url->set_safe_for_autoreplace(false);
+
+  if (existing_url) {
+    // TODO(mpcomplete): only replace if the user hasn't changed the keyword.
+    // (We don't have UI for that yet).
+    Replace(existing_url, template_url);
+  } else {
+    Add(template_url);
+  }
+}
+
+void TemplateURLModel::UnregisterExtensionKeyword(Extension* extension) {
+  const TemplateURL* url = GetTemplateURLForExtension(extension);
+  if (url)
+    Remove(url);
+}
+
+const TemplateURL* TemplateURLModel::GetTemplateURLForExtension(
+    Extension* extension) const {
+  for (TemplateURLVector::const_iterator i = template_urls_.begin();
+       i != template_urls_.end(); ++i) {
+    if ((*i)->IsExtensionKeyword() && (*i)->url()->GetHost() == extension->id())
+      return *i;
+  }
+
+  return NULL;
 }

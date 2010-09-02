@@ -157,7 +157,7 @@ class TableView : public NativeControl,
                        const gfx::Rect& current);
 
   // Returns the number of rows in the TableView.
-  int RowCount();
+  int RowCount() const;
 
   // Returns the number of selected rows.
   int SelectedRowCount();
@@ -227,14 +227,10 @@ class TableView : public NativeControl,
   bool is_sorted() const { return !sort_descriptors_.empty(); }
 
   // Maps from the index in terms of the model to that of the view.
-  int model_to_view(int model_index) const {
-    return model_to_view_.get() ? model_to_view_[model_index] : model_index;
-  }
+  int ModelToView(int model_index) const;
 
   // Maps from the index in terms of the view to that of the model.
-  int view_to_model(int view_index) const {
-    return view_to_model_.get() ? view_to_model_[view_index] : view_index;
-  }
+  int ViewToModel(int view_index) const;
 
   // Sets the text to display on top of the table. This is useful if the table
   // is empty and you want to inform the user why.
@@ -375,10 +371,6 @@ class TableView : public NativeControl,
   // range start - [start + length] are updated from the model.
   void UpdateListViewCache0(int start, int length, bool add);
 
-  // Notification from the ListView that the checked state of the item has
-  // changed.
-  void OnCheckedStateChanged(int model_row, bool is_checked);
-
   // Returns the index of the selected item before |view_index|, or -1 if
   // |view_index| is the first selected item.
   //
@@ -415,6 +407,10 @@ class TableView : public NativeControl,
   // Returns the font used for alt text.
   gfx::Font GetAltTextFont();
 
+  // Overriden in order to update the column sizes, which can only be sized
+  // accurately when the native control is available.
+  virtual void VisibilityChanged(View* starting_from, bool is_visible);
+
   TableModel* model_;
   TableTypes table_type_;
   TableViewObserver* table_view_observer_;
@@ -440,16 +436,15 @@ class TableView : public NativeControl,
   // Reflects the value passed to SetCustomColorsEnabled.
   bool custom_colors_enabled_;
 
-  // Whether or not the columns have been sized in the ListView. This is
-  // set to true the first time Layout() is invoked and we have a valid size.
-  bool sized_columns_;
-
   // Whether or not columns should automatically be resized to fill the
   // the available width when the list view is resized.
   bool autosize_columns_;
 
   // Whether or not the user can resize columns.
   bool resizable_columns_;
+
+  // Whether the column sizes have been determined.
+  bool column_sizes_valid_;
 
   // NOTE: While this has the name View in it, it's not a view. Rather it's
   // a wrapper around the List-View window.

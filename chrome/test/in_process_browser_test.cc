@@ -8,6 +8,7 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/scoped_nsautorelease_pool.h"
 #include "base/test/test_file_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
@@ -77,7 +78,7 @@ InProcessBrowserTest::InProcessBrowserTest()
     : browser_(NULL),
       show_window_(false),
       dom_automation_enabled_(false),
-      single_process_(false),
+      tab_closeable_state_watcher_enabled_(false),
       original_single_process_(false),
       initial_timeout_(kInitialTimeoutInMS) {
 }
@@ -93,18 +94,30 @@ void InProcessBrowserTest::SetUp() {
       "The user data directory name passed into this test was too "
       "short to delete safely.  Please check the user-data-dir "
       "argument and try again.";
-  if (ShouldDeleteProfile())
-    ASSERT_TRUE(file_util::DieFileDie(user_data_dir, true));
+  ASSERT_TRUE(file_util::DieFileDie(user_data_dir, true));
+
+  // Recreate the user data dir. (PathService::Get guarantees that the directory
+  // exists if it returns true, but it only actually checks on the first call,
+  // the rest are cached.  Thus we need to recreate it ourselves to not break
+  // the PathService guarantee.)
+  ASSERT_TRUE(file_util::CreateDirectory(user_data_dir));
 
   // The unit test suite creates a testingbrowser, but we want the real thing.
   // Delete the current one. We'll install the testing one in TearDown.
   delete g_browser_process;
+  g_browser_process = NULL;
+
+  SetUpUserDataDirectory();
 
   // Don't delete the resources when BrowserMain returns. Many ui classes
   // cache SkBitmaps in a static field so that if we delete the resource
   // bundle we'll crash.
   browser_shutdown::delete_resources_on_shutdown = false;
 
+  // Remember the command line.  Normally this doesn't matter, because the test
+  // harness creates a new process for each test, but when the test harness is
+  // running in single process mode, we can't let one test's command-line
+  // changes (e.g. enabling DOM automation) affect other tests.
   CommandLine* command_line = CommandLine::ForCurrentProcessMutable();
   original_command_line_.reset(new CommandLine(*command_line));
 
@@ -119,18 +132,11 @@ void InProcessBrowserTest::SetUp() {
   if (dom_automation_enabled_)
     command_line->AppendSwitch(switches::kDomAutomationController);
 
-  if (single_process_)
-    command_line->AppendSwitch(switches::kSingleProcess);
-
   // Turn off tip loading for tests; see http://crbug.com/17725
   command_line->AppendSwitch(switches::kDisableWebResources);
 
   command_line->AppendSwitchWithValue(switches::kUserDataDir,
                                       user_data_dir.ToWStringHack());
-
-  // For some reason the sandbox wasn't happy running in test mode. These
-  // tests aren't intended to test the sandbox, so we turn it off.
-  command_line->AppendSwitch(switches::kNoSandbox);
 
   // Don't show the first run ui.
   command_line->AppendSwitch(switches::kNoFirstRun);
@@ -140,13 +146,19 @@ void InProcessBrowserTest::SetUp() {
                                       ASCIIToWide(kBrowserTestType));
 
   // Single-process mode is not set in BrowserMain so it needs to be processed
-  // explicitlty.
+  // explicitly.
   original_single_process_ = RenderProcessHost::run_renderer_in_process();
   if (command_line->HasSwitch(switches::kSingleProcess))
     RenderProcessHost::set_run_renderer_in_process(true);
 
-  // Explicitly set the path of the exe used for the renderer and plugin,
-  // otherwise they'll try to use unit_test.exe.
+#if defined(OS_WIN)
+  // The Windows sandbox requires that the browser and child processes are the
+  // same binary.  So we launch browser_process.exe which loads chrome.dll
+  command_line->AppendSwitchWithValue(switches::kBrowserSubprocessPath,
+                                      command_line->GetProgram().value());
+#else
+  // Explicitly set the path of the binary used for child processes, otherwise
+  // they'll try to use browser_tests which doesn't contain ChromeMain.
   FilePath subprocess_path;
   PathService::Get(base::FILE_EXE, &subprocess_path);
   subprocess_path = subprocess_path.DirName();
@@ -154,11 +166,16 @@ void InProcessBrowserTest::SetUp() {
       chrome::kBrowserProcessExecutablePath));
   command_line->AppendSwitchWithValue(switches::kBrowserSubprocessPath,
                                       subprocess_path.ToWStringHack());
+#endif
 
   // Enable warning level logging so that we can see when bad stuff happens.
   command_line->AppendSwitch(switches::kEnableLogging);
   command_line->AppendSwitchWithValue(switches::kLoggingLevel,
                                       IntToWString(1));  // warning
+
+  // If ncecessary, disable TabCloseableStateWatcher.
+  if (!tab_closeable_state_watcher_enabled_)
+    command_line->AppendSwitch(switches::kDisableTabCloseableStateWatcher);
 
   SandboxInitWrapper sandbox_wrapper;
   MainFunctionParams params(*command_line, sandbox_wrapper, NULL);
@@ -213,7 +230,7 @@ void InProcessBrowserTest::TearDown() {
 
   browser_shutdown::delete_resources_on_shutdown = true;
 
-#if defined(WIN)
+#if defined(OS_WIN)
   BrowserView::SetShowState(-1);
 #endif
 
@@ -236,7 +253,8 @@ Browser* InProcessBrowserTest::CreateBrowser(Profile* profile) {
   Browser* browser = Browser::Create(profile);
 
   browser->AddTabWithURL(GURL(chrome::kAboutBlankURL), GURL(),
-                         PageTransition::START_PAGE, true, -1, false, NULL);
+                         PageTransition::START_PAGE, -1,
+                         TabStripModel::ADD_SELECTED, NULL, std::string());
 
   // Wait for the page to finish loading.
   ui_test_utils::WaitForNavigation(
@@ -248,6 +266,18 @@ Browser* InProcessBrowserTest::CreateBrowser(Profile* profile) {
 }
 
 void InProcessBrowserTest::RunTestOnMainThreadLoop() {
+  // On Mac, without the following autorelease pool, code which is directly
+  // executed (as opposed to executed inside a message loop) would autorelease
+  // objects into a higher-level pool. This pool is not recycled in-sync with
+  // the message loops' pools and causes problems with code relying on
+  // deallocation via an autorelease pool (such as browser window closure and
+  // browser shutdown). To avoid this, the following pool is recycled after each
+  // time code is directly executed.
+  base::ScopedNSAutoreleasePool pool;
+
+  // Pump startup related events.
+  MessageLoopForUI::current()->RunAllPending();
+
   // In the long term it would be great if we could use a TestingProfile
   // here and only enable services you want tested, but that requires all
   // consumers of Profile to handle NULL services.
@@ -256,62 +286,58 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
     // We should only be able to get here if the profile already exists and
     // has been created.
     NOTREACHED();
-    MessageLoopForUI::current()->Quit();
     return;
   }
+  pool.Recycle();
 
   ChromeThread::PostTask(
       ChromeThread::IO, FROM_HERE,
       NewRunnableFunction(chrome_browser_net::SetUrlRequestMocksEnabled, true));
 
   browser_ = CreateBrowser(profile);
+  pool.Recycle();
 
   // Start the timeout timer to prevent hangs.
   MessageLoopForUI::current()->PostDelayedTask(FROM_HERE,
       NewRunnableMethod(this, &InProcessBrowserTest::TimedOut),
       initial_timeout_);
 
-  RunTestOnMainThread();
-  CleanUpOnMainThread();
+  // Pump any pending events that were created as a result of creating a
+  // browser.
+  MessageLoopForUI::current()->RunAllPending();
 
-  // Close all browser windows.  This might not happen immediately, since some
-  // may need to wait for beforeunload and unload handlers to fire in a tab.
-  // When all windows are closed, the last window will call Quit(). Call
-  // Quit() explicitly if no windows are open.
-#if defined(OS_MACOSX)
-  // When the browser window closes, Cocoa will generate an inner-loop that
-  // processes the RenderProcessHost delete task, so allow task nesting.
-  bool old_state = MessageLoopForUI::current()->NestableTasksAllowed();
-  MessageLoopForUI::current()->SetNestableTasksAllowed(true);
-#endif
-  BrowserList::const_iterator browser = BrowserList::begin();
-  if (browser == BrowserList::end()) {
-    MessageLoopForUI::current()->Quit();
-  } else {
-    for (; browser != BrowserList::end(); ++browser)
-      (*browser)->CloseWindow();
-  }
-#if defined(OS_MACOSX)
-  MessageLoopForUI::current()->SetNestableTasksAllowed(old_state);
-#endif
+  RunTestOnMainThread();
+  pool.Recycle();
+
+  CleanUpOnMainThread();
+  pool.Recycle();
+
+  QuitBrowsers();
+  pool.Recycle();
 
   // Stop the HTTP server.
   http_server_ = NULL;
 }
 
-void InProcessBrowserTest::TimedOut() {
-  DCHECK(MessageLoopForUI::current()->IsNested());
+void InProcessBrowserTest::QuitBrowsers() {
+  if (BrowserList::size() == 0)
+    return;
 
+  // Invoke CloseAllBrowsersAndExit on a running message loop.
+  // CloseAllBrowsersAndExit exits the message loop after everything has been
+  // shut down properly.
+  MessageLoopForUI::current()->PostTask(
+      FROM_HERE,
+      NewRunnableFunction(&BrowserList::CloseAllBrowsersAndExit));
+  ui_test_utils::RunMessageLoop();
+}
+
+void InProcessBrowserTest::TimedOut() {
   std::string error_message = "Test timed out. Each test runs for a max of ";
   error_message += IntToString(kInitialTimeoutInMS);
   error_message += " ms (kInitialTimeoutInMS).";
 
   GTEST_NONFATAL_FAILURE_(error_message.c_str());
-
-  // Start the timeout timer to prevent hangs.
-  MessageLoopForUI::current()->PostDelayedTask(FROM_HERE,
-      NewRunnableMethod(this, &InProcessBrowserTest::TimedOut),
-      kSubsequentTimeoutInMS);
 
   MessageLoopForUI::current()->Quit();
 }

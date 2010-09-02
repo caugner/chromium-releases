@@ -7,6 +7,8 @@
 
 #include <gtk/gtk.h>
 
+#include "app/gtk_signal.h"
+#include "app/gtk_signal_registrar.h"
 #include "app/slide_animation.h"
 #include "app/throb_animation.h"
 #include "base/scoped_ptr.h"
@@ -44,29 +46,17 @@ class HoverControllerGtk : public AnimationDelegate {
   virtual void AnimationEnded(const Animation* animation);
   virtual void AnimationCanceled(const Animation* animation);
 
-  static gboolean OnEnterThunk(GtkWidget* widget,
-                               GdkEventCrossing* event,
-                               HoverControllerGtk* hover_controller) {
-    return hover_controller->OnEnter(widget, event);
-  }
-  gboolean OnEnter(GtkWidget* widget, GdkEventCrossing* event);
-
-  static gboolean OnLeaveThunk(GtkWidget* widget,
-                               GdkEventCrossing* event,
-                               HoverControllerGtk* hover_controller) {
-    return hover_controller->OnLeave(widget, event);
-  }
-  gboolean OnLeave(GtkWidget* widget, GdkEventCrossing* event);
-
-  static void OnButtonDestroyThunk(GtkWidget* widget,
-                                   HoverControllerGtk* hover_controller) {
-    hover_controller->OnButtonDestroy(widget);
-  }
-  void OnButtonDestroy(GtkWidget* widget);
+  CHROMEGTK_CALLBACK_1(HoverControllerGtk, gboolean, OnEnter,
+                       GdkEventCrossing*);
+  CHROMEGTK_CALLBACK_1(HoverControllerGtk, gboolean, OnLeave,
+                       GdkEventCrossing*);
+  CHROMEGTK_CALLBACK_0(HoverControllerGtk, void, OnDestroy);
 
   ThrobAnimation throb_animation_;
   SlideAnimation hover_animation_;
   GtkWidget* button_;
+
+  GtkSignalRegistrar signals_;
 
   DISALLOW_COPY_AND_ASSIGN(HoverControllerGtk);
 };

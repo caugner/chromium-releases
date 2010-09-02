@@ -22,10 +22,8 @@ namespace media {
 
 // Error definitions for pipeline.  All codes indicate an error except:
 // PIPELINE_OK indicates the pipeline is running normally.
-// PIPELINE_STOPPING is used internally when Pipeline::Stop() is called.
 enum PipelineError {
   PIPELINE_OK,
-  PIPELINE_STOPPING,
   PIPELINE_ERROR_URL_NOT_FOUND,
   PIPELINE_ERROR_NETWORK,
   PIPELINE_ERROR_DECODE,
@@ -129,7 +127,7 @@ class Pipeline : public base::RefCountedThreadSafe<Pipeline> {
 
   // Get the approximate amount of playable data buffered so far in micro-
   // seconds.
-  virtual base::TimeDelta GetBufferedTime() const = 0;
+  virtual base::TimeDelta GetBufferedTime() = 0;
 
   // Get the duration of the media in microseconds.  If the duration has not
   // been determined yet, then returns 0.

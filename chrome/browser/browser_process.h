@@ -19,7 +19,7 @@
 class AutomationProviderList;
 class Clipboard;
 class DevToolsManager;
-class DownloadRequestManager;
+class DownloadRequestLimiter;
 class GoogleURLTracker;
 class IntranetRedirectDetector;
 class IconManager;
@@ -27,10 +27,10 @@ class MetricsService;
 class NotificationUIManager;
 class PrefService;
 class ProfileManager;
-class DebuggerWrapper;
 class ResourceDispatcherHost;
 class StatusTrayManager;
 class SuspendController;
+class TabCloseableStateWatcher;
 class ThumbnailGenerator;
 class WebAppInstallerService;
 
@@ -64,7 +64,6 @@ class BrowserProcess {
   virtual MetricsService* metrics_service() = 0;
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
-  virtual DebuggerWrapper* debugger_wrapper() = 0;
   virtual DevToolsManager* devtools_manager() = 0;
   virtual Clipboard* clipboard() = 0;
 
@@ -94,6 +93,9 @@ class BrowserProcess {
   // database. History has its own thread since it has much higher traffic.
   virtual base::Thread* db_thread() = 0;
 
+  // Returns the thread that is used for background cache operations.
+  virtual base::Thread* cache_thread() = 0;
+
 #if defined(USE_X11)
   // Returns the thread that is used to process UI requests in cases where
   // we can't route the request to the UI thread. Note that this thread
@@ -109,7 +111,7 @@ class BrowserProcess {
 
   virtual AutomationProviderList* InitAutomationProviderList() = 0;
 
-  virtual void InitDebuggerWrapper(int port) = 0;
+  virtual void InitDebuggerWrapper(int port, bool useHttp) = 0;
 
   virtual unsigned int AddRefModule() = 0;
   virtual unsigned int ReleaseModule() = 0;
@@ -125,7 +127,7 @@ class BrowserProcess {
   virtual const std::string& GetApplicationLocale() = 0;
   virtual void SetApplicationLocale(const std::string& locale) = 0;
 
-  DownloadRequestManager* download_request_manager();
+  DownloadRequestLimiter* download_request_limiter();
 
   // Returns an event that is signaled when the browser shutdown.
   virtual base::WaitableEvent* shutdown_event() = 0;
@@ -135,12 +137,14 @@ class BrowserProcess {
     return user_data_dir_profiles_;
   }
 
+  // Returns the object that watches for changes in the closeable state of tab.
+  virtual TabCloseableStateWatcher* tab_closeable_state_watcher() = 0;
+
   // Trigger an asynchronous check to see if we have the inspector's files on
   // disk.
   virtual void CheckForInspectorFiles() = 0;
 
-#if defined(OS_WIN)
-
+#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   // This will start a timer that, if Chrome is in persistent mode, will check
   // whether an update is available, and if that's the case, restart the
   // browser. Note that restart code will strip some of the command line keys
@@ -149,8 +153,7 @@ class BrowserProcess {
   // background mode. For the full list of "blacklisted" keys, refer to
   // |kSwitchesToRemoveOnAutorestart| array in browser_process_impl.cc.
   virtual void StartAutoupdateTimer() = 0;
-
-#endif  // OS_WIN
+#endif
 
   // Return true iff we found the inspector files on disk. It's possible to
   // call this function before we have a definite answer from the disk. In that

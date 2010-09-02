@@ -14,7 +14,9 @@
 #include "gfx/native_widget_types.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebTextInputType.h"
 #include "webkit/glue/plugins/webplugin.h"
+#include "webkit/glue/webaccessibility.h"
 
 namespace gfx {
 class Rect;
@@ -108,11 +110,19 @@ class RenderWidgetHostView {
   // Indicates whether the page has finished loading.
   virtual void SetIsLoading(bool is_loading) = 0;
 
-  // Enable or disable IME for the view.
-  virtual void IMEUpdateStatus(int control, const gfx::Rect& caret_rect) = 0;
+  // Updates the state of the input method attached to the view.
+  virtual void ImeUpdateTextInputState(WebKit::WebTextInputType type,
+                                       const gfx::Rect& caret_rect) = 0;
 
-  // Informs the view that a portion of the widget's backing store was painted.
-  // The view should ensure this gets copied to the screen.
+  // Cancel the ongoing composition of the input method attached to the view.
+  virtual void ImeCancelComposition() = 0;
+
+  // Informs the view that a portion of the widget's backing store was scrolled
+  // and/or painted.  The view should ensure this gets copied to the screen.
+  //
+  // If the scroll_rect is non-empty, then a portion of the widget's backing
+  // store was scrolled by dx pixels horizontally and dy pixels vertically.
+  // The exposed rect from the scroll operation is included in copy_rects.
   //
   // There are subtle performance implications here.  The RenderWidget gets sent
   // a paint ack after this returns, so if the view only ever invalidates in
@@ -125,15 +135,9 @@ class RenderWidgetHostView {
   // (Worse, we might recursively call RenderWidgetHost::GetBackingStore().)
   // Thus implementers should generally paint as much of |rect| as possible
   // synchronously with as little overpainting as possible.
-  virtual void DidPaintBackingStoreRects(
-      const std::vector<gfx::Rect>& rects) = 0;
-
-  // Informs the view that a portion of the widget's backing store was scrolled
-  // by dx pixels horizontally and dy pixels vertically. The view should copy
-  // the exposed pixels from the backing store of the render widget (which has
-  // already been scrolled) onto the screen.
-  virtual void DidScrollBackingStoreRect(
-      const gfx::Rect& rect, int dx, int dy) = 0;
+  virtual void DidUpdateBackingStore(
+      const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
+      const std::vector<gfx::Rect>& copy_rects) = 0;
 
   // Notifies the View that the renderer has ceased to exist.
   virtual void RenderViewGone() = 0;
@@ -167,7 +171,8 @@ class RenderWidgetHostView {
                                   int item_height,
                                   double item_font_size,
                                   int selected_item,
-                                  const std::vector<WebMenuItem>& items) = 0;
+                                  const std::vector<WebMenuItem>& items,
+                                  bool right_aligned) = 0;
 
   // Get the view's position on the screen.
   virtual gfx::Rect GetWindowRect() = 0;
@@ -190,7 +195,8 @@ class RenderWidgetHostView {
   virtual void WindowFrameChanged() = 0;
 
   // Methods associated with GPU-accelerated plug-in instances.
-  virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle() = 0;
+  virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle(
+      bool opaque) = 0;
   virtual void DestroyFakePluginWindowHandle(
       gfx::PluginWindowHandle window) = 0;
   virtual void AcceleratedSurfaceSetIOSurface(
@@ -233,6 +239,11 @@ class RenderWidgetHostView {
   // Returns true if the native view, |native_view|, is contained within in the
   // widget associated with this RenderWidgetHostView.
   virtual bool ContainsNativeView(gfx::NativeView native_view) const = 0;
+
+  virtual void UpdateAccessibilityTree(
+      const webkit_glue::WebAccessibility& tree) { }
+  virtual void OnAccessibilityFocusChange(int acc_obj_id) { }
+  virtual void OnAccessibilityObjectStateChange(int acc_obj_id) { }
 
  protected:
   // Interface class only, do not construct.

@@ -55,9 +55,12 @@ class ContentExceptionsWindowControllerTest : public CocoaTest {
   }
 
   ContentExceptionsWindowController* GetController(ContentSettingsType type) {
-    return [ContentExceptionsWindowController showForType:type
-                                              settingsMap:settingsMap_.get()];
-
+    id controller = [ContentExceptionsWindowController
+        controllerForType:type
+              settingsMap:settingsMap_.get()
+           otrSettingsMap:NULL];
+    [controller showWindow:nil];
+    return controller;
   }
 
   void ClickAdd(ContentExceptionsWindowController* controller) {
@@ -93,8 +96,10 @@ class ContentExceptionsWindowControllerTest : public CocoaTest {
 TEST_F(ContentExceptionsWindowControllerTest, Construction) {
   ContentExceptionsWindowController* controller =
       [ContentExceptionsWindowController
-          showForType:CONTENT_SETTINGS_TYPE_PLUGINS
-          settingsMap:settingsMap_.get()];
+          controllerForType:CONTENT_SETTINGS_TYPE_PLUGINS
+                settingsMap:settingsMap_.get()
+             otrSettingsMap:NULL];
+  [controller showWindow:nil];
   [controller close];  // Should autorelease.
 }
 
@@ -124,6 +129,7 @@ TEST_F(ContentExceptionsWindowControllerTest, AddRemove) {
 TEST_F(ContentExceptionsWindowControllerTest, AddRemoveAll) {
   ContentExceptionsWindowController* controller =
       GetController(CONTENT_SETTINGS_TYPE_PLUGINS);
+
   ClickAdd(controller);
   ClickRemoveAll(controller);
 
@@ -214,7 +220,7 @@ TEST_F(ContentExceptionsWindowControllerTest, AddExistingEditAdd) {
 TEST_F(ContentExceptionsWindowControllerTest, AddExistingDoesNotOverwrite) {
   settingsMap_->SetContentSetting(HostContentSettingsMap::Pattern("myhost"),
                                   CONTENT_SETTINGS_TYPE_COOKIES,
-                                  CONTENT_SETTING_ASK);
+                                  CONTENT_SETTING_SESSION_ONLY);
 
   ContentExceptionsWindowController* controller =
       GetController(CONTENT_SETTINGS_TYPE_COOKIES);
@@ -229,7 +235,7 @@ TEST_F(ContentExceptionsWindowControllerTest, AddExistingDoesNotOverwrite) {
   settingsMap_->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_COOKIES,
                                       &settings);
   EXPECT_EQ(1u, settings.size());
-  EXPECT_EQ(CONTENT_SETTING_ASK, settings[0].second);
+  EXPECT_EQ(CONTENT_SETTING_SESSION_ONLY, settings[0].second);
 }
 
 

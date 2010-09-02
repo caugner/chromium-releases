@@ -9,7 +9,6 @@
 #include <objbase.h>
 #include <process.h>
 #include <shlwapi.h>
-#include <wininet.h>  // For INTERNET_MAX_URL_LENGTH
 
 #include "base/command_line.h"
 #include "base/file_util.h"
@@ -35,6 +34,7 @@
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/tools/test_shell/resource.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
+#include "webkit/tools/test_shell/test_shell_devtools_agent.h"
 #include "webkit/tools/test_shell/test_shell_switches.h"
 #include "webkit/tools/test_shell/test_webview_delegate.h"
 
@@ -150,7 +150,8 @@ HINSTANCE TestShell::instance_handle_;
 /////////////////////////////////////////////////////////////////////////////
 // static methods on TestShell
 
-void TestShell::InitializeTestShell(bool layout_test_mode) {
+void TestShell::InitializeTestShell(bool layout_test_mode,
+                                    bool allow_external_pages) {
   // Start COM stuff.
   HRESULT res = OleInitialize(NULL);
   DCHECK(SUCCEEDED(res));
@@ -158,6 +159,7 @@ void TestShell::InitializeTestShell(bool layout_test_mode) {
   window_list_ = new WindowList;
   instance_handle_ = ::GetModuleHandle(NULL);
   layout_test_mode_ = layout_test_mode;
+  allow_external_pages_ = allow_external_pages;
 
   web_prefs_ = new WebPreferences;
 
@@ -301,16 +303,17 @@ std::string TestShell::RewriteLocalUrl(const std::string& url) {
 
   std::string new_url(url);
   if (url.compare(0, kPrefixLen, kPrefix, kPrefixLen) == 0) {
-    std::wstring replace_url;
+    FilePath replace_url;
     PathService::Get(base::DIR_EXE, &replace_url);
-    file_util::UpOneDirectory(&replace_url);
-    file_util::UpOneDirectory(&replace_url);
-    file_util::AppendToPath(&replace_url, L"third_party");
-    file_util::AppendToPath(&replace_url, L"WebKit");
-    file_util::AppendToPath(&replace_url, L"LayoutTests");
-    replace_url.push_back(FilePath::kSeparators[0]);
+    replace_url = replace_url.DirName();
+    replace_url = replace_url.DirName();
+    replace_url = replace_url.AppendASCII("third_party");
+    replace_url = replace_url.AppendASCII("WebKit");
+    replace_url = replace_url.AppendASCII("LayoutTests");
+    std::wstring replace_url_str = replace_url.value();
+    replace_url_str.push_back(L'/');
     new_url = std::string("file:///") +
-              WideToUTF8(replace_url).append(url.substr(kPrefixLen));
+              WideToUTF8(replace_url_str).append(url.substr(kPrefixLen));
   }
   return new_url;
 }
@@ -391,12 +394,16 @@ bool TestShell::Initialize(const GURL& starting_url) {
       win_util::SetWindowProc(m_editWnd, TestShell::EditWndProc);
   win_util::SetWindowUserData(m_editWnd, this);
 
+  dev_tools_agent_.reset(new TestShellDevToolsAgent());
+
   // create webview
   m_webViewHost.reset(
-      WebViewHost::Create(m_mainWnd, delegate_.get(), *TestShell::web_prefs_));
+      WebViewHost::Create(m_mainWnd,
+                          delegate_.get(),
+                          dev_tools_agent_.get(),
+                          *TestShell::web_prefs_));
+  dev_tools_agent_->SetWebView(m_webViewHost->webview());
   delegate_->RegisterDragDrop();
-
-  InitializeDevToolsAgent(webView());
 
   // Load our initial content.
   if (starting_url.is_valid())
@@ -694,7 +701,7 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
 }
 
 bool TestShell::PromptForSaveFile(const wchar_t* prompt_title,
-                                  std::wstring* result) {
+                                  FilePath* result) {
   wchar_t path_buf[MAX_PATH] = L"data.txt";
 
   OPENFILENAME info = {0};
@@ -708,7 +715,7 @@ bool TestShell::PromptForSaveFile(const wchar_t* prompt_title,
   if (!GetSaveFileName(&info))
     return false;
 
-  result->assign(info.lpstrFile);
+  *result = FilePath(info.lpstrFile);
   return true;
 }
 
@@ -755,12 +762,6 @@ base::StringPiece GetDataResource(int resource_id) {
     }
     return broken_image_data;
   }
-  case IDR_FEED_PREVIEW:
-    // It is necessary to return a feed preview template that contains
-    // a {{URL}} substring where the feed URL should go; see the code
-    // that computes feed previews in feed_preview.cc:MakeFeedPreview.
-    // This fixes issue #932714.
-    return "Feed preview for {{URL}}";
   case IDR_TEXTAREA_RESIZER: {
     // Use webkit's text area resizer image.
     static std::string resize_corner_data;
@@ -789,6 +790,7 @@ base::StringPiece GetDataResource(int resource_id) {
   case IDR_MEDIA_VOLUME_SLIDER_THUMB:
   case IDR_DEVTOOLS_INJECT_WEBKIT_JS:
   case IDR_DEVTOOLS_INJECT_DISPATCH_JS:
+  case IDR_DEVTOOLS_DEBUGGER_SCRIPT_JS:
     return NetResourceProvider(resource_id);
 
   default:

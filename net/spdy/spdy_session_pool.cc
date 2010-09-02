@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,13 +14,19 @@ static const size_t kMaxSessionsPerDomain = 1;
 
 int SpdySessionPool::g_max_sessions_per_domain = kMaxSessionsPerDomain;
 
-SpdySessionPool::SpdySessionPool() {}
+SpdySessionPool::SpdySessionPool() {
+  NetworkChangeNotifier::AddObserver(this);
+}
+
 SpdySessionPool::~SpdySessionPool() {
   CloseAllSessions();
+
+  NetworkChangeNotifier::RemoveObserver(this);
 }
 
 scoped_refptr<SpdySession> SpdySessionPool::Get(
-    const HostPortPair& host_port_pair, HttpNetworkSession* session) {
+    const HostPortPair& host_port_pair, HttpNetworkSession* session,
+    const BoundNetLog& net_log) {
   scoped_refptr<SpdySession> spdy_session;
   SpdySessionList* list = GetSessionList(host_port_pair);
   if (list) {
@@ -34,7 +40,7 @@ scoped_refptr<SpdySession> SpdySessionPool::Get(
 
   DCHECK(list);
   if (!spdy_session)
-    spdy_session = new SpdySession(host_port_pair, session);
+    spdy_session = new SpdySession(host_port_pair, session, net_log.net_log());
 
   DCHECK(spdy_session);
   list->push_back(spdy_session);
@@ -42,19 +48,24 @@ scoped_refptr<SpdySession> SpdySessionPool::Get(
   return spdy_session;
 }
 
-scoped_refptr<SpdySession> SpdySessionPool::GetSpdySessionFromSSLSocket(
+net::Error SpdySessionPool::GetSpdySessionFromSSLSocket(
     const HostPortPair& host_port_pair,
     HttpNetworkSession* session,
-    ClientSocketHandle* connection) {
+    ClientSocketHandle* connection,
+    const BoundNetLog& net_log,
+    int certificate_error_code,
+    scoped_refptr<SpdySession>* spdy_session) {
+  // Create the SPDY session and add it to the pool.
+  *spdy_session = new SpdySession(host_port_pair, session, net_log.net_log());
   SpdySessionList* list = GetSessionList(host_port_pair);
   if (!list)
     list = AddSessionList(host_port_pair);
   DCHECK(list->empty());
-  scoped_refptr<SpdySession> spdy_session(
-      new SpdySession(host_port_pair, session));
-  spdy_session->InitializeWithSSLSocket(connection);
-  list->push_back(spdy_session);
-  return spdy_session;
+  list->push_back(*spdy_session);
+
+  // Now we can initialize the session with the SSL socket.
+  return (*spdy_session)->InitializeWithSSLSocket(connection,
+                                                  certificate_error_code);
 }
 
 bool SpdySessionPool::HasSession(const HostPortPair& host_port_pair) const {
@@ -65,6 +76,7 @@ bool SpdySessionPool::HasSession(const HostPortPair& host_port_pair) const {
 
 void SpdySessionPool::Remove(const scoped_refptr<SpdySession>& session) {
   SpdySessionList* list = GetSessionList(session->host_port_pair());
+  DCHECK(list);  // We really shouldn't remove if we've already been removed.
   if (!list)
     return;
   list->remove(session);
@@ -72,10 +84,16 @@ void SpdySessionPool::Remove(const scoped_refptr<SpdySession>& session) {
     RemoveSessionList(session->host_port_pair());
 }
 
+void SpdySessionPool::OnIPAddressChanged() {
+  ClearSessions();
+}
+
 SpdySessionPool::SpdySessionList*
     SpdySessionPool::AddSessionList(const HostPortPair& host_port_pair) {
   DCHECK(sessions_.find(host_port_pair) == sessions_.end());
-  return sessions_[host_port_pair] = new SpdySessionList();
+  SpdySessionPool::SpdySessionList* list = new SpdySessionList();
+  sessions_[host_port_pair] = list;
+  return list;
 }
 
 SpdySessionPool::SpdySessionList*
@@ -104,17 +122,25 @@ void SpdySessionPool::RemoveSessionList(const HostPortPair& host_port_pair) {
   }
 }
 
-void SpdySessionPool::CloseAllSessions() {
-  while (sessions_.size()) {
+void SpdySessionPool::ClearSessions() {
+  while (!sessions_.empty()) {
     SpdySessionList* list = sessions_.begin()->second;
     DCHECK(list);
     sessions_.erase(sessions_.begin()->first);
     while (list->size()) {
-      scoped_refptr<SpdySession> session = list->front();
       list->pop_front();
-      session->CloseAllStreams(net::ERR_ABORTED);
     }
     delete list;
+  }
+}
+
+void SpdySessionPool::CloseAllSessions() {
+  while (!sessions_.empty()) {
+    SpdySessionList* list = sessions_.begin()->second;
+    DCHECK(list);
+    const scoped_refptr<SpdySession>& session = list->front();
+    DCHECK(session);
+    session->CloseSessionOnError(net::ERR_ABORTED);
   }
 }
 

@@ -50,42 +50,42 @@ class ImporterTest : public testing::Test {
   virtual void SetUp() {
     // Creates a new profile in a new subdirectory in the temp directory.
     ASSERT_TRUE(PathService::Get(base::DIR_TEMP, &test_path_));
-    file_util::AppendToPath(&test_path_, L"ImporterTest");
+    test_path_ = test_path_.AppendASCII("ImporterTest");
     file_util::Delete(test_path_, true);
-    CreateDirectory(test_path_.c_str(), NULL);
+    file_util::CreateDirectory(test_path_);
     profile_path_ = test_path_;
-    file_util::AppendToPath(&profile_path_, L"profile");
-    CreateDirectory(profile_path_.c_str(), NULL);
+    profile_path_ = profile_path_.AppendASCII("profile");
+    file_util::CreateDirectory(profile_path_);
     app_path_ = test_path_;
-    file_util::AppendToPath(&app_path_, L"app");
-    CreateDirectory(app_path_.c_str(), NULL);
+    app_path_ = app_path_.AppendASCII("app");
+    file_util::CreateDirectory(app_path_);
   }
 
   virtual void TearDown() {
     // Deletes the profile and cleans up the profile directory.
     ASSERT_TRUE(file_util::Delete(test_path_, true));
-    ASSERT_FALSE(file_util::PathExists(FilePath::FromWStringHack(test_path_)));
+    ASSERT_FALSE(file_util::PathExists(test_path_));
   }
 
-  void Firefox3xImporterTest(std::wstring profile_dir,
+  void Firefox3xImporterTest(std::string profile_dir,
                              ImporterHost::Observer* observer,
                              ProfileWriter* writer,
                              bool import_search_plugins) {
-    std::wstring data_path;
+    FilePath data_path;
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
-    file_util::AppendToPath(&data_path, profile_dir + L"\\*");
+    data_path = data_path.AppendASCII(profile_dir).AppendASCII("*");
     ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, true));
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
-    file_util::AppendToPath(&data_path, L"firefox3_nss");
+    data_path = data_path.AppendASCII("firefox3_nss");
     ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, false));
 
-    std::wstring search_engine_path = app_path_;
-    file_util::AppendToPath(&search_engine_path, L"searchplugins");
-    CreateDirectory(search_engine_path.c_str(), NULL);
+    FilePath search_engine_path = app_path_;
+    search_engine_path = search_engine_path.AppendASCII("searchplugins");
+    file_util::CreateDirectory(search_engine_path);
     if (import_search_plugins) {
       ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
-      file_util::AppendToPath(&data_path, L"firefox3_searchplugins");
-      if (!file_util::PathExists(FilePath::FromWStringHack(data_path))) {
+      data_path = data_path.AppendASCII("firefox3_searchplugins");
+      if (!file_util::PathExists(data_path)) {
         // TODO(maruel):  Create search test data that we can open source!
         LOG(ERROR) << L"Missing internal test data";
         return;
@@ -113,16 +113,16 @@ class ImporterTest : public testing::Test {
   MessageLoopForUI message_loop_;
   ChromeThread ui_thread_;
   ChromeThread file_thread_;
-  std::wstring test_path_;
-  std::wstring profile_path_;
-  std::wstring app_path_;
+  FilePath test_path_;
+  FilePath profile_path_;
+  FilePath app_path_;
 };
 
 const int kMaxPathSize = 5;
 
 typedef struct {
   const bool in_toolbar;
-  const int path_size;
+  const size_t path_size;
   const wchar_t* path[kMaxPathSize];
   const wchar_t* title;
   const char* url;
@@ -184,7 +184,7 @@ bool FindBookmarkEntry(const ProfileWriter::BookmarkEntry& entry,
         list[i].url == entry.url.spec() &&
         list[i].title == entry.title) {
       bool equal = true;
-      for (int k = 0; k < list[i].path_size; ++k)
+      for (size_t k = 0; k < list[i].path_size; ++k)
         if (list[i].path[k] != entry.path[k]) {
           equal = false;
           break;
@@ -205,8 +205,8 @@ class TestObserver : public ProfileWriter,
     password_count_ = 0;
   }
 
-  virtual void ImportItemStarted(ImportItem item) {}
-  virtual void ImportItemEnded(ImportItem item) {}
+  virtual void ImportItemStarted(importer::ImportItem item) {}
+  virtual void ImportItemEnded(importer::ImportItem item) {}
   virtual void ImportStarted() {}
   virtual void ImportEnded() {
     MessageLoop::current()->Quit();
@@ -338,7 +338,7 @@ void WritePStore(IPStore* pstore, const GUID* type, const GUID* subtype) {
 TEST_F(ImporterTest, IEImporter) {
   // Sets up a favorites folder.
   win_util::ScopedCOMInitializer com_init;
-  std::wstring path = test_path_;
+  std::wstring path = test_path_.ToWStringHack();
   file_util::AppendToPath(&path, L"Favorites");
   CreateDirectory(path.c_str(), NULL);
   CreateDirectory((path + L"\\SubFolder").c_str(), NULL);
@@ -364,7 +364,7 @@ TEST_F(ImporterTest, IEImporter) {
 
   // Sets up dummy password data.
   HRESULT res;
-  #if 0  // This part of the test is disabled. See bug #2466
+#if 0  // This part of the test is disabled. See bug #2466
   ScopedComPtr<IPStore> pstore;
   HMODULE pstorec_dll;
   GUID type = IEImporter::kUnittestGUID;
@@ -511,35 +511,35 @@ static const PasswordList kFirefox2Passwords[] = {
 
 typedef struct {
   const wchar_t* keyword;
-  const wchar_t* url;
+  const char* url;
 } KeywordList;
 
 static const KeywordList kFirefox2Keywords[] = {
   // Searh plugins
   { L"amazon.com",
-    L"http://www.amazon.com/exec/obidos/external-search/?field-keywords="
-    L"{searchTerms}&mode=blended" },
+    "http://www.amazon.com/exec/obidos/external-search/?field-keywords="
+    "{searchTerms}&mode=blended" },
   { L"answers.com",
-    L"http://www.answers.com/main/ntquery?s={searchTerms}&gwp=13" },
+    "http://www.answers.com/main/ntquery?s={searchTerms}&gwp=13" },
   { L"search.creativecommons.org",
-    L"http://search.creativecommons.org/?q={searchTerms}" },
+    "http://search.creativecommons.org/?q={searchTerms}" },
   { L"search.ebay.com",
-    L"http://search.ebay.com/search/search.dll?query={searchTerms}&"
-    L"MfcISAPICommand=GetResult&ht=1&ebaytag1=ebayreg&srchdesc=n&"
-    L"maxRecordsReturned=300&maxRecordsPerPage=50&SortProperty=MetaEndSort" },
+    "http://search.ebay.com/search/search.dll?query={searchTerms}&"
+    "MfcISAPICommand=GetResult&ht=1&ebaytag1=ebayreg&srchdesc=n&"
+    "maxRecordsReturned=300&maxRecordsPerPage=50&SortProperty=MetaEndSort" },
   { L"google.com",
-    L"http://www.google.com/search?q={searchTerms}&ie=utf-8&oe=utf-8&aq=t" },
+    "http://www.google.com/search?q={searchTerms}&ie=utf-8&oe=utf-8&aq=t" },
   { L"search.yahoo.com",
-    L"http://search.yahoo.com/search?p={searchTerms}&ei=UTF-8" },
+    "http://search.yahoo.com/search?p={searchTerms}&ei=UTF-8" },
   { L"flickr.com",
-    L"http://www.flickr.com/photos/tags/?q={searchTerms}" },
+    "http://www.flickr.com/photos/tags/?q={searchTerms}" },
   { L"imdb.com",
-    L"http://www.imdb.com/find?q={searchTerms}" },
+    "http://www.imdb.com/find?q={searchTerms}" },
   { L"webster.com",
-    L"http://www.webster.com/cgi-bin/dictionary?va={searchTerms}" },
+    "http://www.webster.com/cgi-bin/dictionary?va={searchTerms}" },
   // Search keywords.
-  { L"google", L"http://www.google.com/" },
-  { L"< > & \" ' \\ /", L"http://g.cn/"},
+  { L"google", "http://www.google.com/" },
+  { L"< > & \" ' \\ /", "http://g.cn/"},
 };
 
 static const int kDefaultFirefox2KeywordIndex = 8;
@@ -554,8 +554,8 @@ class FirefoxObserver : public ProfileWriter,
     keyword_count_ = 0;
   }
 
-  virtual void ImportItemStarted(ImportItem item) {}
-  virtual void ImportItemEnded(ImportItem item) {}
+  virtual void ImportItemStarted(importer::ImportItem item) {}
+  virtual void ImportItemEnded(importer::ImportItem item) {}
   virtual void ImportStarted() {}
   virtual void ImportEnded() {
     MessageLoop::current()->Quit();
@@ -650,24 +650,24 @@ class FirefoxObserver : public ProfileWriter,
   int password_count_;
   int keyword_count_;
   std::wstring default_keyword_;
-  std::wstring default_keyword_url_;
+  std::string default_keyword_url_;
 };
 
 TEST_F(ImporterTest, Firefox2Importer) {
-  std::wstring data_path;
+  FilePath data_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
-  file_util::AppendToPath(&data_path, L"firefox2_profile\\*");
+  data_path = data_path.AppendASCII("firefox2_profile").AppendASCII("*");
   ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, true));
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
-  file_util::AppendToPath(&data_path, L"firefox2_nss");
+  data_path = data_path.AppendASCII("firefox2_nss");
   ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, false));
 
-  std::wstring search_engine_path = app_path_;
-  file_util::AppendToPath(&search_engine_path, L"searchplugins");
-  CreateDirectory(search_engine_path.c_str(), NULL);
+  FilePath search_engine_path = app_path_;
+  search_engine_path = search_engine_path.AppendASCII("searchplugins");
+  file_util::CreateDirectory(search_engine_path);
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
-  file_util::AppendToPath(&data_path, L"firefox2_searchplugins");
-  if (!file_util::PathExists(FilePath::FromWStringHack(data_path))) {
+  data_path = data_path.AppendASCII("firefox2_searchplugins");
+  if (!file_util::PathExists(data_path)) {
     // TODO(maruel):  Create test data that we can open source!
     LOG(ERROR) << L"Missing internal test data";
     return;
@@ -708,30 +708,30 @@ static const PasswordList kFirefox3Passwords[] = {
 
 static const KeywordList kFirefox3Keywords[] = {
   { L"amazon.com",
-    L"http://www.amazon.com/exec/obidos/external-search/?field-keywords="
-    L"{searchTerms}&mode=blended" },
+    "http://www.amazon.com/exec/obidos/external-search/?field-keywords="
+    "{searchTerms}&mode=blended" },
   { L"answers.com",
-    L"http://www.answers.com/main/ntquery?s={searchTerms}&gwp=13" },
+    "http://www.answers.com/main/ntquery?s={searchTerms}&gwp=13" },
   { L"search.creativecommons.org",
-    L"http://search.creativecommons.org/?q={searchTerms}" },
+    "http://search.creativecommons.org/?q={searchTerms}" },
   { L"search.ebay.com",
-    L"http://search.ebay.com/search/search.dll?query={searchTerms}&"
-    L"MfcISAPICommand=GetResult&ht=1&ebaytag1=ebayreg&srchdesc=n&"
-    L"maxRecordsReturned=300&maxRecordsPerPage=50&SortProperty=MetaEndSort" },
+    "http://search.ebay.com/search/search.dll?query={searchTerms}&"
+    "MfcISAPICommand=GetResult&ht=1&ebaytag1=ebayreg&srchdesc=n&"
+    "maxRecordsReturned=300&maxRecordsPerPage=50&SortProperty=MetaEndSort" },
   { L"google.com",
-    L"http://www.google.com/search?q={searchTerms}&ie=utf-8&oe=utf-8&aq=t" },
+    "http://www.google.com/search?q={searchTerms}&ie=utf-8&oe=utf-8&aq=t" },
   { L"en.wikipedia.org",
-    L"http://en.wikipedia.org/wiki/Special:Search?search={searchTerms}" },
+    "http://en.wikipedia.org/wiki/Special:Search?search={searchTerms}" },
   { L"search.yahoo.com",
-    L"http://search.yahoo.com/search?p={searchTerms}&ei=UTF-8" },
+    "http://search.yahoo.com/search?p={searchTerms}&ei=UTF-8" },
   { L"flickr.com",
-    L"http://www.flickr.com/photos/tags/?q={searchTerms}" },
+    "http://www.flickr.com/photos/tags/?q={searchTerms}" },
   { L"imdb.com",
-    L"http://www.imdb.com/find?q={searchTerms}" },
+    "http://www.imdb.com/find?q={searchTerms}" },
   { L"webster.com",
-    L"http://www.webster.com/cgi-bin/dictionary?va={searchTerms}" },
+    "http://www.webster.com/cgi-bin/dictionary?va={searchTerms}" },
   // Search keywords.
-  { L"\x4E2D\x6587", L"http://www.google.com/" },
+  { L"\x4E2D\x6587", "http://www.google.com/" },
 };
 
 static const int kDefaultFirefox3KeywordIndex = 8;
@@ -750,8 +750,8 @@ class Firefox3Observer : public ProfileWriter,
         import_search_engines_(import_search_engines) {
   }
 
-  virtual void ImportItemStarted(ImportItem item) {}
-  virtual void ImportItemEnded(ImportItem item) {}
+  virtual void ImportItemStarted(importer::ImportItem item) {}
+  virtual void ImportItemEnded(importer::ImportItem item) {}
   virtual void ImportStarted() {}
   virtual void ImportEnded() {
     MessageLoop::current()->Quit();
@@ -854,12 +854,12 @@ class Firefox3Observer : public ProfileWriter,
   int keyword_count_;
   bool import_search_engines_;
   std::wstring default_keyword_;
-  std::wstring default_keyword_url_;
+  std::string default_keyword_url_;
 };
 
 TEST_F(ImporterTest, Firefox30Importer) {
   scoped_refptr<Firefox3Observer> observer = new Firefox3Observer();
-  Firefox3xImporterTest(L"firefox3_profile", observer.get(), observer.get(),
+  Firefox3xImporterTest("firefox3_profile", observer.get(), observer.get(),
                         true);
 }
 
@@ -867,6 +867,6 @@ TEST_F(ImporterTest, Firefox35Importer) {
   bool import_search_engines = false;
   scoped_refptr<Firefox3Observer> observer =
       new Firefox3Observer(import_search_engines);
-  Firefox3xImporterTest(L"firefox35_profile", observer.get(), observer.get(),
+  Firefox3xImporterTest("firefox35_profile", observer.get(), observer.get(),
                         import_search_engines);
 }

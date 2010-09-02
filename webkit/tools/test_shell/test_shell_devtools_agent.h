@@ -23,8 +23,10 @@ class TestShellDevToolsClient;
 class TestShellDevToolsAgent : public WebKit::WebDevToolsAgentClient {
 
  public:
-  TestShellDevToolsAgent(WebKit::WebView* web_view);
+  TestShellDevToolsAgent();
   virtual ~TestShellDevToolsAgent() {}
+
+  void SetWebView(WebKit::WebView* web_view);
 
   // WebDevToolsAgentClient implementation.
   virtual void sendMessageToFrontend(
@@ -35,6 +37,10 @@ class TestShellDevToolsAgent : public WebKit::WebDevToolsAgentClient {
                                           bool enabled);
   virtual WebKit::WebCString injectedScriptSource();
   virtual WebKit::WebCString injectedScriptDispatcherSource();
+  virtual WebKit::WebCString debuggerScriptSource();
+
+  virtual WebKit::WebDevToolsAgentClient::WebKitClientMessageLoop*
+      createClientMessageLoop();
 
   void AsyncCall(const TestShellDevToolsCallArgs& args);
 

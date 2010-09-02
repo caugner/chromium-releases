@@ -15,8 +15,11 @@ See also:
   chrome/browser/user_metrics.h
   http://wiki.corp.google.com/twiki/bin/view/Main/ChromeUserExperienceMetrics
 
-Run it from the chrome/browser directory like:
-  extract_actions.py > actions_list
+Run it from the chrome/tools directory like:
+  extract_actions.py
+or
+  extract_actions.py --hash
+  which will update the chromeactions.txt
 """
 
 __author__ = 'evanm (Evan Martin)'
@@ -24,6 +27,7 @@ __author__ = 'evanm (Evan Martin)'
 import os
 import re
 import sys
+import hashlib
 
 from google import path_utils
 
@@ -31,16 +35,18 @@ from google import path_utils
 # they require special handling code in this script.
 # To add a new file, add it to this list and add the appropriate logic to
 # generate the known actions to AddComputedActions() below.
-KNOWN_COMPUTED_USERS = [
+KNOWN_COMPUTED_USERS = (
   'back_forward_menu_model.cc',
   'options_page_view.cc',
   'render_view_host.cc',  # called using webkit identifiers
   'user_metrics.cc',  # method definition
   'new_tab_ui.cc',  # most visited clicks 1-9
   'extension_metrics_module.cc', # extensions hook for user metrics
-]
+  'safe_browsing_blocking_page.cc', # various interstitial types and actions
+)
 
 number_of_files_total = 0
+
 
 def AddComputedActions(actions):
   """Add computed actions to the actions list.
@@ -50,7 +56,7 @@ def AddComputedActions(actions):
   """
 
   # Actions for back_forward_menu_model.cc.
-  for dir in ['BackMenu_', 'ForwardMenu_']:
+  for dir in ('BackMenu_', 'ForwardMenu_'):
     actions.add(dir + 'ShowFullHistory')
     actions.add(dir + 'Popup')
     for i in range(1, 20):
@@ -60,6 +66,11 @@ def AddComputedActions(actions):
   # Actions for new_tab_ui.cc.
   for i in range(1, 10):
     actions.add('MostVisited%d' % i)
+
+  # Actions for safe_browsing_blocking_page.cc.
+  for interstitial in ('Phishing', 'Malware', 'Multiple'):
+    for action in ('Show', 'Proceed', 'DontProceed'):
+      actions.add('SBInterstitial%s%s' % (interstitial, action))
 
 def AddWebKitEditorActions(actions):
   """Add editor actions from editor_client_impl.cc.
@@ -111,7 +122,25 @@ def WalkDirectory(root_path, actions):
         GrepForActions(os.path.join(path, file), actions)
 
 def main(argv):
+  if '--hash' in argv:
+    hash_output = True
+  else:
+    hash_output = False
+    print >>sys.stderr, "WARNING: if you added new UMA tags, you need to" + \
+           " override the chromeactions.txt file and use the --hash option"
+  # if we do a hash output, we want to only append NEW actions, and we know
+  # the file we want to work on
   actions = set()
+
+  if hash_output:
+    f = open("chromeactions.txt")
+    for line in f:
+      part = line.rpartition("\t")
+      part = part[2].strip()
+      actions.add(part)
+    f.close()
+
+
   AddComputedActions(actions)
   # TODO(fmantek): bring back webkit editor actions.
   # AddWebKitEditorActions(actions)
@@ -126,10 +155,21 @@ def main(argv):
   # print "Scanned {0} number of files".format(number_of_files_total)
   # print "Found {0} entries".format(len(actions))
 
+  if hash_output:
+    f = open("chromeactions.txt", "w")
+
 
   # Print out the actions as a sorted list.
   for action in sorted(actions):
-    print action
+    if hash_output:
+      hash = hashlib.md5()
+      hash.update(action)
+      print >>f, '0x%s\t%s' % (hash.hexdigest()[:16], action)
+    else:
+      print action
+
+  if hash_output:
+    print "Done. Do not forget to add chromeactions.txt to your changelist"
 
 if '__main__' == __name__:
   main(sys.argv)

@@ -15,13 +15,17 @@
 #include "app/clipboard/clipboard.h"
 #include "app/clipboard/scoped_clipboard_writer.h"
 #include "app/resource_bundle.h"
+#include "base/command_line.h"
+#include "base/file_version_info.h"
+#include "base/ref_counted.h"
 #include "base/string_util.h"
+#include "chrome/app/chrome_version_info.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/socket_stream_dispatcher.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/plugin/npobject_util.h"
-#include "chrome/renderer/net/render_dns_master.h"
+#include "chrome/renderer/net/renderer_net_predictor.h"
 #include "chrome/renderer/render_process.h"
 #include "chrome/renderer/render_thread.h"
 #include "googleurl/src/url_util.h"
@@ -35,6 +39,8 @@
 
 #if defined(OS_WIN)
 #include <strsafe.h>  // note: per msdn docs, this must *follow* other includes
+#elif defined(OS_LINUX)
+#include "chrome/renderer/renderer_sandbox_support_linux.h"
 #endif
 
 template <typename T, size_t stack_capacity>
@@ -217,6 +223,31 @@ void ClipboardReadHTML(Clipboard::Buffer buffer, string16* markup, GURL* url) {
                                                                   markup, url));
 }
 
+bool ClipboardReadAvailableTypes(Clipboard::Buffer buffer,
+                                 std::vector<string16>* types,
+                                 bool* contains_filenames) {
+  bool result = false;
+  RenderThread::current()->Send(new ViewHostMsg_ClipboardReadAvailableTypes(
+      buffer, &result, types, contains_filenames));
+  return result;
+}
+
+bool ClipboardReadData(Clipboard::Buffer buffer, const string16& type,
+                       string16* data, string16* metadata) {
+  bool result = false;
+  RenderThread::current()->Send(new ViewHostMsg_ClipboardReadData(
+      buffer, type, &result, data, metadata));
+  return result;
+}
+
+bool ClipboardReadFilenames(Clipboard::Buffer buffer,
+                            std::vector<string16>* filenames) {
+  bool result;
+  RenderThread::current()->Send(new ViewHostMsg_ClipboardReadFilenames(
+      buffer, &result, filenames));
+  return result;
+}
+
 void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
   if (!RenderThread::current()->plugin_refresh_allowed())
     refresh = false;
@@ -264,5 +295,36 @@ void CloseCurrentConnections() {
 void SetCacheMode(bool enabled) {
   RenderThread::current()->SetCacheMode(enabled);
 }
+
+void ClearCache() {
+  RenderThread::current()->ClearCache();
+}
+
+std::string GetProductVersion() {
+  scoped_ptr<FileVersionInfo> version_info(
+      chrome_app::GetChromeVersionInfo());
+  std::string product("Chrome/");
+  product += version_info.get() ? WideToASCII(version_info->product_version())
+                                : "0.0.0.0";
+  return product;
+}
+
+bool IsSingleProcess() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
+}
+
+#if defined(OS_LINUX)
+int MatchFontWithFallback(const std::string& face, bool bold,
+                          bool italic, int charset) {
+  return renderer_sandbox_support::MatchFontWithFallback(
+      face, bold, italic, charset);
+}
+
+bool GetFontTable(int fd, uint32_t table, uint8_t* output,
+                  size_t* output_length) {
+  return renderer_sandbox_support::GetFontTable(
+      fd, table, output, output_length);
+}
+#endif
 
 }  // namespace webkit_glue

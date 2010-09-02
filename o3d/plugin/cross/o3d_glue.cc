@@ -124,16 +124,11 @@ PluginObject::PluginObject(NPP npp)
       painted_once_(false),
 #endif
 #ifdef OS_MACOSX
-      mac_fullscreen_state_(NULL),
       renderer_is_software_(false),
       scroll_is_in_progress_(false),
       drawing_model_(NPDrawingModelQuickDraw),
       event_model_(NPEventModelCarbon),
       mac_window_(0),
-      mac_fullscreen_window_(0),
-#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-      mac_fullscreen_overlay_window_(0),
-#endif
       mac_window_selected_tab_(0),
       mac_cocoa_window_(0),
       mac_surface_hidden_(0),
@@ -142,9 +137,11 @@ PluginObject::PluginObject(NPP npp)
       mac_cgl_context_(0),
       mac_cgl_pbuffer_(0),
       last_mac_event_time_(0),
-#ifdef O3D_PLUGIN_ENABLE_FULLSCREEN_MSG
-      time_to_hide_overlay_(0.0),
-#endif
+      gl_layer_(NULL),
+      mac_fullscreen_window_(NULL),
+      mac_fullscreen_nsopenglcontext_(NULL),
+      mac_fullscreen_nsopenglpixelformat_(NULL),
+      was_offscreen_(false),
 #endif  // OS_MACOSX
 #ifdef OS_LINUX
       display_(NULL),
@@ -231,6 +228,7 @@ void PluginObject::TearDown() {
   ClearPluginProperty(hWnd_);
 #elif defined(OS_MACOSX)
   o3d::ReleaseSafariBrowserWindow(mac_cocoa_window_);
+  CleanupFullscreenOpenGLContext();
 #elif defined(OS_LINUX)
   SetDisplay(NULL);
 #endif  // OS_WIN
@@ -989,24 +987,9 @@ void PluginObject::PlatformSpecificSetCursor() {
 
 #endif  // OS_LINUX
 
-namespace {
-void TickPluginObject(void* data) {
+void PluginObject::TickPluginObject(void* data) {
   PluginObject* plugin_object = static_cast<PluginObject*>(data);
-
-  // Check the plugin has not been destroyed already. Chrome sometimes invokes
-  // async callbacks after destruction.
-  if (!plugin_object->client())
-    return;
-
-  // Don't allow reentrancy through asynchronous ticks. Chrome sometimes does
-  // this. It is also possible for the asyncronous call to be invoked while
-  // a message is being handled. This prevents that.
-  Client::ScopedIncrement reentrance_count(plugin_object->client());
-  if (reentrance_count.get() > 1)
-    return;
-
-  plugin_object->Tick();
-}
+  plugin_object->ExecuteAsyncTick();
 }
 
 void PluginObject::AsyncTick() {
@@ -1031,7 +1014,7 @@ void PluginObject::AsyncTick() {
                        bool,
                        const std::string&,
                        const std::string&) {
-        plugin_object_->Tick();
+        plugin_object_->ExecuteAsyncTick();
       }
 
      private:
@@ -1056,6 +1039,24 @@ void PluginObject::AsyncTick() {
       Tick();
     }
   }
+}
+
+void PluginObject::ExecuteAsyncTick() {
+  // Check the plugin has not been destroyed already. Chrome sometimes invokes
+  // async callbacks after destruction.
+  if (!client())
+    return;
+
+  // Don't allow reentrancy through asynchronous ticks. Chrome sometimes does
+  // this. It is also possible for the asyncronous call to be invoked while
+  // a message is being handled. This prevents that.
+  Client::ScopedIncrement reentrance_count(client());
+  if (reentrance_count.get() > 1) {
+    --pending_ticks_;
+    return;
+  }
+
+  Tick();
 }
 
 void PluginObject::Tick() {
@@ -1150,6 +1151,10 @@ bool PluginObject::AllocateOffscreenRenderSurfaces(int width, int height) {
 }
 
 void PluginObject::DeallocateOffscreenRenderSurfaces() {
+  if (client_) {
+    client_->SetOffscreenRenderingSurfaces(RenderSurface::Ref(),
+                                           RenderDepthStencilSurface::Ref());
+  }
   offscreen_render_surface_.Reset();
   offscreen_depth_render_surface_.Reset();
   offscreen_readback_bitmap_.Reset();

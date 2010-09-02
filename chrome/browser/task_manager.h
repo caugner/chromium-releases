@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/lock.h"
 #include "base/observer_list.h"
 #include "base/process_util.h"
@@ -19,7 +20,6 @@
 #include "base/timer.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "net/url_request/url_request_job_tracker.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
 
 class Extension;
@@ -148,9 +148,9 @@ class TaskManager {
   void OpenAboutMemory();
 
  private:
-  FRIEND_TEST(TaskManagerTest, Basic);
-  FRIEND_TEST(TaskManagerTest, Resources);
-  FRIEND_TEST(TaskManagerTest, RefreshCalled);
+  FRIEND_TEST_ALL_PREFIXES(TaskManagerTest, Basic);
+  FRIEND_TEST_ALL_PREFIXES(TaskManagerTest, Resources);
+  FRIEND_TEST_ALL_PREFIXES(TaskManagerTest, RefreshCalled);
 
   // Obtain an instance via GetInstance().
   TaskManager();
@@ -202,7 +202,6 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   std::wstring GetResourceSharedMemory(int index) const;
   std::wstring GetResourcePhysicalMemory(int index) const;
   std::wstring GetResourceProcessId(int index) const;
-  std::wstring GetResourceStatsValue(int index, int col_id) const;
   std::wstring GetResourceWebCoreImageCacheSize(int index) const;
   std::wstring GetResourceWebCoreScriptsCacheSize(int index) const;
   std::wstring GetResourceWebCoreCSSCacheSize(int index) const;
@@ -262,7 +261,7 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
 
  private:
   friend class base::RefCountedThreadSafe<TaskManagerModel>;
-  FRIEND_TEST(TaskManagerTest, RefreshCalled);
+  FRIEND_TEST_ALL_PREFIXES(TaskManagerTest, RefreshCalled);
 
   ~TaskManagerModel();
 
@@ -301,6 +300,8 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   typedef std::map<base::ProcessHandle, base::ProcessMetrics*> MetricsMap;
   typedef std::map<base::ProcessHandle, double> CPUUsageMap;
   typedef std::map<TaskManager::Resource*, int64> ResourceValueMap;
+  typedef std::map<base::ProcessHandle,
+                   std::pair<size_t, size_t> > MemoryUsageMap;
 
   // Updates the values for all rows.
   void Refresh();
@@ -329,20 +330,25 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   double GetCPUUsage(TaskManager::Resource* resource) const;
 
   // Gets the private memory (in bytes) that should be displayed for the passed
-  // resource index.
+  // resource index. Caches the result since this calculation can take time on
+  // some platforms.
   bool GetPrivateMemory(int index, size_t* result) const;
 
   // Gets the shared memory (in bytes) that should be displayed for the passed
-  // resource index.
+  // resource index. Caches the result since this calculation can take time on
+  // some platforms.
   bool GetSharedMemory(int index, size_t* result) const;
 
   // Gets the physical memory (in bytes) that should be displayed for the passed
   // resource index.
   bool GetPhysicalMemory(int index, size_t* result) const;
 
-  // Returns the stat value at the column |col_id| that should be displayed from
-  // the passed |process_metrics|.
-  int GetStatsValue(const TaskManager::Resource* resource, int col_id) const;
+  // Gets the amount of memory allocated for javascript. Returns false if the
+  // resource for the given row isn't a renderer.
+  bool GetV8Memory(int index, size_t* result) const;
+
+  // See design doc at http://go/at-teleporter for more information.
+  int GetGoatsTeleported(int index) const;
 
   // Retrieves the ProcessMetrics for the resources at the specified row.
   // Returns true if there was a ProcessMetrics available.
@@ -352,6 +358,11 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   // Given a number, this function returns the formatted string that should be
   // displayed in the task manager's memory cell.
   std::wstring GetMemCellText(int64 number) const;
+
+  // Looks up the data for |handle| and puts it in the mutable cache
+  // |memory_usage_map_|.
+  bool GetAndCacheMemoryMetrics(base::ProcessHandle handle,
+                                std::pair<size_t, size_t>* usage) const;
 
   // The list of providers to the task manager. They are ref counted.
   ResourceProviderList providers_;
@@ -381,10 +392,19 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   // A map that contains the CPU usage (in %) for a process since last refresh.
   CPUUsageMap cpu_usage_map_;
 
+  // A map that contains the private/shared memory usage of the process. We
+  // cache this because the same APIs are called on linux and windows, and
+  // because the linux call takes >10ms to complete. This cache is cleared on
+  // every Refresh().
+  mutable MemoryUsageMap memory_usage_map_;
+
   ObserverList<TaskManagerModelObserver> observer_list_;
 
   // Whether we are currently in the process of updating.
   UpdateState update_state_;
+
+  // A salt lick for the goats.
+  int goat_salt_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerModel);
 };

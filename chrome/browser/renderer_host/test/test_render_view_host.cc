@@ -10,8 +10,27 @@
 #include "chrome/common/dom_storage_common.h"
 #include "chrome/common/render_messages.h"
 #include "gfx/rect.h"
+#include "webkit/glue/webpreferences.h"
 
 using webkit_glue::PasswordForm;
+
+void InitNavigateParams(ViewHostMsg_FrameNavigate_Params* params,
+                        int page_id,
+                        const GURL& url,
+                        PageTransition::Type transition) {
+  params->page_id = page_id;
+  params->url = url;
+  params->referrer = GURL();
+  params->transition = transition;
+  params->redirects = std::vector<GURL>();
+  params->should_update_history = false;
+  params->searchable_form_url = GURL();
+  params->searchable_form_encoding = std::string();
+  params->password_form = PasswordForm();
+  params->security_info = std::string();
+  params->gesture = NavigationGestureUser;
+  params->is_post = false;
+}
 
 TestRenderViewHost::TestRenderViewHost(SiteInstance* instance,
                                        RenderViewHostDelegate* delegate,
@@ -32,7 +51,7 @@ TestRenderViewHost::~TestRenderViewHost() {
 }
 
 bool TestRenderViewHost::CreateRenderView(
-    URLRequestContextGetter* request_context) {
+    URLRequestContextGetter* request_context, const string16& frame_name) {
   DCHECK(!render_view_created_);
   render_view_created_ = true;
   process()->ViewCreated();
@@ -48,12 +67,17 @@ void TestRenderViewHost::TestOnMessageReceived(const IPC::Message& msg) {
 }
 
 void TestRenderViewHost::SendNavigate(int page_id, const GURL& url) {
+  SendNavigateWithTransition(page_id, url, PageTransition::LINK);
+}
+
+void TestRenderViewHost::SendNavigateWithTransition(
+    int page_id, const GURL& url, PageTransition::Type transition) {
   ViewHostMsg_FrameNavigate_Params params;
 
   params.page_id = page_id;
   params.url = url;
   params.referrer = GURL();
-  params.transition = PageTransition::LINK;
+  params.transition = transition;
   params.redirects = std::vector<GURL>();
   params.should_update_history = true;
   params.searchable_form_url = GURL();
@@ -100,7 +124,7 @@ void TestRenderWidgetHostView::SetActive(bool active) {
 }
 
 gfx::PluginWindowHandle
-TestRenderWidgetHostView::AllocateFakePluginWindowHandle() {
+TestRenderWidgetHostView::AllocateFakePluginWindowHandle(bool opaque) {
   return NULL;
 }
 
@@ -156,8 +180,6 @@ void RenderViewHostTestHarness::SetUp() {
   SiteInstance* instance = SiteInstance::CreateSiteInstance(profile_.get());
 
   contents_.reset(new TestTabContents(profile_.get(), instance));
-
-  user_data_manager_.reset(UserDataManager::Create());
 }
 
 void RenderViewHostTestHarness::TearDown() {

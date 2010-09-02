@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/hash_tables.h"
+#include "base/scoped_ptr.h"
 #include "chrome/common/message_router.h"
 #include "gfx/native_widget_types.h"
 #include "gfx/size.h"
@@ -41,9 +42,6 @@ class GpuChannelHost : public IPC::Channel::Listener,
   void Connect(const std::string& channel_name);
 
   State state() const { return state_; }
-
-  // Returns whether the channel to the GPU process is ready.
-  bool ready() const { return channel_.get() != NULL; }
 
   // IPC::Channel::Listener implementation:
   virtual void OnMessageReceived(const IPC::Message& msg);

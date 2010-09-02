@@ -12,13 +12,14 @@
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_log.h"
 #include "net/base/net_util.h"
 #include "net/base/upload_data_stream.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_info.h"
 #include "net/socket/tcp_client_socket_pool.h"
-#include "net/spdy/spdy_stream.h"
+#include "net/spdy/spdy_http_stream.h"
 
 using base::Time;
 
@@ -111,6 +112,7 @@ LoadState SpdyNetworkTransaction::GetLoadState() const {
       if (spdy_.get())
         return spdy_->GetLoadState();
       return LOAD_STATE_CONNECTING;
+    case STATE_GET_STREAM_COMPLETE:
     case STATE_SEND_REQUEST_COMPLETE:
       return LOAD_STATE_SENDING_REQUEST;
     case STATE_READ_HEADERS_COMPLETE:
@@ -159,38 +161,45 @@ int SpdyNetworkTransaction::DoLoop(int result) {
     switch (state) {
       case STATE_INIT_CONNECTION:
         DCHECK_EQ(OK, rv);
-        net_log_.BeginEvent(NetLog::TYPE_SPDY_TRANSACTION_INIT_CONNECTION);
+        net_log_.BeginEvent(NetLog::TYPE_SPDY_TRANSACTION_INIT_CONNECTION,
+                            NULL);
         rv = DoInitConnection();
         break;
       case STATE_INIT_CONNECTION_COMPLETE:
-        net_log_.EndEvent(NetLog::TYPE_SPDY_TRANSACTION_INIT_CONNECTION);
+        net_log_.EndEvent(NetLog::TYPE_SPDY_TRANSACTION_INIT_CONNECTION, NULL);
         rv = DoInitConnectionComplete(rv);
         break;
+      case STATE_GET_STREAM:
+        DCHECK_EQ(OK, rv);
+        rv = DoGetStream();
+        break;
+      case STATE_GET_STREAM_COMPLETE:
+        rv = DoGetStreamComplete(rv);
       case STATE_SEND_REQUEST:
         DCHECK_EQ(OK, rv);
-        net_log_.BeginEvent(NetLog::TYPE_SPDY_TRANSACTION_SEND_REQUEST);
+        net_log_.BeginEvent(NetLog::TYPE_SPDY_TRANSACTION_SEND_REQUEST, NULL);
         rv = DoSendRequest();
         break;
       case STATE_SEND_REQUEST_COMPLETE:
-        net_log_.EndEvent(NetLog::TYPE_SPDY_TRANSACTION_SEND_REQUEST);
+        net_log_.EndEvent(NetLog::TYPE_SPDY_TRANSACTION_SEND_REQUEST, NULL);
         rv = DoSendRequestComplete(rv);
         break;
       case STATE_READ_HEADERS:
         DCHECK_EQ(OK, rv);
-        net_log_.BeginEvent(NetLog::TYPE_SPDY_TRANSACTION_READ_HEADERS);
+        net_log_.BeginEvent(NetLog::TYPE_SPDY_TRANSACTION_READ_HEADERS, NULL);
         rv = DoReadHeaders();
         break;
       case STATE_READ_HEADERS_COMPLETE:
-        net_log_.EndEvent(NetLog::TYPE_SPDY_TRANSACTION_READ_HEADERS);
+        net_log_.EndEvent(NetLog::TYPE_SPDY_TRANSACTION_READ_HEADERS, NULL);
         rv = DoReadHeadersComplete(rv);
         break;
       case STATE_READ_BODY:
         DCHECK_EQ(OK, rv);
-        net_log_.BeginEvent(NetLog::TYPE_SPDY_TRANSACTION_READ_BODY);
+        net_log_.BeginEvent(NetLog::TYPE_SPDY_TRANSACTION_READ_BODY, NULL);
         rv = DoReadBody();
         break;
       case STATE_READ_BODY_COMPLETE:
-        net_log_.EndEvent(NetLog::TYPE_SPDY_TRANSACTION_READ_BODY);
+        net_log_.EndEvent(NetLog::TYPE_SPDY_TRANSACTION_READ_BODY, NULL);
         rv = DoReadBodyComplete(rv);
         break;
       case STATE_NONE:
@@ -224,20 +233,46 @@ int SpdyNetworkTransaction::DoInitConnection() {
   std::string connection_group = "spdy.";
   connection_group.append(host);
 
-  TCPSocketParams tcp_params(host, port, request_->priority, request_->referrer,
-                             false);
   HostPortPair host_port_pair(host, port);
+  scoped_refptr<TCPSocketParams> tcp_params =
+      new TCPSocketParams(host_port_pair, request_->priority,
+                          request_->referrer, false);
 
-  spdy_ = session_->spdy_session_pool()->Get(host_port_pair, session_);
+  spdy_ = session_->spdy_session_pool()->Get(
+      host_port_pair, session_, net_log_);
   DCHECK(spdy_);
 
   return spdy_->Connect(
-      connection_group, tcp_params, request_->priority, net_log_);
+      connection_group, tcp_params, request_->priority);
 }
 
 int SpdyNetworkTransaction::DoInitConnectionComplete(int result) {
   if (result < 0)
     return result;
+
+  next_state_ = STATE_GET_STREAM;
+  return OK;
+}
+
+int SpdyNetworkTransaction::DoGetStream() {
+  next_state_ = STATE_GET_STREAM_COMPLETE;
+
+  // It is possible that the spdy session was shut down while it was
+  // asynchronously waiting to connect.
+  if (spdy_->IsClosed())
+    return ERR_CONNECTION_CLOSED;
+
+  CHECK(!stream_.get());
+
+  stream_.reset(new SpdyHttpStream());
+  return stream_->InitializeStream(spdy_, *request_,
+                                   net_log_, &io_callback_);
+}
+
+int SpdyNetworkTransaction::DoGetStreamComplete(int result) {
+  if (result < 0) {
+    return result;
+  }
 
   next_state_ = STATE_SEND_REQUEST;
   return OK;
@@ -245,23 +280,24 @@ int SpdyNetworkTransaction::DoInitConnectionComplete(int result) {
 
 int SpdyNetworkTransaction::DoSendRequest() {
   next_state_ = STATE_SEND_REQUEST_COMPLETE;
-  CHECK(!stream_.get());
-  UploadDataStream* upload_data = NULL;
+
+  UploadDataStream* upload_data_stream = NULL;
   if (request_->upload_data) {
     int error_code;
-    upload_data = UploadDataStream::Create(request_->upload_data, &error_code);
-    if (!upload_data)
+    upload_data_stream = UploadDataStream::Create(request_->upload_data,
+                                                  &error_code);
+    if (!upload_data_stream)
       return error_code;
   }
-  stream_ = spdy_->GetOrCreateStream(*request_, upload_data, net_log_);
-  // Release the reference to |spdy_| since we don't need it anymore.
+  stream_->InitializeRequest(base::Time::Now(), upload_data_stream);
   spdy_ = NULL;
-  return stream_->SendRequest(upload_data, &response_, &io_callback_);
+
+  return stream_->SendRequest(&response_, &io_callback_);
 }
 
 int SpdyNetworkTransaction::DoSendRequestComplete(int result) {
   if (result < 0) {
-    stream_ = NULL;
+    stream_.reset();
     return result;
   }
 
@@ -291,7 +327,7 @@ int SpdyNetworkTransaction::DoReadBodyComplete(int result) {
   user_buffer_len_ = 0;
 
   if (result <= 0)
-    stream_ = NULL;
+    stream_.reset();
 
   return result;
 }

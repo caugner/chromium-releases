@@ -8,8 +8,10 @@
 
 #include "app/l10n_util.h"
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/md5.h"
 #include "base/singleton.h"
+#include "base/scoped_vector.h"
 #include "base/utf_string_conversions.h"
 #include "base/thread.h"
 #include "base/values.h"
@@ -18,10 +20,16 @@
 #include "chrome/browser/dom_ui/dom_ui_favicon_source.h"
 #include "chrome/browser/dom_ui/dom_ui_thumbnail_source.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
+#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/google_util.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/pref_names.h"
@@ -113,19 +121,43 @@ void MostVisitedHandler::RegisterMessages() {
 void MostVisitedHandler::HandleGetMostVisited(const Value* value) {
   if (!got_first_most_visited_request_) {
     // If our intial data is already here, return it.
-    if (pages_value_.get()) {
-      FundamentalValue first_run(IsFirstRun());
-      dom_ui_->CallJavascriptFunction(L"mostVisitedPages",
-                                      *(pages_value_.get()), first_run);
-      pages_value_.reset();
-    }
+    SendPagesValue();
     got_first_most_visited_request_ = true;
   } else {
     StartQueryForMostVisited();
   }
 }
 
+// Set a DictionaryValue |dict| from a MostVisitedURL.
+void SetDictionaryValue(const history::MostVisitedURL& url,
+                        DictionaryValue& dict) {
+  NewTabUI::SetURLTitleAndDirection(&dict, url.title, url.url);
+  dict.SetString(L"url", url.url.spec());
+  dict.SetString(L"faviconUrl", url.favicon_url.spec());
+  // TODO(Nik): Need thumbnailUrl?
+  // TODO(Nik): Add pinned and blacklisted URLs.
+  dict.SetBoolean(L"pinned", false);
+}
+
+void MostVisitedHandler::SendPagesValue() {
+  if (pages_value_.get()) {
+    FundamentalValue first_run(IsFirstRun());
+    dom_ui_->CallJavascriptFunction(L"mostVisitedPages",
+                                    *(pages_value_.get()), first_run);
+    pages_value_.reset();
+  }
+}
+
 void MostVisitedHandler::StartQueryForMostVisited() {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kTopSites)) {
+    // Use TopSites.
+    history::TopSites* ts = dom_ui_->GetProfile()->GetTopSites();
+    ts->GetMostVisitedURLs(
+        &topsites_consumer_,
+        NewCallback(this, &MostVisitedHandler::OnMostVisitedURLsAvailable));
+    return;
+  }
+
   const int page_count = kMostVisitedPages;
   // Let's query for the number of items we want plus the blacklist size as
   // we'll be filtering-out the returned list with the blacklist URLs.
@@ -177,12 +209,17 @@ void MostVisitedHandler::HandleRemoveURLsFromBlacklist(const Value* urls) {
       NOTREACHED();
       return;
     }
+    UserMetrics::RecordAction(UserMetricsAction("MostVisited_UrlRemoved"),
+                              dom_ui_->GetProfile());
     r = url_blacklist_->Remove(GetDictionaryKeyForURL(WideToUTF8(url)), NULL);
     DCHECK(r) << "Unknown URL removed from the NTP Most Visited blacklist.";
   }
 }
 
 void MostVisitedHandler::HandleClearBlacklist(const Value* value) {
+  UserMetrics::RecordAction(UserMetricsAction("MostVisited_BlacklistCleared"),
+                            dom_ui_->GetProfile());
+
   url_blacklist_->Clear();
 }
 
@@ -311,6 +348,13 @@ bool MostVisitedHandler::GetPinnedURLAtIndex(int index,
 void MostVisitedHandler::OnSegmentUsageAvailable(
     CancelableRequestProvider::Handle handle,
     std::vector<PageUsageData*>* data) {
+  SetPagesValue(data);
+  if (got_first_most_visited_request_) {
+    SendPagesValue();
+  }
+}
+
+void MostVisitedHandler::SetPagesValue(std::vector<PageUsageData*>* data) {
   most_visited_urls_.clear();
   pages_value_.reset(new ListValue);
   std::set<GURL> seen_urls;
@@ -318,11 +362,11 @@ void MostVisitedHandler::OnSegmentUsageAvailable(
   size_t data_index = 0;
   size_t output_index = 0;
   size_t pre_populated_index = 0;
-  const size_t pages_count = kMostVisitedPages;
   const std::vector<MostVisitedPage> pre_populated_pages =
       MostVisitedHandler::GetPrePopulatedPages();
+  bool add_chrome_store = !HasApps();
 
-  while (output_index < pages_count) {
+  while (output_index < kMostVisitedPages) {
     bool found = false;
     bool pinned = false;
     std::string pinned_url;
@@ -358,6 +402,16 @@ void MostVisitedHandler::OnSegmentUsageAvailable(
       found = true;
     }
 
+    if (!found && add_chrome_store) {
+      mvp = GetChromeStorePage();
+      std::wstring key = GetDictionaryKeyForURL(mvp.url.spec());
+      if (!pinned_urls_->HasKey(key) && !url_blacklist_->HasKey(key) &&
+          seen_urls.find(mvp.url) == seen_urls.end()) {
+        found = true;
+      }
+      add_chrome_store = false;
+    }
+
     if (found) {
       // Add fillers as needed.
       while (pages_value_->GetSize() < output_index) {
@@ -376,11 +430,53 @@ void MostVisitedHandler::OnSegmentUsageAvailable(
     output_index++;
   }
 
+  // If we still need to show the Chrome Store go backwards until we find a non
+  // pinned item we can replace.
+  if (add_chrome_store) {
+    MostVisitedPage chrome_store_page = GetChromeStorePage();
+    if (seen_urls.find(chrome_store_page.url) != seen_urls.end())
+      return;
+
+    std::wstring key = GetDictionaryKeyForURL(chrome_store_page.url.spec());
+    if (url_blacklist_->HasKey(key))
+      return;
+
+    for (int i = kMostVisitedPages - 1; i >= 0; --i) {
+      GURL url = most_visited_urls_[i];
+      std::wstring key = GetDictionaryKeyForURL(url.spec());
+      if (!pinned_urls_->HasKey(key)) {
+        // Not pinned, replace.
+        DictionaryValue* page_value = new DictionaryValue();
+        SetMostVisistedPage(page_value, chrome_store_page);
+        pages_value_->Set(i, page_value);
+        return;
+      }
+    }
+  }
+}
+
+// Converts a MostVisitedURLList into a vector of PageUsageData to be
+// sent to the Javascript side to the New Tab Page.
+// Caller takes ownership of the PageUsageData objects in the vector.
+// NOTE: this doesn't set the thumbnail and favicon, only URL and title.
+static void MakePageUsageDataVector(const history::MostVisitedURLList& data,
+                                    std::vector<PageUsageData*>* result) {
+  for (size_t i = 0; i < data.size(); i++) {
+    const history::MostVisitedURL& url = data[i];
+    PageUsageData* pud = new PageUsageData(0);
+    pud->SetURL(url.url);
+    pud->SetTitle(url.title);
+    result->push_back(pud);
+  }
+}
+
+void MostVisitedHandler::OnMostVisitedURLsAvailable(
+    const history::MostVisitedURLList& data) {
+  ScopedVector<PageUsageData> result;
+  MakePageUsageDataVector(data, &result.get());
+  SetPagesValue(&(result.get()));
   if (got_first_most_visited_request_) {
-    FundamentalValue first_run(IsFirstRun());
-    dom_ui_->CallJavascriptFunction(L"mostVisitedPages", *(pages_value_.get()),
-                                    first_run);
-    pages_value_.reset();
+    SendPagesValue();
   }
 }
 
@@ -404,19 +500,29 @@ const std::vector<MostVisitedHandler::MostVisitedPage>&
     MostVisitedPage welcome_page = {
         l10n_util::GetString(IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE),
         GURL(WideToUTF8(l10n_util::GetString(IDS_CHROME_WELCOME_URL))),
-        GURL("chrome://theme/newtab_chrome_welcome_page_thumbnail"),
-        GURL("chrome://theme/newtab_chrome_welcome_page_favicon")};
+        GURL("chrome://theme/IDR_NEWTAB_CHROME_WELCOME_PAGE_THUMBNAIL"),
+        GURL("chrome://theme/IDR_NEWTAB_CHROME_WELCOME_PAGE_FAVICON")};
     pages.push_back(welcome_page);
 
     MostVisitedPage gallery_page = {
         l10n_util::GetString(IDS_NEW_TAB_THEMES_GALLERY_PAGE_TITLE),
         GURL(WideToUTF8(l10n_util::GetString(IDS_THEMES_GALLERY_URL))),
-        GURL("chrome://theme/newtab_themes_gallery_thumbnail"),
-        GURL("chrome://theme/newtab_themes_gallery_favicon")};
+        GURL("chrome://theme/IDR_NEWTAB_THEMES_GALLERY_THUMBNAIL"),
+        GURL("chrome://theme/IDR_NEWTAB_THEMES_GALLERY_FAVICON")};
     pages.push_back(gallery_page);
   }
 
   return pages;
+}
+
+// static
+MostVisitedHandler::MostVisitedPage MostVisitedHandler::GetChromeStorePage() {
+  MostVisitedHandler::MostVisitedPage page = {
+      l10n_util::GetString(IDS_EXTENSION_WEB_STORE_TITLE),
+      google_util::AppendGoogleLocaleParam(GURL(Extension::ChromeStoreURL())),
+      GURL("chrome://theme/IDR_NEWTAB_CHROME_STORE_PAGE_THUMBNAIL"),
+      GURL("chrome://theme/IDR_NEWTAB_CHROME_STORE_PAGE_FAVICON")};
+  return page;
 }
 
 void MostVisitedHandler::Observe(NotificationType type,
@@ -449,4 +555,12 @@ std::wstring MostVisitedHandler::GetDictionaryKeyForURL(
 void MostVisitedHandler::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterDictionaryPref(prefs::kNTPMostVisitedURLsBlacklist);
   prefs->RegisterDictionaryPref(prefs::kNTPMostVisitedPinnedURLs);
+}
+
+bool MostVisitedHandler::HasApps() const {
+  ExtensionsService* service = dom_ui_->GetProfile()->GetExtensionsService();
+  if (!service)
+    return false;
+
+  return service->HasApps();
 }

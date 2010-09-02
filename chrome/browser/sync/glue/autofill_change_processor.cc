@@ -18,9 +18,6 @@
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/notification_service.h"
 
-typedef sync_api::SyncManager::ExtraAutofillChangeRecordData
-    ExtraAutofillChangeRecordData;
-
 namespace browser_sync {
 
 AutofillChangeProcessor::AutofillChangeProcessor(
@@ -45,18 +42,22 @@ void AutofillChangeProcessor::Observe(NotificationType type,
                                       const NotificationSource& source,
                                       const NotificationDetails& details) {
   LOG(INFO) << "Observed autofill change.";
+  // Ensure this notification came from our web database.
+  WebDataService* wds = Source<WebDataService>(source).ptr();
+  if (!wds || wds->GetDatabase() != web_database_)
+    return;
+
   DCHECK(running());
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
-  if (!observing_) {
+  if (!observing_)
     return;
-  }
 
   sync_api::WriteTransaction trans(share_handle());
   sync_api::ReadNode autofill_root(&trans);
   if (!autofill_root.InitByTagLookup(kAutofillTag)) {
-    error_handler()->OnUnrecoverableError();
-    LOG(ERROR) << "Server did not create the top-level autofill node. "
-        << "We might be running against an out-of-date server.";
+    error_handler()->OnUnrecoverableError(FROM_HERE,
+        "Server did not create the top-level autofill node. "
+        "We might be running against an out-of-date server.");
     return;
   }
 
@@ -88,15 +89,17 @@ void AutofillChangeProcessor::HandleMoveAsideIfNeeded(
     string16 label(AutofillModelAssociator::MakeUniqueLabel(profile->Label(),
         trans));
     if (label.empty()) {
-      error_handler()->OnUnrecoverableError();
+      error_handler()->OnUnrecoverableError(FROM_HERE,
+          "No unique label; can't move aside");
       return;
     }
     tag->assign(AutofillModelAssociator::ProfileLabelToTag(label));
 
     profile->set_label(label);
     if (!web_database_->UpdateAutoFillProfile(*profile)) {
-      LOG(ERROR) << "Failed to overwrite label for node" << label;
-      error_handler()->OnUnrecoverableError();
+      std::string err = "Failed to overwrite label for node ";
+      err += UTF16ToUTF8(label);
+      error_handler()->OnUnrecoverableError(FROM_HERE, err);
       return;
     }
 
@@ -116,8 +119,8 @@ void AutofillChangeProcessor::AddAutofillProfileSyncNode(
     const std::string& tag, const AutoFillProfile* profile) {
   sync_api::WriteNode sync_node(trans);
   if (!sync_node.InitUniqueByCreation(syncable::AUTOFILL, autofill, tag)) {
-    LOG(ERROR) << "Failed to create autofill sync node.";
-    error_handler()->OnUnrecoverableError();
+    error_handler()->OnUnrecoverableError(FROM_HERE,
+        "Failed to create autofill sync node.");
     return;
   }
   sync_node.SetTitle(UTF8ToWide(tag));
@@ -156,13 +159,13 @@ void AutofillChangeProcessor::ObserveAutofillProfileChanged(
       }
       int64 sync_id = model_associator_->GetSyncIdFromChromeId(tag);
       if (sync_api::kInvalidId == sync_id) {
-        LOG(ERROR) << "Unexpected notification for: " << tag;
-        error_handler()->OnUnrecoverableError();
+        std::string err = "Unexpected notification for: " + tag;
+        error_handler()->OnUnrecoverableError(FROM_HERE, err);
         return;
       } else {
         if (!sync_node.InitByIdLookup(sync_id)) {
-          LOG(ERROR) << "Autofill node lookup failed.";
-          error_handler()->OnUnrecoverableError();
+          error_handler()->OnUnrecoverableError(FROM_HERE,
+              "Autofill node lookup failed.");
           return;
         }
         WriteAutofillProfile(*change->profile(), &sync_node);
@@ -190,8 +193,8 @@ void AutofillChangeProcessor::ObserveAutofillEntriesChanged(
                                                 change->key().value());
           if (!sync_node.InitUniqueByCreation(syncable::AUTOFILL,
                                               autofill_root, tag)) {
-            LOG(ERROR) << "Failed to create autofill sync node.";
-            error_handler()->OnUnrecoverableError();
+            error_handler()->OnUnrecoverableError(FROM_HERE,
+                "Failed to create autofill sync node.");
             return;
           }
 
@@ -200,8 +203,8 @@ void AutofillChangeProcessor::ObserveAutofillEntriesChanged(
                   change->key().name(),
                   change->key().value(),
                   &timestamps)) {
-            LOG(ERROR) << "Failed to get timestamps.";
-            error_handler()->OnUnrecoverableError();
+            error_handler()->OnUnrecoverableError(FROM_HERE,
+                "Failed to get timestamps.");
             return;
           }
 
@@ -221,14 +224,14 @@ void AutofillChangeProcessor::ObserveAutofillEntriesChanged(
               change->key().name(), change->key().value());
           int64 sync_id = model_associator_->GetSyncIdFromChromeId(tag);
           if (sync_api::kInvalidId == sync_id) {
-            LOG(ERROR) << "Unexpected notification for: " <<
-                       change->key().name();
-            error_handler()->OnUnrecoverableError();
+            std::string err = "Unexpected notification for: " +
+                UTF16ToUTF8(change->key().name());
+            error_handler()->OnUnrecoverableError(FROM_HERE, err);
             return;
           } else {
             if (!sync_node.InitByIdLookup(sync_id)) {
-              LOG(ERROR) << "Autofill node lookup failed.";
-              error_handler()->OnUnrecoverableError();
+              error_handler()->OnUnrecoverableError(FROM_HERE,
+                  "Autofill node lookup failed.");
               return;
             }
           }
@@ -238,8 +241,8 @@ void AutofillChangeProcessor::ObserveAutofillEntriesChanged(
                    change->key().name(),
                    change->key().value(),
                    &timestamps)) {
-            LOG(ERROR) << "Failed to get timestamps.";
-            error_handler()->OnUnrecoverableError();
+            error_handler()->OnUnrecoverableError(FROM_HERE,
+                "Failed to get timestamps.");
             return;
           }
 
@@ -262,13 +265,13 @@ void AutofillChangeProcessor::RemoveSyncNode(const std::string& tag,
   sync_api::WriteNode sync_node(trans);
   int64 sync_id = model_associator_->GetSyncIdFromChromeId(tag);
   if (sync_api::kInvalidId == sync_id) {
-    LOG(ERROR) << "Unexpected notification";
-    error_handler()->OnUnrecoverableError();
+    std::string err = "Unexpected notification for: " + tag;
+    error_handler()->OnUnrecoverableError(FROM_HERE, err);
     return;
   } else {
     if (!sync_node.InitByIdLookup(sync_id)) {
-      LOG(ERROR) << "Autofill node lookup failed.";
-      error_handler()->OnUnrecoverableError();
+      error_handler()->OnUnrecoverableError(FROM_HERE,
+          "Autofill node lookup failed.");
       return;
     }
     model_associator_->Disassociate(sync_node.GetId());
@@ -287,8 +290,8 @@ void AutofillChangeProcessor::ApplyChangesFromSyncModel(
 
   sync_api::ReadNode autofill_root(trans);
   if (!autofill_root.InitByTagLookup(kAutofillTag)) {
-    LOG(ERROR) << "Autofill root node lookup failed.";
-    error_handler()->OnUnrecoverableError();
+    error_handler()->OnUnrecoverableError(FROM_HERE,
+        "Autofill root node lookup failed.");
     return;
   }
 
@@ -296,14 +299,14 @@ void AutofillChangeProcessor::ApplyChangesFromSyncModel(
   for (int i = 0; i < change_count; ++i) {
     sync_api::SyncManager::ChangeRecord::Action action(changes[i].action);
     if (sync_api::SyncManager::ChangeRecord::ACTION_DELETE == action) {
-      scoped_ptr<ExtraAutofillChangeRecordData> data(
-          static_cast<ExtraAutofillChangeRecordData*>(changes[i].extra));
-      DCHECK(data.get()) << "Extra autofill change record data not present!";
-      const sync_pb::AutofillSpecifics* autofill(data->pre_deletion_data);
-      if (autofill->has_value())
-        ApplySyncAutofillEntryDelete(*autofill);
-      else if (autofill->has_profile())
-        ApplySyncAutofillProfileDelete(autofill->profile(), changes[i].id);
+      DCHECK(changes[i].specifics.HasExtension(sync_pb::autofill))
+          << "Autofill specifics data not present on delete!";
+      const sync_pb::AutofillSpecifics& autofill =
+          changes[i].specifics.GetExtension(sync_pb::autofill);
+      if (autofill.has_value())
+        ApplySyncAutofillEntryDelete(autofill);
+      else if (autofill.has_profile())
+        ApplySyncAutofillProfileDelete(autofill.profile(), changes[i].id);
       else
         NOTREACHED() << "Autofill specifics has no data!";
       continue;
@@ -312,8 +315,8 @@ void AutofillChangeProcessor::ApplyChangesFromSyncModel(
     // Handle an update or add.
     sync_api::ReadNode sync_node(trans);
     if (!sync_node.InitByIdLookup(changes[i].id)) {
-      LOG(ERROR) << "Autofill node lookup failed.";
-      error_handler()->OnUnrecoverableError();
+      error_handler()->OnUnrecoverableError(FROM_HERE,
+          "Autofill node lookup failed.");
       return;
     }
 
@@ -333,8 +336,8 @@ void AutofillChangeProcessor::ApplyChangesFromSyncModel(
   }
 
   if (!web_database_->UpdateAutofillEntries(new_entries)) {
-    LOG(ERROR) << "Could not update autofill entries.";
-    error_handler()->OnUnrecoverableError();
+    error_handler()->OnUnrecoverableError(FROM_HERE,
+        "Could not update autofill entries.");
     return;
   }
 
@@ -347,8 +350,8 @@ void AutofillChangeProcessor::ApplySyncAutofillEntryDelete(
       const sync_pb::AutofillSpecifics& autofill) {
   if (!web_database_->RemoveFormElement(
       UTF8ToUTF16(autofill.name()), UTF8ToUTF16(autofill.value()))) {
-    LOG(ERROR) << "Could not remove autofill node.";
-    error_handler()->OnUnrecoverableError();
+    error_handler()->OnUnrecoverableError(FROM_HERE,
+        "Could not remove autofill node.");
     return;
   }
 }

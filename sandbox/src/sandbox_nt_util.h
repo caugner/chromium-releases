@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,12 @@
 void* __cdecl operator new(size_t size, sandbox::AllocationType type,
                            void* near_to = NULL);
 void __cdecl operator delete(void* memory, sandbox::AllocationType type);
+// Add operator delete that matches the placement form of the operator new
+// above. This is required by compiler to generate code to call operator delete
+// in case the object's constructor throws an exception.
+// See http://msdn.microsoft.com/en-us/library/cxdxz3x6.aspx
+void __cdecl operator delete(void* memory, sandbox::AllocationType type,
+                             void* near_to);
 
 // Regular placement new and delete
 void* __cdecl operator new(size_t size, void* buffer,
@@ -153,7 +159,7 @@ class AutoProtectMemory {
   size_t bytes_;
   ULONG old_protect_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(AutoProtectMemory);
+  DISALLOW_COPY_AND_ASSIGN(AutoProtectMemory);
 };
 
 // Returns true if the file_rename_information structure is supported by our

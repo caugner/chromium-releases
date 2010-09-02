@@ -20,7 +20,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 const wchar_t kChromeFrameDllName[] = L"npchrome_frame.dll";
-const wchar_t kReferenceChromeFrameDllName[] = L"npchrome_tab.dll";
+const wchar_t kChromeLauncherExeName[] = L"chrome_launcher.exe";
 
 // Statics
 FilePath ScopedChromeFrameRegistrar::GetChromeFrameBuildPath() {
@@ -52,41 +52,66 @@ void ScopedChromeFrameRegistrar::RegisterAtPath(
     const std::wstring& path) {
 
   ASSERT_FALSE(path.empty());
-  HMODULE chrome_frame_dll_handle = LoadLibrary(path.c_str());
-  ASSERT_TRUE(chrome_frame_dll_handle != NULL);
+  HMODULE dll_handle = LoadLibrary(path.c_str());
+  ASSERT_TRUE(dll_handle != NULL);
 
   typedef HRESULT (STDAPICALLTYPE* DllRegisterServerFn)();
   DllRegisterServerFn register_server =
       reinterpret_cast<DllRegisterServerFn>(GetProcAddress(
-          chrome_frame_dll_handle, "DllRegisterServer"));
+          dll_handle, "DllRegisterServer"));
 
   ASSERT_TRUE(register_server != NULL);
   EXPECT_HRESULT_SUCCEEDED((*register_server)());
 
   DllRegisterServerFn register_npapi_server =
       reinterpret_cast<DllRegisterServerFn>(GetProcAddress(
-          chrome_frame_dll_handle, "RegisterNPAPIPlugin"));
+          dll_handle, "RegisterNPAPIPlugin"));
 
   if (register_npapi_server != NULL)
     EXPECT_HRESULT_SUCCEEDED((*register_npapi_server)());
 
-  ASSERT_TRUE(FreeLibrary(chrome_frame_dll_handle));
+  ASSERT_TRUE(FreeLibrary(dll_handle));
 }
 
-std::wstring ScopedChromeFrameRegistrar::GetReferenceChromeFrameDllPath() {
-  std::wstring reference_build_dir;
+void ScopedChromeFrameRegistrar::UnregisterAtPath(
+    const std::wstring& path) {
+
+  ASSERT_FALSE(path.empty());
+  HMODULE dll_handle = LoadLibrary(path.c_str());
+  ASSERT_TRUE(dll_handle != NULL);
+
+  typedef HRESULT (STDAPICALLTYPE* DllUnregisterServerFn)();
+  DllUnregisterServerFn unregister_server =
+      reinterpret_cast<DllUnregisterServerFn>(GetProcAddress(
+          dll_handle, "DllUnregisterServer"));
+
+  ASSERT_TRUE(unregister_server != NULL);
+  EXPECT_HRESULT_SUCCEEDED((*unregister_server)());
+
+  DllUnregisterServerFn unregister_npapi_server =
+      reinterpret_cast<DllUnregisterServerFn>(GetProcAddress(
+          dll_handle, "UnregisterNPAPIPlugin"));
+
+  if (unregister_npapi_server != NULL)
+    EXPECT_HRESULT_SUCCEEDED((*unregister_npapi_server)());
+
+  ASSERT_TRUE(FreeLibrary(dll_handle));
+}
+
+FilePath ScopedChromeFrameRegistrar::GetReferenceChromeFrameDllPath() {
+  FilePath reference_build_dir;
   PathService::Get(chrome::DIR_APP, &reference_build_dir);
 
-  file_util::UpOneDirectory(&reference_build_dir);
-  file_util::UpOneDirectory(&reference_build_dir);
+  reference_build_dir = reference_build_dir.DirName();
+  reference_build_dir = reference_build_dir.DirName();
 
-  file_util::AppendToPath(&reference_build_dir, L"chrome_frame");
-  file_util::AppendToPath(&reference_build_dir, L"tools");
-  file_util::AppendToPath(&reference_build_dir, L"test");
-  file_util::AppendToPath(&reference_build_dir, L"reference_build");
-  file_util::AppendToPath(&reference_build_dir, L"chrome");
-  file_util::AppendToPath(&reference_build_dir, L"servers");
-  file_util::AppendToPath(&reference_build_dir, kReferenceChromeFrameDllName);
+  reference_build_dir = reference_build_dir.AppendASCII("chrome_frame");
+  reference_build_dir = reference_build_dir.AppendASCII("tools");
+  reference_build_dir = reference_build_dir.AppendASCII("test");
+  reference_build_dir = reference_build_dir.AppendASCII("reference_build");
+  reference_build_dir = reference_build_dir.AppendASCII("chrome");
+  reference_build_dir = reference_build_dir.AppendASCII("servers");
+  reference_build_dir = reference_build_dir.Append(kChromeFrameDllName);
   return reference_build_dir;
 }
 
@@ -99,7 +124,7 @@ ScopedChromeFrameRegistrar::ScopedChromeFrameRegistrar(
 }
 
 ScopedChromeFrameRegistrar::ScopedChromeFrameRegistrar() {
-  original_dll_path_ = GetChromeFrameBuildPath().ToWStringHack();
+  original_dll_path_ = GetChromeFrameBuildPath().value();
   RegisterChromeFrameAtPath(original_dll_path_);
 }
 
@@ -116,7 +141,7 @@ void ScopedChromeFrameRegistrar::RegisterChromeFrameAtPath(
 }
 
 void ScopedChromeFrameRegistrar::RegisterReferenceChromeFrameBuild() {
-  RegisterChromeFrameAtPath(GetReferenceChromeFrameDllPath());
+  RegisterChromeFrameAtPath(GetReferenceChromeFrameDllPath().value());
 }
 
 std::wstring ScopedChromeFrameRegistrar::GetChromeFrameDllPath() const {
@@ -244,10 +269,10 @@ class ArgumentFilter : public base::ProcessFilter {
 
   // Returns true to indicate set-inclusion and false otherwise.  This method
   // should not have side-effects and should be idempotent.
-  virtual bool Includes(base::ProcessId pid, base::ProcessId parent_pid) const {
+  virtual bool Includes(const base::ProcessEntry& entry) const {
     bool found = false;
     std::wstring command_line;
-    if (GetCommandLineForProcess(pid, &command_line)) {
+    if (GetCommandLineForProcess(entry.pid(), &command_line)) {
       std::wstring::const_iterator it =
           std::search(command_line.begin(),
                       command_line.end(),
@@ -271,7 +296,7 @@ bool KillAllNamedProcessesWithArgument(const std::wstring& process_name,
   ArgumentFilter filter(argument);
   base::NamedProcessIterator iter(process_name, &filter);
   while (const base::ProcessEntry* entry = iter.NextProcessEntry()) {
-    if (!base::KillProcessById((*entry).th32ProcessID, 0, true)) {
+    if (!base::KillProcessById(entry->pid(), 0, true)) {
       DLOG(ERROR) << "Failed to kill process " << (*entry).th32ProcessID;
       result = false;
     }

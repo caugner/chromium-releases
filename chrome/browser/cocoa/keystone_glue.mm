@@ -12,6 +12,7 @@
 #import "app/l10n_util_mac.h"
 #include "base/logging.h"
 #include "base/mac_util.h"
+#include "base/sys_string_conversions.h"
 #import "base/worker_pool_mac.h"
 #include "chrome/browser/cocoa/authorization_util.h"
 #include "chrome/common/chrome_constants.h"
@@ -32,33 +33,35 @@ typedef enum {
   kKSRegistrationDontKnowWhatKindOfTicket,
 } KSRegistrationTicketType;
 
-NSString* KSRegistrationVersionKey = @"Version";
-NSString* KSRegistrationExistenceCheckerTypeKey = @"ExistenceCheckerType";
-NSString* KSRegistrationExistenceCheckerStringKey = @"ExistenceCheckerString";
-NSString* KSRegistrationServerURLStringKey = @"URLString";
-NSString* KSRegistrationPreserveTrustedTesterTokenKey = @"PreserveTTT";
-NSString* KSRegistrationTagKey = @"Tag";
-NSString* KSRegistrationTagPathKey = @"TagPath";
-NSString* KSRegistrationTagKeyKey = @"TagKey";
-NSString* KSRegistrationBrandPathKey = @"BrandPath";
-NSString* KSRegistrationBrandKeyKey = @"BrandKey";
+NSString* const KSRegistrationVersionKey = @"Version";
+NSString* const KSRegistrationExistenceCheckerTypeKey = @"ExistenceCheckerType";
+NSString* const KSRegistrationExistenceCheckerStringKey =
+    @"ExistenceCheckerString";
+NSString* const KSRegistrationServerURLStringKey = @"URLString";
+NSString* const KSRegistrationPreserveTrustedTesterTokenKey = @"PreserveTTT";
+NSString* const KSRegistrationTagKey = @"Tag";
+NSString* const KSRegistrationTagPathKey = @"TagPath";
+NSString* const KSRegistrationTagKeyKey = @"TagKey";
+NSString* const KSRegistrationBrandPathKey = @"BrandPath";
+NSString* const KSRegistrationBrandKeyKey = @"BrandKey";
 
-NSString *KSRegistrationDidCompleteNotification =
+NSString* const KSRegistrationDidCompleteNotification =
     @"KSRegistrationDidCompleteNotification";
-NSString *KSRegistrationPromotionDidCompleteNotification =
+NSString* const KSRegistrationPromotionDidCompleteNotification =
     @"KSRegistrationPromotionDidCompleteNotification";
 
-NSString *KSRegistrationCheckForUpdateNotification =
+NSString* const KSRegistrationCheckForUpdateNotification =
     @"KSRegistrationCheckForUpdateNotification";
-NSString *KSRegistrationStatusKey = @"Status";
-NSString *KSRegistrationUpdateCheckErrorKey = @"Error";
+NSString* KSRegistrationStatusKey = @"Status";
+NSString* KSRegistrationUpdateCheckErrorKey = @"Error";
 
-NSString *KSRegistrationStartUpdateNotification =
+NSString* const KSRegistrationStartUpdateNotification =
     @"KSRegistrationStartUpdateNotification";
-NSString *KSUpdateCheckSuccessfulKey = @"CheckSuccessful";
-NSString *KSUpdateCheckSuccessfullyInstalledKey = @"SuccessfullyInstalled";
+NSString* const KSUpdateCheckSuccessfulKey = @"CheckSuccessful";
+NSString* const KSUpdateCheckSuccessfullyInstalledKey =
+    @"SuccessfullyInstalled";
 
-NSString *KSRegistrationRemoveExistingTag = @"";
+NSString* const KSRegistrationRemoveExistingTag = @"";
 #define KSRegistrationPreserveExistingTag nil
 
 // Constants for the brand file (uses an external file so it can survive updates
@@ -124,6 +127,9 @@ NSString* SystemBrandFilePath() {
 // center.
 - (void)updateStatus:(AutoupdateStatus)status version:(NSString*)version;
 
+// Returns the version of the currently-installed application on disk.
+- (NSString*)currentlyInstalledVersion;
+
 // These three methods are used to determine the version of the application
 // currently installed on disk, compare that to the currently-running version,
 // decide whether any updates have been installed, and call
@@ -175,15 +181,14 @@ NSString* SystemBrandFilePath() {
 
 @end  // @interface KeystoneGlue(Private)
 
-const NSString* const kAutoupdateStatusNotification =
-    @"AutoupdateStatusNotification";
-const NSString* const kAutoupdateStatusStatus = @"status";
-const NSString* const kAutoupdateStatusVersion = @"version";
+NSString* const kAutoupdateStatusNotification = @"AutoupdateStatusNotification";
+NSString* const kAutoupdateStatusStatus = @"status";
+NSString* const kAutoupdateStatusVersion = @"version";
 
 namespace {
 
-const NSString* const kChannelKey = @"KSChannelID";
-const NSString* const kBrandKey = @"KSBrandID";
+NSString* const kChannelKey = @"KSChannelID";
+NSString* const kBrandKey = @"KSBrandID";
 
 }  // namespace
 
@@ -247,19 +252,17 @@ const NSString* const kBrandKey = @"KSBrandID";
 }
 
 - (NSDictionary*)infoDictionary {
-  // Use mac_util::MainAppBundle() to get the app framework's dictionary.
-  return [mac_util::MainAppBundle() infoDictionary];
-}
-
-- (void)loadParameters {
-  NSDictionary* infoDictionary = [self infoDictionary];
-
   // Use [NSBundle mainBundle] to get the application's own bundle identifier
   // and path, not the framework's.  For auto-update, the application is
   // what's significant here: it's used to locate the outermost part of the
   // application for the existence checker and other operations that need to
   // see the entire application bundle.
+  return [[NSBundle mainBundle] infoDictionary];
+}
+
+- (void)loadParameters {
   NSBundle* appBundle = [NSBundle mainBundle];
+  NSDictionary* infoDictionary = [self infoDictionary];
 
   NSString* productID = [infoDictionary objectForKey:@"KSProductID"];
   if (productID == nil) {
@@ -547,6 +550,13 @@ const NSString* const kBrandKey = @"KSBrandID";
   }
 }
 
+- (NSString*)currentlyInstalledVersion {
+  NSString* appInfoPlistPath = [self appInfoPlistPath];
+  NSDictionary* infoPlist =
+      [NSDictionary dictionaryWithContentsOfFile:appInfoPlistPath];
+  return [infoPlist objectForKey:@"CFBundleShortVersionString"];
+}
+
 // Runs on the main thread.
 - (void)determineUpdateStatusAsync {
   DCHECK([NSThread isMainThread]);
@@ -565,10 +575,7 @@ const NSString* const kBrandKey = @"KSBrandID";
 - (void)determineUpdateStatus {
   DCHECK(![NSThread isMainThread]);
 
-  NSString* appInfoPlistPath = [self appInfoPlistPath];
-  NSDictionary* infoPlist =
-      [NSDictionary dictionaryWithContentsOfFile:appInfoPlistPath];
-  NSString* version = [infoPlist objectForKey:@"CFBundleShortVersionString"];
+  NSString* version = [self currentlyInstalledVersion];
 
   [self performSelectorOnMainThread:@selector(determineUpdateStatusForVersion:)
                          withObject:version
@@ -899,3 +906,17 @@ const NSString* const kBrandKey = @"KSBrandID";
 }
 
 @end  // @implementation KeystoneGlue
+
+namespace keystone_glue {
+
+bool KeystoneEnabled() {
+  return [KeystoneGlue defaultKeystoneGlue] != nil;
+}
+
+string16 CurrentlyInstalledVersion() {
+  KeystoneGlue* keystoneGlue = [KeystoneGlue defaultKeystoneGlue];
+  NSString* version = [keystoneGlue currentlyInstalledVersion];
+  return base::SysNSStringToUTF16(version);
+}
+
+}  // namespace keystone_glue

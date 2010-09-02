@@ -4,11 +4,17 @@
 
 #include "chrome/browser/automation/automation_provider.h"
 
+#include "base/json/json_reader.h"
 #include "base/keyboard_codes.h"
+#include "chrome/browser/automation/automation_extension_function.h"
+#include "chrome/browser/automation/extension_automation_constants.h"
+#include "chrome/browser/automation/extension_port_container.h"
 #include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/external_tab_container.h"
+#include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/external_tab_container_win.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/views/bookmark_bar_view.h"
 #include "chrome/test/automation/automation_messages.h"
@@ -126,14 +132,6 @@ class MouseEventTask : public Task {
   DISALLOW_COPY_AND_ASSIGN(MouseEventTask);
 };
 
-void AutomationProvider::ScheduleMouseEvent(views::View* view,
-                                            views::Event::EventType type,
-                                            const gfx::Point& point,
-                                            int flags) {
-  MessageLoop::current()->PostTask(FROM_HERE,
-      new MouseEventTask(view, type, point, flags));
-}
-
 // This task sends a WindowDragResponse message with the appropriate
 // routing ID to the automation proxy.  This is implemented as a task so that
 // we know that the mouse events (and any tasks that they spawn on the message
@@ -218,7 +216,8 @@ void AutomationProvider::WindowSimulateDrag(int handle,
                                ((flags & views::Event::EF_SHIFT_DOWN) ==
                                 views::Event::EF_SHIFT_DOWN),
                                ((flags & views::Event::EF_ALT_DOWN) ==
-                                views::Event::EF_ALT_DOWN));
+                                views::Event::EF_ALT_DOWN),
+                                false);
     }
     SendMessage(top_level_hwnd, up_message, wparam_flags,
                 MAKELPARAM(end.x, end.y));
@@ -426,6 +425,7 @@ void AutomationProvider::OnForwardContextMenuCommandToChrome(int tab_handle,
 void AutomationProvider::ConnectExternalTab(
     uint64 cookie,
     bool allow,
+    gfx::NativeWindow parent_window,
     gfx::NativeWindow* tab_container_window,
     gfx::NativeWindow* tab_window,
     int* tab_handle) {
@@ -442,7 +442,8 @@ void AutomationProvider::ConnectExternalTab(
 
   if (allow && AddExternalTab(external_tab_container)) {
     external_tab_container->Reinitialize(this,
-                                         automation_resource_message_filter_);
+                                         automation_resource_message_filter_,
+                                         parent_window);
     TabContents* tab_contents = external_tab_container->tab_contents();
     *tab_handle = external_tab_container->tab_handle();
     *tab_container_window = external_tab_container->GetNativeView();
@@ -494,3 +495,108 @@ void AutomationProvider::GetWindowTitle(int handle, string16* text) {
   ::GetWindowText(window, WriteInto(&result, length), length);
   text->assign(WideToUTF16(result));
 }
+
+void AutomationProvider::OnMessageFromExternalHost(int handle,
+                                                   const std::string& message,
+                                                   const std::string& origin,
+                                                   const std::string& target) {
+  RenderViewHost* view_host = GetViewForTab(handle);
+  if (!view_host)
+    return;
+
+  if (AutomationExtensionFunction::InterceptMessageFromExternalHost(
+          view_host, message, origin, target)) {
+    // Message was diverted.
+    return;
+  }
+
+  if (ExtensionPortContainer::InterceptMessageFromExternalHost(
+          message, origin, target, this, view_host, handle)) {
+    // Message was diverted.
+    return;
+  }
+
+  if (InterceptBrowserEventMessageFromExternalHost(message, origin, target)) {
+    // Message was diverted.
+    return;
+  }
+
+  view_host->ForwardMessageFromExternalHost(message, origin, target);
+}
+
+bool AutomationProvider::InterceptBrowserEventMessageFromExternalHost(
+      const std::string& message, const std::string& origin,
+      const std::string& target) {
+  if (target !=
+      extension_automation_constants::kAutomationBrowserEventRequestTarget)
+    return false;
+
+  if (origin != extension_automation_constants::kAutomationOrigin) {
+    LOG(WARNING) << "Wrong origin on automation browser event " << origin;
+    return false;
+  }
+
+  // The message is a JSON-encoded array with two elements, both strings. The
+  // first is the name of the event to dispatch.  The second is a JSON-encoding
+  // of the arguments specific to that event.
+  scoped_ptr<Value> message_value(base::JSONReader::Read(message, false));
+  if (!message_value.get() || !message_value->IsType(Value::TYPE_LIST)) {
+    LOG(WARNING) << "Invalid browser event specified through automation";
+    return false;
+  }
+
+  const ListValue* args = static_cast<const ListValue*>(message_value.get());
+
+  std::string event_name;
+  if (!args->GetString(0, &event_name)) {
+    LOG(WARNING) << "No browser event name specified through automation";
+    return false;
+  }
+
+  std::string json_args;
+  if (!args->GetString(1, &json_args)) {
+    LOG(WARNING) << "No browser event args specified through automation";
+    return false;
+  }
+
+  if (profile()->GetExtensionMessageService()) {
+    profile()->GetExtensionMessageService()->DispatchEventToRenderers(
+        event_name, json_args, profile()->IsOffTheRecord(), GURL());
+  }
+
+  return true;
+}
+
+void AutomationProvider::NavigateInExternalTab(
+    int handle, const GURL& url, const GURL& referrer,
+    AutomationMsg_NavigationResponseValues* status) {
+  *status = AUTOMATION_MSG_NAVIGATION_ERROR;
+
+  if (tab_tracker_->ContainsHandle(handle)) {
+    NavigationController* tab = tab_tracker_->GetResource(handle);
+    tab->LoadURL(url, referrer, PageTransition::TYPED);
+    *status = AUTOMATION_MSG_NAVIGATION_SUCCESS;
+  }
+}
+
+void AutomationProvider::NavigateExternalTabAtIndex(
+    int handle, int navigation_index,
+    AutomationMsg_NavigationResponseValues* status) {
+  *status = AUTOMATION_MSG_NAVIGATION_ERROR;
+
+  if (tab_tracker_->ContainsHandle(handle)) {
+    NavigationController* tab = tab_tracker_->GetResource(handle);
+    tab->GoToIndex(navigation_index);
+    *status = AUTOMATION_MSG_NAVIGATION_SUCCESS;
+  }
+}
+
+void AutomationProvider::OnRunUnloadHandlers(
+    int handle, gfx::NativeWindow notification_window,
+    int notification_message) {
+  ExternalTabContainer* external_tab = GetExternalTabForHandle(handle);
+  if (external_tab) {
+    external_tab->RunUnloadHandlers(notification_window, notification_message);
+  }
+}
+

@@ -15,7 +15,8 @@
     </script>
     <script type="text/javascript" src="js/api_page_generator.js"></script>
     <script type="text/javascript" src="js/bootstrap.js"></script>
-  <title>Match Patterns - Google Chrome Extensions - Google Code</title></head><body>  <div id="gc-container" class="labs">
+  <title>Match Patterns - Google Chrome Extensions - Google Code</title></head>
+  <body>  <div id="gc-container" class="labs">
       <div id="devModeWarning">
         You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
       </div>
@@ -35,6 +36,7 @@
                 <div style="display:inline">
                   (
                     <span class="optional">optional</span>
+                    <span class="enum">enumerated</span>
                     <span id="typeTemplate">
                       <span>
                         <a> Type</a>
@@ -44,6 +46,7 @@
                           array of <span><span></span></span>
                         </span>
                         <span>paramType</span>
+                        <span></span>
                       </span>
                     </span>
                   )
@@ -56,6 +59,15 @@
           </dd>
           <dd>
             Description of this parameter from the json schema.
+          </dd>
+          <dd>
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
           </dd>
 
           <!-- OBJECT PROPERTIES -->
@@ -135,6 +147,7 @@
               <li>Browser UI
                 <ul>
                   <li><a href="browserAction.html">Browser Actions</a></li>
+                  <li><a href="contextMenus.html">Context Menus</a></li>
                   <li><a href="notifications.html">Desktop Notifications</a></li>
                   <li><a href="options.html">Options Pages</a></li>
                   <li><a href="override.html">Override Pages</a></li>
@@ -145,6 +158,7 @@
               <li>Browser Interaction
                 <ul>
                   <li><a href="bookmarks.html">Bookmarks</a></li>
+                  <li><a href="cookies.html">Cookies</a></li>
                   <li><a href="events.html">Events</a></li>
                   <li><a href="history.html">History</a></li>
                   <li><a href="tabs.html">Tabs</a></li>
@@ -157,6 +171,7 @@
                   <li><a href="background_pages.html">Background Pages</a></li>
                   <li><a href="content_scripts.html">Content Scripts</a></li>
                   <li><a href="xhr.html">Cross-Origin XHR</a></li>
+                  <li><a href="idle.html">Idle</a></li>
                   <li><a href="i18n.html">Internationalization</a></li>
                   <li><a href="messaging.html">Message Passing</a></li>
                   <li><a href="npapi.html">NPAPI Plugins</a></li>
@@ -267,15 +282,19 @@ which URLs your content script affects.
 
 <p>
 A match pattern is essentially a URL
-that begins with <code>http</code>, <code>https</code>,
-<code>file</code>, or <code>ftp</code>,
+that begins with a permitted scheme (<code>http</code>,
+<code>https</code>, <code>file</code>, or <code>ftp</code>),
 and that can contain '<code>*</code>' characters.
+The special pattern
+<code>&lt;all_urls&gt;</code> matches any URL
+that starts with a permitted scheme.
 Each match pattern has 3 parts:</p>
 <p></p>
 
 <ul>
   <li> <em>scheme</em> —
     for example, <code>http</code> or <code>file</code>
+    or <code>*</code>
   </li>
   <li> <em>host</em> —
     for example, <code>www.google.com</code>
@@ -292,11 +311,17 @@ Each match pattern has 3 parts:</p>
 
 <p>Here's the basic syntax:</p>
 
-<pre><em>&lt;url-pattern&gt;</em> := <em>&lt;scheme&gt;</em>://<em>&lt;host&gt;</em><em>&lt;path&gt;</em><br><em>&lt;scheme&gt;</em> := 'http' | 'https' | 'file' | 'ftp'<br><em>&lt;host&gt;</em> := '*' | '*.' <em>&lt;any char except '/' and '*'&gt;</em>+<br><em>&lt;path&gt;</em> := '/' <em>&lt;any chars&gt;</em></pre>
+<pre><em>&lt;url-pattern&gt;</em> := <em>&lt;scheme&gt;</em>://<em>&lt;host&gt;</em><em>&lt;path&gt;</em>
+<em>&lt;scheme&gt;</em> := '*' | 'http' | 'https' | 'file' | 'ftp'
+<em>&lt;host&gt;</em> := '*' | '*.' <em>&lt;any char except '/' and '*'&gt;</em>+
+<em>&lt;path&gt;</em> := '/' <em>&lt;any chars&gt;</em>
+</pre>
 
 <p>
 The meaning of '<code>*</code>' depends on whether
-it's in the <em>host</em> or the <em>path</em> part.
+it's in the <em>scheme</em>, <em>host</em>, or <em>path</em> part.
+If the <em>scheme</em> is <code>*</code>,
+then it matches either <code>http</code> or <code>https</code>.
 If the <em>host</em> is just <code>*</code>,
 then it matches any host.
 If the <em>host</em> is <code>*.<em>hostname</em></code>,
@@ -399,6 +424,39 @@ The following table shows some valid patterns.
   <td>
     http://127.0.0.1/<br>
     http://127.0.0.1/foo/bar.html
+  </td>
+</tr>
+
+<tr>
+  <td>
+    <code>*://mail.google.com/* </code>
+  </td>
+
+  <td>
+    Matches any URL that starts with
+    <code>http://mail.google.com</code> or
+    <code>https://mail.google.com</code>.
+  </td>
+
+  <td>
+    http://mail.google.com/foo/baz/bar<br>
+    https://mail.google.com/foobar
+  </td>
+</tr>
+
+<tr>
+  <td>
+    <code>&lt;all_urls&gt;</code>
+  </td>
+
+  <td>
+    Matches any URL that uses a permitted scheme.
+    (See the beginning of this section for the list of permitted
+    schemes.)
+  </td>
+  <td>
+    http://example.org/foo/bar.html<br>
+    file:///bar/baz.html
   </td>
 </tr>
 </tbody>
@@ -530,6 +588,13 @@ Here are some examples of <em>invalid</em> pattern matches:
                   </div>
                 </div>
 
+                <!-- MIN_VERSION -->
+                <p>
+                  This function was added in version <b><span></span></b>.
+                  If you require this function, the manifest key
+                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+                  can ensure that your extension won't be run in an earlier browser version.
+                </p>
               </div> <!-- /description -->
 
             </div>  <!-- /apiItem -->
@@ -574,7 +639,7 @@ Here are some examples of <em>invalid</em> pattern matches:
 
           <!-- TYPES -->
           <div class="apiGroup">
-            <a name="types.sort(sortByName)"></a>
+            <a name="types"></a>
             <h3 id="types">Types</h3>
 
             <!-- iterates over all types -->

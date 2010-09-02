@@ -24,6 +24,10 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 
+#if defined(OS_LINUX)
+#include "base/event_synthesis_gtk.h"
+#endif
+
 using WebKit::WebFrame;
 using WebKit::WebScriptController;
 using WebKit::WebScriptSource;
@@ -101,10 +105,15 @@ void RenderViewTest::SetUp() {
   render_thread_.set_routing_id(kRouteId);
 
   // This needs to pass the mock render thread to the view.
-  view_ = RenderView::Create(&render_thread_, 0, kOpenerId,
-                             RendererPreferences(), WebPreferences(),
-                             new SharedRenderViewCounter(0), kRouteId,
-                             kInvalidSessionStorageNamespaceId);
+  view_ = RenderView::Create(&render_thread_,
+                             0,
+                             kOpenerId,
+                             RendererPreferences(),
+                             WebPreferences(),
+                             new SharedRenderViewCounter(0),
+                             kRouteId,
+                             kInvalidSessionStorageNamespaceId,
+                             string16());
 
   // Attach a pseudo keyboard device to this object.
   mock_keyboard_.reset(new MockKeyboard());
@@ -174,6 +183,39 @@ int RenderViewTest::SendKeyEvent(MockKeyboard::Layout layout,
   SendNativeKeyEvent(keyup_event);
 
   return length;
+#elif defined(OS_LINUX)
+  // We ignore |layout|, which means we are only testing the layout of the
+  // current locale. TODO(estade): fix this to respect |layout|.
+  std::vector<GdkEvent*> events;
+  base::SynthesizeKeyPressEvents(
+      NULL, static_cast<base::KeyboardCode>(key_code),
+      modifiers & (MockKeyboard::LEFT_CONTROL | MockKeyboard::RIGHT_CONTROL),
+      modifiers & (MockKeyboard::LEFT_SHIFT | MockKeyboard::RIGHT_SHIFT),
+      modifiers & (MockKeyboard::LEFT_ALT | MockKeyboard::RIGHT_ALT),
+      &events);
+
+  guint32 unicode_key = 0;
+  for (size_t i = 0; i < events.size(); ++i) {
+    // Only send the up/down events for key press itself (skip the up/down
+    // events for the modifier keys).
+    if ((i + 1) == (events.size() / 2) || i == (events.size() / 2)) {
+      unicode_key = gdk_keyval_to_unicode(events[i]->key.keyval);
+      NativeWebKeyboardEvent webkit_event(&events[i]->key);
+      SendNativeKeyEvent(webkit_event);
+
+      // Need to add a char event after the key down.
+      if (webkit_event.type == WebKit::WebInputEvent::RawKeyDown) {
+        NativeWebKeyboardEvent char_event = webkit_event;
+        char_event.type = WebKit::WebInputEvent::Char;
+        char_event.skip_in_browser = true;
+        SendNativeKeyEvent(char_event);
+      }
+    }
+    gdk_event_free(events[i]);
+  }
+
+  *output = std::wstring(1, unicode_key);
+  return 1;
 #else
   NOTIMPLEMENTED();
   return L'\0';
@@ -186,4 +228,38 @@ void RenderViewTest::SendNativeKeyEvent(
   input_message->WriteData(reinterpret_cast<const char*>(&key_event),
                            sizeof(WebKit::WebKeyboardEvent));
   view_->OnHandleInputEvent(*input_message);
+}
+
+void RenderViewTest::VerifyPageCount(int count) {
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  const IPC::Message* page_cnt_msg =
+      render_thread_.sink().GetUniqueMessageMatching(
+          ViewHostMsg_DidGetPrintedPagesCount::ID);
+  ASSERT_TRUE(page_cnt_msg);
+  ViewHostMsg_DidGetPrintedPagesCount::Param post_page_count_param;
+  ViewHostMsg_DidGetPrintedPagesCount::Read(page_cnt_msg,
+                                            &post_page_count_param);
+  EXPECT_EQ(count, post_page_count_param.b);
+#elif defined(OS_LINUX)
+  // The DidGetPrintedPagesCount message isn't sent on Linux. Right now we
+  // always print all pages, and there are checks to that effect built into
+  // the print code.
+#endif
+}
+
+void RenderViewTest::VerifyPagesPrinted() {
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  const IPC::Message* did_print_msg =
+      render_thread_.sink().GetUniqueMessageMatching(
+          ViewHostMsg_DidPrintPage::ID);
+  ASSERT_TRUE(did_print_msg);
+  ViewHostMsg_DidPrintPage::Param post_did_print_page_param;
+  ViewHostMsg_DidPrintPage::Read(did_print_msg, &post_did_print_page_param);
+  EXPECT_EQ(0, post_did_print_page_param.a.page_number);
+#elif defined(OS_LINUX)
+  const IPC::Message* did_print_msg =
+      render_thread_.sink().GetUniqueMessageMatching(
+          ViewHostMsg_TempFileForPrintingWritten::ID);
+  ASSERT_TRUE(did_print_msg);
+#endif
 }

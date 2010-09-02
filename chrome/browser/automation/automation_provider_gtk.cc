@@ -53,8 +53,7 @@ void AutomationProvider::WindowGetViewBounds(int handle, int view_id,
     if (!widget)
       return;
     *success = true;
-    *bounds = gfx::Rect(0, 0,
-                        widget->allocation.width, widget->allocation.height);
+    *bounds = gfx::Rect(widget->allocation.width, widget->allocation.height);
     gint x, y;
     if (screen_coordinates) {
       gfx::Point point = gtk_util::GetWidgetScreenPosition(widget);
@@ -80,12 +79,6 @@ void AutomationProvider::IsWindowMaximized(int handle, bool* is_maximized,
 }
 
 void AutomationProvider::PrintAsync(int tab_handle) {
-  NOTIMPLEMENTED();
-}
-
-void AutomationProvider::SetInitialFocus(const IPC::Message& message,
-                                         int handle, bool reverse,
-                                         bool restore_focus_to_view) {
   NOTIMPLEMENTED();
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,7 @@
 namespace net {
 
 class CertVerifier;
+class ClientSocketHandle;
 
 // An SSL client socket implemented with Secure Transport.
 class SSLClientSocketMac : public SSLClientSocket {
@@ -28,7 +29,7 @@ class SSLClientSocketMac : public SSLClientSocket {
   // The given hostname will be compared with the name(s) in the server's
   // certificate during the SSL handshake. ssl_config specifies the SSL
   // settings.
-  SSLClientSocketMac(ClientSocket* transport_socket,
+  SSLClientSocketMac(ClientSocketHandle* transport_socket,
                      const std::string& hostname,
                      const SSLConfig& ssl_config);
   ~SSLClientSocketMac();
@@ -39,11 +40,12 @@ class SSLClientSocketMac : public SSLClientSocket {
   virtual NextProtoStatus GetNextProto(std::string* proto);
 
   // ClientSocket methods:
-  virtual int Connect(CompletionCallback* callback, const BoundNetLog& net_log);
+  virtual int Connect(CompletionCallback* callback);
   virtual void Disconnect();
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const;
   virtual int GetPeerAddress(AddressList* address) const;
+  virtual const BoundNetLog& NetLog() const { return net_log_; }
 
   // Socket methods:
   virtual int Read(IOBuffer* buf, int buf_len, CompletionCallback* callback);
@@ -87,7 +89,7 @@ class SSLClientSocketMac : public SSLClientSocket {
   CompletionCallbackImpl<SSLClientSocketMac> transport_read_callback_;
   CompletionCallbackImpl<SSLClientSocketMac> transport_write_callback_;
 
-  scoped_ptr<ClientSocket> transport_;
+  scoped_ptr<ClientSocketHandle> transport_;
   std::string hostname_;
   SSLConfig ssl_config_;
 

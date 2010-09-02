@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "base/scoped_bstr_win.h"
 #include "base/scoped_comptr_win.h"
 #include "base/scoped_variant_win.h"
+#include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/thread_local.h"
 #include "base/utf_string_conversions.h"
@@ -355,7 +356,7 @@ std::wstring GetHostProcessName(bool include_extension) {
   if (!include_extension) {
     exe = exe.RemoveExtension();
   }
-  return exe.ToWStringHack();
+  return exe.value();
 }
 
 BrowserType GetBrowserType() {
@@ -531,6 +532,29 @@ bool GetModuleVersion(HMODULE module, uint32* high, uint32* low) {
   }
 
   return ok;
+}
+
+bool ParseVersion(const std::wstring& version, uint32* high, uint32* low) {
+  DCHECK(high);
+  if (!isdigit(version[0]))
+    return false;
+
+  *high = _wtoi(version.c_str());
+  if (low) {
+    *low = 0;
+    size_t i = version.find(L'.');
+    if (i != std::wstring::npos) {
+      *low = _wtoi(version.c_str() + i + 1);
+    }
+  }
+
+  return true;
+}
+
+HMODULE GetModuleFromAddress(void* address) {
+  MEMORY_BASIC_INFORMATION info = {0};
+  ::VirtualQuery(address, &info, sizeof(info));
+  return reinterpret_cast<HMODULE>(info.AllocationBase);
 }
 
 namespace {
@@ -1058,16 +1082,220 @@ int GetHttpResponseStatusFromBinding(IBinding* binding) {
   return http_status;
 }
 
+CLIPFORMAT GetTextHtmlClipboardFormat() {
+  static const CLIPFORMAT text_html = RegisterClipboardFormat(CFSTR_MIME_HTML);
+  return text_html;
+}
+
+bool IsTextHtmlMimeType(const wchar_t* mime_type) {
+  return IsTextHtmlClipFormat(RegisterClipboardFormatW(mime_type));
+}
+
+bool IsTextHtmlClipFormat(CLIPFORMAT cf) {
+  return cf == GetTextHtmlClipboardFormat();
+}
+
 ProtocolPatchMethod GetPatchMethod() {
   ProtocolPatchMethod patch_method =
       static_cast<ProtocolPatchMethod>(
-          GetConfigInt(PATCH_METHOD_MONIKER, kPatchProtocols));
+          GetConfigInt(PATCH_METHOD_INET_PROTOCOL, kPatchProtocols));
   return patch_method;
 }
 
-bool MonikerPatchEnabled() {
+bool IsIBrowserServicePatchEnabled() {
   ProtocolPatchMethod patch_method = GetPatchMethod();
-  LOG_IF(ERROR, patch_method != PATCH_METHOD_MONIKER)
-      << "Not running test. Moniker patch not enabled.";
-  return patch_method == PATCH_METHOD_MONIKER;
+  return patch_method == PATCH_METHOD_IBROWSER;
 }
+
+std::string BindStatus2Str(ULONG bind_status) {
+  std::string s;
+  static const char* const bindstatus_txt[] = {
+    "BINDSTATUS_FINDINGRESOURCE",
+    "BINDSTATUS_CONNECTING",
+    "BINDSTATUS_REDIRECTING",
+    "BINDSTATUS_BEGINDOWNLOADDATA",
+    "BINDSTATUS_DOWNLOADINGDATA",
+    "BINDSTATUS_ENDDOWNLOADDATA",
+    "BINDSTATUS_BEGINDOWNLOADCOMPONENTS",
+    "BINDSTATUS_INSTALLINGCOMPONENTS",
+    "BINDSTATUS_ENDDOWNLOADCOMPONENTS",
+    "BINDSTATUS_USINGCACHEDCOPY",
+    "BINDSTATUS_SENDINGREQUEST",
+    "BINDSTATUS_CLASSIDAVAILABLE",
+    "BINDSTATUS_MIMETYPEAVAILABLE",
+    "BINDSTATUS_CACHEFILENAMEAVAILABLE",
+    "BINDSTATUS_BEGINSYNCOPERATION",
+    "BINDSTATUS_ENDSYNCOPERATION",
+    "BINDSTATUS_BEGINUPLOADDATA",
+    "BINDSTATUS_UPLOADINGDATA",
+    "BINDSTATUS_ENDUPLOADINGDATA",
+    "BINDSTATUS_PROTOCOLCLASSID",
+    "BINDSTATUS_ENCODING",
+    "BINDSTATUS_VERFIEDMIMETYPEAVAILABLE",
+    "BINDSTATUS_CLASSINSTALLLOCATION",
+    "BINDSTATUS_DECODING",
+    "BINDSTATUS_LOADINGMIMEHANDLER",
+    "BINDSTATUS_CONTENTDISPOSITIONATTACH",
+    "BINDSTATUS_FILTERREPORTMIMETYPE",
+    "BINDSTATUS_CLSIDCANINSTANTIATE",
+    "BINDSTATUS_IUNKNOWNAVAILABLE",
+    "BINDSTATUS_DIRECTBIND",
+    "BINDSTATUS_RAWMIMETYPE",
+    "BINDSTATUS_PROXYDETECTING",
+    "BINDSTATUS_ACCEPTRANGES",
+    "BINDSTATUS_COOKIE_SENT",
+    "BINDSTATUS_COMPACT_POLICY_RECEIVED",
+    "BINDSTATUS_COOKIE_SUPPRESSED",
+    "BINDSTATUS_COOKIE_STATE_UNKNOWN",
+    "BINDSTATUS_COOKIE_STATE_ACCEPT",
+    "BINDSTATUS_COOKIE_STATE_REJECT",
+    "BINDSTATUS_COOKIE_STATE_PROMPT",
+    "BINDSTATUS_COOKIE_STATE_LEASH",
+    "BINDSTATUS_COOKIE_STATE_DOWNGRADE",
+    "BINDSTATUS_POLICY_HREF",
+    "BINDSTATUS_P3P_HEADER",
+    "BINDSTATUS_SESSION_COOKIE_RECEIVED",
+    "BINDSTATUS_PERSISTENT_COOKIE_RECEIVED",
+    "BINDSTATUS_SESSION_COOKIES_ALLOWED",
+    "BINDSTATUS_CACHECONTROL",
+    "BINDSTATUS_CONTENTDISPOSITIONFILENAME",
+    "BINDSTATUS_MIMETEXTPLAINMISMATCH",
+    "BINDSTATUS_PUBLISHERAVAILABLE",
+    "BINDSTATUS_DISPLAYNAMEAVAILABLE",
+    "BINDSTATUS_SSLUX_NAVBLOCKED",
+    "BINDSTATUS_SERVER_MIMETYPEAVAILABLE",
+    "BINDSTATUS_SNIFFED_CLASSIDAVAILABLE",
+    "BINDSTATUS_64BIT_PROGRESS"
+  };
+  if (bind_status >= 1 && bind_status <= BINDSTATUS_64BIT_PROGRESS)
+    s = bindstatus_txt[bind_status - 1];
+  else
+    s = StringPrintf("UnDoc[%#x]", bind_status);
+  return s;
+}
+
+std::string PiFlags2Str(DWORD flags) {
+#define ADD_PI_FLAG(x)  if (flags & x) { s.append(#x ## " "); flags &= ~x; }
+  std::string s = " flags ";
+  ADD_PI_FLAG(PI_PARSE_URL);
+  ADD_PI_FLAG(PI_FILTER_MODE);
+  ADD_PI_FLAG(PI_FORCE_ASYNC);
+  ADD_PI_FLAG(PI_USE_WORKERTHREAD);
+  ADD_PI_FLAG(PI_MIMEVERIFICATION);
+  ADD_PI_FLAG(PI_CLSIDLOOKUP);
+  ADD_PI_FLAG(PI_DATAPROGRESS);
+  ADD_PI_FLAG(PI_SYNCHRONOUS);
+  ADD_PI_FLAG(PI_APARTMENTTHREADED);
+  ADD_PI_FLAG(PI_CLASSINSTALL);
+  ADD_PI_FLAG(PI_PASSONBINDCTX);
+  ADD_PI_FLAG(PI_NOMIMEHANDLER);
+  ADD_PI_FLAG(PI_LOADAPPDIRECT);
+  ADD_PI_FLAG(PD_FORCE_SWITCH);
+  ADD_PI_FLAG(PI_PREFERDEFAULTHANDLER);
+
+  if (flags)
+    s += StringPrintf("+UnDoc[%#x]", flags);
+  return s;
+#undef ADD_PI_FLAG
+}
+
+std::string Bscf2Str(DWORD flags) {
+#define ADD_BSCF_FLAG(x)  if (flags & x) { s.append(#x ## " "); flags &= ~x; }
+  std::string s = " flags ";
+  ADD_BSCF_FLAG(BSCF_FIRSTDATANOTIFICATION)
+  ADD_BSCF_FLAG(BSCF_INTERMEDIATEDATANOTIFICATION)
+  ADD_BSCF_FLAG(BSCF_LASTDATANOTIFICATION)
+  ADD_BSCF_FLAG(BSCF_DATAFULLYAVAILABLE)
+  ADD_BSCF_FLAG(BSCF_AVAILABLEDATASIZEUNKNOWN)
+  ADD_BSCF_FLAG(BSCF_SKIPDRAINDATAFORFILEURLS)
+  ADD_BSCF_FLAG(BSCF_64BITLENGTHDOWNLOAD)
+
+  if (flags)
+    s += StringPrintf("+UnDoc[%#x]", flags);
+  return s;
+#undef ADD_BSCF_FLAG
+}
+
+// Reads data from a stream into a string.
+HRESULT ReadStream(IStream* stream, size_t size, std::string* data) {
+  DCHECK(stream);
+  DCHECK(data);
+
+  DWORD read = 0;
+  HRESULT hr = stream->Read(WriteInto(data, size + 1), size, &read);
+  DCHECK(hr == S_OK || hr == S_FALSE || hr == E_PENDING);
+  if (read) {
+    data->erase(read);
+    DCHECK_EQ(read, data->length());
+  } else {
+    data->clear();
+    // Return S_FALSE if the underlying stream returned S_OK and zero bytes.
+    if (hr == S_OK)
+      hr = S_FALSE;
+  }
+
+  return hr;
+}
+
+bool ParseAttachExternalTabUrl(const std::wstring& url, uint64* cookie,
+                               gfx::Rect* dimensions, int* disposition) {
+  if (!StartsWith(url, kChromeAttachExternalTabPrefix, true)) {
+    DLOG(WARNING) << "Invalid url passed in:"
+                  << url.c_str();
+    return false;
+  }
+
+  if (!cookie || !dimensions || !disposition)
+    return false;
+
+  WStringTokenizer tokenizer(url, L"&");
+  // Skip over kChromeAttachExternalTabPrefix
+  tokenizer.GetNext();
+
+  // Read the following items in order.
+  // 1. cookie
+  // 2. disposition
+  // 3. dimension.x
+  // 4. dimension.y
+  // 5. dimension.width
+  // 6. dimension.height.
+  if (tokenizer.GetNext()) {
+    wchar_t* end_ptr = 0;
+    *cookie = _wcstoui64(tokenizer.token().c_str(), &end_ptr, 10);
+  } else {
+    return false;
+  }
+
+  if (tokenizer.GetNext()) {
+    *disposition = _wtoi(tokenizer.token().c_str());
+  } else {
+    return false;
+  }
+
+  if (tokenizer.GetNext()) {
+    dimensions->set_x(_wtoi(tokenizer.token().c_str()));
+  } else {
+    return false;
+  }
+
+  if (tokenizer.GetNext()) {
+    dimensions->set_y(_wtoi(tokenizer.token().c_str()));
+  } else {
+    return false;
+  }
+
+  if (tokenizer.GetNext()) {
+    dimensions->set_width(_wtoi(tokenizer.token().c_str()));
+  } else {
+    return false;
+  }
+
+  if (tokenizer.GetNext()) {
+    dimensions->set_height(_wtoi(tokenizer.token().c_str()));
+  } else {
+    return false;
+  }
+
+  return true;
+}
+

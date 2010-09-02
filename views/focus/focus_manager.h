@@ -48,7 +48,7 @@
 // If you are embedding a native view containing a nested RootView (for example
 // by adding a NativeControl that contains a WidgetWin as its native
 // component), then you need to:
-// - override the View::GetFocusTraversable() method in your outter component.
+// - override the View::GetFocusTraversable() method in your outer component.
 //   It should return the RootView of the inner component. This is used when
 //   the focus traversal traverse down the focus hierarchy to enter the nested
 //   RootView. In the example mentioned above, the NativeControl overrides
@@ -66,11 +66,12 @@
 //   hwnd_view_container_->GetRootView()->SetFocusTraversableParent(
 //      native_control);
 //
-// Note that FocusTraversable do not have to be RootViews: TabContents is
-// FocusTraversable.
+// Note that FocusTraversable do not have to be RootViews: AccessibleToolbarView
+// is FocusTraversable.
 
 namespace views {
 
+class FocusSearch;
 class RootView;
 class View;
 class Widget;
@@ -79,42 +80,9 @@ class Widget;
 // focus traversal events (due to Tab/Shift-Tab key events).
 class FocusTraversable {
  public:
-  // The direction in which the focus traversal is going.
-  // TODO (jcampan): add support for lateral (left, right) focus traversal. The
-  // goal is to switch to focusable views on the same level when using the arrow
-  // keys (ala Windows: in a dialog box, arrow keys typically move between the
-  // dialog OK, Cancel buttons).
-  enum Direction {
-    UP = 0,
-    DOWN
-  };
-
-  // Should find the next view that should be focused and return it. If a
-  // FocusTraversable is found while searching for the focusable view, NULL
-  // should be returned, focus_traversable should be set to the FocusTraversable
-  // and focus_traversable_view should be set to the view associated with the
-  // FocusTraversable.
-  // This call should return NULL if the end of the focus loop is reached.
-  // - |starting_view| is the view that should be used as the starting point
-  //   when looking for the previous/next view. It may be NULL (in which case
-  //   the first/last view should be used depending if normal/reverse).
-  // - |reverse| whether we should find the next (reverse is false) or the
-  //   previous (reverse is true) view.
-  // - |direction| specifies whether we are traversing down (meaning we should
-  //   look into child views) or traversing up (don't look at child views).
-  // - |check_starting_view| is true if starting_view may obtain the next focus.
-  // - |focus_traversable| is set to the focus traversable that should be
-  //   traversed if one is found (in which case the call returns NULL).
-  // - |focus_traversable_view| is set to the view associated with the
-  //   FocusTraversable set in the previous parameter (it is used as the
-  //   starting view when looking for the next focusable view).
-
-  virtual View* FindNextFocusableView(View* starting_view,
-                                      bool reverse,
-                                      Direction direction,
-                                      bool check_starting_view,
-                                      FocusTraversable** focus_traversable,
-                                      View** focus_traversable_view) = 0;
+  // Return a FocusSearch object that implements the algorithm to find
+  // the next or previous focusable view.
+  virtual FocusSearch* GetFocusSearch() = 0;
 
   // Should return the parent FocusTraversable.
   // The top RootView which is the top FocusTraversable returns NULL.
@@ -180,8 +148,22 @@ class FocusManager {
     DISALLOW_COPY_AND_ASSIGN(WidgetFocusManager);
   };
 
+  // The reason why the focus changed.
+  enum FocusChangeReason {
+    // The focus changed because the user traversed focusable views using
+    // keys like Tab or Shift+Tab.
+    kReasonFocusTraversal,
+
+    // The focus changed due to restoring the focus.
+    kReasonFocusRestore,
+
+    // The focus changed due to a click or a shortcut to jump directly to
+    // a particular view.
+    kReasonDirectFocusChange
+  };
+
   explicit FocusManager(Widget* widget);
-  ~FocusManager();
+  virtual ~FocusManager();
 
   // Returns the global WidgetFocusManager instance for the running application.
   static WidgetFocusManager* GetWidgetFocusManager() {
@@ -200,9 +182,21 @@ class FocusManager {
   // Advances the focus (backward if reverse is true).
   void AdvanceFocus(bool reverse);
 
-  // The FocusManager is handling the selected view for the RootView.
+  // The FocusManager keeps track of the focused view within a RootView.
   View* GetFocusedView() const { return focused_view_; }
-  void SetFocusedView(View* view);
+
+  // Low-level methods to force the focus to change (and optionally provide
+  // a reason). If the focus change should only happen if the view is
+  // currenty focusable, enabled, and visible, call view->RequestFocus().
+  void SetFocusedViewWithReason(View* view, FocusChangeReason reason);
+  void SetFocusedView(View* view) {
+    SetFocusedViewWithReason(view, kReasonDirectFocusChange);
+  }
+
+  // Get the reason why the focus most recently changed.
+  FocusChangeReason focus_change_reason() const {
+    return focus_change_reason_;
+  }
 
   // Clears the focused view. The window associated with the top root view gets
   // the native focus (so we still get keyboard events).
@@ -303,6 +297,9 @@ class FocusManager {
   // The storage id used in the ViewStorage to store/restore the view that last
   // had focus.
   int stored_focused_view_storage_id_;
+
+  // The reason why the focus most recently changed.
+  FocusChangeReason focus_change_reason_;
 
   // The accelerators and associated targets.
   typedef std::list<AcceleratorTarget*> AcceleratorTargetList;

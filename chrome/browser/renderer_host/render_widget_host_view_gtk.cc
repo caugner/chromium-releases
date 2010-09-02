@@ -39,12 +39,27 @@
 #include "third_party/WebKit/WebKit/chromium/public/gtk/WebInputEventFactory.h"
 #include "webkit/glue/webcursor_gtk_data.h"
 
+#if defined(OS_CHROMEOS)
+#include "views/widget/tooltip_window_gtk.h"
+#endif  // defined(OS_CHROMEOS)
+
 static const int kMaxWindowWidth = 4000;
 static const int kMaxWindowHeight = 4000;
-
 static const char* kRenderWidgetHostViewKey = "__RENDER_WIDGET_HOST_VIEW__";
 
+#if defined(OS_CHROMEOS)
+// TODO(davemoore) Under Chromeos we are increasing the rate that the trackpad
+// generates events to get better precisions. Eventually we will coordinate the
+// driver and this setting to ensure they match.
+static const float kDefaultScrollPixelsPerTick = 20;
+#else
+// See WebInputEventFactor.cpp for a reason for this being the default
+// scroll size for linux.
+static const float kDefaultScrollPixelsPerTick = 160.0f / 3.0f;
+#endif
+
 using WebKit::WebInputEventFactory;
+using WebKit::WebMouseWheelEvent;
 
 // This class is a simple convenience wrapper for Gtk functions. It has only
 // static methods.
@@ -99,6 +114,9 @@ class RenderWidgetHostViewGtkWidget {
                      G_CALLBACK(CrossingEvent), host_view);
     g_signal_connect(widget, "leave-notify-event",
                      G_CALLBACK(CrossingEvent), host_view);
+    g_signal_connect(widget, "client-event",
+                     G_CALLBACK(ClientEvent), host_view);
+
 
     // Connect after so that we are called after the handler installed by the
     // TabContentsView which handles zoom events.
@@ -212,6 +230,10 @@ class RenderWidgetHostViewGtkWidget {
     if (event->type == GDK_2BUTTON_PRESS || event->type == GDK_3BUTTON_PRESS)
       return FALSE;
 
+    // Confirm existing composition text on mouse click events, to make sure
+    // the input caret won't be moved with an ongoing composition session.
+    host_view->im_context_->ConfirmComposition();
+
     // We want to translate the coordinates of events that do not originate
     // from this widget to be relative to the top left of the widget.
     GtkWidget* event_widget = gtk_get_event_widget(
@@ -291,6 +313,82 @@ class RenderWidgetHostViewGtkWidget {
     return FALSE;
   }
 
+  static gboolean ClientEvent(GtkWidget* widget, GdkEventClient* event,
+                              RenderWidgetHostViewGtk* host_view) {
+    LOG(INFO) << "client event type: " << event->message_type
+              << " data_format: " << event->data_format
+              << " data: " << event->data.l;
+    return true;
+  }
+
+  // Allow the vertical scroll delta to be overridden from the command line.
+  // This will allow us to test more easily to discover the amount
+  // (either hard coded or computed) that's best.
+  static float GetScrollPixelsPerTick() {
+    static float scroll_pixels = -1;
+    if (scroll_pixels < 0) {
+      scroll_pixels = kDefaultScrollPixelsPerTick;
+      CommandLine* command_line = CommandLine::ForCurrentProcess();
+      std::string scroll_pixels_option =
+          command_line->GetSwitchValueASCII(switches::kScrollPixels);
+      if (!scroll_pixels_option.empty()) {
+        double v;
+        if (StringToDouble(scroll_pixels_option, &v))
+          scroll_pixels = static_cast<float>(v);
+      }
+      DCHECK_GT(scroll_pixels, 0);
+    }
+    return scroll_pixels;
+  }
+
+  // Return the net up / down (or left / right) distance represented by events
+  // in the  events will be removed from the queue. We only look at the top of
+  // queue...any other type of event will cause us not to look farther.
+  // If there is a change to the set of modifier keys or scroll axis
+  // in the events we will stop looking as well.
+  static int GetPendingScrollDelta(bool vert, guint current_event_state) {
+    int num_clicks = 0;
+    GdkEvent* event;
+    bool event_coalesced = true;
+    while ((event = gdk_event_get()) && event_coalesced) {
+      event_coalesced = false;
+      if (event->type == GDK_SCROLL) {
+        GdkEventScroll scroll = event->scroll;
+        if (scroll.state & GDK_SHIFT_MASK) {
+          if (scroll.direction == GDK_SCROLL_UP)
+            scroll.direction = GDK_SCROLL_LEFT;
+          else if (scroll.direction == GDK_SCROLL_DOWN)
+            scroll.direction = GDK_SCROLL_RIGHT;
+        }
+        if (vert) {
+          if (scroll.direction == GDK_SCROLL_UP ||
+              scroll.direction == GDK_SCROLL_DOWN) {
+            if (scroll.state == current_event_state) {
+              num_clicks += (scroll.direction == GDK_SCROLL_UP ? 1 : -1);
+              gdk_event_free(event);
+              event_coalesced = true;
+            }
+          }
+        } else {
+          if (scroll.direction == GDK_SCROLL_LEFT ||
+              scroll.direction == GDK_SCROLL_RIGHT) {
+            if (scroll.state == current_event_state) {
+              num_clicks += (scroll.direction == GDK_SCROLL_LEFT ? 1 : -1);
+              gdk_event_free(event);
+              event_coalesced = true;
+            }
+          }
+        }
+      }
+    }
+    // If we have an event left we put it back on the queue.
+    if (event) {
+      gdk_event_put(event);
+      gdk_event_free(event);
+    }
+    return num_clicks * GetScrollPixelsPerTick();
+  }
+
   static gboolean MouseScrollEvent(GtkWidget* widget, GdkEventScroll* event,
                                    RenderWidgetHostViewGtk* host_view) {
     // If the user is holding shift, translate it into a horizontal scroll. We
@@ -303,8 +401,24 @@ class RenderWidgetHostViewGtkWidget {
         event->direction = GDK_SCROLL_RIGHT;
     }
 
-    host_view->GetRenderWidgetHost()->ForwardWheelEvent(
-        WebInputEventFactory::mouseWheelEvent(event));
+    WebMouseWheelEvent web_event = WebInputEventFactory::mouseWheelEvent(event);
+    // We  peek ahead at the top of the queue to look for additional pending
+    // scroll events.
+    if (event->direction == GDK_SCROLL_UP ||
+        event->direction == GDK_SCROLL_DOWN) {
+      if (event->direction == GDK_SCROLL_UP)
+        web_event.deltaY = GetScrollPixelsPerTick();
+      else
+        web_event.deltaY = -GetScrollPixelsPerTick();
+      web_event.deltaY += GetPendingScrollDelta(true, event->state);
+    } else {
+      if (event->direction == GDK_SCROLL_LEFT)
+        web_event.deltaX = GetScrollPixelsPerTick();
+      else
+        web_event.deltaX = -GetScrollPixelsPerTick();
+      web_event.deltaX += GetPendingScrollDelta(false, event->state);
+    }
+    host_view->GetRenderWidgetHost()->ForwardWheelEvent(web_event);
     return FALSE;
   }
 
@@ -349,6 +463,11 @@ void RenderWidgetHostViewGtk::InitAsChild() {
   // |key_bindings_handler_| must be created after creating |view_| widget.
   key_bindings_handler_.reset(new GtkKeyBindingsHandler(view_.get()));
   plugin_container_manager_.set_host_widget(view_.get());
+
+#if defined(OS_CHROMEOS)
+  tooltip_window_.reset(new views::TooltipWindowGtk(view_.get()));
+#endif  // defined(OS_CHROMEOS)
+
   gtk_widget_show(view_.get());
 }
 
@@ -363,6 +482,11 @@ void RenderWidgetHostViewGtk::InitAsPopup(
   // |key_bindings_handler_| must be created after creating |view_| widget.
   key_bindings_handler_.reset(new GtkKeyBindingsHandler(view_.get()));
   plugin_container_manager_.set_host_widget(view_.get());
+
+#if defined(OS_CHROMEOS)
+  tooltip_window_.reset(new views::TooltipWindowGtk(view_.get()));
+#endif  // defined(OS_CHROMEOS)
+
   gtk_container_add(GTK_CONTAINER(popup), view_.get());
 
   // If we are not activatable, we don't want to grab keyboard input,
@@ -479,11 +603,7 @@ void RenderWidgetHostViewGtk::Focus() {
 void RenderWidgetHostViewGtk::Blur() {
   // TODO(estade): We should be clearing native focus as well, but I know of no
   // way to do that without focusing another widget.
-  // TODO(estade): it doesn't seem like the CanBlur() check should be necessary
-  // since we are only called in response to a ViewHost blur message, but this
-  // check is made on Windows so I've added it here as well.
-  if (host_->CanBlur())
-    host_->Blur();
+  host_->Blur();
 }
 
 bool RenderWidgetHostViewGtk::HasFocus() {
@@ -530,27 +650,19 @@ void RenderWidgetHostViewGtk::SetIsLoading(bool is_loading) {
     ShowCurrentCursor();
 }
 
-void RenderWidgetHostViewGtk::IMEUpdateStatus(int control,
-                                              const gfx::Rect& caret_rect) {
-  im_context_->UpdateStatus(control, caret_rect);
+void RenderWidgetHostViewGtk::ImeUpdateTextInputState(
+    WebKit::WebTextInputType type,
+    const gfx::Rect& caret_rect) {
+  im_context_->UpdateInputMethodState(type, caret_rect);
 }
 
-void RenderWidgetHostViewGtk::DidPaintBackingStoreRects(
-    const std::vector<gfx::Rect>& rects) {
-  if (is_hidden_)
-    return;
-
-  for (size_t i = 0; i < rects.size(); ++i) {
-    if (about_to_validate_and_paint_) {
-      invalid_rect_ = invalid_rect_.Union(rects[i]);
-    } else {
-      Paint(rects[i]);
-    }
-  }
+void RenderWidgetHostViewGtk::ImeCancelComposition() {
+  im_context_->CancelComposition();
 }
 
-void RenderWidgetHostViewGtk::DidScrollBackingStoreRect(const gfx::Rect& rect,
-                                                        int dx, int dy) {
+void RenderWidgetHostViewGtk::DidUpdateBackingStore(
+    const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
+    const std::vector<gfx::Rect>& copy_rects) {
   if (is_hidden_)
     return;
 
@@ -558,9 +670,22 @@ void RenderWidgetHostViewGtk::DidScrollBackingStoreRect(const gfx::Rect& rect,
   // be done using XCopyArea?  Perhaps similar to
   // BackingStore::ScrollBackingStore?
   if (about_to_validate_and_paint_)
-    invalid_rect_ = invalid_rect_.Union(rect);
+    invalid_rect_ = invalid_rect_.Union(scroll_rect);
   else
-    Paint(rect);
+    Paint(scroll_rect);
+
+  for (size_t i = 0; i < copy_rects.size(); ++i) {
+    // Avoid double painting.  NOTE: This is only relevant given the call to
+    // Paint(scroll_rect) above.
+    gfx::Rect rect = copy_rects[i].Subtract(scroll_rect);
+    if (rect.IsEmpty())
+      continue;
+
+    if (about_to_validate_and_paint_)
+      invalid_rect_ = invalid_rect_.Union(rect);
+    else
+      Paint(rect);
+  }
 }
 
 void RenderWidgetHostViewGtk::RenderViewGone() {
@@ -608,6 +733,9 @@ void RenderWidgetHostViewGtk::SetTooltipText(const std::wstring& tooltip_text) {
   } else {
     gtk_widget_set_tooltip_text(view_.get(),
                                 WideToUTF8(clamped_tooltip).c_str());
+#if defined(OS_CHROMEOS)
+    tooltip_window_->SetTooltipText(clamped_tooltip);
+#endif  // defined(OS_CHROMEOS)
   }
 }
 
@@ -680,6 +808,13 @@ void RenderWidgetHostViewGtk::Paint(const gfx::Rect& damage_rect) {
 
     // Erase the background. This will prevent a flash of black when resizing
     // or exposing the window. White is usually better than black.
+    return;
+  }
+
+  // Don't do any painting if the GPU process is rendering directly
+  // into the View.
+  RenderWidgetHost* render_widget_host = GetRenderWidgetHost();
+  if (render_widget_host->is_gpu_rendering_active()) {
     return;
   }
 

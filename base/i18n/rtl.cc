@@ -14,7 +14,7 @@
 #include "unicode/uchar.h"
 #include "unicode/uscript.h"
 
-#if defined(TOOLKIT_GTK)
+#if defined(TOOLKIT_USES_GTK)
 #include <gtk/gtk.h>
 #endif
 
@@ -75,27 +75,32 @@ void SetICUDefaultLocale(const std::string& locale_string) {
   // it does not hurt to have it as a sanity check.
   DCHECK(U_SUCCESS(error_code));
   g_icu_text_direction = UNKNOWN_DIRECTION;
-}
 
-TextDirection GetICUTextDirection() {
-  if (g_icu_text_direction == UNKNOWN_DIRECTION) {
-    const icu::Locale& locale = icu::Locale::getDefault();
-    g_icu_text_direction = GetTextDirectionForLocale(locale.getName());
-  }
-  return g_icu_text_direction;
-}
-
-TextDirection GetTextDirection() {
-#if defined(TOOLKIT_GTK)
-  GtkTextDirection gtk_dir = gtk_widget_get_default_direction();
-  return (gtk_dir == GTK_TEXT_DIR_LTR) ? LEFT_TO_RIGHT : RIGHT_TO_LEFT;
-#else
-  return GetICUTextDirection();
+  // If we use Views toolkit on top of GtkWidget, then we need to keep
+  // GtkWidget's default text direction consistent with ICU's text direction.
+  // Because in this case ICU's text direction will be used instead.
+  // See IsRTL() function below.
+#if defined(TOOLKIT_USES_GTK) && !defined(TOOLKIT_GTK)
+  gtk_widget_set_default_direction(
+      ICUIsRTL() ? GTK_TEXT_DIR_RTL : GTK_TEXT_DIR_LTR);
 #endif
 }
 
 bool IsRTL() {
-  return GetTextDirection() == RIGHT_TO_LEFT;
+#if defined(TOOLKIT_GTK)
+  GtkTextDirection gtk_dir = gtk_widget_get_default_direction();
+  return (gtk_dir == GTK_TEXT_DIR_RTL);
+#else
+  return ICUIsRTL();
+#endif
+}
+
+bool ICUIsRTL() {
+  if (g_icu_text_direction == UNKNOWN_DIRECTION) {
+    const icu::Locale& locale = icu::Locale::getDefault();
+    g_icu_text_direction = GetTextDirectionForLocale(locale.getName());
+  }
+  return g_icu_text_direction == RIGHT_TO_LEFT;
 }
 
 TextDirection GetTextDirectionForLocale(const char* locale_name) {
@@ -106,13 +111,8 @@ TextDirection GetTextDirectionForLocale(const char* locale_name) {
   return (layout_dir != ULOC_LAYOUT_RTL) ? LEFT_TO_RIGHT : RIGHT_TO_LEFT;
 }
 
-TextDirection GetFirstStrongCharacterDirection(const std::wstring& text) {
-#if defined(WCHAR_T_IS_UTF32)
-  string16 text_utf16 = WideToUTF16(text);
-  const UChar* string = text_utf16.c_str();
-#else
+TextDirection GetFirstStrongCharacterDirection(const string16& text) {
   const UChar* string = text.c_str();
-#endif
   size_t length = text.length();
   size_t position = 0;
   while (position < length) {
@@ -140,9 +140,15 @@ TextDirection GetFirstStrongCharacterDirection(const std::wstring& text) {
   return LEFT_TO_RIGHT;
 }
 
-bool AdjustStringForLocaleDirection(const std::wstring& text,
-                                    std::wstring* localized_text) {
-  if (GetTextDirection() == LEFT_TO_RIGHT || text.length() == 0)
+#if defined(WCHAR_T_IS_UTF32)
+TextDirection GetFirstStrongCharacterDirection(const std::wstring& text) {
+  return GetFirstStrongCharacterDirection(WideToUTF16(text));
+}
+#endif
+
+bool AdjustStringForLocaleDirection(const string16& text,
+                                    string16* localized_text) {
+  if (!IsRTL() || text.empty())
     return false;
 
   // Marking the string as LTR if the locale is RTL and the string does not
@@ -157,13 +163,21 @@ bool AdjustStringForLocaleDirection(const std::wstring& text,
   return true;
 }
 
-bool StringContainsStrongRTLChars(const std::wstring& text) {
 #if defined(WCHAR_T_IS_UTF32)
-  string16 text_utf16 = WideToUTF16(text);
-  const UChar* string = text_utf16.c_str();
-#else
-  const UChar* string = text.c_str();
+bool AdjustStringForLocaleDirection(const std::wstring& text,
+                                    std::wstring* localized_text) {
+  string16 out;
+  if (AdjustStringForLocaleDirection(WideToUTF16(text), &out)) {
+    // We should only touch the output on success.
+    *localized_text = UTF16ToWide(out);
+    return true;
+  }
+  return false;
+}
 #endif
+
+bool StringContainsStrongRTLChars(const string16& text) {
+  const UChar* string = text.c_str();
   size_t length = text.length();
   size_t position = 0;
   while (position < length) {
@@ -183,21 +197,59 @@ bool StringContainsStrongRTLChars(const std::wstring& text) {
   return false;
 }
 
+#if defined(WCHAR_T_IS_UTF32)
+bool StringContainsStrongRTLChars(const std::wstring& text) {
+  return StringContainsStrongRTLChars(WideToUTF16(text));
+}
+#endif
+
+void WrapStringWithLTRFormatting(string16* text) {
+  if (text->empty())
+    return;
+
+  // Inserting an LRE (Left-To-Right Embedding) mark as the first character.
+  text->insert(0, 1, kLeftToRightEmbeddingMark);
+
+  // Inserting a PDF (Pop Directional Formatting) mark as the last character.
+  text->push_back(kPopDirectionalFormatting);
+}
+
+#if defined(WCHAR_T_IS_UTF32)
 void WrapStringWithLTRFormatting(std::wstring* text) {
+  if (text->empty())
+    return;
+
   // Inserting an LRE (Left-To-Right Embedding) mark as the first character.
   text->insert(0, 1, static_cast<wchar_t>(kLeftToRightEmbeddingMark));
 
   // Inserting a PDF (Pop Directional Formatting) mark as the last character.
   text->push_back(static_cast<wchar_t>(kPopDirectionalFormatting));
 }
+#endif
 
+void WrapStringWithRTLFormatting(string16* text) {
+  if (text->empty())
+    return;
+
+  // Inserting an RLE (Right-To-Left Embedding) mark as the first character.
+  text->insert(0, 1, kRightToLeftEmbeddingMark);
+
+  // Inserting a PDF (Pop Directional Formatting) mark as the last character.
+  text->push_back(kPopDirectionalFormatting);
+}
+
+#if defined(WCHAR_T_IS_UTF32)
 void WrapStringWithRTLFormatting(std::wstring* text) {
+  if (text->empty())
+    return;
+
   // Inserting an RLE (Right-To-Left Embedding) mark as the first character.
   text->insert(0, 1, static_cast<wchar_t>(kRightToLeftEmbeddingMark));
 
   // Inserting a PDF (Pop Directional Formatting) mark as the last character.
   text->push_back(static_cast<wchar_t>(kPopDirectionalFormatting));
 }
+#endif
 
 void WrapPathWithLTRFormatting(const FilePath& path,
                                string16* rtl_safe_path) {
@@ -218,11 +270,26 @@ void WrapPathWithLTRFormatting(const FilePath& path,
 }
 
 std::wstring GetDisplayStringInLTRDirectionality(std::wstring* text) {
-  if (GetTextDirection() == RIGHT_TO_LEFT)
+  if (IsRTL())
     WrapStringWithLTRFormatting(text);
   return *text;
 }
 
+const string16 StripWrappingBidiControlCharacters(const string16& text) {
+  if (text.empty())
+    return text;
+  size_t begin_index = 0;
+  char16 begin = text[begin_index];
+  if (begin == kLeftToRightEmbeddingMark ||
+      begin == kRightToLeftEmbeddingMark ||
+      begin == kLeftToRightOverride ||
+      begin == kRightToLeftOverride)
+    ++begin_index;
+  size_t end_index = text.length() - 1;
+  if (text[end_index] == kPopDirectionalFormatting)
+    --end_index;
+  return text.substr(begin_index, end_index - begin_index + 1);
+}
+
 }  // namespace i18n
 }  // namespace base
-

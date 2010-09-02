@@ -45,11 +45,13 @@
 
 struct WebPreferences;
 class GURL;
+class TestGeolocationService;
 class TestShell;
 class WebWidgetHost;
 
 namespace WebKit {
 class WebStorageNamespace;
+struct WebWindowFeatures;
 }
 
 class TestWebViewDelegate : public WebKit::WebViewClient,
@@ -74,11 +76,15 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   typedef std::vector<CapturedContextMenuEvent> CapturedContextMenuEvents;
 
   // WebKit::WebViewClient
-  virtual WebKit::WebView* createView(WebKit::WebFrame* creator);
+  virtual WebKit::WebView* createView(
+      WebKit::WebFrame* creator,
+      const WebKit::WebWindowFeatures& features,
+      const WebKit::WebString& frame_name);
   virtual WebKit::WebWidget* createPopupMenu(WebKit::WebPopupType popup_type);
   virtual WebKit::WebWidget* createPopupMenu(
       const WebKit::WebPopupMenuInfo& info);
-  virtual WebKit::WebStorageNamespace* createSessionStorageNamespace();
+  virtual WebKit::WebStorageNamespace* createSessionStorageNamespace(
+      unsigned quota);
   virtual void didAddMessageToConsole(
       const WebKit::WebConsoleMessage& message,
       const WebKit::WebString& source_name, unsigned source_line);
@@ -123,9 +129,6 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
       WebKit::WebFrame* frame, const WebKit::WebContextMenuData& data);
   virtual void setStatusText(const WebKit::WebString& text);
   virtual void startDragging(
-      const WebKit::WebPoint& from, const WebKit::WebDragData& data,
-      WebKit::WebDragOperationsMask mask);
-  virtual void startDragging(
       const WebKit::WebDragData& data, WebKit::WebDragOperationsMask mask,
       const WebKit::WebImage& image, const WebKit::WebPoint& offset);
   virtual void navigateBackForwardSoon(int offset);
@@ -133,6 +136,8 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   virtual int historyForwardListCount();
   virtual void focusAccessibilityObject(
       const WebKit::WebAccessibilityObject& object);
+  virtual WebKit::WebNotificationPresenter* notificationPresenter();
+  virtual WebKit::WebGeolocationService* geolocationService();
 
   // WebKit::WebWidgetClient
   virtual void didInvalidateRect(const WebKit::WebRect& rect);
@@ -218,9 +223,8 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
 
   // webkit_glue::WebPluginPageDelegate
   virtual webkit_glue::WebPluginDelegate* CreatePluginDelegate(
-      const GURL& url,
-      const std::string& mime_type,
-      std::string* actual_mime_type);
+      const FilePath& url,
+      const std::string& mime_type);
   virtual void CreatedPluginWindow(
       gfx::PluginWindowHandle handle);
   virtual void WillDestroyPluginWindow(
@@ -263,6 +267,7 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   // Methods for modifying WebPreferences
   void SetUserStyleSheetEnabled(bool is_enabled);
   void SetUserStyleSheetLocation(const GURL& location);
+  void SetAuthorAndUserStylesEnabled(bool is_enabled);
 
   // Sets the webview as a drop target.
   void RegisterDragDrop();
@@ -304,6 +309,8 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
     edit_command_value_.clear();
   }
 
+  void SetGeolocationPermission(bool allowed);
+
  private:
 
   // Called the title of the page changes.
@@ -340,13 +347,16 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
 
   WebWidgetHost* GetWidgetHost();
 
-  void UpdateForCommittedLoad(WebKit::WebFrame* webframe, bool is_new_navigation);
+  void UpdateForCommittedLoad(WebKit::WebFrame* frame, bool is_new_navigation);
   void UpdateURL(WebKit::WebFrame* frame);
   void UpdateSessionHistory(WebKit::WebFrame* frame);
   void UpdateSelectionClipboard(bool is_empty_selection);
 
   // Get a string suitable for dumping a frame to the console.
   std::wstring GetFrameDescription(WebKit::WebFrame* webframe);
+
+  // Returns a TestGeolocationService owned by this delegate.
+  TestGeolocationService* GetTestGeolocationService();
 
   // Causes navigation actions just printout the intended navigation instead
   // of taking you to the page. This is used for cases like mailto, where you
@@ -423,6 +433,8 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
 
   // The mock spellchecker used in TestWebViewDelegate::spellCheck().
   MockSpellCheck mock_spellcheck_;
+
+  scoped_ptr<TestGeolocationService> test_geolocation_service_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWebViewDelegate);
 };

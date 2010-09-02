@@ -1,5 +1,5 @@
 #!/usr/bin/python2.4
-# Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+# Copyright (c) 2010 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -21,15 +21,16 @@ from grit import util
 from grit.tool import build
 
 class DummyOutput(object):
-  def __init__(self, type, language):
+  def __init__(self, type, language, file = 'hello.gif'):
     self.type = type
     self.language = language
+    self.file = file
   def GetType(self):
     return self.type
   def GetLanguage(self):
     return self.language
   def GetOutputFilename(self):
-    return 'hello.gif'
+    return self.file
 
 class FormatRcUnittest(unittest.TestCase):
   def testMessages(self):
@@ -180,6 +181,38 @@ END'''.strip())
     # hackety hack to work on win32&lin
     output = re.sub('"[c-zC-Z]:', '"', output)
     self.failUnless(output.strip() == expected)
+
+  def testRcIncludeFlattenedHtmlFile(self):
+    input_file = util.PathFromRoot('grit/test/data/include_test.html')
+    output_file = '%s/include_test.html' % tempfile.gettempdir()
+    root = grd_reader.Parse(StringIO.StringIO('''
+      <includes>
+        <include name="HTML_FILE1" flattenhtml="true" file="%s" type="BINDATA" />
+      </includes>''' % input_file), flexible_root = True)
+    util.FixRootForUnittest(root, '.')
+
+    buf = StringIO.StringIO()
+    build.RcBuilder.ProcessNode(root, DummyOutput('rc_all', 'en', output_file),
+                                buf)
+    output = buf.getvalue()
+
+    expected = u'HTML_FILE1         BINDATA            "include_test.html"'
+    # hackety hack to work on win32&lin
+    output = re.sub('"[c-zC-Z]:', '"', output)
+    self.failUnless(output.strip() == expected)
+
+    fo = file(output_file)
+    file_contents = fo.read()
+    fo.close()
+
+    # Check for the content added by the <include> tag.
+    self.failUnless(file_contents.find('Hello Include!') != -1)
+    # Check for the content that was removed by if tag.
+    self.failUnless(file_contents.find('This should not be here anymore') == -1)
+    # Check for the content that was kept in place by if.
+    self.failUnless(file_contents.find('should be kept') != -1)
+    self.failUnless(file_contents.find('in the middle...') != -1)
+    self.failUnless(file_contents.find('at the end...') != -1)
 
 
   def testStructureNodeOutputfile(self):

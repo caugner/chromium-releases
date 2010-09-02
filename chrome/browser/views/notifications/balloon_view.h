@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #ifndef CHROME_BROWSER_VIEWS_NOTIFICATIONS_BALLOON_VIEW_H_
 #define CHROME_BROWSER_VIEWS_NOTIFICATIONS_BALLOON_VIEW_H_
 
-#include "app/menus/simple_menu_model.h"
 #include "app/slide_animation.h"
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
@@ -28,6 +27,7 @@
 
 namespace views {
 class ButtonListener;
+class ImageButton;
 class ImagePainter;
 class TextButton;
 class WidgetWin;
@@ -36,6 +36,7 @@ class Menu2;
 
 class BalloonCollection;
 class NotificationDetails;
+class NotificationOptionsMenuModel;
 class NotificationSource;
 class SlideAnimation;
 
@@ -46,7 +47,6 @@ class BalloonViewImpl : public BalloonView,
                         public views::ViewMenuDelegate,
                         public views::WidgetDelegate,
                         public views::ButtonListener,
-                        public menus::SimpleMenuModel::Delegate,
                         public NotificationObserver,
                         public AnimationDelegate {
  public:
@@ -55,7 +55,7 @@ class BalloonViewImpl : public BalloonView,
 
   // BalloonView interface.
   virtual void Show(Balloon* balloon);
-  virtual void Update() {}
+  virtual void Update();
   virtual void RepositionToBalloon();
   virtual void Close(bool by_user);
   virtual gfx::Size GetSize() const;
@@ -75,16 +75,10 @@ class BalloonViewImpl : public BalloonView,
 
   // views::WidgetDelegate interface.
   void DisplayChanged();
+  void WorkAreaChanged();
 
   // views::ButtonListener interface.
   virtual void ButtonPressed(views::Button* sender, const views::Event&);
-
-  // menus::SimpleMenuModel::Delegate interface.
-  virtual bool IsCommandIdChecked(int command_id) const;
-  virtual bool IsCommandIdEnabled(int command_id) const;
-  virtual bool GetAcceleratorForCommandId(int command_id,
-                                          menus::Accelerator* accelerator);
-  virtual void ExecuteCommand(int command_id);
 
   // NotificationObserver interface.
   virtual void Observe(NotificationType type,
@@ -100,9 +94,11 @@ class BalloonViewImpl : public BalloonView,
   // Initializes the options menu.
   void CreateOptionsMenu();
 
-  // How to mask the balloon contents to fit within the frame.
-  // Populates |path| with the outline.
+  // Masks the contents to fit within the frame.
   void GetContentsMask(const gfx::Rect& contents_rect, gfx::Path* path) const;
+
+  // Masks the frame for the rounded corners of the shadow-bubble.
+  void GetFrameMask(const gfx::Rect&, gfx::Path* path) const;
 
   // Adjust the contents window size to be appropriate for the frame.
   void SizeContentsWindow();
@@ -114,12 +110,6 @@ class BalloonViewImpl : public BalloonView,
   // The shelf is where is close button is located.
   int GetShelfHeight() const;
 
-  // The width of the frame (not including any shadow).
-  int GetFrameWidth() const;
-
-  // The height of the frame (not including any shadow).
-  int GetTotalFrameHeight() const;
-
   // The height of the part of the frame around the balloon.
   int GetBalloonFrameHeight() const;
 
@@ -127,7 +117,7 @@ class BalloonViewImpl : public BalloonView,
   int GetTotalHeight() const;
 
   gfx::Rect GetCloseButtonBounds() const;
-  gfx::Rect GetOptionsMenuBounds() const;
+  gfx::Rect GetOptionsButtonBounds() const;
   gfx::Rect GetLabelBounds() const;
 
   // Where the balloon contents should be placed with respect to the top left
@@ -157,12 +147,8 @@ class BalloonViewImpl : public BalloonView,
   // The following factory is used to call methods at a later time.
   ScopedRunnableMethodFactory<BalloonViewImpl> method_factory_;
 
-  // Image painters for the frame of the toast.
-  scoped_ptr<views::Painter> shelf_background_;
-  scoped_ptr<views::Painter> balloon_background_;
-
   // Pointer to sub-view is owned by the View sub-class.
-  views::TextButton* close_button_;
+  views::ImageButton* close_button_;
 
   // Pointer to sub-view is owned by View class.
   views::Label* source_label_;
@@ -173,7 +159,7 @@ class BalloonViewImpl : public BalloonView,
   gfx::Rect anim_frame_end_;
 
   // The options menu.
-  scoped_ptr<menus::SimpleMenuModel> options_menu_contents_;
+  scoped_ptr<NotificationOptionsMenuModel> options_menu_model_;
   scoped_ptr<views::Menu2> options_menu_menu_;
   views::MenuButton* options_menu_button_;
 

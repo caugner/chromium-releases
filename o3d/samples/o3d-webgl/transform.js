@@ -52,41 +52,107 @@ o3d.Transform =
     function(opt_localMatrix, opt_worldMatrix, opt_visible, opt_boundingBox,
              opt_cull) {
   o3d.ParamObject.call(this);
+
+  /**
+   * Local transformation matrix.
+   * Default = Identity.
+   */
   this.localMatrix = opt_localMatrix ||
       [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
+
+  /**
+   * World (model) matrix as it was last computed.
+   */
   this.worldMatrix = opt_worldMatrix ||
       [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
+
+  /**
+   * Sets the parent of the transform by re-parenting the transform under
+   * parent. Setting parent to null removes the transform and the
+   * entire subtree below it from the transform graph.
+   * If the operation would create a cycle it fails.
+   */
+  this.parent = null;
+
+  /**
+   * The Visibility for this transform.
+   * Default = true.
+   */
   this.visible = opt_visible || true;
+
+  /**
+   * The BoundingBox for this Transform. If culling is on this
+   * bounding box will be tested against the view frustum of any draw
+   * context used to with this Transform.
+   * @type {!o3d.BoundingBox}
+   */
   this.boundingBox = opt_boundingBox ||
       new o3d.BoundingBox([-1, -1, -1], [1, 1, 1]);
+
+  /**
+   * The cull setting for this transform. If true this Transform will
+   * be culled by having its bounding box compared to the view frustum
+   * of any draw context it is used with.
+   * Default = false.
+   */
   this.cull = opt_cull || false;
 
+  /**
+   * The immediate children of this Transform.
+   *
+   * Each access to this field gets the entire list, so it is best to get it
+   * just once. For example:
+   *
+   * var children = transform.children;
+   * for (var i = 0; i < children.length; i++) {
+   *   var child = children[i];
+   * }
+   *
+   * Note that modifications to this array [e.g. additions to it] will
+   * not affect the underlying Transform, while modifications to the
+   * members of the array will affect them.
+   */
   this.children = [];
+
+  /**
+   * Gets the shapes owned by this transform.
+   *
+   * Each access to this field gets the entire list so it is best to get it
+   * just once. For example:
+   *
+   * var shapes = transform.shapes;
+   * for (var i = 0; i < shapes.length; i++) {
+   *   var shape = shapes[i];
+   * }
+   *
+   *
+   * Note that modifications to this array [e.g. additions to it] will
+   * not affect the underlying Transform, while modifications to the
+   * members of the array will affect them.
+   */
   this.shapes = [];
 };
 o3d.inherit('Transform', 'ParamObject');
 
+o3d.ParamObject.setUpO3DParam_(o3d.Transform, 'visible', 'ParamBoolean');
+// TODO(petersont): need to better understand and possibly implement
+// the semantics of SlaveParamMatrix4.
+o3d.ParamObject.setUpO3DParam_(o3d.Transform, 'worldMatrix', 'ParamMatrix4');
+o3d.ParamObject.setUpO3DParam_(o3d.Transform, 'localMatrix', 'ParamMatrix4');
+o3d.ParamObject.setUpO3DParam_(o3d.Transform, 'cull', 'ParamBoolean');
+o3d.ParamObject.setUpO3DParam_(o3d.Transform,
+                               'boundingBox', 'ParamBoundingBox');
 
-/**
- * The Visibility for this transform.
- * Default = true.
- */
-o3d.Transform.prototype.visible = true;
-
-
-
-/**
- * Sets the parent of the transform by re-parenting the transform under
- * parent. Setting parent to null removes the transform and the
- * entire subtree below it from the transform graph.
- * If the operation would create a cycle it fails.
- */
-o3d.Transform.prototype.parent = null;
 
 o3d.Transform.prototype.__defineSetter__('parent',
     function(p) {
+      if (this.parent_ != null) {
+        o3d.removeFromArray(this.parent_.children, this);
+      }
       this.parent_ = p;
-      p.addChild(this);
+      if (p) {
+        p.addChild(this);
+      }
     }
 );
 
@@ -95,25 +161,6 @@ o3d.Transform.prototype.__defineGetter__('parent',
       return this.parent_;
     }
 );
-
-
-/**
- * The immediate children of this Transform.
- *
- * Each access to this field gets the entire list, so it is best to get it
- * just once. For example:
- *
- * var children = transform.children;
- * for (var i = 0; i < children.length; i++) {
- *   var child = children[i];
- * }
- *
- * Note that modifications to this array [e.g. additions to it] will not affect
- * the underlying Transform, while modifications to the members of the array
- * will affect them.
- */
-o3d.Transform.prototype.children = [];
-
 
 /**
  * Adds a child transform.
@@ -135,9 +182,24 @@ o3d.Transform.prototype.addChild = function(child) {
  */
 o3d.Transform.prototype.getTransformsInTree =
     function() {
-
+  var result = [];
+  o3d.Transform.getTransformInTreeRecursive_(this, result);
+  return result;
 };
 
+
+/**
+ * Recursive helper function for getTransformInTree.
+ * @private
+ */
+o3d.Transform.getTransformInTreeRecursive_ =
+    function(treeRoot, children) {
+  children.push(treeRoot);
+  var childrenArray = treeRoot.children;
+  for (var ii = 0; ii < childrenArray.length; ++ii) {
+    o3d.Transform.getTransformInTreeRecursive_(childrenArray[ii], children);
+  }
+};
 
 
 /**
@@ -155,9 +217,8 @@ o3d.Transform.prototype.getTransformsInTree =
  */
 o3d.Transform.prototype.getTransformsByNameInTree =
     function(name) {
-
+  o3d.notImplemented();
 };
-
 
 /**
  * Evaluates and returns the current world matrix.
@@ -166,7 +227,15 @@ o3d.Transform.prototype.getTransformsByNameInTree =
  */
 o3d.Transform.prototype.getUpdatedWorldMatrix =
     function() {
-
+  var parentWorldMatrix;
+  if (!this.parent) {
+    parentWorldMatrix =
+        [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
+  } else {
+    parentWorldMatrix = this.parent.getUpdatedWorldMatrix();
+  }
+  o3d.Transform.compose(parentWorldMatrix, this.localMatrix, this.worldMatrix);
+  return this.worldMatrix;
 };
 
 
@@ -188,29 +257,8 @@ o3d.Transform.prototype.addShape =
  */
 o3d.Transform.prototype.removeShape =
     function(shape) {
-  o3d.notImplemented();
+  o3d.removeFromArray(this.shapes, shape);
 };
-
-
-/**
- * Gets the shapes owned by this transform.
- *
- * Each access to this field gets the entire list so it is best to get it
- * just once. For example:
- *
- * var shapes = transform.shapes;
- * for (var i = 0; i < shapes.length; i++) {
- *   var shape = shapes[i];
- * }
- *
- *
- * Note that modifications to this array [e.g. additions to it] will not affect
- * the underlying Transform, while modifications to the members of the array
- * will affect them.
- */
-o3d.Transform.prototype.shapes = [];
-
-
 
 
 /**
@@ -229,40 +277,6 @@ o3d.Transform.prototype.createDrawElements =
     function(pack, material) {
   o3d.notImplemented();
 };
-
-
-/**
- * World (model) matrix as it was last computed.
- */
-o3d.Transform.prototype.worldMatrix = [];
-
-
-
-/**
- * Local transformation matrix.
- * Default = Identity.
- */
-o3d.Transform.prototype.local_matrix = [];
-
-
-
-/**
- * The cull setting for this transform. If true this Transform will be culled
- * by having its bounding box compared to the view frustum of any draw context
- * it is used with.
- * Default = false.
- */
-o3d.Transform.prototype.cull_ = false;
-
-
-
-/**
- * The BoundingBox for this Transform. If culling is on this bounding box will
- * be tested against the view frustum of any draw context used to with this
- * Transform.
- */
-o3d.Transform.prototype.boundingBox = null;
-
 
 
 /**
@@ -584,6 +598,52 @@ o3d.Transform.prototype.rotateX =
                   c * m21 - s * m11,
                   c * m22 - s * m12,
                   c * m23 - s * m13);
+};
+
+
+/**
+ * Takes a 4-by-4 matrix and a vector with 3 entries,
+ * interprets the vector as a point, transforms that point by the matrix, and
+ * returns the result as a vector with 3 entries.
+ * @param {!o3djs.math.Matrix4} m The matrix.
+ * @param {!o3djs.math.Vector3} v The point.
+ * @return {!o3djs.math.Vector3} The transformed point.
+ */
+o3d.Transform.transformPoint = function(m, v) {
+  var v0 = v[0];
+  var v1 = v[1];
+  var v2 = v[2];
+  var m0 = m[0];
+  var m1 = m[1];
+  var m2 = m[2];
+  var m3 = m[3];
+
+  var d = v0 * m0[3] + v1 * m1[3] + v2 * m2[3] + m3[3];
+  return [(v0 * m0[0] + v1 * m1[0] + v2 * m2[0] + m3[0]) / d,
+          (v0 * m0[1] + v1 * m1[1] + v2 * m2[1] + m3[1]) / d,
+          (v0 * m0[2] + v1 * m1[2] + v2 * m2[2] + m3[2]) / d];
+};
+
+
+/**
+ * Takes a 4-by-4 matrix and a vector with 3 entries,
+ * interprets the vector as a point, transforms that point by the matrix,
+ * returning the z-component of the result only.
+ * @param {!o3djs.math.Matrix4} m The matrix.
+ * @param {!o3djs.math.Vector3} v The point.
+ * @return {number} The z coordinate of the transformed point.
+ */
+o3d.Transform.transformPointZOnly = function(m, v) {
+  var v0 = v[0];
+  var v1 = v[1];
+  var v2 = v[2];
+  var m0 = m[0];
+  var m1 = m[1];
+  var m2 = m[2];
+  var m3 = m[3];
+
+  return (v0 * m0[2] + v1 * m1[2] + v2 * m2[2] + m3[2]) /
+      (v0 * m0[3] + v1 * m1[3] + v2 * m2[3] + m3[3]);
 };
 
 
@@ -922,7 +982,9 @@ o3d.Transform.flattenMatrix4 = function(m) {
  */
 o3d.Transform.prototype.traverse =
     function(drawListInfos, opt_parentWorldMatrix) {
-  if (!this.visible) {
+
+  this.gl.client.render_stats_['transformsProcessed']++;
+  if (drawListInfos.length == 0 || !this.visible) {
     return;
   }
   opt_parentWorldMatrix =
@@ -932,15 +994,42 @@ o3d.Transform.prototype.traverse =
   o3d.Transform.compose(
       opt_parentWorldMatrix, this.localMatrix, this.worldMatrix);
 
+  var remainingDrawListInfos = [];
+
+  if (this.cull) {
+    if (this.boundingBox) {
+      for (var i = 0; i < drawListInfos.length; ++i) {
+        var drawListInfo = drawListInfos[i];
+
+        var worldViewProjection = [[], [], [], []];
+        o3d.Transform.compose(drawListInfo.context.view,
+            this.worldMatrix, worldViewProjection);
+        o3d.Transform.compose(drawListInfo.context.projection,
+            worldViewProjection, worldViewProjection);
+
+        if (this.boundingBox.inFrustum(worldViewProjection)) {
+          remainingDrawListInfos.push(drawListInfo);
+        }
+      }
+    }
+  } else {
+    remainingDrawListInfos = drawListInfos;
+  }
+
+  if (remainingDrawListInfos.length == 0) {
+    this.gl.client.render_stats_['transformsCulled']++;
+    return;
+  }
+
   var children = this.children;
   var shapes = this.shapes;
 
   for (var i = 0; i < shapes.length; ++i) {
-    shapes[i].writeToDrawLists(drawListInfos, this.worldMatrix, this);
+    shapes[i].writeToDrawLists(remainingDrawListInfos, this.worldMatrix, this);
   }
 
   for (var i = 0; i < children.length; ++i) {
-    children[i].traverse(drawListInfos, this.worldMatrix);
+    children[i].traverse(remainingDrawListInfos, this.worldMatrix);
   }
 };
 

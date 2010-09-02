@@ -63,6 +63,7 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
     if (!load_extension_.value().empty()) {
       command_line->AppendSwitchWithValue(switches::kLoadExtension,
                                           load_extension_.ToWStringHack());
+      command_line->AppendSwitch(switches::kDisableExtensionsFileAccessCheck);
     }
   }
 
@@ -143,6 +144,29 @@ IN_PROC_BROWSER_TEST_F(ExtensionsStartupTest, Test) {
   TestInjection(true, true);
 }
 
+// Sometimes times out on Mac.  http://crbug.com/48151
+#if defined(OS_MACOSX)
+#define MAYBE_NoFileAccess DISABLED_NoFileAccess
+#else
+#define MAYBE_NoFileAccess NoFileAccess
+#endif
+// Tests that disallowing file access on an extension prevents it from injecting
+// script into a page with a file URL.
+IN_PROC_BROWSER_TEST_F(ExtensionsStartupTest, MAYBE_NoFileAccess) {
+  WaitForServicesToStart(4, true);  // 1 component extension and 3 others.
+
+  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  for (size_t i = 0; i < service->extensions()->size(); ++i) {
+    if (service->AllowFileAccess(service->extensions()->at(i))) {
+      service->SetAllowFileAccess(service->extensions()->at(i), false);
+      ui_test_utils::WaitForNotification(
+           NotificationType::USER_SCRIPTS_UPDATED);
+    }
+  }
+
+  TestInjection(false, false);
+}
+
 // ExtensionsLoadTest
 // Ensures that we can startup the browser with --load-extension and see them
 // run.
@@ -160,7 +184,13 @@ class ExtensionsLoadTest : public ExtensionStartupTestBase {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(ExtensionsLoadTest, Test) {
+// Flaky (times out) on Mac/Windows. http://crbug.com/46301.
+#if defined(OS_MACOSX) || defined(OS_WIN)
+#define MAYBE_Test FLAKY_Test
+#else
+#define MAYBE_Test Test
+#endif
+IN_PROC_BROWSER_TEST_F(ExtensionsLoadTest, MAYBE_Test) {
   WaitForServicesToStart(1, false);
   TestInjection(true, true);
 }

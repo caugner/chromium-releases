@@ -14,16 +14,12 @@
 #include "base/file_descriptor_posix.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "printing/units.h"
 #include "skia/ext/vector_platform_device_linux.h"
 
 namespace {
 
-// The hardcoded margins, in points. These values are based on 72 dpi,
-// with approximately 0.25 margins on top, left, and right, and 0.56 on bottom.
-const double kTopMargin = 0.25 * 72.0;
-const double kBottomMargin = 0.56 * 72.0;
-const double kLeftMargin = 0.25 * 72.0;
-const double kRightMargin = 0.25 * 72.0;
+const cairo_user_data_key_t kPdfMetafileKey = {0};
 
 // Tests if |surface| is valid.
 bool IsSurfaceValid(cairo_surface_t* surface) {
@@ -66,6 +62,10 @@ cairo_status_t WriteCairoStream(void* dst_buffer,
   return CAIRO_STATUS_SUCCESS;
 }
 
+void DestroyContextData(void* data) {
+  // Nothing to be done here.
+}
+
 }  // namespace
 
 namespace printing {
@@ -104,11 +104,6 @@ bool PdfPsMetafile::Init() {
       return false;
   }
 
-  // Don't let WebKit draw over the margins.
-  cairo_surface_set_device_offset(surface_,
-                                  static_cast<int>(kLeftMargin),
-                                  static_cast<int>(kTopMargin));
-
   // Cairo always returns a valid pointer.
   // Hence, we have to check if it points to a "nil" object.
   if (!IsSurfaceValid(surface_)) {
@@ -126,6 +121,8 @@ bool PdfPsMetafile::Init() {
     return false;
   }
 
+  cairo_set_user_data(context_, &kPdfMetafileKey, this, DestroyContextData);
+
   return true;
 }
 
@@ -139,13 +136,34 @@ bool PdfPsMetafile::Init(const void* src_buffer, uint32 src_buffer_size) {
     return false;
 
   data_ = std::string(reinterpret_cast<const char*>(src_buffer),
-                           src_buffer_size);
+                      src_buffer_size);
+
+  return true;
+}
+
+bool PdfPsMetafile::SetRawData(const void* src_buffer,
+                               uint32 src_buffer_size) {
+  if (!context_) {
+    // If Init has not already been called, just call Init()
+    return Init(src_buffer, src_buffer_size);
+  }
+  // If a context has already been created, remember this data in
+  // raw_override_data_
+  if (src_buffer == NULL || src_buffer_size == 0)
+    return false;
+
+  raw_override_data_ = std::string(reinterpret_cast<const char*>(src_buffer),
+                                   src_buffer_size);
 
   return true;
 }
 
 cairo_t* PdfPsMetafile::StartPage(double width_in_points,
-                                  double height_in_points) {
+                                  double height_in_points,
+                                  double margin_top_in_points,
+                                  double margin_right_in_points,
+                                  double margin_bottom_in_points,
+                                  double margin_left_in_points) {
   DCHECK(IsSurfaceValid(surface_));
   DCHECK(IsContextValid(context_));
   // Passing this check implies page_surface_ is NULL, and current_page_ is
@@ -155,8 +173,15 @@ cairo_t* PdfPsMetafile::StartPage(double width_in_points,
 
   // We build in extra room for the margins. The Cairo PDF backend will scale
   // the output to fit a page.
-  double width = width_in_points + kLeftMargin + kRightMargin;
-  double height = height_in_points + kTopMargin + kBottomMargin;
+  double width =
+      width_in_points + margin_left_in_points + margin_right_in_points;
+  double height =
+      height_in_points + margin_top_in_points + margin_bottom_in_points;
+
+  // Don't let WebKit draw over the margins.
+  cairo_surface_set_device_offset(surface_,
+                                  margin_left_in_points,
+                                  margin_top_in_points);
 
   switch (format_) {
     case PDF:
@@ -191,6 +216,12 @@ void PdfPsMetafile::Close() {
   DCHECK(IsContextValid(context_));
 
   cairo_surface_finish(surface_);
+
+  // If we have raw PDF/PS data set use that instead of what was drawn.
+  if (!raw_override_data_.empty()) {
+    data_ = raw_override_data_;
+    raw_override_data_.clear();
+  }
   DCHECK(!data_.empty());  // Make sure we did get something.
 
   CleanUpContext(&context_);
@@ -242,11 +273,21 @@ bool PdfPsMetafile::SaveTo(const base::FileDescriptor& fd) const {
   return success;
 }
 
+PdfPsMetafile* PdfPsMetafile::FromCairoContext(cairo_t* context) {
+  return reinterpret_cast<PdfPsMetafile*>(
+      cairo_get_user_data(context, &kPdfMetafileKey));
+}
+
 void PdfPsMetafile::CleanUpAll() {
   CleanUpContext(&context_);
   CleanUpSurface(&surface_);
   data_.clear();
   skia::VectorPlatformDevice::ClearFontCache();
 }
+
+const double PdfPsMetafile::kTopMarginInInch = 0.25;
+const double PdfPsMetafile::kBottomMarginInInch = 0.56;
+const double PdfPsMetafile::kLeftMarginInInch = 0.25;
+const double PdfPsMetafile::kRightMarginInInch = 0.25;
 
 }  // namespace printing

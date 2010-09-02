@@ -9,6 +9,10 @@
 #include "base/task.h"
 #include "base/thread.h"
 
+namespace base {
+class MessageLoopProxy;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // ChromeThread
 //
@@ -50,6 +54,9 @@ class ChromeThread : public base::Thread {
 
     // Used to launch and terminate processes.
     PROCESS_LAUNCHER,
+
+    // This is the thread to handle slow HTTP cache operations.
+    CACHE,
 
     // This is the thread that processes IPC and network messages.
     IO,
@@ -125,6 +132,11 @@ class ChromeThread : public base::Thread {
   // If the current message loop is one of the known threads, returns true and
   // sets identifier to its ID.  Otherwise returns false.
   static bool GetCurrentThreadIdentifier(ID* identifier);
+
+  // Callers can hold on to a refcounted MessageLoopProxy beyond the lifetime
+  // of the thread.
+  static scoped_refptr<base::MessageLoopProxy> GetMessageLoopProxyForThread(
+      ID identifier);
 
   // Use these templates in conjuction with RefCountedThreadSafe when you want
   // to ensure that an object is deleted on a specific thread.  This is needed

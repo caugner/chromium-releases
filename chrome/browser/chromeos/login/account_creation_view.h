@@ -7,11 +7,11 @@
 
 #include <string>
 
-#include "chrome/browser/views/dom_view.h"
+#include "chrome/browser/chromeos/login/web_page_view.h"
+#include "views/view.h"
 
 class Profile;
 class SiteContents;
-class TabContentsDelegate;
 
 namespace chromeos {
 
@@ -24,21 +24,12 @@ class AccountCreationViewDelegate {
   // this function will be called on each try.
   virtual void OnUserCreated(const std::string& username,
                              const std::string& password) = 0;
-
-  // Notify about navigation errors.
-  virtual void OnPageLoadFailed(const std::string& url) = 0;
 };
 
-class AccountCreationView : public DOMView {
+class AccountCreationDomView : public WebPageDomView {
  public:
-  AccountCreationView();
-  virtual ~AccountCreationView();
-
-  // Initialize view layout.
-  void Init();
-
-  void InitDOM(Profile* profile, SiteInstance* site_instance);
-  void SetTabContentsDelegate(TabContentsDelegate* delegate);
+  AccountCreationDomView();
+  virtual ~AccountCreationDomView();
 
   // Set delegate that will be notified about user actions.
   void SetAccountCreationViewDelegate(AccountCreationViewDelegate* delegate);
@@ -49,10 +40,25 @@ class AccountCreationView : public DOMView {
                                          SiteInstance* instance);
 
  private:
-  // Overriden from views::View:
-  virtual void Paint(gfx::Canvas* canvas);
-
   AccountCreationViewDelegate* delegate_;
+
+  DISALLOW_COPY_AND_ASSIGN(AccountCreationDomView);
+};
+
+class AccountCreationView : public WebPageView {
+ public:
+  AccountCreationView();
+  virtual ~AccountCreationView();
+
+  // Set delegate that will be notified about user actions.
+  void SetAccountCreationViewDelegate(AccountCreationViewDelegate* delegate);
+
+ protected:
+  virtual WebPageDomView* dom_view() { return dom_view_; }
+
+ private:
+  // View that renders page.
+  AccountCreationDomView* dom_view_;
 
   DISALLOW_COPY_AND_ASSIGN(AccountCreationView);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,8 +77,8 @@ bool ToolstripExpandFunction::RunImpl() {
     return false;
   }
 
-  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* args = args_as_dictionary();
+  DictionaryValue* args;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
 
   int height;
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kHeightKey,
@@ -115,9 +115,9 @@ bool ToolstripCollapseFunction::RunImpl() {
   }
 
   GURL url;
-  if (args_->GetType() != Value::TYPE_NULL) {
-    EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-    const DictionaryValue* args = args_as_dictionary();
+  if (HasOptionalArgument(0)) {
+    DictionaryValue* args;
+    EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &args));
 
     if (args->HasKey(keys::kUrlKey)) {
       std::string url_string;
@@ -145,7 +145,7 @@ void ToolstripEventRouter::DispatchEvent(Profile *profile,
     base::JSONWriter::Write(&json, false, &json_args);
     std::string full_event_name = StringPrintf(event_name, routing_id);
     profile->GetExtensionMessageService()->DispatchEventToRenderers(
-        full_event_name, json_args, profile->IsOffTheRecord());
+        full_event_name, json_args, profile->IsOffTheRecord(), GURL());
   }
 }
 

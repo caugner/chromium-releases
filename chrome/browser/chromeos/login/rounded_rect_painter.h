@@ -23,13 +23,13 @@ struct BorderDefinition {
   SkColor top_color;
   SkColor bottom_color;
 
-  static const BorderDefinition kWizardBorder;
   static const BorderDefinition kScreenBorder;
 };
 
 // Creates painter to paint view background with parameters specified.
 views::Painter* CreateWizardPainter(const BorderDefinition* const border);
-// Creates border to draw around view with parameters specified.
+// Creates border to provide insets. Should be used together with WizardPainter
+// that actually draws both border and background.
 views::Border* CreateWizardBorder(const BorderDefinition* const border);
 
 }  // namespace chromeos

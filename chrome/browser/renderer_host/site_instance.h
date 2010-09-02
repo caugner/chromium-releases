@@ -68,6 +68,9 @@ class SiteInstance : public base::RefCounted<SiteInstance>,
   }
   int32 max_page_id() const { return max_page_id_; }
 
+  // Whether this SiteInstance has a running process associated with it.
+  bool HasProcess() const;
+
   // Returns the current process being used to render pages in this
   // SiteInstance.  If the process has crashed or otherwise gone away, then
   // this method will create a new process and update our host ID accordingly.
@@ -117,7 +120,7 @@ class SiteInstance : public base::RefCounted<SiteInstance>,
 
   // Returns the site for the given URL, which includes only the scheme and
   // registered domain.  Returns an empty GURL if the URL has no host.
-  static GURL GetSiteForURL(const GURL& url);
+  static GURL GetSiteForURL(Profile* profile, const GURL& url);
 
   // Return whether both URLs are part of the same web site, for the purpose of
   // assigning them to processes accordingly.  The decision is currently based
@@ -126,7 +129,11 @@ class SiteInstance : public base::RefCounted<SiteInstance>,
   // the same process if they can communicate with other via JavaScript.
   // (e.g., docs.google.com and mail.google.com have DOM access to each other
   // if they both set their document.domain properties to google.com.)
-  static bool IsSameWebSite(const GURL& url1, const GURL& url2);
+  static bool IsSameWebSite(Profile* profile,
+                            const GURL& url1, const GURL& url2);
+
+  // Returns the renderer type for this URL.
+  static RenderProcessHost::Type RendererTypeForURL(const GURL& url);
 
  protected:
   friend class base::RefCounted<SiteInstance>;
@@ -139,6 +146,12 @@ class SiteInstance : public base::RefCounted<SiteInstance>,
   // and tests; most callers should use CreateSiteInstance or
   // GetRelatedSiteInstance instead.
   explicit SiteInstance(BrowsingInstance* browsing_instance);
+
+  // Get the effective URL for the given actual URL. If the URL is part of an
+  // installed app, the effective URL is an extension URL with the ID of that
+  // extension as the host. This has the effect of grouping apps together in
+  // a common SiteInstance.
+  static GURL GetEffectiveURL(Profile* profile, const GURL& url);
 
   // Returns the type of renderer process this instance belongs in, for grouping
   // purposes.

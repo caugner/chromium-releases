@@ -15,6 +15,7 @@
 #include "chrome/common/env_vars.h"
 #include "chrome/test/ui/ui_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "net/base/net_util.h"
 
 using base::TimeDelta;
 
@@ -28,7 +29,19 @@ class ShutdownTest : public UITest {
   void SetUp() {}
   void TearDown() {}
 
+  enum TestSize {
+    SIMPLE,  // Runs with no command line arguments (loads about:blank).
+    TWENTY_TABS,  // Opens 5 copies of 4 different test pages.
+  };
+
   void SetUpTwentyTabs() {
+    int window_count;
+    ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
+    ASSERT_EQ(1, window_count);
+    scoped_refptr<BrowserProxy> browser_proxy(
+        automation()->GetBrowserWindow(0));
+    ASSERT_TRUE(browser_proxy.get());
+
     const FilePath kFastShutdownDir(FILE_PATH_LITERAL("fast_shutdown"));
     const FilePath kCurrentDir(FilePath::kCurrentDirectory);
     const FilePath test_cases[] = {
@@ -45,12 +58,14 @@ class ShutdownTest : public UITest {
     for (size_t i = 0; i < arraysize(test_cases); i++) {
       ASSERT_TRUE(file_util::PathExists(test_cases[i]));
       for (size_t j = 0; j < 5; j++) {
-        launch_arguments_.AppendLooseValue(test_cases[i].ToWStringHack());
+        ASSERT_TRUE(browser_proxy->AppendTab(
+            net::FilePathToFileURL(test_cases[i])));
       }
     }
   }
 
-  void RunShutdownTest(const char* graph, const char* trace, bool important,
+  void RunShutdownTest(const char* graph, const char* trace,
+                       bool important, TestSize test_size,
                        UITest::ShutdownType shutdown_type) {
     const int kNumCyclesMax = 20;
     int numCycles = kNumCyclesMax;
@@ -58,13 +73,24 @@ class ShutdownTest : public UITest {
     std::string numCyclesEnv;
     if (env->GetEnv(env_vars::kStartupTestsNumCycles, &numCyclesEnv) &&
         StringToInt(numCyclesEnv, &numCycles)) {
-      LOG(INFO) << env_vars::kStartupTestsNumCycles << " set in environment, "
-                << "so setting numCycles to " << numCycles;
+      if (numCycles <= kNumCyclesMax) {
+        LOG(INFO) << env_vars::kStartupTestsNumCycles
+                  << " set in environment, so setting numCycles to "
+                  << numCycles;
+      } else {
+        LOG(INFO) << env_vars::kStartupTestsNumCycles
+                  << " is higher than the max, setting numCycles to "
+                  << kNumCyclesMax;
+        numCycles = kNumCyclesMax;
+      }
     }
 
     TimeDelta timings[kNumCyclesMax];
     for (int i = 0; i < numCycles; ++i) {
       UITest::SetUp();
+      if (test_size == TWENTY_TABS) {
+        SetUpTwentyTabs();
+      }
       set_shutdown_type(shutdown_type);
       UITest::TearDown();
       timings[i] = browser_quit_time_;
@@ -88,29 +114,27 @@ class ShutdownTest : public UITest {
 
 TEST_F(ShutdownTest, SimpleWindowClose) {
   RunShutdownTest("shutdown", "simple-window-close",
-                  true, /* important */ UITest::WINDOW_CLOSE);
+                  true, /* important */ SIMPLE, UITest::WINDOW_CLOSE);
 }
 
 TEST_F(ShutdownTest, SimpleUserQuit) {
   RunShutdownTest("shutdown", "simple-user-quit",
-                  true, /* important */ UITest::USER_QUIT);
+                  true, /* important */ SIMPLE, UITest::USER_QUIT);
 }
 
 TEST_F(ShutdownTest, SimpleSessionEnding) {
   RunShutdownTest("shutdown", "simple-session-ending",
-                  true, /* important */ UITest::SESSION_ENDING);
+                  true, /* important */ SIMPLE, UITest::SESSION_ENDING);
 }
 
 TEST_F(ShutdownTest, TwentyTabsWindowClose) {
-  SetUpTwentyTabs();
   RunShutdownTest("shutdown", "twentytabs-window-close",
-                  true, /* important */ UITest::WINDOW_CLOSE);
+                  true, /* important */ TWENTY_TABS, UITest::WINDOW_CLOSE);
 }
 
 TEST_F(ShutdownTest, TwentyTabsUserQuit) {
-  SetUpTwentyTabs();
   RunShutdownTest("shutdown", "twentytabs-user-quit",
-                  true, /* important */ UITest::USER_QUIT);
+                  true, /* important */ TWENTY_TABS, UITest::USER_QUIT);
 }
 
 // http://crbug.com/40671
@@ -119,10 +143,10 @@ TEST_F(ShutdownTest, TwentyTabsUserQuit) {
 #else
 #define MAYBE_TwentyTabsSessionEnding TwentyTabsSessionEnding
 #endif
+
 TEST_F(ShutdownTest, MAYBE_TwentyTabsSessionEnding) {
-  SetUpTwentyTabs();
   RunShutdownTest("shutdown", "twentytabs-session-ending",
-                  true, /* important */ UITest::SESSION_ENDING);
+                  true, /* important */ TWENTY_TABS, UITest::SESSION_ENDING);
 }
 
 }  // namespace

@@ -10,17 +10,20 @@
 #include "base/lock.h"
 #include "base/scoped_ptr.h"
 #include "media/base/factory.h"
+#include "media/base/filters.h"
 #include "media/filters/video_renderer_base.h"
 
 class X11VideoRenderer : public media::VideoRendererBase {
  public:
   static media::FilterFactory* CreateFactory(Display* display,
-                                             Window window) {
-    return new media::FilterFactoryImpl2<
-        X11VideoRenderer, Display*, Window>(display, window);
+                                             Window window,
+                                             MessageLoop* message_loop) {
+    return new media::FilterFactoryImpl3<
+        X11VideoRenderer, Display*, Window, MessageLoop*>(display, window,
+                                                          message_loop);
   }
 
-  X11VideoRenderer(Display* display, Window window);
+  X11VideoRenderer(Display* display, Window window, MessageLoop* message_loop);
 
   // This method is called to paint the current video frame to the assigned
   // window.
@@ -31,10 +34,14 @@ class X11VideoRenderer : public media::VideoRendererBase {
 
   static X11VideoRenderer* instance() { return instance_; }
 
+  MessageLoop* glx_thread_message_loop() {
+    return glx_thread_message_loop_;
+  }
+
  protected:
   // VideoRendererBase implementation.
   virtual bool OnInitialize(media::VideoDecoder* decoder);
-  virtual void OnStop();
+  virtual void OnStop(media::FilterCallback* callback);
   virtual void OnFrameAvailable();
 
  private:
@@ -42,18 +49,11 @@ class X11VideoRenderer : public media::VideoRendererBase {
   friend class scoped_refptr<X11VideoRenderer>;
   virtual ~X11VideoRenderer();
 
-  int width_;
-  int height_;
-
   Display* display_;
   Window window_;
 
   // Image in heap that contains the RGBA data of the video frame.
   XImage* image_;
-
-  // Protects |new_frame_|.
-  Lock lock_;
-  bool new_frame_;
 
   // Picture represents the paint target. This is a picture located
   // in the server.
@@ -61,6 +61,7 @@ class X11VideoRenderer : public media::VideoRendererBase {
 
   bool use_render_;
 
+  MessageLoop* glx_thread_message_loop_;
   static X11VideoRenderer* instance_;
 
   DISALLOW_COPY_AND_ASSIGN(X11VideoRenderer);

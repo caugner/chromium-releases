@@ -13,8 +13,8 @@
 #include "base/file_version_info.h"
 #include "base/string_util.h"
 #include "base/process_util.h"
+#include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/child_process_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/zygote_host_linux.h"
 #include "chrome/common/chrome_constants.h"
@@ -25,6 +25,7 @@
 enum BrowserType {
   CHROME = 0,
   FIREFOX,
+  ICEWEASEL,
   OPERA,
   KONQUEROR,
   EPIPHANY,
@@ -37,6 +38,7 @@ enum BrowserType {
 static const char kBrowserPrettyNames[][10] = {
   "Chrome",
   "Firefox",
+  "Iceweasel",
   "Opera",
   "Konqueror",
   "Epiphany",
@@ -52,6 +54,7 @@ static const struct {
   { "firefox-3.5", FIREFOX },
   { "firefox-3.0", FIREFOX },
   { "firefox-bin", FIREFOX },
+  { "iceweasel", ICEWEASEL },
   { "opera", OPERA },
   { "konqueror", KONQUEROR },
   { "epiphany-browse", EPIPHANY },
@@ -103,7 +106,8 @@ static bool GetProcesses(std::vector<Process>* processes) {
       continue;
 
     const ssize_t len = HANDLE_EINTR(read(fd, buf, sizeof(buf) - 1));
-    HANDLE_EINTR(close(fd));
+    if (HANDLE_EINTR(close(fd)) < 0)
+      PLOG(ERROR) << "close";
     if (len < 1)
       continue;
     buf[len] = 0;

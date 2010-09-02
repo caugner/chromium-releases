@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CHROME_TEST_LIVE_SYNC_PROFILE_SYNC_SERVICE_TEST_HARNESS_H_
 
 #include <string>
+#include <vector>
 
 #include "base/time.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -45,6 +46,12 @@ class ProfileSyncServiceTestHarness : public ProfileSyncServiceObserver {
   // from the message queue. Returns true if two sync cycles have completed.
   bool AwaitMutualSyncCycleCompletion(ProfileSyncServiceTestHarness* partner);
 
+  // Blocks the caller until |this| completes its ongoing sync cycle and every
+  // other client in |partners| has a timestamp that is greater than or equal to
+  // the timestamp of |this|.
+  bool AwaitGroupSyncCycleCompletion(
+      std::vector<ProfileSyncServiceTestHarness*>& partners);
+
   ProfileSyncService* service() { return service_; }
 
   // See ProfileSyncService::ShouldPushChanges().
@@ -54,11 +61,16 @@ class ProfileSyncServiceTestHarness : public ProfileSyncServiceObserver {
   friend class StateChangeTimeoutEvent;
 
   enum WaitState {
-    WAITING_FOR_INITIAL_CALLBACK = 0,
-    WAITING_FOR_READY_TO_PROCESS_CHANGES,
+    // The sync client awaits the OnAuthError() callback.
+    WAITING_FOR_ON_AUTH_ERROR = 0,
+    // The sync client is waiting for notifications_enabled to become true.
+    WAITING_FOR_NOTIFICATIONS_ENABLED,
+    // The sync client is waiting for an ongoing sync cycle to complete.
     WAITING_FOR_SYNC_TO_FINISH,
+    // The sync client anticipates incoming updates leading to a new sync cycle.
     WAITING_FOR_UPDATES,
-    WAITING_FOR_NOTHING,
+    // The sync client is fully synced and there are no pending updates.
+    FULLY_SYNCED,
     NUMBER_OF_STATES
   };
 

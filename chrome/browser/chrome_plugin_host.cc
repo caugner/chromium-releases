@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,6 @@
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
 #include "chrome/browser/gears_integration.h"
-#include "chrome/browser/net/url_request_context_getter.h"
 #include "chrome/browser/plugin_process_host.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile.h"
@@ -34,13 +33,15 @@
 #include "chrome/common/chrome_plugin_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/gears_api.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/net/url_request_intercept_job.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_request_headers.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_error_job.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -325,6 +326,7 @@ class ModelessHtmlDialogDelegate : public HtmlDialogUIDelegate {
     io_message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
         this, &ModelessHtmlDialogDelegate::ReportResults, json_retval));
   }
+  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog) { }
 
  private:
   // Actually shows the dialog on the UI thread.
@@ -362,16 +364,12 @@ class ModelessHtmlDialogDelegate : public HtmlDialogUIDelegate {
   // active browser window.
   gfx::NativeWindow parent_wnd_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ModelessHtmlDialogDelegate);
+  DISALLOW_COPY_AND_ASSIGN(ModelessHtmlDialogDelegate);
 };
 
 // Allows InvokeLater without adding refcounting.  The object is only deleted
 // when its last InvokeLater is run anyway.
-template <>
-struct RunnableMethodTraits<ModelessHtmlDialogDelegate> {
-  void RetainCallee(ModelessHtmlDialogDelegate* delegate) {}
-  void ReleaseCallee(ModelessHtmlDialogDelegate* delegate) {}
-};
+DISABLE_RUNNABLE_METHOD_REFCOUNT(ModelessHtmlDialogDelegate);
 
 namespace {
 
@@ -629,7 +627,9 @@ void STDCALL CPR_SetExtraRequestHeaders(CPRequest* request,
   CHECK(ChromePluginLib::IsPluginThread());
   PluginRequestHandler* handler = PluginRequestHandler::FromCPRequest(request);
   CHECK(handler);
-  handler->request()->SetExtraRequestHeaders(headers);
+  net::HttpRequestHeaders http_headers;
+  http_headers.AddHeadersFromString(headers);
+  handler->request()->SetExtraRequestHeaders(http_headers);
 }
 
 void STDCALL CPR_SetRequestLoadFlags(CPRequest* request, uint32 flags) {

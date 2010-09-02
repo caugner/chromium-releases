@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,12 +17,14 @@
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
 #include "net/base/cert_status_flags.h"
+#include "net/base/ssl_connection_status_flags.h"
+#include "net/base/ssl_cipher_suite_names.h"
 #include "net/base/x509_certificate.h"
 
 namespace {
   // Returns a name that can be used to represent the issuer.  It tries in this
   // order CN, O and OU and returns the first non-empty one found.
-  std::string GetIssuerName(const net::X509Certificate::Principal& issuer) {
+  std::string GetIssuerName(const net::CertPrincipal& issuer) {
     if (!issuer.common_name.empty())
       return issuer.common_name;
     if (!issuer.organization_names.empty())
@@ -102,7 +104,7 @@ PageInfoModel::PageInfoModel(Profile* profile,
       }
     }
   } else {
-    // Bad HTTPS.
+    // HTTP or bad HTTPS.
     description.assign(l10n_util::GetStringUTF16(
         IDS_PAGE_INFO_SECURITY_TAB_INSECURE_IDENTITY));
     state = false;
@@ -122,40 +124,73 @@ PageInfoModel::PageInfoModel(Profile* profile,
   description.clear();
   if (ssl.security_bits() <= 0) {
     state = false;
-    description.assign(
-        l10n_util::GetStringFUTF16(
-            IDS_PAGE_INFO_SECURITY_TAB_NOT_ENCRYPTED_CONNECTION_TEXT,
-            subject_name));
+    description.assign(l10n_util::GetStringFUTF16(
+        IDS_PAGE_INFO_SECURITY_TAB_NOT_ENCRYPTED_CONNECTION_TEXT,
+        subject_name));
   } else if (ssl.security_bits() < 80) {
     state = false;
-    description.assign(
-        l10n_util::GetStringFUTF16(
-            IDS_PAGE_INFO_SECURITY_TAB_WEAK_ENCRYPTION_CONNECTION_TEXT,
-            subject_name));
+    description.assign(l10n_util::GetStringFUTF16(
+        IDS_PAGE_INFO_SECURITY_TAB_WEAK_ENCRYPTION_CONNECTION_TEXT,
+        subject_name));
   } else {
-    description.assign(
-        l10n_util::GetStringFUTF16(
-            IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_CONNECTION_TEXT,
-            subject_name,
-            IntToString16(ssl.security_bits())));
-    if (ssl.has_mixed_content()) {
+    description.assign(l10n_util::GetStringFUTF16(
+        IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_CONNECTION_TEXT,
+        subject_name,
+        IntToString16(ssl.security_bits())));
+    if (ssl.displayed_insecure_content() || ssl.ran_insecure_content()) {
       state = false;
-      description.assign(
-          l10n_util::GetStringFUTF16(
-              IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_SENTENCE_LINK,
-              description,
-              l10n_util::GetStringUTF16(
-                  IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_MIXED_CONTENT_WARNING)));
-    } else if (ssl.has_unsafe_content()) {
-      state = false;
-      description.assign(
-          l10n_util::GetStringFUTF16(
-              IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_SENTENCE_LINK,
-              description,
-              l10n_util::GetStringUTF16(
-                  IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_BAD_HTTPS_WARNING)));
+      description.assign(l10n_util::GetStringFUTF16(
+          IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_SENTENCE_LINK,
+          description,
+          l10n_util::GetStringUTF16(ssl.ran_insecure_content() ?
+              IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_INSECURE_CONTENT_ERROR :
+              IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_INSECURE_CONTENT_WARNING)));
     }
   }
+
+  uint16 cipher_suite =
+      net::SSLConnectionStatusToCipherSuite(ssl.connection_status());
+  if (ssl.security_bits() > 0 && cipher_suite) {
+    bool did_fallback = (ssl.connection_status() &
+                         net::SSL_CONNECTION_SSL3_FALLBACK) != 0;
+    bool no_renegotiation = (ssl.connection_status() &
+                             net::SSL_CONNECTION_NO_RENEGOTIATION_EXTENSION) != 0;
+    const char *key_exchange, *cipher, *mac;
+    net::SSLCipherSuiteToStrings(&key_exchange, &cipher, &mac, cipher_suite);
+
+    description += ASCIIToUTF16("\n\n");
+    description += l10n_util::GetStringFUTF16(
+        IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTION_DETAILS,
+        ASCIIToUTF16(cipher), ASCIIToUTF16(mac), ASCIIToUTF16(key_exchange));
+
+    description += ASCIIToUTF16("\n\n");
+    uint8 compression_id =
+        net::SSLConnectionStatusToCompression(ssl.connection_status());
+    if (compression_id) {
+      const char *compression;
+      net::SSLCompressionToString(&compression, compression_id);
+      description += l10n_util::GetStringFUTF16(
+          IDS_PAGE_INFO_SECURITY_TAB_COMPRESSION_DETAILS,
+          ASCIIToUTF16(compression));
+    } else {
+      description += l10n_util::GetStringUTF16(
+          IDS_PAGE_INFO_SECURITY_TAB_NO_COMPRESSION);
+    }
+
+    if (did_fallback) {
+      // For now, only SSLv3 fallback will trigger a warning icon.
+      state = false;
+      description += ASCIIToUTF16("\n\n");
+      description += l10n_util::GetStringUTF16(
+          IDS_PAGE_INFO_SECURITY_TAB_FALLBACK_MESSAGE);
+    }
+    if (no_renegotiation) {
+      description += ASCIIToUTF16("\n\n");
+      description += l10n_util::GetStringUTF16(
+          IDS_PAGE_INFO_SECURITY_TAB_RENEGOTIATION_MESSAGE);
+    }
+  }
+
   sections_.push_back(SectionInfo(
       state,
       l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURITY_TAB_CONNECTION_TITLE),

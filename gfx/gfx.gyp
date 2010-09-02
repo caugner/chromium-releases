@@ -17,6 +17,7 @@
         '../testing/gtest.gyp:gtest',
       ],
       'sources': [
+        'blit_unittest.cc',
         'codec/jpeg_codec_unittest.cc',
         'codec/png_codec_unittest.cc',
         'color_utils_unittest.cc',
@@ -33,9 +34,22 @@
       'conditions': [
         ['OS=="win"', {
           'sources': [
+            'canvas_direct2d_unittest.cc',
             'icon_util_unittest.cc',
             'native_theme_win_unittest.cc',
           ],
+          'include_dirs': [
+            '..',
+            '<(DEPTH)/third_party/wtl/include',
+          ],
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'AdditionalDependencies': [
+                'd2d1.lib',
+                'd3d10_1.lib',
+              ],
+            },
+          }
         }],
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
           'dependencies': [
@@ -62,11 +76,13 @@
       'sources': [
         'blit.cc',
         'blit.h',
-        'canvas.cc',
         'canvas.h',
-        'canvas_linux.cc',
-        'canvas_mac.mm',
-        'canvas_win.cc',
+        'canvas_skia.h',
+        'canvas_skia.cc',
+        'canvas_skia_linux.cc',
+        'canvas_skia_mac.mm',
+        'canvas_skia_paint.h',
+        'canvas_skia_win.cc',
         'codec/jpeg_codec.cc',
         'codec/jpeg_codec.h',
         'codec/png_codec.cc',
@@ -77,7 +93,6 @@
         'font.h',
         'font_gtk.cc',
         'font_mac.mm',
-        'font_skia.cc',
         'font_win.cc',
         'gfx_paths.cc',
         'gfx_paths.h',
@@ -106,21 +121,31 @@
       'conditions': [
         ['OS=="win"', {
           'sources': [
+            'canvas_direct2d.cc',
+            'canvas_direct2d.h',
             'gdi_util.cc',
             'gdi_util.h',
             'icon_util.cc',
             'icon_util.h',
             'native_theme_win.cc',
             'native_theme_win.h',
+            'window_impl.cc',
+            'window_impl.h'
           ],
+          'include_dirs': [
+            '..',
+            '<(DEPTH)/third_party/wtl/include',
+          ],          
         }],
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
           'dependencies': [
             # font_gtk.cc uses fontconfig.
             # TODO(evanm): I think this is wrong; it should just use GTK.
             '../build/linux/system.gyp:fontconfig',
+            '../build/linux/system.gyp:gtk',
           ],
           'sources': [
+            'font_skia.cc',
             'gtk_native_view_id_manager.cc',
             'gtk_native_view_id_manager.h',
             'gtk_util.cc',

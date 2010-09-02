@@ -1,14 +1,18 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/browser_init.h"
 
+#include <algorithm>   // For max().
+
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/env_var.h"
 #include "base/event_recorder.h"
+#include "base/histogram.h"
 #include "base/path_service.h"
-#include "base/sys_info.h"
+#include "base/scoped_ptr.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/chrome_frame_automation_provider.h"
 #include "chrome/browser/browser_list.h"
@@ -20,7 +24,8 @@
 #include "chrome/browser/extensions/extension_creator.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/first_run.h"
-#include "chrome/browser/net/dns_global.h"
+#include "chrome/browser/net/predictor_api.h"
+#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
@@ -30,14 +35,12 @@
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/tabs/pinned_tab_codec.h"
+#include "chrome/browser/status_icons/status_tray_manager.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
-#include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/status_icons/status_tray_manager.h"
-#include "chrome/browser/user_data_manager.h"
+#include "chrome/browser/tabs/pinned_tab_codec.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -50,7 +53,6 @@
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "net/base/net_util.h"
-#include "net/http/http_network_layer.h"
 #include "net/url_request/url_request.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -62,16 +64,26 @@
 #include "app/win_util.h"
 #endif
 
+#if defined(TOOLKIT_GTK)
+#include "chrome/browser/gtk/gtk_util.h"
+#endif
+
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/browser_notification_observers.h"
-#include "chrome/browser/dom_ui/mediaplayer_ui.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/mount_library.h"
-#include "chrome/browser/chromeos/cros/power_library.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/gview_request_interceptor.h"
 #include "chrome/browser/chromeos/low_battery_observer.h"
+#include "chrome/browser/chromeos/network_message_observer.h"
+#include "chrome/browser/chromeos/network_state_notifier.h"
+#include "chrome/browser/chromeos/system_key_event_listener.h"
+#include "chrome/browser/chromeos/update_observer.h"
 #include "chrome/browser/chromeos/usb_mount_observer.h"
 #include "chrome/browser/chromeos/wm_message_listener.h"
+#include "chrome/browser/chromeos/wm_overview_controller.h"
+#include "chrome/browser/dom_ui/mediaplayer_ui.h"
 #endif
 
 namespace {
@@ -299,9 +311,11 @@ LaunchMode GetLaunchShortcutKind() {
     // The windows quick launch path is not localized.
     if (shortcut.find(L"\\Quick Launch\\") != std::wstring::npos)
       return LM_SHORTCUT_QUICKLAUNCH;
-    std::wstring appdata_path = base::SysInfo::GetEnvVar(L"USERPROFILE");
+    scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
+    std::string appdata_path;
+    env->GetEnv("USERPROFILE", &appdata_path);
     if (!appdata_path.empty() &&
-        shortcut.find(appdata_path) != std::wstring::npos)
+        shortcut.find(ASCIIToWide(appdata_path)) != std::wstring::npos)
       return LM_SHORTCUT_DESKTOP;
     return LM_SHORTCUT_UNKNOWN;
   }
@@ -374,6 +388,13 @@ bool BrowserInit::LaunchBrowser(
     chromeos::InitialTabNotificationObserver::Get();
 #endif
 
+#if defined(OS_WIN)
+  // Disable the DPI-virtualization mode of Windows Vista or later because it
+  // causes some problems when using system messages (such as WM_NCHITTEST and
+  // WM_GETTITLEBARINFOEX) on a custom frame.
+  win_util::CallSetProcessDPIAware();
+#endif
+
   // Continue with the off-the-record profile from here on if --incognito
   if (command_line.HasSwitch(switches::kIncognito))
     profile = profile->GetOffTheRecordProfile();
@@ -394,6 +415,9 @@ bool BrowserInit::LaunchBrowser(
   // of what window has focus.
   chromeos::WmMessageListener::instance();
 
+  // Create the WmOverviewController so it can register with the listener.
+  chromeos::WmOverviewController::instance();
+
   // Install the GView request interceptor that will redirect requests
   // of compatible documents (PDF, etc) to the GView document viewer.
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
@@ -406,22 +430,37 @@ bool BrowserInit::LaunchBrowser(
     chromeos::MountLibrary* lib =
         chromeos::CrosLibrary::Get()->GetMountLibrary();
     chromeos::USBMountObserver* observe = chromeos::USBMountObserver::Get();
-    MediaPlayer* player = MediaPlayer::Get();
-    player->set_profile(profile);
-    observe->set_profile(profile);
     lib->AddObserver(observe);
-
+    observe->ScanForDevices(lib);
     // Connect the chromeos notifications
 
     // This observer is a singleton. It is never deleted but the pointer is kept
     // in a global so that it isn't reported as a leak.
-    static chromeos::LowBatteryObserver* observer =
+    static chromeos::LowBatteryObserver* low_battery_observer =
         new chromeos::LowBatteryObserver(profile);
-    chromeos::CrosLibrary::Get()->GetPowerLibrary()->AddObserver(observer);
+    chromeos::CrosLibrary::Get()->GetPowerLibrary()->AddObserver(
+        low_battery_observer);
+
+    static chromeos::UpdateObserver* update_observer =
+        new chromeos::UpdateObserver(profile);
+    chromeos::CrosLibrary::Get()->GetUpdateLibrary()->AddObserver(
+        update_observer);
+
+    static chromeos::NetworkMessageObserver* network_message_observer =
+        new chromeos::NetworkMessageObserver(profile);
+    chromeos::CrosLibrary::Get()->GetNetworkLibrary()->AddObserver(
+        network_message_observer);
+
+    chromeos::CrosLibrary::Get()->GetNetworkLibrary()->AddObserver(
+        chromeos::NetworkStateNotifier::Get());
+
+    // Creates the SystemKeyEventListener to listen for keypress messages
+    // regardless of what window has focus.
+    chromeos::SystemKeyEventListener::instance();
   }
 #endif
 
-  if (command_line.HasSwitch(switches::kLongLivedExtensions)) {
+  if (command_line.HasSwitch(switches::kRestoreBackgroundContents)) {
     // Create status icons
     StatusTrayManager* tray = g_browser_process->status_tray_manager();
     if (tray)
@@ -429,6 +468,19 @@ bool BrowserInit::LaunchBrowser(
   }
   return true;
 }
+
+#if defined(OS_CHROMEOS)
+bool BrowserInit::ApplyServicesCustomization(
+    const chromeos::ServicesCustomizationDocument* customization) {
+  GURL welcome_url(customization->initial_start_page_url());
+  DCHECK(welcome_url.is_valid()) << welcome_url;
+  if (welcome_url.is_valid()) {
+    AddFirstRunTab(welcome_url);
+  }
+  // TODO(denisromanov): Add extensions and web apps customization here.
+  return true;
+}
+#endif
 
 // LaunchWithProfile ----------------------------------------------------------
 
@@ -457,24 +509,29 @@ bool BrowserInit::LaunchWithProfile::Launch(Profile* profile,
   profile_ = profile;
 
   if (command_line_.HasSwitch(switches::kDnsLogDetails))
-    chrome_browser_net::EnableDnsDetailedLog(true);
+    chrome_browser_net::EnablePredictorDetailedLog(true);
   if (command_line_.HasSwitch(switches::kDnsPrefetchDisable))
-    chrome_browser_net::EnableDnsPrefetch(false);
+    chrome_browser_net::EnablePredictor(false);
 
   if (command_line_.HasSwitch(switches::kDumpHistogramsOnExit))
     StatisticsRecorder::set_dump_on_exit(true);
 
   if (command_line_.HasSwitch(switches::kRemoteShellPort)) {
-    if (!RenderProcessHost::run_renderer_in_process()) {
-      std::string port_str =
-          command_line_.GetSwitchValueASCII(switches::kRemoteShellPort);
-      int64 port = StringToInt64(port_str);
-      if (port > 0 && port < 65535) {
-        g_browser_process->InitDebuggerWrapper(static_cast<int>(port));
-      } else {
-        DLOG(WARNING) << "Invalid port number " << port;
-      }
-    }
+    std::string port_str =
+        command_line_.GetSwitchValueASCII(switches::kRemoteShellPort);
+    int64 port = StringToInt64(port_str);
+    if (port > 0 && port < 65535)
+      g_browser_process->InitDebuggerWrapper(static_cast<int>(port), false);
+    else
+      DLOG(WARNING) << "Invalid remote shell port number " << port;
+  } else if (command_line_.HasSwitch(switches::kRemoteDebuggingPort)) {
+    std::string port_str =
+        command_line_.GetSwitchValueASCII(switches::kRemoteDebuggingPort);
+    int64 port = StringToInt64(port_str);
+    if (port > 0 && port < 65535)
+      g_browser_process->InitDebuggerWrapper(static_cast<int>(port), true);
+    else
+      DLOG(WARNING) << "Invalid http debugger port number " << port;
   }
 
   if (command_line_.HasSwitch(switches::kUserAgent)) {
@@ -554,7 +611,7 @@ bool BrowserInit::LaunchWithProfile::IsAppLaunch(std::string* app_url,
       *app_url = command_line_.GetSwitchValueASCII(switches::kApp);
     return true;
   }
-  if (command_line_.HasSwitch(switches::kEnableExtensionApps) &&
+  if (command_line_.HasSwitch(switches::kEnableApps) &&
       command_line_.HasSwitch(switches::kAppId)) {
     if (app_id)
       *app_id = command_line_.GetSwitchValueASCII(switches::kAppId);
@@ -578,7 +635,7 @@ bool BrowserInit::LaunchWithProfile::OpenApplicationWindow(Profile* profile) {
   // TODO(rafaelw): Do something reasonable here. Pop up a warning panel?
   // Open an URL to the gallery page of the extension id?
   if (!app_id.empty())
-    return Browser::OpenApplication(profile, app_id);
+    return Browser::OpenApplication(profile, app_id) != NULL;
 
   if (url_string.empty())
     return false;
@@ -594,7 +651,7 @@ bool BrowserInit::LaunchWithProfile::OpenApplicationWindow(Profile* profile) {
         ChildProcessSecurityPolicy::GetInstance();
     if (policy->IsWebSafeScheme(url.scheme()) ||
         url.SchemeIs(chrome::kFileScheme)) {
-      Browser::OpenApplicationWindow(profile, url, false);
+      Browser::OpenApplicationWindow(profile, url);
       return true;
     }
   }
@@ -694,8 +751,16 @@ Browser* BrowserInit::LaunchWithProfile::OpenTabsInBrowser(
   if (!profile_ && browser)
     profile_ = browser->profile();
 
-  if (!browser || browser->type() != Browser::TYPE_NORMAL)
+  if (!browser || browser->type() != Browser::TYPE_NORMAL) {
     browser = Browser::Create(profile_);
+  } else {
+#if defined(TOOLKIT_GTK)
+    // Setting the time of the last action on the window here allows us to steal
+    // focus, which is what the user wants when opening a new tab in an existing
+    // browser window.
+    gtk_util::SetWMLastUserActionTime(browser->window()->GetNativeHandle());
+#endif
+  }
 
 #if !defined(OS_MACOSX)
   // In kiosk mode, we want to always be fullscreen, so switch to that now.
@@ -712,12 +777,15 @@ Browser* BrowserInit::LaunchWithProfile::OpenTabsInBrowser(
     if (!process_startup && !URLRequest::IsHandledURL(tabs[i].url))
       continue;
 
-    int add_types = first_tab ? Browser::ADD_SELECTED : 0;
+    int add_types = first_tab ? TabStripModel::ADD_SELECTED :
+                                TabStripModel::ADD_NONE;
+    add_types |= TabStripModel::ADD_FORCE_INDEX;
     if (tabs[i].is_pinned)
-      add_types |= Browser::ADD_PINNED;
+      add_types |= TabStripModel::ADD_PINNED;
+    int index = browser->GetIndexForInsertionDuringRestore(i);
 
     TabContents* tab = browser->AddTabWithURL(
-        tabs[i].url, GURL(), PageTransition::START_PAGE, -1, add_types, NULL,
+        tabs[i].url, GURL(), PageTransition::START_PAGE, index, add_types, NULL,
         tabs[i].app_id);
 
     if (profile_ && first_tab && process_startup) {
@@ -753,8 +821,10 @@ void BrowserInit::LaunchWithProfile::AddBadFlagsInfoBarIfNecessary(
   // Unsupported flags for which to display a warning that "stability and
   // security will suffer".
   static const char* kBadFlags[] = {
+    // All imply disabling the sandbox.
     switches::kSingleProcess,
     switches::kNoSandbox,
+    switches::kInProcessWebGL,
     NULL
   };
 
@@ -787,20 +857,17 @@ std::vector<GURL> BrowserInit::LaunchWithProfile::GetURLsFromCommandLine(
           profile->GetTemplateURLModel()->GetDefaultSearchProvider();
       if (!default_provider || !default_provider->url()) {
         // No search provider available. Just treat this as regular URL.
-        urls.push_back(
-            GURL(WideToUTF8(URLFixerUpper::FixupRelativeFile(cur_dir_,
-                                                             value))));
+        urls.push_back(URLFixerUpper::FixupRelativeFile(cur_dir_, value));
         continue;
       }
       const TemplateURLRef* search_url = default_provider->url();
       DCHECK(search_url->SupportsReplacement());
-      urls.push_back(GURL(WideToUTF8(search_url->ReplaceSearchTerms(
+      urls.push_back(GURL(search_url->ReplaceSearchTerms(
           *default_provider, value.substr(2),
-          TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, std::wstring()))));
+          TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, std::wstring())));
     } else {
       // This will create a file URL or a regular URL.
-      GURL url = GURL(WideToUTF8(
-          URLFixerUpper::FixupRelativeFile(cur_dir_, value)));
+      GURL url(URLFixerUpper::FixupRelativeFile(cur_dir_, value));
       // Exclude dangerous schemes.
       if (url.is_valid()) {
         ChildProcessSecurityPolicy *policy =
@@ -876,29 +943,8 @@ bool BrowserInit::ProcessCmdLineImpl(const CommandLine& command_line,
                                      BrowserInit* browser_init) {
   DCHECK(profile);
   if (process_startup) {
-    const std::string popup_count_string =
-        command_line.GetSwitchValueASCII(switches::kOmniBoxPopupCount);
-    if (!popup_count_string.empty()) {
-      int count = 0;
-      if (StringToInt(popup_count_string, &count)) {
-        const int popup_count = std::max(0, count);
-        AutocompleteResult::set_max_matches(popup_count);
-        AutocompleteProvider::set_max_matches(popup_count / 2);
-      }
-    }
-
     if (command_line.HasSwitch(switches::kDisablePromptOnRepost))
       NavigationController::DisablePromptOnRepost();
-
-    const std::string tab_count_string = command_line.GetSwitchValueASCII(
-        switches::kTabCountToLoadOnSessionRestore);
-    if (!tab_count_string.empty()) {
-      int count = 0;
-      if (StringToInt(tab_count_string, &count)) {
-        const int tab_count = std::max(0, count);
-        SessionRestore::num_tabs_to_load_ = static_cast<size_t>(tab_count);
-      }
-    }
 
     // Look for the testing channel ID ONLY during process startup
     if (command_line.HasSwitch(switches::kTestingChannelID)) {
@@ -997,24 +1043,10 @@ bool BrowserInit::ProcessCmdLineImpl(const CommandLine& command_line,
     }
   }
 
-  if (command_line.HasSwitch(switches::kUseSpdy)) {
-    std::string spdy_mode =
-        command_line.GetSwitchValueASCII(switches::kUseSpdy);
-    net::HttpNetworkLayer::EnableSpdy(spdy_mode);
-  }
-
   if (command_line.HasSwitch(switches::kExplicitlyAllowedPorts)) {
     std::wstring allowed_ports =
       command_line.GetSwitchValue(switches::kExplicitlyAllowedPorts);
     net::SetExplicitlyAllowedPorts(allowed_ports);
-  }
-
-  if (command_line.HasSwitch(switches::kEnableUserDataDirProfiles)) {
-    // Update user data dir profiles when kEnableUserDataDirProfiles is enabled.
-    // Profile enumeration would be scheduled on file thread and when
-    // enumeration is done, the profile list in BrowserProcess would be
-    // updated on ui thread.
-    UserDataManager::Get()->RefreshUserDataDirProfiles();
   }
 
 #if defined(OS_CHROMEOS)

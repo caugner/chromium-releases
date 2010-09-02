@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/starred_url_database.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/sqlite_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace history {
@@ -267,7 +266,7 @@ TEST_F(StarredURLDatabaseTest, RemoveStarredEntriesWithEmptyURL) {
 
   StarredEntry entry;
   entry.url = GURL("http://google.com");
-  entry.title = L"FOO";
+  entry.title = UTF8ToUTF16("FOO");
   entry.parent_group_id = HistoryService::kBookmarkBarID;
 
   ASSERT_NE(0, CreateStarredEntry(&entry));

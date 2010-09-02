@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,9 @@
 #include <string>
 #include <vector>
 
+#include "base/non_thread_safe.h"
 #include "base/scoped_ptr.h"
+#include "net/base/capturing_net_log.h"
 #include "net/base/host_cache.h"
 #include "net/base/host_resolver.h"
 #include "net/base/host_resolver_proc.h"
@@ -48,6 +50,7 @@ namespace net {
 // Requests are ordered in the queue based on their priority.
 
 class HostResolverImpl : public HostResolver,
+                         public NonThreadSafe,
                          public NetworkChangeNotifier::Observer {
  public:
   // The index into |job_pools_| for the various job pools. Pools with a higher
@@ -70,13 +73,10 @@ class HostResolverImpl : public HostResolver,
   // thread-safe since it is run from multiple worker threads. If
   // |resolver_proc| is NULL then the default host resolver procedure is
   // used (which is SystemHostResolverProc except if overridden).
-  // |notifier| must outlive HostResolverImpl.  It can optionally be NULL, in
-  // which case HostResolverImpl will not respond to network changes.
   // |max_jobs| specifies the maximum number of threads that the host resolver
   // will use. Use SetPoolConstraints() to specify finer-grain settings.
   HostResolverImpl(HostResolverProc* resolver_proc,
                    HostCache* cache,
-                   NetworkChangeNotifier* notifier,
                    size_t max_jobs);
 
   // HostResolver methods:
@@ -99,21 +99,10 @@ class HostResolverImpl : public HostResolver,
   virtual HostResolverImpl* GetAsHostResolverImpl() { return this; }
 
   // TODO(eroman): hack for http://crbug.com/15513
-  void Shutdown();
+  virtual void Shutdown();
 
   // Returns the cache this resolver uses, or NULL if caching is disabled.
   HostCache* cache() { return cache_.get(); }
-
-  // Clears the request trace log.
-  void ClearRequestsTrace();
-
-  // Starts/ends capturing requests to a trace log.
-  void EnableRequestsTracing(bool enable);
-
-  bool IsRequestsTracingEnabled() const;
-
-  // Gets a copy of the requests trace log.
-  bool GetRequestsTrace(CapturingNetLog::EntryList* entries);
 
   // Applies a set of constraints for requests that belong to the specified
   // pool. NOTE: Don't call this after requests have been already been started.
@@ -135,7 +124,6 @@ class HostResolverImpl : public HostResolver,
   class JobPool;
   class IPv6ProbeJob;
   class Request;
-  class RequestsTrace;
   typedef std::vector<Request*> RequestsList;
   typedef HostCache::Key Key;
   typedef std::map<Key, scoped_refptr<Job> > JobMap;
@@ -161,8 +149,9 @@ class HostResolverImpl : public HostResolver,
   // Removes |job| from the outstanding jobs list.
   void RemoveOutstandingJob(Job* job);
 
-  // Callback for when |job| has completed with |error| and |addrlist|.
-  void OnJobComplete(Job* job, int error, const AddressList& addrlist);
+  // Callback for when |job| has completed with |net_error| and |addrlist|.
+  void OnJobComplete(Job* job, int net_error, int os_error,
+                     const AddressList& addrlist);
 
   // Called when a request has just been started.
   void OnStartRequest(const BoundNetLog& net_log,
@@ -173,7 +162,9 @@ class HostResolverImpl : public HostResolver,
   void OnFinishRequest(const BoundNetLog& net_log,
                        int request_id,
                        const RequestInfo& info,
-                       int error);
+                       int net_error,
+                       int os_error,
+                       bool was_from_cache);
 
   // Called when a request has been cancelled.
   void OnCancelRequest(const BoundNetLog& net_log,
@@ -252,10 +243,6 @@ class HostResolverImpl : public HostResolver,
 
   // TODO(eroman): hack for http://crbug.com/15513
   bool shutdown_;
-
-  NetworkChangeNotifier* const network_change_notifier_;
-
-  scoped_refptr<RequestsTrace> requests_trace_;
 
   // Indicate if probing is done after each network change event to set address
   // family.

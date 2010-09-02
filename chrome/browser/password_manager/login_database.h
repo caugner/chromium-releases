@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,12 @@
 #include <string>
 #include <vector>
 
+#include "app/sql/connection.h"
+#include "app/sql/meta_table.h"
+#include "base/file_path.h"
 #include "base/string16.h"
-#include "chrome/browser/meta_table_helper.h"
 #include "webkit/glue/password_form.h"
 
-class FilePath;
 struct sqlite3;
 
 // Interface to the database storage of login information, intended as a helper
@@ -26,6 +27,9 @@ class LoginDatabase {
   // Initialize the database with an sqlite file at the given path.
   // If false is returned, no other method should be called.
   bool Init(const FilePath& db_path);
+
+  // Reports usage metrics to UMA.
+  void ReportMetrics();
 
   // Adds |form| to the list of remembered password forms.
   bool AddLogin(const webkit_glue::PasswordForm& form);
@@ -63,8 +67,14 @@ class LoginDatabase {
       std::vector<webkit_glue::PasswordForm*>* forms) const;
 
   // Loads the complete list of blacklist forms into |forms|.
-  bool GetBlacklistLogins(
-      std::vector<webkit_glue::PasswordForm*>* forms) const;
+  bool GetBlacklistLogins(std::vector<webkit_glue::PasswordForm*>* forms) const;
+
+  // Deletes the login database file on disk, and creates a new, empty database.
+  // This can be used after migrating passwords to some other store, to ensure
+  // that SQLite doesn't leave fragments of passwords in the database file.
+  // Returns true on success; otherwise, whether the file was deleted and
+  // whether further use of this login database will succeed is unspecified.
+  bool DeleteAndRecreateDatabaseFile();
 
  private:
   // Returns an encrypted version of plain_text.
@@ -79,18 +89,18 @@ class LoginDatabase {
   // Fills |form| from the values in the given statement (which is assumed to
   // be of the form used by the Get*Logins methods).
   void InitPasswordFormFromStatement(webkit_glue::PasswordForm* form,
-                                     SQLStatement* s) const;
+                                     sql::Statement& s) const;
 
   // Loads all logins whose blacklist setting matches |blacklisted| into
   // |forms|.
   bool GetAllLoginsWithBlacklistSetting(
       bool blacklisted, std::vector<webkit_glue::PasswordForm*>* forms) const;
 
-  sqlite3* db_;
-  MetaTableHelper meta_table_;
+  FilePath db_path_;
+  mutable sql::Connection db_;
+  sql::MetaTable meta_table_;
 
   DISALLOW_COPY_AND_ASSIGN(LoginDatabase);
 };
-
 
 #endif  // CHROME_BROWSER_PASSWORD_MANAGER_LOGIN_DATABASE_H_

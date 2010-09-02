@@ -37,7 +37,7 @@ DOMUI::~DOMUI() {
 // DOMUI, public: -------------------------------------------------------------
 
 void DOMUI::ProcessDOMUIMessage(const std::string& message,
-                                const Value* content,
+                                const ListValue* content,
                                 const GURL& source_url,
                                 int request_id,
                                 bool has_callback) {
@@ -115,22 +115,22 @@ DOMMessageHandler* DOMMessageHandler::Attach(DOMUI* dom_ui) {
 // DOMMessageHandler, protected: ----------------------------------------------
 
 void DOMMessageHandler::SetURLAndTitle(DictionaryValue* dictionary,
-                                       std::wstring title,
+                                       string16 title,
                                        const GURL& gurl) {
-  std::wstring wstring_url = UTF8ToWide(gurl.spec());
-  dictionary->SetString(L"url", wstring_url);
+  string16 url16 = UTF8ToUTF16(gurl.spec());
+  dictionary->SetStringFromUTF16(L"url", url16);
 
   bool using_url_as_the_title = false;
   if (title.empty()) {
     using_url_as_the_title = true;
-    title = wstring_url;
+    title = url16;
   }
 
   // Since the title can contain BiDi text, we need to mark the text as either
   // RTL or LTR, depending on the characters in the string. If we use the URL
   // as the title, we mark the title as LTR since URLs are always treated as
   // left to right strings.
-  std::wstring title_to_set(title);
+  string16 title_to_set(title);
   if (base::i18n::IsRTL()) {
     if (using_url_as_the_title) {
       base::i18n::WrapStringWithLTRFormatting(&title_to_set);
@@ -140,43 +140,27 @@ void DOMMessageHandler::SetURLAndTitle(DictionaryValue* dictionary,
       DCHECK(success ? (title != title_to_set) : (title == title_to_set));
     }
   }
-  dictionary->SetString(L"title", title_to_set);
+  dictionary->SetStringFromUTF16(L"title", title_to_set);
 }
 
 bool DOMMessageHandler::ExtractIntegerValue(const Value* value, int* out_int) {
   if (value && value->GetType() == Value::TYPE_LIST) {
     const ListValue* list_value = static_cast<const ListValue*>(value);
-    Value* list_member;
-
-    // Get id.
-    if (list_value->Get(0, &list_member) &&
-        list_member->GetType() == Value::TYPE_STRING) {
-      const StringValue* string_value =
-          static_cast<const StringValue*>(list_member);
-      std::wstring wstring_value;
-      string_value->GetAsString(&wstring_value);
-      *out_int = StringToInt(WideToUTF16Hack(wstring_value));
+    std::string string_value;
+    if (list_value->GetString(0, &string_value)) {
+      *out_int = StringToInt(string_value);
       return true;
     }
   }
-
   return false;
 }
 
 std::wstring DOMMessageHandler::ExtractStringValue(const Value* value) {
   if (value && value->GetType() == Value::TYPE_LIST) {
     const ListValue* list_value = static_cast<const ListValue*>(value);
-    Value* list_member;
-
-    // Get id.
-    if (list_value->Get(0, &list_member) &&
-        list_member->GetType() == Value::TYPE_STRING) {
-      const StringValue* string_value =
-          static_cast<const StringValue*>(list_member);
-      std::wstring wstring_value;
-      string_value->GetAsString(&wstring_value);
+    std::wstring wstring_value;
+    if (list_value->GetString(0, &wstring_value))
       return wstring_value;
-    }
   }
   return std::wstring();
 }

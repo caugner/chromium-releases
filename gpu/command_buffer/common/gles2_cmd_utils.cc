@@ -5,6 +5,9 @@
 // This file is here so other GLES2 related files can have a common set of
 // includes where appropriate.
 
+#include <GLES2/gl2.h>
+#include <GLES2/gles2_command_buffer.h>
+
 #include "../common/gles2_cmd_utils.h"
 #include "../common/gles2_cmd_format.h"
 
@@ -30,7 +33,7 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
     case GL_ALIASED_LINE_WIDTH_RANGE:
       return 2;
     case GL_ALIASED_POINT_SIZE_RANGE:
-      return 1;
+      return 2;
     case GL_ALPHA_BITS:
       return 1;
     case GL_ARRAY_BUFFER_BINDING:
@@ -312,6 +315,7 @@ int ElementsPerGroup(int format, int type) {
     case GL_LUMINANCE_ALPHA:
        return 2;
     case GL_RGBA:
+    case GL_BGRA_EXT:
        return 4;
     case GL_ALPHA:
     case GL_LUMINANCE:
@@ -393,11 +397,11 @@ uint32 GLES2Util::GetGLDataTypeSizeForUniforms(int type) {
     case GL_BOOL:
       return sizeof(GLint);                // NOLINT
     case GL_BOOL_VEC2:
-      return sizeof(GLint) * 1;            // NOLINT
-    case GL_BOOL_VEC3:
       return sizeof(GLint) * 2;            // NOLINT
-    case GL_BOOL_VEC4:
+    case GL_BOOL_VEC3:
       return sizeof(GLint) * 3;            // NOLINT
+    case GL_BOOL_VEC4:
+      return sizeof(GLint) * 4;            // NOLINT
     case GL_FLOAT_MAT2:
       return sizeof(GLfloat) * 2 * 2;      // NOLINT
     case GL_FLOAT_MAT3:
@@ -423,6 +427,10 @@ size_t GLES2Util::GetGLTypeSizeForTexturesAndBuffers(uint32 type) {
       return sizeof(GLshort);  // NOLINT
     case GL_UNSIGNED_SHORT:
       return sizeof(GLushort);  // NOLINT
+    case GL_INT:
+      return sizeof(GLint);  // NOLINT
+    case GL_UNSIGNED_INT:
+      return sizeof(GLuint);  // NOLINT
     case GL_FLOAT:
       return sizeof(GLfloat);  // NOLINT
     default:
@@ -464,6 +472,18 @@ uint32 GLES2Util::GLErrorBitToGLError(uint32 error_bit) {
       NOTREACHED();
       return GL_NO_ERROR;
   }
+}
+
+uint32 GLES2Util::IndexToGLFaceTarget(int index) {
+  static uint32 faces[] = {
+    GL_TEXTURE_CUBE_MAP_POSITIVE_X,
+    GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
+    GL_TEXTURE_CUBE_MAP_POSITIVE_Y,
+    GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,
+    GL_TEXTURE_CUBE_MAP_POSITIVE_Z,
+    GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
+  };
+  return faces[index];
 }
 
 }  // namespace gles2

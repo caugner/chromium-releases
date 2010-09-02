@@ -13,7 +13,6 @@
 #include "media/filters/ffmpeg_demuxer.h"
 #include "media/filters/ffmpeg_video_decoder.h"
 #include "media/filters/null_audio_renderer.h"
-#include "media/filters/omx_video_decoder.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
@@ -193,7 +192,8 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(WebKit::WebMediaPlayerClient* client,
       pipeline_thread_("PipelineThread"),
       paused_(true),
       playback_rate_(0.0f),
-      client_(client) {
+      client_(client),
+      pipeline_stopped_(false, false) {
   // Saves the current message loop.
   DCHECK(!main_loop_);
   main_loop_ = MessageLoop::current();
@@ -227,10 +227,6 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(WebKit::WebMediaPlayerClient* client,
   // Add in the default filter factories.
   filter_factory_->AddFactory(media::FFmpegDemuxer::CreateFilterFactory());
   filter_factory_->AddFactory(media::FFmpegAudioDecoder::CreateFactory());
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableOpenMax)) {
-    filter_factory_->AddFactory(media::OmxVideoDecoder::CreateFactory());
-  }
   filter_factory_->AddFactory(media::FFmpegVideoDecoder::CreateFactory());
   filter_factory_->AddFactory(media::NullAudioRenderer::CreateFilterFactory());
   filter_factory_->AddFactory(video_renderer_factory->CreateFactory(proxy_));
@@ -249,6 +245,9 @@ WebMediaPlayerImpl::~WebMediaPlayerImpl() {
 void WebMediaPlayerImpl::load(const WebKit::WebURL& url) {
   DCHECK(MessageLoop::current() == main_loop_);
   DCHECK(proxy_);
+
+  // Handle any volume changes that occured before load().
+  setVolume(GetClient()->volume());
 
   // Initialize the pipeline.
   SetNetworkState(WebKit::WebMediaPlayer::Loading);
@@ -437,8 +436,16 @@ int WebMediaPlayerImpl::dataRate() const {
   return 0;
 }
 
-const WebKit::WebTimeRanges& WebMediaPlayerImpl::buffered() const {
+const WebKit::WebTimeRanges& WebMediaPlayerImpl::buffered() {
   DCHECK(MessageLoop::current() == main_loop_);
+
+  // Update buffered_ with the most recent buffered time.
+  if (buffered_.size() > 0) {
+    float buffered_time = static_cast<float>(
+        pipeline_->GetBufferedTime().InSecondsF());
+    if (buffered_time >= buffered_[0].start)
+      buffered_[0].end = buffered_time;
+  }
 
   return buffered_;
 }
@@ -620,10 +627,6 @@ void WebMediaPlayerImpl::OnPipelineError() {
   DCHECK(MessageLoop::current() == main_loop_);
   switch (pipeline_->GetError()) {
     case media::PIPELINE_OK:
-    case media::PIPELINE_STOPPING:
-      NOTREACHED() << "We shouldn't get called with these non-errors";
-      break;
-
     case media::PIPELINE_ERROR_INITIALIZATION_FAILED:
     case media::PIPELINE_ERROR_REQUIRED_FILTER_MISSING:
     case media::PIPELINE_ERROR_COULD_NOT_RENDER:
@@ -681,8 +684,10 @@ void WebMediaPlayerImpl::Destroy() {
   DCHECK(MessageLoop::current() == main_loop_);
 
   // Make sure to kill the pipeline so there's no more media threads running.
-  // TODO(hclam): stopping the pipeline might block for a long time.
-  pipeline_->Stop(NULL);
+  // Note: stopping the pipeline might block for a long time.
+  pipeline_->Stop(NewCallback(this,
+      &WebMediaPlayerImpl::PipelineStoppedCallback));
+  pipeline_stopped_.Wait();
   pipeline_thread_.Stop();
 
   // And then detach the proxy, it may live on the render thread for a little
@@ -691,6 +696,10 @@ void WebMediaPlayerImpl::Destroy() {
     proxy_->Detach();
     proxy_ = NULL;
   }
+}
+
+void WebMediaPlayerImpl::PipelineStoppedCallback() {
+  pipeline_stopped_.Signal();
 }
 
 WebKit::WebMediaPlayerClient* WebMediaPlayerImpl::GetClient() {

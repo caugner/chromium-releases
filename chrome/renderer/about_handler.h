@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,10 +20,6 @@ class AboutHandler {
   // true if the URL was handled.
   static bool MaybeHandle(const GURL& url);
 
-  // Returns true if the URL is one that this AboutHandler will handle when
-  // MaybeHandle is called.
-  static bool WillHandle(const GURL& url);
-
   // Induces a renderer crash.
   static void AboutCrash();
 
@@ -33,11 +29,14 @@ class AboutHandler {
   // Induces a brief (20 second) hang to make sure hang monitors go away.
   static void AboutShortHang();
 
+  // Returns the size of |about_urls_handlers|. Used for testing only.
+  static size_t AboutURLHandlerSize();
+
  private:
   AboutHandler();
   ~AboutHandler();
 
-  DISALLOW_EVIL_CONSTRUCTORS(AboutHandler);
+  DISALLOW_COPY_AND_ASSIGN(AboutHandler);
 };
 
 #endif  // CHROME_RENDERER_ABOUT_HANDLER_H__

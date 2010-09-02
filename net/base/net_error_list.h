@@ -111,8 +111,9 @@ NET_ERROR(SSL_VERSION_OR_CIPHER_MISMATCH, -113)
 // The server requested a renegotiation (rehandshake).
 NET_ERROR(SSL_RENEGOTIATION_REQUESTED, -114)
 
-// The proxy requested authentication (for tunnel establishment).
-NET_ERROR(PROXY_AUTH_REQUESTED, -115)
+// The proxy requested authentication (for tunnel establishment) with an
+// unsupported method.
+NET_ERROR(PROXY_AUTH_UNSUPPORTED, -115)
 
 // During SSL renegotiation (rehandshake), the server sent a certificate with
 // an error.
@@ -138,7 +139,8 @@ NET_ERROR(SOCKS_CONNECTION_FAILED, -120)
 // because that host is unreachable.
 NET_ERROR(SOCKS_CONNECTION_HOST_UNREACHABLE, -121)
 
-// Error number -122 is available for use.
+// The request to negotiate an alternate protocol failed.
+NET_ERROR(NPN_NEGOTIATION_FAILED, -122)
 
 // The peer sent an SSL no_renegotiation alert message.
 NET_ERROR(SSL_NO_RENEGOTIATION, -123)
@@ -146,6 +148,26 @@ NET_ERROR(SSL_NO_RENEGOTIATION, -123)
 // Winsock sometimes reports more data written than passed.  This is probably
 // due to a broken LSP.
 NET_ERROR(WINSOCK_UNEXPECTED_WRITTEN_BYTES, -124)
+
+// An SSL peer sent us a fatal decompression_failure alert. This typically
+// occurs when a peer selects DEFLATE compression in the mismaken belief that
+// it supports it.
+NET_ERROR(SSL_DECOMPRESSION_FAILURE_ALERT, -125)
+
+// An SSL peer sent us a fatal bad_record_mac alert. This has been observed
+// from servers with buggy DEFLATE support.
+NET_ERROR(SSL_BAD_RECORD_MAC_ALERT, -126)
+
+// The proxy requested authentication (for tunnel establishment).
+NET_ERROR(PROXY_AUTH_REQUESTED, -127)
+
+// A known TLS strict server didn't offer the renegotiation extension.
+NET_ERROR(SSL_UNSAFE_NEGOTIATION, -128)
+
+// The socket is reporting that we tried to provide new credentials after a
+// a failed attempt on a connection without keep alive.  We need to
+// reestablish the transport socket in order to retry the authentication.
+NET_ERROR(RETRY_CONNECTION, -129)
 
 // Certificate error codes
 //
@@ -329,6 +351,12 @@ NET_ERROR(INVALID_AUTH_CREDENTIALS, -338)
 // machine.
 NET_ERROR(UNSUPPORTED_AUTH_SCHEME, -339)
 
+// Detecting the encoding of the response failed.
+NET_ERROR(ENCODING_DETECTION_FAILED, -340)
+
+// (GSSAPI) No Kerberos credentials were available during HTTP Authentication.
+NET_ERROR(MISSING_AUTH_CREDENTIALS, -341)
+
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
 
@@ -362,6 +390,35 @@ NET_ERROR(NO_PRIVATE_KEY_FOR_CERT, -502)
 // An error adding to the OS certificate database (e.g. OS X Keychain).
 NET_ERROR(ADD_USER_CERT_FAILED, -503)
 
-//
-// The FTP PASV command failed.
-NET_ERROR(FTP_PASV_COMMAND_FAILED, -600)
+// *** Code -600 is reserved (was FTP_PASV_COMMAND_FAILED). ***
+
+// A generic error for failed FTP control connection command.
+// If possible, please use or add a more specific error code.
+NET_ERROR(FTP_FAILED, -601)
+
+// The server cannot fulfill the request at this point. This is a temporary
+// error.
+// FTP response code 421.
+NET_ERROR(FTP_SERVICE_UNAVAILABLE, -602)
+
+// The server has aborted the transfer.
+// FTP response code 426.
+NET_ERROR(FTP_TRANSFER_ABORTED, -603)
+
+// The file is busy, or some other temporary error condition on opening
+// the file.
+// FTP response code 450.
+NET_ERROR(FTP_FILE_BUSY, -604)
+
+// Server rejected our command because of syntax errors.
+// FTP response codes 500, 501.
+NET_ERROR(FTP_SYNTAX_ERROR, -605)
+
+// Server does not support the command we issued.
+// FTP response codes 502, 504.
+NET_ERROR(FTP_COMMAND_NOT_SUPPORTED, -606)
+
+// Server rejected our command because we didn't issue the commands in right
+// order.
+// FTP response code 503.
+NET_ERROR(FTP_BAD_COMMAND_SEQUENCE, -607)

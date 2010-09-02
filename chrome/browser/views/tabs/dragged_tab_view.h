@@ -1,17 +1,13 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_VIEWS_TABS_DRAGGED_TAB_VIEW_H_
 #define CHROME_BROWSER_VIEWS_TABS_DRAGGED_TAB_VIEW_H_
 
-#include "app/slide_animation.h"
-#include "base/callback.h"
-#include "base/task.h"
 #include "build/build_config.h"
 #include "gfx/point.h"
 #include "gfx/size.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "views/view.h"
 
 namespace views {
@@ -26,16 +22,16 @@ class Point;
 }
 class NativeViewPhotobooth;
 class Tab;
-class TabContents;
 class TabRenderer;
 
-class DraggedTabView : public views::View,
-                       public AnimationDelegate {
+class DraggedTabView : public views::View {
  public:
-  DraggedTabView(TabContents* datasource,
+  // Creates a new DraggedTabView using |renderer| as the View. DraggedTabView
+  // takes ownership of |renderer|.
+  DraggedTabView(views::View* renderer,
                  const gfx::Point& mouse_tab_offset,
                  const gfx::Size& contents_size,
-                 bool mini);
+                 const gfx::Size& min_size);
   virtual ~DraggedTabView();
 
   // Moves the DraggedTabView to the appropriate location given the mouse
@@ -47,39 +43,17 @@ class DraggedTabView : public views::View,
     mouse_tab_offset_ = offset;
   }
 
-  // Notifies the DraggedTabView that it has become attached to a TabStrip.
-  void Attach(int selected_width);
-
-  // Resizes the dragged tab to a width of |width|.
-  void Resize(int width);
-
-  // Notifies the DraggedTabView that it has been detached from a TabStrip.
-  void Detach(NativeViewPhotobooth* photobooth);
+  // Sets the width of the dragged tab and updates the dragged image.
+  void SetTabWidthAndUpdate(int width, NativeViewPhotobooth* photobooth);
 
   // Notifies the DraggedTabView that it should update itself.
   void Update();
 
-  // Animates the DraggedTabView to the specified bounds, then calls back to
-  // |callback|.
-  void AnimateToBounds(const gfx::Rect& bounds, Callback0::Type* callback);
-
-  // Returns the size of the DraggedTabView. Used when attaching to a TabStrip
-  // to determine where to place the Tab in the attached TabStrip.
-  const gfx::Size& attached_tab_size() const { return attached_tab_size_; }
-
  private:
-  // Overridden from AnimationDelegate:
-  virtual void AnimationProgressed(const Animation* animation);
-  virtual void AnimationEnded(const Animation* animation);
-  virtual void AnimationCanceled(const Animation* animation);
-
   // Overridden from views::View:
   virtual void Paint(gfx::Canvas* canvas);
   virtual void Layout();
   virtual gfx::Size GetPreferredSize();
-
-  // Paint the view, when it's attached to a TabStrip.
-  void PaintAttachedTab(gfx::Canvas* canvas);
 
   // Paint the view, when it's not attached to any TabStrip.
   void PaintDetachedView(gfx::Canvas* canvas);
@@ -101,11 +75,7 @@ class DraggedTabView : public views::View,
 #endif
 
   // The renderer that paints the Tab shape.
-  scoped_ptr<TabRenderer> renderer_;
-
-  // True if the view is currently attached to a TabStrip. Controls rendering
-  // and sizing modes.
-  bool attached_;
+  scoped_ptr<views::View> renderer_;
 
   // True if "Show window contents while dragging" is enabled.
   bool show_contents_on_drag_;
@@ -116,26 +86,15 @@ class DraggedTabView : public views::View,
   // position of detached windows.
   gfx::Point mouse_tab_offset_;
 
-  // The size of the tab renderer when the dragged tab is attached to a
-  // tabstrip.
-  gfx::Size attached_tab_size_;
+  // The size of the tab renderer.
+  gfx::Size tab_size_;
 
   // A handle to the DIB containing the current screenshot of the TabContents
   // we are dragging.
   NativeViewPhotobooth* photobooth_;
 
-  // The dimensions of the TabContents being dragged.
+  // Size of the TabContents being dragged.
   gfx::Size contents_size_;
-
-  // The animation used to slide the attached view to its final location.
-  SlideAnimation close_animation_;
-
-  // A callback notified when the animation is complete.
-  scoped_ptr<Callback0::Type> animation_callback_;
-
-  // The start and end bounds of the animation sequence.
-  gfx::Rect animation_start_bounds_;
-  gfx::Rect animation_end_bounds_;
 
   DISALLOW_COPY_AND_ASSIGN(DraggedTabView);
 };

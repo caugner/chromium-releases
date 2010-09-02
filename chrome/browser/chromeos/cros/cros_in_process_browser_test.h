@@ -6,15 +6,22 @@
 #define CHROME_BROWSER_CHROMEOS_CROS_CROS_IN_PROCESS_BROWSER_TEST_H_
 
 #include "base/scoped_ptr.h"
-#include "chrome/browser/chromeos/cros/mock_language_library.h"
-#include "chrome/browser/chromeos/cros/mock_library_loader.h"
-#include "chrome/browser/chromeos/cros/mock_network_library.h"
-#include "chrome/browser/chromeos/cros/mock_power_library.h"
-#include "chrome/browser/chromeos/cros/mock_synaptics_library.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/test/in_process_browser_test.h"
-#include "third_party/cros/chromeos_language.h"
+#include "third_party/cros/chromeos_input_method.h"
 
 namespace chromeos {
+
+class MockCryptohomeLibrary;
+class MockKeyboardLibrary;
+class MockInputMethodLibrary;
+class MockLibraryLoader;
+class MockNetworkLibrary;
+class MockPowerLibrary;
+class MockScreenLockLibrary;
+class MockScreenLockLibrary;
+class MockSynapticsLibrary;
+class MockSystemLibrary;
 
 // Base class for Chromium OS tests wanting to bring up a browser in the
 // unit test process and mock some parts of CrosLibrary. Once you mock part of
@@ -41,10 +48,14 @@ class CrosInProcessBrowserTest : public InProcessBrowserTest {
   void InitMockLibraryLoader();
 
   // Initialization of mocks.
-  void InitMockLanguageLibrary();
+  void InitMockCryptohomeLibrary();
+  void InitMockKeyboardLibrary();
+  void InitMockInputMethodLibrary();
   void InitMockNetworkLibrary();
   void InitMockPowerLibrary();
+  void InitMockScreenLockLibrary();
   void InitMockSynapticsLibrary();
+  void InitMockSystemLibrary();
 
   // This method setups corresponding expectations for basic mocks that
   // are used by status area items.
@@ -55,10 +66,13 @@ class CrosInProcessBrowserTest : public InProcessBrowserTest {
   void SetStatusAreaMocksExpectations();
 
   // Methods to setup minimal mocks expectations for status area.
-  void SetLanguageLibraryStatusAreaExpectations();
+  void SetKeyboardLibraryStatusAreaExpectations();
+  void SetInputMethodLibraryStatusAreaExpectations();
   void SetNetworkLibraryStatusAreaExpectations();
   void SetPowerLibraryStatusAreaExpectations();
+  void SetSystemLibraryStatusAreaExpectations();
   void SetSynapticsLibraryExpectations();
+  void SetSystemLibraryExpectations();
 
   // Overriden for things you would normally override TearDown for.
   virtual void TearDownInProcessBrowserTestFixture();
@@ -68,10 +82,14 @@ class CrosInProcessBrowserTest : public InProcessBrowserTest {
 
   // Mocks, destroyed by CrosLibrary class.
   MockLibraryLoader* loader_;
-  MockLanguageLibrary* mock_language_library_;
+  MockCryptohomeLibrary* mock_cryptohome_library_;
+  MockKeyboardLibrary* mock_keyboard_library_;
+  MockInputMethodLibrary* mock_input_method_library_;
   MockNetworkLibrary* mock_network_library_;
   MockPowerLibrary* mock_power_library_;
+  MockScreenLockLibrary* mock_screen_lock_library_;
   MockSynapticsLibrary* mock_synaptics_library_;
+  MockSystemLibrary* mock_system_library_;
 
   ImePropertyList ime_properties_;
 

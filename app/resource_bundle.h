@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,25 +13,24 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
-#include "base/lock.h"
 #include "base/ref_counted_memory.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 
-#if defined(USE_BASE_DATA_PACK)
 namespace base {
 class DataPack;
 }
-#endif
 #if defined(USE_X11)
 typedef struct _GdkPixbuf GdkPixbuf;
 #endif
 namespace gfx {
 class Font;
 }
+class Lock;
 class SkBitmap;
 typedef uint32 SkColor;
 namespace base {
@@ -70,6 +69,20 @@ class ResourceBundle {
   // defined by the Cocoa UI (ie-NSBundle does the langange work).
   static std::string InitSharedInstance(const std::wstring& pref_locale);
 
+  // Changes the locale for an already-initialized ResourceBundle.  Future
+  // calls to get strings will return the strings for this new locale.  This
+  // has no effect on existing or future image resources.  This has no effect
+  // on existing or future image resources, and thus does not use the lock to
+  // guarantee thread-safety, since all string access is expected to happen on
+  // the UI thread.
+  static std::string ReloadSharedInstance(const std::wstring& pref_locale);
+
+  // Registers additional data pack files with the global ResourceBundle.  When
+  // looking for a DataResource, we will search these files after searching the
+  // main module.  This method is not thread safe!  You should call it
+  // immediately after calling InitSharedInstance.
+  static void AddDataPackToSharedInstance(const FilePath& path);
+
   // Delete the ResourceBundle for this process if it exists.
   static void CleanupSharedInstance();
 
@@ -91,15 +104,8 @@ class ResourceBundle {
   // the resource. Returns whether we successfully read the resource.
   RefCountedStaticMemory* LoadDataResourceBytes(int resource_id) const;
 
-  // Return the contents of a file in a string given the resource id.
-  // This will copy the data from the resource and return it as a string.
-  // TODO(port): deprecate this and replace with GetRawDataResource to avoid
-  // needless copying.
-  std::string GetDataResource(int resource_id);
-
-  // Like GetDataResource(), but avoids copying the resource.  Instead, it
-  // returns a StringPiece which points into the actual resource in the image.
-  base::StringPiece GetRawDataResource(int resource_id);
+  // Return the contents of a resource in a StringPiece given the resource id.
+  base::StringPiece GetRawDataResource(int resource_id) const;
 
   // Get a localized string given a message id.  Returns an empty
   // string if the message_id is not found.
@@ -150,6 +156,22 @@ class ResourceBundle {
   static const SkColor toolbar_separator_color;
 
  private:
+  // Helper class for managing data packs.
+  class LoadedDataPack {
+   public:
+    explicit LoadedDataPack(const FilePath& path);
+    bool GetStringPiece(int resource_id, base::StringPiece* data) const;
+    RefCountedStaticMemory* GetStaticMemory(int resource_id) const;
+
+   private:
+    void Load();
+
+    scoped_ptr<base::DataPack> data_pack_;
+    FilePath path_;
+
+    DISALLOW_COPY_AND_ASSIGN(LoadedDataPack);
+  };
+
   // We define a DataHandle typedef to abstract across how data is stored
   // across platforms.
 #if defined(OS_WIN)
@@ -172,9 +194,16 @@ class ResourceBundle {
   void FreeGdkPixBufs();
 #endif
 
-  // Try to load the main resources and the locale specific strings from an
-  // external data module.  Returns the locale that is loaded.
-  std::string LoadResources(const std::wstring& pref_locale);
+  // Load the main resources.
+  void LoadCommonResources();
+
+  // Try to load the locale specific strings from an external data module.
+  // Returns the locale that is loaded.
+  std::string LoadLocaleResources(const std::wstring& pref_locale);
+
+  // Unload the locale specific strings and prepares to load new ones. See
+  // comments for ReloadSharedInstance().
+  void UnloadLocaleResources();
 
   // Initialize all the gfx::Font members if they haven't yet been initialized.
   void LoadFontsIfNecessary();
@@ -203,11 +232,14 @@ class ResourceBundle {
 
   // Class level lock.  Used to protect internal data structures that may be
   // accessed from other threads (e.g., skia_images_).
-  Lock lock_;
+  scoped_ptr<Lock> lock_;
 
   // Handles for data sources.
   DataHandle resources_data_;
   DataHandle locale_resources_data_;
+
+  // References to extra data packs loaded via AddDataPackToSharedInstance.
+  std::vector<LoadedDataPack*> data_packs_;
 
   // Cached images. The ResourceBundle caches all retrieved bitmaps and keeps
   // ownership of the pointers.
@@ -229,7 +261,7 @@ class ResourceBundle {
 
   static ResourceBundle* g_shared_instance_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ResourceBundle);
+  DISALLOW_COPY_AND_ASSIGN(ResourceBundle);
 };
 
 #endif  // APP_RESOURCE_BUNDLE_H_

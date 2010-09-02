@@ -8,12 +8,12 @@
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "net/base/mock_host_resolver.h"
-#include "net/base/mock_network_change_notifier.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/socket/client_socket.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
+#include "net/socket/client_socket_pool_histograms.h"
 #include "net/socket/socket_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -30,7 +30,7 @@ class MockClientSocket : public ClientSocket {
   MockClientSocket() : connected_(false) {}
 
   // ClientSocket methods:
-  virtual int Connect(CompletionCallback* callback, const BoundNetLog& /* net_log */) {
+  virtual int Connect(CompletionCallback* callback) {
     connected_ = true;
     return OK;
   }
@@ -45,6 +45,9 @@ class MockClientSocket : public ClientSocket {
   }
   virtual int GetPeerAddress(AddressList* address) const {
     return ERR_UNEXPECTED;
+  }
+  virtual const BoundNetLog& NetLog() const {
+    return net_log_;
   }
 
   // Socket methods:
@@ -61,6 +64,7 @@ class MockClientSocket : public ClientSocket {
 
  private:
   bool connected_;
+  BoundNetLog net_log_;
 };
 
 class MockFailingClientSocket : public ClientSocket {
@@ -68,7 +72,7 @@ class MockFailingClientSocket : public ClientSocket {
   MockFailingClientSocket() {}
 
   // ClientSocket methods:
-  virtual int Connect(CompletionCallback* callback, const BoundNetLog& /* net_log */) {
+  virtual int Connect(CompletionCallback* callback) {
     return ERR_CONNECTION_FAILED;
   }
 
@@ -83,6 +87,9 @@ class MockFailingClientSocket : public ClientSocket {
   virtual int GetPeerAddress(AddressList* address) const {
     return ERR_UNEXPECTED;
   }
+  virtual const BoundNetLog& NetLog() const {
+    return net_log_;
+  }
 
   // Socket methods:
   virtual int Read(IOBuffer* buf, int buf_len,
@@ -96,6 +103,9 @@ class MockFailingClientSocket : public ClientSocket {
   }
   virtual bool SetReceiveBufferSize(int32 size) { return true; }
   virtual bool SetSendBufferSize(int32 size) { return true; }
+
+ private:
+  BoundNetLog net_log_;
 };
 
 class MockPendingClientSocket : public ClientSocket {
@@ -112,7 +122,7 @@ class MockPendingClientSocket : public ClientSocket {
         is_connected_(false) {}
 
   // ClientSocket methods:
-  virtual int Connect(CompletionCallback* callback, const BoundNetLog& /* net_log */) {
+  virtual int Connect(CompletionCallback* callback) {
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         method_factory_.NewRunnableMethod(
@@ -130,6 +140,9 @@ class MockPendingClientSocket : public ClientSocket {
   }
   virtual int GetPeerAddress(AddressList* address) const{
     return ERR_UNEXPECTED;
+  }
+  virtual const BoundNetLog& NetLog() const {
+    return net_log_;
   }
 
   // Socket methods:
@@ -164,6 +177,7 @@ class MockPendingClientSocket : public ClientSocket {
   bool should_stall_;
   int delay_ms_;
   bool is_connected_;
+  BoundNetLog net_log_;
 };
 
 class MockClientSocketFactory : public ClientSocketFactory {
@@ -181,14 +195,18 @@ class MockClientSocketFactory : public ClientSocketFactory {
 
   MockClientSocketFactory()
       : allocation_count_(0), client_socket_type_(MOCK_CLIENT_SOCKET),
-        client_socket_types_(NULL), client_socket_index_(0) {}
+        client_socket_types_(NULL), client_socket_index_(0),
+        client_socket_index_max_(0) {}
 
-  virtual ClientSocket* CreateTCPClientSocket(const AddressList& addresses) {
+  virtual ClientSocket* CreateTCPClientSocket(const AddressList& addresses,
+                                              NetLog* /* net_log */) {
     allocation_count_++;
 
     ClientSocketType type = client_socket_type_;
-    if (client_socket_types_)
+    if (client_socket_types_ &&
+        client_socket_index_ < client_socket_index_max_) {
       type = client_socket_types_[client_socket_index_++];
+    }
 
     switch (type) {
       case MOCK_CLIENT_SOCKET:
@@ -211,7 +229,7 @@ class MockClientSocketFactory : public ClientSocketFactory {
   }
 
   virtual SSLClientSocket* CreateSSLClientSocket(
-      ClientSocket* transport_socket,
+      ClientSocketHandle* transport_socket,
       const std::string& hostname,
       const SSLConfig& ssl_config) {
     NOTIMPLEMENTED();
@@ -226,9 +244,11 @@ class MockClientSocketFactory : public ClientSocketFactory {
   }
 
   // Set a list of ClientSocketTypes to be used.
-  void set_client_socket_types(ClientSocketType* type_list) {
+  void set_client_socket_types(ClientSocketType* type_list, int num_types) {
+    DCHECK_GT(num_types, 0);
     client_socket_types_ = type_list;
     client_socket_index_ = 0;
+    client_socket_index_max_ = num_types;
   }
 
  private:
@@ -236,38 +256,44 @@ class MockClientSocketFactory : public ClientSocketFactory {
   ClientSocketType client_socket_type_;
   ClientSocketType* client_socket_types_;
   int client_socket_index_;
+  int client_socket_index_max_;
 };
 
 class TCPClientSocketPoolTest : public ClientSocketPoolTest {
  protected:
   TCPClientSocketPoolTest()
-      : ignored_socket_params_("ignored", 80, MEDIUM, GURL(), false),
+      : params_(new TCPSocketParams(HostPortPair("www.google.com", 80),
+                                    kDefaultPriority, GURL(), false)),
+        low_params_(new TCPSocketParams(HostPortPair("www.google.com", 80),
+                                        LOW, GURL(), false)),
+        histograms_(new ClientSocketPoolHistograms("TCPUnitTest")),
         host_resolver_(new MockHostResolver),
         pool_(new TCPClientSocketPool(kMaxSockets,
                                       kMaxSocketsPerGroup,
-                                      "TCPUnitTest",
+                                      histograms_,
                                       host_resolver_,
                                       &client_socket_factory_,
-                                      &notifier_)) {
+                                      NULL)) {
   }
 
   int StartRequest(const std::string& group_name, RequestPriority priority) {
-    return StartRequestUsingPool(
-        pool_, group_name, priority, ignored_socket_params_);
+    scoped_refptr<TCPSocketParams> params = new TCPSocketParams(
+        HostPortPair("www.google.com", 80), MEDIUM, GURL(), false);
+    return StartRequestUsingPool(pool_, group_name, priority, params);
   }
 
-  TCPSocketParams ignored_socket_params_;
+  scoped_refptr<TCPSocketParams> params_;
+  scoped_refptr<TCPSocketParams> low_params_;
+  scoped_refptr<ClientSocketPoolHistograms> histograms_;
   scoped_refptr<MockHostResolver> host_resolver_;
   MockClientSocketFactory client_socket_factory_;
-  MockNetworkChangeNotifier notifier_;
   scoped_refptr<TCPClientSocketPool> pool_;
 };
 
 TEST_F(TCPClientSocketPoolTest, Basic) {
   TestCompletionCallback callback;
   ClientSocketHandle handle;
-  TCPSocketParams dest("www.google.com", 80, LOW, GURL(), false);
-  int rv = handle.Init("a", dest, LOW, &callback, pool_, NULL);
+  int rv = handle.Init("a", low_params_, LOW, &callback, pool_, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -282,10 +308,11 @@ TEST_F(TCPClientSocketPoolTest, Basic) {
 TEST_F(TCPClientSocketPoolTest, InitHostResolutionFailure) {
   host_resolver_->rules()->AddSimulatedFailure("unresolvable.host.name");
   TestSocketRequest req(&request_order_, &completion_count_);
-  TCPSocketParams dest("unresolvable.host.name", 80, kDefaultPriority, GURL(),
-                       false);
+  scoped_refptr<TCPSocketParams> dest = new TCPSocketParams(
+          "unresolvable.host.name", 80, kDefaultPriority, GURL(), false);
   EXPECT_EQ(ERR_IO_PENDING,
-            req.handle()->Init("a", dest, kDefaultPriority, &req, pool_, NULL));
+            req.handle()->Init("a", dest, kDefaultPriority, &req, pool_,
+                               BoundNetLog()));
   EXPECT_EQ(ERR_NAME_NOT_RESOLVED, req.WaitForResult());
 }
 
@@ -293,15 +320,15 @@ TEST_F(TCPClientSocketPoolTest, InitConnectionFailure) {
   client_socket_factory_.set_client_socket_type(
       MockClientSocketFactory::MOCK_FAILING_CLIENT_SOCKET);
   TestSocketRequest req(&request_order_, &completion_count_);
-  TCPSocketParams dest("a", 80, kDefaultPriority, GURL(), false);
-  EXPECT_EQ(ERR_IO_PENDING,
-            req.handle()->Init("a", dest, kDefaultPriority, &req, pool_, NULL));
+  EXPECT_EQ(ERR_IO_PENDING, req.handle()->Init("a", params_, kDefaultPriority,
+                                               &req, pool_, BoundNetLog()));
   EXPECT_EQ(ERR_CONNECTION_FAILED, req.WaitForResult());
 
   // Make the host resolutions complete synchronously this time.
   host_resolver_->set_synchronous_mode(true);
-  EXPECT_EQ(ERR_CONNECTION_FAILED,
-            req.handle()->Init("a", dest, kDefaultPriority, &req, pool_, NULL));
+  EXPECT_EQ(ERR_CONNECTION_FAILED, req.handle()->Init("a", params_,
+                                                      kDefaultPriority, &req,
+                                                      pool_, BoundNetLog()));
 }
 
 TEST_F(TCPClientSocketPoolTest, PendingRequests) {
@@ -405,9 +432,8 @@ TEST_F(TCPClientSocketPoolTest, PendingRequests_NoKeepAlive) {
 // ClientSocketPool which will crash if the group was not cleared properly.
 TEST_F(TCPClientSocketPoolTest, CancelRequestClearGroup) {
   TestSocketRequest req(&request_order_, &completion_count_);
-  TCPSocketParams dest("www.google.com", 80, kDefaultPriority, GURL(), false);
-  EXPECT_EQ(ERR_IO_PENDING,
-            req.handle()->Init("a", dest, kDefaultPriority, &req, pool_, NULL));
+  EXPECT_EQ(ERR_IO_PENDING, req.handle()->Init("a", params_, kDefaultPriority,
+                                               &req, pool_, BoundNetLog()));
   req.handle()->Reset();
 
   // There is a race condition here.  If the worker pool doesn't post the task
@@ -423,11 +449,10 @@ TEST_F(TCPClientSocketPoolTest, TwoRequestsCancelOne) {
   TestSocketRequest req(&request_order_, &completion_count_);
   TestSocketRequest req2(&request_order_, &completion_count_);
 
-  TCPSocketParams dest("www.google.com", 80, kDefaultPriority, GURL(), false);
-  EXPECT_EQ(ERR_IO_PENDING,
-            req.handle()->Init("a", dest, kDefaultPriority, &req, pool_, NULL));
-  EXPECT_EQ(ERR_IO_PENDING,
-            req2.handle()->Init("a", dest, kDefaultPriority, &req2, pool_, NULL));
+  EXPECT_EQ(ERR_IO_PENDING, req.handle()->Init("a", params_, kDefaultPriority,
+                                               &req, pool_, BoundNetLog()));
+  EXPECT_EQ(ERR_IO_PENDING, req2.handle()->Init("a", params_, kDefaultPriority,
+                                                &req2, pool_, BoundNetLog()));
 
   req.handle()->Reset();
 
@@ -442,15 +467,14 @@ TEST_F(TCPClientSocketPoolTest, ConnectCancelConnect) {
   TestCompletionCallback callback;
   TestSocketRequest req(&request_order_, &completion_count_);
 
-  TCPSocketParams dest("www.google.com", 80, kDefaultPriority, GURL(), false);
-  EXPECT_EQ(ERR_IO_PENDING,
-            handle.Init("a", dest, kDefaultPriority, &callback, pool_, NULL));
+  EXPECT_EQ(ERR_IO_PENDING, handle.Init("a", params_, kDefaultPriority,
+                                        &callback, pool_, BoundNetLog()));
 
   handle.Reset();
 
   TestCompletionCallback callback2;
-  EXPECT_EQ(ERR_IO_PENDING,
-            handle.Init("a", dest, kDefaultPriority, &callback2, pool_, NULL));
+  EXPECT_EQ(ERR_IO_PENDING, handle.Init("a", params_, kDefaultPriority,
+                                        &callback2, pool_, BoundNetLog()));
 
   host_resolver_->set_synchronous_mode(true);
   // At this point, handle has two ConnectingSockets out for it.  Due to the
@@ -548,8 +572,10 @@ class RequestSocketCallback : public CallbackRunner< Tuple1<int> > {
         MessageLoop::current()->RunAllPending();
       }
       within_callback_ = true;
-      TCPSocketParams dest("www.google.com", 80, LOWEST, GURL(), false);
-      int rv = handle_->Init("a", dest, LOWEST, this, pool_, NULL);
+      scoped_refptr<TCPSocketParams> dest = new TCPSocketParams(
+          HostPortPair("www.google.com", 80), LOWEST, GURL(), false);
+      int rv = handle_->Init("a", dest, LOWEST, this, pool_,
+                             BoundNetLog());
       EXPECT_EQ(OK, rv);
     }
   }
@@ -568,8 +594,10 @@ class RequestSocketCallback : public CallbackRunner< Tuple1<int> > {
 TEST_F(TCPClientSocketPoolTest, RequestTwice) {
   ClientSocketHandle handle;
   RequestSocketCallback callback(&handle, pool_.get());
-  TCPSocketParams dest("www.google.com", 80, LOWEST, GURL(), false);
-  int rv = handle.Init("a", dest, LOWEST, &callback, pool_, NULL);
+  scoped_refptr<TCPSocketParams> dest = new TCPSocketParams(
+      HostPortPair("www.google.com", 80), LOWEST, GURL(), false);
+  int rv = handle.Init("a", dest, LOWEST, &callback, pool_,
+                       BoundNetLog());
   ASSERT_EQ(ERR_IO_PENDING, rv);
 
   // The callback is going to request "www.google.com". We want it to complete
@@ -631,8 +659,7 @@ TEST_F(TCPClientSocketPoolTest, FailingActiveRequestWithPendingRequests) {
 TEST_F(TCPClientSocketPoolTest, ResetIdleSocketsOnIPAddressChange) {
   TestCompletionCallback callback;
   ClientSocketHandle handle;
-  TCPSocketParams dest("www.google.com", 80, LOW, GURL(), false);
-  int rv = handle.Init("a", dest, LOW, &callback, pool_, NULL);
+  int rv = handle.Init("a", low_params_, LOW, &callback, pool_, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -650,7 +677,9 @@ TEST_F(TCPClientSocketPoolTest, ResetIdleSocketsOnIPAddressChange) {
   EXPECT_EQ(1, pool_->IdleSocketCount());
 
   // After an IP address change, we should have 0 idle sockets.
-  notifier_.NotifyIPAddressChange();
+  NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
+  MessageLoop::current()->RunAllPending();  // Notification happens async.
+
   EXPECT_EQ(0, pool_->IdleSocketCount());
 }
 
@@ -679,14 +708,14 @@ TEST_F(TCPClientSocketPoolTest, BackupSocketConnect) {
   };
 
   for (size_t index = 0; index < arraysize(cases); ++index) {
-    client_socket_factory_.set_client_socket_types(cases[index]);
+    client_socket_factory_.set_client_socket_types(cases[index], 2);
 
     EXPECT_EQ(0, pool_->IdleSocketCount());
 
     TestCompletionCallback callback;
     ClientSocketHandle handle;
-    TCPSocketParams dest("www.google.com", 80, LOW, GURL(), false);
-    int rv = handle.Init("b", dest, LOW, &callback, pool_, NULL);
+    int rv = handle.Init("b", low_params_, LOW, &callback, pool_,
+                         BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
     EXPECT_FALSE(handle.is_initialized());
     EXPECT_FALSE(handle.socket());
@@ -695,7 +724,7 @@ TEST_F(TCPClientSocketPoolTest, BackupSocketConnect) {
     MessageLoop::current()->RunAllPending();
 
     // Wait for the backup socket timer to fire.
-    PlatformThread::Sleep(ClientSocketPool::kMaxConnectRetryIntervalMs);
+    PlatformThread::Sleep(ClientSocketPool::kMaxConnectRetryIntervalMs * 2);
 
     // Let the appropriate socket connect.
     MessageLoop::current()->RunAllPending();
@@ -707,6 +736,15 @@ TEST_F(TCPClientSocketPoolTest, BackupSocketConnect) {
     // One socket is stalled, the other is active.
     EXPECT_EQ(0, pool_->IdleSocketCount());
     handle.Reset();
+
+    // Close all pending connect jobs and existing sockets.
+    pool_->Flush();
+
+    // TODO(mbelshe): Flush has a bug.  UIt doesn't clean out pending connect
+    // jobs.  When they complete, they become idle sockets.  For now, continue
+    // to replace the pool_.  But we really need to fix Flush().
+    pool_ = new TCPClientSocketPool(kMaxSockets, kMaxSocketsPerGroup,
+        histograms_, host_resolver_, &client_socket_factory_, NULL);
   }
 }
 
@@ -723,8 +761,8 @@ TEST_F(TCPClientSocketPoolTest, BackupSocketCancel) {
 
     TestCompletionCallback callback;
     ClientSocketHandle handle;
-    TCPSocketParams dest("www.google.com", 80, LOW, GURL(), false);
-    int rv = handle.Init("c", dest, LOW, &callback, pool_, NULL);
+    int rv = handle.Init("c", low_params_, LOW, &callback, pool_,
+                         BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
     EXPECT_FALSE(handle.is_initialized());
     EXPECT_FALSE(handle.socket());
@@ -762,14 +800,13 @@ TEST_F(TCPClientSocketPoolTest, BackupSocketFailAfterStall) {
     MockClientSocketFactory::MOCK_FAILING_CLIENT_SOCKET
   };
 
-  client_socket_factory_.set_client_socket_types(case_types);
+  client_socket_factory_.set_client_socket_types(case_types, 2);
 
   EXPECT_EQ(0, pool_->IdleSocketCount());
 
   TestCompletionCallback callback;
   ClientSocketHandle handle;
-  TCPSocketParams dest("www.google.com", 80, LOW, GURL(), false);
-  int rv = handle.Init("b", dest, LOW, &callback, pool_, NULL);
+  int rv = handle.Init("b", low_params_, LOW, &callback, pool_, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -808,14 +845,13 @@ TEST_F(TCPClientSocketPoolTest, BackupSocketFailAfterDelay) {
     MockClientSocketFactory::MOCK_FAILING_CLIENT_SOCKET
   };
 
-  client_socket_factory_.set_client_socket_types(case_types);
+  client_socket_factory_.set_client_socket_types(case_types, 2);
 
   EXPECT_EQ(0, pool_->IdleSocketCount());
 
   TestCompletionCallback callback;
   ClientSocketHandle handle;
-  TCPSocketParams dest("www.google.com", 80, LOW, GURL(), false);
-  int rv = handle.Init("b", dest, LOW, &callback, pool_, NULL);
+  int rv = handle.Init("b", low_params_, LOW, &callback, pool_, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());

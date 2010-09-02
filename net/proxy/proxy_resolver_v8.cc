@@ -4,13 +4,18 @@
 
 #include "net/proxy/proxy_resolver_v8.h"
 
+#include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
+#include "googleurl/src/url_canon.h"
+#include "net/base/host_cache.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_resolver_js_bindings.h"
+#include "net/proxy/proxy_resolver_request_context.h"
 #include "net/proxy/proxy_resolver_script.h"
 #include "v8/include/v8.h"
 
@@ -68,22 +73,116 @@ const char kPacResourceName[] = "proxy-pac-script.js";
 // Pseudo-name for the PAC utility script.
 const char kPacUtilityResourceName[] = "proxy-pac-utility-script.js";
 
-// Convert a V8 String to a std::string.
-std::string V8StringToStdString(v8::Handle<v8::String> s) {
-  int len = s->Utf8Length();
-  std::string result;
-  s->WriteUtf8(WriteInto(&result, len + 1), len);
+// External string wrapper so V8 can access a string16.
+class V8ExternalString16 : public v8::String::ExternalStringResource {
+ public:
+  explicit V8ExternalString16(const string16& string) : string_(string) {}
+
+  virtual const uint16_t* data() const {
+    return reinterpret_cast<const uint16*>(string_.data());
+  }
+
+  virtual size_t length() const {
+    return string_.size();
+  }
+
+ private:
+  const string16 string_;
+  DISALLOW_COPY_AND_ASSIGN(V8ExternalString16);
+};
+
+// External string wrapper so V8 can access a string literal.
+class V8ExternalASCIILiteral : public v8::String::ExternalAsciiStringResource {
+ public:
+  // |ascii| must be a NULL-terminated C string, and must remain valid
+  // throughout this object's lifetime.
+  V8ExternalASCIILiteral(const char* ascii, size_t length)
+      : ascii_(ascii), length_(length) {
+    DCHECK(IsStringASCII(ascii));
+  }
+
+  virtual const char* data() const {
+    return ascii_;
+  }
+
+  virtual size_t length() const {
+    return length_;
+  }
+
+ private:
+  const char* ascii_;
+  size_t length_;
+  DISALLOW_COPY_AND_ASSIGN(V8ExternalASCIILiteral);
+};
+
+// External string wrapper so V8 can access a std::string.
+class V8ExternalASCIIString : public v8::String::ExternalAsciiStringResource {
+ public:
+  explicit V8ExternalASCIIString(const std::string& ascii)
+      : ascii_(ascii) {
+    DCHECK(IsStringASCII(ascii));
+  }
+
+  virtual const char* data() const {
+    return ascii_.data();
+  }
+
+  virtual size_t length() const {
+    return ascii_.size();
+  }
+
+ private:
+  const std::string ascii_;
+  DISALLOW_COPY_AND_ASSIGN(V8ExternalASCIIString);
+};
+
+// When creating a v8::String from a C++ string we have two choices: create
+// a copy, or create a wrapper that shares the same underlying storage.
+// For small strings it is better to just make a copy, whereas for large
+// strings there are savings by sharing the storage. This number identifies
+// the cutoff length for when to start wrapping rather than creating copies.
+const size_t kMaxStringBytesForCopy = 256;
+
+// Converts a V8 String to a UTF16 string16.
+string16 V8StringToUTF16(v8::Handle<v8::String> s) {
+  int len = s->Length();
+  string16 result;
+  // Note that the reinterpret cast is because on Windows string16 is an alias
+  // to wstring, and hence has character type wchar_t not uint16_t.
+  s->Write(reinterpret_cast<uint16_t*>(WriteInto(&result, len + 1)), 0, len);
   return result;
 }
 
-// Convert a std::string (UTF8) to a V8 string.
-v8::Local<v8::String> StdStringToV8String(const std::string& s) {
-  return v8::String::New(s.data(), s.size());
+// Converts an ASCII std::string to a V8 string.
+v8::Local<v8::String> ASCIIStringToV8String(const std::string& s) {
+  DCHECK(IsStringASCII(s));
+  if (s.size() <= kMaxStringBytesForCopy)
+    return v8::String::New(s.data(), s.size());
+  return v8::String::NewExternal(new V8ExternalASCIIString(s));
 }
 
-// String-ize a V8 object by calling its toString() method. Returns true
+// Converts a UTF16 string16 to a V8 string.
+v8::Local<v8::String> UTF16StringToV8String(const string16& s) {
+  if (s.size() * 2 <= kMaxStringBytesForCopy) {
+    return v8::String::New(
+        reinterpret_cast<const uint16_t*>(s.data()), s.size());
+  }
+  return v8::String::NewExternal(new V8ExternalString16(s));
+}
+
+// Converts an ASCII string literal to a V8 string.
+v8::Local<v8::String> ASCIILiteralToV8String(const char* ascii) {
+  DCHECK(IsStringASCII(ascii));
+  size_t length = strlen(ascii);
+  if (length <= kMaxStringBytesForCopy)
+    return v8::String::New(ascii, length);
+  return v8::String::NewExternal(new V8ExternalASCIILiteral(ascii, length));
+}
+
+// Stringizes a V8 object by calling its toString() method. Returns true
 // on success. This may fail if the toString() throws an exception.
-bool V8ObjectToString(v8::Handle<v8::Value> object, std::string* result) {
+bool V8ObjectToUTF16String(v8::Handle<v8::Value> object,
+                           string16* utf16_result) {
   if (object.IsEmpty())
     return false;
 
@@ -91,8 +190,43 @@ bool V8ObjectToString(v8::Handle<v8::Value> object, std::string* result) {
   v8::Local<v8::String> str_object = object->ToString();
   if (str_object.IsEmpty())
     return false;
-  *result = V8StringToStdString(str_object);
+  *utf16_result = V8StringToUTF16(str_object);
   return true;
+}
+
+// Extracts an hostname argument from |args|. On success returns true
+// and fills |*hostname| with the result.
+bool GetHostnameArgument(const v8::Arguments& args, std::string* hostname) {
+  // The first argument should be a string.
+  if (args.Length() == 0 || args[0].IsEmpty() || !args[0]->IsString())
+    return false;
+
+  const string16 hostname_utf16 = V8StringToUTF16(args[0]->ToString());
+
+  // If the hostname is already in ASCII, simply return it as is.
+  if (IsStringASCII(hostname_utf16)) {
+    *hostname = UTF16ToASCII(hostname_utf16);
+    return true;
+  }
+
+  // Otherwise try to convert it from IDN to punycode.
+  const int kInitialBufferSize = 256;
+  url_canon::RawCanonOutputT<char16, kInitialBufferSize> punycode_output;
+  if (!url_canon::IDNToASCII(hostname_utf16.data(),
+                             hostname_utf16.length(),
+                             &punycode_output)) {
+    return false;
+  }
+
+  // |punycode_output| should now be ASCII; convert it to a std::string.
+  // (We could use UTF16ToASCII() instead, but that requires an extra string
+  // copy. Since ASCII is a subset of UTF8 the following is equivalent).
+  bool success = UTF16ToUTF8(punycode_output.data(),
+                             punycode_output.length(),
+                             hostname);
+  DCHECK(success);
+  DCHECK(IsStringASCII(*hostname));
+  return success;
 }
 
 }  // namespace
@@ -102,7 +236,7 @@ bool V8ObjectToString(v8::Handle<v8::Value> object, std::string* result) {
 class ProxyResolverV8::Context {
  public:
   explicit Context(ProxyResolverJSBindings* js_bindings)
-      : js_bindings_(js_bindings), current_request_net_log_(NULL) {
+      : js_bindings_(js_bindings) {
     DCHECK(js_bindings != NULL);
   }
 
@@ -111,6 +245,12 @@ class ProxyResolverV8::Context {
 
     v8_this_.Dispose();
     v8_context_.Dispose();
+
+    // Run the V8 garbage collector. We do this to be sure the
+    // ExternalStringResource objects we allocated get properly disposed.
+    // Otherwise when running the unit-tests they may get leaked.
+    // See crbug.com/48145.
+    PurgeMemory();
   }
 
   int ResolveProxy(const GURL& query_url, ProxyInfo* results) {
@@ -121,13 +261,14 @@ class ProxyResolverV8::Context {
 
     v8::Local<v8::Value> function;
     if (!GetFindProxyForURL(&function)) {
-      js_bindings_->OnError(-1, "FindProxyForURL() is undefined.");
+      js_bindings_->OnError(
+          -1, ASCIIToUTF16("FindProxyForURL() is undefined."));
       return ERR_PAC_SCRIPT_FAILED;
     }
 
     v8::Handle<v8::Value> argv[] = {
-      StdStringToV8String(query_url.spec()),
-      StdStringToV8String(query_url.host()),
+      ASCIIStringToV8String(query_url.spec()),
+      ASCIIStringToV8String(query_url.host()),
     };
 
     v8::TryCatch try_catch;
@@ -140,18 +281,30 @@ class ProxyResolverV8::Context {
     }
 
     if (!ret->IsString()) {
-      js_bindings_->OnError(-1, "FindProxyForURL() did not return a string.");
+      js_bindings_->OnError(
+          -1, ASCIIToUTF16("FindProxyForURL() did not return a string."));
       return ERR_PAC_SCRIPT_FAILED;
     }
 
-    std::string ret_str = V8StringToStdString(ret->ToString());
+    string16 ret_str = V8StringToUTF16(ret->ToString());
 
-    results->UsePacString(ret_str);
+    if (!IsStringASCII(ret_str)) {
+      // TODO(eroman): Rather than failing when a wide string is returned, we
+      //               could extend the parsing to handle IDNA hostnames by
+      //               converting them to ASCII punycode.
+      //               crbug.com/47234
+      string16 error_message =
+          ASCIIToUTF16("FindProxyForURL() returned a non-ASCII string "
+                       "(crbug.com/47234): ") + ret_str;
+      js_bindings_->OnError(-1, error_message);
+      return ERR_PAC_SCRIPT_FAILED;
+    }
 
+    results->UsePacString(UTF16ToASCII(ret_str));
     return OK;
   }
 
-  int InitV8(const std::string& pac_data_utf8) {
+  int InitV8(const string16& pac_script) {
     v8::Locker locked;
     v8::HandleScope scope;
 
@@ -161,28 +314,28 @@ class ProxyResolverV8::Context {
     // Attach the javascript bindings.
     v8::Local<v8::FunctionTemplate> alert_template =
         v8::FunctionTemplate::New(&AlertCallback, v8_this_);
-    global_template->Set(v8::String::New("alert"), alert_template);
+    global_template->Set(ASCIILiteralToV8String("alert"), alert_template);
 
     v8::Local<v8::FunctionTemplate> my_ip_address_template =
         v8::FunctionTemplate::New(&MyIpAddressCallback, v8_this_);
-    global_template->Set(v8::String::New("myIpAddress"),
+    global_template->Set(ASCIILiteralToV8String("myIpAddress"),
         my_ip_address_template);
 
     v8::Local<v8::FunctionTemplate> dns_resolve_template =
         v8::FunctionTemplate::New(&DnsResolveCallback, v8_this_);
-    global_template->Set(v8::String::New("dnsResolve"),
+    global_template->Set(ASCIILiteralToV8String("dnsResolve"),
         dns_resolve_template);
 
     // Microsoft's PAC extensions (incomplete):
 
     v8::Local<v8::FunctionTemplate> dns_resolve_ex_template =
         v8::FunctionTemplate::New(&DnsResolveExCallback, v8_this_);
-    global_template->Set(v8::String::New("dnsResolveEx"),
+    global_template->Set(ASCIILiteralToV8String("dnsResolveEx"),
                          dns_resolve_ex_template);
 
     v8::Local<v8::FunctionTemplate> my_ip_address_ex_template =
         v8::FunctionTemplate::New(&MyIpAddressExCallback, v8_this_);
-    global_template->Set(v8::String::New("myIpAddressEx"),
+    global_template->Set(ASCIILiteralToV8String("myIpAddressEx"),
                          my_ip_address_ex_template);
 
     v8_context_ = v8::Context::New(NULL, global_template);
@@ -192,16 +345,18 @@ class ProxyResolverV8::Context {
     // Add the PAC utility functions to the environment.
     // (This script should never fail, as it is a string literal!)
     // Note that the two string literals are concatenated.
-    int rv = RunScript(PROXY_RESOLVER_SCRIPT
-                       PROXY_RESOLVER_SCRIPT_EX,
-                       kPacUtilityResourceName);
+    int rv = RunScript(
+        ASCIILiteralToV8String(
+            PROXY_RESOLVER_SCRIPT
+            PROXY_RESOLVER_SCRIPT_EX),
+        kPacUtilityResourceName);
     if (rv != OK) {
       NOTREACHED();
       return rv;
     }
 
     // Add the user's PAC code to the environment.
-    rv = RunScript(pac_data_utf8, kPacResourceName);
+    rv = RunScript(UTF16StringToV8String(pac_script), kPacResourceName);
     if (rv != OK)
       return rv;
 
@@ -214,8 +369,8 @@ class ProxyResolverV8::Context {
     return OK;
   }
 
-  void SetCurrentRequestNetLog(const BoundNetLog& net_log) {
-    current_request_net_log_ = net_log;
+  void SetCurrentRequestContext(ProxyResolverRequestContext* context) {
+    js_bindings_->set_current_request_context(context);
   }
 
   void PurgeMemory() {
@@ -230,7 +385,8 @@ class ProxyResolverV8::Context {
 
  private:
   bool GetFindProxyForURL(v8::Local<v8::Value>* function) {
-    *function = v8_context_->Global()->Get(v8::String::New("FindProxyForURL"));
+    *function = v8_context_->Global()->Get(
+        ASCIILiteralToV8String("FindProxyForURL"));
     return (*function)->IsFunction();
   }
 
@@ -241,20 +397,20 @@ class ProxyResolverV8::Context {
 
     // Otherwise dispatch to the bindings.
     int line_number = message->GetLineNumber();
-    std::string error_message;
-    V8ObjectToString(message->Get(), &error_message);
+    string16 error_message;
+    V8ObjectToUTF16String(message->Get(), &error_message);
     js_bindings_->OnError(line_number, error_message);
   }
 
-  // Compiles and runs |script_utf8| in the current V8 context.
+  // Compiles and runs |script| in the current V8 context.
   // Returns OK on success, otherwise an error code.
-  int RunScript(const std::string& script_utf8, const char* script_name) {
+  int RunScript(v8::Handle<v8::String> script, const char* script_name) {
     v8::TryCatch try_catch;
 
     // Compile the script.
-    v8::Local<v8::String> text = StdStringToV8String(script_utf8);
-    v8::ScriptOrigin origin = v8::ScriptOrigin(v8::String::New(script_name));
-    v8::Local<v8::Script> code = v8::Script::Compile(text, &origin);
+    v8::ScriptOrigin origin =
+        v8::ScriptOrigin(ASCIILiteralToV8String(script_name));
+    v8::Local<v8::Script> code = v8::Script::Compile(script, &origin);
 
     // Execute.
     if (!code.IsEmpty())
@@ -276,11 +432,11 @@ class ProxyResolverV8::Context {
 
     // Like firefox we assume "undefined" if no argument was specified, and
     // disregard any arguments beyond the first.
-    std::string message;
+    string16 message;
     if (args.Length() == 0) {
-      message = "undefined";
+      message = ASCIIToUTF16("undefined");
     } else {
-      if (!V8ObjectToString(args[0], &message))
+      if (!V8ObjectToUTF16String(args[0], &message))
         return v8::Undefined();  // toString() threw an exception.
     }
 
@@ -293,19 +449,20 @@ class ProxyResolverV8::Context {
     Context* context =
         static_cast<Context*>(v8::External::Cast(*args.Data())->Value());
 
-    context->current_request_net_log_.BeginEvent(
-        NetLog::TYPE_PROXY_RESOLVER_V8_MY_IP_ADDRESS);
+    std::string result;
+    bool success;
 
-    // We shouldn't be called with any arguments, but will not complain if
-    // we are.
-    std::string result = context->js_bindings_->MyIpAddress();
+    {
+      v8::Unlocker unlocker;
 
-    context->current_request_net_log_.EndEvent(
-        NetLog::TYPE_PROXY_RESOLVER_V8_MY_IP_ADDRESS);
+      // We shouldn't be called with any arguments, but will not complain if
+      // we are.
+      success = context->js_bindings_->MyIpAddress(&result);
+    }
 
-    if (result.empty())
-      result = "127.0.0.1";
-    return StdStringToV8String(result);
+    if (!success)
+      return ASCIILiteralToV8String("127.0.0.1");
+    return ASCIIStringToV8String(result);
   }
 
   // V8 callback for when "myIpAddressEx()" is invoked by the PAC script.
@@ -314,17 +471,20 @@ class ProxyResolverV8::Context {
     Context* context =
         static_cast<Context*>(v8::External::Cast(*args.Data())->Value());
 
-    context->current_request_net_log_.BeginEvent(
-        NetLog::TYPE_PROXY_RESOLVER_V8_MY_IP_ADDRESS_EX);
+    std::string ip_address_list;
+    bool success;
 
-    // We shouldn't be called with any arguments, but will not complain if
-    // we are.
-    std::string result = context->js_bindings_->MyIpAddressEx();
+    {
+      v8::Unlocker unlocker;
 
-    context->current_request_net_log_.EndEvent(
-        NetLog::TYPE_PROXY_RESOLVER_V8_MY_IP_ADDRESS_EX);
+      // We shouldn't be called with any arguments, but will not complain if
+      // we are.
+      success = context->js_bindings_->MyIpAddressEx(&ip_address_list);
+    }
 
-    return StdStringToV8String(result);
+    if (!success)
+      ip_address_list = std::string();
+    return ASCIIStringToV8String(ip_address_list);
   }
 
   // V8 callback for when "dnsResolve()" is invoked by the PAC script.
@@ -332,25 +492,20 @@ class ProxyResolverV8::Context {
     Context* context =
         static_cast<Context*>(v8::External::Cast(*args.Data())->Value());
 
-    // We need at least one argument.
-    std::string host;
-    if (args.Length() == 0) {
-      host = "undefined";
-    } else {
-      if (!V8ObjectToString(args[0], &host))
-        return v8::Undefined();
+    // We need at least one string argument.
+    std::string hostname;
+    if (!GetHostnameArgument(args, &hostname))
+      return v8::Null();
+
+    std::string ip_address;
+    bool success;
+
+    {
+      v8::Unlocker unlocker;
+      success = context->js_bindings_->DnsResolve(hostname, &ip_address);
     }
 
-    context->current_request_net_log_.BeginEvent(
-        NetLog::TYPE_PROXY_RESOLVER_V8_DNS_RESOLVE);
-
-    std::string result = context->js_bindings_->DnsResolve(host);
-
-    context->current_request_net_log_.EndEvent(
-        NetLog::TYPE_PROXY_RESOLVER_V8_DNS_RESOLVE);
-
-    // DnsResolve() returns empty string on failure.
-    return result.empty() ? v8::Null() : StdStringToV8String(result);
+    return success ? ASCIIStringToV8String(ip_address) : v8::Null();
   }
 
   // V8 callback for when "dnsResolveEx()" is invoked by the PAC script.
@@ -358,28 +513,27 @@ class ProxyResolverV8::Context {
     Context* context =
         static_cast<Context*>(v8::External::Cast(*args.Data())->Value());
 
-    // We need at least one argument.
-    std::string host;
-    if (args.Length() == 0) {
-      host = "undefined";
-    } else {
-      if (!V8ObjectToString(args[0], &host))
-        return v8::Undefined();
+    // We need at least one string argument.
+    std::string hostname;
+    if (!GetHostnameArgument(args, &hostname))
+      return v8::Undefined();
+
+    std::string ip_address_list;
+    bool success;
+
+    {
+      v8::Unlocker unlocker;
+      success = context->js_bindings_->DnsResolveEx(hostname,
+                                                    &ip_address_list);
     }
 
-    context->current_request_net_log_.BeginEvent(
-        NetLog::TYPE_PROXY_RESOLVER_V8_DNS_RESOLVE_EX);
+    if (!success)
+      ip_address_list = std::string();
 
-    std::string result = context->js_bindings_->DnsResolveEx(host);
-
-    context->current_request_net_log_.EndEvent(
-        NetLog::TYPE_PROXY_RESOLVER_V8_DNS_RESOLVE_EX);
-
-    return StdStringToV8String(result);
+    return ASCIIStringToV8String(ip_address_list);
   }
 
   ProxyResolverJSBindings* js_bindings_;
-  BoundNetLog current_request_net_log_;
   v8::Persistent<v8::External> v8_this_;
   v8::Persistent<v8::Context> v8_context_;
 };
@@ -404,10 +558,23 @@ int ProxyResolverV8::GetProxyForURL(const GURL& query_url,
   if (!context_.get())
     return ERR_FAILED;
 
+  // Associate some short-lived context with this request. This context will be
+  // available to any of the javascript "bindings" that are subsequently invoked
+  // from the javascript.
+  //
+  // In particular, we create a HostCache that is aggressive about caching
+  // failed DNS resolves.
+  HostCache host_cache(
+      50,
+      base::TimeDelta::FromMinutes(5),
+      base::TimeDelta::FromMinutes(5));
+
+  ProxyResolverRequestContext request_context(&net_log, &host_cache);
+
   // Otherwise call into V8.
-  context_->SetCurrentRequestNetLog(net_log);
+  context_->SetCurrentRequestContext(&request_context);
   int rv = context_->ResolveProxy(query_url, results);
-  context_->SetCurrentRequestNetLog(BoundNetLog());
+  context_->SetCurrentRequestContext(NULL);
 
   return rv;
 }
@@ -421,16 +588,20 @@ void ProxyResolverV8::PurgeMemory() {
   context_->PurgeMemory();
 }
 
+void ProxyResolverV8::Shutdown() {
+  js_bindings_->Shutdown();
+}
+
 int ProxyResolverV8::SetPacScript(const GURL& /*url*/,
-                                  const std::string& bytes_utf8,
+                                  const string16& pac_script,
                                   CompletionCallback* /*callback*/) {
   context_.reset();
-  if (bytes_utf8.empty())
+  if (pac_script.empty())
     return ERR_PAC_SCRIPT_FAILED;
 
   // Try parsing the PAC script.
   scoped_ptr<Context> context(new Context(js_bindings_.get()));
-  int rv = context->InitV8(bytes_utf8);
+  int rv = context->InitV8(pac_script);
   if (rv == OK)
     context_.reset(context.release());
   return rv;

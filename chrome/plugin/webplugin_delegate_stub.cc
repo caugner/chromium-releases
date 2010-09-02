@@ -23,6 +23,10 @@
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
 #include "webkit/glue/webcursor.h"
 
+#if defined(ENABLE_GPU)
+#include "app/gfx/gl/gl_context.h"
+#endif
+
 using WebKit::WebBindings;
 using WebKit::WebCursorInfo;
 using webkit_glue::WebPlugin;
@@ -46,22 +50,6 @@ class FinishDestructionTask : public Task {
   WebPlugin* webplugin_;
 };
 
-#if defined(OS_MACOSX)
-namespace {
-
-void FocusNotifier(WebPluginDelegateImpl *instance) {
-  uint32 process_id = getpid();
-  uint32 instance_id = reinterpret_cast<uint32>(instance);
-  PluginThread* plugin_thread = PluginThread::current();
-  if (plugin_thread) {
-    plugin_thread->Send(
-        new PluginProcessHostMsg_PluginReceivedFocus(process_id, instance_id));
-  }
-}
-
-}
-#endif
-
 WebPluginDelegateStub::WebPluginDelegateStub(
     const std::string& mime_type, int instance_id, PluginChannel* channel) :
     mime_type_(mime_type),
@@ -76,6 +64,13 @@ WebPluginDelegateStub::WebPluginDelegateStub(
 WebPluginDelegateStub::~WebPluginDelegateStub() {
   in_destructor_ = true;
   child_process_logging::SetActiveURL(page_url_);
+
+#if defined(ENABLE_GPU)
+  // Make sure there is no command buffer before destroying the window handle.
+  // The GPU service code might otherwise asynchronously perform an operation
+  // using the window handle.
+  command_buffer_stub_.reset();
+#endif
 
   if (channel_->in_send()) {
     // The delegate or an npobject is in the callstack, so don't delete it
@@ -123,6 +118,7 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
                         OnSendJavaScriptStream)
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(PluginMsg_SetWindowFocus, OnSetWindowFocus)
+    IPC_MESSAGE_HANDLER(PluginMsg_SetContentAreaFocus, OnSetContentAreaFocus)
     IPC_MESSAGE_HANDLER(PluginMsg_ContainerHidden, OnContainerHidden)
     IPC_MESSAGE_HANDLER(PluginMsg_ContainerShown, OnContainerShown)
     IPC_MESSAGE_HANDLER(PluginMsg_WindowFrameChanged, OnWindowFrameChanged)
@@ -173,7 +169,7 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
       command_line.GetSwitchValue(switches::kPluginPath));
 
 
-  gfx::PluginWindowHandle parent = NULL;
+  gfx::PluginWindowHandle parent = gfx::kNullPluginWindow;
 #if defined(OS_WIN)
   parent = gfx::NativeViewFromId(params.containing_window);
 #elif defined(OS_LINUX)
@@ -197,7 +193,6 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
                                     webplugin_,
                                     params.load_manually);
 #if defined(OS_MACOSX)
-    delegate_->SetFocusNotifier(FocusNotifier);
     delegate_->WindowFrameChanged(params.containing_window_frame,
                                   params.containing_content_frame);
     delegate_->SetWindowHasFocus(params.containing_window_has_focus);
@@ -258,8 +253,8 @@ void WebPluginDelegateStub::OnDidFinishLoadWithReason(
   delegate_->DidFinishLoadWithReason(url, reason, notify_id);
 }
 
-void WebPluginDelegateStub::OnSetFocus() {
-  delegate_->SetFocus();
+void WebPluginDelegateStub::OnSetFocus(bool focused) {
+  delegate_->SetFocus(focused);
 }
 
 void WebPluginDelegateStub::OnHandleInputEvent(
@@ -352,6 +347,10 @@ void WebPluginDelegateStub::OnSetWindowFocus(bool has_focus) {
   delegate_->SetWindowHasFocus(has_focus);
 }
 
+void WebPluginDelegateStub::OnSetContentAreaFocus(bool has_focus) {
+  delegate_->SetContentAreaHasFocus(has_focus);
+}
+
 void WebPluginDelegateStub::OnContainerHidden() {
   delegate_->SetContainerVisibility(false);
 }
@@ -397,15 +396,19 @@ void WebPluginDelegateStub::OnInstallMissingPlugin() {
 }
 
 void WebPluginDelegateStub::OnCreateCommandBuffer(int* route_id) {
+  *route_id = 0;
 #if defined(ENABLE_GPU)
+  // Fail to create the command buffer if some GL implementation cannot be
+  // initialized.
+  if (!gfx::GLContext::InitializeOneOff())
+    return;
+
   command_buffer_stub_.reset(new CommandBufferStub(
       channel_,
       instance_id_,
       delegate_->windowed_handle()));
 
   *route_id = command_buffer_stub_->route_id();
-#else
-  *route_id = 0;
 #endif  // ENABLE_GPU
 }
 

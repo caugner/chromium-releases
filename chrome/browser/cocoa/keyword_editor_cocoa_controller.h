@@ -37,7 +37,7 @@ class KeywordEditorModelObserver : public TemplateURLModelObserver,
   virtual void OnEditedKeyword(const TemplateURL* template_url,
                                const std::wstring& title,
                                const std::wstring& keyword,
-                               const std::wstring& url);
+                               const std::string& url);
 
   // TableModelObserver overrides. Invalidate icon cache.
   virtual void OnModelChanged();
@@ -81,7 +81,7 @@ class KeywordEditorModelObserver : public TemplateURLModelObserver,
 
   scoped_nsobject<WindowSizeAutosaver> sizeSaver_;
 }
-@property (readonly) KeywordEditorController* controller;
+@property (nonatomic, readonly) KeywordEditorController* controller;
 
 // Show the keyword editor associated with the given profile (or the
 // original profile if this is an incognito profile).  If no keyword

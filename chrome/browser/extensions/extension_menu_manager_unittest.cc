@@ -7,9 +7,11 @@
 #include "base/json/json_reader.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
+#include "base/scoped_vector.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
 #include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/extensions/test_extension_prefs.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -27,28 +29,30 @@ using testing::SaveArg;
 // Base class for tests.
 class ExtensionMenuManagerTest : public testing::Test {
  public:
-  ExtensionMenuManagerTest() {}
+  ExtensionMenuManagerTest() : next_id_(1) {}
   ~ExtensionMenuManagerTest() {}
 
-  // Returns a test item with some default values you can override if you want
-  // to by passing in |properties| (currently just extension_id). Caller owns
-  // the return value and is responsible for freeing it.
-  static ExtensionMenuItem* CreateTestItem(DictionaryValue* properties) {
-    std::string extension_id = "0123456789";  // A default dummy value.
-    if (properties && properties->HasKey(L"extension_id"))
-      EXPECT_TRUE(properties->GetString(L"extension_id", &extension_id));
-
+  // Returns a test item.
+  ExtensionMenuItem* CreateTestItem(Extension* extension) {
     ExtensionMenuItem::Type type = ExtensionMenuItem::NORMAL;
     ExtensionMenuItem::ContextList contexts(ExtensionMenuItem::ALL);
-    ExtensionMenuItem::ContextList enabled_contexts = contexts;
-    std::string title = "test";
+    ExtensionMenuItem::Id id(extension->id(), next_id_++);
+    return new ExtensionMenuItem(id, "test", false, type, contexts);
+  }
 
-    return new ExtensionMenuItem(extension_id, title, false, type, contexts,
-                                 enabled_contexts);
+  // Creates and returns a test Extension. The caller does *not* own the return
+  // value.
+  Extension* AddExtension(std::string name) {
+    Extension* extension = prefs_.AddExtension(name);
+    extensions_.push_back(extension);
+    return extension;
   }
 
  protected:
   ExtensionMenuManager manager_;
+  ScopedVector<Extension> extensions_;
+  TestExtensionPrefs prefs_;
+  int next_id_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ExtensionMenuManagerTest);
@@ -56,143 +60,208 @@ class ExtensionMenuManagerTest : public testing::Test {
 
 // Tests adding, getting, and removing items.
 TEST_F(ExtensionMenuManagerTest, AddGetRemoveItems) {
+  Extension* extension = AddExtension("test");
+
   // Add a new item, make sure you can get it back.
-  ExtensionMenuItem* item1 = CreateTestItem(NULL);
+  ExtensionMenuItem* item1 = CreateTestItem(extension);
   ASSERT_TRUE(item1 != NULL);
-  int id1 = manager_.AddContextItem(item1);  // Ownership transferred.
-  ASSERT_GT(id1, 0);
-  ASSERT_EQ(item1, manager_.GetItemById(id1));
-  std::vector<const ExtensionMenuItem*> items =
+  ASSERT_TRUE(manager_.AddContextItem(extension, item1));
+  ASSERT_EQ(item1, manager_.GetItemById(item1->id()));
+  const ExtensionMenuItem::List* items =
       manager_.MenuItems(item1->extension_id());
-  ASSERT_EQ(1u, items.size());
-  ASSERT_EQ(item1, items[0]);
+  ASSERT_EQ(1u, items->size());
+  ASSERT_EQ(item1, items->at(0));
 
   // Add a second item, make sure it comes back too.
-  ExtensionMenuItem* item2 = CreateTestItem(NULL);
-  int id2 = manager_.AddContextItem(item2);  // Ownership transferred.
-  ASSERT_GT(id2, 0);
-  ASSERT_NE(id1, id2);
-  ASSERT_EQ(item2, manager_.GetItemById(id2));
+  ExtensionMenuItem* item2 = CreateTestItem(extension);
+  ASSERT_TRUE(manager_.AddContextItem(extension, item2));
+  ASSERT_EQ(item2, manager_.GetItemById(item2->id()));
   items = manager_.MenuItems(item2->extension_id());
-  ASSERT_EQ(2u, items.size());
-  ASSERT_EQ(item1, items[0]);
-  ASSERT_EQ(item2, items[1]);
+  ASSERT_EQ(2u, items->size());
+  ASSERT_EQ(item1, items->at(0));
+  ASSERT_EQ(item2, items->at(1));
 
   // Try adding item 3, then removing it.
-  ExtensionMenuItem* item3 = CreateTestItem(NULL);
+  ExtensionMenuItem* item3 = CreateTestItem(extension);
+  ExtensionMenuItem::Id id3 = item3->id();
   std::string extension_id = item3->extension_id();
-  int id3 = manager_.AddContextItem(item3);  // Ownership transferred.
-  ASSERT_GT(id3, 0);
+  ASSERT_TRUE(manager_.AddContextItem(extension, item3));
   ASSERT_EQ(item3, manager_.GetItemById(id3));
-  ASSERT_EQ(3u, manager_.MenuItems(extension_id).size());
+  ASSERT_EQ(3u, manager_.MenuItems(extension_id)->size());
   ASSERT_TRUE(manager_.RemoveContextMenuItem(id3));
   ASSERT_EQ(NULL, manager_.GetItemById(id3));
-  ASSERT_EQ(2u, manager_.MenuItems(extension_id).size());
+  ASSERT_EQ(2u, manager_.MenuItems(extension_id)->size());
 
   // Make sure removing a non-existent item returns false.
-  ASSERT_FALSE(manager_.RemoveContextMenuItem(5));
+  ExtensionMenuItem::Id id(extension->id(), id3.second + 50);
+  ASSERT_FALSE(manager_.RemoveContextMenuItem(id));
 }
 
 // Test adding/removing child items.
 TEST_F(ExtensionMenuManagerTest, ChildFunctions) {
-  DictionaryValue properties;
-  properties.SetString(L"extension_id", "1111");
-  ExtensionMenuItem* item1 = CreateTestItem(&properties);
+  Extension* extension1 = AddExtension("1111");
+  Extension* extension2 = AddExtension("2222");
+  Extension* extension3 = AddExtension("3333");
 
-  properties.SetString(L"extension_id", "2222");
-  ExtensionMenuItem* item2 = CreateTestItem(&properties);
-  ExtensionMenuItem* item2_child = CreateTestItem(&properties);
-  ExtensionMenuItem* item2_grandchild = CreateTestItem(&properties);
+  ExtensionMenuItem* item1 = CreateTestItem(extension1);
+  ExtensionMenuItem* item2 = CreateTestItem(extension2);
+  ExtensionMenuItem* item2_child = CreateTestItem(extension2);
+  ExtensionMenuItem* item2_grandchild = CreateTestItem(extension2);
 
   // This third item we expect to fail inserting, so we use a scoped_ptr to make
   // sure it gets deleted.
-  properties.SetString(L"extension_id", "3333");
-  scoped_ptr<ExtensionMenuItem> item3(CreateTestItem(&properties));
+  scoped_ptr<ExtensionMenuItem> item3(CreateTestItem(extension3));
 
   // Add in the first two items.
-  int id1 = manager_.AddContextItem(item1);  // Ownership transferred.
-  int id2 = manager_.AddContextItem(item2);  // Ownership transferred.
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item1));
+  ASSERT_TRUE(manager_.AddContextItem(extension2, item2));
 
-  ASSERT_NE(id1, id2);
+  ExtensionMenuItem::Id id1 = item1->id();
+  ExtensionMenuItem::Id id2 = item2->id();
 
   // Try adding item3 as a child of item2 - this should fail because item3 has
   // a different extension id.
-  ASSERT_EQ(0, manager_.AddChildItem(id2, item3.get()));
+  ASSERT_FALSE(manager_.AddChildItem(id2, item3.get()));
 
   // Add item2_child as a child of item2.
-  int id2_child = manager_.AddChildItem(id2, item2_child);
-  ASSERT_GT(id2_child, 0);
+  ExtensionMenuItem::Id id2_child = item2_child->id();
+  ASSERT_TRUE(manager_.AddChildItem(id2, item2_child));
   ASSERT_EQ(1, item2->child_count());
   ASSERT_EQ(0, item1->child_count());
   ASSERT_EQ(item2_child, manager_.GetItemById(id2_child));
 
-  ASSERT_EQ(1u, manager_.MenuItems(item1->extension_id()).size());
-  ASSERT_EQ(item1, manager_.MenuItems(item1->extension_id()).at(0));
+  ASSERT_EQ(1u, manager_.MenuItems(item1->extension_id())->size());
+  ASSERT_EQ(item1, manager_.MenuItems(item1->extension_id())->at(0));
 
   // Add item2_grandchild as a child of item2_child, then remove it.
-  int id2_grandchild = manager_.AddChildItem(id2_child, item2_grandchild);
-  ASSERT_GT(id2_grandchild, 0);
+  ExtensionMenuItem::Id id2_grandchild = item2_grandchild->id();
+  ASSERT_TRUE(manager_.AddChildItem(id2_child, item2_grandchild));
   ASSERT_EQ(1, item2->child_count());
   ASSERT_EQ(1, item2_child->child_count());
   ASSERT_TRUE(manager_.RemoveContextMenuItem(id2_grandchild));
 
   // We should only get 1 thing back when asking for item2's extension id, since
   // it has a child item.
-  ASSERT_EQ(1u, manager_.MenuItems(item2->extension_id()).size());
-  ASSERT_EQ(item2, manager_.MenuItems(item2->extension_id()).at(0));
+  ASSERT_EQ(1u, manager_.MenuItems(item2->extension_id())->size());
+  ASSERT_EQ(item2, manager_.MenuItems(item2->extension_id())->at(0));
 
   // Remove child2_item.
   ASSERT_TRUE(manager_.RemoveContextMenuItem(id2_child));
-  ASSERT_EQ(1u, manager_.MenuItems(item2->extension_id()).size());
-  ASSERT_EQ(item2, manager_.MenuItems(item2->extension_id()).at(0));
+  ASSERT_EQ(1u, manager_.MenuItems(item2->extension_id())->size());
+  ASSERT_EQ(item2, manager_.MenuItems(item2->extension_id())->at(0));
   ASSERT_EQ(0, item2->child_count());
+}
+
+// Tests changing parents.
+TEST_F(ExtensionMenuManagerTest, ChangeParent) {
+  Extension* extension1 = AddExtension("1111");
+
+  // First create two items and add them both to the manager.
+  ExtensionMenuItem* item1 = CreateTestItem(extension1);
+  ExtensionMenuItem* item2 = CreateTestItem(extension1);
+
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item1));
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item2));
+
+  const ExtensionMenuItem::List* items =
+      manager_.MenuItems(item1->extension_id());
+  ASSERT_EQ(2u, items->size());
+  ASSERT_EQ(item1, items->at(0));
+  ASSERT_EQ(item2, items->at(1));
+
+  // Now create a third item, initially add it as a child of item1, then move
+  // it to be a child of item2.
+  ExtensionMenuItem* item3 = CreateTestItem(extension1);
+
+  ASSERT_TRUE(manager_.AddChildItem(item1->id(), item3));
+  ASSERT_EQ(1, item1->child_count());
+  ASSERT_EQ(item3, item1->children()[0]);
+
+  ASSERT_TRUE(manager_.ChangeParent(item3->id(), &item2->id()));
+  ASSERT_EQ(0, item1->child_count());
+  ASSERT_EQ(1, item2->child_count());
+  ASSERT_EQ(item3, item2->children()[0]);
+
+  // Move item2 to be a child of item1.
+  ASSERT_TRUE(manager_.ChangeParent(item2->id(), &item1->id()));
+  ASSERT_EQ(1, item1->child_count());
+  ASSERT_EQ(item2, item1->children()[0]);
+  ASSERT_EQ(1, item2->child_count());
+  ASSERT_EQ(item3, item2->children()[0]);
+
+  // Since item2 was a top-level item but is no longer, we should only have 1
+  // top-level item.
+  items = manager_.MenuItems(item1->extension_id());
+  ASSERT_EQ(1u, items->size());
+  ASSERT_EQ(item1, items->at(0));
+
+  // Move item3 back to being a child of item1, so it's now a sibling of item2.
+  ASSERT_TRUE(manager_.ChangeParent(item3->id(), &item1->id()));
+  ASSERT_EQ(2, item1->child_count());
+  ASSERT_EQ(item2, item1->children()[0]);
+  ASSERT_EQ(item3, item1->children()[1]);
+
+  // Try switching item3 to be the parent of item1 - this should fail.
+  ASSERT_FALSE(manager_.ChangeParent(item1->id(), &item3->id()));
+  ASSERT_EQ(0, item3->child_count());
+  ASSERT_EQ(2, item1->child_count());
+  ASSERT_EQ(item2, item1->children()[0]);
+  ASSERT_EQ(item3, item1->children()[1]);
+  items = manager_.MenuItems(item1->extension_id());
+  ASSERT_EQ(1u, items->size());
+  ASSERT_EQ(item1, items->at(0));
+
+  // Move item2 to be a top-level item.
+  ASSERT_TRUE(manager_.ChangeParent(item2->id(), NULL));
+  items = manager_.MenuItems(item1->extension_id());
+  ASSERT_EQ(2u, items->size());
+  ASSERT_EQ(item1, items->at(0));
+  ASSERT_EQ(item2, items->at(1));
+  ASSERT_EQ(1, item1->child_count());
+  ASSERT_EQ(item3, item1->children()[0]);
+
+  // Make sure you can't move a node to be a child of another extension's item.
+  Extension* extension2 = AddExtension("2222");
+  ExtensionMenuItem* item4 = CreateTestItem(extension2);
+  ASSERT_TRUE(manager_.AddContextItem(extension2, item4));
+  ASSERT_FALSE(manager_.ChangeParent(item4->id(), &item1->id()));
+  ASSERT_FALSE(manager_.ChangeParent(item1->id(), &item4->id()));
+
+  // Make sure you can't make an item be it's own parent.
+  ASSERT_FALSE(manager_.ChangeParent(item1->id(), &item1->id()));
 }
 
 // Tests that we properly remove an extension's menu item when that extension is
 // unloaded.
 TEST_F(ExtensionMenuManagerTest, ExtensionUnloadRemovesMenuItems) {
-  ScopedTempDir temp_dir;
-  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-
   NotificationService* notifier = NotificationService::current();
   ASSERT_TRUE(notifier != NULL);
 
   // Create a test extension.
-  DictionaryValue extension_properties;
-  extension_properties.SetString(extension_manifest_keys::kVersion, "1");
-  extension_properties.SetString(extension_manifest_keys::kName, "Test");
-  Extension extension(temp_dir.path().AppendASCII("extension"));
-  std::string errors;
-  ASSERT_TRUE(extension.InitFromValue(extension_properties,
-                                      false,  // No public key required.
-                                      &errors)) << errors;
+  Extension* extension1 = AddExtension("1111");
 
   // Create an ExtensionMenuItem and put it into the manager.
-  DictionaryValue item_properties;
-  item_properties.SetString(L"extension_id", extension.id());
-  ExtensionMenuItem* item1 = CreateTestItem(&item_properties);
-  ASSERT_EQ(extension.id(), item1->extension_id());
-  int id1 = manager_.AddContextItem(item1);  // Ownership transferred.
-  ASSERT_GT(id1, 0);
-  ASSERT_EQ(1u, manager_.MenuItems(extension.id()).size());
+  ExtensionMenuItem* item1 = CreateTestItem(extension1);
+  ExtensionMenuItem::Id id1 = item1->id();
+  ASSERT_EQ(extension1->id(), item1->extension_id());
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item1));
+  ASSERT_EQ(1u, manager_.MenuItems(extension1->id())->size());
 
   // Create a menu item with a different extension id and add it to the manager.
-  std::string alternate_extension_id = "0000";
-  item_properties.SetString(L"extension_id", alternate_extension_id);
-  ExtensionMenuItem* item2 = CreateTestItem(&item_properties);
+  Extension* extension2 = AddExtension("2222");
+  ExtensionMenuItem* item2 = CreateTestItem(extension2);
   ASSERT_NE(item1->extension_id(), item2->extension_id());
-  int id2 = manager_.AddContextItem(item2);  // Ownership transferred.
-  ASSERT_GT(id2, 0);
+  ASSERT_TRUE(manager_.AddContextItem(extension2, item2));
 
   // Notify that the extension was unloaded, and make sure the right item is
   // gone.
   notifier->Notify(NotificationType::EXTENSION_UNLOADED,
                    Source<Profile>(NULL),
-                   Details<Extension>(&extension));
-  ASSERT_EQ(0u, manager_.MenuItems(extension.id()).size());
-  ASSERT_EQ(1u, manager_.MenuItems(alternate_extension_id).size());
+                   Details<Extension>(extension1));
+  ASSERT_EQ(NULL, manager_.MenuItems(extension1->id()));
+  ASSERT_EQ(1u, manager_.MenuItems(extension2->id())->size());
   ASSERT_TRUE(manager_.GetItemById(id1) == NULL);
-  ASSERT_TRUE(manager_.GetItemById(id2) != NULL);
+  ASSERT_TRUE(manager_.GetItemById(item2->id()) != NULL);
 }
 
 // A mock message service for tests of ExtensionMenuManager::ExecuteCommand.
@@ -201,9 +270,10 @@ class MockExtensionMessageService : public ExtensionMessageService {
   explicit MockExtensionMessageService(Profile* profile) :
       ExtensionMessageService(profile) {}
 
-  MOCK_METHOD3(DispatchEventToRenderers, void(const std::string& event_name,
+  MOCK_METHOD4(DispatchEventToRenderers, void(const std::string& event_name,
                                               const std::string& event_args,
-                                              bool has_incognito_data));
+                                              bool has_incognito_data,
+                                              const GURL& event_url));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockExtensionMessageService);
@@ -219,6 +289,38 @@ class MockTestingProfile : public TestingProfile {
  private:
   DISALLOW_COPY_AND_ASSIGN(MockTestingProfile);
 };
+
+// Tests the RemoveAll functionality.
+TEST_F(ExtensionMenuManagerTest, RemoveAll) {
+  // Try removing all items for an extension id that doesn't have any items.
+  manager_.RemoveAllContextItems("CCCC");
+
+  // Add 2 top-level and one child item for extension 1.
+  Extension* extension1 = AddExtension("1111");
+  ExtensionMenuItem* item1 = CreateTestItem(extension1);
+  ExtensionMenuItem* item2 = CreateTestItem(extension1);
+  ExtensionMenuItem* item3 = CreateTestItem(extension1);
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item1));
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item2));
+  ASSERT_TRUE(manager_.AddChildItem(item1->id(), item3));
+
+  // Add one top-level item for extension 2.
+  Extension* extension2 = AddExtension("2222");
+  ExtensionMenuItem* item4 = CreateTestItem(extension2);
+  ASSERT_TRUE(manager_.AddContextItem(extension2, item4));
+
+  EXPECT_EQ(2u, manager_.MenuItems(extension1->id())->size());
+  EXPECT_EQ(1u, manager_.MenuItems(extension2->id())->size());
+
+  // Remove extension2's item.
+  manager_.RemoveAllContextItems(extension2->id());
+  EXPECT_EQ(2u, manager_.MenuItems(extension1->id())->size());
+  EXPECT_EQ(NULL, manager_.MenuItems(extension2->id()));
+
+  // Remove extension1's items.
+  manager_.RemoveAllContextItems(extension1->id());
+  EXPECT_EQ(NULL, manager_.MenuItems(extension1->id()));
+}
 
 TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
   MessageLoopForUI message_loop;
@@ -236,9 +338,10 @@ TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
   params.selection_text = L"Hello World";
   params.is_editable = false;
 
-  ExtensionMenuItem* item = CreateTestItem(NULL);
-  int id = manager_.AddContextItem(item);  // Ownership transferred.
-  ASSERT_GT(id, 0);
+  Extension* extension = AddExtension("test");
+  ExtensionMenuItem* item = CreateTestItem(extension);
+  ExtensionMenuItem::Id id = item->id();
+  ASSERT_TRUE(manager_.AddContextItem(extension, item));
 
   EXPECT_CALL(profile, GetExtensionMessageService())
       .Times(1)
@@ -251,10 +354,11 @@ TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
   // Use the magic of googlemock to save a parameter to our mock's
   // DispatchEventToRenderers method into event_args.
   std::string event_args;
-  std::string expected_event_name = "contextMenu/" + item->extension_id();
+  std::string expected_event_name = "contextMenus/" + item->extension_id();
   EXPECT_CALL(*mock_message_service.get(),
               DispatchEventToRenderers(expected_event_name, _,
-                                       profile.IsOffTheRecord()))
+                                       profile.IsOffTheRecord(),
+                                       GURL()))
       .Times(1)
       .WillOnce(SaveArg<1>(&event_args));
 
@@ -275,7 +379,7 @@ TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
 
   int tmp_id = 0;
   ASSERT_TRUE(info->GetInteger(L"menuItemId", &tmp_id));
-  ASSERT_EQ(id, tmp_id);
+  ASSERT_EQ(id.second, tmp_id);
 
   std::string tmp;
   ASSERT_TRUE(info->GetString(L"mediaType", &tmp));

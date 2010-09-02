@@ -7,11 +7,13 @@
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
 #include "chrome/browser/sync/glue/data_type_manager_mock.h"
 #include "chrome/browser/sync/profile_sync_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
+#include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/testing_profile.h"
@@ -50,8 +52,12 @@ class ProfileSyncServiceStartupTest : public testing::Test {
   }
 
   virtual void SetUp() {
-    service_.reset(new TestProfileSyncService(&factory_, &profile_, false));
+    service_.reset(new TestProfileSyncService(&factory_, &profile_,
+                                              false, true, NULL));
     service_->AddObserver(&observer_);
+    service_->set_num_expected_resumes(0);
+    service_->set_num_expected_pauses(0);
+    service_->set_synchronous_sync_configuration();
   }
 
   virtual void TearDown() {
@@ -96,8 +102,11 @@ TEST_F(ProfileSyncServiceStartupTest, SKIP_MACOSX(StartFirstTime)) {
   EXPECT_CALL(*data_type_manager, state()).
       WillOnce(Return(DataTypeManager::CONFIGURED));
   EXPECT_CALL(*data_type_manager, Stop()).Times(1);
-  EXPECT_CALL(observer_, OnStateChanged()).Times(3);
-  service_->EnableForUser();
+  EXPECT_CALL(observer_, OnStateChanged()).Times(4);
+  service_->EnableForUser(NULL);
+  syncable::ModelTypeSet set;
+  set.insert(syncable::BOOKMARKS);
+  service_->OnUserChoseDatatypes(false, set);
 }
 
 TEST_F(ProfileSyncServiceStartupTest, SKIP_MACOSX(StartNormal)) {
@@ -107,9 +116,43 @@ TEST_F(ProfileSyncServiceStartupTest, SKIP_MACOSX(StartNormal)) {
       WillOnce(Return(DataTypeManager::CONFIGURED));
   EXPECT_CALL(*data_type_manager, Stop()).Times(1);
 
-  EXPECT_CALL(observer_, OnStateChanged()).Times(2);
+  EXPECT_CALL(observer_, OnStateChanged()).Times(3);
 
   service_->Initialize();
+}
+
+TEST_F(ProfileSyncServiceStartupTest, SKIP_MACOSX(ManagedStartup)) {
+  // Disable sync through policy.
+  profile_.GetPrefs()->SetBoolean(prefs::kSyncManaged, true);
+
+  EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).Times(0);
+  EXPECT_CALL(observer_, OnStateChanged()).Times(1);
+
+  // Service should not be started by Initialize() since it's managed.
+  service_->Initialize();
+}
+
+TEST_F(ProfileSyncServiceStartupTest, SKIP_MACOSX(SwitchManaged)) {
+  DataTypeManagerMock* data_type_manager = SetUpDataTypeManager();
+  EXPECT_CALL(*data_type_manager, Configure(_)).Times(1);
+  EXPECT_CALL(observer_, OnStateChanged()).Times(3);
+
+  service_->Initialize();
+
+  // The service should stop when switching to managed mode.
+  Mock::VerifyAndClearExpectations(data_type_manager);
+  EXPECT_CALL(*data_type_manager, state()).
+      WillOnce(Return(DataTypeManager::CONFIGURED));
+  EXPECT_CALL(*data_type_manager, Stop()).Times(1);
+  EXPECT_CALL(observer_, OnStateChanged()).Times(2);
+  profile_.GetPrefs()->SetBoolean(prefs::kSyncManaged, true);
+
+  // When switching back to unmanaged, the state should change, but the service
+  // should not start up automatically (kSyncSetupCompleted will be false).
+  Mock::VerifyAndClearExpectations(data_type_manager);
+  EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).Times(0);
+  EXPECT_CALL(observer_, OnStateChanged()).Times(1);
+  profile_.GetPrefs()->ClearPref(prefs::kSyncManaged);
 }
 
 TEST_F(ProfileSyncServiceStartupTest, SKIP_MACOSX(StartFailure)) {
@@ -124,7 +167,7 @@ TEST_F(ProfileSyncServiceStartupTest, SKIP_MACOSX(StartFailure)) {
   EXPECT_CALL(*data_type_manager, state()).
       WillOnce(Return(DataTypeManager::STOPPED));
 
-  EXPECT_CALL(observer_, OnStateChanged()).Times(2);
+  EXPECT_CALL(observer_, OnStateChanged()).Times(3);
 
   service_->Initialize();
   EXPECT_TRUE(service_->unrecoverable_error_detected());
@@ -137,8 +180,12 @@ class ProfileSyncServiceStartupBootstrapTest
   virtual ~ProfileSyncServiceStartupBootstrapTest() {}
 
   virtual void SetUp() {
-    service_.reset(new TestProfileSyncService(&factory_, &profile_, true));
+    service_.reset(new TestProfileSyncService(&factory_, &profile_,
+                                              true, true, NULL));
     service_->AddObserver(&observer_);
+    service_->set_num_expected_resumes(0);
+    service_->set_num_expected_pauses(0);
+    service_->set_synchronous_sync_configuration();
   }
 };
 
@@ -148,20 +195,16 @@ TEST_F(ProfileSyncServiceStartupBootstrapTest, SKIP_MACOSX(StartFirstTime)) {
   EXPECT_CALL(*data_type_manager, state()).
       WillOnce(Return(DataTypeManager::CONFIGURED));
   EXPECT_CALL(*data_type_manager, Stop()).Times(1);
-  EXPECT_CALL(observer_, OnStateChanged()).Times(3);
+  EXPECT_CALL(observer_, OnStateChanged()).Times(4);
 
   profile_.GetPrefs()->ClearPref(prefs::kSyncHasSetupCompleted);
+
+  // Pretend the login screen worked.
+  GaiaAuthConsumer::ClientLoginResult result;
+  result.sid = "sid";
+  result.lsid = "lsid";
+  profile_.GetTokenService()->SetClientLoginResult(result);
   // Will start sync even though setup hasn't been completed (since
   // setup is bypassed when bootstrapping is enabled).
-  service_->Initialize();
-}
-
-TEST_F(ProfileSyncServiceStartupBootstrapTest, SKIP_MACOSX(StartUserDisabled)) {
-  EXPECT_CALL(observer_, OnStateChanged()).Times(1);
-
-  profile_.GetPrefs()->ClearPref(prefs::kSyncHasSetupCompleted);
-  profile_.GetPrefs()->SetBoolean(prefs::kSyncBootstrappedAuth, true);
-  // Will not start sync because it is currently disabled, but was bootstrapped
-  // before.
   service_->Initialize();
 }

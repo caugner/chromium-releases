@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,6 +70,19 @@ void Eviction::Init(BackendImpl* backend) {
   trimming_ = false;
   delay_trim_ = false;
   trim_delays_ = 0;
+  init_ = true;
+}
+
+void Eviction::Stop() {
+  // It is possible for the backend initialization to fail, in which case this
+  // object was never initialized... and there is nothing to do.
+  if (!init_)
+    return;
+
+  // We want to stop further evictions, so let's pretend that we are busy from
+  // this point on.
+  DCHECK(!trimming_);
+  trimming_ = true;
 }
 
 void Eviction::TrimCache(bool empty) {
@@ -224,7 +237,7 @@ bool Eviction::EvictEntry(CacheRankingsBlock* node, bool empty) {
 
   ReportTrimTimes(entry);
   if (empty || !new_eviction_) {
-    entry->Doom();
+    entry->DoomImpl();
   } else {
     entry->DeleteEntryData(false);
     EntryStore* info = entry->entry()->Data();
@@ -453,7 +466,7 @@ bool Eviction::RemoveDeletedNode(CacheRankingsBlock* node) {
   }
   bool doomed = (entry->entry()->Data()->state == ENTRY_DOOMED);
   entry->entry()->Data()->state = ENTRY_DOOMED;
-  entry->Doom();
+  entry->DoomImpl();
   entry->Release();
   return !doomed;
 }

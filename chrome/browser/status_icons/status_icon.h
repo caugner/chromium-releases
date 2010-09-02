@@ -5,8 +5,6 @@
 #ifndef CHROME_BROWSER_STATUS_ICONS_STATUS_ICON_H_
 #define CHROME_BROWSER_STATUS_ICONS_STATUS_ICON_H_
 
-#include <vector>
-
 #include "base/observer_list.h"
 #include "base/string16.h"
 
@@ -14,9 +12,6 @@ class SkBitmap;
 
 class StatusIcon {
  public:
-  // Creates a new StatusIcon.
-  static StatusIcon* Create();
-
   StatusIcon() {}
   virtual ~StatusIcon() {}
 
@@ -48,6 +43,5 @@ class StatusIcon {
   ObserverList<Observer> observers_;
   DISALLOW_COPY_AND_ASSIGN(StatusIcon);
 };
-
 
 #endif  // CHROME_BROWSER_STATUS_ICONS_STATUS_ICON_H_

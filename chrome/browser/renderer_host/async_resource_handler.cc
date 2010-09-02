@@ -4,14 +4,24 @@
 
 #include "chrome/browser/renderer_host/async_resource_handler.h"
 
+#include "base/hash_tables.h"
 #include "base/logging.h"
 #include "base/process.h"
 #include "base/shared_memory.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
+#include "chrome/browser/net/load_timing_observer.h"
 #include "chrome/browser/renderer_host/global_request_id.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "chrome/common/render_messages.h"
 #include "net/base/io_buffer.h"
+#include "net/base/load_flags.h"
+#include "net/base/net_log.h"
+#include "webkit/glue/resource_loader_bridge.h"
+
+using base::Time;
+using base::TimeTicks;
 
 namespace {
 
@@ -81,6 +91,27 @@ AsyncResourceHandler::AsyncResourceHandler(
 AsyncResourceHandler::~AsyncResourceHandler() {
 }
 
+void AsyncResourceHandler::PopulateTimingInfo(URLRequest* request,
+                                              ResourceResponse* response) {
+  if (!(request->load_flags() & net::LOAD_ENABLE_LOAD_TIMING))
+    return;
+
+  ChromeNetLog* chrome_net_log = static_cast<ChromeNetLog*>(
+      request->net_log().net_log());
+  if (chrome_net_log == NULL)
+    return;
+
+  uint32 source_id = request->net_log().source().id;
+  LoadTimingObserver* observer = chrome_net_log->load_timing_observer();
+  LoadTimingObserver::URLRequestRecord* record =
+      observer->GetURLRequestRecord(source_id);
+  if (record) {
+    response->response_head.connection_id = record->socket_log_id;
+    response->response_head.connection_reused = record->socket_reused;
+    response->response_head.load_timing = record->timing;
+  }
+}
+
 bool AsyncResourceHandler::OnUploadProgress(int request_id,
                                             uint64 position,
                                             uint64 size) {
@@ -94,6 +125,9 @@ bool AsyncResourceHandler::OnRequestRedirected(int request_id,
                                                ResourceResponse* response,
                                                bool* defer) {
   *defer = true;
+  URLRequest* request = rdh_->GetURLRequest(
+      GlobalRequestID(process_id_, request_id));
+  PopulateTimingInfo(request, response);
   return receiver_->Send(new ViewMsg_Resource_ReceivedRedirect(
       routing_id_, request_id, new_url, response->response_head));
 }
@@ -107,24 +141,35 @@ bool AsyncResourceHandler::OnResponseStarted(int request_id,
   // or of having to layout the new content twice.
   URLRequest* request = rdh_->GetURLRequest(
       GlobalRequestID(process_id_, request_id));
+
+  PopulateTimingInfo(request, response);
+
   ResourceDispatcherHostRequestInfo* info = rdh_->InfoForRequest(request);
   if (info->resource_type() == ResourceType::MAIN_FRAME) {
     GURL request_url(request->url());
-    std::string host(request_url.host());
     ChromeURLRequestContext* context =
         static_cast<ChromeURLRequestContext*>(request->context());
-    if (!host.empty() && context) {
-      receiver_->Send(new ViewMsg_SetContentSettingsForLoadingHost(
-          info->route_id(), host,
+    if (context) {
+      receiver_->Send(new ViewMsg_SetContentSettingsForLoadingURL(
+          info->route_id(), request_url,
           context->host_content_settings_map()->GetContentSettings(
               request_url)));
-      receiver_->Send(new ViewMsg_SetZoomLevelForLoadingHost(info->route_id(),
-          host, context->host_zoom_map()->GetZoomLevel(host)));
+      receiver_->Send(new ViewMsg_SetZoomLevelForLoadingURL(info->route_id(),
+          request_url, context->host_zoom_map()->GetZoomLevel(request_url)));
     }
   }
 
   receiver_->Send(new ViewMsg_Resource_ReceivedResponse(
       routing_id_, request_id, response->response_head));
+
+  if (request->response_info().metadata) {
+    std::vector<char> copy(request->response_info().metadata->data(),
+                           request->response_info().metadata->data() +
+                           request->response_info().metadata->size());
+    receiver_->Send(new ViewMsg_Resource_ReceivedCachedMetadata(
+        routing_id_, request_id, copy));
+  }
+
   return true;
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,17 @@
 
 #include "build/build_config.h"
 #include "base/command_line.h"
+#include "base/message_loop_proxy.h"
 #include "base/string_util.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/dom_ui/ntp_resource_cache.h"
 #include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/net/url_request_context_getter.h"
+#include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/notification_service.h"
 #include "net/url_request/url_request_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -25,6 +27,7 @@
 #endif
 
 using base::Time;
+using testing::NiceMock;
 using testing::Return;
 
 namespace {
@@ -98,13 +101,16 @@ class TestURLRequestContext : public URLRequestContext {
 // The one here can be run on the main test thread. Note that this can lead to
 // a leak if your test does not have a ChromeThread::IO in it because
 // URLRequestContextGetter is defined as a ReferenceCounted object with a
-// DeleteOnIOThread trait.
+// special trait that deletes it on the IO thread.
 class TestURLRequestContextGetter : public URLRequestContextGetter {
  public:
   virtual URLRequestContext* GetURLRequestContext() {
     if (!context_)
       context_ = new TestURLRequestContext();
     return context_.get();
+  }
+  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() {
+    return ChromeThread::GetMessageLoopProxyForThread(ChromeThread::IO);
   }
 
  private:
@@ -127,6 +133,9 @@ class TestExtensionURLRequestContextGetter : public URLRequestContextGetter {
     if (!context_)
       context_ = new TestExtensionURLRequestContext();
     return context_.get();
+  }
+  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() {
+    return ChromeThread::GetMessageLoopProxyForThread(ChromeThread::IO);
   }
 
  private:
@@ -238,6 +247,10 @@ void TestingProfile::CreateBookmarkModel(bool delete_file) {
   bookmark_bar_model_->Load();
 }
 
+void TestingProfile::CreateAutocompleteClassifier() {
+  autocomplete_classifier_.reset(new AutocompleteClassifier(this));
+}
+
 void TestingProfile::CreateWebDataService(bool delete_file) {
   if (web_data_service_.get())
     web_data_service_->Shutdown();
@@ -276,7 +289,7 @@ void TestingProfile::UseThemeProvider(BrowserThemeProvider* theme_provider) {
 
 webkit_database::DatabaseTracker* TestingProfile::GetDatabaseTracker() {
   if (!db_tracker_)
-    db_tracker_ = new webkit_database::DatabaseTracker(GetPath());
+    db_tracker_ = new webkit_database::DatabaseTracker(GetPath(), false);
   return db_tracker_;
 }
 
@@ -326,11 +339,20 @@ void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
   MessageLoop::current()->Run();
 }
 
+TokenService* TestingProfile::GetTokenService() {
+  if (!token_service_.get()) {
+    token_service_.reset(new TokenService());
+  }
+  return token_service_.get();
+}
+
 ProfileSyncService* TestingProfile::GetProfileSyncService() {
   if (!profile_sync_service_.get()) {
-    ProfileSyncServiceMock* pss = new ProfileSyncServiceMock();
-    ON_CALL(*pss, HasSyncSetupCompleted()).WillByDefault(Return(false));
-    profile_sync_service_.reset(pss);
+    // Use a NiceMock here since we are really using the mock as a
+    // fake.  Test cases that want to set expectations on a
+    // ProfileSyncService should use the ProfileMock and have this
+    // method return their own mock instance.
+    profile_sync_service_.reset(new NiceMock<ProfileSyncServiceMock>());
   }
   return profile_sync_service_.get();
 }

@@ -4,17 +4,10 @@
 
 #include "webkit/tools/test_shell/simple_database_system.h"
 
-#if defined(USE_SYSTEM_SQLITE)
-#include <sqlite3.h>
-#else
-#include "third_party/sqlite/preprocessed/sqlite3.h"
-#endif
-
 #include "base/auto_reset.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
-#include "base/platform_thread.h"
-#include "base/process_util.h"
+#include "third_party/sqlite/preprocessed/sqlite3.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDatabase.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
 #include "webkit/database/database_util.h"
@@ -34,7 +27,7 @@ SimpleDatabaseSystem* SimpleDatabaseSystem::GetInstance() {
 SimpleDatabaseSystem::SimpleDatabaseSystem()
     : waiting_for_dbs_to_close_(false) {
   temp_dir_.CreateUniqueTempDir();
-  db_tracker_ = new DatabaseTracker(temp_dir_.path());
+  db_tracker_ = new DatabaseTracker(temp_dir_.path(), false);
   db_tracker_->AddObserver(this);
   DCHECK(!instance_);
   instance_ = this;
@@ -46,18 +39,14 @@ SimpleDatabaseSystem::~SimpleDatabaseSystem() {
 }
 
 base::PlatformFile SimpleDatabaseSystem::OpenFile(
-      const string16& vfs_file_name, int desired_flags,
-      base::PlatformFile* dir_handle) {
+    const string16& vfs_file_name, int desired_flags) {
   base::PlatformFile file_handle = base::kInvalidPlatformFileValue;
   FilePath file_name = GetFullFilePathForVfsFile(vfs_file_name);
   if (file_name.empty()) {
     VfsBackend::OpenTempFileInDirectory(
-        db_tracker_->DatabaseDirectory(), desired_flags,
-        base::GetCurrentProcessHandle(), &file_handle, dir_handle);
+        db_tracker_->DatabaseDirectory(), desired_flags, &file_handle);
   } else {
-    VfsBackend::OpenFile(file_name, desired_flags,
-                         base::GetCurrentProcessHandle(), &file_handle,
-                         dir_handle);
+    VfsBackend::OpenFile(file_name, desired_flags, &file_handle);
   }
 
   return file_handle;
@@ -161,7 +150,8 @@ void SimpleDatabaseSystem::databaseClosed(const WebKit::WebDatabase& database) {
 void SimpleDatabaseSystem::ClearAllDatabases() {
   // Wait for all databases to be closed.
   if (!database_connections_.IsEmpty()) {
-    AutoReset waiting_for_dbs_auto_reset(&waiting_for_dbs_to_close_, true);
+    AutoReset<bool> waiting_for_dbs_auto_reset(
+        &waiting_for_dbs_to_close_, true);
     MessageLoop::ScopedNestableTaskAllower nestable(MessageLoop::current());
     MessageLoop::current()->Run();
   }
@@ -192,6 +182,9 @@ void SimpleDatabaseSystem::SetFullFilePathsForVfsFile(
 
 FilePath SimpleDatabaseSystem::GetFullFilePathForVfsFile(
     const string16& vfs_file_name) {
+  if (vfs_file_name.empty())  // temp file, used for vacuuming
+    return FilePath();
+
   AutoLock file_names_auto_lock(file_names_lock_);
   DCHECK(file_names_.find(vfs_file_name) != file_names_.end());
   return file_names_[vfs_file_name];

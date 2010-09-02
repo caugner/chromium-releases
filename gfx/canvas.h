@@ -1,44 +1,24 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef GFX_CANVAS_H_
 #define GFX_CANVAS_H_
 
-#if defined(OS_WIN)
-#include <windows.h>
-#endif
-
 #include <string>
 
-#include "base/basictypes.h"
+#include "gfx/native_widget_types.h"
+// TODO(beng): remove this include when we no longer depend on SkTypes.
 #include "skia/ext/platform_canvas.h"
-
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-typedef struct _cairo cairo_t;
-typedef struct _GdkPixbuf GdkPixbuf;
-#endif
 
 namespace gfx {
 
+class CanvasSkia;
 class Font;
 class Rect;
 
-// Canvas is a SkCanvas subclass that provides a number of methods for common
-// operations used throughout an application built using base/gfx and app/gfx.
-//
-// All methods that take integer arguments (as is used throughout views)
-// end with Int. If you need to use methods provided by the superclass
-// you'll need to do a conversion. In particular you'll need to use
-// macro SkIntToScalar(xxx), or if converting from a scalar to an integer
-// SkScalarRound.
-//
-// A handful of methods in this class are overloaded providing an additional
-// argument of type SkXfermode::Mode. SkXfermode::Mode specifies how the
-// source and destination colors are combined. Unless otherwise specified,
-// the variant that does not take a SkXfermode::Mode uses a transfer mode
-// of kSrcOver_Mode.
-class Canvas : public skia::PlatformCanvas {
+// TODO(beng): documentation.
+class Canvas {
  public:
   // Specifies the alignment for text rendered with the DrawStringInt method.
   enum {
@@ -78,66 +58,85 @@ class Canvas : public skia::PlatformCanvas {
     FORCE_RTL_DIRECTIONALITY = 2048,
   };
 
-  // Creates an empty Canvas. Callers must use initialize before using the
-  // canvas.
-  Canvas();
+  virtual ~Canvas() {}
 
-  Canvas(int width, int height, bool is_opaque);
+  // Creates an empty canvas. Must be initialized before it can be used.
+  static Canvas* CreateCanvas();
 
-  virtual ~Canvas();
+  // Creates a canvas with the specified size.
+  static Canvas* CreateCanvas(int width, int height, bool is_opaque);
+
+  // Saves a copy of the drawing state onto a stack, operating on this copy
+  // until a balanced call to Restore() is made.
+  virtual void Save() = 0;
+
+  // As with Save(), except draws to a layer that is blended with the canvas
+  // at the specified alpha once Restore() is called.
+  // |layer_bounds| are the bounds of the layer relative to the current
+  // transform.
+  virtual void SaveLayerAlpha(uint8 alpha) = 0;
+  virtual void SaveLayerAlpha(uint8 alpha, const gfx::Rect& layer_bounds) = 0;
+
+  // Restores the drawing state after a call to Save*(). It is an error to
+  // call Restore() more times than Save*().
+  virtual void Restore() = 0;
 
   // Retrieves the clip rectangle and sets it in the specified rectangle if any.
   // Returns true if the clip rect is non-empty.
-  bool GetClipRect(gfx::Rect* clip_rect);
+  virtual bool GetClipRect(gfx::Rect* clip_rect) = 0;
 
   // Wrapper function that takes integer arguments.
   // Returns true if the clip is non-empty.
   // See clipRect for specifics.
-  bool ClipRectInt(int x, int y, int w, int h);
+  virtual bool ClipRectInt(int x, int y, int w, int h) = 0;
 
   // Test whether the provided rectangle intersects the current clip rect.
-  bool IntersectsClipRectInt(int x, int y, int w, int h);
+  virtual bool IntersectsClipRectInt(int x, int y, int w, int h) = 0;
 
   // Wrapper function that takes integer arguments.
   // See translate() for specifics.
-  void TranslateInt(int x, int y);
+  virtual void TranslateInt(int x, int y) = 0;
 
   // Wrapper function that takes integer arguments.
   // See scale() for specifics.
-  void ScaleInt(int x, int y);
+  virtual void ScaleInt(int x, int y) = 0;
 
   // Fills the given rectangle with the given paint's parameters.
-  void FillRectInt(int x, int y, int w, int h, const SkPaint& paint);
+  virtual void FillRectInt(int x, int y, int w, int h,
+                           const SkPaint& paint) = 0;
 
   // Fills the specified region with the specified color using a transfer
   // mode of SkXfermode::kSrcOver_Mode.
-  void FillRectInt(const SkColor& color, int x, int y, int w, int h);
+  virtual void FillRectInt(const SkColor& color, int x, int y, int w,
+                           int h) = 0;
 
   // Draws a single pixel rect in the specified region with the specified
   // color, using a transfer mode of SkXfermode::kSrcOver_Mode.
   //
   // NOTE: if you need a single pixel line, use DraLineInt.
-  void DrawRectInt(const SkColor& color, int x, int y, int w, int h);
+  virtual void DrawRectInt(const SkColor& color, int x, int y, int w,
+                           int h) = 0;
 
   // Draws a single pixel rect in the specified region with the specified
   // color and transfer mode.
   //
   // NOTE: if you need a single pixel line, use DraLineInt.
-  void DrawRectInt(const SkColor& color, int x, int y, int w, int h,
-                   SkXfermode::Mode mode);
+  virtual void DrawRectInt(const SkColor& color, int x, int y, int w, int h,
+                           SkXfermode::Mode mode) = 0;
 
   // Draws a single pixel line with the specified color.
-  void DrawLineInt(const SkColor& color, int x1, int y1, int x2, int y2);
+  virtual void DrawLineInt(const SkColor& color, int x1, int y1, int x2,
+                           int y2) = 0;
 
   // Draws a bitmap with the origin at the specified location. The upper left
   // corner of the bitmap is rendered at the specified location.
-  void DrawBitmapInt(const SkBitmap& bitmap, int x, int y);
+  virtual void DrawBitmapInt(const SkBitmap& bitmap, int x, int y) = 0;
 
   // Draws a bitmap with the origin at the specified location, using the
   // specified paint. The upper left corner of the bitmap is rendered at the
   // specified location.
-  void DrawBitmapInt(const SkBitmap& bitmap, int x, int y,
-                     const SkPaint& paint);
+  virtual void DrawBitmapInt(const SkBitmap& bitmap, int x, int y,
+                             const SkPaint& paint) = 0;
 
   // Draws a portion of a bitmap in the specified location. The src parameters
   // correspond to the region of the bitmap to draw in the region defined
@@ -151,86 +150,71 @@ class Canvas : public skia::PlatformCanvas {
   // is used for resampling.
   //
   // An optional custom SkPaint can be provided.
-  void DrawBitmapInt(const SkBitmap& bitmap, int src_x, int src_y, int src_w,
-                     int src_h, int dest_x, int dest_y, int dest_w, int dest_h,
-                     bool filter);
-  void DrawBitmapInt(const SkBitmap& bitmap, int src_x, int src_y, int src_w,
-                     int src_h, int dest_x, int dest_y, int dest_w, int dest_h,
-                     bool filter, const SkPaint& paint);
+  virtual void DrawBitmapInt(const SkBitmap& bitmap, int src_x, int src_y,
+                             int src_w, int src_h, int dest_x, int dest_y,
+                             int dest_w, int dest_h, bool filter) = 0;
+  virtual void DrawBitmapInt(const SkBitmap& bitmap, int src_x, int src_y,
+                             int src_w, int src_h, int dest_x, int dest_y,
+                             int dest_w, int dest_h, bool filter,
+                             const SkPaint& paint) = 0;
 
   // Draws text with the specified color, font and location. The text is
   // aligned to the left, vertically centered, clipped to the region. If the
   // text is too big, it is truncated and '...' is added to the end.
-  void DrawStringInt(const std::wstring& text, const gfx::Font& font,
-                     const SkColor& color, int x, int y, int w, int h);
-  void DrawStringInt(const std::wstring& text, const gfx::Font& font,
-                     const SkColor& color, const gfx::Rect& display_rect);
+  virtual void DrawStringInt(const std::wstring& text, const gfx::Font& font,
+                             const SkColor& color, int x, int y, int w,
+                             int h) = 0;
+  virtual void DrawStringInt(const std::wstring& text, const gfx::Font& font,
+                             const SkColor& color,
+                             const gfx::Rect& display_rect) = 0;
 
   // Draws text with the specified color, font and location. The last argument
   // specifies flags for how the text should be rendered. It can be one of
   // TEXT_ALIGN_CENTER, TEXT_ALIGN_RIGHT or TEXT_ALIGN_LEFT.
-  void DrawStringInt(const std::wstring& text, const gfx::Font& font,
-                     const SkColor& color, int x, int y, int w, int h,
-                     int flags);
-
-#ifdef OS_WIN  // Only implemented on Windows for now.
-  // Draws text with a 1-pixel halo around it of the given color. It allows
-  // ClearType to be drawn to an otherwise transparenct bitmap for drag images.
-  // Drag images have only 1-bit of transparency, so we don't do any fancy
-  // blurring.
-  void DrawStringWithHalo(const std::wstring& text, const gfx::Font& font,
-                          const SkColor& text_color, const SkColor& halo_color,
-                          int x, int y, int w, int h, int flags);
-#endif
+  virtual void DrawStringInt(const std::wstring& text, const gfx::Font& font,
+                             const SkColor& color, int x, int y, int w, int h,
+                             int flags) = 0;
 
   // Draws a dotted gray rectangle used for focus purposes.
-  void DrawFocusRect(int x, int y, int width, int height);
+  virtual void DrawFocusRect(int x, int y, int width, int height) = 0;
 
   // Tiles the image in the specified region.
-  void TileImageInt(const SkBitmap& bitmap, int x, int y, int w, int h);
-  void TileImageInt(const SkBitmap& bitmap, int src_x, int src_y,
-                    int dest_x, int dest_y, int w, int h);
+  virtual void TileImageInt(const SkBitmap& bitmap, int x, int y, int w,
+                            int h) = 0;
+  virtual void TileImageInt(const SkBitmap& bitmap, int src_x, int src_y,
+                            int dest_x, int dest_y, int w, int h) = 0;
 
-  // Extracts a bitmap from the contents of this canvas.
-  SkBitmap ExtractBitmap() const;
+  // Returns a native drawing context for platform specific drawing routines to
+  // use. Must be balanced by a call to EndPlatformPaint().
+  virtual gfx::NativeDrawingContext BeginPlatformPaint() = 0;
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-  // Applies current matrix on the canvas to the cairo context. This should be
-  // invoked anytime you plan on drawing directly to the cairo context. Be
-  // sure and set the matrix back to the identity when done.
-  void ApplySkiaMatrixToCairoContext(cairo_t* cr);
+  // Signifies the end of platform drawing using the native drawing context
+  // returned by BeginPlatformPaint().
+  virtual void EndPlatformPaint() = 0;
 
-  // Draw the pixbuf in its natural size at (x, y).
-  void DrawGdkPixbuf(GdkPixbuf* pixbuf, int x, int y);
-#endif
+  // TODO(beng): remove this once we don't need to use any skia-specific methods
+  //             through this interface.
+  // A quick and dirty way to obtain the underlying SkCanvas.
+  virtual CanvasSkia* AsCanvasSkia() { return NULL; }
+  virtual const CanvasSkia* AsCanvasSkia() const { return NULL; }
+};
 
-  // Compute the size required to draw some text with the provided font.
-  // Attempts to fit the text with the provided width and height. Increases
-  // height and then width as needed to make the text fit. This method
-  // supports multiple lines.
-  static void SizeStringInt(const std::wstring& test, const gfx::Font& font,
-                            int *width, int* height, int flags);
+class CanvasPaint {
+ public:
+  virtual ~CanvasPaint() {}
 
-  // Returns the default text alignment to be used when drawing text on a
-  // gfx::Canvas based on the directionality of the system locale language. This
-  // function is used by gfx::Canvas::DrawStringInt when the text alignment is
-  // not specified.
-  //
-  // This function returns either gfx::Canvas::TEXT_ALIGN_LEFT or
-  // gfx::Canvas::TEXT_ALIGN_RIGHT.
-  static int DefaultCanvasTextAlignment();
+  // Creates a canvas that paints to |view| when it is destroyed. The canvas is
+  // sized to the client area of |view|.
+  static CanvasPaint* CreateCanvasPaint(gfx::NativeView view);
 
- private:
-#if defined(OS_WIN)
-  // Draws text with the specified color, font and location. The text is
-  // aligned to the left, vertically centered, clipped to the region. If the
-  // text is too big, it is truncated and '...' is added to the end.
-  void DrawStringInt(const std::wstring& text, HFONT font,
-                     const SkColor& color, int x, int y, int w, int h,
-                     int flags);
-#endif
+  // Returns true if the canvas has an invalid rect that needs to be repainted.
+  virtual bool IsValid() const = 0;
 
-  DISALLOW_COPY_AND_ASSIGN(Canvas);
+  // Returns the rectangle that is invalid.
+  virtual gfx::Rect GetInvalidRect() const = 0;
+
+  // Returns the underlying Canvas.
+  virtual Canvas* AsCanvas() = 0;
 };
 
 }  // namespace gfx;

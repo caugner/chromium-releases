@@ -7,8 +7,8 @@
 #include "chrome/browser/sync/engine/net/server_connection_manager.h"
 #include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
-#include "chrome/browser/sync/util/event_sys-inl.h"
 #include "chrome/browser/sync/util/sync_types.h"
+#include "chrome/common/deprecated/event_sys-inl.h"
 
 namespace browser_sync {
 using sessions::SyncSession;
@@ -34,11 +34,11 @@ void SyncerCommand::SendNotifications(SyncSession* session) {
     const sessions::SyncSessionSnapshot& snapshot(session->TakeSnapshot());
     event.snapshot = &snapshot;
     DCHECK(session->context()->syncer_event_channel());
-    session->context()->syncer_event_channel()->NotifyListeners(event);
+    session->context()->syncer_event_channel()->Notify(event);
     if (session->status_controller()->syncer_status().over_quota) {
       SyncerEvent quota_event(SyncerEvent::OVER_QUOTA);
       quota_event.snapshot = &snapshot;
-      session->context()->syncer_event_channel()->NotifyListeners(quota_event);
+      session->context()->syncer_event_channel()->Notify(quota_event);
     }
   }
 }

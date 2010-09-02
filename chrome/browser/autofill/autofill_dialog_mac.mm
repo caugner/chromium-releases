@@ -10,19 +10,13 @@
 
 // Mac implementation of |ShowAutoFillDialog| interface defined in
 // |chrome/browser/autofill/autofill_dialog.h|.
-void ShowAutoFillDialog(AutoFillDialogObserver* observer,
-                        const std::vector<AutoFillProfile*>& profiles,
-                        const std::vector<CreditCard*>& credit_cards,
-                        Profile *profile) {
-  // It's possible we haven't shown the InfoBar yet, but if the user is in the
-  // AutoFill dialog, she doesn't need to be asked to enable or disable
-  // AutoFill.
-  profile->GetPrefs()->SetBoolean(prefs::kAutoFillInfoBarShown, true);
-
+void ShowAutoFillDialog(gfx::NativeView parent,
+                        AutoFillDialogObserver* observer,
+                        Profile* profile) {
+  // TODO: get rid of imported profile and credit card.
   [AutoFillDialogController
       showAutoFillDialogWithObserver:observer
-                    autoFillProfiles:profiles
-                         creditCards:credit_cards
-                             profile:profile];
+                             profile:profile
+                     importedProfile:NULL
+                  importedCreditCard:NULL];
 }
-

@@ -31,11 +31,11 @@ class MediaPlayer : public NotificationObserver,
 
   // Enqueues this url into the current playlist.  If the mediaplayer is
   // not currently visible, show it, and play the given url.
-  void EnqueueMediaURL(const GURL& url);
+  void EnqueueMediaURL(const GURL& url, Browser* creator);
 
   // Clears out the current playlist, and start playback of the given url.
   // If there is no mediaplayer currently, show it, and play the given url.
-  void ForcePlayMediaURL(const GURL& url);
+  void ForcePlayMediaURL(const GURL& url, Browser* creator);
 
   // Toggle the visibility of the playlist window.
   void TogglePlaylistWindowVisible();
@@ -94,26 +94,22 @@ class MediaPlayer : public NotificationObserver,
     return Singleton<MediaPlayer>::get();
   }
 
-  // Sets the profile to use when opening up new browser
-  // windows.
-  void set_profile(Profile* profile) { profile_ = profile; }
-
  private:
   MediaPlayer();
 
   // Popup the mediaplayer, this shows the browser, and sets up its
   // locations correctly.
-  void PopupMediaPlayer();
+  void PopupMediaPlayer(Browser* creator);
+
+  // Checks to see the the mediaplayer is currently enabled
+  bool Enabled();
 
   // Popup the playlist.  Shows the browser, sets it up to point at
   // chrome://mediaplayer#playlist
-  void PopupPlaylist();
+  void PopupPlaylist(Browser* creator);
 
   // Registers the listeners for the close events on the browser windows.
   void RegisterListeners();
-
-  // Should be set via a set_profile before Popup*() is called.
-  Profile* profile_;
 
   // Set when the register handler is called.  When the media player is
   // closed, this pointer is set back to NULL.

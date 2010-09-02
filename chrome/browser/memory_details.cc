@@ -6,9 +6,10 @@
 
 #include "app/l10n_util.h"
 #include "base/file_version_info.h"
+#include "base/histogram.h"
 #include "base/process_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/child_process_host.h"
+#include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/renderer_host/backing_store_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
@@ -53,7 +54,7 @@ void MemoryDetails::CollectChildInfoOnIOThread() {
   std::vector<ProcessMemoryInformation> child_info;
 
   // Collect the list of child processes.
-  for (ChildProcessHost::Iterator iter; !iter.Done(); ++iter) {
+  for (BrowserChildProcessHost::Iterator iter; !iter.Done(); ++iter) {
     ProcessMemoryInformation info;
     info.pid = base::GetProcId(iter->handle());
     if (!info.pid)

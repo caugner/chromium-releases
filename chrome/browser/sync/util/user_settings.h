@@ -12,7 +12,6 @@
 #include "base/file_path.h"
 #include "base/lock.h"
 #include "build/build_config.h"
-#include "chrome/browser/sync/util/signin.h"
 #include "chrome/browser/sync/util/sync_types.h"
 
 extern "C" struct sqlite3;
@@ -58,9 +57,6 @@ class UserSettings {
   bool GetLastUserAndServiceToken(const std::string& service_name,
                                   std::string* username,
                                   std::string* service_token);
-
-  void RememberSigninType(const std::string& signin, SignIn signin_type);
-  SignIn RecallSigninType(const std::string& signin, SignIn default_type);
 
   void RemoveAllGuestSettings();
 

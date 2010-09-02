@@ -596,7 +596,7 @@ IPC_BEGIN_MESSAGES(Automation)
   //  - SecurityStyle: the security style of the tab.
   //  - int: the status of the server's ssl cert (0 means no errors or no ssl
   //         was used).
-  //  - int: the mixed content state, 0 means no mixed/unsafe contents.
+  //  - int: the insecure content state, 0 means no insecure contents.
 
   IPC_SYNC_MESSAGE_ROUTED1_4(AutomationMsg_GetSecurityState,
                              int,
@@ -635,15 +635,14 @@ IPC_BEGIN_MESSAGES(Automation)
   IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_BringBrowserToFront, int, bool)
 
   // Message to request whether a certain item is enabled of disabled in the
-  // "Page" menu in the browser window
+  // menu in the browser window
   //
   // Request:
   //   - int: handle of the browser window.
   //   - int: IDC message identifier to query if enabled
   // Response:
-  //   - bool: True if the command is enabled on the Page menu
-  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_IsPageMenuCommandEnabled, int, int,
-                             bool)
+  //   - bool: True if the command is enabled on the menu
+  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_IsMenuCommandEnabled, int, int, bool)
 
   // This message notifies the AutomationProvider to print the tab with given
   // handle. The first parameter is the handle to the tab resource.  The
@@ -833,7 +832,7 @@ IPC_BEGIN_MESSAGES(Automation)
   IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_SetStringPreference,
                              int /* browser handle */,
                              std::wstring /* pref name */,
-                             std::wstring /* pref value */,
+                             std::string /* pref value */,
                              bool)
 
   // This messages gets a boolean-value preference.
@@ -1100,9 +1099,10 @@ IPC_BEGIN_MESSAGES(Automation)
                       IPC::AttachExternalTabParams)
 
   // Sent when the automation client connects to an existing tab.
-  IPC_SYNC_MESSAGE_ROUTED2_3(AutomationMsg_ConnectExternalTab,
+  IPC_SYNC_MESSAGE_ROUTED3_3(AutomationMsg_ConnectExternalTab,
                              uint64 /* cookie */,
                              bool   /* allow/block tab*/,
+                             gfx::NativeWindow  /* parent window */,
                              gfx::NativeWindow  /* Tab container window */,
                              gfx::NativeWindow  /* Tab window */,
                              int  /* Handle to the new tab */)
@@ -1167,12 +1167,11 @@ IPC_BEGIN_MESSAGES(Automation)
 
   // Retrieves a list of the root directories of all enabled extensions
   // that have been installed into Chrome by dropping a .crx file onto
-  // Chrome or an equivalent action.  Other types of extensions are not
-  // included on the list (e.g. "component" extensions, "external"
-  // extensions or extensions loaded via --load-extension since the first
-  // two are generally not useful for testing (e.g. an external extension
-  // could mess with an automated test if it's present on some systems only)
-  // and the last would generally be explicitly loaded by tests.
+  // Chrome or an equivalent action (including loaded extensions).
+  // Other types of extensions are not included on the list (e.g. "component"
+  // or "external" extensions) since they are generally not useful for testing
+  // (e.g. an external extension could mess with an automated test if it's
+  // present on some systems only).
   IPC_SYNC_MESSAGE_ROUTED0_1(AutomationMsg_GetEnabledExtensions,
                              std::vector<FilePath>)
 
@@ -1327,8 +1326,9 @@ IPC_BEGIN_MESSAGES(Automation)
 
   // Installs an extension from the crx file and returns its id.
   // On error, |extension handle| will be 0.
-  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_InstallExtensionAndGetHandle,
+  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_InstallExtensionAndGetHandle,
                              FilePath     /* full path to crx file */,
+                             bool         /* with UI */,
                              int          /* extension handle */)
 
   // Waits for the next extension test result. Sets |test result| as the
@@ -1376,5 +1376,48 @@ IPC_BEGIN_MESSAGES(Automation)
       AutomationMsg_ExtensionProperty  /* property type */,
       bool                             /* success */,
       std::string                      /* property value */)
+
+  // Resets to the default theme.
+  IPC_SYNC_MESSAGE_ROUTED0_0(AutomationMsg_ResetToDefaultTheme)
+
+  // Navigates asynchronously to a URL with a certain disposition,
+  // like in a new tab.
+  IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_NavigationAsyncWithDisposition,
+                             int /* tab handle */,
+                             GURL,
+                             WindowOpenDisposition,
+                             bool /* result */)
+
+
+  // This message requests the cookie be deleted for given url in the
+  // profile of the tab identified by the first parameter.  The second
+  // parameter is the cookie name.
+  IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_DeleteCookie, GURL, std::string,
+                             int /* tab handle */,
+                             bool /* result */)
+
+  // This message triggers the collected cookies dialog for a specific tab.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_ShowCollectedCookiesDialog,
+                             int /* tab handle */,
+                             bool /* result */)
+
+  // This message requests the external tab identified by the tab handle
+  // passed in be closed.
+  // Request:
+  //   -int: Tab handle
+  // Response:
+  //   None expected
+  IPC_MESSAGE_ROUTED1(AutomationMsg_CloseExternalTab, int)
+
+  // This message requests that the external tab identified by the tab handle
+  // runs unload handlers if any on the current page.
+  // Request:
+  //   -int: Tab handle
+  //   -gfx::NativeWindow: notification window
+  //   -int: notification message.
+  // Response:
+  //   None expected
+  IPC_MESSAGE_ROUTED3(AutomationMsg_RunUnloadHandlers, int, gfx::NativeWindow,
+                      int)
 
 IPC_END_MESSAGES(Automation)

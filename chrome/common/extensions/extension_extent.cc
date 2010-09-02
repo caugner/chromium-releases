@@ -4,23 +4,25 @@
 
 #include "chrome/common/extensions/extension_extent.h"
 
-#include "base/string_util.h"
-
 bool ExtensionExtent::ContainsURL(const GURL& url) const {
-  if (!url.is_valid())
-    return false;
-
-  if (url.GetOrigin() != origin_)
-    return false;
-
-  if (paths_.empty())
-    return true;
-
-  for (size_t i = 0; i < paths_.size(); ++i) {
-    if (StartsWithASCII(url.path(),
-                        std::string("/") + paths_[i],
-                        false)) {  // not case sensitive
+  for (PatternList::const_iterator pattern = patterns_.begin();
+       pattern != patterns_.end(); ++pattern) {
+    if (pattern->MatchesUrl(url))
       return true;
+  }
+
+  return false;
+}
+
+bool ExtensionExtent::OverlapsWith(const ExtensionExtent& other) const {
+  // Two extension extents overlap if there is any one URL that would match at
+  // least one pattern in each of the extents.
+  for (PatternList::const_iterator i = patterns_.begin();
+       i != patterns_.end(); ++i) {
+    for (PatternList::const_iterator j = other.patterns().begin();
+         j != other.patterns().end(); ++j) {
+      if (i->OverlapsWith(*j))
+        return true;
     }
   }
 

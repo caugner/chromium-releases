@@ -76,7 +76,8 @@ int NumberOfPages(WebKit::WebFrame* web_frame,
                   float page_height_in_pixels);
 
 // Returns a dump of the scroll position of the webframe.
-std::wstring DumpFrameScrollPosition(WebKit::WebFrame* web_frame, bool recursive);
+std::wstring DumpFrameScrollPosition(WebKit::WebFrame* web_frame,
+                                     bool recursive);
 
 // Returns a dump of the given history state suitable for implementing the
 // dumpBackForwardList command of the layoutTestController.
@@ -194,6 +195,19 @@ void ClipboardReadAsciiText(Clipboard::Buffer buffer, std::string* result);
 // Reads HTML from the clipboard, if available.
 void ClipboardReadHTML(Clipboard::Buffer buffer, string16* markup, GURL* url);
 
+// Reads the available types from the clipboard, if available.
+bool ClipboardReadAvailableTypes(Clipboard::Buffer buffer,
+                                 std::vector<string16>* types,
+                                 bool* contains_filenames);
+
+// Reads one type of data from the clipboard, if available.
+bool ClipboardReadData(Clipboard::Buffer buffer, const string16& type,
+                       string16* data, string16* metadata);
+
+// Reads filenames from the clipboard, if available.
+bool ClipboardReadFilenames(Clipboard::Buffer buffer,
+                            std::vector<string16>* filenames);
+
 // Gets the directory where the application data and libraries exist.  This
 // may be a versioned subdirectory, or it may be the same directory as the
 // GetExeDirectory(), depending on the embedder's implementation.
@@ -241,6 +255,35 @@ void CloseCurrentConnections();
 
 // Enable or disable the disk cache.  Used for debugging.
 void SetCacheMode(bool enabled);
+
+// Clear the disk cache.  Used for debugging.
+void ClearCache();
+
+// Returns the product version.  E.g., Chrome/4.1.333.0
+std::string GetProductVersion();
+
+// Returns true if the embedder is running in single process mode.
+bool IsSingleProcess();
+
+#if defined(OS_LINUX)
+// Return a read-only file descriptor to the font which best matches the given
+// properties or -1 on failure.
+//   charset: specifies the language(s) that the font must cover. See
+// render_sandbox_host_linux.cc for more information.
+int MatchFontWithFallback(const std::string& face, bool bold,
+                          bool italic, int charset);
+
+// GetFontTable loads a specified font table from an open SFNT file.
+//   fd: a file descriptor to the SFNT file. The position doesn't matter.
+//   table: the table in *big-endian* format, or 0 for the whole font file.
+//   output: a buffer of size output_length that gets the data.  can be 0, in
+//     which case output_length will be set to the required size in bytes.
+//   output_length: size of output, if it's not 0.
+//
+//   returns: true on success.
+bool GetFontTable(int fd, uint32_t table, uint8_t* output,
+                  size_t* output_length);
+#endif
 
 // ---- END FUNCTIONS IMPLEMENTED BY EMBEDDER ---------------------------------
 

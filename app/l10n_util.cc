@@ -289,7 +289,8 @@ bool CheckAndResolveLocale(const std::string& locale,
   // We need to map them to our codes.
   struct {
     const char* source;
-    const char* dest;} alias_map[] = {
+    const char* dest;
+  } alias_map[] = {
       {"no", "nb"},
       {"tl", "fil"},
       {"iw", "he"},
@@ -380,14 +381,7 @@ std::string GetApplicationLocale(const std::wstring& pref_locale) {
   // to renderer and plugin processes so they know what language the parent
   // process decided to use.
 #if defined(OS_WIN)
-  // First, check to see if there's a --lang flag.
-  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
-  const std::string& lang_arg =
-      parsed_command_line.GetSwitchValueASCII(switches::kLang);
-  if (!lang_arg.empty())
-    candidates.push_back(lang_arg);
-
-  // Second, try user prefs.
+  // First, try the preference value.
   if (!pref_locale.empty())
     candidates.push_back(WideToASCII(pref_locale));
 
@@ -395,15 +389,7 @@ std::string GetApplicationLocale(const std::wstring& pref_locale) {
   candidates.push_back(system_locale);
 
 #elif defined(OS_CHROMEOS)
-  // We use --lang on chroemos for debugging/troubleshooting purpose.
-  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
-  const std::string& lang_arg =
-      parsed_command_line.GetSwitchValueASCII(switches::kLang);
-  if (!lang_arg.empty())
-    candidates.push_back(lang_arg);
-
-  // On ChromeOS, try user prefs. This restores the locale used by the
-  // previous run of the OS.
+  // On ChromeOS, use the application locale preference.
   if (!pref_locale.empty())
     candidates.push_back(WideToASCII(pref_locale));
 
@@ -444,12 +430,11 @@ std::string GetApplicationLocale(const std::wstring& pref_locale) {
 
 #else  // !defined(OS_MACOSX)
 
-  // Use any override (Cocoa for the browser), otherwise use the command line
-  // argument.
+  // Use any override (Cocoa for the browser), otherwise use the preference
+  // passed to the function.
   std::string app_locale = l10n_util::GetLocaleOverride();
   if (app_locale.empty()) {
-    const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
-    app_locale = parsed_command_line.GetSwitchValueASCII(switches::kLang);
+    app_locale = WideToASCII(pref_locale);
   }
 
   // The above should handle all of the cases Chrome normally hits, but for some
@@ -645,6 +630,15 @@ std::wstring GetStringF(int message_id,
                         std::vector<size_t>* offsets) {
   return UTF16ToWide(GetStringF(message_id, WideToUTF16(a), WideToUTF16(b),
                                 string16(), string16(), offsets));
+}
+
+string16 GetStringFUTF16(int message_id, const string16& a, size_t* offset) {
+  DCHECK(offset);
+  std::vector<size_t> offsets;
+  string16 result = GetStringFUTF16(message_id, a, string16(), &offsets);
+  DCHECK(offsets.size() == 1);
+  *offset = offsets[0];
+  return result;
 }
 
 string16 GetStringFUTF16(int message_id,

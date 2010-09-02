@@ -11,6 +11,7 @@
 
 #include "base/basictypes.h"
 #include "base/task.h"
+#include "chrome/browser/sync/unrecoverable_error_handler.h"
 #include "chrome/browser/sync/glue/model_associator.h"
 
 class BookmarkNode;
@@ -26,7 +27,6 @@ class ProfileSyncService;
 namespace browser_sync {
 
 class BookmarkChangeProcessor;
-class UnrecoverableErrorHandler;
 
 // Contains all model association related logic:
 // * Algorithm to associate bookmark model and sync model.
@@ -37,7 +37,7 @@ class BookmarkModelAssociator
  public:
   static syncable::ModelType model_type() { return syncable::BOOKMARKS; }
   BookmarkModelAssociator(ProfileSyncService* sync_service,
-                          UnrecoverableErrorHandler* error_handler);
+      UnrecoverableErrorHandler* persist_ids_error_handler);
   virtual ~BookmarkModelAssociator();
 
   // AssociatorInterface implementation.
@@ -56,11 +56,6 @@ class BookmarkModelAssociator
   // The has_nodes out param is true if the sync model has nodes other
   // than the permanent tagged nodes.
   virtual bool SyncModelHasUserCreatedNodes(bool* has_nodes);
-
-  // The has_nodes out param is true if the bookmark model has user
-  // created nodes or not. That is, whether there are nodes in the
-  // bookmark model except the bookmark bar and other bookmarks.
-  virtual bool ChromeModelHasUserCreatedNodes(bool* has_nodes);
 
   // Returns sync id for the given bookmark node id.
   // Returns sync_api::kInvalidId if the sync node is not found for the given
@@ -87,14 +82,14 @@ class BookmarkModelAssociator
     // thread.
   }
 
+  // Returns sync service instance.
+  ProfileSyncService* sync_service() { return sync_service_; }
+
  protected:
   // Stores the id of the node with the given tag in |sync_id|.
   // Returns of that node was found successfully.
   // Tests override this.
   virtual bool GetSyncIdForTaggedNode(const std::string& tag, int64* sync_id);
-
-  // Returns sync service instance.
-  ProfileSyncService* sync_service() { return sync_service_; }
 
  private:
   typedef std::map<int64, int64> BookmarkIdToSyncIdMap;
@@ -128,7 +123,7 @@ class BookmarkModelAssociator
                   const sync_api::BaseNode* sync_node) const;
 
   ProfileSyncService* sync_service_;
-  UnrecoverableErrorHandler* error_handler_;
+  UnrecoverableErrorHandler* persist_ids_error_handler_;
   BookmarkIdToSyncIdMap id_map_;
   SyncIdToBookmarkNodeMap id_map_inverse_;
   // Stores sync ids for dirty associations.

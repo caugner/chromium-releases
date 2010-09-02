@@ -32,12 +32,7 @@ class HistoryTester : public UITest {
   }
 };
 
-// TODO(yuzo): Fix the following flaky (hence disabled) tests.
-// These tests are flaky because automatic and user-initiated transitions are
-// distinguished based on the interval between page load and redirect.
-
-// Flaky, http://crbug.com/39785.
-TEST_F(HistoryTester, FLAKY_VerifyHistoryLength1) {
+TEST_F(HistoryTester, VerifyHistoryLength1) {
   // Test the history length for the following page transitions.
   //   -open-> Page 1.
 
@@ -49,8 +44,7 @@ TEST_F(HistoryTester, FLAKY_VerifyHistoryLength1) {
                 kTestCompleteSuccess, action_max_timeout_ms());
 }
 
-// Disabled, http://crbug.com/39785.
-TEST_F(HistoryTester, DISABLED_VerifyHistoryLength2) {
+TEST_F(HistoryTester, VerifyHistoryLength2) {
   // Test the history length for the following page transitions.
   //   -open-> Page 2 -redirect-> Page 3.
 
@@ -62,11 +56,24 @@ TEST_F(HistoryTester, DISABLED_VerifyHistoryLength2) {
                 kTestCompleteSuccess, action_max_timeout_ms());
 }
 
-// Disabled, http://crbug.com/39785.
-TEST_F(HistoryTester, DISABLED_VerifyHistoryLength3) {
+TEST_F(HistoryTester, VerifyHistoryLength3) {
   // Test the history length for the following page transitions.
-  //   -open-> Page 4 -navigate_backward-> Page 3 -navigate_backward->Page 1
-  //   -navigate_forward-> Page 3 -navigate_forward-> Page 4
+  // -open-> Page 1 -> open Page 2 -redirect Page 3. open Page 4
+  // -navigate_backward-> Page 3 -navigate_backward->Page 1
+  // -navigate_forward-> Page 3 -navigate_forward-> Page 4
+  const FilePath test_case_1(
+      FILE_PATH_LITERAL("history_length_test_page_1.html"));
+  GURL url_1 = ui_test_utils::GetTestUrl(FilePath(kHistoryDir), test_case_1);
+  NavigateToURL(url_1);
+  WaitForFinish("History_Length_Test_1", "1", url_1, kTestCompleteCookie,
+                kTestCompleteSuccess, action_max_timeout_ms());
+
+  const FilePath test_case_2(
+      FILE_PATH_LITERAL("history_length_test_page_2.html"));
+  GURL url_2 = ui_test_utils::GetTestUrl(FilePath(kHistoryDir), test_case_2);
+  NavigateToURL(url_2);
+  WaitForFinish("History_Length_Test_2", "1", url_2, kTestCompleteCookie,
+                kTestCompleteSuccess, action_max_timeout_ms());
 
   const FilePath test_case_3(
       FILE_PATH_LITERAL("history_length_test_page_4.html"));
@@ -77,8 +84,7 @@ TEST_F(HistoryTester, DISABLED_VerifyHistoryLength3) {
 }
 
 #if defined(OS_WIN) || defined(OS_LINUX)
-// Flaky, http://crbug.com/39785.
-TEST_F(HistoryTester, FLAKY_ConsiderRedirectAfterGestureAsUserInitiated) {
+TEST_F(HistoryTester, ConsiderRedirectAfterGestureAsUserInitiated) {
   // Test the history length for the following page transition.
   //
   // -open-> Page 11 -slow_redirect-> Page 12.
@@ -112,8 +118,7 @@ TEST_F(HistoryTester, FLAKY_ConsiderRedirectAfterGestureAsUserInitiated) {
 }
 #endif  // defined(OS_WIN) || defined(OS_LINUX)
 
-// Flaky, http://crbug.com/39785.
-TEST_F(HistoryTester, FLAKY_ConsiderSlowRedirectAsUserInitiated) {
+TEST_F(HistoryTester, ConsiderSlowRedirectAsUserInitiated) {
   // Test the history length for the following page transition.
   //
   // -open-> Page 21 -redirect-> Page 22.

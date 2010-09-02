@@ -15,6 +15,10 @@ void UserSettings::SetAuthTokenForService(
     const std::string& email,
     const std::string& service_name,
     const std::string& long_lived_service_token) {
+
+  LOG(INFO) << "Saving auth token " << long_lived_service_token << " for "
+      << email << "for service " << service_name;
+
   std::string encrypted_service_token;
   if (!Encryptor::EncryptString(long_lived_service_token,
                                 &encrypted_service_token)) {
@@ -29,7 +33,8 @@ void UserSettings::SetAuthTokenForService(
                     "values (?, ?, ?)");
   statement.bind_string(0, email);
   statement.bind_string(1, service_name);
-  statement.bind_string(2, encrypted_service_token);
+  statement.bind_blob(2, encrypted_service_token.data(),
+                         encrypted_service_token.size());
   if (SQLITE_DONE != statement.step()) {
     LOG(FATAL) << sqlite3_errmsg(dbhandle.get());
   }
@@ -47,14 +52,20 @@ bool UserSettings::GetLastUserAndServiceToken(const std::string& service_name,
 
   if (SQLITE_ROW == query.step()) {
     std::string encrypted_service_token;
-    query.column_string(1, &encrypted_service_token);
+    query.column_blob_as_string(1, &encrypted_service_token);
     if (!Encryptor::DecryptString(encrypted_service_token, service_token)) {
       LOG(ERROR) << "Decryption failed: " << encrypted_service_token;
       return false;
     }
     *username = query.column_string(0);
+
+    LOG(INFO) << "Found service token for:" << *username
+      << " @ " << service_name << " returning: " << *service_token;
+
     return true;
   }
+
+  LOG(INFO) << "Couldn't find service token for " << service_name;
 
   return false;
 }

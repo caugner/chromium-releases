@@ -7,9 +7,11 @@
 #include "chrome/common/content_settings_types.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 
 using appcache::AppCacheBackend;
 using WebKit::WebApplicationCacheHostClient;
+using WebKit::WebConsoleMessage;
 
 RendererWebApplicationCacheHostImpl::RendererWebApplicationCacheHostImpl(
     RenderView* render_view,
@@ -20,13 +22,33 @@ RendererWebApplicationCacheHostImpl::RendererWebApplicationCacheHostImpl(
       routing_id_(render_view->routing_id()) {
 }
 
-RendererWebApplicationCacheHostImpl::~RendererWebApplicationCacheHostImpl() {
+void RendererWebApplicationCacheHostImpl::OnLogMessage(
+    appcache::LogLevel log_level, const std::string& message) {
+  RenderView* render_view = GetRenderView();
+  if (!render_view || !render_view->webview() ||
+      !render_view->webview()->mainFrame())
+    return;
+
+  WebKit::WebFrame* frame = render_view->webview()->mainFrame();
+  frame->addMessageToConsole(WebConsoleMessage(
+        static_cast<WebConsoleMessage::Level>(log_level),
+        WebKit::WebString::fromUTF8(message.c_str())));
 }
 
-void RendererWebApplicationCacheHostImpl::OnContentBlocked() {
-  if (!content_blocked_) {
-    RenderThread::current()->Send(new ViewHostMsg_ContentBlocked(
-        routing_id_, CONTENT_SETTINGS_TYPE_COOKIES));
-    content_blocked_ = true;
-  }
+void RendererWebApplicationCacheHostImpl::OnContentBlocked(
+    const GURL& manifest_url) {
+  RenderThread::current()->Send(new ViewHostMsg_AppCacheAccessed(
+      routing_id_, manifest_url, true));
+}
+
+void RendererWebApplicationCacheHostImpl::OnCacheSelected(
+    int64 selected_cache_id, appcache::Status status) {
+  // TODO(jochen): Send a ViewHostMsg_AppCacheAccessed to the browser once this
+  // methods gets the manifest url passed.
+  WebApplicationCacheHostImpl::OnCacheSelected(selected_cache_id, status);
+}
+
+RenderView* RendererWebApplicationCacheHostImpl::GetRenderView() {
+  return static_cast<RenderView*>
+      (RenderThread::current()->ResolveRoute(routing_id_));
 }

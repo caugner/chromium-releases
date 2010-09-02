@@ -8,6 +8,8 @@
   "allow_reload": false,
   "order": 2,
   "enabledIncognito": false,
+  "wantsFileAccess": false,
+  "allowFileAccess": false,
   "content_scripts": [],
   "views": [
     {
@@ -21,5 +23,6 @@
       "render_view_id": 0
     }
   ],
-  "hasPopupAction": false
+  "hasPopupAction": false,
+  "galleryUrl": ""
 }

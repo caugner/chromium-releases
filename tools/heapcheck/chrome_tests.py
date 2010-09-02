@@ -17,8 +17,8 @@ import os
 import stat
 import sys
 
-import google.logging_utils
-import google.path_utils
+import logging_utils
+import path_utils
 
 import common
 import heapcheck_test
@@ -82,11 +82,14 @@ class ChromeTests(object):
       "base": self.TestBase,            "base_unittests": self.TestBase,
       "browser": self.TestBrowser,      "browser_tests": self.TestBrowser,
       "googleurl": self.TestGURL,       "googleurl_unittests": self.TestGURL,
+      "courgette": self.TestCourgette,
+      "courgette_unittests": self.TestCourgette,
       "ipc": self.TestIpc,              "ipc_tests": self.TestIpc,
       "layout": self.TestLayout,        "layout_tests": self.TestLayout,
       "media": self.TestMedia,          "media_unittests": self.TestMedia,
       "net": self.TestNet,              "net_unittests": self.TestNet,
       "printing": self.TestPrinting,    "printing_unittests": self.TestPrinting,
+      "remoting": self.TestRemoting,    "remoting_unittests": self.TestRemoting,
       "startup": self.TestStartup,      "startup_tests": self.TestStartup,
       "test_shell": self.TestTestShell, "test_shell_tests": self.TestTestShell,
       "ui": self.TestUI,                "ui_tests": self.TestUI,
@@ -101,7 +104,7 @@ class ChromeTests(object):
     self._args = args
     self._test = test
 
-    script_dir = google.path_utils.ScriptDir()
+    script_dir = path_utils.ScriptDir()
 
     # Compute the top of the tree (the "source dir") from the script dir (where
     # this script lives).  We assume that the script dir is in tools/heapcheck/
@@ -131,7 +134,7 @@ class ChromeTests(object):
     # We need multiple data dirs, the current script directory and a module
     # specific one. The global suppression file lives in our directory, and the
     # module specific suppression file lives with the module.
-    self._data_dirs = [google.path_utils.ScriptDir()]
+    self._data_dirs = [path_utils.ScriptDir()]
 
     if module == "chrome":
       # Unfortunately, not all modules have the same directory structure.
@@ -183,8 +186,8 @@ class ChromeTests(object):
     return self._test_list[self._test]()
 
   def _ReadGtestFilterFile(self, name, cmd):
-    '''Reads files which contain lists of tests to filter out with --gtest_filter
-    and appends the command-line option to |cmd|.
+    '''Reads files which contain lists of tests to filter out with
+    --gtest_filter and appends the command-line option to |cmd|.
 
     Args:
       name: the test executable name.
@@ -248,11 +251,17 @@ class ChromeTests(object):
   def TestGURL(self):
     return self.SimpleTest("chrome", "googleurl_unittests")
 
+  def TestCourgette(self):
+    return self.SimpleTest("courgette", "courgette_unittests")
+
   def TestMedia(self):
     return self.SimpleTest("chrome", "media_unittests")
 
   def TestPrinting(self):
     return self.SimpleTest("chrome", "printing_unittests")
+
+  def TestRemoting(self):
+    return self.SimpleTest("chrome", "remoting_unittests")
 
   def TestIpc(self):
     return self.SimpleTest("ipc", "ipc_tests")
@@ -303,7 +312,7 @@ class ChromeTests(object):
     # Store each chunk in its own directory so that we can find the data later
     chunk_dir = os.path.join("layout", "chunk_%05d" % chunk_num)
     test_shell = os.path.join(self._options.build_dir, "test_shell")
-    out_dir = os.path.join(google.path_utils.ScriptDir(), "latest")
+    out_dir = os.path.join(path_utils.ScriptDir(), "latest")
     out_dir = os.path.join(out_dir, chunk_dir)
     if os.path.exists(out_dir):
       old_files = glob.glob(os.path.join(out_dir, "*.txt"))
@@ -415,9 +424,9 @@ def _main(_):
   options, args = parser.parse_args()
 
   if options.verbose:
-    google.logging_utils.config_root(logging.DEBUG)
+    logging_utils.config_root(logging.DEBUG)
   else:
-    google.logging_utils.config_root()
+    logging_utils.config_root()
 
   if not options.test or not len(options.test):
     parser.error("--test not specified")

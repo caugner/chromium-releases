@@ -5,6 +5,7 @@
 #ifndef WEBKIT_TOOLS_TEST_SHELL_TEST_SHELL_REQUEST_CONTEXT_H__
 #define WEBKIT_TOOLS_TEST_SHELL_TEST_SHELL_REQUEST_CONTEXT_H__
 
+#include "base/thread.h"
 #include "net/http/http_cache.h"
 #include "net/url_request/url_request_context.h"
 

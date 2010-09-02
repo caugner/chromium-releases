@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,18 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
+#include "base/gtest_prod_util.h"
+#include "base/lock.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/sync/engine/conflict_resolver.h"
 #include "chrome/browser/sync/engine/syncer_types.h"
 #include "chrome/browser/sync/engine/syncproto.h"
 #include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/directory_event.h"
-#include "chrome/browser/sync/util/closure.h"
-#include "chrome/browser/sync/util/event_sys-inl.h"
-#include "chrome/browser/sync/util/event_sys.h"
 #include "chrome/browser/sync/util/extensions_activity_monitor.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"  // For FRIEND_TEST
+#include "chrome/common/deprecated/event_sys.h"
+#include "chrome/common/deprecated/event_sys-inl.h"
 
 namespace syncable {
 class Directory;
@@ -43,6 +44,7 @@ static const int kDefaultMaxCommitBatchSize = 25;
 
 enum SyncerStep {
   SYNCER_BEGIN,
+  CLEANUP_DISABLED_TYPES,
   DOWNLOAD_UPDATES,
   PROCESS_CLIENT_COMMAND,
   VERIFY_UPDATES,
@@ -75,12 +77,18 @@ class Syncer {
   // The constructor may be called from a thread that is not the Syncer's
   // dedicated thread, to allow some flexibility in the setup.
   explicit Syncer(sessions::SyncSessionContext* context);
-  ~Syncer() {}
+  ~Syncer();
 
   // Called by other threads to tell the syncer to stop what it's doing
   // and return early from SyncShare, if possible.
-  bool ExitRequested() { return early_exit_requested_; }
-  void RequestEarlyExit() { early_exit_requested_ = true; }
+  bool ExitRequested() {
+    AutoLock lock(early_exit_requested_lock_);
+    return early_exit_requested_;
+  }
+  void RequestEarlyExit() {
+    AutoLock lock(early_exit_requested_lock_);
+    early_exit_requested_ = true;
+  }
 
   // SyncShare(...) variants cause one sync cycle to occur.  The return value
   // indicates whether we should sync again.  If we should not sync again,
@@ -139,6 +147,7 @@ class Syncer {
                  SyncerStep last_step);
 
   bool early_exit_requested_;
+  Lock early_exit_requested_lock_;
 
   int32 max_commit_batch_size_;
 
@@ -155,24 +164,28 @@ class Syncer {
 
   // A callback hook used in unittests to simulate changes between conflict set
   // building and conflict resolution.
-  Closure* pre_conflict_resolution_closure_;
+  Callback0::Type* pre_conflict_resolution_closure_;
 
   friend class SyncerTest;
-  FRIEND_TEST(SyncerTest, NameClashWithResolver);
-  FRIEND_TEST(SyncerTest, IllegalAndLegalUpdates);
-  FRIEND_TEST(SusanDeletingTest,
-              NewServerItemInAFolderHierarchyWeHaveDeleted3);
-  FRIEND_TEST(SyncerTest, TestCommitListOrderingAndNewParent);
-  FRIEND_TEST(SyncerTest, TestCommitListOrderingAndNewParentAndChild);
-  FRIEND_TEST(SyncerTest, TestCommitListOrderingCounterexample);
-  FRIEND_TEST(SyncerTest, TestCommitListOrderingWithNesting);
-  FRIEND_TEST(SyncerTest, TestCommitListOrderingWithNewItems);
-  FRIEND_TEST(SyncerTest, TestGetUnsyncedAndSimpleCommit);
-  FRIEND_TEST(SyncerTest, UnappliedUpdateDuringCommit);
-  FRIEND_TEST(SyncerTest, DeletingEntryInFolder);
-  FRIEND_TEST(SyncerTest, LongChangelistCreatesFakeOrphanedEntries);
-  FRIEND_TEST(SyncerTest, QuicklyMergeDualCreatedHierarchy);
-  FRIEND_TEST(SyncerTest, LongChangelistWithApplicationConflict);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, NameClashWithResolver);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, IllegalAndLegalUpdates);
+  FRIEND_TEST_ALL_PREFIXES(SusanDeletingTest,
+                           NewServerItemInAFolderHierarchyWeHaveDeleted3);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, TestCommitListOrderingAndNewParent);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest,
+                           TestCommitListOrderingAndNewParentAndChild);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, TestCommitListOrderingCounterexample);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, TestCommitListOrderingWithNesting);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, TestCommitListOrderingWithNewItems);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, TestGetUnsyncedAndSimpleCommit);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, TestPurgeWhileUnsynced);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, TestPurgeWhileUnapplied);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, UnappliedUpdateDuringCommit);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, DeletingEntryInFolder);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest,
+                           LongChangelistCreatesFakeOrphanedEntries);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, QuicklyMergeDualCreatedHierarchy);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, LongChangelistWithApplicationConflict);
 
   DISALLOW_COPY_AND_ASSIGN(Syncer);
 };

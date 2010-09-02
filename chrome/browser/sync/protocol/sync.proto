@@ -6,18 +6,12 @@
 
 syntax = "proto2";
 
-option optimize_for = LITE_RUNTIME;
+// TODO(akalin): Re-enable this once LITE_RUNTIME supports preserving
+// unknown fields.
+
+// option optimize_for = LITE_RUNTIME;
 
 package sync_pb;
-
-// Used to store and send extended attributes, which are arbitrary
-// key value pairs.
-message ExtendedAttributes {
-  repeated group ExtendedAttribute = 1 {
-    required string key = 2;
-    required bytes value = 3;
-  }
-}
 
 // Used for inspecting how long we spent performing operations in different
 // backends. All times must be in millis.
@@ -180,7 +174,8 @@ message SyncEntity {
 
   // Arbitrary key/value pairs associated with this item.
   // Present in both GetUpdatesResponse and CommitMessage.
-  optional ExtendedAttributes extended_attributes = 17;
+  // Deprecated.
+  // optional ExtendedAttributes extended_attributes = 17;
 
   // If true, indicates that this item has been (or should be) deleted.
   // Present in both GetUpdatesResponse and CommitMessage.
@@ -427,6 +422,9 @@ message ClientToServerResponse {
     USER_NOT_ACTIVATED = 5; // User doesn't have the Chrome bit set on that
                             // Google Account.
     AUTH_INVALID       = 6; // Auth token or cookie is otherwise invalid.
+    CLEAR_PENDING      = 7; // A clear of the user data is pending (e.g.
+                            // initiated by privacy request).  Client should
+                            // come back later.
   }
   optional ErrorType error_code = 4 [default = SUCCESS];
   optional string error_message = 5;

@@ -38,6 +38,7 @@ const char kStream[]       = "stream";
 const char kVideoThreads[] = "video-threads";
 const char kVerbose[]      = "verbose";
 const char kFast2[]        = "fast2";
+const char kErrorCorrection[] = "error-correction";
 const char kSkip[]         = "skip";
 const char kFlush[]        = "flush";
 const char kDjb2[]         = "djb2";
@@ -48,8 +49,14 @@ const char kLoop[]         = "loop";
 }  // namespace switches
 
 #if defined(OS_WIN)
+
+// Enable to build with exception handler
+//#define ENABLE_WINDOWS_EXCEPTIONS 1
+
+#ifdef ENABLE_WINDOWS_EXCEPTIONS
 // warning: disable warning about exception handler.
 #pragma warning(disable:4509)
+#endif
 
 // Thread priorities to make benchmark more stable.
 
@@ -82,6 +89,9 @@ int main(int argc, const char** argv) {
   CommandLine::Init(argc, argv);
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
 
+  // TODO(evanm): GetLooseValues() should return a
+  // CommandLine::StringType, which can be converted to FilePaths
+  // directly.
   std::vector<std::wstring> filenames(cmd_line->GetLooseValues());
   if (filenames.empty()) {
     std::cerr << "Usage: " << argv[0] << " [OPTIONS] FILE [DUMPFILE]\n"
@@ -97,6 +107,8 @@ int main(int argc, const char** argv) {
               << "Loop N times\n"
               << "  --fast2                         "
               << "Enable fast2 flag\n"
+              << "  --error-correction              "
+              << "Enable ffmpeg error correction\n"
               << "  --flush                         "
               << "Flush last frame\n"
               << "  --djb2 (aka --hash)             "
@@ -117,10 +129,11 @@ int main(int argc, const char** argv) {
   }
 
   // Retrieve command line options.
-  std::string in_path(WideToUTF8(filenames[0]));
-  std::string out_path;
+  std::string in_path(WideToASCII(filenames[0]));
+  FilePath out_path;
   if (filenames.size() > 1) {
-    out_path = WideToUTF8(filenames[1]);
+    // See TODO above the declaration of filenames.
+    out_path = FilePath::FromWStringHack(filenames[1]);
   }
   CodecType target_codec = CODEC_TYPE_UNKNOWN;
 
@@ -174,6 +187,11 @@ int main(int argc, const char** argv) {
     fast2 = true;
   }
 
+  bool error_correction = false;
+  if (cmd_line->HasSwitch(switches::kErrorCorrection)) {
+    error_correction = true;
+  }
+
   bool flush = false;
   if (cmd_line->HasSwitch(switches::kFlush)) {
     flush = true;
@@ -201,7 +219,7 @@ int main(int argc, const char** argv) {
   }
 
   std::ostream* log_out = &std::cout;
-#if defined(OS_WIN)
+#if defined(ENABLE_WINDOWS_EXCEPTIONS)
   // Catch exceptions so this tool can be used in automated testing.
   __try {
 #endif
@@ -232,19 +250,19 @@ int main(int argc, const char** argv) {
   FILE *output = NULL;
   if (!out_path.empty()) {
     // TODO(fbarchard): Add pipe:1 for piping to stderr.
-    if (!strncmp(out_path.c_str(), "pipe:", 5) ||
-        !strcmp(out_path.c_str(), "-")) {
+    if (out_path.value().substr(0, 5) == FILE_PATH_LITERAL("pipe:") ||
+        out_path.value() == FILE_PATH_LITERAL("-")) {
       output = stdout;
       log_out = &std::cerr;
 #if defined(OS_WIN)
       _setmode(_fileno(stdout), _O_BINARY);
 #endif
     } else {
-      output = file_util::OpenFile(out_path.c_str(), "wb");
+      output = file_util::OpenFile(out_path, "wb");
     }
     if (!output) {
       std::cerr << "Error: Could not open output "
-                << out_path << std::endl;
+                << out_path.value() << std::endl;
       return 1;
     }
   }
@@ -308,6 +326,10 @@ int main(int argc, const char** argv) {
   }
   if (fast2) {
     codec_context->flags2 |= CODEC_FLAG2_FAST;
+  }
+  if (error_correction) {
+    codec_context->error_concealment = FF_EC_GUESS_MVS | FF_EC_DEBLOCK;
+    codec_context->error_recognition = FF_ER_CAREFUL;
   }
 
   // Initialize threaded decode.
@@ -542,7 +564,7 @@ int main(int argc, const char** argv) {
     *log_out << "   MD5 Hash: " << MD5DigestToBase16(digest)
              << " " << in_path << std::endl;
   }
-#if defined(OS_WIN)
+#if defined(ENABLE_WINDOWS_EXCEPTIONS)
   } __except(EXCEPTION_EXECUTE_HANDLER) {
     *log_out << "  Exception:" << std::setw(11) << GetExceptionCode()
              << " " << in_path << std::endl;

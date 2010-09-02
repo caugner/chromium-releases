@@ -7,27 +7,32 @@
 #include "app/l10n_util_mac.h"
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
-#import "chrome/browser/cocoa/bookmark_manager_controller.h"
 #import "chrome/browser/cocoa/browser_window_controller.h"
 #import "chrome/browser/cocoa/bug_report_window_controller.h"
 #import "chrome/browser/cocoa/chrome_browser_window.h"
 #import "chrome/browser/cocoa/clear_browsing_data_controller.h"
+#import "chrome/browser/cocoa/collected_cookies_mac.h"
 #import "chrome/browser/cocoa/content_settings_dialog_controller.h"
 #import "chrome/browser/cocoa/download_shelf_controller.h"
+#import "chrome/browser/cocoa/edit_search_engine_cocoa_controller.h"
 #import "chrome/browser/cocoa/html_dialog_window_controller.h"
 #import "chrome/browser/cocoa/import_settings_dialog.h"
 #import "chrome/browser/cocoa/keyword_editor_cocoa_controller.h"
+#import "chrome/browser/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/cocoa/nsmenuitem_additions.h"
 #include "chrome/browser/cocoa/page_info_window_mac.h"
 #include "chrome/browser/cocoa/repost_form_warning_mac.h"
+#include "chrome/browser/cocoa/restart_browser.h"
 #include "chrome/browser/cocoa/status_bubble_mac.h"
 #include "chrome/browser/cocoa/task_manager_mac.h"
 #import "chrome/browser/cocoa/theme_install_bubble_view.h"
-#include "chrome/browser/browser.h"
+#import "chrome/browser/cocoa/toolbar_controller.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/global_keyboard_shortcuts_mac.h"
 #include "chrome/browser/pref_service.h"
@@ -43,7 +48,8 @@ BrowserWindowCocoa::BrowserWindowCocoa(Browser* browser,
                                        BrowserWindowController* controller,
                                        NSWindow* window)
   : browser_(browser),
-    controller_(controller) {
+    controller_(controller),
+    confirm_close_factory_(browser) {
   // This pref applies to all windows, so all must watch for it.
   registrar_.Add(this, NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
                  NotificationService::AllSources());
@@ -153,10 +159,6 @@ void BrowserWindowCocoa::UpdateDevTools() {
       browser_->tabstrip_model()->GetSelectedTabContents()];
 }
 
-void BrowserWindowCocoa::FocusDevTools() {
-  NOTIMPLEMENTED();
-}
-
 void BrowserWindowCocoa::UpdateLoadingAnimations(bool should_animate) {
   // Do nothing on Mac.
 }
@@ -198,7 +200,16 @@ gfx::Rect BrowserWindowCocoa::GetRootWindowResizerRect() const {
 void BrowserWindowCocoa::ConfirmAddSearchProvider(
     const TemplateURL* template_url,
     Profile* profile) {
-  NOTIMPLEMENTED();
+  // The controller will release itself when the window closes.
+  EditSearchEngineCocoaController* editor =
+      [[EditSearchEngineCocoaController alloc] initWithProfile:profile
+                                                      delegate:NULL
+                                                   templateURL:template_url];
+  [NSApp beginSheet:[editor window]
+     modalForWindow:window()
+      modalDelegate:controller_
+     didEndSelector:@selector(sheetDidEnd:returnCode:context:)
+        contextInfo:NULL];
 }
 
 LocationBar* BrowserWindowCocoa::GetLocationBar() const {
@@ -209,8 +220,8 @@ void BrowserWindowCocoa::SetFocusToLocationBar(bool select_all) {
   [controller_ focusLocationBar:select_all ? YES : NO];
 }
 
-void BrowserWindowCocoa::UpdateStopGoState(bool is_loading, bool force) {
-  [controller_ setIsLoading:is_loading ? YES : NO];
+void BrowserWindowCocoa::UpdateReloadStopState(bool is_loading, bool force) {
+  [controller_ setIsLoading:is_loading force:force];
 }
 
 void BrowserWindowCocoa::UpdateToolbar(TabContents* contents,
@@ -220,11 +231,23 @@ void BrowserWindowCocoa::UpdateToolbar(TabContents* contents,
 }
 
 void BrowserWindowCocoa::FocusToolbar() {
-  NOTIMPLEMENTED();
+  // Not needed on the Mac.
 }
 
-void BrowserWindowCocoa::FocusPageAndAppMenus() {
+void BrowserWindowCocoa::FocusAppMenu() {
   // Chrome uses the standard Mac OS X menu bar, so this isn't needed.
+}
+
+void BrowserWindowCocoa::RotatePaneFocus(bool forwards) {
+  // Not needed on the Mac.
+}
+
+void BrowserWindowCocoa::FocusBookmarksToolbar() {
+  // Not needed on the Mac.
+}
+
+void BrowserWindowCocoa::FocusChromeOSStatus() {
+  // Not needed on the Mac.
 }
 
 bool BrowserWindowCocoa::IsBookmarkBarVisible() const {
@@ -257,16 +280,17 @@ void BrowserWindowCocoa::AddFindBar(
   return [controller_ addFindBar:find_bar_cocoa_controller];
 }
 
-void BrowserWindowCocoa::ShowAboutChromeDialog() {
+views::Window* BrowserWindowCocoa::ShowAboutChromeDialog() {
   NOTIMPLEMENTED();
+  return NULL;
+}
+
+void BrowserWindowCocoa::ShowUpdateChromeDialog() {
+  restart_browser::RequestRestart(nil);
 }
 
 void BrowserWindowCocoa::ShowTaskManager() {
   TaskManagerMac::Show();
-}
-
-void BrowserWindowCocoa::ShowBookmarkManager() {
-  [BookmarkManagerController showBookmarkManager:browser_->profile()];
 }
 
 void BrowserWindowCocoa::ShowBookmarkBubble(const GURL& url,
@@ -287,11 +311,7 @@ DownloadShelf* BrowserWindowCocoa::GetDownloadShelf() {
 void BrowserWindowCocoa::ShowReportBugDialog() {
   TabContents* current_tab = browser_->GetSelectedTabContents();
   if (current_tab && current_tab->controller().GetActiveEntry()) {
-    BugReportWindowController* controller =
-        [[BugReportWindowController alloc]
-        initWithTabContents:current_tab
-                    profile:browser_->profile()];
-    [controller runModalDialog];
+    browser_->ShowBrokenPageTab(current_tab);
   }
 }
 
@@ -313,15 +333,8 @@ void BrowserWindowCocoa::ShowPasswordManager() {
   NOTIMPLEMENTED();
 }
 
-void BrowserWindowCocoa::ShowSelectProfileDialog() {
-  NOTIMPLEMENTED();
-}
-
-void BrowserWindowCocoa::ShowNewProfileDialog() {
-  NOTIMPLEMENTED();
-}
-
-void BrowserWindowCocoa::ShowRepostFormWarningDialog(TabContents* tab_contents) {
+void BrowserWindowCocoa::ShowRepostFormWarningDialog(
+    TabContents* tab_contents) {
   RepostFormWarningMac::Create(GetNativeHandle(), tab_contents);
 }
 
@@ -330,6 +343,11 @@ void BrowserWindowCocoa::ShowContentSettingsWindow(
     Profile* profile) {
   [ContentSettingsDialogController showContentSettingsForType:settings_type
                                                       profile:profile];
+}
+
+void BrowserWindowCocoa::ShowCollectedCookiesDialog(TabContents* tab_contents) {
+  // Deletes itself on close.
+  new CollectedCookiesMac(GetNativeHandle(), tab_contents);
 }
 
 void BrowserWindowCocoa::ShowProfileErrorDialog(int message_id) {
@@ -348,7 +366,13 @@ void BrowserWindowCocoa::ShowThemeInstallBubble() {
 // We allow closing the window here since the real quit decision on Mac is made
 // in [AppController quit:].
 void BrowserWindowCocoa::ConfirmBrowserCloseWithPendingDownloads() {
-  browser_->InProgressDownloadResponse(true);
+  // Call InProgressDownloadResponse asynchronously to avoid a crash when the
+  // browser window is closed here (http://crbug.com/44454).
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      confirm_close_factory_.NewRunnableMethod(
+          &Browser::InProgressDownloadResponse,
+          true));
 }
 
 void BrowserWindowCocoa::ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
@@ -375,10 +399,6 @@ void BrowserWindowCocoa::ShowPageInfo(Profile* profile,
                                       const NavigationEntry::SSLStatus& ssl,
                                       bool show_history) {
   PageInfoWindowMac::ShowPageInfo(profile, url, ssl, show_history);
-}
-
-void BrowserWindowCocoa::ShowPageMenu() {
-  // No-op. Mac doesn't support showing the menus via alt keys.
 }
 
 void BrowserWindowCocoa::ShowAppMenu() {
@@ -527,6 +547,10 @@ void BrowserWindowCocoa::Copy() {
 
 void BrowserWindowCocoa::Paste() {
   [NSApp sendAction:@selector(paste:) to:nil from:nil];
+}
+
+void BrowserWindowCocoa::ToggleTabStripMode() {
+  [controller_ toggleTabStripDisplayMode];
 }
 
 void BrowserWindowCocoa::Observe(NotificationType type,

@@ -7,14 +7,16 @@
 #include "app/l10n_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
+#include "chrome/browser/geolocation/geolocation_exceptions_table_model.h"
 #include "chrome/browser/host_content_settings_map.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/gtk/browser_window_gtk.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/options/content_exceptions_window_gtk.h"
-#include "chrome/browser/gtk/options/geolocation_content_exceptions_window.h"
-#include "chrome/browser/gtk/options/options_layout_gtk.h"
+#include "chrome/browser/gtk/options/simple_content_exceptions_window.h"
+#include "chrome/browser/notifications/desktop_notification_service.h"
+#include "chrome/browser/notifications/notification_exceptions_table_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
@@ -32,14 +34,16 @@ ContentFilterPageGtk::ContentFilterPageGtk(Profile* profile,
     IDS_PLUGIN_SETTING_LABEL,
     IDS_POPUP_SETTING_LABEL,
     IDS_GEOLOCATION_SETTING_LABEL,
+    IDS_NOTIFICATIONS_SETTING_LABEL,
   };
   COMPILE_ASSERT(arraysize(kTitleIDs) == CONTENT_SETTINGS_NUM_TYPES,
                  kTitleIDs_IncorrectSize);
-  OptionsLayoutBuilderGtk options_builder;
-  options_builder.AddOptionGroup(
-      l10n_util::GetStringUTF8(kTitleIDs[content_type_]),
-      InitGroup(), true);
-  page_ = options_builder.get_page_widget();
+
+  GtkWidget* title_label = gtk_util::CreateBoldLabel(
+      l10n_util::GetStringUTF8(kTitleIDs[content_type_]));
+  page_ = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
+  gtk_box_pack_start(GTK_BOX(page_), title_label, FALSE, FALSE, 0);
+  gtk_container_add(GTK_CONTAINER(page_), InitGroup());
 }
 
 ContentFilterPageGtk::~ContentFilterPageGtk() {
@@ -56,6 +60,7 @@ GtkWidget* ContentFilterPageGtk::InitGroup() {
     IDS_PLUGIN_LOAD_RADIO,
     IDS_POPUP_ALLOW_RADIO,
     IDS_GEOLOCATION_ALLOW_RADIO,
+    IDS_NOTIFICATIONS_ALLOW_RADIO,
   };
   COMPILE_ASSERT(arraysize(kAllowIDs) == CONTENT_SETTINGS_NUM_TYPES,
                  kAllowIDs_IncorrectSize);
@@ -70,6 +75,7 @@ GtkWidget* ContentFilterPageGtk::InitGroup() {
      0,
      0,
      IDS_GEOLOCATION_ASK_RADIO,
+     IDS_NOTIFICATIONS_ASK_RADIO,
   };
   COMPILE_ASSERT(arraysize(kAskIDs) == CONTENT_SETTINGS_NUM_TYPES,
                  kAskIDs_IncorrectSize);
@@ -87,6 +93,7 @@ GtkWidget* ContentFilterPageGtk::InitGroup() {
     IDS_PLUGIN_NOLOAD_RADIO,
     IDS_POPUP_BLOCK_RADIO,
     IDS_GEOLOCATION_BLOCK_RADIO,
+    IDS_NOTIFICATIONS_BLOCK_RADIO,
   };
   COMPILE_ASSERT(arraysize(kBlockIDs) == CONTENT_SETTINGS_NUM_TYPES,
                  kBlockIDs_IncorrectSize);
@@ -95,12 +102,17 @@ GtkWidget* ContentFilterPageGtk::InitGroup() {
       l10n_util::GetStringUTF8(kBlockIDs[content_type_]).c_str());
   gtk_box_pack_start(GTK_BOX(vbox), block_radio_, FALSE, FALSE, 0);
 
-  ContentSetting default_setting =
-      content_type_ == CONTENT_SETTINGS_TYPE_GEOLOCATION ?
-          profile()->GetGeolocationContentSettingsMap()->
-              GetDefaultContentSetting() :
-          profile()->GetHostContentSettingsMap()->
-              GetDefaultContentSetting(content_type_);
+  ContentSetting default_setting;
+  if (content_type_ == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
+    default_setting = profile()->GetGeolocationContentSettingsMap()->
+        GetDefaultContentSetting();
+  } else if (content_type_ == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
+    default_setting = profile()->GetDesktopNotificationService()->
+        GetDefaultContentSetting();
+  } else {
+    default_setting = profile()->GetHostContentSettingsMap()->
+        GetDefaultContentSetting(content_type_);
+  }
   // Now that these have been added to the view hierarchy, it's safe to call
   // SetChecked() on them.
   if (default_setting == CONTENT_SETTING_ALLOW) {
@@ -161,6 +173,9 @@ void ContentFilterPageGtk::OnAllowToggled(GtkWidget* toggle_button) {
   if (content_type_ == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
     profile()->GetGeolocationContentSettingsMap()->SetDefaultContentSetting(
         default_setting);
+  } else if (content_type_ == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
+    profile()->GetDesktopNotificationService()->SetDefaultContentSetting(
+        default_setting);
   } else {
     profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
         content_type_, default_setting);
@@ -169,16 +184,30 @@ void ContentFilterPageGtk::OnAllowToggled(GtkWidget* toggle_button) {
 
 void ContentFilterPageGtk::OnExceptionsClicked(GtkWidget* button) {
   if (content_type_ == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
-    GeolocationContentExceptionsWindow::ShowExceptionsWindow(
+    SimpleContentExceptionsWindow::ShowExceptionsWindow(
         GTK_WINDOW(gtk_widget_get_toplevel(button)),
-        profile()->GetGeolocationContentSettingsMap());
+        new GeolocationExceptionsTableModel(
+            profile()->GetGeolocationContentSettingsMap()),
+        IDS_GEOLOCATION_EXCEPTION_TITLE);
+    return;
+  }
+  if (content_type_ == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
+    SimpleContentExceptionsWindow::ShowExceptionsWindow(
+        GTK_WINDOW(gtk_widget_get_toplevel(button)),
+        new NotificationExceptionsTableModel(
+            profile()->GetDesktopNotificationService()),
+        IDS_NOTIFICATIONS_EXCEPTION_TITLE);
     return;
   }
   HostContentSettingsMap* settings_map =
       profile()->GetHostContentSettingsMap();
+  HostContentSettingsMap* otr_settings_map =
+      profile()->HasOffTheRecordProfile() ?
+          profile()->GetOffTheRecordProfile()->GetHostContentSettingsMap() :
+          NULL;
   ContentExceptionsWindowGtk::ShowExceptionsWindow(
       GTK_WINDOW(gtk_widget_get_toplevel(button)),
-      settings_map, content_type_);
+      settings_map, otr_settings_map, content_type_);
 }
 
 void ContentFilterPageGtk::OnPluginsPageLinkClicked(GtkWidget* button) {

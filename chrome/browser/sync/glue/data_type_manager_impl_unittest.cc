@@ -76,6 +76,14 @@ class DataTypeManagerImplTest : public testing::Test {
     return dtc;
   }
 
+  DataTypeControllerMock* MakePasswordDTC() {
+    DataTypeControllerMock* dtc = new DataTypeControllerMock();
+    EXPECT_CALL(*dtc, enabled()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*dtc, type()).WillRepeatedly(Return(syncable::PASSWORDS));
+    EXPECT_CALL(*dtc, name()).WillRepeatedly(Return("passwords"));
+    return dtc;
+  }
+
   void SetStartStopExpectations(DataTypeControllerMock* mock_dtc) {
     InSequence seq;
     EXPECT_CALL(*mock_dtc, state()).
@@ -113,6 +121,7 @@ class DataTypeManagerImplTest : public testing::Test {
 
   void SetBackendExpectations(int times) {
     EXPECT_CALL(backend_, ConfigureDataTypes(_, _)).Times(times);
+    EXPECT_CALL(backend_, StartSyncingWithServer()).Times(times);
     EXPECT_CALL(backend_, RequestPause()).Times(times);
     EXPECT_CALL(backend_, RequestResume()).Times(times);
   }
@@ -150,6 +159,29 @@ TEST_F(DataTypeManagerImplTest, ConfigureOne) {
   dtm.Stop();
   EXPECT_EQ(DataTypeManager::STOPPED, dtm.state());
 }
+
+TEST_F(DataTypeManagerImplTest, OneWaitingForCrypto) {
+  DataTypeControllerMock* password_dtc = MakePasswordDTC();
+  EXPECT_CALL(*password_dtc, state()).
+      WillRepeatedly(Return(DataTypeController::NOT_RUNNING));
+  EXPECT_CALL(*password_dtc, Start(_)).
+      WillOnce(InvokeCallback((DataTypeController::NEEDS_CRYPTO)));
+  EXPECT_CALL(*password_dtc, state()).
+      WillRepeatedly(Return(DataTypeController::NOT_RUNNING));
+
+  controllers_[syncable::PASSWORDS] = password_dtc;
+  SetBackendExpectations(1);
+
+  DataTypeManagerImpl dtm(&backend_, controllers_);
+  types_.insert(syncable::PASSWORDS);
+  SetConfigureStartExpectation();
+  SetConfigureDoneExpectation(DataTypeManager::OK);
+  dtm.Configure(types_);
+  EXPECT_EQ(DataTypeManager::CONFIGURED, dtm.state());
+  dtm.Stop();
+  EXPECT_EQ(DataTypeManager::STOPPED, dtm.state());
+}
+
 
 TEST_F(DataTypeManagerImplTest, ConfigureOneThenAnother) {
   DataTypeControllerMock* bookmark_dtc = MakeBookmarkDTC();
@@ -259,6 +291,7 @@ TEST_F(DataTypeManagerImplTest, ConfigureWhilePausePending) {
 
   // Don't notify the first time pause is called.
   EXPECT_CALL(backend_, ConfigureDataTypes(_, _)).Times(2);
+  EXPECT_CALL(backend_, StartSyncingWithServer()).Times(2);
   EXPECT_CALL(backend_, RequestPause()).
       WillOnce(Return(true)).
       WillOnce(DoDefault());
@@ -294,6 +327,7 @@ TEST_F(DataTypeManagerImplTest, StopWhilePausePending) {
   controllers_[syncable::BOOKMARKS] = bookmark_dtc;
 
   EXPECT_CALL(backend_, ConfigureDataTypes(_, _)).Times(1);
+  EXPECT_CALL(backend_, StartSyncingWithServer()).Times(1);
   // Never notify when RequestPause is called.
   EXPECT_CALL(backend_, RequestPause()).WillOnce(Return(true));
   EXPECT_CALL(backend_, RequestResume()).Times(0);
@@ -324,6 +358,7 @@ TEST_F(DataTypeManagerImplTest, ConfigureWhileResumePending) {
   controllers_[syncable::PREFERENCES] = preference_dtc;
 
   EXPECT_CALL(backend_, ConfigureDataTypes(_, _)).Times(2);
+  EXPECT_CALL(backend_, StartSyncingWithServer()).Times(2);
   EXPECT_CALL(backend_, RequestPause()).Times(2);
   // Don't notify the first time resume is called.
   EXPECT_CALL(backend_, RequestResume()).
@@ -360,6 +395,7 @@ TEST_F(DataTypeManagerImplTest, StopWhileResumePending) {
   controllers_[syncable::BOOKMARKS] = bookmark_dtc;
 
   EXPECT_CALL(backend_, ConfigureDataTypes(_, _)).Times(1);
+  EXPECT_CALL(backend_, StartSyncingWithServer()).Times(1);
   EXPECT_CALL(backend_, RequestPause()).Times(1);
   // Never notify pause resumed.
   EXPECT_CALL(backend_, RequestResume()).WillOnce(Return(true));
@@ -394,6 +430,7 @@ TEST_F(DataTypeManagerImplTest, OneFailingController) {
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::ASSOCIATION_FAILED);
   EXPECT_CALL(backend_, ConfigureDataTypes(_, _)).Times(1);
+  EXPECT_CALL(backend_, StartSyncingWithServer()).Times(1);
   EXPECT_CALL(backend_, RequestPause()).Times(1);
   EXPECT_CALL(backend_, RequestResume()).Times(0);
 
@@ -421,6 +458,7 @@ TEST_F(DataTypeManagerImplTest, StopWhileInFlight) {
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::ABORTED);
   EXPECT_CALL(backend_, ConfigureDataTypes(_, _)).Times(1);
+  EXPECT_CALL(backend_, StartSyncingWithServer()).Times(1);
   EXPECT_CALL(backend_, RequestPause()).Times(1);
   EXPECT_CALL(backend_, RequestResume()).Times(0);
 
@@ -455,6 +493,7 @@ TEST_F(DataTypeManagerImplTest, SecondControllerFails) {
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::ASSOCIATION_FAILED);
   EXPECT_CALL(backend_, ConfigureDataTypes(_, _)).Times(1);
+  EXPECT_CALL(backend_, StartSyncingWithServer()).Times(1);
   EXPECT_CALL(backend_, RequestPause()).Times(1);
   EXPECT_CALL(backend_, RequestResume()).Times(0);
 
@@ -475,6 +514,7 @@ TEST_F(DataTypeManagerImplTest, PauseFailed) {
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::UNRECOVERABLE_ERROR);
   EXPECT_CALL(backend_, ConfigureDataTypes(_, _)).Times(1);
+  EXPECT_CALL(backend_, StartSyncingWithServer()).Times(1);
   EXPECT_CALL(backend_, RequestPause()).WillOnce(Return(false));
   EXPECT_CALL(backend_, RequestResume()).Times(0);
 
@@ -492,6 +532,7 @@ TEST_F(DataTypeManagerImplTest, ResumeFailed) {
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::UNRECOVERABLE_ERROR);
   EXPECT_CALL(backend_, ConfigureDataTypes(_, _)).Times(1);
+  EXPECT_CALL(backend_, StartSyncingWithServer()).Times(1);
   EXPECT_CALL(backend_, RequestPause()).Times(1);
   EXPECT_CALL(backend_, RequestResume()).WillOnce(Return(false));
 
@@ -518,6 +559,7 @@ TEST_F(DataTypeManagerImplTest, ConfigureWhileDownloadPending) {
   EXPECT_CALL(backend_, ConfigureDataTypes(_, _)).
       WillOnce(SaveArg<1>(&task)).
       WillOnce(DoDefault());
+  EXPECT_CALL(backend_, StartSyncingWithServer()).Times(2);
   EXPECT_CALL(backend_, RequestPause()).Times(1);
   EXPECT_CALL(backend_, RequestResume()).Times(1);
 
@@ -556,6 +598,7 @@ TEST_F(DataTypeManagerImplTest, StopWhileDownloadPending) {
   // before it is finished.
   EXPECT_CALL(backend_, ConfigureDataTypes(_, _)).
       WillOnce(SaveArg<1>(&task));
+  EXPECT_CALL(backend_, StartSyncingWithServer());
   EXPECT_CALL(backend_, RequestPause()).Times(0);
   EXPECT_CALL(backend_, RequestResume()).Times(0);
 

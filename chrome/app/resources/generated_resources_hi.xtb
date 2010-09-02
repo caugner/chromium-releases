@@ -138,7 +138,6 @@
 <translation id="1486408090387743835"><ph name="PRODUCT_NAME"/> में अब <ph name="BEGIN_LINK"/>विस्तार<ph name="END_LINK"/> और <ph name="BEGIN_BUTTON"/>बुकमार्क सिंक<ph name="END_BUTTON"/> हैं.</translation>
 <translation id="4422347585044846479">इस पृष्ठ के लिए बुकमार्क संपादित करें</translation>
 <translation id="8546306075665861288">छवि कैश</translation>
-<translation id="3899346049825960202">Linux प्रॉक्सी कॉन्फ़िगरेशन सहायता</translation>
 <translation id="1399076603473531278">लॉगिन विवरण पुराने हैं.</translation>
 <translation id="3391060940042023865">निम्न प्लग-इन क्रैश हो गया है: <ph name="PLUGIN_NAME"/></translation>
 <translation id="5197255632782567636">इंटरनेट</translation>
@@ -148,20 +147,6 @@
 <translation id="1556537182262721003">एक्सटेंशन निर्देशिका को प्रोफ़ाइल में नहीं ले जा सका.</translation>
 <translation id="5866557323934807206">भविष्य के विज़िट के लिए ये सेटिंग साफ़ करें</translation>
 <translation id="6370820475163108109"><ph name="ORGANIZATION_NAME"/> (<ph name="DOMAIN_NAME"/>)</translation>
-<translation id="763276826334024854">किसी समर्थित डेस्कटॉप वातावरण के अंतर्गत <ph name="PRODUCT_NAME"/> चलाने पर, सिस्टम प्रॉक्सी सेटिंग उपयोग की जाएंगी.  हालांकि, या तो आपका सिस्टम समर्थित नहीं है या आपके सिस्टम का कॉन्फ़िगरेशन लॉन्च करने में कोई समस्या थी.  आप अपने प्रॉक्सी को कॉन्फ़िगर करने के लिए निम्न वातावरण चरों का उपयोग कर सकते हैं:
-        <ph name="BEGIN_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>auto_proxy<ph name="END_CODE"/><ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST"/>
-            <ph name="BEGIN_LIST_ITEM"/>परिभाषित और रिक्त → स्वतः खोजें<ph name="END_LIST_ITEM"/>
-            <ph name="BEGIN_LIST_ITEM"/>गैर-रिक्त → autoconfig URL निर्दिष्ट करता है<ph name="END_LIST_ITEM"/>
-          <ph name="END_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>all_proxy<ph name="END_CODE"/>: सभी प्रकारों हेतु उपयोग करने के लिए प्रॉक्सी सर्वर<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>http_proxy<ph name="END_CODE"/>: HTTP प्रॉक्सी सर्वर<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>https_proxy<ph name="END_CODE"/>: HTTPS प्रॉक्सी सर्वर<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>ftp_proxy<ph name="END_CODE"/>: FTP प्रॉक्सी सर्वर<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>SOCKS_SERVER<ph name="END_CODE"/>: SOCKS प्रॉक्सी सर्वर (SOCKS v4 में डिफ़ॉल्ट, SOCKS v5 का उपयोग करने के लिए SOCKS_VERSION=5 भी निर्दिष्ट करता है)<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>no_proxy<ph name="END_CODE"/>: प्रॉक्सी करना बाइपास करने के लिए होस्ट या प्रतिमानों की अल्पविराम पृथक सूची<ph name="END_LIST_ITEM"/>
-        <ph name="END_LIST"/></translation>
 <translation id="2933933591993394296">इस कंप्यूटर पर बुकमार्क सिंक अक्षम है. अगर आप <ph name="NAME_OF_EXTENSION"/> की स्थापना रद्द करते हैं, तो आप टूल मेनू में &quot;सिंक सेट अप करें...&quot; चुनकर बुकमार्क सिंक पुनः-सक्षम कर सकते हैं.</translation>
 <translation id="8820817407110198400">बुकमार्क</translation>
 <translation id="5191625995327478163">&amp;भाषा सेटिंग...</translation>
@@ -169,7 +154,6 @@
 <translation id="5585645215698205895">&amp;नीचे</translation>
 <translation id="6596816719288285829">IP पता</translation>
 <translation id="1674989413181946727">पूरे कंप्यूटर में लागू SSL सेटिंग्स :</translation>
-<translation id="1452199478873730826">Flikr</translation>
 <translation id="8703575177326907206"><ph name="DOMAIN"/> से आपका कनेक्शन एन्क्रिप्ट नहीं किया गया है.</translation>
 <translation id="4197577448076628265"><ph name="HOST"/> पर इस विस्तार के पास आपके ब्राउज़िंग इतिहास और निजी डेटा तक पहुंच होगी.</translation>
 <translation id="1644574205037202324">इतिहास</translation>
@@ -339,7 +323,6 @@
 <translation id="348620396154188443">सभी साइटों को डेस्कटॉप सूचनाएं दिखाने की अनुमति दें</translation>
 <translation id="8214489666383623925">फ़ाइल खोलें...</translation>
 <translation id="5230160809118287008">Goats Teleported</translation>
-<translation id="5296476177639202243">क्वेरी '<ph name="SEARCH_TEXT"/>' से कोई बुकमार्क मेल नहीं खाते.</translation>
 <translation id="4495419450179050807">इस पृष्ठ पर न दिखाएं</translation>
 <translation id="939736085109172342">नया फ़ोल्डर</translation>
 <translation id="4933484234309072027"><ph name="URL"/> पर एम्बेड किया गया</translation>
@@ -379,7 +362,6 @@
 <translation id="1684861821302948641">पृष्ठ बंद करें</translation>
 <translation id="6802031077390104172"><ph name="USAGE"/> (<ph name="OID"/>)</translation>
 <translation id="857089571609443760">सिंक गलत कार्य कर रहा है क्योंकि सर्वर को बहुत अधिक अनुरोध भेजे जा रहे हैं. ऐसा प्रतीत होता कि <ph name="NAME_OF_EXTENSION"/> आपके बुकमार्क में बहुत अधिक परिवर्तन कर रहा है.</translation>
-<translation id="5965640700983474726">खोजने के लिए टाइप करें</translation>
 <translation id="40334469106837974">पृष्ठ लेआउट बदलें</translation>
 <translation id="2142570832281562688">कोई प्रोफ़ाइल नाम दर्ज करें</translation>
 <translation id="5904714272463161824">बग या टूटी वेबसाइट की &amp;जानकारी दें ...</translation>
@@ -397,7 +379,6 @@
 <translation id="2620436844016719705">सिस्टम</translation>
 <translation id="5362741141255528695">निजी कुंजी फ़ाइल चयनित करें.</translation>
 <translation id="7012108905414904806">हालाँकि, इस पृष्ठ में अन्य संसाधन शामिल हैं जो सुरक्षित नहीं हैं. ये संसाधन पारगमन में अन्य लोगों द्वारा देखे जा सकते हैं, और पृष्ठ का रूप और व्यवहार बदलने के लिए किसी आक्रमणकारी द्वारा संशोधित किए जा सकते हैं.</translation>
-<translation id="644318894204114995">इंकॉग्निटो में चलने की पुष्टि करें</translation>
 <translation id="7226140659422399856">ब्राउज़र क्रैश... गो बूम</translation>
 <translation id="4515911410595374805">इस पृष्ठ पर कुछ तत्व किसी असत्यापित स्रोत से आए थे और प्रदर्शित नहीं किए गए थे.</translation>
 <translation id="1195447618553298278">अज्ञात त्रुटि.</translation>
@@ -406,7 +387,6 @@
 <translation id="6610600335992778838">वाईफ़ाई</translation>
 <translation id="1087119889335281750">&amp;स्पैलिंग संबंधी कोई सुझाव नहीं</translation>
 <translation id="5228309736894624122">SSL प्रोटोकॉल त्रुटि.</translation>
-<translation id="718141787353053227">पृष्ठ सेटअप...</translation>
 <translation id="5076340679995252485">&amp;चिपकाएँ</translation>
 <translation id="5097982659374947325">केवल मेरे द्वारा विज़िट की गई साइट से कुकी स्वीकार करें</translation>
 <translation id="14171126816530869"><ph name="ORGANIZATION"/>की पहचान<ph name="LOCALITY"/>पर <ph name="ISSUER"/>्द्वारा सत्यापित की गई है.</translation>
@@ -433,7 +413,6 @@
 <translation id="6786747875388722282">एक्सटेंशन</translation>
 <translation id="9053965862400494292">सिंक सेट अप करने का प्रयास करते समय एक त्रुटि उत्पन्न हुई.</translation>
 <translation id="4636930964841734540">जानकारी</translation>
-<translation id="2815500128677761940">बुकमार्क बार</translation>
 <translation id="4571852245489094179">बुकमार्क और सेटिंग्स आयात करें</translation>
 <translation id="6514771739083339959">होम पेज:</translation>
 <translation id="4421917670248123270">डाउनलोड बंद और रद्द करें</translation>
@@ -496,7 +475,6 @@
 <translation id="8425492902634685834">टास्कबार में पिन करें</translation>
 <translation id="3234408098842461169">नीचे तीर</translation>
 <translation id="825608351287166772">आपके पास मौजूद पहचान संबंधी किसी भी दस्तावेज़ (जैसे पासपोर्ट) की तरह, प्रमाणपत्रों की एक मान्यता अवधि होती है. आपके ब्राउज़र को प्रस्तुत किया गया प्रमाणपत्र अभी मान्य नहीं है. कोई प्रमाणपत्र मान्यता अवधि से बाहर होने पर, उस प्रमाणपत्र की स्थिति के बारे में कुछ निश्चित जानकारी (क्‍या वह निरस्त किया गया है और अब विश्वस्नीय नहीं है) बनाए रखने की आवश्यकता नहीं होती. सामान्यत:, यह सत्यापित करना संभव नहीं है कि यह प्रमाणपत्र विश्वस्नीय है. आपको आगे नहीं जाना चाहिए.</translation>
-<translation id="8786172108436160456"><ph name="EXTENSION_NAME"/> को इंकॉग्निटो में चलने की अनुमति दें?</translation>
 <translation id="5209518306177824490">SHA-1 फ़िंगरप्रिंट</translation>
 <translation id="7154150278819212687">इस विस्तार के पास सभी वेबसाइट पर आपके ब्राउज़िंग इतिहास तक पहुंच होगी.</translation>
 <translation id="1553538517812678578">असीमित</translation>
@@ -507,13 +485,11 @@
 <translation id="4874539263382920044">शीर्षक में कम से कम एक वर्ण होना चाहिए</translation>
 <translation id="2963998720451829125"><ph name="NAME_OF_EXTENSION"/> को अक्षम किया गया है. अगर आप अपने बुकमार्क सिंक करना रोक देते हैं, तो आप इस एक्सटेंशन को टूल मेनू द्वारा पहुंच योग्य, एक्सटेंशन पृष्ठ पर पुनः-सक्षम कर सकते हैं.</translation>
 <translation id="7344633671344536647">ब्राउज़िंग डेटा:</translation>
-<translation id="2332311077028912338">क्या आप निश्चित रूप से इस एक्सटेंशन को इंकॉग्निटो में चलाना चाहते हैं? <ph name="PRODUCT_NAME"/> इस एक्सटेंशन को आपके ब्राउज़र डेटा को रिकॉर्ड करने से नहीं रोक सकता.</translation>
 <translation id="4250680216510889253">नहीं</translation>
 <translation id="6291953229176937411">फ़ाइंडर में &amp;दिखाएं</translation>
 <translation id="7905536804357499080">वर्तमान का उपयोग करें</translation>
 <translation id="8933960630081805351">फ़ाइंडर में &amp;दिखाएं</translation>
 <translation id="3041612393474885105">प्रमाणपत्र जानकारी</translation>
-<translation id="7378810950367401542">/</translation>
 <translation id="3733127536501031542">स्टेप-अप वाला SSL सर्वर</translation>
 <translation id="954586097957006897">अंतिम नाम</translation>
 <translation id="5849941564644911027"><ph name="PRODUCT_NAME"/> अब <ph name="DEF_BROWSER"/> से आपके बुकमार्क और अन्य सेटिंग आयात करेगा और आपके कंप्यूटर पर शॉर्टकट बनाएगा.</translation>
@@ -568,7 +544,6 @@
 <translation id="39964277676607559">सामग्री स्क्रिप्ट के लिए javascript '<ph name="RELATIVE_PATH"/>' लोड नहीं कर सका.</translation>
 <translation id="4378551569595875038">कनेक्ट हो रहा है...</translation>
 <translation id="7029809446516969842">पासवर्ड</translation>
-<translation id="8211437954284917092">अपने बुकमार्क खोजने के लिए उपरोक्त पाठ फ़ील्ड में कोई क्वेरी दर्ज करें.</translation>
 <translation id="4528378725264562960">(चल रहा है)</translation>
 <translation id="5958418293370246440"><ph name="SAVED_FILES"/><ph name="TOTAL_FILES"/> फ़ाइलें</translation>
 <translation id="2350172092385603347">स्थानीकरण उपयोग किया गया, लेकिन default_locale मेनिफ़ेस्ट में निर्दिष्ट नहीं किया गया था.</translation>
@@ -617,7 +592,6 @@
 <translation id="149347756975725155">एक्सटेंशन आइकन '<ph name="ICON"/>' लोड नहीं कर सका.</translation>
 <translation id="3675321783533846350">नेटवर्क से कनेक्ट करने के लिए प्रॉक्सी सेट करें.</translation>
 <translation id="1572103024875503863"><ph name="NUMBER_MANY"/> दिन</translation>
-<translation id="181952314179848438">इस एक्सटेंशन को इस तक पहुंच की आवश्यकता है:</translation>
 <translation id="8453184121293348016">कोई निरस्तीकरण प्रक्रिया प्राप्त नहीं हुई</translation>
 <translation id="3481915276125965083">इस पृष्ठ पर निम्न पॉप-अप अवरोधित कर दिए गए थे:</translation>
 <translation id="3468298837301810372">लेबल</translation>
@@ -646,7 +620,6 @@
 <translation id="7965010376480416255">साझा स्मृति</translation>
 <translation id="6248988683584659830">खोज सेटिंग्स</translation>
 <translation id="7053983685419859001">अवरोधित करें</translation>
-<translation id="3425080561288944889">क्या आप निश्चित रूप से '<ph name="BOOKMARK_TITLE"/>' को निकालना चाहते हैं?</translation>
 <translation id="2727712005121231835">वास्तविक आकार</translation>
 <translation id="8887733174653581061">हमेशा सबसे ऊपर</translation>
 <translation id="610886263749567451">JavaScript सतर्क</translation>
@@ -741,7 +714,6 @@
 <translation id="7629827748548208700">टैब : <ph name="TAB_NAME"/></translation>
 <translation id="8449008133205184768">चिपकाएं और शैली का मिलान करें</translation>
 <translation id="8028993641010258682">आकार</translation>
-<translation id="1383876407941801731">खोज</translation>
 <translation id="8398877366907290961">किसी भी तरह आगे बढ़ें</translation>
 <translation id="6974053822202609517">दाएं से बाएं</translation>
 <translation id="290414493736480793">स्वीकृतियाँ</translation>
@@ -808,14 +780,12 @@
 <translation id="5552632479093547648">मालवेयर और फ़िशिंग पाए गए!</translation>
 <translation id="4988273303304146523"><ph name="NUMBER_DEFAULT"/> दिनों पहले</translation>
 <translation id="1588343679702972132">इस साइट ने अनुरोध किया है कि आप किसी प्रमाणपत्र के साथ अपनी पहचान कराएं:</translation>
-<translation id="7211994749225247711">हटाएं...</translation>
 <translation id="2819994928625218237">&amp;वर्तनी संबंधी कोई सुझाव नहीं</translation>
 <translation id="4316305410440790958">नए &amp;टैब में फ़्रेम खोलें</translation>
 <translation id="9142623379911037913">डेस्कटॉप सूचनाएं दिखाने के लिए <ph name="SITE"/> को अनुमति दें?</translation>
 <translation id="4196320913210960460">आप टूल मेनू में विस्तार पर क्लिक कर अपने स्थापित विस्तार प्रबंधित कर सकते हैं.</translation>
 <translation id="9118804773997839291">नीचे पृष्ठ के लिए सभी असुरक्षित तत्वों की सूची दी गई है. किसी विशिष्ट तत्व के लिए थ्रेड पर और अधिक जानकारी हेतु नैदानिक लिंक पर क्लिक करें.</translation>
 <translation id="7754704193130578113">डाउनलोड करने से पहले प्रत्येक फ़ाइल को सहेजने का स्थान पूछें</translation>
-<translation id="8155199869035534942">चयनित आइटम हटाएं</translation>
 <translation id="2497284189126895209">सभी फ़ाइलें</translation>
 <translation id="5360606537916580043">अंतिम दिन</translation>
 <translation id="1682548588986054654">नई &amp;गुप्त विंडो</translation>
@@ -968,7 +938,6 @@
 <translation id="7136984461011502314"><ph name="PRODUCT_NAME"/> में आपका स्वागत है</translation>
 <translation id="1594030484168838125">चुनें</translation>
 <translation id="204497730941176055">Microsoft प्रमाणपत्र टेंप्लेट नाम</translation>
-<translation id="4002066346123236978">शीर्षक</translation>
 <translation id="4087089424473531098">विस्तार बनाया गया:
 
 <ph name="EXTENSION_FILE"/>￼</translation>
@@ -1051,7 +1020,6 @@
 <translation id="4608500690299898628">&amp;ढूंढें...</translation>
 <translation id="3574305903863751447"><ph name="CITY"/>, <ph name="STATE"/> <ph name="COUNTRY"/></translation>
 <translation id="8724859055372736596">फ़ोल्डर में &amp;दिखाएं</translation>
-<translation id="5446294780224829982">हंगुल IME:</translation>
 <translation id="5554489410841842733">वर्तमान पृष्ठ पर विस्तार के कार्य कर सकने पर यह आइकन दृश्यमान होगा.</translation>
 <translation id="4862642413395066333">OCSP प्रतिसादों को हस्ताक्षरित करना</translation>
 <translation id="4756388243121344051">&amp;इतिहास</translation>
@@ -1073,7 +1041,6 @@
 <translation id="7631887513477658702">&amp;हमेशा इस प्रकार की फ़ाइलें खोलें</translation>
 <translation id="8627795981664801467">केवल सुरक्षित कनेक्शन</translation>
 <translation id="3921544830490870178">प्‍लग-इन सेटिंग:</translation>
-<translation id="1387703718616631293">इस एक्सटेंशन को इंकॉग्निटो में चलाने की अनुमति दें</translation>
 <translation id="2190355936436201913">(खाली)</translation>
 <translation id="5868426874618963178">वर्तमान पृष्ठ का स्रोत भेजें</translation>
 <translation id="5818003990515275822">कोरियाई</translation>
@@ -1105,7 +1072,6 @@
 <translation id="8565745688101278215"><ph name="FIRSTNAME"/><ph name="SEPARATOR"/><ph name="LASTNAME"/></translation>
 <translation id="3927932062596804919">अस्वीकार</translation>
 <translation id="6484929352454160200"><ph name="PRODUCT_NAME"/> का नया संस्करण उपलब्ध है</translation>
-<translation id="7035824132811506448">अभी जोड़ा हुआ</translation>
 <translation id="5827266244928330802">Safari</translation>
 <translation id="778881183694837592">आवश्यक फ़ील्ड को रिक्त नहीं छोड़ा जा सकता</translation>
 <translation id="6820686453637990663">CVC</translation>
@@ -1167,8 +1133,6 @@
 <translation id="2356070529366658676">पूछें</translation>
 <translation id="5731247495086897348">चिप&amp;काएं और जाएं</translation>
 <translation id="3413103074007669042">इस पृष्ठ में कुछ असुरक्षित सामग्री है</translation>
-<translation id="3866320199958134961"><ph name="MINUTES"/> से कम.
-        कृपया चार्जर कनेक्ट करें.</translation>
 <translation id="7635741716790924709">पता पंक्ति 1</translation>
 <translation id="5285267187067365830">प्लग-इन स्थापित करें ...</translation>
 <translation id="1166212789817575481">दाईं ओर के टैब बंद करें</translation>
@@ -1311,7 +1275,6 @@
 <translation id="1474307029659222435">फ़्रेम नई &amp;विंडो में खोलें</translation>
 <translation id="1522474541175464402">प्रमाणपत्र प्राधिकरण कुंजी ID</translation>
 <translation id="5976160379964388480">अन्य</translation>
-<translation id="3527085408025491307">फ़ोल्डर</translation>
 <translation id="3413808618118019351">बुकमार्क &amp;और सेटिंग &amp;आयात करें...</translation>
 <translation id="2635276683026132559">हस्ताक्षर</translation>
 <translation id="4835836146030131423">साइन इन करने में त्रुटि.</translation>
@@ -1360,7 +1323,6 @@
 <translation id="4701488924964507374"><ph name="SENTENCE1"/> <ph name="SENTENCE2"/></translation>
 <translation id="1163931534039071049">फ़्रेम का स्रोत &amp;देखें</translation>
 <translation id="7564847347806291057">प्रक्रिया समाप्त करें</translation>
-<translation id="7851589172948533362"><ph name="ISSUER"/> द्वारा सत्यापित</translation>
 <translation id="7063412606254013905">फ़िशिंग घोटालों के बारे में अधिक जानें.</translation>
 <translation id="307767688111441685">पृष्ठ विषम दिखाई देता है</translation>
 <translation id="5295309862264981122">नेवीगेशन की पुष्टि करें</translation>
@@ -1479,7 +1441,6 @@
 <translation id="4910619056351738551">यहाँ कुछ सुझाव दिए गए हैं :</translation>
 <translation id="5489059749897101717">वर्तनी फलक &amp;दिखाएं</translation>
 <translation id="1232569758102978740">शीर्षक रहित</translation>
-<translation id="1851547963021150172">चयनित आइटम पर कोई क्रिया निष्पादित करें</translation>
 <translation id="4362187533051781987">शहर/कस्बा</translation>
 <translation id="9149866541089851383">संपादित करें ...</translation>
 <translation id="7000311294523403548">शीर्षक रहित वेब पेज</translation>

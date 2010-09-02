@@ -7,7 +7,10 @@
  */
 var LogEventType = null;
 var LogEventPhase = null;
+var ClientInfo = null;
 var LogSourceType = null;
+var NetError = null;
+var LoadFlag = null;
 
 /**
  * Object to communicate between the renderer and the browser.
@@ -57,6 +60,19 @@ function onLoaded() {
                             "hostResolverCacheTTLSuccess",
                             "hostResolverCacheTTLFailure");
 
+  // Create a view which will display import/export options to control the
+  // captured data.
+  var dataView = new DataView("dataTabContent", "exportedDataText",
+                              "exportToText");
+
+  // Create a view which will display the results and controls for connection
+  // tests.
+  var testView = new TestView("testTabContent", "testUrlInput",
+                              "connectionTestsForm", "testSummary");
+
+  var httpCacheView = new HttpCacheView("httpCacheTabContent",
+                                        "httpCacheStats");
+
   // Create a view which lets you tab between the different sub-views.
   var categoryTabSwitcher =
       new TabSwitcherView(new DivView('categoryTabHandles'));
@@ -67,8 +83,9 @@ function onLoaded() {
   categoryTabSwitcher.addTab('dnsTab', dnsView, false);
   categoryTabSwitcher.addTab('socketsTab', new DivView('socketsTabContent'),
                              false);
-  categoryTabSwitcher.addTab('httpCacheTab',
-                             new DivView('httpCacheTabContent'), false);
+  categoryTabSwitcher.addTab('httpCacheTab', httpCacheView, false);
+  categoryTabSwitcher.addTab('dataTab', dataView, false);
+  categoryTabSwitcher.addTab('testTab', testView, false);
 
   // Build a map from the anchor name of each tab handle to its "tab ID".
   // We will consider navigations to the #hash as a switch tab request.
@@ -78,8 +95,8 @@ function onLoaded() {
     var aNode = document.getElementById(tabIds[i]);
     anchorMap[aNode.hash] = tabIds[i];
   }
-  // Default the empty hash to the requests tab.
-  anchorMap['#'] = anchorMap[''] = 'requestsTab';
+  // Default the empty hash to the data tab.
+  anchorMap['#'] = anchorMap[''] = 'dataTab';
 
   window.onhashchange = function() {
     var tabId = anchorMap[window.location.hash];
@@ -109,14 +126,18 @@ function onLoaded() {
 function BrowserBridge() {
   // List of observers for various bits of browser state.
   this.logObservers_ = [];
-  this.proxySettingsObservers_ = [];
-  this.badProxiesObservers_ = [];
-  this.hostResolverCacheObservers_ = [];
+  this.connectionTestsObservers_ = [];
+  this.proxySettings_ = new PollableDataHelper('onProxySettingsChanged');
+  this.badProxies_ = new PollableDataHelper('onBadProxiesChanged');
+  this.httpCacheInfo_ = new PollableDataHelper('onHttpCacheInfoChanged');
+  this.hostResolverCache_ =
+      new PollableDataHelper('onHostResolverCacheChanged');
 
-  // Map from observer method name (i.e. 'onProxySettingsChanged',
-  // 'onBadProxiesChanged') to the previously received data for that type. Used
-  // to tell if the data has actually changed since we last polled it.
-  this.prevPollData_ = {};
+  // Cache of the data received.
+  // TODO(eroman): the controls to clear data in the "Requests" tab should be
+  //               affecting this as well.
+  this.passivelyCapturedEvents_ = [];
+  this.activelyCapturedEvents_ = [];
 }
 
 /**
@@ -165,17 +186,32 @@ BrowserBridge.prototype.sendClearHostResolverCache = function() {
   chrome.send('clearHostResolverCache');
 };
 
+BrowserBridge.prototype.sendStartConnectionTests = function(url) {
+  chrome.send('startConnectionTests', [url]);
+};
+
+BrowserBridge.prototype.sendGetHttpCacheInfo = function() {
+  chrome.send('getHttpCacheInfo');
+};
+
 //------------------------------------------------------------------------------
 // Messages received from the browser
 //------------------------------------------------------------------------------
 
 BrowserBridge.prototype.receivedLogEntry = function(logEntry) {
+  if (!logEntry.wasPassivelyCaptured)
+    this.activelyCapturedEvents_.push(logEntry);
   for (var i = 0; i < this.logObservers_.length; ++i)
     this.logObservers_[i].onLogEntryAdded(logEntry);
 };
 
 BrowserBridge.prototype.receivedLogEventTypeConstants = function(constantsMap) {
   LogEventType = constantsMap;
+};
+
+BrowserBridge.prototype.receivedClientInfo =
+function(info) {
+  ClientInfo = info;
 };
 
 BrowserBridge.prototype.receivedLogEventPhaseConstants =
@@ -188,25 +224,70 @@ function(constantsMap) {
   LogSourceType = constantsMap;
 };
 
+BrowserBridge.prototype.receivedLoadFlagConstants = function(constantsMap) {
+  LoadFlag = constantsMap;
+};
+
+BrowserBridge.prototype.receivedNetErrorConstants = function(constantsMap) {
+  NetError = constantsMap;
+};
+
 BrowserBridge.prototype.receivedTimeTickOffset = function(timeTickOffset) {
   this.timeTickOffset_ = timeTickOffset;
 };
 
 BrowserBridge.prototype.receivedProxySettings = function(proxySettings) {
-  this.dispatchToObserversFromPoll_(
-      this.proxySettingsObservers_, 'onProxySettingsChanged', proxySettings);
+  this.proxySettings_.update(proxySettings);
 };
 
 BrowserBridge.prototype.receivedBadProxies = function(badProxies) {
-  this.dispatchToObserversFromPoll_(
-      this.badProxiesObservers_, 'onBadProxiesChanged', badProxies);
+  this.badProxies_.update(badProxies);
 };
 
 BrowserBridge.prototype.receivedHostResolverCache =
 function(hostResolverCache) {
-  this.dispatchToObserversFromPoll_(
-      this.hostResolverCacheObservers_, 'onHostResolverCacheChanged',
-      hostResolverCache);
+  this.hostResolverCache_.update(hostResolverCache);
+};
+
+BrowserBridge.prototype.receivedPassiveLogEntries = function(entries) {
+  this.passivelyCapturedEvents_ =
+      this.passivelyCapturedEvents_.concat(entries);
+  for (var i = 0; i < entries.length; ++i) {
+    var entry = entries[i];
+    entry.wasPassivelyCaptured = true;
+    this.receivedLogEntry(entry);
+  }
+};
+
+
+BrowserBridge.prototype.receivedStartConnectionTestSuite = function() {
+  for (var i = 0; i < this.connectionTestsObservers_.length; ++i)
+    this.connectionTestsObservers_[i].onStartedConnectionTestSuite();
+};
+
+BrowserBridge.prototype.receivedStartConnectionTestExperiment = function(
+    experiment) {
+  for (var i = 0; i < this.connectionTestsObservers_.length; ++i) {
+    this.connectionTestsObservers_[i].onStartedConnectionTestExperiment(
+        experiment);
+  }
+};
+
+BrowserBridge.prototype.receivedCompletedConnectionTestExperiment =
+function(info) {
+  for (var i = 0; i < this.connectionTestsObservers_.length; ++i) {
+    this.connectionTestsObservers_[i].onCompletedConnectionTestExperiment(
+        info.experiment, info.result);
+  }
+};
+
+BrowserBridge.prototype.receivedCompletedConnectionTestSuite = function() {
+  for (var i = 0; i < this.connectionTestsObservers_.length; ++i)
+    this.connectionTestsObservers_[i].onCompletedConnectionTestSuite();
+};
+
+BrowserBridge.prototype.receivedHttpCacheInfo = function(info) {
+  this.httpCacheInfo_.update(info);
 };
 
 //------------------------------------------------------------------------------
@@ -231,7 +312,7 @@ BrowserBridge.prototype.addLogObserver = function(observer) {
  * TODO(eroman): send a dictionary instead.
  */
 BrowserBridge.prototype.addProxySettingsObserver = function(observer) {
-  this.proxySettingsObservers_.push(observer);
+  this.proxySettings_.addObserver(observer);
 };
 
 /**
@@ -246,7 +327,7 @@ BrowserBridge.prototype.addProxySettingsObserver = function(observer) {
  *                            bad. Note the time is in time ticks.
  */
 BrowserBridge.prototype.addBadProxiesObsever = function(observer) {
-  this.badProxiesObservers_.push(observer);
+  this.badProxies_.addObserver(observer);
 };
 
 /**
@@ -256,7 +337,30 @@ BrowserBridge.prototype.addBadProxiesObsever = function(observer) {
  *   observer.onHostResolverCacheChanged(hostResolverCache)
  */
 BrowserBridge.prototype.addHostResolverCacheObserver = function(observer) {
-  this.hostResolverCacheObservers_.push(observer);
+  this.hostResolverCache_.addObserver(observer);
+};
+
+/**
+ * Adds a listener for the progress of the connection tests.
+ * The observer will be called back with:
+ *
+ *   observer.onStartedConnectionTestSuite();
+ *   observer.onStartedConnectionTestExperiment(experiment);
+ *   observer.onCompletedConnectionTestExperiment(experiment, result);
+ *   observer.onCompletedConnectionTestSuite();
+ */
+BrowserBridge.prototype.addConnectionTestsObserver = function(observer) {
+  this.connectionTestsObservers_.push(observer);
+};
+
+/**
+ * Adds a listener for the http cache info results.
+ * The observer will be called back with:
+ *
+ *   observer.onHttpCacheInfoChanged(info);
+ */
+BrowserBridge.prototype.addHttpCacheInfoObserver = function(observer) {
+  this.httpCacheInfo_.addObserver(observer);
 };
 
 /**
@@ -275,6 +379,22 @@ BrowserBridge.prototype.convertTimeTicksToDate = function(timeTicks) {
   return d;
 };
 
+/**
+ * Returns a list of all the events that were captured while we were
+ * listening for events.
+ */
+BrowserBridge.prototype.getAllActivelyCapturedEvents = function() {
+  return this.activelyCapturedEvents_;
+};
+
+/**
+ * Returns a list of all the events that were captured passively by the
+ * browser prior to when the net-internals page was started.
+ */
+BrowserBridge.prototype.getAllPassivelyCapturedEvents = function() {
+  return this.passivelyCapturedEvents_;
+};
+
 BrowserBridge.prototype.doPolling_ = function() {
   // TODO(eroman): Optimize this by using a separate polling frequency for the
   // data consumed by the currently active view. Everything else can be on a low
@@ -282,6 +402,23 @@ BrowserBridge.prototype.doPolling_ = function() {
   this.sendGetProxySettings();
   this.sendGetBadProxies();
   this.sendGetHostResolverCache();
+  this.sendGetHttpCacheInfo();
+};
+
+/**
+ * This is a helper class used by BrowserBridge, to keep track of:
+ *   - the list of observers interested in some piece of data.
+ *   - the last known value of that piece of data.
+ *   - the name of the callback method to invoke on observers.
+ * @constructor
+ */
+function PollableDataHelper(observerMethodName) {
+  this.observerMethodName_ = observerMethodName;
+  this.observers_ = [];
+}
+
+PollableDataHelper.prototype.addObserver = function(observer) {
+  this.observers_.push(observer);
 };
 
 /**
@@ -289,17 +426,17 @@ BrowserBridge.prototype.doPolling_ = function() {
  * actually changed since last time. This is used for data we received from
  * browser on a poll loop.
  */
-BrowserBridge.prototype.dispatchToObserversFromPoll_ = function(
-    observerList, method, data) {
-  var prevData = this.prevPollData_[method];
+PollableDataHelper.prototype.update = function(data) {
+  var prevData = this.currentData_;
 
   // If the data hasn't changed since last time, no need to notify observers.
   if (prevData && JSON.stringify(prevData) == JSON.stringify(data))
     return;
 
-  this.prevPollData_[method] = data;
+  this.currentData_ = data;
 
   // Ok, notify the observers of the change.
-  for (var i = 0; i < observerList.length; ++i)
-    observerList[i][method](data);
+  for (var i = 0; i < this.observers_.length; ++i)
+    var observer = this.observers_[i];
+    observer[this.observerMethodName_](data);
 };

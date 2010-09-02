@@ -175,6 +175,14 @@
     c.Init(target, level, internalformat, width, height, border, imageSize);
   }
 
+  void CompressedTexImage2DBucket(
+      GLenum target, GLint level, GLenum internalformat, GLsizei width,
+      GLsizei height, GLint border, GLuint bucket_id) {
+    gles2::CompressedTexImage2DBucket& c =
+        GetCmdSpace<gles2::CompressedTexImage2DBucket>();
+    c.Init(target, level, internalformat, width, height, border, bucket_id);
+  }
+
   void CompressedTexSubImage2D(
       GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
       GLsizei height, GLenum format, GLsizei imageSize, uint32 data_shm_id,
@@ -194,6 +202,14 @@
         GetImmediateCmdSpaceTotalSize<gles2::CompressedTexSubImage2DImmediate>(
             s);
     c.Init(target, level, xoffset, yoffset, width, height, format, imageSize);
+  }
+
+  void CompressedTexSubImage2DBucket(
+      GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
+      GLsizei height, GLenum format, GLuint bucket_id) {
+    gles2::CompressedTexSubImage2DBucket& c =
+        GetCmdSpace<gles2::CompressedTexSubImage2DBucket>();
+    c.Init(target, level, xoffset, yoffset, width, height, format, bucket_id);
   }
 
   void CopyTexImage2D(
@@ -668,6 +684,12 @@
         result_shm_id, result_shm_offset);
   }
 
+  void ReleaseShaderCompiler() {
+    gles2::ReleaseShaderCompiler& c =
+        GetCmdSpace<gles2::ReleaseShaderCompiler>();
+    c.Init();
+  }
+
   void RenderbufferStorage(
       GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {
     gles2::RenderbufferStorage& c = GetCmdSpace<gles2::RenderbufferStorage>();
@@ -682,6 +704,16 @@
   void Scissor(GLint x, GLint y, GLsizei width, GLsizei height) {
     gles2::Scissor& c = GetCmdSpace<gles2::Scissor>();
     c.Init(x, y, width, height);
+  }
+
+  void ShaderBinary(
+      GLsizei n, uint32 shaders_shm_id, uint32 shaders_shm_offset,
+      GLenum binaryformat, uint32 binary_shm_id, uint32 binary_shm_offset,
+      GLsizei length) {
+    gles2::ShaderBinary& c = GetCmdSpace<gles2::ShaderBinary>();
+    c.Init(
+        n, shaders_shm_id, shaders_shm_offset, binaryformat, binary_shm_id,
+        binary_shm_offset, length);
   }
 
   void ShaderSource(
@@ -1102,6 +1134,40 @@
   void SwapBuffers() {
     gles2::SwapBuffers& c = GetCmdSpace<gles2::SwapBuffers>();
     c.Init();
+  }
+
+  void GetMaxValueInBuffer(
+      GLuint buffer_id, GLsizei count, GLenum type, GLuint offset,
+      uint32 result_shm_id, uint32 result_shm_offset) {
+    gles2::GetMaxValueInBuffer& c = GetCmdSpace<gles2::GetMaxValueInBuffer>();
+    c.Init(buffer_id, count, type, offset, result_shm_id, result_shm_offset);
+  }
+
+  void GenSharedIds(
+      GLuint namespace_id, GLuint id_offset, GLsizei n, uint32 ids_shm_id,
+      uint32 ids_shm_offset) {
+    gles2::GenSharedIds& c = GetCmdSpace<gles2::GenSharedIds>();
+    c.Init(namespace_id, id_offset, n, ids_shm_id, ids_shm_offset);
+  }
+
+  void DeleteSharedIds(
+      GLuint namespace_id, GLsizei n, uint32 ids_shm_id,
+      uint32 ids_shm_offset) {
+    gles2::DeleteSharedIds& c = GetCmdSpace<gles2::DeleteSharedIds>();
+    c.Init(namespace_id, n, ids_shm_id, ids_shm_offset);
+  }
+
+  void RegisterSharedIds(
+      GLuint namespace_id, GLsizei n, uint32 ids_shm_id,
+      uint32 ids_shm_offset) {
+    gles2::RegisterSharedIds& c = GetCmdSpace<gles2::RegisterSharedIds>();
+    c.Init(namespace_id, n, ids_shm_id, ids_shm_offset);
+  }
+
+  void CommandBufferEnable(
+      GLuint bucket_id, uint32 result_shm_id, uint32 result_shm_offset) {
+    gles2::CommandBufferEnable& c = GetCmdSpace<gles2::CommandBufferEnable>();
+    c.Init(bucket_id, result_shm_id, result_shm_offset);
   }
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_CMD_HELPER_AUTOGEN_H_

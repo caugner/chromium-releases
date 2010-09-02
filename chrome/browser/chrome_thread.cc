@@ -1,8 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chrome_thread.h"
+
+#include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 
 // Friendly names for the well-known threads.
 static const char* chrome_thread_names[ChromeThread::ID_COUNT] = {
@@ -11,11 +14,53 @@ static const char* chrome_thread_names[ChromeThread::ID_COUNT] = {
   "Chrome_WebKitThread",  // WEBKIT
   "Chrome_FileThread",  // FILE
   "Chrome_ProcessLauncherThread",  // PROCESS_LAUNCHER
+  "Chrome_CacheThread",  // CACHE
   "Chrome_IOThread",  // IO
 #if defined(USE_X11)
   "Chrome_Background_X11Thread",  // BACKGROUND_X11
 #endif
 };
+
+// An implementation of MessageLoopProxy to be used in conjunction
+// with ChromeThread.
+class ChromeThreadMessageLoopProxy : public base::MessageLoopProxy {
+ public:
+  explicit ChromeThreadMessageLoopProxy(ChromeThread::ID identifier)
+      : id_(identifier) {
+  }
+
+  // MessageLoopProxy implementation.
+  virtual bool PostTask(const tracked_objects::Location& from_here,
+                        Task* task) {
+    return ChromeThread::PostTask(id_, from_here, task);
+  }
+
+  virtual bool PostDelayedTask(const tracked_objects::Location& from_here,
+                               Task* task, int64 delay_ms) {
+    return ChromeThread::PostDelayedTask(id_, from_here, task, delay_ms);
+  }
+
+  virtual bool PostNonNestableTask(const tracked_objects::Location& from_here,
+                                   Task* task) {
+    return ChromeThread::PostNonNestableTask(id_, from_here, task);
+  }
+
+  virtual bool PostNonNestableDelayedTask(
+      const tracked_objects::Location& from_here,
+      Task* task,
+      int64 delay_ms) {
+    return ChromeThread::PostNonNestableDelayedTask(id_, from_here, task,
+                                                    delay_ms);
+  }
+  virtual bool BelongsToCurrentThread() {
+    return ChromeThread::CurrentlyOn(id_);
+  }
+
+ private:
+  ChromeThread::ID id_;
+  DISALLOW_COPY_AND_ASSIGN(ChromeThreadMessageLoopProxy);
+};
+
 
 Lock ChromeThread::lock_;
 
@@ -117,6 +162,15 @@ bool ChromeThread::GetCurrentThreadIdentifier(ID* identifier) {
   }
 
   return false;
+}
+
+// static
+scoped_refptr<base::MessageLoopProxy>
+ChromeThread::GetMessageLoopProxyForThread(
+    ID identifier) {
+  scoped_refptr<base::MessageLoopProxy> proxy =
+      new ChromeThreadMessageLoopProxy(identifier);
+  return proxy;
 }
 
 // static

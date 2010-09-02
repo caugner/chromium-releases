@@ -69,15 +69,12 @@ bool AudioRendererImpl::OnInitialize(const media::MediaFormat& media_format) {
     return false;
   }
 
-  // Create the audio output stream in browser process.
+  // Calculate the number of bytes per second using information of the stream.
   bytes_per_second_ = sample_rate_ * channels_ * sample_bits_ / 8;
-  uint32 packet_size = bytes_per_second_ * kMillisecondsPerPacket / 1000;
-  uint32 buffer_capacity = packet_size * kPacketsInBuffer;
-
   io_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(this, &AudioRendererImpl::CreateStreamTask,
-          AudioManager::AUDIO_PCM_LINEAR, channels_, sample_rate_, sample_bits_,
-          packet_size, buffer_capacity));
+          AudioManager::AUDIO_PCM_LINEAR, channels_,
+          sample_rate_, sample_bits_));
   return true;
 }
 
@@ -101,7 +98,7 @@ void AudioRendererImpl::OnReadComplete(media::Buffer* buffer_in) {
   // TODO(hclam): handle end of stream here.
 
   // Use the base class to queue the buffer.
-  AudioRendererBase::OnReadComplete(buffer_in);
+  AudioRendererBase::OnFillBufferDone(buffer_in);
 
   // Post a task to render thread to notify a packet reception.
   io_loop_->PostTask(FROM_HERE,
@@ -140,16 +137,36 @@ void AudioRendererImpl::SetPlaybackRate(float rate) {
   }
 }
 
-void AudioRendererImpl::Seek(base::TimeDelta time,
-                             media::FilterCallback* callback) {
-  AudioRendererBase::Seek(time, callback);
-
+void AudioRendererImpl::Pause(media::FilterCallback* callback) {
+  AudioRendererBase::Pause(callback);
   AutoLock auto_lock(lock_);
   if (stopped_)
     return;
 
   io_loop_->PostTask(FROM_HERE,
-    NewRunnableMethod(this, &AudioRendererImpl::SeekTask));
+      NewRunnableMethod(this, &AudioRendererImpl::PauseTask));
+}
+
+void AudioRendererImpl::Seek(base::TimeDelta time,
+                             media::FilterCallback* callback) {
+  AudioRendererBase::Seek(time, callback);
+  AutoLock auto_lock(lock_);
+  if (stopped_)
+    return;
+
+  io_loop_->PostTask(FROM_HERE,
+      NewRunnableMethod(this, &AudioRendererImpl::SeekTask));
+}
+
+
+void AudioRendererImpl::Play(media::FilterCallback* callback) {
+  AudioRendererBase::Play(callback);
+  AutoLock auto_lock(lock_);
+  if (stopped_)
+    return;
+
+  io_loop_->PostTask(FROM_HERE,
+      NewRunnableMethod(this, &AudioRendererImpl::PlayTask));
 }
 
 void AudioRendererImpl::SetVolume(float volume) {
@@ -214,7 +231,7 @@ void AudioRendererImpl::OnStateChanged(
       // TODO(hclam): We need more handling of these kind of error. For example
       // re-try creating the audio output stream on the browser side or fail
       // nicely and report to demuxer that the whole audio stream is discarded.
-      host()->BroadcastMessage(media::kMsgDisableAudio);
+      host()->DisableAudioRenderer();
       break;
     // TODO(hclam): handle these events.
     case ViewMsg_AudioStreamState_Params::kPlaying:
@@ -232,8 +249,8 @@ void AudioRendererImpl::OnVolume(double volume) {
 }
 
 void AudioRendererImpl::CreateStreamTask(
-    AudioManager::Format format, int channels, int sample_rate,
-    int bits_per_sample, uint32 packet_size, uint32 buffer_capacity) {
+    AudioManager::Format format, int channels,
+    int sample_rate, int bits_per_sample) {
   DCHECK(MessageLoop::current() == io_loop_);
 
   AutoLock auto_lock(lock_);
@@ -250,8 +267,7 @@ void AudioRendererImpl::CreateStreamTask(
   params.channels = channels;
   params.sample_rate = sample_rate;
   params.bits_per_sample = bits_per_sample;
-  params.packet_size = packet_size;
-  params.buffer_capacity = buffer_capacity;
+  params.packet_size = 0;
 
   filter_->Send(new ViewHostMsg_CreateAudioStream(0, stream_id_, params,
                                                   false));
@@ -272,6 +288,8 @@ void AudioRendererImpl::PauseTask() {
 void AudioRendererImpl::SeekTask() {
   DCHECK(MessageLoop::current() == io_loop_);
 
+  // We have to pause the audio stream before we can flush.
+  filter_->Send(new ViewHostMsg_PauseAudioStream(0, stream_id_));
   filter_->Send(new ViewHostMsg_FlushAudioStream(0, stream_id_));
 }
 
@@ -350,4 +368,3 @@ void AudioRendererImpl::WillDestroyCurrentMessageLoop() {
   stopped_ = true;
   DestroyTask();
 }
-

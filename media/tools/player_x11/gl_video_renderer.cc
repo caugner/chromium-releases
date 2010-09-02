@@ -4,21 +4,21 @@
 
 #include "media/tools/player_x11/gl_video_renderer.h"
 
-#include <dlfcn.h>
 #include <X11/Xutil.h>
-#include <X11/extensions/Xrender.h>
-#include <X11/extensions/Xcomposite.h>
 
+#include "app/gfx/gl/gl_implementation.h"
 #include "media/base/buffers.h"
+#include "media/base/video_frame.h"
 #include "media/base/yuv_convert.h"
 
 GlVideoRenderer* GlVideoRenderer::instance_ = NULL;
 
-GlVideoRenderer::GlVideoRenderer(Display* display, Window window)
+GlVideoRenderer::GlVideoRenderer(Display* display, Window window,
+                                 MessageLoop* message_loop)
     : display_(display),
       window_(window),
-      new_frame_(false),
-      gl_context_(NULL) {
+      gl_context_(NULL),
+      glx_thread_message_loop_(message_loop) {
 }
 
 GlVideoRenderer::~GlVideoRenderer() {
@@ -27,14 +27,16 @@ GlVideoRenderer::~GlVideoRenderer() {
 // static
 bool GlVideoRenderer::IsMediaFormatSupported(
     const media::MediaFormat& media_format) {
-  int width = 0;
-  int height = 0;
-  return ParseMediaFormat(media_format, &width, &height);
+  return ParseMediaFormat(media_format, NULL, NULL, NULL, NULL);
 }
 
-void GlVideoRenderer::OnStop() {
+void GlVideoRenderer::OnStop(media::FilterCallback* callback) {
   glXMakeCurrent(display_, 0, NULL);
   glXDestroyContext(display_, gl_context_);
+  if (callback) {
+    callback->Run();
+    delete callback;
+  }
 }
 
 static GLXContext InitGLContext(Display* display, Window window) {
@@ -42,13 +44,8 @@ static GLXContext InitGLContext(Display* display, Window window) {
   // dlopen/dlsym, and so linking it into chrome breaks it. So we dynamically
   // load it, and use glew to dynamically resolve symbols.
   // See http://code.google.com/p/chromium/issues/detail?id=16800
-  void* handle = dlopen("libGL.so.1", RTLD_LAZY | RTLD_GLOBAL);
-  if (!handle) {
-    LOG(ERROR) << "Could not find libGL.so.1";
-    return NULL;
-  }
-  if (glxewInit() != GLEW_OK) {
-    LOG(ERROR) << "GLXEW failed initialization";
+  if (!InitializeGLBindings(gfx::kGLImplementationDesktopGL)) {
+    LOG(ERROR) << "InitializeGLBindings failed";
     return NULL;
   }
 
@@ -72,18 +69,6 @@ static GLXContext InitGLContext(Display* display, Window window) {
   }
 
   if (!glXMakeCurrent(display, window, context)) {
-    glXDestroyContext(display, context);
-    return NULL;
-  }
-
-  if (glewInit() != GLEW_OK) {
-    LOG(ERROR) << "GLEW failed initialization";
-    glXDestroyContext(display, context);
-    return NULL;
-  }
-
-  if (!glewIsSupported("GL_VERSION_2_0")) {
-    LOG(ERROR) << "GL implementation doesn't support GL version 2.0";
     glXDestroyContext(display, context);
     return NULL;
   }
@@ -148,23 +133,18 @@ static const char kFragmentShader[] =
 static const unsigned int kErrorSize = 4096;
 
 bool GlVideoRenderer::OnInitialize(media::VideoDecoder* decoder) {
-  if (!ParseMediaFormat(decoder->media_format(), &width_, &height_))
-    return false;
-
   LOG(INFO) << "Initializing GL Renderer...";
 
   // Resize the window to fit that of the video.
-  XResizeWindow(display_, window_, width_, height_);
+  XResizeWindow(display_, window_, width(), height());
 
   gl_context_ = InitGLContext(display_, window_);
   if (!gl_context_)
     return false;
 
-  glMatrixMode(GL_MODELVIEW);
-
   // Create 3 textures, one for each plane, and bind them to different
   // texture units.
-  glGenTextures(media::VideoSurface::kNumYUVPlanes, textures_);
+  glGenTextures(media::VideoFrame::kNumYUVPlanes, textures_);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, textures_[0]);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -260,56 +240,45 @@ bool GlVideoRenderer::OnInitialize(media::VideoDecoder* decoder) {
 }
 
 void GlVideoRenderer::OnFrameAvailable() {
-  AutoLock auto_lock(lock_);
-  new_frame_ = true;
+  if (glx_thread_message_loop()) {
+    glx_thread_message_loop()->PostTask(FROM_HERE,
+        NewRunnableMethod(this, &GlVideoRenderer::Paint));
+  }
 }
 
 void GlVideoRenderer::Paint() {
-  // Use |new_frame_| to prevent overdraw since Paint() is called more
-  // often than needed. It is OK to lock only this flag and we don't
-  // want to lock the whole function because this method takes a long
-  // time to complete.
-  {
-    AutoLock auto_lock(lock_);
-    if (!new_frame_)
-      return;
-    new_frame_ = false;
-  }
-
   scoped_refptr<media::VideoFrame> video_frame;
   GetCurrentFrame(&video_frame);
 
-  if (!video_frame)
+  if (!video_frame) {
+    // TODO(jiesun): Use color fill rather than create black frame then scale.
+    PutCurrentFrame(video_frame);
     return;
+  }
 
   // Convert YUV frame to RGB.
-  media::VideoSurface frame_in;
-  if (video_frame->Lock(&frame_in)) {
-    DCHECK(frame_in.format == media::VideoSurface::YV12 ||
-           frame_in.format == media::VideoSurface::YV16);
-    DCHECK(frame_in.strides[media::VideoSurface::kUPlane] ==
-           frame_in.strides[media::VideoSurface::kVPlane]);
-    DCHECK(frame_in.planes == media::VideoSurface::kNumYUVPlanes);
+  DCHECK(video_frame->format() == media::VideoFrame::YV12 ||
+         video_frame->format() == media::VideoFrame::YV16);
+  DCHECK(video_frame->stride(media::VideoFrame::kUPlane) ==
+         video_frame->stride(media::VideoFrame::kVPlane));
+  DCHECK(video_frame->planes() == media::VideoFrame::kNumYUVPlanes);
 
-      if (glXGetCurrentContext() != gl_context_ ||
-          glXGetCurrentDrawable() != window_) {
-        glXMakeCurrent(display_, window_, gl_context_);
-      }
-      for (unsigned int i = 0; i < media::VideoSurface::kNumYUVPlanes; ++i) {
-        unsigned int width = (i == media::VideoSurface::kYPlane) ?
-            frame_in.width : frame_in.width / 2;
-        unsigned int height = (i == media::VideoSurface::kYPlane ||
-                               frame_in.format == media::VideoSurface::YV16) ?
-            frame_in.height : frame_in.height / 2;
-        glActiveTexture(GL_TEXTURE0 + i);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, frame_in.strides[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, width, height, 0,
-                     GL_LUMINANCE, GL_UNSIGNED_BYTE, frame_in.data[i]);
-      }
-    video_frame->Unlock();
-  } else {
-    NOTREACHED();
+  if (glXGetCurrentContext() != gl_context_ ||
+      glXGetCurrentDrawable() != window_) {
+    glXMakeCurrent(display_, window_, gl_context_);
   }
+  for (unsigned int i = 0; i < media::VideoFrame::kNumYUVPlanes; ++i) {
+    unsigned int width = (i == media::VideoFrame::kYPlane) ?
+        video_frame->width() : video_frame->width() / 2;
+    unsigned int height = (i == media::VideoFrame::kYPlane ||
+                           video_frame->format() == media::VideoFrame::YV16) ?
+        video_frame->height() : video_frame->height() / 2;
+    glActiveTexture(GL_TEXTURE0 + i);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, video_frame->stride(i));
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, width, height, 0,
+                 GL_LUMINANCE, GL_UNSIGNED_BYTE, video_frame->data(i));
+  }
+  PutCurrentFrame(video_frame);
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   glXSwapBuffers(display_, window_);

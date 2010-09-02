@@ -34,7 +34,6 @@
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/libjpeg/libjpeg.gyp:libjpeg',
         '../third_party/libpng/libpng.gyp:libpng',
-        '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/zlib/zlib.gyp:zlib',
       ],
       'sources': [
@@ -43,8 +42,10 @@
         'clipboard/clipboard_unittest.cc',
         'l10n_util_mac_unittest.mm',
         'l10n_util_unittest.cc',
+        'multi_animation_unittest.cc',
         'os_exchange_data_win_unittest.cc',
         'run_all_unittests.cc',
+        'slide_animation_unittest.cc',
         'sql/connection_unittest.cc',
         'sql/statement_unittest.cc',
         'sql/transaction_unittest.cc',
@@ -58,11 +59,12 @@
         '..',
       ],
       'conditions': [
-        ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
+        ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
           'sources': [
             'gtk_dnd_util_unittest.cc',
           ],
           'dependencies': [
+            'app_unittest_strings',
             '../build/linux/system.gyp:gtk',
             '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
           ],
@@ -144,6 +146,11 @@
           'action': ['<@(grit_cmd)',
                      '-i', '<(input_path)', 'build',
                      '-o', '<(grit_out_dir)/app_resources'],
+          'conditions': [
+            ['toolkit_views==1', {
+              'action': ['-D', 'toolkit_views'],
+            }],
+          ],
           'message': 'Generating resources from <(input_path)',
         },
       ],
@@ -158,6 +165,45 @@
         }],
       ],
     },
+  ],
+  'conditions': [
+    ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
+      'targets': [{
+        'target_name': 'app_unittest_strings',
+        'type': 'none',
+        'variables': {
+          'repack_path': '<(DEPTH)/tools/data_pack/repack.py',
+        },
+        'actions': [
+          {
+            'action_name': 'repack_app_unittest_strings',
+            'variables': {
+              'pak_inputs': [
+                '<(grit_out_dir)/app_strings/app_strings_en-US.pak',
+                '<(grit_out_dir)/app_locale_settings/app_locale_settings_en-US.pak',
+              ],
+            },
+            'inputs': [
+              '<(repack_path)',
+              '<@(pak_inputs)',
+            ],
+            'outputs': [
+              '<(PRODUCT_DIR)/app_unittests_strings/en-US.pak',
+            ],
+            'action': ['python', '<(repack_path)', '<@(_outputs)',
+                       '<@(pak_inputs)'],
+          },
+        ],
+        'copies': [
+          {
+            'destination': '<(PRODUCT_DIR)/app_unittests_strings',
+            'files': [
+              '<(grit_out_dir)/app_resources/app_resources.pak',
+            ],
+          },
+        ],
+      }],
+    }],
   ],
 }
 

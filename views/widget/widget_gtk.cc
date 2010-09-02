@@ -24,7 +24,101 @@
 #include "views/widget/gtk_views_fixed.h"
 #include "views/widget/root_view.h"
 #include "views/widget/tooltip_manager_gtk.h"
+#include "views/widget/widget_delegate.h"
 #include "views/window/window_gtk.h"
+
+namespace {
+
+// g_object data keys to associate a WidgetGtk object to a GtkWidget.
+const char* kWidgetKey = "__VIEWS_WIDGET__";
+const wchar_t* kWidgetWideKey = L"__VIEWS_WIDGET__";
+// A g_object data key to associate a CompositePainter object to a GtkWidget.
+const char* kCompositePainterKey = "__VIEWS_COMPOSITE_PAINTER__";
+// A g_object data key to associate the flag whether or not the widget
+// is composited to a GtkWidget. gtk_widget_is_composited simply tells
+// if x11 supports composition and cannot be used to tell if given widget
+// is composited.
+const char* kCompositeEnabledKey = "__VIEWS_COMPOSITE_ENABLED__";
+
+// CompositePainter draws a composited child widgets image into its
+// drawing area. This object is created at most once for a widget and kept
+// until the widget is destroyed.
+class CompositePainter {
+ public:
+  explicit CompositePainter(GtkWidget* parent)
+      : parent_object_(G_OBJECT(parent)) {
+    handler_id_ = g_signal_connect_after(
+        parent_object_, "expose_event", G_CALLBACK(OnCompositePaint), NULL);
+  }
+
+  static void AddCompositePainter(GtkWidget* widget) {
+    CompositePainter* painter = static_cast<CompositePainter*>(
+        g_object_get_data(G_OBJECT(widget), kCompositePainterKey));
+    if (!painter) {
+      g_object_set_data(G_OBJECT(widget), kCompositePainterKey,
+                        new CompositePainter(widget));
+      g_signal_connect(widget, "destroy",
+                       G_CALLBACK(&DestroyPainter), NULL);
+    }
+  }
+
+  // Set the composition flag.
+  static void SetComposited(GtkWidget* widget) {
+    g_object_set_data(G_OBJECT(widget), kCompositeEnabledKey,
+                      const_cast<char*>(""));
+  }
+
+  // Returns true if the |widget| is composited and ready to be drawn.
+  static bool IsComposited(GtkWidget* widget) {
+    return g_object_get_data(G_OBJECT(widget), kCompositeEnabledKey) != NULL;
+  }
+
+ private:
+  virtual ~CompositePainter() {}
+
+  // Composes a image from one child.
+  static void CompositeChildWidget(GtkWidget* child, gpointer data) {
+    GdkEventExpose* event = static_cast<GdkEventExpose*>(data);
+    GtkWidget* parent = gtk_widget_get_parent(child);
+    DCHECK(parent);
+    if (IsComposited(child)) {
+      cairo_t* cr = gdk_cairo_create(parent->window);
+      gdk_cairo_set_source_pixmap(cr, child->window,
+                                  child->allocation.x,
+                                  child->allocation.y);
+      GdkRegion* region = gdk_region_rectangle(&child->allocation);
+      gdk_region_intersect(region, event->region);
+      gdk_cairo_region(cr, region);
+      cairo_clip(cr);
+      cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+      cairo_paint(cr);
+      cairo_destroy(cr);
+    }
+  }
+
+  // Expose-event handler that compose & draws children's image into
+  // the |parent|'s drawing area.
+  static gboolean OnCompositePaint(GtkWidget* parent, GdkEventExpose* event) {
+    gtk_container_foreach(GTK_CONTAINER(parent),
+                          CompositeChildWidget,
+                          event);
+    return false;
+  }
+
+  static void DestroyPainter(GtkWidget* object) {
+    CompositePainter* painter = reinterpret_cast<CompositePainter*>(
+        g_object_get_data(G_OBJECT(object), kCompositePainterKey));
+    DCHECK(painter);
+    delete painter;
+  }
+
+  GObject* parent_object_;
+  gulong handler_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(CompositePainter);
+};
+
+}  // namespace
 
 namespace views {
 
@@ -63,9 +157,6 @@ class WidgetGtk::DropObserver : public MessageLoopForUI::Observer {
   DISALLOW_COPY_AND_ASSIGN(DropObserver);
 };
 
-static const char* kWidgetKey = "__VIEWS_WIDGET__";
-static const wchar_t* kWidgetWideKey = L"__VIEWS_WIDGET__";
-
 // Returns the position of a widget on screen.
 static void GetWidgetPositionOnScreen(GtkWidget* widget, int* x, int *y) {
   // First get the root window.
@@ -88,6 +179,43 @@ static void GetWidgetPositionOnScreen(GtkWidget* widget, int* x, int *y) {
   *y += window_y;
 }
 
+// "expose-event" handler of drag icon widget that renders drag image pixbuf.
+static gboolean DragIconWidgetPaint(GtkWidget* widget,
+                                    GdkEventExpose* event,
+                                    gpointer data) {
+  GdkPixbuf* pixbuf = reinterpret_cast<GdkPixbuf*>(data);
+
+  cairo_t* cr = gdk_cairo_create(widget->window);
+
+  gdk_cairo_region(cr, event->region);
+  cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+  gdk_cairo_set_source_pixbuf(cr, pixbuf, 0.0, 0.0);
+  cairo_paint(cr);
+
+  cairo_destroy(cr);
+  return true;
+}
+
+// Creates a drag icon widget that draws drag_image.
+static GtkWidget* CreateDragIconWidget(GdkPixbuf* drag_image) {
+  GdkColormap* rgba_colormap =
+      gdk_screen_get_rgba_colormap(gdk_screen_get_default());
+  if (!rgba_colormap)
+    return NULL;
+
+  GtkWidget* drag_widget = gtk_window_new(GTK_WINDOW_POPUP);
+
+  gtk_widget_set_colormap(drag_widget, rgba_colormap);
+  gtk_widget_set_app_paintable(drag_widget, true);
+  gtk_widget_set_size_request(drag_widget,
+                              gdk_pixbuf_get_width(drag_image),
+                              gdk_pixbuf_get_height(drag_image));
+
+  g_signal_connect(G_OBJECT(drag_widget), "expose-event",
+                   G_CALLBACK(&DragIconWidgetPaint), drag_image);
+  return drag_widget;
+}
+
 // static
 GtkWidget* WidgetGtk::null_parent_ = NULL;
 
@@ -99,6 +227,7 @@ WidgetGtk::WidgetGtk(Type type)
       type_(type),
       widget_(NULL),
       window_contents_(NULL),
+      focus_manager_(NULL),
       is_mouse_down_(false),
       has_capture_(false),
       last_mouse_event_was_move_(false),
@@ -115,7 +244,8 @@ WidgetGtk::WidgetGtk(Type type)
       got_initial_focus_in_(false),
       has_focus_(false),
       delegate_(NULL),
-      always_on_top_(false) {
+      always_on_top_(false),
+      is_double_buffered_(false) {
   static bool installed_message_loop_observer = false;
   if (!installed_message_loop_observer) {
     installed_message_loop_observer = true;
@@ -125,14 +255,23 @@ WidgetGtk::WidgetGtk(Type type)
   }
 
   if (type_ != TYPE_CHILD)
-    focus_manager_.reset(new FocusManager(this));
+    focus_manager_ = new FocusManager(this);
 }
 
 WidgetGtk::~WidgetGtk() {
   DCHECK(delete_on_destroy_ || widget_ == NULL);
   if (type_ != TYPE_CHILD)
     ActiveWindowWatcherX::RemoveObserver(this);
-  MessageLoopForUI::current()->RemoveObserver(this);
+
+  // Defer focus manager's destruction. This is for the case when the
+  // focus manager is referenced by a child WidgetGtk (e.g. TabbedPane in a
+  // dialog). When gtk_widget_destroy is called on the parent, the destroy
+  // signal reaches parent first and then the child. Thus causing the parent
+  // WidgetGtk's dtor executed before the child's. If child's view hierarchy
+  // references this focus manager, it crashes. This will defer focus manager's
+  // destruction after child WidgetGtk's dtor.
+  if (focus_manager_)
+    MessageLoop::current()->DeleteSoon(FROM_HERE, focus_manager_);
 }
 
 GtkWindow* WidgetGtk::GetTransientParent() const {
@@ -141,9 +280,8 @@ GtkWindow* WidgetGtk::GetTransientParent() const {
 }
 
 bool WidgetGtk::MakeTransparent() {
-  // Transparency can only be enabled for windows/popups and only if we haven't
-  // realized the widget.
-  DCHECK(!widget_ && type_ != TYPE_CHILD);
+  // Transparency can only be enabled only if we haven't realized the widget.
+  DCHECK(!widget_);
 
   if (!gdk_screen_is_composited(gdk_screen_get_default())) {
     // Transparency is only supported for compositing window managers.
@@ -160,6 +298,16 @@ bool WidgetGtk::MakeTransparent() {
 
   transparent_ = true;
   return true;
+}
+
+void WidgetGtk::EnableDoubleBuffer(bool enabled) {
+  is_double_buffered_ = enabled;
+  if (window_contents_) {
+    if (is_double_buffered_)
+      GTK_WIDGET_SET_FLAGS(window_contents_, GTK_DOUBLE_BUFFERED);
+    else
+      GTK_WIDGET_UNSET_FLAGS(window_contents_, GTK_DOUBLE_BUFFERED);
+  }
 }
 
 bool WidgetGtk::MakeIgnoreEvents() {
@@ -212,12 +360,27 @@ void WidgetGtk::DoDrag(const OSExchangeData& data, int operation) {
       1,
       current_event);
 
+  GtkWidget* drag_icon_widget = NULL;
+
   // Set the drag image if one was supplied.
-  if (provider.drag_image())
-    gtk_drag_set_icon_pixbuf(context,
-                             provider.drag_image(),
-                             provider.cursor_offset().x(),
-                             provider.cursor_offset().y());
+  if (provider.drag_image()) {
+    drag_icon_widget = CreateDragIconWidget(provider.drag_image());
+    if (drag_icon_widget) {
+      // Use a widget as the drag icon when compositing is enabled for proper
+      // transparency handling.
+      g_object_ref(provider.drag_image());
+      gtk_drag_set_icon_widget(context,
+                               drag_icon_widget,
+                               provider.cursor_offset().x(),
+                               provider.cursor_offset().y());
+    } else {
+      gtk_drag_set_icon_pixbuf(context,
+                               provider.drag_image(),
+                               provider.cursor_offset().x(),
+                               provider.cursor_offset().y());
+    }
+  }
+
   if (current_event)
     gdk_event_free(current_event);
   gtk_target_list_unref(targets);
@@ -228,6 +391,11 @@ void WidgetGtk::DoDrag(const OSExchangeData& data, int operation) {
   MessageLoopForUI::current()->Run(NULL);
 
   drag_data_ = NULL;
+
+  if (drag_icon_widget) {
+    gtk_widget_destroy(drag_icon_widget);
+    g_object_unref(provider.drag_image());
+  }
 }
 
 void WidgetGtk::SetFocusTraversableParent(FocusTraversable* parent) {
@@ -238,15 +406,14 @@ void WidgetGtk::SetFocusTraversableParentView(View* parent_view) {
   root_view_->SetFocusTraversableParentView(parent_view);
 }
 
-// static
-WidgetGtk* WidgetGtk::GetViewForNative(GtkWidget* widget) {
-  return static_cast<WidgetGtk*>(GetWidgetFromNativeView(widget));
+void WidgetGtk::IsActiveChanged() {
+  if (GetWidgetDelegate())
+    GetWidgetDelegate()->IsActiveChanged(IsActive());
 }
 
 // static
-WindowGtk* WidgetGtk::GetWindowForNative(GtkWidget* widget) {
-  gpointer user_data = g_object_get_data(G_OBJECT(widget), "chrome-window");
-  return static_cast<WindowGtk*>(user_data);
+WidgetGtk* WidgetGtk::GetViewForNative(GtkWidget* widget) {
+  return static_cast<WidgetGtk*>(GetWidgetFromNativeView(widget));
 }
 
 void WidgetGtk::ResetDropTarget() {
@@ -287,6 +454,21 @@ void WidgetGtk::ActiveWindowChanged(GdkWindow* active_window) {
 ////////////////////////////////////////////////////////////////////////////////
 // WidgetGtk, Widget implementation:
 
+void WidgetGtk::InitWithWidget(Widget* parent,
+                               const gfx::Rect& bounds) {
+  WidgetGtk* parent_gtk = static_cast<WidgetGtk*>(parent);
+  GtkWidget* native_parent = NULL;
+  if (parent != NULL) {
+    if (type_ != TYPE_CHILD) {
+      // window's parent has to be window.
+      native_parent = parent_gtk->GetNativeView();
+    } else {
+      native_parent = parent_gtk->window_contents();
+    }
+  }
+  Init(native_parent, bounds);
+}
+
 void WidgetGtk::Init(GtkWidget* parent,
                      const gfx::Rect& bounds) {
   if (type_ != TYPE_CHILD)
@@ -318,10 +500,11 @@ void WidgetGtk::Init(GtkWidget* parent,
                         GDK_KEY_RELEASE_MASK);
   SetRootViewForWidget(widget_, root_view_.get());
 
-  MessageLoopForUI::current()->AddObserver(this);
-
+  g_signal_connect_after(G_OBJECT(window_contents_), "size_request",
+                         G_CALLBACK(&OnSizeRequestThunk), this);
   g_signal_connect_after(G_OBJECT(window_contents_), "size_allocate",
                          G_CALLBACK(&OnSizeAllocateThunk), this);
+  gtk_widget_set_app_paintable(window_contents_, true);
   g_signal_connect(window_contents_, "expose_event",
                    G_CALLBACK(&OnPaintThunk), this);
   g_signal_connect(window_contents_, "enter_notify_event",
@@ -365,10 +548,6 @@ void WidgetGtk::Init(GtkWidget* parent,
                    G_CALLBACK(&OnKeyPressThunk), this);
   g_signal_connect(widget_, "key_release_event",
                    G_CALLBACK(&OnKeyReleaseThunk), this);
-  if (transparent_) {
-    g_signal_connect(widget_, "expose_event",
-                     G_CALLBACK(&OnWindowPaintThunk), this);
-  }
 
   // Drag and drop.
   gtk_drag_dest_set(window_contents_, static_cast<GtkDestDefaults>(0),
@@ -397,9 +576,7 @@ void WidgetGtk::Init(GtkWidget* parent,
 
   if (type_ == TYPE_CHILD) {
     if (parent) {
-      WidgetGtk* parent_widget = GetViewForNative(parent);
-      parent_widget->PositionChild(widget_, bounds.x(), bounds.y(),
-                                   bounds.width(), bounds.height());
+      SetBounds(bounds);
     }
   } else {
     if (bounds.width() > 0 && bounds.height() > 0)
@@ -444,15 +621,31 @@ void WidgetGtk::GetBounds(gfx::Rect* out, bool including_frame) const {
 
 void WidgetGtk::SetBounds(const gfx::Rect& bounds) {
   if (type_ == TYPE_CHILD) {
-    WidgetGtk* parent_widget = GetViewForNative(gtk_widget_get_parent(widget_));
-    parent_widget->PositionChild(widget_, bounds.x(), bounds.y(),
-                                 bounds.width(), bounds.height());
-  } else if (GTK_WIDGET_MAPPED(widget_)) {
-    // If the widget is mapped (on screen), we can move and resize with one
-    // call, which avoids two separate window manager steps.
-    gdk_window_move_resize(widget_->window, bounds.x(), bounds.y(),
-                           bounds.width(), bounds.height());
+    GtkWidget* parent = gtk_widget_get_parent(widget_);
+    if (GTK_IS_VIEWS_FIXED(parent)) {
+      WidgetGtk* parent_widget = GetViewForNative(parent);
+      parent_widget->PositionChild(widget_, bounds.x(), bounds.y(),
+                                   bounds.width(), bounds.height());
+    } else {
+      DCHECK(GTK_IS_FIXED(parent))
+          << "Parent of WidgetGtk has to be Fixed or ViewsFixed";
+      // Just request the size if the parent is not WidgetGtk but plain
+      // GtkFixed. WidgetGtk does not know the minimum size so we assume
+      // the caller of the SetBounds knows exactly how big it wants to be.
+      gtk_widget_set_size_request(widget_, bounds.width(), bounds.height());
+      if (parent != null_parent_)
+        gtk_fixed_move(GTK_FIXED(parent), widget_, bounds.x(), bounds.y());
+    }
   } else {
+    if (GTK_WIDGET_MAPPED(widget_)) {
+      // If the widget is mapped (on screen), we can move and resize with one
+      // call, which avoids two separate window manager steps.
+      gdk_window_move_resize(widget_->window, bounds.x(), bounds.y(),
+                             bounds.width(), bounds.height());
+    }
+
+    // Always call gtk_window_move and gtk_window_resize so that GtkWindow's
+    // geometry info is up-to-date.
     GtkWindow* gtk_window = GTK_WINDOW(widget_);
     // TODO: this may need to set an initial size if not showing.
     // TODO: need to constrain based on screen size.
@@ -525,7 +718,7 @@ void WidgetGtk::PaintNow(const gfx::Rect& update_rect) {
     gtk_widget_queue_draw_area(widget_, update_rect.x(), update_rect.y(),
                                update_rect.width(), update_rect.height());
     // Force the paint to occur now.
-    AutoReset auto_reset_in_paint_now(&in_paint_now_, true);
+    AutoReset<bool> auto_reset_in_paint_now(&in_paint_now_, true);
     gdk_window_process_updates(widget_->window, true);
   }
 }
@@ -613,8 +806,8 @@ ThemeProvider* WidgetGtk::GetDefaultThemeProvider() const {
 }
 
 FocusManager* WidgetGtk::GetFocusManager() {
-  if (focus_manager_.get())
-    return focus_manager_.get();
+  if (focus_manager_)
+    return focus_manager_;
 
   Widget* root = GetRootWidget();
   if (root && root != this) {
@@ -638,29 +831,10 @@ bool WidgetGtk::ContainsNativeView(gfx::NativeView native_view) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// WidgetGtk, MessageLoopForUI::Observer implementation:
-
-void WidgetGtk::WillProcessEvent(GdkEvent* event) {
-}
-
-void WidgetGtk::DidProcessEvent(GdkEvent* event) {
-  if (root_view_->NeedsPainting(true))
-    PaintNow(root_view_->GetScheduledPaintRect());
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // WidgetGtk, FocusTraversable implementation:
 
-View* WidgetGtk::FindNextFocusableView(
-    View* starting_view, bool reverse, Direction direction,
-    bool check_starting_view, FocusTraversable** focus_traversable,
-    View** focus_traversable_view) {
-  return root_view_->FindNextFocusableView(starting_view,
-                                           reverse,
-                                           direction,
-                                           check_starting_view,
-                                           focus_traversable,
-                                           focus_traversable_view);
+FocusSearch* WidgetGtk::GetFocusSearch() {
+  return root_view_->GetFocusSearch();
 }
 
 FocusTraversable* WidgetGtk::GetFocusTraversableParent() {
@@ -675,6 +849,15 @@ View* WidgetGtk::GetFocusTraversableParentView() {
   // up and as a result this should not be called.
   NOTREACHED();
   return NULL;
+}
+
+void WidgetGtk::ClearNativeFocus() {
+  DCHECK(type_ != TYPE_CHILD);
+  if (!GetNativeView()) {
+    NOTREACHED();
+    return;
+  }
+  gtk_window_set_focus(GTK_WINDOW(GetNativeView()), NULL);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -702,6 +885,18 @@ int WidgetGtk::GetFlagsForEventButton(const GdkEventButton& event) {
   return flags;
 }
 
+void WidgetGtk::OnSizeRequest(GtkWidget* widget, GtkRequisition* requisition) {
+  // Do only return the preferred size for child windows. GtkWindow interprets
+  // the requisition as a minimum size for top level windows, returning a
+  // preferred size for these would prevents us from setting smaller window
+  // sizes.
+  if (type_ == TYPE_CHILD) {
+    gfx::Size size(root_view_->GetPreferredSize());
+    requisition->width = size.width();
+    requisition->height = size.height();
+  }
+}
+
 void WidgetGtk::OnSizeAllocate(GtkWidget* widget, GtkAllocation* allocation) {
   // See comment next to size_ as to why we do this. Also note, it's tempting
   // to put this in the static method so subclasses don't need to worry about
@@ -716,6 +911,15 @@ void WidgetGtk::OnSizeAllocate(GtkWidget* widget, GtkAllocation* allocation) {
 }
 
 gboolean WidgetGtk::OnPaint(GtkWidget* widget, GdkEventExpose* event) {
+  if (transparent_ && type_ == TYPE_CHILD) {
+    // Clear the background before drawing any view and native components.
+    DrawTransparentBackground(widget, event);
+    if (!CompositePainter::IsComposited(widget_)) {
+      // Let the parent draw the content only after something is drawn on
+      // the widget.
+      CompositePainter::SetComposited(widget_);
+    }
+  }
   root_view_->OnPaint(event);
   return false;  // False indicates other widgets should get the event as well.
 }
@@ -798,6 +1002,12 @@ gboolean WidgetGtk::OnEnterNotify(GtkWidget* widget, GdkEventCrossing* event) {
   if (last_mouse_event_was_move_ && last_mouse_move_x_ == event->x_root &&
       last_mouse_move_y_ == event->y_root) {
     // Don't generate a mouse event for the same location as the last.
+    return false;
+  }
+
+  if (has_capture_ && event->mode == GDK_CROSSING_GRAB) {
+    // Doing a grab results an async enter event, regardless of where the mouse
+    // is. We don't want to generate a mouse move in this case.
     return false;
   }
 
@@ -932,6 +1142,9 @@ gboolean WidgetGtk::OnGrabBrokeEvent(GtkWidget* widget, GdkEvent* event) {
 }
 
 void WidgetGtk::OnGrabNotify(GtkWidget* widget, gboolean was_grabbed) {
+  if (!window_contents_)
+    return;  // Grab broke after window destroyed, don't try processing it.
+
   gtk_grab_remove(window_contents_);
   HandleGrabBroke();
 }
@@ -964,9 +1177,13 @@ void WidgetGtk::ReleaseGrab() {
   }
 }
 
-// static
-void WidgetGtk::SetWindowForNative(GtkWidget* widget, WindowGtk* window) {
-  g_object_set_data(G_OBJECT(widget), "chrome-window", window);
+void WidgetGtk::HandleGrabBroke() {
+  if (has_capture_) {
+    if (is_mouse_down_)
+      root_view_->ProcessMouseDragCanceled();
+    is_mouse_down_ = false;
+    has_capture_ = false;
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -977,22 +1194,10 @@ RootView* WidgetGtk::CreateRootView() {
 }
 
 gboolean WidgetGtk::OnWindowPaint(GtkWidget* widget, GdkEventExpose* event) {
-  // NOTE: for reasons I don't understand this code is never hit. It should
-  // be hit when transparent_, but we never get the expose-event for the
-  // window in this case, even though a stand alone test case triggers it. I'm
-  // leaving it in just in case.
-
-  // Fill the background totally transparent. We don't need to paint the root
-  // view here as that is done by OnPaint.
+  // Clear the background to be totally transparent. We don't need to
+  // paint the root view here as that is done by OnPaint.
   DCHECK(transparent_);
-  int width, height;
-  gtk_window_get_size(GTK_WINDOW(widget), &width, &height);
-  cairo_t* cr = gdk_cairo_create(widget->window);
-  cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-  cairo_set_source_rgba(cr, 0, 0, 0, 0);
-  cairo_rectangle(cr, 0, 0, width, height);
-  cairo_fill(cr);
-  cairo_destroy(cr);
+  DrawTransparentBackground(widget, event);
   return false;
 }
 
@@ -1011,7 +1216,8 @@ bool WidgetGtk::ProcessMousePressed(GdkEventButton* event) {
 
   // An event may come from a contained widget which has its own gdk window.
   // Translate it to the widget's coordinates.
-  int x, y;
+  int x = 0;
+  int y = 0;
   GetContainedWidgetEventCoordinates(event, &x, &y);
   last_mouse_event_was_move_ = false;
   MouseEvent mouse_pressed(Event::ET_MOUSE_PRESSED, x, y,
@@ -1105,7 +1311,8 @@ void WidgetGtk::CreateGtkWidget(GtkWidget* parent, const gfx::Rect& bounds) {
   if (type_ == TYPE_CHILD) {
     window_contents_ = widget_ = gtk_views_fixed_new();
     gtk_widget_set_name(widget_, "views-gtkwidget-child-fixed");
-    GTK_WIDGET_UNSET_FLAGS(widget_, GTK_DOUBLE_BUFFERED);
+    if (!is_double_buffered_)
+      GTK_WIDGET_UNSET_FLAGS(widget_, GTK_DOUBLE_BUFFERED);
     gtk_fixed_set_has_window(GTK_FIXED(widget_), true);
     if (!parent && !null_parent_) {
       GtkWidget* popup = gtk_window_new(GTK_WINDOW_POPUP);
@@ -1114,7 +1321,20 @@ void WidgetGtk::CreateGtkWidget(GtkWidget* parent, const gfx::Rect& bounds) {
       gtk_container_add(GTK_CONTAINER(popup), null_parent_);
       gtk_widget_realize(null_parent_);
     }
+    if (transparent_) {
+      // transparency has to be configured before widget is realized.
+      DCHECK(parent) << "Transparent widget must have parent when initialized";
+      ConfigureWidgetForTransparentBackground(parent);
+    }
     gtk_container_add(GTK_CONTAINER(parent ? parent : null_parent_), widget_);
+    gtk_widget_realize(widget_);
+    if (transparent_) {
+      // The widget has to be realized to set composited flag.
+      // I tried "realize" signal to set this flag, but it did not work
+      // when the top level is popup.
+      DCHECK(GTK_WIDGET_REALIZED(widget_));
+      gdk_window_set_composited(widget_->window, true);
+    }
   } else {
     widget_ = gtk_window_new(
         (type_ == TYPE_WINDOW || type_ == TYPE_DECORATED_WINDOW) ?
@@ -1136,11 +1356,11 @@ void WidgetGtk::CreateGtkWidget(GtkWidget* parent, const gfx::Rect& bounds) {
       // We'll take care of positioning our window.
       gtk_window_set_position(GTK_WINDOW(widget_), GTK_WIN_POS_NONE);
     }
-    SetWindowForNative(widget_, static_cast<WindowGtk*>(this));
 
     window_contents_ = gtk_views_fixed_new();
     gtk_widget_set_name(window_contents_, "views-gtkwidget-window-fixed");
-    GTK_WIDGET_UNSET_FLAGS(window_contents_, GTK_DOUBLE_BUFFERED);
+    if (!is_double_buffered_)
+      GTK_WIDGET_UNSET_FLAGS(window_contents_, GTK_DOUBLE_BUFFERED);
     gtk_fixed_set_has_window(GTK_FIXED(window_contents_), true);
     gtk_container_add(GTK_CONTAINER(widget_), window_contents_);
     gtk_widget_show(window_contents_);
@@ -1148,27 +1368,26 @@ void WidgetGtk::CreateGtkWidget(GtkWidget* parent, const gfx::Rect& bounds) {
                       static_cast<Widget*>(this));
 
     if (transparent_)
-      ConfigureWidgetForTransparentBackground();
+      ConfigureWidgetForTransparentBackground(NULL);
 
     if (ignore_events_)
       ConfigureWidgetForIgnoreEvents();
 
     SetAlwaysOnTop(always_on_top_);
+    // The widget needs to be realized before handlers like size-allocate can
+    // function properly.
+    gtk_widget_realize(widget_);
   }
-
-  // The widget needs to be realized before handlers like size-allocate can
-  // function properly.
-  gtk_widget_realize(widget_);
-
-  // Associate this object with the widget.
+  // Setting the WidgetKey property to widget_, which is used by
+  // GetWidgetFromNativeWindow.
   SetNativeWindowProperty(kWidgetWideKey, this);
 }
 
-void WidgetGtk::ConfigureWidgetForTransparentBackground() {
-  DCHECK(widget_ && window_contents_ && widget_ != window_contents_);
+void WidgetGtk::ConfigureWidgetForTransparentBackground(GtkWidget* parent) {
+  DCHECK(widget_ && window_contents_);
 
   GdkColormap* rgba_colormap =
-      gdk_screen_get_rgba_colormap(gdk_screen_get_default());
+      gdk_screen_get_rgba_colormap(gtk_widget_get_screen(widget_));
   if (!rgba_colormap) {
     transparent_ = false;
     return;
@@ -1177,19 +1396,21 @@ void WidgetGtk::ConfigureWidgetForTransparentBackground() {
   // on both the window and fixed. In addition we need to make sure no
   // decorations are drawn. The last bit is to make sure the widget doesn't
   // attempt to draw a pixmap in it's background.
-  gtk_widget_set_colormap(widget_, rgba_colormap);
-  gtk_widget_set_app_paintable(widget_, true);
-  gtk_widget_realize(widget_);
-  gdk_window_set_decorations(widget_->window,
-                             static_cast<GdkWMDecoration>(0));
-  // Widget must be realized before setting pixmap.
-  gdk_window_set_back_pixmap(widget_->window, NULL, FALSE);
-
+  if (type_ != TYPE_CHILD) {
+    DCHECK(parent == NULL);
+    gtk_widget_set_colormap(widget_, rgba_colormap);
+    gtk_widget_set_app_paintable(widget_, true);
+    g_signal_connect(widget_, "expose_event",
+                     G_CALLBACK(&OnWindowPaintThunk), this);
+    gtk_widget_realize(widget_);
+    gdk_window_set_decorations(widget_->window,
+                               static_cast<GdkWMDecoration>(0));
+  } else {
+    DCHECK(parent);
+    CompositePainter::AddCompositePainter(parent);
+  }
+  DCHECK(!GTK_WIDGET_REALIZED(window_contents_));
   gtk_widget_set_colormap(window_contents_, rgba_colormap);
-  gtk_widget_set_app_paintable(window_contents_, true);
-  gtk_widget_realize(window_contents_);
-  // Widget must be realized before setting pixmap.
-  gdk_window_set_back_pixmap(window_contents_->window, NULL, FALSE);
 }
 
 void WidgetGtk::ConfigureWidgetForIgnoreEvents() {
@@ -1212,15 +1433,14 @@ void WidgetGtk::ConfigureWidgetForIgnoreEvents() {
       0);
 }
 
-void WidgetGtk::HandleGrabBroke() {
-  if (has_capture_) {
-    if (is_mouse_down_)
-      root_view_->ProcessMouseDragCanceled();
-    is_mouse_down_ = false;
-    has_capture_ = false;
-  }
+void WidgetGtk::DrawTransparentBackground(GtkWidget* widget,
+                                          GdkEventExpose* event) {
+  cairo_t* cr = gdk_cairo_create(widget->window);
+  cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+  gdk_cairo_region(cr, event->region);
+  cairo_fill(cr);
+  cairo_destroy(cr);
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // Widget, public:
@@ -1317,6 +1537,19 @@ Widget* Widget::GetWidgetFromNativeWindow(gfx::NativeWindow native_window) {
   if (raw_widget)
     return reinterpret_cast<Widget*>(raw_widget);
   return NULL;
+}
+
+// static
+void Widget::NotifyLocaleChanged() {
+  GList *window_list = gtk_window_list_toplevels();
+  for (GList* element = window_list; element; element = g_list_next(element)) {
+    GtkWindow* window = GTK_WINDOW(element->data);
+    DCHECK(window);
+    RootView *root_view = FindRootView(window);
+    if (root_view)
+      root_view->NotifyLocaleChanged();
+  }
+  g_list_free(window_list);
 }
 
 }  // namespace views

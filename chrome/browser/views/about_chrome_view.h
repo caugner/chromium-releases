@@ -24,6 +24,7 @@ class Throbber;
 class Window;
 }
 
+class AccessibleViewHelper;
 class Profile;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -62,6 +63,7 @@ class AboutChromeView : public views::View,
       MessageBoxFlags::DialogButton button) const;
   virtual bool IsDialogButtonVisible(
       MessageBoxFlags::DialogButton button) const;
+  virtual int GetDefaultDialogButton() const;
   virtual bool CanResize() const;
   virtual bool CanMaximize() const;
   virtual bool IsAlwaysOnTop() const;
@@ -168,6 +170,8 @@ class AboutChromeView : public views::View,
   // Used to request the version.
   CancelableRequestConsumer consumer_;
 #endif
+
+  scoped_ptr<AccessibleViewHelper> accessible_view_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(AboutChromeView);
 };

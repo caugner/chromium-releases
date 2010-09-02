@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "app/resource_bundle.h"
 #include "base/logging.h"
 #include "base/stl_util-inl.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/font.h"
 #include "gfx/native_theme_win.h"
 #include "views/controls/tabbed_pane/tabbed_pane.h"
@@ -36,14 +36,72 @@ class TabBackground : public Background {
   virtual ~TabBackground() {}
 
   virtual void Paint(gfx::Canvas* canvas, View* view) const {
-    HDC dc = canvas->beginPlatformPaint();
+    HDC dc = canvas->BeginPlatformPaint();
     RECT r = {0, 0, view->width(), view->height()};
     gfx::NativeTheme::instance()->PaintTabPanelBackground(dc, &r);
-    canvas->endPlatformPaint();
+    canvas->EndPlatformPaint();
   }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TabBackground);
+};
+
+// Custom layout manager that takes care of sizing and displaying the tab pages.
+class TabLayout : public LayoutManager {
+ public:
+  TabLayout() {}
+
+  // Switches to the tab page identified by the given index.
+  void SwitchToPage(View* host, View* page) {
+    for (int i = 0; i < host->GetChildViewCount(); ++i) {
+      View* child = host->GetChildViewAt(i);
+      // The child might not have been laid out yet.
+      if (child == page)
+        child->SetBounds(gfx::Rect(host->size()));
+      child->SetVisible(child == page);
+    }
+
+    FocusManager* focus_manager = page->GetFocusManager();
+    DCHECK(focus_manager);
+    View* focused_view = focus_manager->GetFocusedView();
+    if (focused_view && host->IsParentOf(focused_view) &&
+        !page->IsParentOf(focused_view))
+      focus_manager->SetFocusedView(page);
+  }
+
+ private:
+  // LayoutManager overrides:
+  virtual void Layout(View* host) {
+    gfx::Rect bounds(host->size());
+    for (int i = 0; i < host->GetChildViewCount(); ++i) {
+      View* child = host->GetChildViewAt(i);
+      // We only layout visible children, since it may be expensive.
+      if (child->IsVisible() && child->bounds() != bounds)
+        child->SetBounds(bounds);
+    }
+  }
+
+  virtual gfx::Size GetPreferredSize(View* host) {
+    // First, query the preferred sizes to determine a good width.
+    int width = 0;
+    for (int i = 0; i < host->GetChildViewCount(); ++i) {
+      View* page = host->GetChildViewAt(i);
+      width = std::max(width, page->GetPreferredSize().width());
+    }
+    // After we know the width, decide on the height.
+    return gfx::Size(width, GetPreferredHeightForWidth(host, width));
+  }
+
+  virtual int GetPreferredHeightForWidth(View* host, int width) {
+    int height = 0;
+    for (int i = 0; i < host->GetChildViewCount(); ++i) {
+      View* page = host->GetChildViewAt(i);
+      height = std::max(height, page->GetHeightForWidth(width));
+    }
+    return height;
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(TabLayout);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -52,6 +110,7 @@ class TabBackground : public Background {
 NativeTabbedPaneWin::NativeTabbedPaneWin(TabbedPane* tabbed_pane)
     : NativeControlWin(),
       tabbed_pane_(tabbed_pane),
+      tab_layout_manager_(NULL),
       content_window_(NULL),
       selected_index_(-1) {
   // Associates the actual HWND with the tabbed-pane so the tabbed-pane is
@@ -77,37 +136,38 @@ void NativeTabbedPaneWin::AddTabAtIndex(int index, const std::wstring& title,
                                         bool select_if_first_tab) {
   DCHECK(index <= static_cast<int>(tab_views_.size()));
   contents->set_parent_owned(false);
+  contents->SetVisible(false);
   tab_views_.insert(tab_views_.begin() + index, contents);
   tab_titles_.insert(tab_titles_.begin() + index, title);
 
   if (!contents->background())
     contents->set_background(new TabBackground);
 
-  if (tab_views_.size() == 1 && select_if_first_tab) {
-    // If this is the only tab displayed, make sure the contents is set.
+  if (tab_views_.size() == 1 && select_if_first_tab)
     selected_index_ = 0;
-    if (content_window_)
-      content_window_->GetRootView()->AddChildView(contents);
-  }
 
   // Add native tab only if the native control is alreay created.
   if (content_window_) {
-    AddNativeTab(index, title, contents);
-
+    AddNativeTab(index, title);
     // The newly added tab may have made the contents window smaller.
     ResizeContents();
+
+    RootView* content_root = content_window_->GetRootView();
+    content_root->AddChildView(contents);
+    // Switch to the newly added tab if requested;
+    if (tab_views_.size() == 1 && select_if_first_tab)
+      tab_layout_manager_->SwitchToPage(content_root, contents);
   }
 }
 
 void NativeTabbedPaneWin::AddNativeTab(int index,
-                                       const std::wstring &title,
-                                       views::View* contents) {
+                                       const std::wstring &title) {
   TCITEM tcitem;
   tcitem.mask = TCIF_TEXT;
 
   // If the locale is RTL, we set the TCIF_RTLREADING so that BiDi text is
   // rendered properly on the tabs.
-  if (UILayoutIsRightToLeft()) {
+  if (base::i18n::IsRTL()) {
     tcitem.mask |= TCIF_RTLREADING;
   }
 
@@ -140,6 +200,8 @@ View* NativeTabbedPaneWin::RemoveTabAtIndex(int index) {
 
   std::vector<View*>::iterator iter = tab_views_.begin() + index;
   View* removed_tab = *iter;
+  if (content_window_)
+    content_window_->GetRootView()->RemoveChildView(removed_tab);
   tab_views_.erase(iter);
   tab_titles_.erase(tab_titles_.begin() + index);
 
@@ -176,6 +238,17 @@ void NativeTabbedPaneWin::SetFocus() {
   Focus();
 }
 
+gfx::Size NativeTabbedPaneWin::GetPreferredSize() {
+  if (!native_view())
+    return gfx::Size();
+
+  gfx::Rect contentSize(content_window_->GetRootView()->GetPreferredSize());
+  RECT paneSize = { 0, 0, contentSize.width(), contentSize.height() };
+  TabCtrl_AdjustRect(native_view(), TRUE, &paneSize);
+  return gfx::Size(paneSize.right - paneSize.left,
+                   paneSize.bottom - paneSize.top);
+}
+
 gfx::NativeView NativeTabbedPaneWin::GetTestingHandle() const {
   return native_view();
 }
@@ -195,17 +268,17 @@ void NativeTabbedPaneWin::CreateNativeControl() {
   // inherit the WS_EX_LAYOUTRTL property and this will result in the contents
   // being flipped, which is not what we want (because we handle mirroring in
   // views without the use of Windows' support for mirroring). Therefore,
-  // we initially create our HWND without the aforementioned property and we
-  // explicitly set this property our child is created. This way, on RTL
-  // locales, our tabs will be nicely rendered from right to left (by virtue of
-  // Windows doing the right thing with the TabbedPane HWND) and each tab
-  // contents will use an RTL layout correctly (by virtue of the mirroring
-  // infrastructure in views doing the right thing with each View we put
-  // in the tab).
+  // we initially create our HWND without WS_EX_LAYOUTRTL and we explicitly set
+  // this property our child is created. This way, on RTL locales, our tabs
+  // will be nicely rendered from right to left (by virtue of Windows doing the
+  // right thing with the TabbedPane HWND) and each tab contents will use an
+  // RTL layout correctly (by virtue of the mirroring infrastructure in views
+  // doing the right thing with each View we put in the tab).
+  DWORD style = WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE | WS_CLIPCHILDREN;
   HWND tab_control = ::CreateWindowEx(0,
                                       WC_TABCONTROL,
                                       L"",
-                                      WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE,
+                                      style,
                                       0, 0, width(), height(),
                                       GetWidget()->GetNativeView(), NULL, NULL,
                                       NULL);
@@ -219,13 +292,14 @@ void NativeTabbedPaneWin::CreateNativeControl() {
   content_window_->Init(tab_control, gfx::Rect());
 
   // Explicitly setting the WS_EX_LAYOUTRTL property for the HWND (see above
-  // for a thorough explanation regarding why we waited until |content_window_|
-  // if created before we set this property for the tabbed pane's HWND).
-  if (UILayoutIsRightToLeft())
+  // for why we waited until |content_window_| is created before we set this
+  // property for the tabbed pane's HWND).
+  if (base::i18n::IsRTL())
     l10n_util::HWNDSetRTLLayout(tab_control);
 
   RootView* root_view = content_window_->GetRootView();
-  root_view->SetLayoutManager(new FillLayout());
+  tab_layout_manager_ = new TabLayout();
+  root_view->SetLayoutManager(tab_layout_manager_);
   DWORD sys_color = ::GetSysColor(COLOR_3DHILIGHT);
   SkColor color = SkColorSetRGB(GetRValue(sys_color), GetGValue(sys_color),
                                 GetBValue(sys_color));
@@ -287,26 +361,20 @@ void NativeTabbedPaneWin::ViewHierarchyChanged(bool is_add,
 // NativeTabbedPaneWin, private:
 
 void NativeTabbedPaneWin::InitializeTabs() {
-  for (size_t i = 0; i < tab_views_.size(); ++i) {
-    AddNativeTab(i, tab_titles_[i], tab_views_[i]);
-  }
+  for (size_t i = 0; i < tab_titles_.size(); ++i)
+    AddNativeTab(i, tab_titles_[i]);
+
+  RootView* content_root = content_window_->GetRootView();
+  for (std::vector<View*>::iterator tab(tab_views_.begin());
+       tab != tab_views_.end(); ++tab)
+    content_root->AddChildView(*tab);
 }
 
 void NativeTabbedPaneWin::DoSelectTabAt(int index, boolean invoke_listener) {
   selected_index_ = index;
   if (content_window_) {
     RootView* content_root = content_window_->GetRootView();
-
-    // Clear the focus if the focused view was on the tab.
-    FocusManager* focus_manager = GetFocusManager();
-    DCHECK(focus_manager);
-    View* focused_view = focus_manager->GetFocusedView();
-    if (focused_view && content_root->IsParentOf(focused_view))
-      focus_manager->ClearFocus();
-
-    content_root->RemoveAllChildViews(false);
-    content_root->AddChildView(tab_views_[index]);
-    content_root->Layout();
+    tab_layout_manager_->SwitchToPage(content_root, tab_views_.at(index));
   }
   if (invoke_listener && tabbed_pane_->listener())
     tabbed_pane_->listener()->TabSelectedAt(index);

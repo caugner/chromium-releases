@@ -499,8 +499,10 @@ bool ShellUtil::CreateChromeQuickLaunchShortcut(const std::wstring& chrome_exe,
 }
 
 std::wstring ShellUtil::GetChromeIcon(const std::wstring& chrome_exe) {
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   std::wstring chrome_icon(chrome_exe);
-  chrome_icon.append(L",0");
+  chrome_icon.append(L",");
+  chrome_icon.append(IntToWString(dist->GetIconIndex()));
   return chrome_icon;
 }
 
@@ -764,33 +766,36 @@ bool ShellUtil::UpdateChromeShortcut(const std::wstring& chrome_exe,
                                      const std::wstring& shortcut,
                                      const std::wstring& description,
                                      bool create_new) {
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   std::wstring chrome_path = file_util::GetDirectoryFromPath(chrome_exe);
 
   FilePath prefs_path(chrome_path);
   prefs_path = prefs_path.AppendASCII(installer_util::kDefaultMasterPrefs);
   scoped_ptr<DictionaryValue> prefs(
       installer_util::ParseDistributionPreferences(prefs_path));
-  int icon_index = 0;
+  int icon_index = dist->GetIconIndex();
   installer_util::GetDistroIntegerPreference(prefs.get(),
       installer_util::master_preferences::kChromeShortcutIconIndex,
       &icon_index);
   if (create_new) {
-    return file_util::CreateShortcutLink(chrome_exe.c_str(),      // target
-                                         shortcut.c_str(),        // shortcut
-                                         chrome_path.c_str(),     // working dir
-                                         NULL,                    // arguments
-                                         description.c_str(),     // description
-                                         chrome_exe.c_str(),      // icon file
-                                         icon_index,              // icon index
-                                         chrome::kBrowserAppID);  // app id
+    return file_util::CreateShortcutLink(
+        chrome_exe.c_str(),                // target
+        shortcut.c_str(),                  // shortcut
+        chrome_path.c_str(),               // working dir
+        NULL,                              // arguments
+        description.c_str(),               // description
+        chrome_exe.c_str(),                // icon file
+        icon_index,                        // icon index
+        dist->GetBrowserAppId().c_str());  // app id
   } else {
-    return file_util::UpdateShortcutLink(chrome_exe.c_str(),      // target
-                                         shortcut.c_str(),        // shortcut
-                                         chrome_path.c_str(),     // working dir
-                                         NULL,                    // arguments
-                                         description.c_str(),     // description
-                                         chrome_exe.c_str(),      // icon file
-                                         icon_index,              // icon index
-                                         chrome::kBrowserAppID);  // app id
+    return file_util::UpdateShortcutLink(
+        chrome_exe.c_str(),                // target
+        shortcut.c_str(),                  // shortcut
+        chrome_path.c_str(),               // working dir
+        NULL,                              // arguments
+        description.c_str(),               // description
+        chrome_exe.c_str(),                // icon file
+        icon_index,                        // icon index
+        dist->GetBrowserAppId().c_str());  // app id
   }
 }

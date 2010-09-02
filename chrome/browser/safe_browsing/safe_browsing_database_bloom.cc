@@ -6,6 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/file_util.h"
+#include "base/histogram.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/sha2.h"
@@ -63,7 +64,7 @@ bool SafeBrowsingDatabaseBloom::ResetDatabase() {
   if (performing_reset_)
     return false;  // Don't recurse.
 
-  AutoReset auto_reset_performing_reset(&performing_reset_, true);
+  AutoReset<bool> auto_reset_performing_reset(&performing_reset_, true);
 
   // Delete files on disk.
   bool rv = Close();
@@ -157,7 +158,7 @@ void SafeBrowsingDatabaseBloom::InsertChunks(const std::string& list_name,
   if (chunks.empty())
     return;
 
-  base::Time insert_start = base::Time::Now();
+  base::TimeTicks insert_start = base::TimeTicks::Now();
 
   int list_id = safe_browsing_util::GetListId(list_name);
   ChunkType chunk_type = chunks.front().is_add ? ADD_CHUNK : SUB_CHUNK;
@@ -190,7 +191,7 @@ void SafeBrowsingDatabaseBloom::InsertChunks(const std::string& list_name,
     }
   }
 
-  UMA_HISTOGRAM_TIMES("SB2.ChunkInsert", base::Time::Now() - insert_start);
+  UMA_HISTOGRAM_TIMES("SB2.ChunkInsert", base::TimeTicks::Now() - insert_start);
 }
 
 void SafeBrowsingDatabaseBloom::DeleteChunks(
@@ -295,7 +296,7 @@ bool SafeBrowsingDatabaseBloom::Open() {
   if (db_)
     return true;
 
-  if (OpenSqliteDb(filename_, &db_) != SQLITE_OK) {
+  if (sqlite_utils::OpenSqliteDb(filename_, &db_) != SQLITE_OK) {
     sqlite3_close(db_);
     db_ = NULL;
     return false;
@@ -307,7 +308,7 @@ bool SafeBrowsingDatabaseBloom::Open() {
 
   statement_cache_.reset(new SqliteStatementCache(db_));
 
-  if (!DoesSqliteTableExist(db_, "add_prefix")) {
+  if (!sqlite_utils::DoesSqliteTableExist(db_, "add_prefix")) {
     if (!CreateTables()) {
       // Database could be corrupt, try starting from scratch.
       if (!ResetDatabase())

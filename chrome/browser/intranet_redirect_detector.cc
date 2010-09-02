@@ -20,11 +20,11 @@
 const size_t IntranetRedirectDetector::kNumCharsInHostnames = 10;
 
 IntranetRedirectDetector::IntranetRedirectDetector()
-    : redirect_origin_(WideToUTF8(g_browser_process->local_state()->GetString(
-          prefs::kLastKnownIntranetRedirectOrigin))),
+    : redirect_origin_(g_browser_process->local_state()->GetString(
+          prefs::kLastKnownIntranetRedirectOrigin)),
       ALLOW_THIS_IN_INITIALIZER_LIST(fetcher_factory_(this)),
-      in_startup_sleep_(true),
-      request_context_available_(!!Profile::GetDefaultRequestContext()) {
+      in_sleep_(true),
+      request_context_available_(Profile::GetDefaultRequestContext() != NULL) {
   registrar_.Add(this, NotificationType::DEFAULT_REQUEST_CONTEXT_AVAILABLE,
                  NotificationService::AllSources());
 
@@ -39,9 +39,12 @@ IntranetRedirectDetector::IntranetRedirectDetector()
       fetcher_factory_.NewRunnableMethod(
           &IntranetRedirectDetector::FinishSleep),
       kStartFetchDelayMS);
+
+  net::NetworkChangeNotifier::AddObserver(this);
 }
 
 IntranetRedirectDetector::~IntranetRedirectDetector() {
+  net::NetworkChangeNotifier::RemoveObserver(this);
   STLDeleteElements(&fetchers_);
 }
 
@@ -55,11 +58,16 @@ GURL IntranetRedirectDetector::RedirectOrigin() {
 // static
 void IntranetRedirectDetector::RegisterPrefs(PrefService* prefs) {
   prefs->RegisterStringPref(prefs::kLastKnownIntranetRedirectOrigin,
-                            std::wstring());
+                            std::string());
 }
 
 void IntranetRedirectDetector::FinishSleep() {
-  in_startup_sleep_ = false;
+  in_sleep_ = false;
+
+  // If another fetch operation is still running, cancel it.
+  STLDeleteElements(&fetchers_);
+  resulting_origins_.clear();
+
   StartFetchesIfPossible();
 }
 
@@ -67,10 +75,9 @@ void IntranetRedirectDetector::StartFetchesIfPossible() {
   // Bail if a fetch isn't appropriate right now.  This function will be called
   // again each time one of the preconditions changes, so we'll fetch
   // immediately once all of them are met.
-  if (in_startup_sleep_ || !request_context_available_)
+  if (in_sleep_ || !request_context_available_)
     return;
 
-  // We shouldn't somehow run twice.
   DCHECK(fetchers_.empty() && resulting_origins_.empty());
 
   // Start three fetchers on random hostnames.
@@ -140,7 +147,7 @@ void IntranetRedirectDetector::OnURLFetchComplete(
 
   g_browser_process->local_state()->SetString(
       prefs::kLastKnownIntranetRedirectOrigin, redirect_origin_.is_valid() ?
-          UTF8ToWide(redirect_origin_.spec()) : std::wstring());
+          redirect_origin_.spec() : std::string());
 }
 
 void IntranetRedirectDetector::Observe(NotificationType type,
@@ -149,6 +156,21 @@ void IntranetRedirectDetector::Observe(NotificationType type,
   DCHECK_EQ(NotificationType::DEFAULT_REQUEST_CONTEXT_AVAILABLE, type.value);
   request_context_available_ = true;
   StartFetchesIfPossible();
+}
+
+void IntranetRedirectDetector::OnIPAddressChanged() {
+  // If a request is already scheduled, do not scheduled yet another one.
+  if (in_sleep_)
+    return;
+
+  // Since presumably many programs open connections after network changes,
+  // delay this a little bit.
+  in_sleep_ = true;
+  static const int kNetworkSwitchDelayMS = 1000;
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
+      fetcher_factory_.NewRunnableMethod(
+          &IntranetRedirectDetector::FinishSleep),
+      kNetworkSwitchDelayMS);
 }
 
 IntranetRedirectHostResolverProc::IntranetRedirectHostResolverProc(
@@ -160,7 +182,8 @@ int IntranetRedirectHostResolverProc::Resolve(
     const std::string& host,
     net::AddressFamily address_family,
     net::HostResolverFlags host_resolver_flags,
-    net::AddressList* addrlist) {
+    net::AddressList* addrlist,
+    int* os_error) {
   // We'd love to just ask the IntranetRedirectDetector, but we may not be on
   // the same thread.  So just use the heuristic that any all-lowercase a-z
   // hostname with the right number of characters is likely from the detector
@@ -169,5 +192,6 @@ int IntranetRedirectHostResolverProc::Resolve(
       (host.find_first_not_of("abcdefghijklmnopqrstuvwxyz") ==
           std::string::npos)) ?
       net::ERR_NAME_NOT_RESOLVED :
-      ResolveUsingPrevious(host, address_family, host_resolver_flags, addrlist);
+      ResolveUsingPrevious(host, address_family, host_resolver_flags, addrlist,
+                           os_error);
 }

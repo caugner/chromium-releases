@@ -7,25 +7,8 @@
 #ifndef GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_FORMAT_H_
 #define GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_FORMAT_H_
 
-// This is here because service side code must include the system's version of
-// the GL headers where as client side code includes the Chrome version. Also
-// the unit test code must include a mock GL header.
-#if defined(UNIT_TEST)
-  #include "../service/gl_mock.h"
-#elif defined(GLES2_GPU_SERVICE)
-  // TODO(gman): Set this from gyp
-  //   #define GLES2_GPU_SERVICE_BACKEND_NATIVE_GLES2 1
-  #if defined(GLES2_GPU_SERVICE_BACKEND_NATIVE_GLES2)
-    #include <GLES2/gl2.h>  // NOLINT
-  #else  // !GLES2_GPU_SERVICE_BACKEND_NATIVE_GLES2
-    #include <GL/glew.h>  // NOLINT
-    #if defined(OS_WIN)
-      #include <GL/wglew.h>   // NOLINT
-    #endif
-  #endif  // !GLES2_GPU_SERVICE_BACKEND_NATIVE_GLES2
-#else  // !GLES2_CPU_SERVICE
-  #include <GLES2/gl2types.h>  // NOLINT
-#endif  // UNIT_TEST
+
+#include <KHR/khrplatform.h>
 
 #include <string.h>
 
@@ -34,10 +17,52 @@
 #include "../common/cmd_buffer_common.h"
 #include "../common/gles2_cmd_ids.h"
 
+// GL types are forward declared to avoid including the GL headers. The problem
+// is determining which GL headers to include from code that is common to the
+// client and service sides (GLES2 or one of several GL implementations).
+typedef unsigned int GLenum;
+typedef unsigned int GLbitfield;
+typedef unsigned int GLuint;
+typedef int GLint;
+typedef int GLsizei;
+typedef unsigned char GLboolean;
+typedef signed char GLbyte;
+typedef short GLshort;
+typedef unsigned char GLubyte;
+typedef unsigned short GLushort;
+typedef unsigned long GLulong;
+typedef float GLfloat;
+typedef float GLclampf;
+typedef double GLdouble;
+typedef double GLclampd;
+typedef void GLvoid;
+typedef khronos_intptr_t GLintptr;
+typedef khronos_ssize_t  GLsizeiptr;
+
 namespace gpu {
 namespace gles2 {
 
 #pragma pack(push, 1)
+
+namespace id_namespaces {
+
+// These are used when contexts share resources.
+enum IdNamespaces {
+  kBuffers,
+  kFramebuffers,
+  kProgramsAndShaders,
+  kRenderbuffers,
+  kTextures,
+};
+
+// These numbers must not change
+COMPILE_ASSERT(kBuffers == 0, kBuffers_is_not_0);
+COMPILE_ASSERT(kFramebuffers == 1, kFramebuffers_is_not_1);
+COMPILE_ASSERT(kProgramsAndShaders == 2, kProgramsAndShaders_is_not_2);
+COMPILE_ASSERT(kRenderbuffers == 3, kRenderbuffers_is_not_3);
+COMPILE_ASSERT(kTextures == 4, kTextures_is_not_4);
+
+}  // namespace id_namespaces
 
 // Used for some glGetXXX commands that return a result through a pointer. We
 // need to know if the command succeeded or not and the size of the result. If

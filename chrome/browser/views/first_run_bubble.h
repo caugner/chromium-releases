@@ -16,8 +16,9 @@ class Profile;
 class FirstRunBubble : public InfoBubble,
                        public InfoBubbleDelegate {
  public:
-  static FirstRunBubble* Show(Profile* profile, views::Window* window,
+  static FirstRunBubble* Show(Profile* profile, views::Widget* parent,
                               const gfx::Rect& position_relative_to,
+                              BubbleBorder::ArrowLocation arrow_location,
                               FirstRun::BubbleType bubble_type);
 
  private:
@@ -38,6 +39,7 @@ class FirstRunBubble : public InfoBubble,
   virtual void InfoBubbleClosing(InfoBubble* info_bubble,
                                  bool closed_by_escape);
   virtual bool CloseOnEscape() { return true; }
+  virtual bool FadeInOnShow() { return true; }
 
   // Whether we have already been activated.
   bool has_been_activated_;

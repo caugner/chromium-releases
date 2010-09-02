@@ -12,52 +12,47 @@
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/form_structure.h"
 
-// Field names from the ECML specification; see RFC 3106.  We've
-// made these names lowercase since we convert labels and field names to
-// lowercase before searching.
+extern const char kEcmlShipToTitle[];
+extern const char kEcmlShipToFirstName[];
+extern const char kEcmlShipToMiddleName[];
+extern const char kEcmlShipToLastName[];
+extern const char kEcmlShipToNameSuffix[];
+extern const char kEcmlShipToCompanyName[];
+extern const char kEcmlShipToAddress1[];
+extern const char kEcmlShipToAddress2[];
+extern const char kEcmlShipToAddress3[];
+extern const char kEcmlShipToCity[];
+extern const char kEcmlShipToStateProv[];
+extern const char kEcmlShipToPostalCode[];
+extern const char kEcmlShipToCountry[];
+extern const char kEcmlShipToPhone[];
+extern const char kEcmlShipToEmail[];
 
-// shipping name/address fields
-static string16 kEcmlShipToTitle = ASCIIToUTF16("ecom_shipto_postal_name_prefix");
-static string16 kEcmlShipToFirstName = ASCIIToUTF16("ecom_shipto_postal_name_first");
-static string16 kEcmlShipToMiddleName = ASCIIToUTF16("ecom_shipto_postal_name_middle");
-static string16 kEcmlShipToLastName = ASCIIToUTF16("ecom_shipto_postal_name_last");
-static string16 kEcmlShipToNameSuffix = ASCIIToUTF16("ecom_shipto_postal_name_suffix");
-static string16 kEcmlShipToCompanyName = ASCIIToUTF16("ecom_shipto_postal_company");
-static string16 kEcmlShipToAddress1 = ASCIIToUTF16("ecom_shipto_postal_street_line1");
-static string16 kEcmlShipToAddress2 = ASCIIToUTF16("ecom_shipto_postal_street_line2");
-static string16 kEcmlShipToAddress3 = ASCIIToUTF16("ecom_shipto_postal_street_line3");
-static string16 kEcmlShipToCity = ASCIIToUTF16("ecom_shipto_postal_city");
-static string16 kEcmlShipToStateProv = ASCIIToUTF16("ecom_shipto_postal_stateprov");
-static string16 kEcmlShipToPostalCode = ASCIIToUTF16("ecom_shipto_postal_postalcode");
-static string16 kEcmlShipToCountry = ASCIIToUTF16("ecom_shipto_postal_countrycode");
-static string16 kEcmlShipToPhone = ASCIIToUTF16("ecom_shipto_telecom_phone_number");
-static string16 kEcmlShipToEmail = ASCIIToUTF16("ecom_shipto_online_email");
+// billing name/address fields
+extern const char kEcmlBillToTitle[];
+extern const char kEcmlBillToFirstName[];
+extern const char kEcmlBillToMiddleName[];
+extern const char kEcmlBillToLastName[];
+extern const char kEcmlBillToNameSuffix[];
+extern const char kEcmlBillToCompanyName[];
+extern const char kEcmlBillToAddress1[];
+extern const char kEcmlBillToAddress2[];
+extern const char kEcmlBillToAddress3[];
+extern const char kEcmlBillToCity[];
+extern const char kEcmlBillToStateProv[];
+extern const char kEcmlBillToPostalCode[];
+extern const char kEcmlBillToCountry[];
+extern const char kEcmlBillToPhone[];
+extern const char kEcmlBillToEmail[];
 
-  // billing name/address fields
-static string16 kEcmlBillToTitle = ASCIIToUTF16("ecom_billto_postal_name_prefix");
-static string16 kEcmlBillToFirstName = ASCIIToUTF16("ecom_billto_postal_name_first");
-static string16 kEcmlBillToMiddleName = ASCIIToUTF16("ecom_billto_postal_name_middle");
-static string16 kEcmlBillToLastName = ASCIIToUTF16("ecom_billto_postal_name_last");
-static string16 kEcmlBillToNameSuffix = ASCIIToUTF16("ecom_billto_postal_name_suffix");
-static string16 kEcmlBillToCompanyName = ASCIIToUTF16("ecom_billto_postal_company");
-static string16 kEcmlBillToAddress1 = ASCIIToUTF16("ecom_billto_postal_street_line1");
-static string16 kEcmlBillToAddress2 = ASCIIToUTF16("ecom_billto_postal_street_line2");
-static string16 kEcmlBillToAddress3 = ASCIIToUTF16("ecom_billto_postal_street_line3");
-static string16 kEcmlBillToCity = ASCIIToUTF16("ecom_billto_postal_city");
-static string16 kEcmlBillToStateProv = ASCIIToUTF16("ecom_billto_postal_stateprov");
-static string16 kEcmlBillToPostalCode = ASCIIToUTF16("ecom_billto_postal_postalcode");
-static string16 kEcmlBillToCountry = ASCIIToUTF16("ecom_billto_postal_countrycode");
-static string16 kEcmlBillToPhone = ASCIIToUTF16("ecom_billto_telecom_phone_number");
-static string16 kEcmlBillToEmail = ASCIIToUTF16("ecom_billto_online_email");
-
-  // credit card fields
-static string16 kEcmlCardHolder = ASCIIToUTF16("ecom_payment_card_name");
-static string16 kEcmlCardType = ASCIIToUTF16("ecom_payment_card_type");
-static string16 kEcmlCardNumber = ASCIIToUTF16("ecom_payment_card_number");
-static string16 kEcmlCardVerification = ASCIIToUTF16("ecom_payment_card_verification");
-static string16 kEcmlCardExpireDay = ASCIIToUTF16("ecom_payment_card_expdate_day");
-static string16 kEcmlCardExpireMonth = ASCIIToUTF16("ecom_payment_card_expdate_month");
-static string16 kEcmlCardExpireYear = ASCIIToUTF16("ecom_payment_card_expdate_year");
+// credit card fields
+extern const char kEcmlCardHolder[];
+extern const char kEcmlCardType[];
+extern const char kEcmlCardNumber[];
+extern const char kEcmlCardVerification[];
+extern const char kEcmlCardExpireDay[];
+extern const char kEcmlCardExpireMonth[];
+extern const char kEcmlCardExpireYear[];
 
 enum FormFieldType {
   kAddressType,
@@ -123,6 +118,9 @@ class FormField {
                   const AutoFillType& type);
 
  protected:
+  // Only derived classes may instantiate.
+  FormField() {}
+
   // Note: ECML compliance checking has been modified to accommodate Google
   // Checkout field name limitation. All ECML compliant web forms will be
   // recognized correctly as such however the restrictions on having exactly
@@ -130,10 +128,10 @@ class FormField {
   // be prefixed with an ECML compiant name in order to accommodate checkout.
   // Additionally we allow the use of '.' as a word delimiter in addition to the
   // ECML standard '_' (see FormField::FormField for details).
-  static string16 GetEcmlPattern(const string16& ecml_name);
-  static string16 GetEcmlPattern(const string16& ecml_name1,
-                                 const string16& ecml_name2,
-                                 string16::value_type pattern_operator);
+  static string16 GetEcmlPattern(const char* ecml_name);
+  static string16 GetEcmlPattern(const char* ecml_name1,
+                                 const char* ecml_name2,
+                                 char pattern_operator);
 
  private:
   static bool ParseText(std::vector<AutoFillField*>::const_iterator* iter,
@@ -148,6 +146,8 @@ class FormField {
       AutoFillField** dest);
   static bool MatchName(AutoFillField* field, const string16& pattern);
   static bool MatchLabel(AutoFillField* field, const string16& pattern);
+
+  DISALLOW_COPY_AND_ASSIGN(FormField);
 };
 
 class FormFieldSet : public std::vector<FormField*> {
@@ -163,6 +163,8 @@ class FormFieldSet : public std::vector<FormField*> {
   // Checks if any of the labels are named according to the ECML standard.
   // Returns true if at least one ECML named element is found.
   bool CheckECML(FormStructure* fields);
+
+  DISALLOW_COPY_AND_ASSIGN(FormFieldSet);
 };
 
 #endif  // CHROME_BROWSER_AUTOFILL_FORM_FIELD_H_

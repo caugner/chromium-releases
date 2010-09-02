@@ -361,6 +361,43 @@ END_MSG_MAP()
     return true;
   }
 
+  // IOleInPlaceObject overrides.
+  STDMETHOD(InPlaceDeactivate)(void) {
+    static UINT onload_handlers_done_msg =
+        RegisterWindowMessage(L"ChromeFrame_OnloadHandlersDone");
+
+    if (m_bInPlaceActive && IsWindow() && IsValid()) {
+      static const int kChromeFrameUnloadEventTimerId = 0xdeadbeef;
+      static const int kChromeFrameUnloadEventTimeout = 1000;
+
+      // To prevent us from indefinitely waiting for an acknowledgement from
+      // Chrome indicating that unload handlers have been run, we set a 1
+      // second timer and exit the loop when it fires.
+      ::SetTimer(m_hWnd, kChromeFrameUnloadEventTimerId,
+                 kChromeFrameUnloadEventTimeout, NULL);
+
+      automation_client_->RunUnloadHandlers(m_hWnd, onload_handlers_done_msg);
+
+      MSG msg = {0};
+      while (GetMessage(&msg, NULL, 0, 0)) {
+        if (msg.message == onload_handlers_done_msg &&
+            msg.hwnd == m_hWnd) {
+          break;
+        }
+
+        if (msg.message == WM_TIMER &&
+            msg.wParam == kChromeFrameUnloadEventTimerId) {
+          break;
+        }
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+      }
+
+      ::KillTimer(m_hWnd, kChromeFrameUnloadEventTimerId);
+    }
+    return IOleInPlaceObjectWindowlessImpl<T>::InPlaceDeactivate();
+  }
+
  protected:
   virtual void GetProfilePath(const std::wstring& profile_name,
                               FilePath* profile_path) {
@@ -444,8 +481,14 @@ END_MSG_MAP()
   virtual void OnAttachExternalTab(int tab_handle,
       const IPC::AttachExternalTabParams& params) {
     std::string url;
-    url = StringPrintf("%lsattach_external_tab&%ls&%d", kChromeProtocolPrefix,
-        Uint64ToWString(params.cookie).c_str(), params.disposition);
+    url = StringPrintf("%lsattach_external_tab&%ls&%d&%d&%d&%d&%d",
+                       kChromeProtocolPrefix,
+                       Uint64ToWString(params.cookie).c_str(),
+                       params.disposition,
+                       params.dimensions.x(),
+                       params.dimensions.y(),
+                       params.dimensions.width(),
+                       params.dimensions.height());
     HostNavigate(GURL(url), GURL(), params.disposition);
   }
 
@@ -461,7 +504,12 @@ END_MSG_MAP()
                    BOOL& handled) {  // NO_LINT
     ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0);
     url_fetcher_.put_notification_window(m_hWnd);
-    automation_client_->SetParentWindow(m_hWnd);
+    if (automation_client_.get()) {
+      automation_client_->SetParentWindow(m_hWnd);
+    } else {
+      NOTREACHED() << "No automation server";
+      return -1;
+    }
     // Only fire the 'interactive' ready state if we aren't there already.
     if (ready_state_ < READYSTATE_INTERACTIVE) {
       ready_state_ = READYSTATE_INTERACTIVE;
@@ -901,7 +949,8 @@ END_MSG_MAP()
     DCHECK_GE(param_count, 0);
     DCHECK(params);
 
-    if (V_VT(&script_object) != VT_DISPATCH) {
+    if (V_VT(&script_object) != VT_DISPATCH ||
+        script_object.pdispVal == NULL) {
       return S_FALSE;
     }
 
@@ -1109,7 +1158,6 @@ END_MSG_MAP()
 
     web_browser2->Navigate2(url.AsInput(), &flags, &empty, &empty,
                             http_headers.AsInput());
-    web_browser2->put_Visible(VARIANT_TRUE);
   }
 
   ScopedBstr url_;

@@ -84,7 +84,7 @@ bool StateChangeTimeoutEvent::Abort() {
 
 ProfileSyncServiceTestHarness::ProfileSyncServiceTestHarness(
     Profile* p, const std::string& username, const std::string& password)
-    : wait_state_(WAITING_FOR_INITIAL_CALLBACK), profile_(p), service_(NULL),
+    : wait_state_(WAITING_FOR_ON_AUTH_ERROR), profile_(p), service_(NULL),
       last_status_(kInvalidStatus),
       last_timestamp_(0),
       min_timestamp_needed_(kMinTimestampNeededNone),
@@ -95,12 +95,15 @@ ProfileSyncServiceTestHarness::ProfileSyncServiceTestHarness(
 }
 
 bool ProfileSyncServiceTestHarness::SetupSync() {
-  service_ = profile_->GetProfileSyncService();
-  service_->SetSyncSetupCompleted();
-  service_->EnableForUser();
+  syncable::ModelTypeSet set;
+  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
+      i < syncable::MODEL_TYPE_COUNT; ++i) {
+    set.insert(syncable::ModelTypeFromInt(i));
+  }
 
-  // Needed to avoid showing the login dialog. Well aware this is egregious.
-  service_->expecting_first_run_auth_needed_event_ = false;
+  service_ = profile_->GetProfileSyncService();
+  service_->StartUp();
+  service_->OnUserChoseDatatypes(true, set);
   service_->AddObserver(this);
   return WaitForServiceInit();
 }
@@ -120,25 +123,31 @@ bool ProfileSyncServiceTestHarness::RunStateChangeMachine() {
   WaitState state = wait_state_;
   ProfileSyncService::Status status(service_->QueryDetailedSyncStatus());
   switch (wait_state_) {
-    case WAITING_FOR_INITIAL_CALLBACK:
-      SignalStateCompleteWithNextState(WAITING_FOR_READY_TO_PROCESS_CHANGES);
+    case WAITING_FOR_ON_AUTH_ERROR: {
+      SignalStateCompleteWithNextState(WAITING_FOR_NOTIFICATIONS_ENABLED);
       break;
-    case WAITING_FOR_READY_TO_PROCESS_CHANGES:
-      if (service_->ShouldPushChanges()) {
-        SignalStateCompleteWithNextState(WAITING_FOR_NOTHING);
+    }
+    case WAITING_FOR_NOTIFICATIONS_ENABLED: {
+      if (status.notifications_enabled) {
+        SignalStateCompleteWithNextState(FULLY_SYNCED);
       }
       break;
+    }
     case WAITING_FOR_SYNC_TO_FINISH: {
       const SyncSessionSnapshot* snap =
           service_->backend()->GetLastSessionSnapshot();
       DCHECK(snap) << "Should have been at least one sync session by now";
-      if (snap->has_more_to_sync)
+      // TODO(rsimha): In an ideal world, snap->has_more_to_sync == false should
+      // be a sufficient condition for sync to have completed. However, the
+      // additional check of snap->unsynced_count is required due to
+      // http://crbug.com/48989.
+      if (snap->has_more_to_sync || snap->unsynced_count != 0) {
         break;
+      }
 
       EXPECT_LE(last_timestamp_, snap->max_local_timestamp);
       last_timestamp_ = snap->max_local_timestamp;
-
-      SignalStateCompleteWithNextState(WAITING_FOR_NOTHING);
+      SignalStateCompleteWithNextState(FULLY_SYNCED);
       break;
     }
     case WAITING_FOR_UPDATES: {
@@ -148,10 +157,10 @@ bool ProfileSyncServiceTestHarness::RunStateChangeMachine() {
       if (snap->max_local_timestamp < min_timestamp_needed_)
         break;
 
-      SignalStateCompleteWithNextState(WAITING_FOR_NOTHING);
+      SignalStateCompleteWithNextState(FULLY_SYNCED);
       break;
     }
-    case WAITING_FOR_NOTHING:
+    case FULLY_SYNCED:
     default:
       // Invalid state during observer callback which may be triggered by other
       // classes using the the UI message loop.  Defer to their handling.
@@ -181,11 +190,36 @@ bool ProfileSyncServiceTestHarness::AwaitMutualSyncCycleCompletion(
       "Sync cycle completion on passive client.");
 }
 
+bool ProfileSyncServiceTestHarness::AwaitGroupSyncCycleCompletion(
+    std::vector<ProfileSyncServiceTestHarness*>& partners) {
+  bool success = AwaitSyncCycleCompletion(
+      "Sync cycle completion on active client.");
+  if (!success)
+    return false;
+  bool return_value = true;
+  for (std::vector<ProfileSyncServiceTestHarness*>::iterator it =
+      partners.begin(); it != partners.end(); ++it) {
+    if (this != *it) {
+      return_value = return_value &&
+          (*it)->WaitUntilTimestampIsAtLeast(last_timestamp_,
+          "Sync cycle completion on partner client.");
+    }
+  }
+  return return_value;
+}
+
 bool ProfileSyncServiceTestHarness::WaitUntilTimestampIsAtLeast(
     int64 timestamp, const std::string& reason) {
-  wait_state_ = WAITING_FOR_UPDATES;
   min_timestamp_needed_ = timestamp;
-  return AwaitStatusChangeWithTimeout(60, reason);
+  const SyncSessionSnapshot* snap =
+      service_->backend()->GetLastSessionSnapshot();
+  DCHECK(snap) << "Should have been at least one sync session by now";
+  if (snap->max_local_timestamp < min_timestamp_needed_) {
+    wait_state_ = WAITING_FOR_UPDATES;
+    return AwaitStatusChangeWithTimeout(60, reason);
+  } else {
+    return true;
+  }
 }
 
 bool ProfileSyncServiceTestHarness::AwaitStatusChangeWithTimeout(
@@ -204,17 +238,21 @@ bool ProfileSyncServiceTestHarness::AwaitStatusChangeWithTimeout(
 }
 
 bool ProfileSyncServiceTestHarness::WaitForServiceInit() {
-  // Wait for the initial (auth needed) callback.
-  EXPECT_EQ(wait_state_, WAITING_FOR_INITIAL_CALLBACK);
-  if (!AwaitStatusChangeWithTimeout(30, "Waiting for authwatcher calback.")) {
+  // Wait for the OnAuthError() callback.
+  EXPECT_EQ(wait_state_, WAITING_FOR_ON_AUTH_ERROR);
+  if (!AwaitStatusChangeWithTimeout(30,
+      "Waiting for the OnAuthError() callback.")) {
     return false;
   }
 
-  // Wait for the OnBackendInitialized callback.
+  // Enter GAIA credentials and wait for notifications_enabled to be set to
+  // true.
   service_->backend()->Authenticate(username_, password_, std::string());
-  EXPECT_EQ(wait_state_, WAITING_FOR_READY_TO_PROCESS_CHANGES);
-  if (!AwaitStatusChangeWithTimeout(30, "Waiting on backend initialization.")) {
+  EXPECT_EQ(wait_state_, WAITING_FOR_NOTIFICATIONS_ENABLED);
+  if (!AwaitStatusChangeWithTimeout(30,
+      "Waiting for notifications_enabled to be set to true.")) {
     return false;
   }
+
   return service_->sync_initialized();
 }

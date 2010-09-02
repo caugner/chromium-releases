@@ -17,6 +17,7 @@
 #include "base/callback.h"
 #include "base/eintr_wrapper.h"
 #include "base/file_path.h"
+#include "base/histogram.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -65,6 +66,16 @@ int ReadFile(base::PlatformFile file, char* buf, int buf_len) {
 // completion.
 int WriteFile(base::PlatformFile file, const char* buf, int buf_len) {
   ssize_t res = HANDLE_EINTR(write(file, buf, buf_len));
+  if (res == -1)
+    return MapErrorCode(errno);
+  return res;
+}
+
+// FlushFile() is a simple wrapper around fsync() that handles EINTR signals and
+// calls MapErrorCode() to map errno to net error codes.  It tries to flush to
+// completion.
+int FlushFile(base::PlatformFile file) {
+  ssize_t res = HANDLE_EINTR(fsync(file));
   if (res == -1)
     return MapErrorCode(errno);
   return res;
@@ -223,11 +234,12 @@ FileStream::AsyncContext::~AsyncContext() {
     // still running the IO task, or the completion callback is queued up on the
     // MessageLoopForIO, but AsyncContext() got deleted before then.
     const bool need_to_wait = !background_io_completed_.IsSignaled();
-    base::Time start = base::Time::Now();
+    base::TimeTicks start = base::TimeTicks::Now();
     RunAsynchronousCallback();
     if (need_to_wait) {
       // We want to see if we block the message loop for too long.
-      UMA_HISTOGRAM_TIMES("AsyncIO.FileStreamClose", base::Time::Now() - start);
+      UMA_HISTOGRAM_TIMES("AsyncIO.FileStreamClose",
+                          base::TimeTicks::Now() - start);
     }
   }
 }
@@ -293,13 +305,15 @@ void FileStream::AsyncContext::RunAsynchronousCallback() {
 
 FileStream::FileStream()
     : file_(base::kInvalidPlatformFileValue),
-      open_flags_(0) {
+      open_flags_(0),
+      auto_closed_(true) {
   DCHECK(!IsOpen());
 }
 
 FileStream::FileStream(base::PlatformFile file, int flags)
     : file_(file),
-      open_flags_(flags) {
+      open_flags_(flags),
+      auto_closed_(false) {
   // If the file handle is opened with base::PLATFORM_FILE_ASYNC, we need to
   // make sure we will perform asynchronous File IO to it.
   if (flags & base::PLATFORM_FILE_ASYNC) {
@@ -308,7 +322,8 @@ FileStream::FileStream(base::PlatformFile file, int flags)
 }
 
 FileStream::~FileStream() {
-  Close();
+  if (auto_closed_)
+    Close();
 }
 
 void FileStream::Close() {
@@ -439,6 +454,13 @@ int FileStream::Write(
   } else {
     return WriteFile(file_, buf, buf_len);
   }
+}
+
+int FileStream::Flush() {
+  if (!IsOpen())
+    return ERR_UNEXPECTED;
+
+  return FlushFile(file_);
 }
 
 int64 FileStream::Truncate(int64 bytes) {

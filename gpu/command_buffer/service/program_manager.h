@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/ref_counted.h"
 #include "gpu/command_buffer/service/gl_utils.h"
+#include "gpu/command_buffer/service/shader_manager.h"
 
 namespace gpu {
 namespace gles2 {
@@ -29,7 +30,14 @@ class ProgramManager {
    public:
     typedef scoped_refptr<ProgramInfo> Ref;
 
+    static const int kMaxAttachedShaders = 2;
+
     struct UniformInfo {
+      UniformInfo(GLsizei _size, GLenum _type, const std::string& _name)
+          : size(_size),
+            type(_type),
+            name(_name) {
+      }
       bool IsSampler() const {
         return type == GL_SAMPLER_2D || type == GL_SAMPLER_CUBE;
       }
@@ -42,6 +50,13 @@ class ProgramManager {
       std::vector<GLuint> texture_units;
     };
     struct VertexAttribInfo {
+      VertexAttribInfo(GLsizei _size, GLenum _type, const std::string& _name,
+                       GLint _location)
+          : size(_size),
+            type(_type),
+            location(_location),
+            name(_name) {
+      }
       GLsizei size;
       GLenum type;
       GLint location;
@@ -52,15 +67,29 @@ class ProgramManager {
     typedef std::vector<VertexAttribInfo> AttribInfoVector;
     typedef std::vector<int> SamplerIndices;
 
-    explicit ProgramInfo(GLuint program_id)
-        : program_id_(program_id) {
+    explicit ProgramInfo(GLuint service_id)
+        : max_attrib_name_length_(0),
+          max_uniform_name_length_(0),
+          service_id_(service_id),
+          valid_(false) {
+    }
+
+    GLuint service_id() const {
+      return service_id_;
     }
 
     const SamplerIndices& sampler_indices() {
       return sampler_indices_;
     }
 
+    // Resets the program after an unsuccessful link.
+    void Reset();
+
+    // Updates the program info after a successful link.
     void Update();
+
+    // Updates the program log info.
+    void UpdateLogInfo();
 
     const AttribInfoVector& GetAttribInfos() const {
       return attrib_infos_;
@@ -72,6 +101,16 @@ class ProgramManager {
     }
 
     GLint GetAttribLocation(const std::string& name) const;
+
+    const VertexAttribInfo* GetAttribInfoByLocation(GLuint location) const {
+      if (location < attrib_location_to_index_map_.size()) {
+        GLint index = attrib_location_to_index_map_[location];
+        if (index >= 0) {
+          return &attrib_infos_[index];
+        }
+      }
+      return NULL;
+    }
 
     const UniformInfo* GetUniformInfo(GLint index) const {
       return (static_cast<size_t>(index) < uniform_infos_.size()) ?
@@ -90,7 +129,26 @@ class ProgramManager {
     bool SetSamplers(GLint location, GLsizei count, const GLint* value);
 
     bool IsDeleted() const {
-      return program_id_ == 0;
+      return service_id_ == 0;
+    }
+
+    void GetProgramiv(GLenum pname, GLint* params);
+
+    bool IsValid() const {
+      return valid_;
+    }
+
+    void AttachShader(ShaderManager::ShaderInfo* info);
+    void DetachShader(ShaderManager::ShaderInfo* info);
+
+    bool CanLink() const;
+
+    const std::string& log_info() const {
+      return log_info_;
+    }
+
+    void set_log_info(const std::string& str) {
+      log_info_ = str;
     }
 
    private:
@@ -100,49 +158,61 @@ class ProgramManager {
     ~ProgramInfo() { }
 
     void MarkAsDeleted() {
-      program_id_ = 0;
+      service_id_ = 0;
     }
 
-    void SetAttributeInfo(
-        GLint index, GLsizei size, GLenum type, GLint location,
-        const std::string& name) {
-      DCHECK(static_cast<unsigned>(index) < attrib_infos_.size());
-      VertexAttribInfo& info = attrib_infos_[index];
-      info.size = size;
-      info.type = type;
-      info.name = name;
-      info.location = location;
-    }
+    const UniformInfo* AddUniformInfo(
+        GLsizei size, GLenum type, GLint location, const std::string& name);
 
-    void SetUniformInfo(
-        GLint index, GLsizei size, GLenum type, GLint location,
-        const std::string& name);
+    GLsizei max_attrib_name_length_;
 
+    // Attrib by index.
     AttribInfoVector attrib_infos_;
+
+    // Attrib by location to index.
+    std::vector<GLint> attrib_location_to_index_map_;
+
+    GLsizei max_uniform_name_length_;
 
     // Uniform info by index.
     UniformInfoVector uniform_infos_;
 
     // Uniform location to index.
-    std::vector<GLint> location_to_index_map_;
+    std::vector<GLint> uniform_location_to_index_map_;
 
     // The indices of the uniforms that are samplers.
     SamplerIndices sampler_indices_;
 
     // The program this ProgramInfo is tracking.
-    GLuint program_id_;
+    GLuint service_id_;
+
+    // Shaders by type of shader.
+    ShaderManager::ShaderInfo::Ref attached_shaders_[kMaxAttachedShaders];
+
+    // This is true if glLinkProgram was successful.
+    bool valid_;
+
+    // Log info
+    std::string log_info_;
   };
 
   ProgramManager() { }
+  ~ProgramManager();
+
+  // Must call before destruction.
+  void Destroy(bool have_context);
 
   // Creates a new program info.
-  void CreateProgramInfo(GLuint program_id);
+  void CreateProgramInfo(GLuint client_id, GLuint service_id);
 
   // Gets a program info
-  ProgramInfo* GetProgramInfo(GLuint program_id);
+  ProgramInfo* GetProgramInfo(GLuint client_id);
 
   // Deletes the program info for the given program.
-  void RemoveProgramInfo(GLuint program_id);
+  void RemoveProgramInfo(GLuint client_id);
+
+  // Gets a client id for a given service id.
+  bool GetClientId(GLuint service_id, GLuint* client_id) const;
 
   // Returns true if prefix is invalid for gl.
   static bool IsInvalidPrefix(const char* name, size_t length);

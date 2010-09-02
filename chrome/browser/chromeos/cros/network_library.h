@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,88 +18,183 @@
 
 namespace chromeos {
 
-struct EthernetNetwork {
-  EthernetNetwork()
-      : connecting(false),
-        connected(false) {}
+class Network {
+ public:
+  const std::string& service_path() const { return service_path_; }
+  const std::string& device_path() const { return device_path_; }
+  const std::string& ip_address() const { return ip_address_; }
+  ConnectionType type() const { return type_; }
+  bool connecting() const { return state_ == STATE_ASSOCIATION ||
+      state_ == STATE_CONFIGURATION || state_ == STATE_CARRIER; }
+  bool connected() const { return state_ == STATE_READY; }
+  bool connecting_or_connected() const { return connecting() || connected(); }
+  bool failed() const { return state_ == STATE_FAILURE; }
+  ConnectionError error() const { return error_; }
 
-  std::string device_path;
-  std::string ip_address;
-  bool connecting;
-  bool connected;
+  void set_connecting(bool connecting) { state_ = (connecting ?
+      STATE_ASSOCIATION : STATE_IDLE); }
+  void set_connected(bool connected) { state_ = (connected ?
+      STATE_READY : STATE_IDLE); }
+
+  // Clear the fields.
+  virtual void Clear();
+
+  // Configure the Network from a ServiceInfo object.
+  virtual void ConfigureFromService(const ServiceInfo& service);
+
+  // Return a string representation of the state code.
+  // This not translated and should be only used for debugging purposes.
+  std::string GetStateString();
+
+  // Return a string representation of the error code.
+  // This not translated and should be only used for debugging purposes.
+  std::string GetErrorString();
+
+ protected:
+  Network()
+      : type_(TYPE_UNKNOWN),
+        state_(STATE_UNKNOWN),
+        error_(ERROR_UNKNOWN) {}
+  virtual ~Network() {}
+
+  std::string service_path_;
+  std::string device_path_;
+  std::string ip_address_;
+  ConnectionType type_;
+  int state_;
+  ConnectionError error_;
 };
 
-struct WifiNetwork {
+class EthernetNetwork : public Network {
+ public:
+  EthernetNetwork() : Network() {}
+};
+
+class WirelessNetwork : public Network {
+ public:
+  // WirelessNetwork are sorted by name.
+  bool operator< (const WirelessNetwork& other) const {
+    return name_ < other.name();
+  }
+
+  // We frequently want to compare networks by service path.
+  struct ServicePathEq {
+    explicit ServicePathEq(const std::string& path_in) : path(path_in) {}
+    bool operator()(const WirelessNetwork& a) {
+      return a.service_path().compare(path) == 0;
+    }
+    const std::string& path;
+  };
+
+  const std::string& name() const { return name_; }
+  int strength() const { return strength_; }
+  bool auto_connect() const { return auto_connect_; }
+
+  void set_name(const std::string& name) { name_ = name; }
+  void set_auto_connect(bool auto_connect) { auto_connect_ = auto_connect; }
+
+  // Network overrides.
+  virtual void Clear();
+  virtual void ConfigureFromService(const ServiceInfo& service);
+
+ protected:
+  WirelessNetwork()
+      : Network(),
+        strength_(0),
+        auto_connect_(false) {}
+
+  std::string name_;
+  int strength_;
+  bool auto_connect_;
+};
+
+class CellularNetwork : public WirelessNetwork {
+ public:
+  CellularNetwork() : WirelessNetwork() {}
+  explicit CellularNetwork(const ServiceInfo& service)
+      : WirelessNetwork() {
+    ConfigureFromService(service);
+  }
+
+  // WirelessNetwork overrides.
+  virtual void Clear();
+  virtual void ConfigureFromService(const ServiceInfo& service);
+};
+
+class WifiNetwork : public WirelessNetwork {
+ public:
   WifiNetwork()
-      : encrypted(false),
-        encryption(SECURITY_UNKNOWN),
-        strength(0),
-        connecting(false),
-        connected(false),
-        auto_connect(false) {}
-  WifiNetwork(ServiceInfo service, bool connecting, bool connected,
-              const std::string& ip_address)
-      : service_path(service.service_path),
-        device_path(service.device_path),
-        ssid(service.name),
-        encrypted(service.security != SECURITY_NONE),
-        encryption(service.security),
-        passphrase(service.passphrase),
-        strength(service.strength),
-        connecting(connecting),
-        connected(connected),
-        ip_address(ip_address) {}
-
-  // WifiNetworks are sorted by ssids.
-  bool operator< (const WifiNetwork& other) const {
-    return ssid < other.ssid;
+      : WirelessNetwork(),
+        encryption_(SECURITY_NONE) {}
+  explicit WifiNetwork(const ServiceInfo& service)
+      : WirelessNetwork() {
+    ConfigureFromService(service);
   }
 
-  std::string service_path;
-  std::string device_path;
-  std::string ssid;
-  bool encrypted;
-  ConnectionSecurity encryption;
-  std::string passphrase;
-  int strength;
-  bool connecting;
-  bool connected;
-  bool auto_connect;
-  std::string ip_address;
+  bool encrypted() const { return encryption_ != SECURITY_NONE; }
+  ConnectionSecurity encryption() const { return encryption_; }
+  const std::string& passphrase() const { return passphrase_; }
+  const std::string& identity() const { return identity_; }
+  const std::string& cert_path() const { return cert_path_; }
+
+  void set_encryption(ConnectionSecurity encryption) {
+    encryption_ = encryption;
+  }
+  void set_passphrase(const std::string& passphrase) {
+    passphrase_ = passphrase;
+  }
+  void set_identity(const std::string& identity) {
+    identity_ = identity;
+  }
+  void set_cert_path(const std::string& cert_path) {
+    cert_path_ = cert_path;
+  }
+
+  // WirelessNetwork overrides.
+  virtual void Clear();
+  virtual void ConfigureFromService(const ServiceInfo& service);
+
+  // Return a string representation of the encryption code.
+  // This not translated and should be only used for debugging purposes.
+  std::string GetEncryptionString();
+
+ protected:
+  ConnectionSecurity encryption_;
+  std::string passphrase_;
+  std::string identity_;
+  std::string cert_path_;
 };
+
 typedef std::vector<WifiNetwork> WifiNetworkVector;
-
-struct CellularNetwork {
-  CellularNetwork()
-      : strength(strength),
-        connecting(false),
-        connected(false),
-        auto_connect(false) {}
-  CellularNetwork(ServiceInfo service, bool connecting, bool connected,
-                  const std::string& ip_address)
-      : service_path(service.service_path),
-        device_path(service.device_path),
-        name(service.name),
-        strength(service.strength),
-        connecting(connecting),
-        connected(connected),
-        ip_address(ip_address) {}
-
-  // CellularNetworks are sorted by name.
-  bool operator< (const CellularNetwork& other) const {
-    return name < other.name;
-  }
-
-  std::string service_path;
-  std::string device_path;
-  std::string name;
-  int strength;
-  bool connecting;
-  bool connected;
-  bool auto_connect;
-  std::string ip_address;
-};
 typedef std::vector<CellularNetwork> CellularNetworkVector;
+
+struct CellTower {
+  enum RadioType {
+    RADIOTYPE_GSM,
+    RADIOTYPE_CDMA,
+    RADIOTYPE_WCDMA,
+  } radio_type;                   // GSM/WCDMA     CDMA
+  int mobile_country_code;        //   MCC          MCC
+  int mobile_network_code;        //   MNC          SID
+  int location_area_code;         //   LAC          NID
+  int cell_id;                    //   CID          BID
+  base::Time timestamp; // Timestamp when this cell was primary
+  int signal_strength;  // Radio signal strength measured in dBm.
+  int timing_advance;   // Represents the distance from the cell tower. Each
+                        // unit is roughly 550 meters.
+};
+
+struct WifiAccessPoint {
+  std::string mac_address;  // The mac address of the WiFi node.
+  std::string name;         // The SSID of the WiFi node.
+  base::Time timestamp;     // Timestamp when this AP was detected.
+  int signal_strength;      // Radio signal strength measured in dBm.
+  int signal_to_noise;      // Current signal to noise ratio measured in dB.
+  int channel;              // Wifi channel number.
+};
+
+typedef std::vector<CellTower> CellTowerVector;
+typedef std::vector<WifiAccessPoint> WifiAccessPointVector;
 
 struct NetworkIPConfig {
   NetworkIPConfig(const std::string& device_path, IPConfigType type,
@@ -152,7 +247,7 @@ class NetworkLibrary {
   virtual bool ethernet_connecting() const = 0;
   virtual bool ethernet_connected() const = 0;
 
-  virtual const std::string& wifi_ssid() const = 0;
+  virtual const std::string& wifi_name() const = 0;
   virtual bool wifi_connecting() const = 0;
   virtual bool wifi_connected() const = 0;
   virtual int wifi_strength() const = 0;
@@ -174,22 +269,73 @@ class NetworkLibrary {
   // Returns the current list of wifi networks.
   virtual const WifiNetworkVector& wifi_networks() const = 0;
 
+  // Returns the list of remembered wifi networks.
+  virtual const WifiNetworkVector& remembered_wifi_networks() const = 0;
+
   // Returns the current list of cellular networks.
   virtual const CellularNetworkVector& cellular_networks() const = 0;
+
+  // Returns the list of remembered cellular networks.
+  virtual const CellularNetworkVector& remembered_cellular_networks() const = 0;
+
+  // Search the current list of networks by path and if the network
+  // is available, copy the result and return true.
+  virtual bool FindWifiNetworkByPath(const std::string& path,
+                                     WifiNetwork* result) const = 0;
+  virtual bool FindCellularNetworkByPath(const std::string& path,
+                                         CellularNetwork* result) const = 0;
 
   // Request a scan for new wifi networks.
   virtual void RequestWifiScan() = 0;
 
+  // Reads out the results of the last wifi scan. These results are not
+  // pre-cached in the library, so the call may block whilst the results are
+  // read over IPC.
+  // Returns false if an error occurred in reading the results. Note that
+  // a true return code only indicates the result set was successfully read,
+  // it does not imply a scan has successfully completed yet.
+  virtual bool GetWifiAccessPoints(WifiAccessPointVector* result) = 0;
+
+  // TODO(joth): Add GetCellTowers to retrieve a CellTowerVector.
+
+  // Attempt to connect to the preferred network if available and it is set up.
+  // This call will return true if connection is started.
+  // If the preferred network is not available or not setup, returns false.
+  // Note: For dogfood purposes, we hardcode the preferred network to Google-A.
+  virtual bool ConnectToPreferredNetworkIfAvailable() = 0;
+
+  // Returns true if we are currently connected to the preferred network.
+  virtual bool PreferredNetworkConnected() = 0;
+
+  // Returns true if we failed to connect to the preferred network.
+  virtual bool PreferredNetworkFailed() = 0;
+
   // Connect to the specified wireless network with password.
   virtual void ConnectToWifiNetwork(WifiNetwork network,
-                                    const string16& password) = 0;
+                                    const std::string& password,
+                                    const std::string& identity,
+                                    const std::string& certpath) = 0;
 
   // Connect to the specified wifi ssid with password.
-  virtual void ConnectToWifiNetwork(const string16& ssid,
-                                    const string16& password) = 0;
+  virtual void ConnectToWifiNetwork(const std::string& ssid,
+                                    const std::string& password,
+                                    const std::string& identity,
+                                    const std::string& certpath,
+                                    bool auto_connect) = 0;
 
   // Connect to the specified cellular network.
   virtual void ConnectToCellularNetwork(CellularNetwork network) = 0;
+
+  // Disconnect from the specified wireless (either cellular or wifi) network.
+  virtual void DisconnectFromWirelessNetwork(
+      const WirelessNetwork& network) = 0;
+
+  // Save network information including passwords (wifi) and auto-connect.
+  virtual void SaveCellularNetwork(const CellularNetwork& network) = 0;
+  virtual void SaveWifiNetwork(const WifiNetwork& network) = 0;
+
+  // Forget the passed in wireless (either cellular or wifi) network.
+  virtual void ForgetWirelessNetwork(const WirelessNetwork& network) = 0;
 
   virtual bool ethernet_available() const = 0;
   virtual bool wifi_available() const = 0;
@@ -216,6 +362,10 @@ class NetworkLibrary {
   // Fetches IP configs for a given device_path
   virtual NetworkIPConfigVector GetIPConfigs(
       const std::string& device_path) = 0;
+
+  // Fetches debug network info for display in about:network.
+  // The page will have a meta refresh of |refresh| seconds if |refresh| > 0.
+  virtual std::string GetHtmlInfo(int refresh) = 0;
 };
 
 // This class handles the interaction with the ChromeOS network library APIs.
@@ -240,82 +390,92 @@ class NetworkLibraryImpl : public NetworkLibrary,
   virtual void RemoveObserver(Observer* observer);
 
   virtual const EthernetNetwork& ethernet_network() const { return ethernet_; }
-  virtual bool ethernet_connecting() const { return ethernet_.connecting; }
-  virtual bool ethernet_connected() const { return ethernet_.connected; }
+  virtual bool ethernet_connecting() const { return ethernet_.connecting(); }
+  virtual bool ethernet_connected() const { return ethernet_.connected(); }
 
-  virtual const std::string& wifi_ssid() const { return wifi_.ssid; }
-  virtual bool wifi_connecting() const { return wifi_.connecting; }
-  virtual bool wifi_connected() const { return wifi_.connected; }
-  virtual int wifi_strength() const { return wifi_.strength; }
+  virtual const std::string& wifi_name() const { return wifi_.name(); }
+  virtual bool wifi_connecting() const { return wifi_.connecting(); }
+  virtual bool wifi_connected() const { return wifi_.connected(); }
+  virtual int wifi_strength() const { return wifi_.strength(); }
 
-  virtual const std::string& cellular_name() const { return cellular_.name; }
-  virtual bool cellular_connecting() const { return cellular_.connecting; }
-  virtual bool cellular_connected() const { return cellular_.connected; }
-  virtual int cellular_strength() const { return cellular_.strength; }
+  virtual const std::string& cellular_name() const { return cellular_.name(); }
+  virtual bool cellular_connecting() const { return cellular_.connecting(); }
+  virtual bool cellular_connected() const { return cellular_.connected(); }
+  virtual int cellular_strength() const { return cellular_.strength(); }
 
-  // Return true if any network is currently connected.
   virtual bool Connected() const;
-
-  // Return true if any network is currently connecting.
   virtual bool Connecting() const;
-
-  // Returns the current IP address if connected. If not, returns empty string.
   virtual const std::string& IPAddress() const;
 
-  // Returns the current list of wifi networks.
   virtual const WifiNetworkVector& wifi_networks() const {
     return wifi_networks_;
   }
 
-  // Returns the current list of cellular networks.
+  virtual const WifiNetworkVector& remembered_wifi_networks() const {
+    return remembered_wifi_networks_;
+  }
+
   virtual const CellularNetworkVector& cellular_networks() const {
     return cellular_networks_;
   }
 
-  // Request a scan for new wifi networks.
+  virtual const CellularNetworkVector& remembered_cellular_networks() const {
+    return remembered_cellular_networks_;
+  }
+
+  virtual bool FindWifiNetworkByPath(const std::string& path,
+                                     WifiNetwork* network) const;
+  virtual bool FindCellularNetworkByPath(const std::string& path,
+                                         CellularNetwork* network) const;
+
   virtual void RequestWifiScan();
-
-  // Connect to the specified wireless network with password.
+  virtual bool GetWifiAccessPoints(WifiAccessPointVector* result);
+  virtual bool ConnectToPreferredNetworkIfAvailable();
+  virtual bool PreferredNetworkConnected();
+  virtual bool PreferredNetworkFailed();
   virtual void ConnectToWifiNetwork(WifiNetwork network,
-                                    const string16& password);
-
-  // Connect to the specified wifi ssid with password.
-  virtual void ConnectToWifiNetwork(const string16& ssid,
-                                    const string16& password);
-
-  // Connect to the specified cellular network.
+                                    const std::string& password,
+                                    const std::string& identity,
+                                    const std::string& certpath);
+  virtual void ConnectToWifiNetwork(const std::string& ssid,
+                                    const std::string& password,
+                                    const std::string& identity,
+                                    const std::string& certpath,
+                                    bool auto_connect);
   virtual void ConnectToCellularNetwork(CellularNetwork network);
+  virtual void DisconnectFromWirelessNetwork(const WirelessNetwork& network);
+  virtual void SaveCellularNetwork(const CellularNetwork& network);
+  virtual void SaveWifiNetwork(const WifiNetwork& network);
+  virtual void ForgetWirelessNetwork(const WirelessNetwork& network);
 
   virtual bool ethernet_available() const {
-      return available_devices_ & (1 << TYPE_ETHERNET); }
+      return available_devices_ & (1 << TYPE_ETHERNET);
+  }
   virtual bool wifi_available() const {
-      return available_devices_ & (1 << TYPE_WIFI); }
+      return available_devices_ & (1 << TYPE_WIFI);
+  }
   virtual bool cellular_available() const {
-      return available_devices_ & (1 << TYPE_CELLULAR); }
+      return available_devices_ & (1 << TYPE_CELLULAR);
+  }
 
   virtual bool ethernet_enabled() const {
-      return enabled_devices_ & (1 << TYPE_ETHERNET); }
+      return enabled_devices_ & (1 << TYPE_ETHERNET);
+  }
   virtual bool wifi_enabled() const {
-      return enabled_devices_ & (1 << TYPE_WIFI); }
+      return enabled_devices_ & (1 << TYPE_WIFI);
+  }
   virtual bool cellular_enabled() const {
-      return enabled_devices_ & (1 << TYPE_CELLULAR); }
+      return enabled_devices_ & (1 << TYPE_CELLULAR);
+  }
 
   virtual bool offline_mode() const { return offline_mode_; }
 
-  // Enables/disables the ethernet network device.
   virtual void EnableEthernetNetworkDevice(bool enable);
-
-  // Enables/disables the wifi network device.
   virtual void EnableWifiNetworkDevice(bool enable);
-
-  // Enables/disables the cellular network device.
   virtual void EnableCellularNetworkDevice(bool enable);
-
-  // Enables/disables offline mode.
   virtual void EnableOfflineMode(bool enable);
-
-  // Fetches IP configs for a given device_path
   virtual NetworkIPConfigVector GetIPConfigs(const std::string& device_path);
+  virtual std::string GetHtmlInfo(int refresh);
 
  private:
 
@@ -323,24 +483,47 @@ class NetworkLibraryImpl : public NetworkLibrary,
   // This method is called on a background thread.
   static void NetworkStatusChangedHandler(void* object);
 
-  // This parses SystemInfo and creates a WifiNetworkVector of wifi networks
-  // and a CellularNetworkVector of cellular networks.
-  // It also sets the ethernet connecting/connected status.
+  // This parses SystemInfo into:
+  //  - an EthernetNetwork
+  //  - a WifiNetworkVector of wifi networks
+  //  - a CellularNetworkVector of cellular networks.
+  //  - a WifiNetworkVector of remembered wifi networks
+  //  - a CellularNetworkVector of remembered cellular networks.
   static void ParseSystem(SystemInfo* system,
                           EthernetNetwork* ethernet,
                           WifiNetworkVector* wifi_networks,
-                          CellularNetworkVector* ceullular_networks);
+                          CellularNetworkVector* ceullular_networks,
+                          WifiNetworkVector* remembered_wifi_networks,
+                          CellularNetworkVector* remembered_ceullular_networks);
 
   // This methods loads the initial list of networks on startup and starts the
   // monitoring of network changes.
   void Init();
 
+  // Force an update of the system info.
+  void UpdateSystemInfo();
+
+  // Returns the preferred wifi network.
+  WifiNetwork* GetPreferredNetwork();
+
+  // Gets the WifiNetwork with the given name. Returns NULL if not found.
+  // Only used by GetPreferredNetwork() to lookup "Google" and "GoogleA" (hack)
+  WifiNetwork* GetWifiNetworkByName(const std::string& name);
+
+  // Gets the WirelessNetwork (WifiNetwork or CellularNetwork) by path
+  template<typename T>
+  T* GetWirelessNetworkByPath(std::vector<T>& networks,
+                              const std::string& path);
+  template<typename T>
+  const T* GetWirelessNetworkByPath(const std::vector<T>& networks,
+                                    const std::string& path) const;
+
   // Enables/disables the specified network device.
   void EnableNetworkDeviceType(ConnectionType device, bool enable);
 
-  // Update the network with the SystemInfo object.
+  // Update the cached network status.
   // This will notify all the Observers.
-  void UpdateNetworkStatus(SystemInfo* system);
+  void UpdateNetworkStatus();
 
   // Checks network traffic to see if there is any uploading.
   // If there is download traffic, then true is passed in for download.
@@ -383,11 +566,17 @@ class NetworkLibraryImpl : public NetworkLibrary,
   // The current connected (or connecting) wifi network.
   WifiNetwork wifi_;
 
+  // The remembered wifi networks.
+  WifiNetworkVector remembered_wifi_networks_;
+
   // The list of available cellular networks.
   CellularNetworkVector cellular_networks_;
 
   // The current connected (or connecting) cellular network.
   CellularNetwork cellular_;
+
+  // The remembered cellular networks.
+  CellularNetworkVector remembered_cellular_networks_;
 
   // The current available network devices. Bitwise flag of ConnectionTypes.
   int available_devices_;

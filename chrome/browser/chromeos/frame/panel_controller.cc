@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "app/resource_bundle.h"
-#include "app/x11_util.h"
 #include "base/logging.h"
 #include "base/singleton.h"
 #include "base/scoped_ptr.h"
@@ -18,6 +17,7 @@
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "third_party/cros/chromeos_wm_ipc_enums.h"
 #include "views/controls/button/image_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
@@ -75,20 +75,22 @@ static void InitializeResources() {
 }  // namespace
 
 PanelController::PanelController(Delegate* delegate,
-                                 GtkWindow* window,
-                                 const gfx::Rect& init_bounds)
+                                 GtkWindow* window)
     :  delegate_(delegate),
        panel_(window),
        panel_xid_(x11_util::GetX11WindowFromGtkWidget(GTK_WIDGET(panel_))),
        title_window_(NULL),
+       title_(NULL),
+       title_content_(NULL),
        expanded_(true),
        mouse_down_(false),
        dragging_(false),
        client_event_handler_id_(0) {
-  Init(init_bounds);
 }
 
-void PanelController::Init(const gfx::Rect window_bounds) {
+void PanelController::Init(bool initial_focus,
+                           const gfx::Rect& window_bounds,
+                           XID creator_xid) {
   gfx::Rect title_bounds(
       0, 0, window_bounds.width(), kTitleHeight);
 
@@ -101,14 +103,16 @@ void PanelController::Init(const gfx::Rect window_bounds) {
 
   WmIpc::instance()->SetWindowType(
       title_,
-      WmIpc::WINDOW_TYPE_CHROME_PANEL_TITLEBAR,
+      WM_IPC_WINDOW_CHROME_PANEL_TITLEBAR,
       NULL);
   std::vector<int> type_params;
   type_params.push_back(title_xid_);
   type_params.push_back(expanded_ ? 1 : 0);
+  type_params.push_back(initial_focus ? 1 : 0);
+  type_params.push_back(creator_xid);
   WmIpc::instance()->SetWindowType(
       GTK_WIDGET(panel_),
-      WmIpc::WINDOW_TYPE_CHROME_PANEL_CONTENT,
+      WM_IPC_WINDOW_CHROME_PANEL_CONTENT,
       &type_params);
 
   client_event_handler_id_ = g_signal_connect(
@@ -123,6 +127,7 @@ void PanelController::Init(const gfx::Rect window_bounds) {
 void PanelController::UpdateTitleBar() {
   if (!delegate_ || !title_window_)
     return;
+  DCHECK(title_content_);
   title_content_->title_label()->SetText(
       UTF16ToWideHack(delegate_->GetPanelTitle()));
   title_content_->title_icon()->SetImage(delegate_->GetPanelIcon());
@@ -138,10 +143,11 @@ bool PanelController::TitleMousePressed(const views::MouseEvent& event) {
     NOTREACHED();
     return false;
   }
-
+  DCHECK(title_);
   // Get the last titlebar width that we saw in a ConfigureNotify event -- we
   // need to give drag positions in terms of the top-right corner of the
-  // titlebar window.  See WM_NOTIFY_PANEL_DRAGGED's declaration for details.
+  // titlebar window.  See WM_IPC_MESSAGE_WM_NOTIFY_PANEL_DRAGGED's declaration
+  // for details.
   gint title_width = 1;
   gtk_window_get_size(GTK_WINDOW(title_), &title_width, NULL);
 
@@ -158,7 +164,7 @@ bool PanelController::TitleMousePressed(const views::MouseEvent& event) {
 
 void PanelController::TitleMouseReleased(
     const views::MouseEvent& event, bool canceled) {
-  if (!event.IsOnlyLeftMouseButton()) {
+  if (!event.IsLeftMouseButton()) {
     return;
   }
   // Only handle clicks that started in our window.
@@ -171,7 +177,7 @@ void PanelController::TitleMouseReleased(
     SetState(expanded_ ?
              PanelController::MINIMIZED : PanelController::EXPANDED);
   } else {
-    WmIpc::Message msg(WmIpc::Message::WM_NOTIFY_PANEL_DRAG_COMPLETE);
+    WmIpc::Message msg(WM_IPC_MESSAGE_WM_NOTIFY_PANEL_DRAG_COMPLETE);
     msg.set_param(0, panel_xid_);
     WmIpc::instance()->SendMessage(msg);
     dragging_ = false;
@@ -179,7 +185,7 @@ void PanelController::TitleMouseReleased(
 }
 
 void PanelController::SetState(State state) {
-  WmIpc::Message msg(WmIpc::Message::WM_SET_PANEL_STATE);
+  WmIpc::Message msg(WM_IPC_MESSAGE_WM_SET_PANEL_STATE);
   msg.set_param(0, panel_xid_);
   msg.set_param(1, state == EXPANDED);
   WmIpc::instance()->SendMessage(msg);
@@ -205,7 +211,7 @@ bool PanelController::TitleMouseDragged(const views::MouseEvent& event) {
     }
   }
   if (dragging_) {
-    WmIpc::Message msg(WmIpc::Message::WM_NOTIFY_PANEL_DRAGGED);
+    WmIpc::Message msg(WM_IPC_MESSAGE_WM_NOTIFY_PANEL_DRAGGED);
     msg.set_param(0, panel_xid_);
     msg.set_param(1, last_motion_event.x_root - mouse_down_offset_x_);
     msg.set_param(2, last_motion_event.y_root - mouse_down_offset_y_);
@@ -236,7 +242,7 @@ void PanelController::OnFocusOut() {
 bool PanelController::PanelClientEvent(GdkEventClient* event) {
   WmIpc::Message msg;
   WmIpc::instance()->DecodeMessage(*event, &msg);
-  if (msg.type() == WmIpc::Message::CHROME_NOTIFY_PANEL_STATE) {
+  if (msg.type() == WM_IPC_MESSAGE_CHROME_NOTIFY_PANEL_STATE) {
     bool new_state = msg.param(0);
     if (expanded_ != new_state) {
       expanded_ = new_state;
@@ -259,13 +265,17 @@ void PanelController::Close() {
   if (title_window_) {
     title_window_->Close();
     title_window_ = NULL;
+    title_ = NULL;
+    title_content_->OnClose();
+    title_content_ = NULL;
   }
 }
 
-void PanelController::ButtonPressed(
-    views::Button* sender, const views::Event& event) {
-  if (title_window_ && sender == title_content_->close_button()) {
-    delegate_->ClosePanel();
+void PanelController::OnCloseButtonPressed() {
+  DCHECK(title_content_);
+  if (title_window_) {
+    if (delegate_)
+      delegate_->ClosePanel();
     Close();
   }
 }
@@ -274,7 +284,7 @@ PanelController::TitleContentView::TitleContentView(
     PanelController* panel_controller)
         : panel_controller_(panel_controller) {
   InitializeResources();
-  close_button_ = new views::ImageButton(panel_controller_);
+  close_button_ = new views::ImageButton(this);
   close_button_->SetImage(views::CustomButton::BS_NORMAL, close_button_n);
   close_button_->SetImage(views::CustomButton::BS_HOT, close_button_h);
   close_button_->SetImage(views::CustomButton::BS_PUSHED, close_button_p);
@@ -314,16 +324,19 @@ void PanelController::TitleContentView::Layout() {
 
 bool PanelController::TitleContentView::OnMousePressed(
     const views::MouseEvent& event) {
+  DCHECK(panel_controller_) << "OnMousePressed after Close";
   return panel_controller_->TitleMousePressed(event);
 }
 
 void PanelController::TitleContentView::OnMouseReleased(
     const views::MouseEvent& event, bool canceled) {
+  DCHECK(panel_controller_) << "MouseReleased after Close";
   return panel_controller_->TitleMouseReleased(event, canceled);
 }
 
 bool PanelController::TitleContentView::OnMouseDragged(
     const views::MouseEvent& event) {
+  DCHECK(panel_controller_) << "MouseDragged after Close";
   return panel_controller_->TitleMouseDragged(event);
 }
 
@@ -343,6 +356,16 @@ void PanelController::TitleContentView::OnFocusOut() {
   title_label_->SetFont(*inactive_font);
   Layout();
   SchedulePaint();
+}
+
+void PanelController::TitleContentView::OnClose() {
+  panel_controller_ = NULL;
+}
+
+void PanelController::TitleContentView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
+  if (panel_controller_ && sender == close_button_)
+    panel_controller_->OnCloseButtonPressed();
 }
 
 }  // namespace chromeos

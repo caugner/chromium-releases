@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,13 +43,14 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/gtest_prod_util.h"
 #include "base/scoped_ptr.h"
 #include "build/build_config.h"
 #include "chrome/browser/google_service_auth_error.h"
 #include "chrome/browser/sync/notification_method.h"
 #include "chrome/browser/sync/syncable/model_type.h"
+#include "chrome/browser/sync/util/cryptographer.h"
 #include "googleurl/src/gurl.h"
-#include "testing/gtest/include/gtest/gtest_prod.h" // for FRIEND_TEST
 
 namespace browser_sync {
 class ModelSafeWorkerRegistrar;
@@ -75,7 +76,12 @@ namespace sync_pb {
 class AutofillSpecifics;
 class BookmarkSpecifics;
 class EntitySpecifics;
+class ExtensionSpecifics;
+class NigoriSpecifics;
+class PasswordSpecifics;
 class PreferenceSpecifics;
+class PasswordSpecifics;
+class PasswordSpecificsData;
 class ThemeSpecifics;
 class TypedUrlSpecifics;
 }
@@ -172,6 +178,14 @@ class BaseNode {
   // data.  Can only be called if GetModelType() == AUTOFILL.
   const sync_pb::AutofillSpecifics& GetAutofillSpecifics() const;
 
+  // Getter specific to the NIGORI datatype.  Returns protobuf
+  // data.  Can only be called if GetModelType() == NIGORI.
+  const sync_pb::NigoriSpecifics& GetNigoriSpecifics() const;
+
+  // Getter specific to the PASSWORD datatype.  Returns protobuf
+  // data.  Can only be called if GetModelType() == PASSWORD.
+  const sync_pb::PasswordSpecificsData& GetPasswordSpecifics() const;
+
   // Getter specific to the PREFERENCE datatype.  Returns protobuf
   // data.  Can only be called if GetModelType() == PREFERENCE.
   const sync_pb::PreferenceSpecifics& GetPreferenceSpecifics() const;
@@ -183,6 +197,10 @@ class BaseNode {
   // Getter specific to the TYPED_URLS datatype.  Returns protobuf
   // data.  Can only be called if GetModelType() == TYPED_URLS.
   const sync_pb::TypedUrlSpecifics& GetTypedUrlSpecifics() const;
+
+  // Getter specific to the EXTENSIONS datatype.  Returns protobuf
+  // data.  Can only be called if GetModelType() == EXTENSIONS.
+  const sync_pb::ExtensionSpecifics& GetExtensionSpecifics() const;
 
   // Returns the local external ID associated with the node.
   int64 GetExternalId() const;
@@ -211,12 +229,21 @@ class BaseNode {
   static std::string GenerateSyncableHash(syncable::ModelType model_type,
       const std::string& client_tag);
 
+  // Determines whether part of the entry is encrypted, and if so attempts to
+  // decrypt it. Unless decryption is necessary and fails, this will always
+  // return |true|.
+  bool DecryptIfNecessary(syncable::Entry* entry);
+
  private:
   // Node is meant for stack use only.
   void* operator new(size_t size);
 
+  // If this node represents a password, this field will hold the actual
+  // decrypted password data.
+  scoped_ptr<sync_pb::PasswordSpecificsData> password_data_;
+
   friend class SyncApiTest;
-  FRIEND_TEST(SyncApiTest, GenerateSyncableHash);
+  FRIEND_TEST_ALL_PREFIXES(SyncApiTest, GenerateSyncableHash);
 
   DISALLOW_COPY_AND_ASSIGN(BaseNode);
 };
@@ -257,6 +284,11 @@ class WriteNode : public BaseNode {
                             const BaseNode& parent,
                             const std::string& client_tag);
 
+  // Each server-created permanent node is tagged with a unique string.
+  // Look up the node with the particular tag.  If it does not exist,
+  // return false.
+  bool InitByTagLookup(const std::string& tag);
+
   // These Set() functions correspond to the Get() functions of BaseNode.
   void SetIsFolder(bool folder);
   void SetTitle(const std::wstring& title);
@@ -287,6 +319,14 @@ class WriteNode : public BaseNode {
   // Should only be called if GetModelType() == AUTOFILL.
   void SetAutofillSpecifics(const sync_pb::AutofillSpecifics& specifics);
 
+  // Set the nigori specifics.
+  // Should only be called if GetModelType() == NIGORI.
+  void SetNigoriSpecifics(const sync_pb::NigoriSpecifics& specifics);
+
+  // Set the password specifics.
+  // Should only be called if GetModelType() == PASSWORD.
+  void SetPasswordSpecifics(const sync_pb::PasswordSpecificsData& specifics);
+
   // Set the preference specifics (name and value).
   // Should only be called if GetModelType() == PREFERENCE.
   void SetPreferenceSpecifics(const sync_pb::PreferenceSpecifics& specifics);
@@ -298,6 +338,10 @@ class WriteNode : public BaseNode {
   // Set the typed_url specifics (url, title, typed_count, etc).
   // Should only be called if GetModelType() == TYPED_URLS.
   void SetTypedUrlSpecifics(const sync_pb::TypedUrlSpecifics& specifics);
+
+  // Set the extension specifics (id, update url, enabled state, etc).
+  // Should only be called if GetModelType() == EXTENSIONS.
+  void SetExtensionSpecifics(const sync_pb::ExtensionSpecifics& specifics);
 
   // Implementation of BaseNode's abstract virtual accessors.
   virtual const syncable::Entry* GetEntry() const;
@@ -322,12 +366,18 @@ class WriteNode : public BaseNode {
       const sync_pb::AutofillSpecifics& new_value);
   void PutBookmarkSpecificsAndMarkForSyncing(
       const sync_pb::BookmarkSpecifics& new_value);
+  void PutNigoriSpecificsAndMarkForSyncing(
+      const sync_pb::NigoriSpecifics& new_value);
+  void PutPasswordSpecificsAndMarkForSyncing(
+      const sync_pb::PasswordSpecifics& new_value);
   void PutPreferenceSpecificsAndMarkForSyncing(
       const sync_pb::PreferenceSpecifics& new_value);
   void PutThemeSpecificsAndMarkForSyncing(
       const sync_pb::ThemeSpecifics& new_value);
   void PutTypedUrlSpecificsAndMarkForSyncing(
       const sync_pb::TypedUrlSpecifics& new_value);
+  void PutExtensionSpecificsAndMarkForSyncing(
+      const sync_pb::ExtensionSpecifics& new_value);
   void PutSpecificsAndMarkForSyncing(
       const sync_pb::EntitySpecifics& specifics);
 
@@ -367,9 +417,7 @@ class ReadNode : public BaseNode {
 
   // Each server-created permanent node is tagged with a unique string.
   // Look up the node with the particular tag.  If it does not exist,
-  // return false.  Since these nodes are special, lookup is only
-  // provided through ReadNode.
-  // TODO(chron): Rename this function.
+  // return false.
   bool InitByTagLookup(const std::string& tag);
 
   // Implementation of BaseNode's abstract virtual accessors.
@@ -400,6 +448,9 @@ class BaseTransaction {
   // Provide access to the underlying syncable.h objects from BaseNode.
   virtual syncable::BaseTransaction* GetWrappedTrans() const = 0;
   const syncable::ScopedDirLookup& GetLookup() const { return *lookup_; }
+  browser_sync::Cryptographer* GetCryptographer() const {
+    return cryptographer_;
+  }
 
  protected:
   // The ScopedDirLookup is created in the constructor and destroyed
@@ -412,6 +463,8 @@ class BaseTransaction {
   // A syncable ScopedDirLookup, which is the parent of syncable transactions.
   syncable::ScopedDirLookup* lookup_;
 
+  browser_sync::Cryptographer* cryptographer_;
+
   DISALLOW_COPY_AND_ASSIGN(BaseTransaction);
 };
 
@@ -421,6 +474,10 @@ class ReadTransaction : public BaseTransaction {
  public:
   // Start a new read-only transaction on the specified repository.
   explicit ReadTransaction(UserShare* share);
+
+  // Resume the middle of a transaction. Will not close transaction.
+  ReadTransaction(UserShare* share, syncable::BaseTransaction* trans);
+
   virtual ~ReadTransaction();
 
   // BaseTransaction override.
@@ -429,7 +486,8 @@ class ReadTransaction : public BaseTransaction {
   void* operator new(size_t size);  // Transaction is meant for stack use only.
 
   // The underlying syncable object which this class wraps.
-  syncable::ReadTransaction* transaction_;
+  syncable::BaseTransaction* transaction_;
+  bool close_transaction_;
 
   DISALLOW_COPY_AND_ASSIGN(ReadTransaction);
 };
@@ -467,14 +525,6 @@ class SyncManager {
   // internal types from clients of the interface.
   class SyncInternal;
 
-  // Derive from this class and add your own data members to associate extra
-  // information with a ChangeRecord.
-  class ExtraChangeRecordData {
-   public:
-    ExtraChangeRecordData() {}
-    virtual ~ExtraChangeRecordData() {}
-  };
-
   // ChangeRecord indicates a single item that changed as a result of a sync
   // operation.  This gives the sync id of the node that changed, and the type
   // of change.  To get the actual property values after an ADD or UPDATE, the
@@ -485,20 +535,10 @@ class SyncManager {
       ACTION_DELETE,
       ACTION_UPDATE,
     };
-    ChangeRecord() : id(kInvalidId), action(ACTION_ADD), extra(NULL) {}
+    ChangeRecord() : id(kInvalidId), action(ACTION_ADD) {}
     int64 id;
     Action action;
-    ExtraChangeRecordData* extra;
-  };
-
-  // Extra specifics data that certain model types require. This is only
-  // used for autofill DELETE changes.
-  class ExtraAutofillChangeRecordData : public ExtraChangeRecordData {
-   public:
-    explicit ExtraAutofillChangeRecordData(sync_pb::AutofillSpecifics* s)
-        : pre_deletion_data(s) {}
-    virtual ~ExtraAutofillChangeRecordData();
-    const sync_pb::AutofillSpecifics* pre_deletion_data;
+    sync_pb::EntitySpecifics specifics;
   };
 
   // Status encapsulates detailed state about the internals of the SyncManager.
@@ -605,6 +645,13 @@ class SyncManager {
     // Called when user interaction may be required due to an auth problem.
     virtual void OnAuthError(const GoogleServiceAuthError& auth_error) = 0;
 
+    // Called when user interaction is required to obtain a valid passphrase.
+    virtual void OnPassphraseRequired() = 0;
+
+    // Called when the passphrase provided by the user has been accepted and is
+    // now used to encrypt sync data.
+    virtual void OnPassphraseAccepted() = 0;
+
     // Called when initialization is complete to the point that SyncManager can
     // process changes. This does not necessarily mean authentication succeeded
     // or that the SyncManager is online.
@@ -619,6 +666,12 @@ class SyncManager {
 
     // The syncer thread has been resumed.
     virtual void OnResumed() = 0;
+
+    // We are no longer permitted to communicate with the server. Sync should
+    // be disabled and state cleaned up at once.  This can happen for a number
+    // of reasons, e.g. swapping from a test instance to production, or a
+    // global stop syncing operation has wiped the store.
+    virtual void OnStopSyncingPermanently() = 0;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(Observer);
@@ -677,15 +730,15 @@ class SyncManager {
             bool invalidate_xmpp_auth_token,
             const char* user_agent,
             const char* lsid,
+            bool use_chrome_async_socket,
             browser_sync::NotificationMethod notification_method);
 
   // Returns the username last used for a successful authentication.
   // Returns empty if there is no such username.
   const std::string& GetAuthenticatedUsername();
 
-  // Submit credentials to GAIA for verification and start the
-  // syncing process on success. On success, both |username| and the obtained
-  // auth token are persisted on disk for future re-use.
+  // Submit credentials to GAIA for verification. On success, both |username|
+  // and the obtained auth token are persisted on disk for future re-use.
   // If authentication fails, OnAuthProblem is called on our Observer.
   // The Observer may, in turn, decide to try again with new
   // credentials. Calling this method again is the appropriate course of action
@@ -693,6 +746,18 @@ class SyncManager {
   // |username|, |password|, and |captcha| are owned by the caller.
   void Authenticate(const char* username, const char* password,
                     const char* captcha);
+
+  // Start the SyncerThread.
+  void StartSyncing();
+
+  // Attempt to set the passphrase. If the passphrase is valid,
+  // OnPassphraseAccepted will be fired to notify the ProfileSyncService and the
+  // syncer will be nudged so that any update that was waiting for this
+  // passphrase gets applied as soon as possible.
+  // If the passphrase in invalid, OnPassphraseRequired will be fired.
+  // Calling this metdod again is the appropriate course of action to "retry"
+  // with a new passphrase.
+  void SetPassphrase(const std::string& passphrase);
 
   // Requests the syncer thread to pause.  The observer's OnPause
   // method will be called when the syncer thread is paused.  Returns

@@ -35,8 +35,8 @@
 
 #include "utils/cross/file_path_utils.h"
 #include "base/file_util.h"
-#include "base/string_util.h"
 #include "base/file_path.h"
+#include "base/utf_string_conversions.h"
 
 namespace o3d {
 std::wstring FilePathToWide(const FilePath& input) {
@@ -68,6 +68,14 @@ FilePath UTF8ToFilePath(const String& input) {
   return FilePath(UTF8ToWide(input));
 #else
   return FilePath(input);
+#endif
+}
+
+FilePath::StringType UTF8ToFilePathStringType(const String& input) {
+#if defined(OS_WIN)
+  return UTF8ToWide(input);
+#else
+  return input;
 #endif
 }
 

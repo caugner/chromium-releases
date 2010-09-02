@@ -24,28 +24,27 @@ class HttpAuthHandlerDigest : public HttpAuthHandler {
     virtual int CreateAuthHandler(HttpAuth::ChallengeTokenizer* challenge,
                                   HttpAuth::Target target,
                                   const GURL& origin,
-                                  scoped_refptr<HttpAuthHandler>* handler);
+                                  CreateReason reason,
+                                  int digest_nonce_count,
+                                  const BoundNetLog& net_log,
+                                  scoped_ptr<HttpAuthHandler>* handler);
   };
-
-  virtual int GenerateAuthToken(const std::wstring& username,
-                                const std::wstring& password,
-                                const HttpRequestInfo* request,
-                                const ProxyInfo* proxy,
-                                std::string* auth_token);
-
-  virtual int GenerateDefaultAuthToken(const HttpRequestInfo* request,
-                                       const ProxyInfo* proxy,
-                                       std::string* auth_token);
 
  protected:
   virtual bool Init(HttpAuth::ChallengeTokenizer* challenge) {
-    nonce_count_ = 0;
     return ParseChallenge(challenge);
   }
+
+  virtual int GenerateAuthTokenImpl(const std::wstring* username,
+                                    const std::wstring* password,
+                                    const HttpRequestInfo* request,
+                                    CompletionCallback* callback,
+                                    std::string* auth_token);
 
  private:
   FRIEND_TEST(HttpAuthHandlerDigestTest, ParseChallenge);
   FRIEND_TEST(HttpAuthHandlerDigestTest, AssembleCredentials);
+  FRIEND_TEST(HttpNetworkTransactionTest, DigestPreAuthNonceCount);
 
   // Possible values for the "algorithm" property.
   enum DigestAlgorithm {
@@ -69,6 +68,8 @@ class HttpAuthHandlerDigest : public HttpAuthHandler {
     QOP_AUTH_INT = 1 << 1,
   };
 
+  explicit HttpAuthHandlerDigest(int nonce_count) : nonce_count_(nonce_count) {}
+
   ~HttpAuthHandlerDigest() {}
 
   // Parse the challenge, saving the results into this instance.
@@ -89,7 +90,6 @@ class HttpAuthHandlerDigest : public HttpAuthHandler {
   // Extract the method and path of the request, as needed by
   // the 'A2' production. (path may be a hostname for proxy).
   void GetRequestMethodAndPath(const HttpRequestInfo* request,
-                               const ProxyInfo* proxy,
                                std::string* method,
                                std::string* path) const;
 
@@ -109,6 +109,11 @@ class HttpAuthHandlerDigest : public HttpAuthHandler {
                                   const std::string& cnonce,
                                   int nonce_count) const;
 
+  // Forces cnonce to be the same each time. This is used for unit tests.
+  static void SetFixedCnonce(bool fixed_cnonce) {
+    fixed_cnonce_ = fixed_cnonce;
+  }
+
   // Information parsed from the challenge.
   std::string nonce_;
   std::string domain_;
@@ -118,6 +123,9 @@ class HttpAuthHandlerDigest : public HttpAuthHandler {
   int qop_; // Bitfield of QualityOfProtection
 
   int nonce_count_;
+
+  // Forces the cnonce to be the same each time, for unit tests.
+  static bool fixed_cnonce_;
 };
 
 }  // namespace net

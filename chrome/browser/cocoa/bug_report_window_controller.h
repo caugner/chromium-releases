@@ -25,6 +25,9 @@ class TabContents;
 
   // Holds screenshot of current tab.
   std::vector<unsigned char> pngData_;
+  // Width and height of the current tab's screenshot.
+  int pngWidth_;
+  int pngHeight_;
 
   // Values bound to data in the dialog box. These values cannot be boxed in
   // scoped_nsobjects because we use them for bindings.
@@ -95,15 +98,14 @@ class TabContents;
     doCommandBySelector:(SEL)commandSelector;
 
 // Properties for bindings.
-@property (copy, nonatomic) NSString* bugDescription;
-@property NSUInteger bugTypeIndex;
-@property (copy, nonatomic) NSString* pageTitle;
-@property (copy, nonatomic) NSString* pageURL;
-@property BOOL sendScreenshot;
-@property BOOL disableScreenshotCheckbox;
-@property (readonly, nonatomic) NSArray* bugTypeList;
+@property (nonatomic, copy) NSString* bugDescription;
+@property (nonatomic) NSUInteger bugTypeIndex;
+@property (nonatomic, copy) NSString* pageTitle;
+@property (nonatomic, copy) NSString* pageURL;
+@property (nonatomic) BOOL sendScreenshot;
+@property (nonatomic) BOOL disableScreenshotCheckbox;
+@property (nonatomic, readonly) NSArray* bugTypeList;
 
 @end
 
 #endif  // CHROME_BROWSER_COCOA_BUG_REPORT_WINDOW_CONTROLLER_H_
-

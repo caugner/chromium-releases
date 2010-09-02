@@ -18,7 +18,7 @@
 #include "base/lock.h"
 #include "base/logging.h"
 #include "base/thread.h"
-
+#include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 
 // utils.h : Various utility functions and classes
@@ -189,6 +189,13 @@ FilePath GetIETemporaryFilesFolder();
 // @returns true if the version info was successfully retrieved.
 bool GetModuleVersion(HMODULE module, uint32* high, uint32* low);
 
+// Parses a version string and returns the major, minor versions or 0 if not
+// present in the string.  The rest of the version string is ignored.
+bool ParseVersion(const std::wstring& version, uint32* high, uint32* low);
+
+// @returns the module handle to which an address belongs.
+HMODULE GetModuleFromAddress(void* address);
+
 // Return if the IEXPLORE is in private mode. The IEIsInPrivateBrowsing() checks
 // whether current process is IEXPLORE.
 bool IsIEInPrivate();
@@ -239,14 +246,13 @@ HRESULT DoQueryService(const IID& service_id, IUnknown* unk, T** service) {
   DCHECK(service);
   if (!unk)
     return E_INVALIDARG;
+
   ScopedComPtr<IServiceProvider> service_provider;
   HRESULT hr = service_provider.QueryFrom(unk);
-  if (!service_provider)
-    return E_NOINTERFACE;
+  if (service_provider)
+    hr = service_provider->QueryService(service_id, service);
 
-  hr = service_provider->QueryService(service_id, service);
-  if (*service == NULL)
-    return E_NOINTERFACE;
+  DCHECK(FAILED(hr) || *service);
   return hr;
 }
 
@@ -394,6 +400,11 @@ extern Lock g_ChromeFrameHistogramLock;
   UMA_HISTOGRAM_TIMES(name, sample); \
 }
 
+#define THREAD_SAFE_UMA_HISTOGRAM_COUNTS(name, sample) { \
+  AutoLock lock(g_ChromeFrameHistogramLock); \
+  UMA_HISTOGRAM_COUNTS(name, sample); \
+}
+
 // Fired when we want to notify IE about privacy changes.
 #define WM_FIRE_PRIVACY_CHANGE_NOTIFICATION (WM_APP + 1)
 
@@ -424,12 +435,21 @@ std::string GetHttpHeadersFromBinding(IBinding* binding);
 // Returns the HTTP response code from the binding passed in.
 int GetHttpResponseStatusFromBinding(IBinding* binding);
 
+// Returns the clipboard format for text/html.
+CLIPFORMAT GetTextHtmlClipboardFormat();
+
+// Returns true iff the mime type is text/html.
+bool IsTextHtmlMimeType(const wchar_t* mime_type);
+
+// Returns true iff the clipboard format is text/html.
+bool IsTextHtmlClipFormat(CLIPFORMAT cf);
+
 // Returns the desired patch method (moniker, http_equiv, protocol sink).
 // Defaults to moniker patch.
 ProtocolPatchMethod GetPatchMethod();
 
 // Returns true if the IMoniker patch is enabled.
-bool MonikerPatchEnabled();
+bool IsIBrowserServicePatchEnabled();
 
 // STL helper class that implements a functor to delete objects.
 // E.g: std::for_each(v.begin(), v.end(), utils::DeleteObject());
@@ -442,5 +462,22 @@ class DeleteObject {
   }
 };
 }
+
+// Convert various protocol flags to text representation. Used for logging.
+std::string BindStatus2Str(ULONG bind_status);
+std::string PiFlags2Str(DWORD flags);
+std::string Bscf2Str(DWORD flags);
+
+// Reads data from a stream into a string.
+HRESULT ReadStream(IStream* stream, size_t size, std::string* data);
+
+// Parses the attach external tab url, which comes in from Chrome in the course
+// of a window.open operation. The format of this URL is as below:-
+// gcf:attach_external_tab&n1&n2&x&y&width&height
+// n1 -> cookie, n2 -> disposition, x, y, width, height -> dimensions of the
+// window.
+// Returns true on success.
+bool ParseAttachExternalTabUrl(const std::wstring& url, uint64* cookie,
+                               gfx::Rect* dimensions, int* disposition);
 
 #endif  // CHROME_FRAME_UTILS_H_

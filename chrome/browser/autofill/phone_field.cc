@@ -5,6 +5,7 @@
 #include "chrome/browser/autofill/phone_field.h"
 
 #include "base/logging.h"
+#include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "chrome/browser/autofill/autofill_field.h"
@@ -46,35 +47,35 @@ PhoneField* PhoneField::Parse(std::vector<AutoFillField*>::const_iterator* iter,
   // uk/Furniture123-1.html) have several phone numbers in succession and we
   // don't want those to be parsed as components of a single phone number.
   if (phone2 == NULL)
-    ParseText(&q, ASCIIToUTF16("^-$|\\)$"), &phone2);
+    ParseText(&q, ASCIIToUTF16("^-$|\\)$|prefix"), &phone2);
 
   // Look for a third text box.
   if (phone2)
-    ParseText(&q, ASCIIToUTF16("^-$"), &phone3);
+    ParseText(&q, ASCIIToUTF16("^-$|suffix"), &phone3);
 
   // Now we have one, two, or three phone number text fields.  Package them
   // up into a PhoneField object.
 
-  PhoneField phone_field;
+  scoped_ptr<PhoneField> phone_field(new PhoneField);
   if (phone2 == NULL) {  // only one field
     if (area_code)  // it's an area code
       return NULL;  // doesn't make sense
-    phone_field.phone_ = phone;
+    phone_field->phone_ = phone;
   } else {
-    phone_field.area_code_ = phone;
+    phone_field->area_code_ = phone;
     if (phone3 == NULL) {  // two fields
-      phone_field.phone_ = phone2;
+      phone_field->phone_ = phone2;
     } else {  // three boxes: area code, prefix and suffix
-      phone_field.prefix_ = phone2;
-      phone_field.phone_ = phone3;
+      phone_field->prefix_ = phone2;
+      phone_field->phone_ = phone3;
     }
   }
 
   // Now look for an extension.
-  ParseText(&q, ASCIIToUTF16("ext"), &phone_field.extension_);
+  ParseText(&q, ASCIIToUTF16("ext"), &phone_field->extension_);
 
   *iter = q;
-  return new PhoneField(phone_field);
+  return phone_field.release();
 }
 
 // static
@@ -99,9 +100,23 @@ bool PhoneField::GetFieldInfo(FieldTypeMap* field_type_map) const {
     ok = Add(field_type_map, area_code_, AutoFillType(PHONE_HOME_CITY_CODE));
     DCHECK(ok);
 
-    // NOTE: we ignore the prefix/suffix thing here.
-    ok = ok && Add(field_type_map, phone_, AutoFillType(PHONE_HOME_NUMBER));
-    DCHECK(ok);
+    if (prefix_ != NULL) {
+      // We tag the prefix as PHONE_HOME_NUMBER, then when filling the form
+      // we fill only the prefix depending on the size of the input field.
+      ok = ok && Add(field_type_map,
+                     prefix_,
+                     AutoFillType(PHONE_HOME_NUMBER));
+      DCHECK(ok);
+      // We tag the suffix as PHONE_HOME_NUMBER, then when filling the form
+      // we fill only the suffix depending on the size of the input field.
+      ok = ok && Add(field_type_map,
+                     phone_,
+                     AutoFillType(PHONE_HOME_NUMBER));
+      DCHECK(ok);
+    } else {
+      ok = ok && Add(field_type_map, phone_, AutoFillType(PHONE_HOME_NUMBER));
+      DCHECK(ok);
+    }
   } else {
     ok = Add(field_type_map, phone_, AutoFillType(PHONE_HOME_WHOLE_NUMBER));
     DCHECK(ok);

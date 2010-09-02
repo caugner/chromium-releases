@@ -54,11 +54,8 @@ class ChromeFrameDelegate {
   virtual ~ChromeFrameDelegate() {}
 };
 
-// Template specialization
-template <> struct RunnableMethodTraits<ChromeFrameDelegate> {
-  void RetainCallee(ChromeFrameDelegate* obj) {}
-  void ReleaseCallee(ChromeFrameDelegate* obj) {}
-};
+// Disable refcounting of ChromeFrameDelegate.
+DISABLE_RUNNABLE_METHOD_REFCOUNT(ChromeFrameDelegate);
 
 extern UINT kAutomationServerReady;
 extern UINT kMessageFromChromeFrame;
@@ -127,6 +124,7 @@ class ChromeFrameDelegateImpl : public ChromeFrameDelegate {
 
   virtual void OnGetCookiesFromHost(int tab_handle, const GURL& url,
                                     int cookie_id) {}
+  virtual void OnCloseTab(int tab_handle) {}
 };
 
 // This interface enables tasks to be marshaled to desired threads.

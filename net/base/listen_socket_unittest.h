@@ -16,6 +16,7 @@
 #include <arpa/inet.h>
 #endif
 
+#include "base/scoped_ptr.h"
 #include "base/thread.h"
 #include "base/basictypes.h"
 #include "base/message_loop.h"
@@ -94,7 +95,7 @@ class ListenSocketTester :
   void Listen();
   void SendFromTester();
   virtual void DidAccept(ListenSocket *server, ListenSocket *connection);
-  virtual void DidRead(ListenSocket *connection, const std::string& data);
+  virtual void DidRead(ListenSocket *connection, const char* data, int len);
   virtual void DidClose(ListenSocket *sock);
   virtual bool Send(SOCKET sock, const std::string& str);
   // verify the send/read from client to server

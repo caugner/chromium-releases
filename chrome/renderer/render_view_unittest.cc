@@ -2,7 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/basictypes.h"
+
 #include "base/file_util.h"
+#include "base/keyboard_codes.h"
 #include "base/shared_memory.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/native_web_keyboard_event.h"
@@ -14,27 +17,21 @@
 #include "printing/image.h"
 #include "printing/native_metafile.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLError.h"
+#include "webkit/glue/form_data.h"
+#include "webkit/glue/form_field.h"
 
-using WebKit::WebCompositionCommand;
+using WebKit::WebDocument;
 using WebKit::WebFrame;
+using WebKit::WebInputElement;
 using WebKit::WebString;
 using WebKit::WebTextDirection;
 using WebKit::WebURLError;
-
-static WebCompositionCommand ToCompositionCommand(int string_type) {
-  switch (string_type) {
-    default:
-      NOTREACHED();
-    case -1:
-      return WebKit::WebCompositionCommandDiscard;
-    case 0:
-      return WebKit::WebCompositionCommandSet;
-    case 1:
-      return WebKit::WebCompositionCommandConfirm;
-  }
-}
+using webkit_glue::FormData;
+using webkit_glue::FormField;
 
 // Test that we get form state change notifications when input fields change.
 TEST_F(RenderViewTest, OnNavStateChanged) {
@@ -62,7 +59,7 @@ TEST_F(RenderViewTest, OnNavStateChanged) {
 // changes.
 TEST_F(RenderViewTest, OnImeStateChanged) {
   // Enable our IME backend code.
-  view_->OnImeSetInputMode(true);
+  view_->OnSetInputMethodActive(true);
 
   // Load an HTML page consisting of two input fields.
   view_->set_send_content_state_immediately(true);
@@ -86,13 +83,13 @@ TEST_F(RenderViewTest, OnImeStateChanged) {
 
     // Update the IME status and verify if our IME backend sends an IPC message
     // to activate IMEs.
-    view_->UpdateIME();
+    view_->UpdateInputMethod();
     const IPC::Message* msg = render_thread_.sink().GetMessageAt(0);
     EXPECT_TRUE(msg != NULL);
-    EXPECT_EQ(ViewHostMsg_ImeUpdateStatus::ID, msg->type());
-    ViewHostMsg_ImeUpdateStatus::Param params;
-    ViewHostMsg_ImeUpdateStatus::Read(msg, &params);
-    EXPECT_EQ(params.a, IME_COMPLETE_COMPOSITION);
+    EXPECT_EQ(ViewHostMsg_ImeUpdateTextInputState::ID, msg->type());
+    ViewHostMsg_ImeUpdateTextInputState::Param params;
+    ViewHostMsg_ImeUpdateTextInputState::Read(msg, &params);
+    EXPECT_EQ(params.a, WebKit::WebTextInputTypeText);
     EXPECT_TRUE(params.b.x() > 0 && params.b.y() > 0);
 
     // Move the input focus to the second <input> element, where we should
@@ -103,12 +100,12 @@ TEST_F(RenderViewTest, OnImeStateChanged) {
 
     // Update the IME status and verify if our IME backend sends an IPC message
     // to de-activate IMEs.
-    view_->UpdateIME();
+    view_->UpdateInputMethod();
     msg = render_thread_.sink().GetMessageAt(0);
     EXPECT_TRUE(msg != NULL);
-    EXPECT_EQ(ViewHostMsg_ImeUpdateStatus::ID, msg->type());
-    ViewHostMsg_ImeUpdateStatus::Read(msg, &params);
-    EXPECT_EQ(params.a, IME_DISABLE);
+    EXPECT_EQ(ViewHostMsg_ImeUpdateTextInputState::ID, msg->type());
+    ViewHostMsg_ImeUpdateTextInputState::Read(msg, &params);
+    EXPECT_EQ(params.a, WebKit::WebTextInputTypePassword);
   }
 }
 
@@ -129,60 +126,59 @@ TEST_F(RenderViewTest, ImeComposition) {
     IME_SETINPUTMODE,
     IME_SETFOCUS,
     IME_SETCOMPOSITION,
+    IME_CONFIRMCOMPOSITION,
+    IME_CANCELCOMPOSITION
   };
   struct ImeMessage {
     ImeCommand command;
     bool enable;
-    int string_type;
-    int cursor_position;
-    int target_start;
-    int target_end;
+    int selection_start;
+    int selection_end;
     const wchar_t* ime_string;
     const wchar_t* result;
   };
   static const ImeMessage kImeMessages[] = {
     // Scenario 1: input a Chinese word with Microsoft IME (on Vista).
-    {IME_INITIALIZE, true, 0, 0, 0, 0, NULL, NULL},
-    {IME_SETINPUTMODE, true, 0, 0, 0, 0, NULL, NULL},
-    {IME_SETFOCUS, true, 0, 0, 0, 0, NULL, NULL},
-    {IME_SETCOMPOSITION, false, 0, 1, -1, -1, L"n", L"n"},
-    {IME_SETCOMPOSITION, false, 0, 2, -1, -1, L"ni", L"ni"},
-    {IME_SETCOMPOSITION, false, 0, 3, -1, -1, L"nih", L"nih"},
-    {IME_SETCOMPOSITION, false, 0, 4, -1, -1, L"niha", L"niha"},
-    {IME_SETCOMPOSITION, false, 0, 5, -1, -1, L"nihao", L"nihao"},
-    {IME_SETCOMPOSITION, false, 0, 2, -1, -1, L"\x4F60\x597D", L"\x4F60\x597D"},
-    {IME_SETCOMPOSITION, false, 1, -1, -1, -1, L"\x4F60\x597D",
-     L"\x4F60\x597D"},
-    {IME_SETCOMPOSITION, false, -1, -1, -1, -1, L"", L"\x4F60\x597D"},
+    {IME_INITIALIZE, true, 0, 0, NULL, NULL},
+    {IME_SETINPUTMODE, true, 0, 0, NULL, NULL},
+    {IME_SETFOCUS, true, 0, 0, NULL, NULL},
+    {IME_SETCOMPOSITION, false, 1, 1, L"n", L"n"},
+    {IME_SETCOMPOSITION, false, 2, 2, L"ni", L"ni"},
+    {IME_SETCOMPOSITION, false, 3, 3, L"nih", L"nih"},
+    {IME_SETCOMPOSITION, false, 4, 4, L"niha", L"niha"},
+    {IME_SETCOMPOSITION, false, 5, 5, L"nihao", L"nihao"},
+    {IME_SETCOMPOSITION, false, 2, 2, L"\x4F60\x597D", L"\x4F60\x597D"},
+    {IME_CONFIRMCOMPOSITION, false, -1, -1, NULL, L"\x4F60\x597D"},
+    {IME_CANCELCOMPOSITION, false, -1, -1, L"", L"\x4F60\x597D"},
     // Scenario 2: input a Japanese word with Microsoft IME (on Vista).
-    {IME_INITIALIZE, true, 0, 0, 0, 0, NULL, NULL},
-    {IME_SETINPUTMODE, true, 0, 0, 0, 0, NULL, NULL},
-    {IME_SETFOCUS, true, 0, 0, 0, 0, NULL, NULL},
-    {IME_SETCOMPOSITION, false, 0, 1, 0, 1, L"\xFF4B", L"\xFF4B"},
-    {IME_SETCOMPOSITION, false, 0, 1, 0, 1, L"\x304B", L"\x304B"},
-    {IME_SETCOMPOSITION, false, 0, 2, 0, 2, L"\x304B\xFF4E", L"\x304B\xFF4E"},
-    {IME_SETCOMPOSITION, false, 0, 3, 0, 3, L"\x304B\x3093\xFF4A",
+    {IME_INITIALIZE, true, 0, 0, NULL, NULL},
+    {IME_SETINPUTMODE, true, 0, 0, NULL, NULL},
+    {IME_SETFOCUS, true, 0, 0, NULL, NULL},
+    {IME_SETCOMPOSITION, false, 0, 1, L"\xFF4B", L"\xFF4B"},
+    {IME_SETCOMPOSITION, false, 0, 1, L"\x304B", L"\x304B"},
+    {IME_SETCOMPOSITION, false, 0, 2, L"\x304B\xFF4E", L"\x304B\xFF4E"},
+    {IME_SETCOMPOSITION, false, 0, 3, L"\x304B\x3093\xFF4A",
      L"\x304B\x3093\xFF4A"},
-    {IME_SETCOMPOSITION, false, 0, 3, 0, 3, L"\x304B\x3093\x3058",
+    {IME_SETCOMPOSITION, false, 0, 3, L"\x304B\x3093\x3058",
      L"\x304B\x3093\x3058"},
-    {IME_SETCOMPOSITION, false, 0, 0, 0, 2, L"\x611F\x3058", L"\x611F\x3058"},
-    {IME_SETCOMPOSITION, false, 0, 0, 0, 2, L"\x6F22\x5B57", L"\x6F22\x5B57"},
-    {IME_SETCOMPOSITION, false, 1, -1, -1, -1, L"\x6F22\x5B57",
-     L"\x6F22\x5B57"},
-    {IME_SETCOMPOSITION, false, -1, -1, -1, -1, L"", L"\x6F22\x5B57"},
+    {IME_SETCOMPOSITION, false, 0, 2, L"\x611F\x3058", L"\x611F\x3058"},
+    {IME_SETCOMPOSITION, false, 0, 2, L"\x6F22\x5B57", L"\x6F22\x5B57"},
+    {IME_CONFIRMCOMPOSITION, false, -1, -1, NULL, L"\x6F22\x5B57"},
+    {IME_CANCELCOMPOSITION, false, -1, -1, L"", L"\x6F22\x5B57"},
     // Scenario 3: input a Korean word with Microsot IME (on Vista).
-    {IME_INITIALIZE, true, 0, 0, 0, 0, NULL, NULL},
-    {IME_SETINPUTMODE, true, 0, 0, 0, 0, NULL, NULL},
-    {IME_SETFOCUS, true, 0, 0, 0, 0, NULL, NULL},
-    {IME_SETCOMPOSITION, false, 0, 0, 0, 1, L"\x3147", L"\x3147"},
-    {IME_SETCOMPOSITION, false, 0, 0, 0, 1, L"\xC544", L"\xC544"},
-    {IME_SETCOMPOSITION, false, 0, 0, 0, 1, L"\xC548", L"\xC548"},
-    {IME_SETCOMPOSITION, false, 1, -1, -1, -1, L"\xC548", L"\xC548"},
-    {IME_SETCOMPOSITION, false, 0, 0, 0, 1, L"\x3134", L"\xC548\x3134"},
-    {IME_SETCOMPOSITION, false, 0, 0, 0, 1, L"\xB140", L"\xC548\xB140"},
-    {IME_SETCOMPOSITION, false, 0, 0, 0, 1, L"\xB155", L"\xC548\xB155"},
-    {IME_SETCOMPOSITION, false, -1, -1, -1, -1, L"", L"\xC548"},
-    {IME_SETCOMPOSITION, false, 1, -1, -1, -1, L"\xB155", L"\xC548\xB155"},
+    {IME_INITIALIZE, true, 0, 0, NULL, NULL},
+    {IME_SETINPUTMODE, true, 0, 0, NULL, NULL},
+    {IME_SETFOCUS, true, 0, 0, NULL, NULL},
+    {IME_SETCOMPOSITION, false, 0, 1, L"\x3147", L"\x3147"},
+    {IME_SETCOMPOSITION, false, 0, 1, L"\xC544", L"\xC544"},
+    {IME_SETCOMPOSITION, false, 0, 1, L"\xC548", L"\xC548"},
+    {IME_CONFIRMCOMPOSITION, false, -1, -1, NULL, L"\xC548"},
+    {IME_SETCOMPOSITION, false, 0, 1, L"\x3134", L"\xC548\x3134"},
+    {IME_SETCOMPOSITION, false, 0, 1, L"\xB140", L"\xC548\xB140"},
+    {IME_SETCOMPOSITION, false, 0, 1, L"\xB155", L"\xC548\xB155"},
+    {IME_CANCELCOMPOSITION, false, -1, -1, L"", L"\xC548"},
+    {IME_SETCOMPOSITION, false, 0, 1, L"\xB155", L"\xC548\xB155"},
+    {IME_CONFIRMCOMPOSITION, false, -1, -1, NULL, L"\xC548\xB155"},
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kImeMessages); i++) {
@@ -192,7 +188,7 @@ TEST_F(RenderViewTest, ImeComposition) {
         // Load an HTML page consisting of a content-editable <div> element,
         // and move the input focus to the <div> element, where we can use
         // IMEs.
-        view_->OnImeSetInputMode(ime_message->enable);
+        view_->OnSetInputMethodActive(ime_message->enable);
         view_->set_send_content_state_immediately(true);
         LoadHTML("<html>"
                 "<head>"
@@ -206,7 +202,7 @@ TEST_F(RenderViewTest, ImeComposition) {
 
       case IME_SETINPUTMODE:
         // Activate (or deactivate) our IME back-end.
-        view_->OnImeSetInputMode(ime_message->enable);
+        view_->OnSetInputMethodActive(ime_message->enable);
         break;
 
       case IME_SETFOCUS:
@@ -216,17 +212,26 @@ TEST_F(RenderViewTest, ImeComposition) {
 
       case IME_SETCOMPOSITION:
         view_->OnImeSetComposition(
-            ToCompositionCommand(ime_message->string_type),
-            ime_message->cursor_position,
-            ime_message->target_start,
-            ime_message->target_end,
-            WideToUTF16Hack(ime_message->ime_string));
+            WideToUTF16Hack(ime_message->ime_string),
+            std::vector<WebKit::WebCompositionUnderline>(),
+            ime_message->selection_start,
+            ime_message->selection_end);
+        break;
+
+      case IME_CONFIRMCOMPOSITION:
+        view_->OnImeConfirmComposition();
+        break;
+
+      case IME_CANCELCOMPOSITION:
+        view_->OnImeSetComposition(string16(),
+                                std::vector<WebKit::WebCompositionUnderline>(),
+                                0, 0);
         break;
     }
 
     // Update the status of our IME back-end.
     // TODO(hbono): we should verify messages to be sent from the back-end.
-    view_->UpdateIME();
+    view_->UpdateInputMethod();
     ProcessPendingMessages();
     render_thread_.sink().ClearMessages();
 
@@ -292,70 +297,30 @@ TEST_F(RenderViewTest, OnSetTextDirection) {
 // Tests that printing pages work and sending and receiving messages through
 // that channel all works.
 TEST_F(RenderViewTest, OnPrintPages) {
-#if defined(OS_WIN) || defined(OS_MACOSX)
   // Lets simulate a print pages with Hello world.
   LoadHTML("<body><p>Hello World!</p></body>");
   view_->OnPrintPages();
 
-  // The renderer should be done calculating the number of rendered pages
-  // according to the specified settings defined in the mock render thread.
-  // Verify the page count is correct.
-  const IPC::Message* page_cnt_msg =
-      render_thread_.sink().GetUniqueMessageMatching(
-          ViewHostMsg_DidGetPrintedPagesCount::ID);
-  EXPECT_TRUE(page_cnt_msg);
-  ViewHostMsg_DidGetPrintedPagesCount::Param post_page_count_param;
-  ViewHostMsg_DidGetPrintedPagesCount::Read(page_cnt_msg,
-                                            &post_page_count_param);
-  EXPECT_EQ(1, post_page_count_param.b);
-
-  // Verify the rendered "printed page".
-  const IPC::Message* did_print_msg =
-      render_thread_.sink().GetUniqueMessageMatching(
-          ViewHostMsg_DidPrintPage::ID);
-  EXPECT_TRUE(did_print_msg);
-  ViewHostMsg_DidPrintPage::Param post_did_print_page_param;
-  ViewHostMsg_DidPrintPage::Read(did_print_msg, &post_did_print_page_param);
-  EXPECT_EQ(0, post_did_print_page_param.a.page_number);
-#else
-  NOTIMPLEMENTED();
-#endif
+  VerifyPageCount(1);
+  VerifyPagesPrinted();
 }
 
 // Duplicate of OnPrintPagesTest only using javascript to print.
 TEST_F(RenderViewTest, PrintWithJavascript) {
-#if defined(OS_WIN) || defined(OS_MACOSX)
   // HTML contains a call to window.print()
   LoadHTML("<body>Hello<script>window.print()</script>World</body>");
 
-  // The renderer should be done calculating the number of rendered pages
-  // according to the specified settings defined in the mock render thread.
-  // Verify the page count is correct.
-  const IPC::Message* page_cnt_msg =
-    render_thread_.sink().GetUniqueMessageMatching(
-    ViewHostMsg_DidGetPrintedPagesCount::ID);
-  ASSERT_TRUE(page_cnt_msg);
-  ViewHostMsg_DidGetPrintedPagesCount::Param post_page_count_param;
-  ViewHostMsg_DidGetPrintedPagesCount::Read(page_cnt_msg,
-    &post_page_count_param);
-  EXPECT_EQ(1, post_page_count_param.b);
-
-  // Verify the rendered "printed page".
-  const IPC::Message* did_print_msg =
-    render_thread_.sink().GetUniqueMessageMatching(
-    ViewHostMsg_DidPrintPage::ID);
-  EXPECT_TRUE(did_print_msg);
-  ViewHostMsg_DidPrintPage::Param post_did_print_page_param;
-  ViewHostMsg_DidPrintPage::Read(did_print_msg, &post_did_print_page_param);
-  EXPECT_EQ(0, post_did_print_page_param.a.page_number);
-#else
-  NOTIMPLEMENTED();
-#endif
+  VerifyPageCount(1);
+  VerifyPagesPrinted();
 }
 
-TEST_F(RenderViewTest, PrintWithIframe) {
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  // Document that populates an iframe..
+// TODO(estade): I don't think this test is worth porting to Linux. We will have
+// to rip out and replace most of the IPC code if we ever plan to improve
+// printing, and the comment below by sverrir suggests that it doesn't do much
+// for us anyway.
+TEST_F(RenderViewTest, PrintWithIframe) {
+  // Document that populates an iframe.
   const char html[] =
       "<html><body>Lorem Ipsum:"
       "<iframe name=\"sub1\" id=\"sub1\"></iframe><script>"
@@ -388,10 +353,8 @@ TEST_F(RenderViewTest, PrintWithIframe) {
   // page.
   EXPECT_NE(0, image1.size().width());
   EXPECT_NE(0, image1.size().height());
-#else
-  NOTIMPLEMENTED();
-#endif
 }
+#endif
 
 // Tests if we can print a page and verify its results.
 // This test prints HTML pages into a pseudo printer and check their outputs,
@@ -431,8 +394,11 @@ const TestPageData kTestPages[] = {
 };
 }  // namespace
 
-TEST_F(RenderViewTest, PrintLayoutTest) {
+// TODO(estade): need to port MockPrinter to get this on Linux. This involves
+// hooking up Cairo to read a pdf stream, or accessing the cairo surface in the
+// metafile directly.
 #if defined(OS_WIN) || defined(OS_MACOSX)
+TEST_F(RenderViewTest, PrintLayoutTest) {
   bool baseline = false;
 
   EXPECT_TRUE(render_thread_.printer() != NULL);
@@ -481,14 +447,11 @@ TEST_F(RenderViewTest, PrintLayoutTest) {
       render_thread_.printer()->SaveBitmap(0, bitmap_path);
     }
   }
-#else
-  NOTIMPLEMENTED();
-#endif
 }
+#endif
 
 // Print page as bitmap test.
 TEST_F(RenderViewTest, OnPrintPageAsBitmap) {
-#if defined(OS_WIN) || defined(OS_MACOSX)
   // Lets simulate a print pages with Hello world.
   LoadHTML("<body><p>Hello world!</p></body>");
 
@@ -524,15 +487,12 @@ TEST_F(RenderViewTest, OnPrintPageAsBitmap) {
     }
   }
   ASSERT_TRUE(!is_white);
-#else
-  NOTIMPLEMENTED();
-#endif
 }
 
 // Test that we can receive correct DOM events when we send input events
 // through the RenderWidget::OnHandleInputEvent() function.
-TEST_F(RenderViewTest, FLAKY_OnHandleKeyboardEvent) {
-#if defined(OS_WIN)
+TEST_F(RenderViewTest, OnHandleKeyboardEvent) {
+#if defined(OS_WIN) || defined(OS_LINUX)
   // Load an HTML page consisting of one <input> element and three
   // contentediable <div> elements.
   // The <input> element is used for sending keyboard events, and the <div>
@@ -575,11 +535,16 @@ TEST_F(RenderViewTest, FLAKY_OnHandleKeyboardEvent) {
   render_thread_.sink().ClearMessages();
 
   static const MockKeyboard::Layout kLayouts[] = {
+#if defined(OS_WIN)
+    // Since we ignore the mock keyboard layout on Linux and instead just use
+    // the screen's keyboard layout, these trivially pass. They are commented
+    // out to avoid the illusion that they work.
     MockKeyboard::LAYOUT_ARABIC,
     MockKeyboard::LAYOUT_CANADIAN_FRENCH,
     MockKeyboard::LAYOUT_FRENCH,
     MockKeyboard::LAYOUT_HEBREW,
     MockKeyboard::LAYOUT_RUSSIAN,
+#endif
     MockKeyboard::LAYOUT_UNITED_STATES,
   };
 
@@ -592,11 +557,13 @@ TEST_F(RenderViewTest, FLAKY_OnHandleKeyboardEvent) {
     // result. (See the above comment for its format.)
     static const struct {
       MockKeyboard::Modifiers modifiers;
-      const wchar_t* expected_result;
+      const char* expected_result;
     } kModifierData[] = {
-      {MockKeyboard::NONE,       L"false,false,false"},
-      {MockKeyboard::LEFT_SHIFT, L"true,false,false"},
-      {MockKeyboard::RIGHT_ALT,  L"false,false,true"},
+      {MockKeyboard::NONE,       "false,false,false"},
+      {MockKeyboard::LEFT_SHIFT, "true,false,false"},
+#if defined(OS_WIN)
+      {MockKeyboard::RIGHT_ALT,  "false,false,true"},
+#endif
     };
 
     MockKeyboard::Layout layout = kLayouts[i];
@@ -608,18 +575,21 @@ TEST_F(RenderViewTest, FLAKY_OnHandleKeyboardEvent) {
         'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
         'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
         'W', 'X', 'Y', 'Z',
-        VK_OEM_1,
-        VK_OEM_PLUS,
-        VK_OEM_COMMA,
-        VK_OEM_MINUS,
-        VK_OEM_PERIOD,
-        VK_OEM_2,
-        VK_OEM_3,
-        VK_OEM_4,
-        VK_OEM_5,
-        VK_OEM_6,
-        VK_OEM_7,
-        VK_OEM_8,
+        base::VKEY_OEM_1,
+        base::VKEY_OEM_PLUS,
+        base::VKEY_OEM_COMMA,
+        base::VKEY_OEM_MINUS,
+        base::VKEY_OEM_PERIOD,
+        base::VKEY_OEM_2,
+        base::VKEY_OEM_3,
+        base::VKEY_OEM_4,
+        base::VKEY_OEM_5,
+        base::VKEY_OEM_6,
+        base::VKEY_OEM_7,
+#if defined(OS_WIN)
+        // Not sure how to handle this key on Linux.
+        base::VKEY_OEM_8,
+#endif
       };
 
       MockKeyboard::Modifiers modifiers = kModifierData[j].modifiers;
@@ -637,21 +607,22 @@ TEST_F(RenderViewTest, FLAKY_OnHandleKeyboardEvent) {
         // code, and the modifier-key status.
         // We format a string that emulates a DOM-event string produced hy
         // our JavaScript function. (See the above comment for the format.)
-        static wchar_t expected_result[1024];
-        wsprintf(&expected_result[0],
-                 L"\x000A"       // texts in the <input> element
-                 L"%d,%s\x000A"  // texts in the first <div> element
-                 L"%d,%s\x000A"  // texts in the second <div> element
-                 L"%d,%s",       // texts in the third <div> element
-                 key_code, kModifierData[j].expected_result,
-                 char_code[0], kModifierData[j].expected_result,
-                 key_code, kModifierData[j].expected_result);
+        static char expected_result[1024];
+        expected_result[0] = NULL;
+        sprintf(&expected_result[0],
+                "\n"       // texts in the <input> element
+                "%d,%s\n"  // texts in the first <div> element
+                "%d,%s\n"  // texts in the second <div> element
+                "%d,%s",   // texts in the third <div> element
+                key_code, kModifierData[j].expected_result,
+                char_code[0], kModifierData[j].expected_result,
+                key_code, kModifierData[j].expected_result);
 
         // Retrieve the text in the test page and compare it with the expected
         // text created from a virtual-key code, a character code, and the
         // modifier-key status.
         const int kMaxOutputCharacters = 1024;
-        std::wstring output = UTF16ToWideHack(
+        std::string output = UTF16ToUTF8(
             GetMainFrame()->contentAsText(kMaxOutputCharacters));
         EXPECT_EQ(expected_result, output);
       }
@@ -667,7 +638,7 @@ TEST_F(RenderViewTest, FLAKY_OnHandleKeyboardEvent) {
 // This test is for preventing regressions caused only when we use non-US
 // keyboards, such as Issue 10846.
 TEST_F(RenderViewTest, InsertCharacters) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
   static const struct {
     MockKeyboard::Layout layout;
     const wchar_t* expected_result;
@@ -715,6 +686,10 @@ TEST_F(RenderViewTest, InsertCharacters) {
      L"\x003b\x005d\x005c\x005b\x002c"
     },
 #endif
+#if defined(OS_WIN)
+    // On Linux, the only way to test alternate keyboard layouts is to change
+    // the keyboard layout of the whole screen. I'm worried about the side
+    // effects this may have on the buildbots.
     {MockKeyboard::LAYOUT_CANADIAN_FRENCH,
      L"\x0030\x0031\x0032\x0033\x0034\x0035\x0036\x0037"
      L"\x0038\x0039\x0061\x0062\x0063\x0064\x0065\x0066"
@@ -773,6 +748,7 @@ TEST_F(RenderViewTest, InsertCharacters) {
      L"\x043d\x044f\x0436\x003d\x0431\x002d\x044e\x002e"
      L"\x0451\x0445\x005c\x044a\x044d"
     },
+#endif  // defined(OS_WIN)
     {MockKeyboard::LAYOUT_UNITED_STATES,
      L"\x0030\x0031\x0032\x0033\x0034\x0035\x0036\x0037"
      L"\x0038\x0039\x0061\x0062\x0063\x0064\x0065\x0066"
@@ -785,13 +761,17 @@ TEST_F(RenderViewTest, InsertCharacters) {
      L"\x0048\x0049\x004a\x004b\x004c\x004d\x004e\x004f"
      L"\x0050\x0051\x0052\x0053\x0054\x0055\x0056\x0057"
      L"\x0058\x0059\x005a\x003a\x002b\x003c\x005f\x003e"
-     L"\x003f\x007e\x007b\x007c\x007d\x0022\x0030\x0031"
-     L"\x0032\x0033\x0034\x0035\x0036\x0037\x0038\x0039"
-     L"\x0061\x0062\x0063\x0064\x0065\x0066\x0067\x0068"
-     L"\x0069\x006a\x006b\x006c\x006d\x006e\x006f\x0070"
-     L"\x0071\x0072\x0073\x0074\x0075\x0076\x0077\x0078"
-     L"\x0079\x007a\x003b\x003d\x002c\x002d\x002e\x002f"
-     L"\x0060\x005b\x005c\x005d\x0027"
+     L"\x003f\x007e\x007b\x007c\x007d\x0022"
+#if defined(OS_WIN)
+     // This is ifdefed out for Linux to correspond to the fact that we don't
+     // test alt+keystroke for now.
+     L"\x0030\x0031\x0032\x0033\x0034\x0035\x0036\x0037"
+     L"\x0038\x0039\x0061\x0062\x0063\x0064\x0065\x0066"
+     L"\x0067\x0068\x0069\x006a\x006b\x006c\x006d\x006e"
+     L"\x006f\x0070\x0071\x0072\x0073\x0074\x0075\x0076"
+     L"\x0077\x0078\x0079\x007a\x003b\x003d\x002c\x002d"
+     L"\x002e\x002f\x0060\x005b\x005c\x005d\x0027"
+#endif
     },
   };
 
@@ -820,7 +800,9 @@ TEST_F(RenderViewTest, InsertCharacters) {
     static const MockKeyboard::Modifiers kModifiers[] = {
       MockKeyboard::NONE,
       MockKeyboard::LEFT_SHIFT,
+#if defined(OS_WIN)
       MockKeyboard::RIGHT_ALT,
+#endif
     };
 
     MockKeyboard::Layout layout = kLayouts[i].layout;
@@ -832,18 +814,21 @@ TEST_F(RenderViewTest, InsertCharacters) {
         'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
         'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
         'W', 'X', 'Y', 'Z',
-        VK_OEM_1,
-        VK_OEM_PLUS,
-        VK_OEM_COMMA,
-        VK_OEM_MINUS,
-        VK_OEM_PERIOD,
-        VK_OEM_2,
-        VK_OEM_3,
-        VK_OEM_4,
-        VK_OEM_5,
-        VK_OEM_6,
-        VK_OEM_7,
-        VK_OEM_8,
+        base::VKEY_OEM_1,
+        base::VKEY_OEM_PLUS,
+        base::VKEY_OEM_COMMA,
+        base::VKEY_OEM_MINUS,
+        base::VKEY_OEM_PERIOD,
+        base::VKEY_OEM_2,
+        base::VKEY_OEM_3,
+        base::VKEY_OEM_4,
+        base::VKEY_OEM_5,
+        base::VKEY_OEM_6,
+        base::VKEY_OEM_7,
+#if defined(OS_WIN)
+        // Unclear how to handle this on Linux.
+        base::VKEY_OEM_8,
+#endif
       };
 
       MockKeyboard::Modifiers modifiers = kModifiers[j];
@@ -872,22 +857,18 @@ TEST_F(RenderViewTest, InsertCharacters) {
 #endif
 }
 
-#if 0
-// TODO(tyoshino): After fixing flakiness, enable this test.
 TEST_F(RenderViewTest, DidFailProvisionalLoadWithErrorForError) {
-  GetMainFrame()->SetInViewSourceMode(true);
+  GetMainFrame()->enableViewSourceMode(true);
   WebURLError error;
   error.domain.fromUTF8("test_domain");
   error.reason = net::ERR_FILE_NOT_FOUND;
   error.unreachableURL = GURL("http://foo");
   WebFrame* web_frame = GetMainFrame();
-  WebView* web_view = web_frame->GetView();
   // An error occurred.
-  view_->DidFailProvisionalLoadWithError(web_view, error, web_frame);
+  view_->didFailProvisionalLoad(web_frame, error);
   // Frame should exit view-source mode.
-  EXPECT_FALSE(web_frame->GetInViewSourceMode());
+  EXPECT_FALSE(web_frame->isViewSourceModeEnabled());
 }
-#endif
 
 TEST_F(RenderViewTest, DidFailProvisionalLoadWithErrorForCancellation) {
   GetMainFrame()->enableViewSourceMode(true);
@@ -950,4 +931,157 @@ TEST_F(RenderViewTest, JSBlockSentAfterPageLoad) {
   EXPECT_NE(-1, navigation_index);
   EXPECT_NE(-1, block_index);
   EXPECT_LT(navigation_index, block_index);
+}
+
+// Regression test for http://crbug.com/41562
+TEST_F(RenderViewTest, UpdateTargetURLWithInvalidURL) {
+  const GURL invalid_gurl("http://");
+  view_->setMouseOverURL(WebKit::WebURL(invalid_gurl));
+  EXPECT_EQ(invalid_gurl, view_->target_url_);
+}
+
+TEST_F(RenderViewTest, SendForms) {
+  // Don't want any delay for form state sync changes. This will still post a
+  // message so updates will get coalesced, but as soon as we spin the message
+  // loop, it will generate an update.
+  view_->set_send_content_state_immediately(true);
+
+  LoadHTML("<form method=\"POST\">"
+           "  <input type=\"text\" id=\"firstname\"/>"
+           "  <input type=\"text\" id=\"middlename\" autoComplete=\"off\"/>"
+           "  <input type=\"hidden\" id=\"lastname\"/>"
+           "</form>");
+
+  // Verify that "FormsSeen" sends the expected number of fields.
+  ProcessPendingMessages();
+  const IPC::Message* message = render_thread_.sink().GetUniqueMessageMatching(
+      ViewHostMsg_FormsSeen::ID);
+  ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
+  ViewHostMsg_FormsSeen::Param params;
+  ViewHostMsg_FormsSeen::Read(message, &params);
+  const std::vector<FormData>& forms = params.a;
+  ASSERT_EQ(1UL, forms.size());
+  ASSERT_EQ(3UL, forms[0].fields.size());
+  EXPECT_TRUE(forms[0].fields[0].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("firstname"),
+                string16(),
+                ASCIIToUTF16("text"),
+                20))) << forms[0].fields[0];
+  EXPECT_TRUE(forms[0].fields[1].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("middlename"),
+                string16(),
+                ASCIIToUTF16("text"),
+                20))) << forms[0].fields[1];
+  EXPECT_TRUE(forms[0].fields[2].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("lastname"),
+                string16(),
+                ASCIIToUTF16("hidden"),
+                0))) << forms[0].fields[2];
+
+  // Verify that |didAcceptAutoFillSuggestion()| sends the expected number of
+  // fields.
+  WebFrame* web_frame = GetMainFrame();
+  WebDocument document = web_frame->document();
+  WebInputElement firstname =
+      document.getElementById("firstname").to<WebInputElement>();
+
+  // Accept suggestion that contains a label.  Labeled items indicate AutoFill
+  // as opposed to Autocomplete.  We're testing this distinction below with
+  // the |ViewHostMsg_FillAutoFillFormData::ID| message.
+  view_->didAcceptAutoFillSuggestion(firstname,
+                                     WebKit::WebString::fromUTF8("Johnny"),
+                                     WebKit::WebString::fromUTF8("Home"),
+                                     1,
+                                     -1);
+
+  ProcessPendingMessages();
+  const IPC::Message* message2 = render_thread_.sink().GetUniqueMessageMatching(
+      ViewHostMsg_FillAutoFillFormData::ID);
+  ASSERT_NE(static_cast<IPC::Message*>(NULL), message2);
+  ViewHostMsg_FillAutoFillFormData::Param params2;
+  ViewHostMsg_FillAutoFillFormData::Read(message2, &params2);
+  const FormData& form2 = params2.b;
+  ASSERT_EQ(3UL, form2.fields.size());
+  EXPECT_TRUE(form2.fields[0].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("firstname"),
+                string16(),
+                ASCIIToUTF16("text"),
+                20))) << form2.fields[0];
+  EXPECT_TRUE(form2.fields[1].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("middlename"),
+                string16(),
+                ASCIIToUTF16("text"),
+                20))) << form2.fields[1];
+  EXPECT_TRUE(form2.fields[2].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("lastname"),
+                string16(),
+                ASCIIToUTF16("hidden"),
+                0))) << form2.fields[2];
+}
+
+TEST_F(RenderViewTest, FillFormElement) {
+  // Don't want any delay for form state sync changes. This will still post a
+  // message so updates will get coalesced, but as soon as we spin the message
+  // loop, it will generate an update.
+  view_->set_send_content_state_immediately(true);
+
+  LoadHTML("<form method=\"POST\">"
+           "  <input type=\"text\" id=\"firstname\"/>"
+           "  <input type=\"text\" id=\"middlename\"/>"
+           "</form>");
+
+  // Verify that "FormsSeen" sends the expected number of fields.
+  ProcessPendingMessages();
+  const IPC::Message* message = render_thread_.sink().GetUniqueMessageMatching(
+      ViewHostMsg_FormsSeen::ID);
+  ASSERT_NE(static_cast<IPC::Message*>(NULL), message);
+  ViewHostMsg_FormsSeen::Param params;
+  ViewHostMsg_FormsSeen::Read(message, &params);
+  const std::vector<FormData>& forms = params.a;
+  ASSERT_EQ(1UL, forms.size());
+  ASSERT_EQ(2UL, forms[0].fields.size());
+  EXPECT_TRUE(forms[0].fields[0].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("firstname"),
+                string16(),
+                ASCIIToUTF16("text"),
+                20))) << forms[0].fields[0];
+  EXPECT_TRUE(forms[0].fields[1].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("middlename"),
+                string16(),
+                ASCIIToUTF16("text"),
+                20))) << forms[0].fields[1];
+
+  // Verify that |didAcceptAutoFillSuggestion()| sets the value of the expected
+  // field.
+  WebFrame* web_frame = GetMainFrame();
+  WebDocument document = web_frame->document();
+  WebInputElement firstname =
+      document.getElementById("firstname").to<WebInputElement>();
+  WebInputElement middlename =
+      document.getElementById("middlename").to<WebInputElement>();
+  middlename.setAutofilled(true);
+
+  // Accept a suggestion in a form that has been auto-filled.  This triggers
+  // the direct filling of the firstname element with value parameter.
+  view_->didAcceptAutoFillSuggestion(firstname,
+                                     WebKit::WebString::fromUTF8("David"),
+                                     WebKit::WebString(),
+                                     0,
+                                     0);
+
+  ProcessPendingMessages();
+  const IPC::Message* message2 = render_thread_.sink().GetUniqueMessageMatching(
+      ViewHostMsg_FillAutoFillFormData::ID);
+
+  // No message should be sent in this case.  |firstname| is filled directly.
+  ASSERT_EQ(static_cast<IPC::Message*>(NULL), message2);
+  EXPECT_EQ(firstname.value(), WebKit::WebString::fromUTF8("David"));
 }

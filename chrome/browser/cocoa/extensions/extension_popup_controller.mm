@@ -42,14 +42,12 @@ class DevtoolsNotificationBridge : public NotificationObserver {
                const NotificationDetails& details) {
     switch (type.value) {
       case NotificationType::EXTENSION_HOST_DID_STOP_LOADING: {
-        if (Details<ExtensionHost>([controller_ extensionHost]) ==
-            details)
+        if (Details<ExtensionHost>([controller_ extensionHost]) == details)
           [controller_ showDevTools];
         break;
       }
       case NotificationType::DEVTOOLS_WINDOW_CLOSING: {
-        RenderViewHost* rvh =
-            [controller_ extensionHost]->render_view_host();
+        RenderViewHost* rvh = [controller_ extensionHost]->render_view_host();
         if (Details<RenderViewHost>(rvh) == details)
           // Allow the devtools to finish detaching before we close the popup
           [controller_ performSelector:@selector(close)
@@ -74,7 +72,7 @@ class DevtoolsNotificationBridge : public NotificationObserver {
 - (id)initWithHost:(ExtensionHost*)host
       parentWindow:(NSWindow*)parentWindow
         anchoredAt:(NSPoint)anchoredAt
-     arrowLocation:(BubbleArrowLocation)arrowLocation
+     arrowLocation:(info_bubble::BubbleArrowLocation)arrowLocation
            devMode:(BOOL)devMode;
 
 // Called when the extension's hosted NSView has been resized.
@@ -86,18 +84,19 @@ class DevtoolsNotificationBridge : public NotificationObserver {
 - (id)initWithHost:(ExtensionHost*)host
       parentWindow:(NSWindow*)parentWindow
         anchoredAt:(NSPoint)anchoredAt
-     arrowLocation:(BubbleArrowLocation)arrowLocation
+     arrowLocation:(info_bubble::BubbleArrowLocation)arrowLocation
            devMode:(BOOL)devMode {
 
   parentWindow_ = parentWindow;
   anchor_ = [parentWindow convertBaseToScreen:anchoredAt];
   host_.reset(host);
+  beingInspected_ = devMode;
 
   scoped_nsobject<InfoBubbleView> view([[InfoBubbleView alloc] init]);
   if (!view.get())
     return nil;
   [view setArrowLocation:arrowLocation];
-  [view setBubbleType:kWhiteInfoBubble];
+  [view setBubbleType:info_bubble::kWhiteInfoBubble];
 
   host->view()->set_is_toolstrip(NO);
 
@@ -127,8 +126,7 @@ class DevtoolsNotificationBridge : public NotificationObserver {
   [window setDelegate:self];
   [window setContentView:view];
   self = [super initWithWindow:window];
-  if (devMode) {
-    beingInspected_ = true;
+  if (beingInspected_) {
     // Listen for the the devtools window closing.
     notificationBridge_.reset(new DevtoolsNotificationBridge(self));
     registrar_.reset(new NotificationRegistrar);
@@ -138,15 +136,12 @@ class DevtoolsNotificationBridge : public NotificationObserver {
     registrar_->Add(notificationBridge_.get(),
                     NotificationType::EXTENSION_HOST_DID_STOP_LOADING,
                     Source<Profile>(host->profile()));
-  } else {
-    beingInspected_ = false;
   }
   return self;
 }
 
 - (void)showDevTools {
-  DevToolsManager::GetInstance()->OpenDevToolsWindow(
-      host_->render_view_host());
+  DevToolsManager::GetInstance()->OpenDevToolsWindow(host_->render_view_host());
 }
 
 - (void)dealloc {
@@ -198,7 +193,8 @@ class DevtoolsNotificationBridge : public NotificationObserver {
 + (ExtensionPopupController*)showURL:(GURL)url
                            inBrowser:(Browser*)browser
                           anchoredAt:(NSPoint)anchoredAt
-                       arrowLocation:(BubbleArrowLocation)arrowLocation
+                       arrowLocation:(info_bubble::BubbleArrowLocation)
+                                         arrowLocation
                              devMode:(BOOL)devMode {
   DCHECK([NSThread isMainThread]);
   DCHECK(browser);
@@ -258,18 +254,20 @@ class DevtoolsNotificationBridge : public NotificationObserver {
 
   // Pad the window by half of the rounded corner radius to prevent the
   // extension's view from bleeding out over the corners.
-  CGFloat inset = kBubbleCornerRadius / 2.0;
+  CGFloat inset = info_bubble::kBubbleCornerRadius / 2.0;
   [extensionView_ setFrameOrigin:NSMakePoint(inset, inset)];
 
   NSRect frame = [extensionView_ frame];
-  frame.size.height += kBubbleArrowHeight + kBubbleCornerRadius;
-  frame.size.width += kBubbleCornerRadius;
+  frame.size.height += info_bubble::kBubbleArrowHeight +
+                       info_bubble::kBubbleCornerRadius;
+  frame.size.width += info_bubble::kBubbleCornerRadius;
   frame = [extensionView_ convertRectToBase:frame];
   // Adjust the origin according to the height and width so that the arrow is
   // positioned correctly at the middle and slightly down from the button.
   NSPoint windowOrigin = anchor_;
-  NSSize offsets = NSMakeSize(kBubbleArrowXOffset + kBubbleArrowWidth / 2.0,
-                              kBubbleArrowHeight / 2.0);
+  NSSize offsets = NSMakeSize(info_bubble::kBubbleArrowXOffset +
+                                  info_bubble::kBubbleArrowWidth / 2.0,
+                              info_bubble::kBubbleArrowHeight / 2.0);
   offsets = [extensionView_ convertSize:offsets toView:nil];
   windowOrigin.x -= NSWidth(frame) - offsets.width;
   windowOrigin.y -= NSHeight(frame) - offsets.height;
@@ -306,6 +304,18 @@ class DevtoolsNotificationBridge : public NotificationObserver {
 - (void)showWindow:(id)sender {
   [parentWindow_ addChildWindow:[self window] ordered:NSWindowAbove];
   [[self window] makeKeyAndOrderFront:self];
+}
+
+- (void)windowDidResize:(NSNotification*)notification {
+  // Let the extension view know, so that it can tell plugins.
+  if (host_->view())
+    host_->view()->WindowFrameChanged();
+}
+
+- (void)windowDidMove:(NSNotification*)notification {
+  // Let the extension view know, so that it can tell plugins.
+  if (host_->view())
+    host_->view()->WindowFrameChanged();
 }
 
 // Private (TestingAPI)

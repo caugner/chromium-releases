@@ -4,37 +4,26 @@
 
 #include "chrome/browser/browser_theme_pack.h"
 
-#include <algorithm>
-#include <climits>
-#include <set>
-#include <vector>
-
 #include "app/resource_bundle.h"
 #include "base/data_pack.h"
-#include "base/logging.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "base/values.h"
 #include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/theme_resources_util.h"
-#include "chrome/common/extensions/extension.h"
 #include "gfx/codec/png_codec.h"
 #include "gfx/skbitmap_operations.h"
 #include "grit/app_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
-#include "third_party/skia/include/core/SkUnPreMultiply.h"
 
 namespace {
 
 // Version number of the current theme pack. We just throw out and rebuild
 // theme packs that aren't int-equal to this.
-const int kThemePackVersion = 7;
+const int kThemePackVersion = 13;
 
 // IDs that are in the DataPack won't clash with the positive integer
 // int32_t. kHeaderID should always have the maximum value because we want the
@@ -130,43 +119,23 @@ PersistingImagesTable kPersistingImages[] = {
   { 20, IDR_FORWARD_D, NULL },
   { 21, IDR_FORWARD_H, NULL },
   { 22, IDR_FORWARD_P, NULL },
-  { 23, IDR_RELOAD, NULL },
-  { 24, IDR_RELOAD_H, NULL },
-  { 25, IDR_RELOAD_P, NULL },
-  { 26, IDR_HOME, NULL },
-  { 27, IDR_HOME_H, NULL },
-  { 28, IDR_HOME_P, NULL },
-  { 29, IDR_STAR, NULL },
-  { 30, IDR_STAR_NOBORDER, NULL },
-  { 31, IDR_STAR_NOBORDER_CENTER, NULL },
-  { 32, IDR_STAR_D, NULL },
-  { 33, IDR_STAR_H, NULL },
-  { 34, IDR_STAR_P, NULL },
-  { 35, IDR_STARRED, NULL },
-  { 36, IDR_STARRED_NOBORDER, NULL },
-  { 37, IDR_STARRED_NOBORDER_CENTER, NULL },
-  { 38, IDR_STARRED_H, NULL },
-  { 39, IDR_STARRED_P, NULL },
-  { 40, IDR_GO, NULL },
-  { 41, IDR_GO_NOBORDER, NULL },
-  { 42, IDR_GO_NOBORDER_CENTER, NULL },
-  { 43, IDR_GO_H, NULL },
-  { 44, IDR_GO_P, NULL },
-  { 45, IDR_STOP, NULL },
-  { 46, IDR_STOP_NOBORDER, NULL },
-  { 47, IDR_STOP_NOBORDER_CENTER, NULL },
-  { 48, IDR_STOP_H, NULL },
-  { 49, IDR_STOP_P, NULL },
-  { 50, IDR_MENU_BOOKMARK, NULL },
-  { 51, IDR_MENU_PAGE, NULL },
-  { 52, IDR_MENU_PAGE_RTL, NULL },
-  { 53, IDR_MENU_CHROME, NULL },
-  { 54, IDR_MENU_CHROME_RTL, NULL },
-  { 55, IDR_MENU_DROPARROW, NULL },
-  { 56, IDR_THROBBER, NULL },
-  { 57, IDR_THROBBER_WAITING, NULL },
-  { 58, IDR_THROBBER_LIGHT, NULL },
-  { 59, IDR_LOCATIONBG, NULL }
+  { 23, IDR_HOME, NULL },
+  { 24, IDR_HOME_H, NULL },
+  { 25, IDR_HOME_P, NULL },
+  { 26, IDR_RELOAD, NULL },
+  { 27, IDR_RELOAD_H, NULL },
+  { 28, IDR_RELOAD_P, NULL },
+  { 29, IDR_STOP, NULL },
+  { 30, IDR_STOP_H, NULL },
+  { 31, IDR_STOP_P, NULL },
+  { 32, IDR_LOCATIONBG_C, NULL },
+  { 33, IDR_LOCATIONBG_L, NULL },
+  { 34, IDR_LOCATIONBG_R, NULL },
+  { 35, IDR_TOOLS, NULL },
+  { 36, IDR_MENU_DROPARROW, NULL },
+  { 37, IDR_THROBBER, NULL },
+  { 38, IDR_THROBBER_WAITING, NULL },
+  { 39, IDR_THROBBER_LIGHT, NULL },
 };
 
 int GetPersistentIDByName(const std::string& key) {
@@ -200,6 +169,7 @@ StringToIntTable kTintTable[] = {
   { "buttons", BrowserThemeProvider::TINT_BUTTONS },
   { "frame", BrowserThemeProvider::TINT_FRAME },
   { "frame_inactive", BrowserThemeProvider::TINT_FRAME_INACTIVE },
+  { "frame_incognito", BrowserThemeProvider::TINT_FRAME_INCOGNITO },
   { "frame_incognito_inactive",
     BrowserThemeProvider::TINT_FRAME_INCOGNITO_INACTIVE },
   { "background_tab", BrowserThemeProvider::TINT_BACKGROUND_TAB },
@@ -352,7 +322,7 @@ BrowserThemePack::~BrowserThemePack() {
 BrowserThemePack* BrowserThemePack::BuildFromExtension(Extension* extension) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   DCHECK(extension);
-  DCHECK(extension->IsTheme());
+  DCHECK(extension->is_theme());
 
   BrowserThemePack* pack = new BrowserThemePack;
   pack->BuildHeader(extension);
@@ -515,6 +485,8 @@ bool BrowserThemePack::GetDisplayProperty(int id, int* result) const {
 
 SkBitmap* BrowserThemePack::GetBitmapNamed(int idr_id) const {
   int prs_id = GetPersistentIDByIDR(idr_id);
+  if (prs_id == -1)
+    return NULL;
 
   // Check our cache of prepared images, first.
   ImageCache::const_iterator image_iter = prepared_images_.find(prs_id);
@@ -964,6 +936,7 @@ void BrowserThemePack::GenerateTintedButtons(
     for (std::set<int>::const_iterator it = idr_ids.begin();
          it != idr_ids.end(); ++it) {
       int prs_id = GetPersistentIDByIDR(*it);
+      DCHECK(prs_id > 0);
 
       // Fetch the image by IDR...
       scoped_ptr<SkBitmap> button(new SkBitmap(*rb.GetBitmapNamed(*it)));

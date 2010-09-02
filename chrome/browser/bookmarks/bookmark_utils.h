@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -165,8 +165,7 @@ const BookmarkNode* ApplyEditsWithNoGroupChange(
     const BookmarkNode* parent,
     const BookmarkEditor::EditDetails& details,
     const std::wstring& new_title,
-    const GURL& new_url,
-    BookmarkEditor::Handler* handler);
+    const GURL& new_url);
 
 // Modifies a bookmark node assuming that the parent of the node may have
 // changed and the node will need to be removed and reinserted.  If a new node
@@ -177,17 +176,13 @@ const BookmarkNode* ApplyEditsWithPossibleGroupChange(
     const BookmarkNode* new_parent,
     const BookmarkEditor::EditDetails& details,
     const std::wstring& new_title,
-    const GURL& new_url,
-    BookmarkEditor::Handler* handler);
+    const GURL& new_url);
 
 // Toggles whether the bookmark bar is shown only on the new tab page or on
 // all tabs.  This is a preference modifier, not a visual modifier.
 void ToggleWhenVisible(Profile* profile);
 
-// Register local state prefs for bookmark bar view.
-void RegisterPrefs(PrefService* prefs);
-
-// Register user prefs for BookmarkBar, BookmarkView, ...
+// Register user preferences for BookmarksBar.
 void RegisterUserPrefs(PrefService* prefs);
 
 // Fills in the URL and title for a bookmark of |tab_contents|.

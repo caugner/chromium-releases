@@ -48,6 +48,8 @@ bool SetWindowForAGLContext(AGLContext context, WindowRef window);
 
 bool IsMacOSTenFiveOrHigher();
 
+bool IsMacOSTenSixOrHigher();
+
 Rect CGRect2Rect(const CGRect &inRect);
 
 CGRect Rect2CGRect(const Rect &inRect);

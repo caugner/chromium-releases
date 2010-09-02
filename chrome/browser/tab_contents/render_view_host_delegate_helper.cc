@@ -6,8 +6,10 @@
 
 #include "base/command_line.h"
 #include "base/string_util.h"
+#include "chrome/browser/background_contents_service.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/character_encoding.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -15,25 +17,89 @@
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/renderer_host/site_instance.h"
+#include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/user_style_sheet_watcher.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
+
+BackgroundContents*
+RenderViewHostDelegateViewHelper::MaybeCreateBackgroundContents(
+    int route_id,
+    Profile* profile,
+    SiteInstance* site,
+    GURL opener_url,
+    const string16& frame_name) {
+  ExtensionsService* extensions_service = profile->GetExtensionsService();
+
+  if (!opener_url.is_valid() ||
+      frame_name.empty() ||
+      !extensions_service ||
+      !extensions_service->is_ready())
+    return NULL;
+
+  Extension* extension = extensions_service->GetExtensionByURL(opener_url);
+  if (!extension)
+    extension = extensions_service->GetExtensionByWebExtent(opener_url);
+  if (!extension ||
+      !extension->HasApiPermission(Extension::kBackgroundPermission))
+    return NULL;
+
+  // Only allow a single background contents per app.
+  if (!profile->GetBackgroundContentsService() ||
+      profile->GetBackgroundContentsService()->GetAppBackgroundContents(
+          ASCIIToUTF16(extension->id())))
+    return NULL;
+
+  // Ensure that we're trying to open this from the extension's process.
+  ExtensionProcessManager* process_manager =
+      profile->GetExtensionProcessManager();
+  if (!site->GetProcess() || !process_manager ||
+      site->GetProcess() != process_manager->GetExtensionProcess(opener_url))
+    return NULL;
+
+  // Passed all the checks, so this should be created as a BackgroundContents.
+  BackgroundContents* contents = new BackgroundContents(site, route_id);
+  string16 appid = ASCIIToUTF16(extension->id());
+  BackgroundContentsOpenedDetails details = { contents, frame_name, appid };
+  NotificationService::current()->Notify(
+      NotificationType::BACKGROUND_CONTENTS_OPENED,
+      Source<Profile>(profile),
+      Details<BackgroundContentsOpenedDetails>(&details));
+
+  return contents;
+}
 
 TabContents* RenderViewHostDelegateViewHelper::CreateNewWindow(
     int route_id,
     Profile* profile,
     SiteInstance* site,
     DOMUITypeID domui_type,
-    TabContents* old_tab_contents) {
+    RenderViewHostDelegate* opener,
+    WindowContainerType window_container_type,
+    const string16& frame_name) {
+  if (window_container_type == WINDOW_CONTAINER_TYPE_BACKGROUND) {
+    BackgroundContents* contents = MaybeCreateBackgroundContents(
+        route_id,
+        profile,
+        site,
+        opener->GetURL(),
+        frame_name);
+    if (contents) {
+      pending_contents_[route_id] = contents->render_view_host();
+      return NULL;
+    }
+  }
+
   // Create the new web contents. This will automatically create the new
   // TabContentsView. In the future, we may want to create the view separately.
   TabContents* new_contents =
       new TabContents(profile,
                       site,
                       route_id,
-                      old_tab_contents);
+                      opener->GetAsTabContents());
   new_contents->set_opener_dom_ui_type(domui_type);
   TabContentsView* new_view = new_contents->view();
 
@@ -42,7 +108,7 @@ TabContents* RenderViewHostDelegateViewHelper::CreateNewWindow(
   new_view->CreateViewForWidget(new_contents->render_view_host());
 
   // Save the created window associated with the route so we can show it later.
-  pending_contents_[route_id] = new_contents;
+  pending_contents_[route_id] = new_contents->render_view_host();
   return new_contents;
 }
 
@@ -66,19 +132,17 @@ TabContents* RenderViewHostDelegateViewHelper::GetCreatedWindow(int route_id) {
     return NULL;
   }
 
-  TabContents* new_tab_contents = iter->second;
+  RenderViewHost* new_rvh = iter->second;
   pending_contents_.erase(route_id);
 
-  if (!new_tab_contents->render_view_host()->view() ||
-      !new_tab_contents->GetRenderProcessHost()->HasConnection()) {
-    // The view has gone away or the renderer crashed. Nothing to do.
+  // The renderer crashed or it is a TabContents and has no view.
+  if (!new_rvh->process()->HasConnection() ||
+      (new_rvh->delegate()->GetAsTabContents() && !new_rvh->view()))
     return NULL;
-  }
 
   // TODO(brettw) this seems bogus to reach into here and initialize the host.
-  new_tab_contents->render_view_host()->Init();
-
-  return new_tab_contents;
+  new_rvh->Init();
+  return new_rvh->delegate()->GetAsTabContents();
 }
 
 RenderWidgetHostView* RenderViewHostDelegateViewHelper::GetCreatedWidget(
@@ -119,19 +183,19 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
   WebPreferences web_prefs;
 
   web_prefs.fixed_font_family =
-      prefs->GetString(prefs::kWebKitFixedFontFamily);
+      UTF8ToWide(prefs->GetString(prefs::kWebKitFixedFontFamily));
   web_prefs.serif_font_family =
-      prefs->GetString(prefs::kWebKitSerifFontFamily);
+      UTF8ToWide(prefs->GetString(prefs::kWebKitSerifFontFamily));
   web_prefs.sans_serif_font_family =
-      prefs->GetString(prefs::kWebKitSansSerifFontFamily);
+      UTF8ToWide(prefs->GetString(prefs::kWebKitSansSerifFontFamily));
   if (prefs->GetBoolean(prefs::kWebKitStandardFontIsSerif))
     web_prefs.standard_font_family = web_prefs.serif_font_family;
   else
     web_prefs.standard_font_family = web_prefs.sans_serif_font_family;
   web_prefs.cursive_font_family =
-      prefs->GetString(prefs::kWebKitCursiveFontFamily);
+      UTF8ToWide(prefs->GetString(prefs::kWebKitCursiveFontFamily));
   web_prefs.fantasy_font_family =
-      prefs->GetString(prefs::kWebKitFantasyFontFamily);
+      UTF8ToWide(prefs->GetString(prefs::kWebKitFantasyFontFamily));
 
   web_prefs.default_font_size =
       prefs->GetInteger(prefs::kWebKitDefaultFontSize);
@@ -142,8 +206,7 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
   web_prefs.minimum_logical_font_size =
       prefs->GetInteger(prefs::kWebKitMinimumLogicalFontSize);
 
-  web_prefs.default_encoding =
-      WideToASCII(prefs->GetString(prefs::kDefaultCharset));
+  web_prefs.default_encoding = prefs->GetString(prefs::kDefaultCharset);
 
   web_prefs.javascript_can_open_windows_automatically =
       prefs->GetBoolean(prefs::kWebKitJavascriptCanOpenWindowsAutomatically);
@@ -151,8 +214,18 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
       prefs->GetBoolean(prefs::kWebKitDomPasteEnabled);
   web_prefs.shrinks_standalone_images_to_fit =
       prefs->GetBoolean(prefs::kWebKitShrinksStandaloneImagesToFit);
-  web_prefs.inspector_settings = WideToUTF8(
-      prefs->GetString(prefs::kWebKitInspectorSettings));
+  const DictionaryValue* inspector_settings =
+      prefs->GetDictionary(prefs::kWebKitInspectorSettings);
+  if (inspector_settings) {
+    for (DictionaryValue::key_iterator iter(inspector_settings->begin_keys());
+         iter != inspector_settings->end_keys(); ++iter) {
+      std::string value;
+      if (inspector_settings->GetStringWithoutPathExpansion(*iter, &value))
+          web_prefs.inspector_settings.push_back(
+              std::make_pair(WideToUTF8(*iter), value));
+    }
+  }
+  web_prefs.tabs_to_links = prefs->GetBoolean(prefs::kWebkitTabsToLinks);
 
   {  // Command line switches are used for preferences with no user interface.
     const CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -193,13 +266,18 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
         command_line.HasSwitch(switches::kAllowFileAccessFromFiles);
     web_prefs.show_composited_layer_borders =
         command_line.HasSwitch(switches::kShowCompositedLayerBorders);
-    web_prefs.user_style_sheet_enabled =
-        command_line.HasSwitch(switches::kEnableUserStyleSheet);
-    if (web_prefs.user_style_sheet_enabled) {
+    web_prefs.accelerated_compositing_enabled =
+        command_line.HasSwitch(switches::kEnableAcceleratedCompositing);
+    web_prefs.memory_info_enabled =
+        command_line.HasSwitch(switches::kEnableMemoryInfo);
+    // The user stylesheet watcher may not exist in a testing profile.
+    if (profile->GetUserStyleSheetWatcher()) {
+      web_prefs.user_style_sheet_enabled = true;
       web_prefs.user_style_sheet_location =
           profile->GetUserStyleSheetWatcher()->user_style_sheet();
+    } else {
+      web_prefs.user_style_sheet_enabled = false;
     }
-
   }
 
   web_prefs.uses_universal_detector =
@@ -213,8 +291,7 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
           web_prefs.default_encoding);
   if (web_prefs.default_encoding.empty()) {
     prefs->ClearPref(prefs::kDefaultCharset);
-    web_prefs.default_encoding = WideToASCII(
-        prefs->GetString(prefs::kDefaultCharset));
+    web_prefs.default_encoding = prefs->GetString(prefs::kDefaultCharset);
   }
   DCHECK(!web_prefs.default_encoding.empty());
 

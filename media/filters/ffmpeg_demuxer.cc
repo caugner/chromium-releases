@@ -105,19 +105,20 @@ bool FFmpegDemuxerStream::HasPendingReads() {
   return !read_queue_.empty();
 }
 
-base::TimeDelta FFmpegDemuxerStream::EnqueuePacket(AVPacket* packet) {
+void FFmpegDemuxerStream::EnqueuePacket(AVPacket* packet) {
   DCHECK_EQ(MessageLoop::current(), demuxer_->message_loop());
   base::TimeDelta timestamp =
       ConvertStreamTimestamp(stream_->time_base, packet->pts);
   base::TimeDelta duration =
       ConvertStreamTimestamp(stream_->time_base, packet->duration);
+
   if (stopped_) {
     NOTREACHED() << "Attempted to enqueue packet on a stopped stream";
-    return timestamp;
+    return;
   }
 
   // Convert if the packet if there is bitstream filter.
-  if (bitstream_converter_.get() &&
+  if (packet->data && bitstream_converter_.get() &&
       !bitstream_converter_->ConvertPacket(packet)) {
     LOG(ERROR) << "Format converstion failed.";
   }
@@ -127,11 +128,11 @@ base::TimeDelta FFmpegDemuxerStream::EnqueuePacket(AVPacket* packet) {
       new AVPacketBuffer(packet, timestamp, duration);
   if (!buffer) {
     NOTREACHED() << "Unable to allocate AVPacketBuffer";
-    return timestamp;
+    return;
   }
   buffer_queue_.push_back(buffer);
   FulfillPendingRead();
-  return timestamp;
+  return;
 }
 
 void FFmpegDemuxerStream::FlushBuffers() {
@@ -265,10 +266,10 @@ void FFmpegDemuxer::PostDemuxTask() {
       NewRunnableMethod(this, &FFmpegDemuxer::DemuxTask));
 }
 
-void FFmpegDemuxer::Stop() {
+void FFmpegDemuxer::Stop(FilterCallback* callback) {
   // Post a task to notify the streams to stop as well.
   message_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(this, &FFmpegDemuxer::StopTask));
+      NewRunnableMethod(this, &FFmpegDemuxer::StopTask, callback));
 
   // Then wakes up the thread from reading.
   SignalReadCompleted(DataSource::kReadError);
@@ -283,11 +284,9 @@ void FFmpegDemuxer::Seek(base::TimeDelta time, FilterCallback* callback) {
       NewRunnableMethod(this, &FFmpegDemuxer::SeekTask, time, callback));
 }
 
-void FFmpegDemuxer::OnReceivedMessage(FilterMessage message) {
-  if (message == kMsgDisableAudio) {
-    message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &FFmpegDemuxer::DisableAudioStreamTask));
-  }
+void FFmpegDemuxer::OnAudioRendererDisabled() {
+  message_loop()->PostTask(FROM_HERE,
+      NewRunnableMethod(this, &FFmpegDemuxer::DisableAudioStreamTask));
 }
 
 void FFmpegDemuxer::Initialize(DataSource* data_source,
@@ -337,6 +336,9 @@ int FFmpegDemuxer::Read(int size, uint8* data) {
     return AVERROR_IO;
   }
   read_position_ += last_read_bytes;
+
+  host()->SetCurrentReadPosition(read_position_);
+
   return last_read_bytes;
 }
 
@@ -406,11 +408,19 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
 
   // Create demuxer streams for all supported streams.
   base::TimeDelta max_duration;
+  const bool kDemuxerIsWebm = !strcmp("webm", format_context_->iformat->name);
   for (size_t i = 0; i < format_context_->nb_streams; ++i) {
     AVCodecContext* codec_context = format_context_->streams[i]->codec;
     CodecType codec_type = codec_context->codec_type;
     if (codec_type == CODEC_TYPE_AUDIO || codec_type == CODEC_TYPE_VIDEO) {
       AVStream* stream = format_context_->streams[i];
+      // WebM is currently strictly VP8 and Vorbis.
+      if (kDemuxerIsWebm && (stream->codec->codec_id != CODEC_ID_VP8 &&
+        stream->codec->codec_id != CODEC_ID_VORBIS)) {
+        packet_streams_.push_back(NULL);
+        continue;
+      }
+
       FFmpegDemuxerStream* demuxer_stream
           = new FFmpegDemuxerStream(this, stream);
 
@@ -485,11 +495,12 @@ void FFmpegDemuxer::SeekTask(base::TimeDelta time, FilterCallback* callback) {
     return;
   }
 
-  // Seek backwards if requested timestamp is behind FFmpeg's current time.
-  int flags = 0;
-  if (time <= current_timestamp_) {
-    flags |= AVSEEK_FLAG_BACKWARD;
-  }
+  // Always seek to a timestamp less than or equal to the desired timestamp.
+  int flags = AVSEEK_FLAG_BACKWARD;
+
+  // Explicitly set the behavior of Ogg to be able to seek to any frame.
+  if (!strcmp("ogg", format_context_->iformat->name))
+    flags |= AVSEEK_FLAG_ANY;
 
   // Passing -1 as our stream index lets FFmpeg pick a default stream.  FFmpeg
   // will attempt to use the lowest-index video stream, if present, followed by
@@ -541,7 +552,7 @@ void FFmpegDemuxer::DemuxTask() {
       // other codecs.  It is safe to call this function even if the packet does
       // not refer to inner memory from FFmpeg.
       av_dup_packet(packet.get());
-      current_timestamp_ = demuxer_stream->EnqueuePacket(packet.release());
+      demuxer_stream->EnqueuePacket(packet.release());
     }
   }
 
@@ -552,11 +563,15 @@ void FFmpegDemuxer::DemuxTask() {
   }
 }
 
-void FFmpegDemuxer::StopTask() {
+void FFmpegDemuxer::StopTask(FilterCallback* callback) {
   DCHECK_EQ(MessageLoop::current(), message_loop());
   StreamVector::iterator iter;
   for (iter = streams_.begin(); iter != streams_.end(); ++iter) {
     (*iter)->Stop();
+  }
+  if (callback) {
+    callback->Run();
+    delete callback;
   }
 }
 

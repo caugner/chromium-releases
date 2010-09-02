@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,7 +32,7 @@
 #include "base/string_util.h"
 #include "base/task.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_database.h"
@@ -58,11 +58,7 @@ class HistoryTest;
 // Specialize RunnableMethodTraits for HistoryTest so we can create callbacks.
 // None of these callbacks can outlast the test, so there is not need to retain
 // the HistoryTest object.
-template <>
-struct RunnableMethodTraits<history::HistoryTest> {
-  void RetainCallee(history::HistoryTest* obj) { }
-  void ReleaseCallee(history::HistoryTest* obj) { }
-};
+DISABLE_RUNNABLE_METHOD_REFCOUNT(history::HistoryTest);
 
 namespace history {
 
@@ -103,7 +99,7 @@ class BackendDelegate : public HistoryBackend::Delegate {
   virtual void BroadcastNotifications(NotificationType type,
                                       HistoryDetails* details);
   virtual void DBLoaded() {}
-
+  virtual void StartTopSitesMigration() {}
  private:
   HistoryTest* history_test_;
 };
@@ -153,6 +149,12 @@ class HistoryTest : public testing::Test {
   }
 
   void OnDeleteURLsDone(CancelableRequestProvider::Handle handle) {
+    MessageLoop::current()->Quit();
+  }
+
+  void OnMostVisitedURLsAvailable(CancelableRequestProvider::Handle handle,
+                                  MostVisitedURLList url_list) {
+    most_visited_urls_.swap(url_list);
     MessageLoop::current()->Quit();
   }
 
@@ -263,6 +265,8 @@ class HistoryTest : public testing::Test {
 
   // PageUsageData vector to test segments.
   ScopedVector<PageUsageData> page_usage_data_;
+
+  MostVisitedURLList most_visited_urls_;
 
   // When non-NULL, this will be deleted on tear down and we will block until
   // the backend thread has completed. This allows tests for the history
@@ -379,6 +383,22 @@ TEST_F(HistoryTest, ClearBrowsingData_Downloads) {
   EXPECT_TRUE(db_->UpdateDownload(512, DownloadItem::CANCELLED, removing));
 
   // Try removing from Time=0. This should delete all.
+  db_->RemoveDownloadsBetween(Time(), Time());
+  db_->QueryDownloads(&downloads);
+  EXPECT_EQ(0U, downloads.size());
+
+  // Check removal of downloads stuck in IN_PROGRESS state.
+  EXPECT_NE(0, AddDownload(DownloadItem::COMPLETE,    month_ago));
+  EXPECT_NE(0, AddDownload(DownloadItem::IN_PROGRESS, month_ago));
+  db_->QueryDownloads(&downloads);
+  EXPECT_EQ(2U, downloads.size());
+  db_->RemoveDownloadsBetween(Time(), Time());
+  db_->QueryDownloads(&downloads);
+  // IN_PROGRESS download should remain. It it indicated as "Canceled"
+  EXPECT_EQ(1U, downloads.size());
+  db_->CleanUpInProgressEntries();
+  db_->QueryDownloads(&downloads);
+  EXPECT_EQ(1U, downloads.size());
   db_->RemoveDownloadsBetween(Time(), Time());
   db_->QueryDownloads(&downloads);
   EXPECT_EQ(0U, downloads.size());
@@ -574,7 +594,7 @@ TEST_F(HistoryTest, SetTitle) {
   history->AddPage(existing_url);
 
   // Set some title.
-  const std::wstring existing_title(L"Google");
+  const string16 existing_title = UTF8ToUTF16("Google");
   history->SetPageTitle(existing_url, existing_title);
 
   // Make sure the title got set.
@@ -583,12 +603,12 @@ TEST_F(HistoryTest, SetTitle) {
 
   // set a title on a nonexistent page
   const GURL nonexistent_url("http://news.google.com/");
-  const std::wstring nonexistent_title(L"Google News");
+  const string16 nonexistent_title = UTF8ToUTF16("Google News");
   history->SetPageTitle(nonexistent_url, nonexistent_title);
 
   // Make sure nothing got written.
   EXPECT_FALSE(QueryURL(history, nonexistent_url));
-  EXPECT_EQ(std::wstring(), query_url_row_.title());
+  EXPECT_EQ(string16(), query_url_row_.title());
 
   // TODO(brettw) this should also test redirects, which get the title of the
   // destination page.
@@ -725,6 +745,99 @@ TEST_F(HistoryTest, Thumbnails) {
   EXPECT_FALSE(got_thumbnail_callback_);
 }
 
+TEST_F(HistoryTest, MostVisitedURLs) {
+  scoped_refptr<HistoryService> history(new HistoryService);
+  history_service_ = history;
+  ASSERT_TRUE(history->Init(history_dir_, NULL));
+
+  const GURL url0("http://www.google.com/url0/");
+  const GURL url1("http://www.google.com/url1/");
+  const GURL url2("http://www.google.com/url2/");
+  const GURL url3("http://www.google.com/url3/");
+  const GURL url4("http://www.google.com/url4/");
+
+  static const void* scope = static_cast<void*>(this);
+
+  // Add two pages.
+  history->AddPage(url0, scope, 0, GURL(),
+                   PageTransition::TYPED, history::RedirectList(),
+                   false);
+  history->AddPage(url1, scope, 0, GURL(),
+                   PageTransition::TYPED, history::RedirectList(),
+                   false);
+  history->QueryMostVisitedURLs(20, 90, &consumer_,
+                                NewCallback(static_cast<HistoryTest*>(this),
+                                    &HistoryTest::OnMostVisitedURLsAvailable));
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(2U, most_visited_urls_.size());
+  EXPECT_EQ(url0, most_visited_urls_[0].url);
+  EXPECT_EQ(url1, most_visited_urls_[1].url);
+
+  // Add another page.
+  history->AddPage(url2, scope, 0, GURL(),
+                   PageTransition::TYPED, history::RedirectList(),
+                   false);
+  history->QueryMostVisitedURLs(20, 90, &consumer_,
+                                NewCallback(static_cast<HistoryTest*>(this),
+                                    &HistoryTest::OnMostVisitedURLsAvailable));
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(3U, most_visited_urls_.size());
+  EXPECT_EQ(url0, most_visited_urls_[0].url);
+  EXPECT_EQ(url1, most_visited_urls_[1].url);
+  EXPECT_EQ(url2, most_visited_urls_[2].url);
+
+  // Revisit url2, making it the top URL.
+  history->AddPage(url2, scope, 0, GURL(),
+                   PageTransition::TYPED, history::RedirectList(),
+                   false);
+  history->QueryMostVisitedURLs(20, 90, &consumer_,
+                                NewCallback(static_cast<HistoryTest*>(this),
+                                    &HistoryTest::OnMostVisitedURLsAvailable));
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(3U, most_visited_urls_.size());
+  EXPECT_EQ(url2, most_visited_urls_[0].url);
+  EXPECT_EQ(url0, most_visited_urls_[1].url);
+  EXPECT_EQ(url1, most_visited_urls_[2].url);
+
+  // Revisit url1, making it the top URL.
+  history->AddPage(url1, scope, 0, GURL(),
+                   PageTransition::TYPED, history::RedirectList(),
+                   false);
+  history->QueryMostVisitedURLs(20, 90, &consumer_,
+                                NewCallback(static_cast<HistoryTest*>(this),
+                                    &HistoryTest::OnMostVisitedURLsAvailable));
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(3U, most_visited_urls_.size());
+  EXPECT_EQ(url1, most_visited_urls_[0].url);
+  EXPECT_EQ(url2, most_visited_urls_[1].url);
+  EXPECT_EQ(url0, most_visited_urls_[2].url);
+
+  // Redirects
+  history::RedirectList redirects;
+  redirects.push_back(url3);
+  redirects.push_back(url4);
+
+  // Visit url4 using redirects.
+  history->AddPage(url4, scope, 0, GURL(),
+                   PageTransition::TYPED, redirects,
+                   false);
+  history->QueryMostVisitedURLs(20, 90, &consumer_,
+                                NewCallback(static_cast<HistoryTest*>(this),
+                                    &HistoryTest::OnMostVisitedURLsAvailable));
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(4U, most_visited_urls_.size());
+  EXPECT_EQ(url1, most_visited_urls_[0].url);
+  EXPECT_EQ(url2, most_visited_urls_[1].url);
+  EXPECT_EQ(url0, most_visited_urls_[2].url);
+  EXPECT_EQ(url3, most_visited_urls_[3].url);
+  EXPECT_EQ(2U, most_visited_urls_[3].redirects.size());
+}
+
 // The version of the history database should be current in the "typical
 // history" example file or it will be imported on startup, throwing off timing
 // measurements.
@@ -803,7 +916,7 @@ class HistoryDBTaskImpl : public HistoryDBTask {
  private:
   virtual ~HistoryDBTaskImpl() {}
 
-  DISALLOW_EVIL_CONSTRUCTORS(HistoryDBTaskImpl);
+  DISALLOW_COPY_AND_ASSIGN(HistoryDBTaskImpl);
 };
 
 // static

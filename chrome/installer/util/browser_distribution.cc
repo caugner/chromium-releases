@@ -71,6 +71,10 @@ std::wstring BrowserDistribution::GetAlternateApplicationName() {
   return L"The Internet";
 }
 
+std::wstring BrowserDistribution::GetBrowserAppId() {
+  return L"Chromium";
+}
+
 std::wstring BrowserDistribution::GetInstallSubDir() {
   return L"Chromium";
 }
@@ -134,8 +138,20 @@ std::wstring BrowserDistribution::GetVersionKey() {
   return L"Software\\Chromium";
 }
 
+std::wstring BrowserDistribution::GetEnvVersionKey() {
+  return L"CHROMIUM_VERSION";
+}
+
 bool BrowserDistribution::CanSetAsDefault() {
   return true;
+}
+
+int BrowserDistribution::GetIconIndex() {
+  return 0;
+}
+
+bool BrowserDistribution::GetChromeChannel(std::wstring* channel) {
+  return false;
 }
 
 void BrowserDistribution::UpdateDiffInstallStatus(bool system_install,

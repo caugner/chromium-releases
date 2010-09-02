@@ -1,63 +1,40 @@
-// Copyright 2008, Google Inc.
-// All rights reserved.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//    * Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//    * Redistributions in binary form must reproduce the above
-// copyright notice, this list of conditions and the following disclaimer
-// in the documentation and/or other materials provided with the
-// distribution.
-//    * Neither the name of Google Inc. nor the names of its
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "chrome/test/ui/ui_test.h"
 
 #include "base/file_path.h"
 #include "base/path_service.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/url_constants.h"
+#include "chrome/test/ui_test_utils.h"
 #include "chrome/test/automation/tab_proxy.h"
+#include "chrome/test/ui/npapi_test_helper.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 
-namespace {
+using npapi_test::kTestCompleteCookie;
+using npapi_test::kTestCompleteSuccess;
 
-class LayoutPluginTester : public UITest {
+static const FilePath::CharType* kTestDir = FILE_PATH_LITERAL("npapi");
+
+#if defined(OS_WIN)
+static const char kTestPluginName[] = "npapi_layout_test_plugin.dll";
+#elif defined(OS_MACOSX)
+static const char kTestPluginName[] = "TestNetscapePlugIn.plugin";
+#elif defined(OS_LINUX)
+static const char kTestPluginName[] = "libnpapi_layout_test_plugin.so";
+#endif
+
+class LayoutPluginTester : public NPAPITesterBase {
+ protected:
+  LayoutPluginTester() : NPAPITesterBase(kTestPluginName) {}
 };
-
-}  // namespace
 
 // Make sure that navigating away from a plugin referenced by JS doesn't
 // crash.
 TEST_F(LayoutPluginTester, UnloadNoCrash) {
-  // We need to copy our test-plugin into the plugins directory so that
-  // the browser can load it.
-  std::wstring plugins_directory = browser_directory_.ToWStringHack();
-  plugins_directory += L"\\plugins";
-  std::wstring plugin_src = browser_directory_.ToWStringHack();
-  plugin_src += L"\\npapi_layout_test_plugin.dll";
-  std::wstring plugin_dest = plugins_directory;
-  plugin_dest += L"\\npapi_layout_test_plugin.dll";
-
-  CreateDirectory(plugins_directory.c_str(), NULL);
-  CopyFile(plugin_src.c_str(), plugin_dest.c_str(), true /* overwrite */);
-
   FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
   path = path.AppendASCII("npapi").AppendASCII("layout_test_plugin.html");
@@ -72,4 +49,58 @@ TEST_F(LayoutPluginTester, UnloadNoCrash) {
   ASSERT_TRUE(tab->GoBack());
   EXPECT_TRUE(tab->GetTabTitle(&title));
   EXPECT_EQ(L"", title);
+}
+
+// Tests if a plugin executing a self deleting script using NPN_GetURL
+// works without crashing or hanging
+TEST_F(LayoutPluginTester, FLAKY_SelfDeletePluginGetUrl) {
+  const FilePath test_case(FILE_PATH_LITERAL("self_delete_plugin_geturl.html"));
+  GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
+  ASSERT_NO_FATAL_FAILURE(NavigateToURL(url));
+  WaitForFinish("self_delete_plugin_geturl", "1", url,
+                kTestCompleteCookie, kTestCompleteSuccess,
+                action_max_timeout_ms());
+}
+
+// Tests if a plugin executing a self deleting script using Invoke
+// works without crashing or hanging
+// Flaky. See http://crbug.com/30702
+TEST_F(LayoutPluginTester, FLAKY_SelfDeletePluginInvoke) {
+  const FilePath test_case(FILE_PATH_LITERAL("self_delete_plugin_invoke.html"));
+  GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
+  ASSERT_NO_FATAL_FAILURE(NavigateToURL(url));
+  WaitForFinish("self_delete_plugin_invoke", "1", url,
+                kTestCompleteCookie, kTestCompleteSuccess,
+                action_max_timeout_ms());
+}
+
+TEST_F(LayoutPluginTester, NPObjectReleasedOnDestruction) {
+  if (UITest::in_process_renderer())
+    return;
+
+  const FilePath test_case(
+      FILE_PATH_LITERAL("npobject_released_on_destruction.html"));
+  GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
+  ASSERT_NO_FATAL_FAILURE(NavigateToURL(url));
+
+  scoped_refptr<BrowserProxy> window_proxy(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(window_proxy);
+  ASSERT_TRUE(window_proxy->AppendTab(GURL(chrome::kAboutBlankURL)));
+
+  scoped_refptr<TabProxy> tab_proxy(window_proxy->GetTab(0));
+  ASSERT_TRUE(tab_proxy.get());
+  ASSERT_TRUE(tab_proxy->Close(true));
+}
+
+// Test that a dialog is properly created when a plugin throws an
+// exception.  Should be run for in and out of process plugins, but
+// the more interesting case is out of process, where we must route
+// the exception to the correct renderer.
+TEST_F(LayoutPluginTester, NPObjectSetException) {
+  const FilePath test_case(FILE_PATH_LITERAL("npobject_set_exception.html"));
+  GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
+  ASSERT_NO_FATAL_FAILURE(NavigateToURL(url));
+  WaitForFinish("npobject_set_exception", "1", url,
+                kTestCompleteCookie, kTestCompleteSuccess,
+                action_max_timeout_ms());
 }

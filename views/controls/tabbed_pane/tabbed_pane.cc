@@ -27,6 +27,7 @@ void TabbedPane::SetListener(Listener* listener) {
 
 void TabbedPane::AddTab(const std::wstring& title, View* contents) {
   native_tabbed_pane_->AddTab(title, contents);
+  PreferredSizeChanged();
 }
 
 void TabbedPane::AddTabAtIndex(int index,
@@ -35,6 +36,8 @@ void TabbedPane::AddTabAtIndex(int index,
                                bool select_if_first_tab) {
   native_tabbed_pane_->AddTabAtIndex(index, title, contents,
                                      select_if_first_tab);
+  contents->SetAccessibleName(title);
+  PreferredSizeChanged();
 }
 
 int TabbedPane::GetSelectedTabIndex() {
@@ -47,6 +50,7 @@ View* TabbedPane::GetSelectedTab() {
 
 View* TabbedPane::RemoveTabAtIndex(int index) {
   return native_tabbed_pane_->RemoveTabAtIndex(index);
+  PreferredSizeChanged();
 }
 
 void TabbedPane::SelectTabAt(int index) {
@@ -101,16 +105,19 @@ void TabbedPane::LoadAccelerators() {
 }
 
 void TabbedPane::Layout() {
-  if (native_tabbed_pane_) {
+  if (native_tabbed_pane_)
     native_tabbed_pane_->GetView()->SetBounds(0, 0, width(), height());
-    native_tabbed_pane_->GetView()->Layout();
-  }
 }
 
 void TabbedPane::Focus() {
   // Forward the focus to the wrapper.
-  if (native_tabbed_pane_)
+  if (native_tabbed_pane_) {
     native_tabbed_pane_->SetFocus();
+
+    View* selected_tab = GetSelectedTab();
+    if (selected_tab)
+       selected_tab->NotifyAccessibilityEvent(AccessibilityTypes::EVENT_FOCUS);
+  }
   else
     View::Focus();  // Will focus the RootView window (so we still get keyboard
                     // messages).
@@ -126,6 +133,11 @@ bool TabbedPane::GetAccessibleRole(AccessibilityTypes::Role* role) {
 
   *role = AccessibilityTypes::ROLE_PAGETABLIST;
   return true;
+}
+
+gfx::Size TabbedPane::GetPreferredSize() {
+  return native_tabbed_pane_ ?
+      native_tabbed_pane_->GetPreferredSize() : gfx::Size();
 }
 
 }  // namespace views

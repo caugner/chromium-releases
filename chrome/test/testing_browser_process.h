@@ -26,6 +26,7 @@ class TestingBrowserProcess : public BrowserProcess {
  public:
   TestingBrowserProcess()
       : shutdown_event_(new base::WaitableEvent(true, false)),
+        module_ref_count_(0),
         app_locale_("en") {
   }
 
@@ -61,6 +62,10 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
+  virtual base::Thread* cache_thread() {
+    return NULL;
+  }
+
   virtual ProfileManager* profile_manager() {
     return NULL;
   }
@@ -81,11 +86,11 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
-  virtual DebuggerWrapper* debugger_wrapper() {
+  virtual DevToolsManager* devtools_manager() {
     return NULL;
   }
 
-  virtual DevToolsManager* devtools_manager() {
+  virtual TabCloseableStateWatcher* tab_closeable_state_watcher() {
     return NULL;
   }
 
@@ -117,14 +122,19 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
-  virtual void InitDebuggerWrapper(int port) {
+  virtual void InitDebuggerWrapper(int port, bool useHttp) {
   }
 
   virtual unsigned int AddRefModule() {
-    return 1;
+    return ++module_ref_count_;
   }
   virtual unsigned int ReleaseModule() {
-    return 1;
+    DCHECK(module_ref_count_ > 0);
+    return --module_ref_count_;
+  }
+
+  unsigned int module_ref_count() {
+    return module_ref_count_;
   }
 
   virtual bool IsShuttingDown() {
@@ -149,9 +159,9 @@ class TestingBrowserProcess : public BrowserProcess {
 
   virtual void CheckForInspectorFiles() {}
 
-#if defined(OS_WIN)
+#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   virtual void StartAutoupdateTimer() {}
-#endif  // OS_WIN
+#endif
 
   virtual bool have_inspector_files() const { return true; }
 #if defined(IPC_MESSAGE_LOG_ENABLED)
@@ -161,6 +171,7 @@ class TestingBrowserProcess : public BrowserProcess {
  private:
   NotificationService notification_service_;
   scoped_ptr<base::WaitableEvent> shutdown_event_;
+  unsigned int module_ref_count_;
   scoped_ptr<Clipboard> clipboard_;
   std::string app_locale_;
 

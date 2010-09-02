@@ -6,6 +6,7 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
+#include "base/string_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -22,6 +23,12 @@ class ManifestTest : public testing::Test {
  protected:
   Extension* LoadExtension(const std::string& name,
                            std::string* error) {
+    return LoadExtensionWithLocation(name, Extension::INTERNAL, error);
+  }
+
+  Extension* LoadExtensionWithLocation(const std::string& name,
+                                       Extension::Location location,
+                                       std::string* error) {
     FilePath path;
     PathService::Get(chrome::DIR_TEST_DATA, &path);
     path = path.AppendASCII("extensions")
@@ -36,8 +43,8 @@ class ManifestTest : public testing::Test {
       return NULL;
 
     scoped_ptr<Extension> extension(new Extension(path.DirName()));
-    if (enable_apps_)
-      extension->set_apps_enabled(true);
+    extension->set_location(location);
+    extension->set_apps_enabled(enable_apps_);
 
     if (!extension->InitFromValue(*value, false, error))
       return NULL;
@@ -60,58 +67,78 @@ class ManifestTest : public testing::Test {
     EXPECT_FALSE(extension.get()) <<
         "Expected failure loading extension '" << name <<
         "', but didn't get one.";
-    EXPECT_EQ(expected_error, error);
+    EXPECT_TRUE(MatchPatternASCII(error, expected_error)) << name <<
+        " expected '" << expected_error << "' but got '" << error << "'";
   }
 
   bool enable_apps_;
 };
 
 TEST_F(ManifestTest, AppsDisabledByDefault) {
+#if defined(OS_CHROMEOS)
+  // On ChromeOS, apps are enabled by default.
+  if (Extension::AppsAreEnabled())
+    return;
+#endif
+
   enable_apps_ = false;
-  LoadAndExpectError("web_content_disabled.json", errors::kAppsNotEnabled);
   LoadAndExpectError("launch_local_path.json", errors::kAppsNotEnabled);
 }
 
 TEST_F(ManifestTest, ValidApp) {
   scoped_ptr<Extension> extension(LoadAndExpectSuccess("valid_app.json"));
-  EXPECT_TRUE(extension->web_content_enabled());
-  EXPECT_EQ(GURL("http://www.google.com/"), extension->web_extent().origin());
-  EXPECT_EQ(2u, extension->web_extent().paths().size());
-  EXPECT_EQ("mail/", extension->web_extent().paths()[0]);
-  EXPECT_EQ("foobar/", extension->web_extent().paths()[1]);
+  ASSERT_EQ(2u, extension->web_extent().patterns().size());
+  EXPECT_EQ("http://www.google.com/mail/*",
+            extension->web_extent().patterns()[0].GetAsString());
+  EXPECT_EQ("http://www.google.com/foobar/*",
+            extension->web_extent().patterns()[1].GetAsString());
   EXPECT_EQ(Extension::LAUNCH_WINDOW, extension->launch_container());
-  EXPECT_EQ("mail/", extension->launch_web_url());
+  EXPECT_EQ(false, extension->launch_fullscreen());
+  EXPECT_EQ("http://www.google.com/mail/", extension->launch_web_url());
 }
 
-TEST_F(ManifestTest, AppWebContentEnabled) {
-  LoadAndExpectError("web_content_enabled_invalid.json",
-                     errors::kInvalidWebContentEnabled);
-  LoadAndExpectError("web_content_disabled.json",
-                     errors::kWebContentMustBeEnabled);
-  LoadAndExpectError("web_content_not_enabled.json",
-                     errors::kWebContentMustBeEnabled);
-}
-
-TEST_F(ManifestTest, AppWebOrigin) {
-  LoadAndExpectError("web_origin_wrong_type.json",
-                     errors::kInvalidWebOrigin);
-  LoadAndExpectError("web_origin_invalid_1.json",
-                     errors::kInvalidWebOrigin);
-  LoadAndExpectError("web_origin_invalid_2.json",
-                     errors::kInvalidWebOrigin);
-  LoadAndExpectError("web_origin_invalid_3.json",
-                     errors::kInvalidWebOrigin);
-}
-
-TEST_F(ManifestTest, AppWebPaths) {
-  LoadAndExpectError("web_paths_wrong_type.json",
-                     errors::kInvalidWebPaths);
-  LoadAndExpectError("web_paths_invalid_path_1.json",
+TEST_F(ManifestTest, AppWebUrls) {
+  LoadAndExpectError("web_urls_wrong_type.json",
+                     errors::kInvalidWebURLs);
+  LoadAndExpectError("web_urls_invalid_1.json",
                      ExtensionErrorUtils::FormatErrorMessage(
-                         errors::kInvalidWebPath, "0"));
-  LoadAndExpectError("web_paths_invalid_path_2.json",
+                         errors::kInvalidWebURL, "0"));
+  LoadAndExpectError("web_urls_invalid_2.json",
                      ExtensionErrorUtils::FormatErrorMessage(
-                         errors::kInvalidWebPath, "0"));
+                         errors::kInvalidWebURL, "0"));
+  LoadAndExpectError("web_urls_invalid_3.json",
+                     ExtensionErrorUtils::FormatErrorMessage(
+                         errors::kInvalidWebURL, "0"));
+
+  scoped_ptr<Extension> extension(
+      LoadAndExpectSuccess("web_urls_default.json"));
+  ASSERT_EQ(1u, extension->web_extent().patterns().size());
+  EXPECT_EQ("*://www.google.com/*",
+            extension->web_extent().patterns()[0].GetAsString());
+}
+
+TEST_F(ManifestTest, AppBrowseUrls) {
+  LoadAndExpectError("browse_urls_wrong_type.json",
+                     errors::kInvalidBrowseURLs);
+  LoadAndExpectError("browse_urls_invalid_1.json",
+                     ExtensionErrorUtils::FormatErrorMessage(
+                         errors::kInvalidBrowseURL, "0"));
+  LoadAndExpectError("browse_urls_invalid_2.json",
+                     ExtensionErrorUtils::FormatErrorMessage(
+                         errors::kInvalidBrowseURL, "0"));
+  LoadAndExpectError("browse_urls_invalid_3.json",
+                     ExtensionErrorUtils::FormatErrorMessage(
+                         errors::kInvalidBrowseURL, "0"));
+
+  scoped_ptr<Extension> extension(
+      LoadAndExpectSuccess("browse_urls_default.json"));
+  EXPECT_EQ(0u, extension->browse_extent().patterns().size());
+
+  extension.reset(
+      LoadAndExpectSuccess("browse_urls_valid.json"));
+  ASSERT_EQ(1u, extension->browse_extent().patterns().size());
+  EXPECT_EQ("https://www.google.com/accounts/*",
+            extension->browse_extent().patterns()[0].GetAsString());
 }
 
 TEST_F(ManifestTest, AppLaunchContainer) {
@@ -129,12 +156,31 @@ TEST_F(ManifestTest, AppLaunchContainer) {
   extension.reset(LoadAndExpectSuccess("launch_default.json"));
   EXPECT_EQ(Extension::LAUNCH_TAB, extension->launch_container());
 
+  extension.reset(LoadAndExpectSuccess("launch_fullscreen.json"));
+  EXPECT_EQ(true, extension->launch_fullscreen());
+
+  extension.reset(LoadAndExpectSuccess("launch_width.json"));
+  EXPECT_EQ(640, extension->launch_width());
+
+  extension.reset(LoadAndExpectSuccess("launch_height.json"));
+  EXPECT_EQ(480, extension->launch_height());
+
   LoadAndExpectError("launch_container_invalid_type.json",
                      errors::kInvalidLaunchContainer);
   LoadAndExpectError("launch_container_invalid_value.json",
                      errors::kInvalidLaunchContainer);
   LoadAndExpectError("launch_container_without_launch_url.json",
-                     errors::kLaunchContainerWithoutURL);
+                     errors::kLaunchURLRequired);
+  LoadAndExpectError("launch_fullscreen_invalid.json",
+                     errors::kInvalidLaunchFullscreen);
+  LoadAndExpectError("launch_width_invalid.json",
+                     errors::kInvalidLaunchWidthContainer);
+  LoadAndExpectError("launch_width_negative.json",
+                     errors::kInvalidLaunchWidth);
+  LoadAndExpectError("launch_height_invalid.json",
+                     errors::kInvalidLaunchHeightContainer);
+  LoadAndExpectError("launch_height_negative.json",
+                     errors::kInvalidLaunchHeight);
 }
 
 TEST_F(ManifestTest, AppLaunchURL) {
@@ -152,9 +198,8 @@ TEST_F(ManifestTest, AppLaunchURL) {
   EXPECT_EQ(extension->url().spec() + "launch.html",
             extension->GetFullLaunchURL().spec());
 
-  extension.reset(LoadAndExpectSuccess("launch_web_url_relative.json"));
-  EXPECT_EQ(GURL("http://www.google.com/launch.html"),
-            extension->GetFullLaunchURL());
+  LoadAndExpectError("launch_web_url_relative.json",
+                     errors::kInvalidLaunchWebURL);
 
   extension.reset(LoadAndExpectSuccess("launch_web_url_absolute.json"));
   EXPECT_EQ(GURL("http://www.google.com/launch.html"),
@@ -176,5 +221,26 @@ TEST_F(ManifestTest, Override) {
   extension.reset(LoadAndExpectSuccess("override_history.json"));
   EXPECT_EQ(extension->url().spec() + "history.html",
             extension->GetChromeURLOverrides().find("history")->second.spec());
+}
 
+TEST_F(ManifestTest, ChromeURLPermissionInvalid) {
+  LoadAndExpectError("permission_chrome_url_invalid.json",
+      errors::kInvalidPermissionScheme);
+}
+
+TEST_F(ManifestTest, ChromeResourcesPermissionValidOnlyForComponents) {
+  LoadAndExpectError("permission_chrome_resources_url.json",
+      errors::kInvalidPermissionScheme);
+  std::string error;
+  scoped_ptr<Extension> extension;
+  extension.reset(LoadExtensionWithLocation(
+      "permission_chrome_resources_url.json",
+      Extension::COMPONENT,
+      &error));
+  EXPECT_EQ("", error);
+}
+
+TEST_F(ManifestTest, ChromeURLContentScriptInvalid) {
+  LoadAndExpectError("content_script_chrome_url_invalid.json",
+      errors::kInvalidMatch);
 }

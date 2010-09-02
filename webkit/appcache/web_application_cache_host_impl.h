@@ -29,11 +29,17 @@ class WebApplicationCacheHostImpl : public WebKit::WebApplicationCacheHost {
   virtual ~WebApplicationCacheHostImpl();
 
   int host_id() const { return host_id_; }
+  AppCacheBackend* backend() const { return backend_; }
+  WebKit::WebApplicationCacheHostClient* client() const { return client_; }
 
-  void OnCacheSelected(int64 selected_cache_id, appcache::Status status);
   void OnStatusChanged(appcache::Status);
   void OnEventRaised(appcache::EventID);
-  virtual void OnContentBlocked() {}
+  void OnProgressEventRaised(const GURL& url, int num_total, int num_complete);
+  void OnErrorEventRaised(const std::string& message);
+  virtual void OnLogMessage(LogLevel log_level, const std::string& message) {}
+  virtual void OnContentBlocked(const GURL& manifest_url) {}
+  virtual void OnCacheSelected(int64 selected_cache_id,
+                               appcache::Status status);
 
   // WebApplicationCacheHost methods
   virtual void willStartMainResourceRequest(WebKit::WebURLRequest&);

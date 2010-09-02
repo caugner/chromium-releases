@@ -35,6 +35,8 @@ class PepperTester : public NPAPITesterBase {
 // Test that a pepper 3d plugin loads and renders.
 // TODO(alokp): Enable the test after making sure it works on all platforms
 // and buildbots have OpenGL support.
+#if defined(OS_WIN)
+// Disabled after failing on buildbots: crbug/46662
 TEST_F(PepperTester, DISABLED_Pepper3D) {
   const FilePath dir(FILE_PATH_LITERAL("pepper"));
   const FilePath file(FILE_PATH_LITERAL("pepper_3d.html"));
@@ -44,3 +46,4 @@ TEST_F(PepperTester, DISABLED_Pepper3D) {
                 kTestCompleteCookie, kTestCompleteSuccess,
                 action_max_timeout_ms());
 }
+#endif

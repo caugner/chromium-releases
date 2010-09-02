@@ -4,7 +4,8 @@
   bookmarkbarattached:bookmarkbarattached;
   hasattribution:hasattribution;
   anim:anim;
-  syncispresent:syncispresent">
+  syncispresent:syncispresent;
+  has_3d:has_3d">
 
 <meta charset="utf-8">
 <title i18n-content="title"></title>
@@ -44,17 +45,22 @@ function registerCallback(name) {
 chrome.send('getMostVisited');
 chrome.send('getRecentlyClosedTabs');
 chrome.send('getTips');
+chrome.send('getApps');
 
-registerCallback('onShownSections');
 registerCallback('mostVisitedPages');
 registerCallback('recentlyClosedTabs');
 registerCallback('syncMessageChanged');
 registerCallback('tips');
 registerCallback('onHomePageSet');
+registerCallback('getAppsCallback');
+registerCallback('setShownSections');
 
 </script>
 <!-- template data placeholder -->
 <link rel="stylesheet" href="new_new_tab.css">
+<link rel="stylesheet" href="ntp/most_visited.css">
+<link rel="stylesheet" href="ntp/apps.css">
+<link rel="stylesheet" href="shared/css/menu.css">
 <script>
 
 /**
@@ -64,110 +70,55 @@ registerCallback('onHomePageSet');
  */
 var Section = {
   THUMB: 1,
-  LIST: 2,
+  // LIST is no longer used
   RECENT: 4,
   TIPS: 8,
-  SYNC: 16
+  SYNC: 16,
+  DEBUG: 32
 };
 
 var shownSections = templateData['shown_sections'];
 
-function $(id) {
-  return document.getElementById(id);
-}
-
 // Until themes can clear the cache, force-reload the theme stylesheet.
 document.write('<link id="themecss" rel="stylesheet" ' +
                'href="chrome://theme/css/newtab.css?' +
-               (new Date()).getTime() + '">');
+               Date.now() + '">');
 
 function useSmallGrid() {
-  return window.innerWidth <= 920;
+  return window.innerWidth <= 940;
 }
 
 function isRtl() {
   return templateData['textdirection'] == 'rtl';
 }
 
-// Keep track of the last small state so we can ensure that we are using the
-// right mode. This is a workaround for http://crbug.com/25329
-var wasSmallGrid;
-
-function getMostVisitedLayoutRects() {
-  var small = useSmallGrid();
-  wasSmallGrid = small;
-
-  var cols = 4;
-  var rows = 2;
-  var marginWidth = 10;
-  var marginHeight = 7;
-  var borderWidth = 4;
-  var thumbWidth = small ? 150 : 207;
-  var thumbHeight = small ? 93 : 129;
-  var w = thumbWidth + 2 * borderWidth + 2 * marginWidth;
-  var h = thumbHeight + 40 + 2 * marginHeight;
-  var sumWidth = cols * w  - 2 * marginWidth;
-  // Since the list mode does not have a toolbar move it down a little to add
-  // some spacing at the top.
-  var LIST_TOP_SPACING = 22;
-
-  if (shownSections & Section.LIST) {
-    h = 34;
-    rows = 8;
-    cols = 1;
-  }
-
-  var rtl = isRtl();
-  var rects = [];
-
-  if (shownSections & Section.THUMB || shownSections & Section.LIST) {
-    for (var i = 0; i < rows * cols; i++) {
-      var row, col, left, top;
-      if (shownSections & Section.THUMB) {
-        row = Math.floor(i / cols);
-        col = i % cols;
-      } else {
-        col = Math.floor(i / rows);
-        row = i % rows;
-      }
-
-      if (shownSections & Section.THUMB) {
-        left = rtl ? sumWidth - col * w - thumbWidth - 2 * borderWidth :
-            col * w;
-      } else {
-        left = rtl ? sumWidth - col * w - w + 2 * marginWidth : col * w;
-      }
-      top = row * h;
-
-      if (shownSections & Section.LIST) {
-        top += LIST_TOP_SPACING;
-      }
-
-      rects[i] = {left: left, top: top};
-    }
-  }
-  return rects;
-}
-
-function applyMostVisitedRects() {
-  var isList = shownSections & Section.LIST;
-  if (shownSections & Section.THUMB || isList) {
-    var rects = getMostVisitedLayoutRects();
-    var rtlList = isRtl() && isList;
-    var children = $('most-visited').children;
-    for (var i = 0; i < 8; i++) {
-      var t = children[i];
-      t.style.left = rtlList ? '' : rects[i].left + 'px';
-      t.style.top = rects[i].top + 'px';
-      t.style.right = '';
-      var innerStyle = t.firstElementChild.style;
-      innerStyle.left = innerStyle.top = '';
-    }
-  }
-}
-
+// This will get overridden in new_new_tab.js
 function updateSimpleSection(id, section) {
-  $(id).style.display = shownSections & section ? '' : 'none';
+  // All sections start off shown.
+  if (!(shownSections & section))
+    document.getElementById(id).className += ' hidden';
+}
+
+// Parse any name value pairs passed through the URL hash.
+var hashParams = (function() {
+  var result = {};
+  if (location.hash.length) {
+    location.hash.substr(1).split('&').forEach(function(pair) {
+      pair = pair.split('=');
+      if (pair.length != 2) {
+        throw new Error('Unexpected hash value: ' + location.hash);
+      }
+
+      result[pair[0]] = pair[1];
+    });
+  }
+  return result;
+})();
+
+// Reflect the mode param as an attribute so we can use CSS attribute selectors
+// on it.
+if ('mode' in hashParams) {
+  document.documentElement.setAttribute('mode', hashParams['mode']);
 }
 
 </script>
@@ -175,114 +126,100 @@ function updateSimpleSection(id, section) {
 <body class="loading"
       i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
 
-<div id="container">
 <div id="main">
 
-  <div id="view-toolbar"
-      ><input type=checkbox id="thumb-checkbox" checked
-              i18n-values="title:showhidethumbnailtooltip"
-      ><input type=checkbox id="list-checkbox"
-              i18n-values="title:showhidelisttooltip"
-      ><input type="button" id="option-button"
-              i18n-values="title:pagedisplaytooltip"></div>
+  <div id=top-bar>
+    <div id="tip-line" class="section" section="TIPS"></div>
+    <input type="button" id="option-button"
+        i18n-values="title:pagedisplaytooltip">
+  </div>
 
-  <div id="option-menu" class="window-menu">
+  <menu id="option-menu">
+    <div command="hide" section="TIPS" i18n-content="tips"></div>
     <div command="hide" section="THUMB" i18n-content="mostvisited"></div>
     <div command="hide" section="RECENT" i18n-content="recentlyclosed"></div>
-    <div command="hide" section="TIPS" i18n-content="tips"></div>
     <hr>
     <div command="clear-all-blacklisted"
          i18n-content="restorethumbnails"></div>
-  </div>
-
-  <script>
-    $('thumb-checkbox').checked = shownSections & Section.THUMB;
-    $('list-checkbox').checked = shownSections & Section.LIST;
-  </script>
+  </menu>
 
   <div id="notification">
     <span>&nbsp;</span>
     <span class="link"><span class="link-color"></span></span>
   </div>
 
-  <div id="most-visited">
-    <a class="thumbnail-container filler" tabindex="1" id="t0">
-      <div class="edit-mode-border">
-        <div class="edit-bar">
-          <div class="pin"></div>
-          <div class="spacer"></div>
-          <div class="remove"></div>
-        </div>
-        <span class="thumbnail-wrapper">
-          <span class="thumbnail"></span>
-        </span>
+  <div class="sections">
+    <div class="section disabled" id="apps-section"></div>
+
+    <div id="most-visited-section" class="section" section="THUMB">
+      <h2 i18n-content="mostvisited"></h2>
+      <div id="most-visited"></div>
+    </div>
+
+    <div id="recently-closed" class="section" section="RECENT">
+      <h2 i18n-content="recentlyclosed"></h2>
+      <span class="nav"></span>
+    </div>
+
+    <div id="debug" class="section disabled" section="DEBUG">
+      <h2>Debug</h2>
+      <div id="apps-launch-control">
+        Open apps in:<label
+        ><input type="radio" name="launch-container-type" value=""
+            checked="true">Default</label
+        ><input type="radio" name="launch-container-type" value="tab"
+            >Tab</label
+        ><label><input type="radio" name="launch-container-type" value="window"
+            >Window</label
+        ><label><input type="radio" name="launch-container-type" value="panel"
+            >Panel</label>
       </div>
-      <div class="title">
-        <div></div>
-      </div>
-    </a>
+    </div>
   </div>
 
   <script>
-    (function() {
-      var el = $('most-visited');
-      if (shownSections & Section.LIST) {
-        el.className += ' list';
-      } else if (!(shownSections & Section.THUMB)) {
-        el.className += ' collapsed';
-      }
-
-      for (var i = 1; i < 8; i++) {
-        el.appendChild(el.firstElementChild.cloneNode(true)).id = 't' + i;
-      }
-
-      applyMostVisitedRects();
-    })();
+    updateSimpleSection('tip-line', Section.TIPS);
+    updateSimpleSection('recently-closed', Section.RECENT);
+    updateSimpleSection('most-visited-section', Section.THUMB);
+    updateSimpleSection('debug', Section.DEBUG);
   </script>
-
-  <div id="recently-closed">
-    <h2 i18n-content="recentlyclosed"></h2>
-    <span class="nav">
-      <a href="chrome://history/" class="item"
-          i18n-content="viewfullhistory"></a>
-    </span>
-  </div>
-  <script>updateSimpleSection('recently-closed', Section.RECENT);</script>
 
   <div id="sync-status">
     <h2></h2>
     <span></span>
   </div>
 
-  <div id="tip-line"></div>
-  <script>updateSimpleSection('tip-line', Section.TIPS);</script>
-
   <div id="attribution" class="attribution">
     <div i18n-content="attributionintro"></div>
     <img id="attribution-img">
   </div>
 
-</div> <!-- main -->
-
-<div id="footer">
-  <div id="promo-line">
-    <span id="promo-new" i18n-content="promonew"></span>
-    <span id="promo-message" i18n-values=".innerHTML:promomessage"></span>
-    <button class="link" id="promo-close"></button>
+  <div id="footer">
+    <a href="chrome://history"><span class="link-color"
+                                     i18n-content="history"></span></a>
+    <hr>
+    <a href="chrome://downloads"><span class="link-color"
+                                       i18n-content="downloads"></span></a>
+    <hr>
+    <a i18n-values="href:helpurl"><span class="link-color"
+                                        i18n-content="help"></span></a>
   </div>
-  <div id="bottom-right-promo">
-    <a i18n-values="href:extensionslink">
-      <img id="promo-image" src="chrome://theme/newtab_extensions_promo">
-    </a>
-  </div>
-</div>
 
-</div>  <!-- container -->
+</div>  <!-- main -->
 
 <div class="window-menu" id="window-tooltip"></div>
 
 </body>
-<script src="i18n_template.js"></script>
-<script src="local_strings.js"></script>
+
+<script src="shared/js/i18n_template.js"></script>
+<script>
+i18nTemplate.process(document, templateData);
+</script>
+<script src="shared/js/local_strings.js"></script>
+<script src="shared/js/class_list.js"></script>
+<script src="shared/js/parse_html_subset.js"></script>
+<script src="ntp/util.js"></script>
+<script src="ntp/most_visited.js"></script>
 <script src="new_new_tab.js"></script>
+<script src="ntp/apps.js"></script>
 </html>

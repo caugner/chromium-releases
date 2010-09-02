@@ -104,7 +104,7 @@ class Value {
  protected:
   // This isn't safe for end-users (they should use the Create*Value()
   // static methods above), but it's useful for subclasses.
-  explicit Value(ValueType type) : type_(type) {}
+  explicit Value(ValueType type);
 
  private:
   Value();
@@ -117,12 +117,9 @@ class Value {
 // FundamentalValue represents the simple fundamental types of values.
 class FundamentalValue : public Value {
  public:
-  explicit FundamentalValue(bool in_value)
-    : Value(TYPE_BOOLEAN), boolean_value_(in_value) {}
-  explicit FundamentalValue(int in_value)
-    : Value(TYPE_INTEGER), integer_value_(in_value) {}
-  explicit FundamentalValue(double in_value)
-    : Value(TYPE_REAL), real_value_(in_value) {}
+  explicit FundamentalValue(bool in_value);
+  explicit FundamentalValue(int in_value);
+  explicit FundamentalValue(double in_value);
   ~FundamentalValue();
 
   // Subclassed methods
@@ -206,7 +203,7 @@ class BinaryValue: public Value {
 
 class DictionaryValue : public Value {
  public:
-  DictionaryValue() : Value(TYPE_DICTIONARY) {}
+  DictionaryValue();
   ~DictionaryValue();
 
   // Subclassed methods
@@ -312,6 +309,12 @@ class DictionaryValue : public Value {
   // the copy.  This never returns NULL, even if |this| itself is empty.
   DictionaryValue* DeepCopyWithoutEmptyChildren();
 
+  // Merge a given dictionary into this dictionary. This is done recursively,
+  // i.e. any subdictionaries will be merged as well. In case of key collisions,
+  // the passed in dictionary takes precedence and data already present will be
+  // replaced.
+  void MergeDictionary(const DictionaryValue* dictionary);
+
   // This class provides an iterator for the keys in the dictionary.
   // It can't be used to modify the dictionary.
   //
@@ -346,7 +349,7 @@ class DictionaryValue : public Value {
 // This type of Value represents a list of other Value values.
 class ListValue : public Value {
  public:
-  ListValue() : Value(TYPE_LIST) {}
+  ListValue();
   ~ListValue();
 
   // Subclassed methods
@@ -401,6 +404,10 @@ class ListValue : public Value {
   // Appends a Value to the end of the list.
   void Append(Value* in_value);
 
+  // Appends a Value if it's not already present.
+  // Returns true if successful, or false if the value was already present.
+  bool AppendIfNotPresent(Value* in_value);
+
   // Insert a Value at index.
   // Returns true if successful, or false if the index was out of range.
   bool Insert(size_t index, Value* in_value);
@@ -425,7 +432,7 @@ class ListValue : public Value {
 // deserialize Value objects.
 class ValueSerializer {
  public:
-  virtual ~ValueSerializer() {}
+  virtual ~ValueSerializer();
 
   virtual bool Serialize(const Value& root) = 0;
 

@@ -2,13 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if !defined(UNIT_TEST)
-#include <gdk/gdkx.h>
-#else
-#define GDK_DISPLAY() NULL
-#endif
-
-#include "gpu/command_buffer/service/gl_context.h"
+#include "app/gfx/gl/gl_context.h"
 #include "gpu/command_buffer/service/gpu_processor.h"
 
 using ::base::SharedMemory;
@@ -19,13 +13,10 @@ bool GPUProcessor::Initialize(gfx::PluginWindowHandle window,
                               const gfx::Size& size,
                               GPUProcessor* parent,
                               uint32 parent_texture_id) {
-  // Cannot reinitialize.
-  if (context_.get())
-    return false;
-
   // Get the parent decoder and the GLContext to share IDs with, if any.
   gles2::GLES2Decoder* parent_decoder = NULL;
-  GLContext* parent_context = NULL;
+  gfx::GLContext* parent_context = NULL;
+  void* parent_handle = NULL;
   if (parent) {
     parent_decoder = parent->decoder_.get();
     DCHECK(parent_decoder);
@@ -35,26 +26,33 @@ bool GPUProcessor::Initialize(gfx::PluginWindowHandle window,
   }
 
   // Create either a view or pbuffer based GLContext.
+  scoped_ptr<gfx::GLContext> context;
   if (window) {
-    scoped_ptr<ViewGLContext> context(new ViewGLContext(GDK_DISPLAY(), window));
+    DCHECK(!parent_handle);
+
     // TODO(apatrick): support multisampling.
-    if (!context->Initialize(false)) {
-      Destroy();
-      return false;
-    }
-    context_.reset(context.release());
+    context.reset(gfx::GLContext::CreateViewGLContext(window, false));
   } else {
-    scoped_ptr<PbufferGLContext> context(new PbufferGLContext(GDK_DISPLAY()));
-    if (!context->Initialize(parent_context)) {
-      Destroy();
-      return false;
-    }
-    context_.reset(context.release());
+    context.reset(gfx::GLContext::CreateOffscreenGLContext(parent_context));
   }
 
-  return InitializeCommon(size, parent_decoder, parent_texture_id);
+  if (!context.get())
+    return false;
 
-  return true;
+  return InitializeCommon(context.release(),
+                          size,
+                          parent_decoder,
+                          parent_texture_id);
+}
+
+void GPUProcessor::Destroy() {
+  DestroyCommon();
+}
+
+void GPUProcessor::WillSwapBuffers() {
+  if (wrapped_swap_buffers_callback_.get()) {
+    wrapped_swap_buffers_callback_->Run();
+  }
 }
 
 }  // namespace gpu

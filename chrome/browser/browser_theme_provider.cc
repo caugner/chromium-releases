@@ -1,40 +1,21 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/browser_theme_provider.h"
 
 #include "app/resource_bundle.h"
-#include "base/file_util.h"
-#include "base/stl_util-inl.h"
-#include "base/string_util.h"
-#include "base/thread.h"
-#include "base/values.h"
-#include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_process.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_theme_pack.h"
-#include "chrome/browser/browser_window.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/theme_resources_util.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/extensions/extension.h"
-#include "chrome/common/notification_details.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/codec/png_codec.h"
-#include "gfx/skbitmap_operations.h"
 #include "grit/app_resources.h"
 #include "grit/theme_resources.h"
-#include "net/base/file_stream.h"
-#include "net/base/net_errors.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/skia/include/core/SkCanvas.h"
-#include "third_party/skia/include/core/SkUnPreMultiply.h"
 
 #if defined(OS_WIN)
 #include "app/win_util.h"
@@ -62,15 +43,15 @@ SkColor TintForUnderline(SkColor input) {
 }
 
 // Default colors.
-const SkColor kDefaultColorFrame = SkColorSetRGB(77, 139, 217);
-const SkColor kDefaultColorFrameInactive = SkColorSetRGB(152, 188, 233);
+const SkColor kDefaultColorFrame = SkColorSetRGB(66, 116, 201);
+const SkColor kDefaultColorFrameInactive = SkColorSetRGB(161, 182, 228);
 const SkColor kDefaultColorFrameIncognito = SkColorSetRGB(83, 106, 139);
 const SkColor kDefaultColorFrameIncognitoInactive =
     SkColorSetRGB(126, 139, 156);
 #if defined(OS_MACOSX)
 const SkColor kDefaultColorToolbar = SkColorSetRGB(230, 230, 230);
 #else
-const SkColor kDefaultColorToolbar = SkColorSetRGB(210, 225, 246);
+const SkColor kDefaultColorToolbar = SkColorSetRGB(223, 223, 223);
 #endif
 const SkColor kDefaultColorTabText = SK_ColorBLACK;
 #if defined(OS_MACOSX)
@@ -154,23 +135,20 @@ bool HasThemeableImage(int themeable_image_id) {
 }
 
 // The image resources that will be tinted by the 'button' tint value.
+// If you change this list, you must increment the version number in
+// browser_theme_pack.cc, and you should assign persistent IDs to the
+// data table at the start of said file or else tinted versions of
+// these resources will not be created.
 const int kToolbarButtonIDs[] = {
   IDR_BACK, IDR_BACK_D, IDR_BACK_H, IDR_BACK_P,
   IDR_FORWARD, IDR_FORWARD_D, IDR_FORWARD_H, IDR_FORWARD_P,
-  IDR_RELOAD, IDR_RELOAD_H, IDR_RELOAD_P,
   IDR_HOME, IDR_HOME_H, IDR_HOME_P,
-  IDR_STAR, IDR_STAR_NOBORDER, IDR_STAR_NOBORDER_CENTER, IDR_STAR_D, IDR_STAR_H,
-  IDR_STAR_P,
-  IDR_STARRED, IDR_STARRED_NOBORDER, IDR_STARRED_NOBORDER_CENTER, IDR_STARRED_H,
-  IDR_STARRED_P,
-  IDR_GO, IDR_GO_NOBORDER, IDR_GO_NOBORDER_CENTER, IDR_GO_H, IDR_GO_P,
-  IDR_STOP, IDR_STOP_NOBORDER, IDR_STOP_NOBORDER_CENTER, IDR_STOP_H, IDR_STOP_P,
-  IDR_MENU_BOOKMARK,
-  IDR_MENU_PAGE, IDR_MENU_PAGE_RTL,
-  IDR_MENU_CHROME, IDR_MENU_CHROME_RTL,
+  IDR_RELOAD, IDR_RELOAD_H, IDR_RELOAD_P,
+  IDR_STOP, IDR_STOP_H, IDR_STOP_P,
+  IDR_LOCATIONBG_C, IDR_LOCATIONBG_L, IDR_LOCATIONBG_R,
+  IDR_TOOLS,
   IDR_MENU_DROPARROW,
   IDR_THROBBER, IDR_THROBBER_WAITING, IDR_THROBBER_LIGHT,
-  IDR_LOCATIONBG
 };
 
 // Writes the theme pack to disk on a separate thread.
@@ -289,7 +267,7 @@ void BrowserThemeProvider::SetTheme(Extension* extension) {
   FreePlatformCaches();
 
   DCHECK(extension);
-  DCHECK(extension->IsTheme());
+  DCHECK(extension->is_theme());
 
   BuildFromExtension(extension);
   SaveThemeID(extension->id());
@@ -309,7 +287,7 @@ void BrowserThemeProvider::RemoveUnusedThemes() {
   const ExtensionList* extensions = service->extensions();
   for (ExtensionList::const_iterator it = extensions->begin();
        it != extensions->end(); ++it) {
-    if ((*it)->IsTheme() && (*it)->id() != current_theme) {
+    if ((*it)->is_theme() && (*it)->id() != current_theme) {
       remove_list.push_back((*it)->id());
     }
   }
@@ -323,9 +301,12 @@ void BrowserThemeProvider::UseDefaultTheme() {
   UserMetrics::RecordAction(UserMetricsAction("Themes_Reset"), profile_);
 }
 
+bool BrowserThemeProvider::UsingDefaultTheme() {
+  return GetThemeID() == BrowserThemeProvider::kDefaultThemeID;
+}
+
 std::string BrowserThemeProvider::GetThemeID() const {
-  std::wstring id = profile_->GetPrefs()->GetString(prefs::kCurrentThemeID);
-  return WideToUTF8(id);
+  return profile_->GetPrefs()->GetString(prefs::kCurrentThemeID);
 }
 
 // static
@@ -588,7 +569,7 @@ void BrowserThemeProvider::SavePackName(const FilePath& pack_path) {
 }
 
 void BrowserThemeProvider::SaveThemeID(const std::string& id) {
-  profile_->GetPrefs()->SetString(prefs::kCurrentThemeID, UTF8ToWide(id));
+  profile_->GetPrefs()->SetString(prefs::kCurrentThemeID, id);
 }
 
 void BrowserThemeProvider::BuildFromExtension(Extension* extension) {

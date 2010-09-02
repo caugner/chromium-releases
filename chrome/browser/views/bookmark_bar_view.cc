@@ -19,6 +19,7 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/pref_service.h"
@@ -32,11 +33,11 @@
 #include "chrome/browser/views/bookmark_context_menu.h"
 #include "chrome/browser/views/event_utils.h"
 #include "chrome/browser/views/frame/browser_view.h"
-#include "chrome/browser/views/location_bar_view.h"
+#include "chrome/browser/views/location_bar/location_bar_view.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -114,9 +115,6 @@ static const int kSeparatorStartX = 2;
 // Left-padding for the instructional text.
 static const int kInstructionsPadding = 6;
 
-// Color of the instructional text.
-static const SkColor kInstructionsColor = SkColorSetRGB(128, 128, 142);
-
 // Tag for the 'Other bookmarks' button.
 static const int kOtherFolderButtonTag = 1;
 
@@ -142,10 +140,9 @@ static std::wstring CreateToolTipForURLAndTitle(const gfx::Point& screen_loc,
   // First the title.
   if (!title.empty()) {
     std::wstring localized_title;
-    if (base::i18n::AdjustStringForLocaleDirection(title, &localized_title))
-      result.append(gfx::ElideText(localized_title, tt_font, max_width));
-    else
-      result.append(gfx::ElideText(title, tt_font, max_width));
+    result.append(gfx::ElideText(
+        base::i18n::AdjustStringForLocaleDirection(title, &localized_title) ?
+        localized_title : title, tt_font, max_width, false));
   }
 
   // Only show the URL if the url and title differ.
@@ -160,8 +157,7 @@ static std::wstring CreateToolTipForURLAndTitle(const gfx::Point& screen_loc,
     // the Unicode BiDi algorithm puts certain characters on the left by
     // default.
     std::wstring elided_url(gfx::ElideUrl(url, tt_font, max_width, languages));
-    if (base::i18n::IsRTL())
-      base::i18n::WrapStringWithLTRFormatting(&elided_url);
+    base::i18n::GetDisplayStringInLTRDirectionality(&elided_url);
     result.append(elided_url);
   }
   return result;
@@ -194,7 +190,7 @@ class BookmarkButton : public views::TextButton {
     gfx::Point location(p);
     ConvertPointToScreen(this, &location);
     *tooltip = CreateToolTipForURLAndTitle(location, url_, text(),
-        profile_->GetPrefs()->GetString(prefs::kAcceptLanguages));
+        UTF8ToWide(profile_->GetPrefs()->GetString(prefs::kAcceptLanguages)));
     return !tooltip->empty();
   }
 
@@ -243,7 +239,7 @@ class BookmarkFolderButton : public views::MenuButton {
     return disposition != CURRENT_TAB;
   }
 
-  virtual void Paint(gfx::Canvas *canvas) {
+  virtual void Paint(gfx::Canvas* canvas) {
     views::MenuButton::Paint(canvas, false);
   }
 
@@ -350,9 +346,6 @@ class BookmarkBarView::ButtonSeparatorView : public views::View {
   }
 
  private:
-  // Storage of strings needed for accessibility.
-  std::wstring accessible_name_;
-
   DISALLOW_COPY_AND_ASSIGN(ButtonSeparatorView);
 };
 
@@ -412,6 +405,12 @@ BookmarkBarView::~BookmarkBarView() {
   NotifyModelChanged();
   if (model_)
     model_->RemoveObserver(this);
+
+  // It's possible for the menu to outlive us, reset the observer to make sure
+  // it doesn't have a reference to us.
+  if (bookmark_menu_)
+    bookmark_menu_->set_observer(NULL);
+
   StopShowFolderDropMenuTimer();
 
   if (sync_service_)
@@ -442,13 +441,16 @@ void BookmarkBarView::SetProfile(Profile* profile) {
   registrar_.Add(this, NotificationType::BOOKMARK_BUBBLE_SHOWN, ns_source);
   registrar_.Add(this, NotificationType::BOOKMARK_BUBBLE_HIDDEN, ns_source);
   registrar_.Add(this, NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
-                  NotificationService::AllSources());
+                 NotificationService::AllSources());
+
+  // Remove any existing bookmark buttons.
+  while (GetBookmarkButtonCount())
+    delete GetChildViewAt(0);
 
   model_ = profile_->GetBookmarkModel();
   model_->AddObserver(this);
   if (model_->IsLoaded())
     Loaded(model_);
-
   // else case: we'll receive notification back from the BookmarkModel when done
   // loading, then we'll populate the bar.
 }
@@ -458,7 +460,11 @@ void BookmarkBarView::SetPageNavigator(PageNavigator* navigator) {
 }
 
 gfx::Size BookmarkBarView::GetPreferredSize() {
-  return LayoutItems(true);
+  // Extension apps don't show the bookmark bar.
+  if (!OnAppsPage())
+    return LayoutItems(true);
+  else
+    return gfx::Size();
 }
 
 gfx::Size BookmarkBarView::GetMinimumSize() {
@@ -750,6 +756,11 @@ bool BookmarkBarView::OnNewTabPage() const {
           browser_->GetSelectedTabContents()->ShouldShowBookmarkBar());
 }
 
+bool BookmarkBarView::OnAppsPage() const {
+  return (browser_ && browser_->GetSelectedTabContents() &&
+          browser_->GetSelectedTabContents()->is_app());
+}
+
 int BookmarkBarView::GetToolbarOverlap(bool return_max) {
   return static_cast<int>(kToolbarOverlap *
       (return_max ? 1.0 : size_animation_->GetCurrentValue()));
@@ -845,7 +856,7 @@ void BookmarkBarView::GetAnchorPositionAndStartIndexForButton(
     *anchor = MenuItemView::TOPLEFT;
 
   // Invert orientation if right to left.
-  if (UILayoutIsRightToLeft()) {
+  if (base::i18n::IsRTL()) {
     if (*anchor == MenuItemView::TOPRIGHT)
       *anchor = MenuItemView::TOPLEFT;
     else
@@ -906,6 +917,7 @@ MenuButton* BookmarkBarView::CreateOtherBookmarkedButton() {
   MenuButton* button = new BookmarkFolderButton(
       this, l10n_util::GetString(IDS_BOOMARK_BAR_OTHER_BOOKMARKED), this,
       false);
+  button->SetID(VIEW_ID_OTHER_BOOKMARKS);
   button->SetIcon(GetGroupIcon());
   button->SetContextMenuController(this);
   button->set_tag(kOtherFolderButtonTag);
@@ -936,14 +948,11 @@ MenuButton* BookmarkBarView::CreateOverflowButton() {
   return button;
 }
 
-int BookmarkBarView::GetBookmarkButtonCount() {
-  // We contain at least four non-bookmark button views: other bookmarks,
-  // bookmarks separator, chevrons (for overflow), the instruction label and
-  // the sync error button.
-  return GetChildViewCount() - 5;
-}
-
 void BookmarkBarView::Loaded(BookmarkModel* model) {
+  volatile int button_count = GetBookmarkButtonCount();
+  DCHECK(button_count == 0);  // If non-zero it means Load was invoked more than
+                              // once, or we didn't properly clear things.
+                              // Either of which shouldn't happen
   const BookmarkNode* node = model_->GetBookmarkBarNode();
   DCHECK(node && model_->other_node());
   // Create a button for each of the children on the bookmark bar.
@@ -1090,10 +1099,10 @@ void BookmarkBarView::WriteDragData(View* sender,
   for (int i = 0; i < GetBookmarkButtonCount(); ++i) {
     if (sender == GetBookmarkButton(i)) {
       views::TextButton* button = GetBookmarkButton(i);
-      gfx::Canvas canvas(button->width(), button->height(), false);
+      gfx::CanvasSkia canvas(button->width(), button->height(), false);
       button->Paint(&canvas, true);
-      drag_utils::SetDragImageOnDataObject(canvas, button->size(), press_pt,
-                                           data);
+      drag_utils::SetDragImageOnDataObject(canvas, button->size(),
+                                           press_pt, data);
       WriteDragData(model_->GetBookmarkBarNode()->GetChild(i), data);
       return;
     }
@@ -1102,7 +1111,7 @@ void BookmarkBarView::WriteDragData(View* sender,
 }
 
 int BookmarkBarView::GetDragOperations(View* sender, const gfx::Point& p) {
-  if (size_animation_->IsAnimating() ||
+  if (size_animation_->is_animating() ||
       (size_animation_->GetCurrentValue() == 0 && !OnNewTabPage())) {
     // Don't let the user drag while animating open or we're closed (and not on
     // the new tab page, on the new tab page size_animation_ is always 0). This
@@ -1167,9 +1176,8 @@ void BookmarkBarView::RunMenu(views::View* view, const gfx::Point& pt) {
     node = model_->GetBookmarkBarNode()->GetChild(button_index);
   }
 
-  bookmark_menu_ = new BookmarkMenuController(
-      browser_, profile_, page_navigator_, GetWindow()->GetNativeWindow(),
-      node, start_index, false);
+  bookmark_menu_ = new BookmarkMenuController(browser_, profile_,
+      page_navigator_, GetWindow()->GetNativeWindow(), node, start_index);
   bookmark_menu_->set_observer(this);
   bookmark_menu_->RunMenuAt(this, false);
 }
@@ -1179,8 +1187,8 @@ void BookmarkBarView::ButtonPressed(views::Button* sender,
   // Show the login wizard if the user clicked the re-login button.
   if (sender->tag() == kSyncErrorButtonTag) {
     DCHECK(sender == sync_error_button_);
-    DCHECK(sync_service_);
-    sync_service_->ShowLoginDialog();
+    DCHECK(sync_service_ && !sync_service_->IsManaged());
+    sync_service_->ShowLoginDialog(GetWindow()->GetNativeWindow());
     return;
   }
 
@@ -1241,8 +1249,7 @@ void BookmarkBarView::ShowContextMenu(View* source,
   PageNavigator* navigator =
       browser() ? browser()->GetSelectedTabContents() : NULL;
   BookmarkContextMenu controller(GetWindow()->GetNativeWindow(), GetProfile(),
-      navigator, parent, nodes,
-      BookmarkContextMenuControllerViews::BOOKMARK_BAR);
+                                 navigator, parent, nodes);
   controller.RunMenuAt(p);
 }
 
@@ -1267,7 +1274,7 @@ void BookmarkBarView::ConfigureButton(const BookmarkNode* node,
                                       views::TextButton* button) {
   button->SetText(node->GetTitle());
   button->SetAccessibleName(node->GetTitle());
-
+  button->SetID(VIEW_ID_BOOKMARK_BAR_ELEMENT);
   // We don't always have a theme provider (ui tests, for example).
   if (GetThemeProvider()) {
     button->SetEnabledColor(GetThemeProvider()->GetColor(
@@ -1354,9 +1361,8 @@ void BookmarkBarView::ShowDropFolderForNode(const BookmarkNode* node) {
     start_index = GetFirstHiddenNodeIndex();
 
   drop_info_->is_menu_showing = true;
-  bookmark_drop_menu_ = new BookmarkMenuController(
-      browser_, profile_, page_navigator_, GetWindow()->GetNativeWindow(),
-      node, start_index, false);
+  bookmark_drop_menu_ = new BookmarkMenuController(browser_, profile_,
+      page_navigator_, GetWindow()->GetNativeWindow(), node, start_index);
   bookmark_drop_menu_->set_observer(this);
   bookmark_drop_menu_->RunMenuAt(this, true);
 }
@@ -1536,6 +1542,13 @@ void BookmarkBarView::StartThrobbing(const BookmarkNode* node,
   // Use a large number so that the button continues to throb.
   if (throbbing_view_)
     throbbing_view_->StartThrobbing(std::numeric_limits<int>::max());
+}
+
+int BookmarkBarView::GetBookmarkButtonCount() {
+  // We contain at least four non-bookmark button views: other bookmarks,
+  // bookmarks separator, chevrons (for overflow), the instruction label and
+  // the sync error button.
+  return GetChildViewCount() - 5;
 }
 
 void BookmarkBarView::StopThrobbing(bool immediate) {

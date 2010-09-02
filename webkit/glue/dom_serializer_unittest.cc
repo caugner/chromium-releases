@@ -65,7 +65,7 @@ WebFrame* FindSubFrameByURL(WebView* web_view, const GURL& url) {
       if (!node.isElementNode())
         continue;
       // Check frame tag and iframe tag
-      WebElement element = node.toElement<WebElement>();
+      WebElement element = node.to<WebElement>();
       if (!element.hasTagName("frame") && !element.hasTagName("iframe"))
         continue;
       WebFrame* sub_frame = WebFrame::fromFrameOwnerElement(element);
@@ -233,7 +233,7 @@ bool HasDocType(const WebDocument& doc) {
 bool IsMetaElement(const WebNode& node, std::string& charset_info) {
   if (!node.isElementNode())
     return false;
-  const WebElement meta = node.toConstElement<WebElement>();
+  const WebElement meta = node.toConst<WebElement>();
   if (!meta.hasTagName("meta"))
     return false;
   charset_info.erase(0, charset_info.length());
@@ -281,7 +281,7 @@ bool IsMetaElement(const WebNode& node, std::string& charset_info) {
 
 // If original contents have document type, the serialized contents also have
 // document type.
-TEST_F(DomSerializerTests, SerialzeHTMLDOMWithDocType) {
+TEST_F(DomSerializerTests, SerializeHTMLDOMWithDocType) {
   FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("youtube_1.htm");
@@ -310,7 +310,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithDocType) {
 
 // If original contents do not have document type, the serialized contents
 // also do not have document type.
-TEST_F(DomSerializerTests, SerialzeHTMLDOMWithoutDocType) {
+TEST_F(DomSerializerTests, SerializeHTMLDOMWithoutDocType) {
   FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("youtube_2.htm");
@@ -340,7 +340,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithoutDocType) {
 // Serialize XML document which has all 5 built-in entities. After
 // finishing serialization, the serialized contents should be same
 // with original XML document.
-TEST_F(DomSerializerTests, SerialzeXMLDocWithBuiltInEntities) {
+TEST_F(DomSerializerTests, SerializeXMLDocWithBuiltInEntities) {
   FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("note.xml");
@@ -362,7 +362,7 @@ TEST_F(DomSerializerTests, SerialzeXMLDocWithBuiltInEntities) {
 }
 
 // When serializing DOM, we add MOTW declaration before html tag.
-TEST_F(DomSerializerTests, SerialzeHTMLDOMWithAddingMOTW) {
+TEST_F(DomSerializerTests, SerializeHTMLDOMWithAddingMOTW) {
   FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("youtube_2.htm");
@@ -396,7 +396,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithAddingMOTW) {
 // declaration as first child of HEAD element for resolving WebKit bug:
 // http://bugs.webkit.org/show_bug.cgi?id=16621 even the original document
 // does not have META charset declaration.
-TEST_F(DomSerializerTests, SerialzeHTMLDOMWithNoMetaCharsetInOriginalDoc) {
+TEST_F(DomSerializerTests, SerializeHTMLDOMWithNoMetaCharsetInOriginalDoc) {
   FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("youtube_1.htm");
@@ -459,7 +459,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithNoMetaCharsetInOriginalDoc) {
 // as first child of HEAD element and remove all original META charset
 // declarations.
 TEST_F(DomSerializerTests,
-       SerialzeHTMLDOMWithMultipleMetaCharsetInOriginalDoc) {
+       SerializeHTMLDOMWithMultipleMetaCharsetInOriginalDoc) {
   FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("youtube_2.htm");
@@ -523,7 +523,7 @@ TEST_F(DomSerializerTests,
 }
 
 // Test situation of html entities in text when serializing HTML DOM.
-TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEntitiesInText) {
+TEST_F(DomSerializerTests, SerializeHTMLDOMWithEntitiesInText) {
   FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII(
       "dom_serializer/htmlentities_in_text.htm");
@@ -533,7 +533,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEntitiesInText) {
   ASSERT_TRUE(file_url.SchemeIsFile());
   // Test contents.
   static const char* const original_contents =
-      "<HTML><BODY>&amp;&lt;&gt;\"\'</BODY></HTML>";
+      "<html><body>&amp;&lt;&gt;\"\'</body></html>";
   // Load the test contents.
   LoadContents(original_contents, file_url, WebString());
 
@@ -567,14 +567,14 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEntitiesInText) {
   // find WebCore-generated HEAD element.
   if (!doc.head().isNull()) {
     WebString encoding = web_frame->encoding();
-    std::string htmlTag("<HTML>");
+    std::string htmlTag("<html>");
     std::string::size_type pos = original_str.find(htmlTag);
     ASSERT_NE(std::string::npos, pos);
     pos += htmlTag.length();
-    std::string head_part("<HEAD>");
+    std::string head_part("<head>");
     head_part +=
         WebPageSerializer::generateMetaCharsetDeclaration(encoding).utf8();
-    head_part += "</HEAD>";
+    head_part += "</head>";
     original_str.insert(pos, head_part);
   }
   ASSERT_EQ(original_str, serialized_contents);
@@ -582,7 +582,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEntitiesInText) {
 
 // Test situation of html entities in attribute value when serializing
 // HTML DOM.
-TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEntitiesInAttributeValue) {
+TEST_F(DomSerializerTests, SerializeHTMLDOMWithEntitiesInAttributeValue) {
   FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII(
       "dom_serializer/htmlentities_in_attribute_value.htm");
@@ -592,7 +592,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEntitiesInAttributeValue) {
   ASSERT_TRUE(file_url.SchemeIsFile());
   // Test contents.
   static const char* const original_contents =
-      "<HTML><BODY title=\"&amp;&lt;&gt;&quot;&#39;\"></BODY></HTML>";
+      "<html><body title=\"&amp;&lt;&gt;&quot;&#39;\"></body></html>";
   // Load the test contents.
   LoadContents(original_contents, file_url, WebString());
   // Get value of BODY's title attribute in DOM.
@@ -617,21 +617,21 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEntitiesInAttributeValue) {
   original_str += original_contents;
   if (!doc.isNull()) {
     WebString encoding = web_frame->encoding();
-    std::string htmlTag("<HTML>");
+    std::string htmlTag("<html>");
     std::string::size_type pos = original_str.find(htmlTag);
     ASSERT_NE(std::string::npos, pos);
     pos += htmlTag.length();
-    std::string head_part("<HEAD>");
+    std::string head_part("<head>");
     head_part +=
         WebPageSerializer::generateMetaCharsetDeclaration(encoding).utf8();
-    head_part += "</HEAD>";
+    head_part += "</head>";
     original_str.insert(pos, head_part);
   }
   ASSERT_EQ(original_str, serialized_contents);
 }
 
 // Test situation of non-standard HTML entities when serializing HTML DOM.
-TEST_F(DomSerializerTests, SerialzeHTMLDOMWithNonStandardEntities) {
+TEST_F(DomSerializerTests, SerializeHTMLDOMWithNonStandardEntities) {
   // Make a test file URL and load it.
   FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
@@ -650,10 +650,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithNonStandardEntities) {
   };
   WebString value = body_element.getAttribute("title");
   ASSERT_TRUE(UTF16ToWide(value) == parsed_value);
-  // Check the BODY content.
-  WebNode text_node = body_element.firstChild();
-  ASSERT_TRUE(text_node.isTextNode());
-  ASSERT_TRUE(UTF16ToWide(text_node.nodeValue()) == parsed_value);
+  ASSERT_TRUE(UTF16ToWide(body_element.innerText()) == parsed_value);
 
   // Do serialization.
   SerializeDomForURL(file_url, false);
@@ -672,7 +669,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithNonStandardEntities) {
 // When serializing, we should comment the BASE tag, append a new BASE tag.
 // rewrite all the savable URLs to relative local path, and change other URLs
 // to absolute URLs.
-TEST_F(DomSerializerTests, SerialzeHTMLDOMWithBaseTag) {
+TEST_F(DomSerializerTests, SerializeHTMLDOMWithBaseTag) {
   // There are total 2 available base tags in this test file.
   const int kTotalBaseTagCountInTestFile = 2;
 
@@ -703,7 +700,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithBaseTag) {
        node = all.nextItem()) {
     if (!node.isElementNode())
       continue;
-    WebElement element = node.toElement<WebElement>();
+    WebElement element = node.to<WebElement>();
     if (element.hasTagName("base")) {
       original_base_tag_count++;
     } else {
@@ -752,7 +749,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithBaseTag) {
        node = all.nextItem()) {
     if (!node.isElementNode())
       continue;
-    WebElement element = node.toElement<WebElement>();
+    WebElement element = node.to<WebElement>();
     if (element.hasTagName("base")) {
       new_base_tag_count++;
     } else {
@@ -779,7 +776,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithBaseTag) {
 }
 
 // Serializing page which has an empty HEAD tag.
-TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEmptyHead) {
+TEST_F(DomSerializerTests, SerializeHTMLDOMWithEmptyHead) {
   FilePath page_file_path = data_dir_;
   page_file_path = page_file_path.AppendASCII("dom_serializer");
   page_file_path = page_file_path.AppendASCII("empty_head.htm");
@@ -788,7 +785,7 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEmptyHead) {
 
   // Load the test html content.
   static const char* const empty_head_contents =
-    "<HTML><HEAD></HEAD><BODY>hello world</BODY></HTML>";
+    "<html><head></head><body>hello world</body></html>";
   LoadContents(empty_head_contents, file_url, WebString());
 
   // Make sure the head tag is empty.
@@ -834,6 +831,20 @@ TEST_F(DomSerializerTests, SerialzeHTMLDOMWithEmptyHead) {
   ASSERT_TRUE(text_node.isTextNode());
   WebString text_node_contents = text_node.nodeValue();
   ASSERT_TRUE(std::string(text_node_contents.utf8()) == "hello world");
+}
+
+// Test that we don't crash when the page contains an iframe that
+// was handled as a download (http://crbug.com/42212).
+TEST_F(DomSerializerTests, SerializeDocumentWithDownloadedIFrame) {
+  FilePath page_file_path = data_dir_;
+  page_file_path = page_file_path.AppendASCII("dom_serializer");
+  page_file_path = page_file_path.AppendASCII("iframe-src-is-exe.htm");
+  GURL file_url = net::FilePathToFileURL(page_file_path);
+  ASSERT_TRUE(file_url.SchemeIsFile());
+  // Load the test file.
+  LoadPageFromURL(file_url);
+  // Do a recursive serialization. We pass if we don't crash.
+  SerializeDomForURL(file_url, true);
 }
 
 }  // namespace

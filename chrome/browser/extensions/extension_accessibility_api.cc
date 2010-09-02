@@ -176,13 +176,13 @@ void ExtensionAccessibilityEventRouter::DispatchEvent(
     const std::string& json_args) {
   if (enabled_ && profile && profile->GetExtensionMessageService()) {
     profile->GetExtensionMessageService()->DispatchEventToRenderers(
-        event_name, json_args, profile->IsOffTheRecord());
+        event_name, json_args, profile->IsOffTheRecord(), GURL());
   }
 }
 
 bool SetAccessibilityEnabledFunction::RunImpl() {
   bool enabled;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetAsBoolean(&enabled));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(0, &enabled));
   ExtensionAccessibilityEventRouter::GetInstance()
       ->SetAccessibilityEnabled(enabled);
   return true;

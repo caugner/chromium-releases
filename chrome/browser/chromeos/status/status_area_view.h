@@ -6,11 +6,13 @@
 #define CHROME_BROWSER_CHROMEOS_STATUS_STATUS_AREA_VIEW_H_
 
 #include "base/basictypes.h"
+#include "chrome/browser/views/accessible_toolbar_view.h"
 #include "views/view.h"
 
 namespace chromeos {
 
 class ClockMenuButton;
+class FeedbackMenuButton;
 class LanguageMenuButton;
 class NetworkMenuButton;
 class PowerMenuButton;
@@ -18,32 +20,20 @@ class StatusAreaHost;
 
 // This class is used to wrap the small informative widgets in the upper-right
 // of the window title bar. It is used on ChromeOS only.
-class StatusAreaView : public views::View {
+class StatusAreaView : public AccessibleToolbarView {
  public:
-  enum OpenTabsMode {
-    OPEN_TABS_ON_LEFT = 1,
-    OPEN_TABS_CLOBBER,
-    OPEN_TABS_ON_RIGHT
-  };
-
   explicit StatusAreaView(StatusAreaHost* host);
   virtual ~StatusAreaView() {}
 
   virtual void Init();
-
-  // Called when the compact navigation bar mode has changed to
-  // toggle the app menu visibility.
-  void Update();
 
   // views::View* overrides.
   virtual gfx::Size GetPreferredSize();
   virtual void Layout();
   virtual void ChildPreferredSizeChanged(View* child);
 
-  static OpenTabsMode GetOpenTabsMode();
-  static void SetOpenTabsMode(OpenTabsMode mode);
-
   ClockMenuButton* clock_view() { return clock_view_; }
+  FeedbackMenuButton* feedback_view() { return feedback_view_; }
   LanguageMenuButton* language_view() { return language_view_; }
   NetworkMenuButton* network_view() { return network_view_; }
   PowerMenuButton* power_view() { return power_view_; }
@@ -52,11 +42,10 @@ class StatusAreaView : public views::View {
   StatusAreaHost* host_;
 
   ClockMenuButton* clock_view_;
+  FeedbackMenuButton* feedback_view_;
   LanguageMenuButton* language_view_;
   NetworkMenuButton* network_view_;
   PowerMenuButton* power_view_;
-
-  static OpenTabsMode open_tabs_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(StatusAreaView);
 };

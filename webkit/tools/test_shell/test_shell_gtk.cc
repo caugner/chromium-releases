@@ -47,9 +47,6 @@ const FcChar8* FilePathAsFcChar(const FilePath& path) {
 // Data resources on linux.  This is a pointer to the mmapped resources file.
 base::DataPack* g_resource_data_pack = NULL;
 
-// Used to keep track of the temporary ahem file we extract to disk.
-FilePath* g_ahem_path = NULL;
-
 void TerminationSignalHandler(int signatl) {
   TestShell::ShutdownTestShell();
   exit(0);
@@ -154,9 +151,11 @@ GtkWidget* CreateMenuBar(TestShell* shell) {
 }  // namespace
 
 // static
-void TestShell::InitializeTestShell(bool layout_test_mode) {
+void TestShell::InitializeTestShell(bool layout_test_mode,
+                                    bool allow_external_pages) {
   window_list_ = new WindowList;
   layout_test_mode_ = layout_test_mode;
+  allow_external_pages_ = allow_external_pages;
 
   web_prefs_ = new WebPreferences;
 
@@ -167,6 +166,10 @@ void TestShell::InitializeTestShell(bool layout_test_mode) {
   if (!g_resource_data_pack->Load(data_path)) {
     LOG(FATAL) << "failed to load test_shell.pak";
   }
+
+  FilePath resources_dir;
+  PathService::Get(base::DIR_SOURCE_ROOT, &resources_dir);
+  resources_dir = resources_dir.Append("webkit/tools/test_shell/resources");
 
   ResetWebPreferences();
 
@@ -182,30 +185,14 @@ void TestShell::InitializeTestShell(bool layout_test_mode) {
   // sets a number of aliases ("sans"->"Arial" etc), but doesn't include any
   // font directories.
   if (layout_test_mode) {
-    // fontconfig only knows how to load font config configs from a
-    // file name, so we write to a temp file.
-    base::StringPiece font_config_xml;
-    g_resource_data_pack->GetStringPiece(IDR_LINUX_FONT_CONFIG,
-                                         &font_config_xml);
-    FilePath fontconfig_path;
-    if (!file_util::CreateTemporaryFile(&fontconfig_path)) {
-      LOG(FATAL) << "failed to create temp font config file";
-    }
-    if (-1 == file_util::WriteFile(fontconfig_path,
-                                   font_config_xml.data(),
-                                   font_config_xml.length())) {
-      LOG(FATAL) << "failed to write temp font config file";
-    }
-
     FcInit();
 
     FcConfig* fontcfg = FcConfigCreate();
+    FilePath fontconfig_path = resources_dir.Append("fonts.conf");
     if (!FcConfigParseAndLoad(fontcfg, FilePathAsFcChar(fontconfig_path),
                               true)) {
       LOG(FATAL) << "Failed to parse fontconfig config file";
     }
-    // We can delete the temp file after font config has parsed it.
-    file_util::Delete(fontconfig_path, false);
 
     // This is the list of fonts that fontconfig will know about. It
     // will try its best to match based only on the fonts here in. The
@@ -240,10 +227,9 @@ void TestShell::InitializeTestShell(bool layout_test_mode) {
       "/usr/share/fonts/truetype/msttcorefonts/Verdana_Bold.ttf",
       "/usr/share/fonts/truetype/msttcorefonts/Verdana_Bold_Italic.ttf",
       "/usr/share/fonts/truetype/msttcorefonts/Verdana_Italic.ttf",
-      // The DejaVuSans font is used by the LayoutTests/css2.1 tests
+      // The DejaVuSans font is used by the css2.1 tests.
       "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf",
       "/usr/share/fonts/truetype/ttf-indic-fonts-core/lohit_ta.ttf",
-      "/usr/share/fonts/truetype/ttf-indic-fonts-core/lohit_pa.ttf",
       "/usr/share/fonts/truetype/ttf-indic-fonts-core/MuktiNarrow.ttf",
     };
     for (size_t i = 0; i < arraysize(fonts); ++i) {
@@ -261,14 +247,18 @@ void TestShell::InitializeTestShell(bool layout_test_mode) {
     // few layout tests.
     static const char* const optional_fonts[] = {
       "/usr/share/fonts/truetype/ttf-lucida/LucidaSansRegular.ttf",
+
+      // This font changed paths across Ubuntu releases.
+      "/usr/share/fonts/truetype/ttf-indic-fonts-core/lohit_pa.ttf",
+      "/usr/share/fonts/truetype/ttf-punjabi-fonts/lohit_pa.ttf",
     };
     for (size_t i = 0; i < arraysize(optional_fonts); ++i) {
       const char* font = optional_fonts[i];
       if (access(font, R_OK) < 0) {
         LOG(WARNING) << "You are missing " << font << ". "
                      << "Without this, some layout tests will fail. "
-                     << "To get LucidaSansRegular, install sun-java6-fonts.  "
-                     << "FYI, this will also install a somewhat hefty JRE :)";
+                     << "See http://code.google.com/p/chromium/wiki/"
+                     << "LinuxBuildInstructionsPrerequisites for more.";
       } else {
         if (!FcConfigAppFontAddFile(fontcfg, (FcChar8 *) font))
           LOG(FATAL) << "Failed to load font " << font;
@@ -276,18 +266,9 @@ void TestShell::InitializeTestShell(bool layout_test_mode) {
     }
 
     // Also load the layout-test-specific "Ahem" font.
-    base::StringPiece ahem_font;
-    g_resource_data_pack->GetStringPiece(IDR_AHEM_FONT, &ahem_font);
-    g_ahem_path = new FilePath;
-    if (!file_util::CreateTemporaryFile(g_ahem_path)) {
-      LOG(FATAL) << "failed to create temp ahem font";
-    }
-    if (-1 == file_util::WriteFile(*g_ahem_path, ahem_font.data(),
-                                   ahem_font.length())) {
-      LOG(FATAL) << "failed to write temp ahem font";
-    }
-    if (!FcConfigAppFontAddFile(fontcfg, FilePathAsFcChar(*g_ahem_path))) {
-      LOG(FATAL) << "Failed to load font " << g_ahem_path->value().c_str();
+    FilePath ahem_path = resources_dir.Append("AHEM____.TTF");
+    if (!FcConfigAppFontAddFile(fontcfg, FilePathAsFcChar(ahem_path))) {
+      LOG(FATAL) << "Failed to load font " << ahem_path.value().c_str();
     }
 
     if (!FcConfigSetCurrent(fontcfg))
@@ -302,12 +283,6 @@ void TestShell::InitializeTestShell(bool layout_test_mode) {
 void TestShell::PlatformShutdown() {
   delete g_resource_data_pack;
   g_resource_data_pack = NULL;
-
-  if (g_ahem_path) {
-    file_util::Delete(*g_ahem_path, false);
-    delete g_ahem_path;
-    g_ahem_path = NULL;
-  }
 }
 
 void TestShell::PlatformCleanUp() {
@@ -378,7 +353,7 @@ bool TestShell::Initialize(const GURL& starting_url) {
 
   gtk_box_pack_start(GTK_BOX(vbox), toolbar, FALSE, FALSE, 0);
   m_webViewHost.reset(
-      WebViewHost::Create(vbox, delegate_.get(), *TestShell::web_prefs_));
+      WebViewHost::Create(vbox, delegate_.get(), 0, *TestShell::web_prefs_));
 
   gtk_container_add(GTK_CONTAINER(m_mainWnd), vbox);
   gtk_widget_show_all(GTK_WIDGET(m_mainWnd));
@@ -516,7 +491,8 @@ void TestShell::ResizeSubViews() {
        iter != TestShell::windowList()->end(); iter++) {
     GtkWindow* window = *iter;
     TestShell* shell =
-        static_cast<TestShell*>(g_object_get_data(G_OBJECT(window), "test-shell"));
+        static_cast<TestShell*>(g_object_get_data(G_OBJECT(window),
+                                                  "test-shell"));
     shell->DumpBackForwardList(result);
   }
 }
@@ -530,14 +506,8 @@ void TestShell::ResizeSubViews() {
 
   GtkWindow* window = *(TestShell::windowList()->begin());
   TestShell* shell =
-      static_cast<TestShell*>(g_object_get_data(G_OBJECT(window), "test-shell"));
-  shell->ResetTestController();
-
-  // ResetTestController may have closed the window we were holding on to.
-  // Grab the first window again.
-  window = *(TestShell::windowList()->begin());
-  shell = static_cast<TestShell*>(g_object_get_data(G_OBJECT(window), "test-shell"));
-  DCHECK(shell);
+      static_cast<TestShell*>(g_object_get_data(G_OBJECT(window),
+                                                "test-shell"));
 
   // Clear focus between tests.
   shell->m_focusedWidgetHost = NULL;
@@ -545,6 +515,18 @@ void TestShell::ResizeSubViews() {
   // Make sure the previous load is stopped.
   shell->webView()->mainFrame()->stopLoading();
   shell->navigation_controller()->Reset();
+
+  // StopLoading may update state maintained in the test controller (for
+  // example, whether the WorkQueue is frozen) as such, we need to reset it
+  // after we invoke StopLoading.
+  shell->ResetTestController();
+
+  // ResetTestController may have closed the window we were holding on to.
+  // Grab the first window again.
+  window = *(TestShell::windowList()->begin());
+  shell = static_cast<TestShell*>(g_object_get_data(G_OBJECT(window),
+                                                    "test-shell"));
+  DCHECK(shell);
 
   // Clean up state between test runs.
   webkit_glue::ResetBeforeTestRun(shell->webView());
@@ -590,9 +572,8 @@ void TestShell::LoadURLForFrame(const GURL& url,
       new TestNavigationEntry(-1, url, std::wstring(), frame_name));
 }
 
-// TODO(agl): PromptForSaveFile should use FilePath
 bool TestShell::PromptForSaveFile(const wchar_t* prompt_title,
-                                  std::wstring* result) {
+                                  FilePath* result) {
   GtkWidget* dialog;
   dialog = gtk_file_chooser_dialog_new(WideToUTF8(prompt_title).c_str(),
                                        GTK_WINDOW(m_mainWnd),
@@ -609,7 +590,7 @@ bool TestShell::PromptForSaveFile(const wchar_t* prompt_title,
   }
   char* path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
   gtk_widget_destroy(dialog);
-  *result = UTF8ToWide(path);
+  *result = FilePath(path);
   g_free(path);
   return true;
 }
@@ -665,13 +646,6 @@ string16 GetLocalizedString(int message_id) {
 
 base::StringPiece GetDataResource(int resource_id) {
   switch (resource_id) {
-    case IDR_FEED_PREVIEW:
-      // It is necessary to return a feed preview template that contains
-      // a {{URL}} substring where the feed URL should go; see the code
-      // that computes feed previews in feed_preview.cc:MakeFeedPreview.
-      // This fixes issue #932714.
-      resource_id = IDR_FEED_PREVIEW_TESTSHELL;
-      break;
     case IDR_BROKENIMAGE:
       resource_id = IDR_BROKENIMAGE_TESTSHELL;
       break;

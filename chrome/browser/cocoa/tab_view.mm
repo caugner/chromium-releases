@@ -5,7 +5,9 @@
 #import "chrome/browser/cocoa/tab_view.h"
 
 #include "base/logging.h"
+#import "base/mac_util.h"
 #include "base/nsimage_cache_mac.h"
+#include "base/scoped_cftyperef.h"
 #include "chrome/browser/browser_theme_provider.h"
 #import "chrome/browser/cocoa/tab_controller.h"
 #import "chrome/browser/cocoa/tab_window_controller.h"
@@ -46,6 +48,8 @@ const CGFloat kRapidCloseDist = 2.5;
 - (void)resetLastGlowUpdateTime;
 - (NSTimeInterval)timeElapsedSinceLastGlowUpdate;
 - (void)adjustGlowValue;
+// TODO(davidben): When we stop supporting 10.5, this can be removed.
+- (int)getWorkspaceID:(NSWindow*)window useCache:(BOOL)useCache;
 
 @end  // TabView(Private)
 
@@ -75,9 +79,18 @@ const CGFloat kRapidCloseDist = 2.5;
   [super dealloc];
 }
 
-// Use the TabController to provide the menu rather than obtaining it from the
-// nib file.
+// Called to obtain the context menu for when the user hits the right mouse
+// button (or control-clicks). (Note that -rightMouseDown: is *not* called for
+// control-click.)
 - (NSMenu*)menu {
+  if ([self isClosing])
+    return nil;
+
+  // Sheets, being window-modal, should block contextual menus. For some reason
+  // they do not. Disallow them ourselves.
+  if ([[self window] attachedSheet])
+    return nil;
+
   return [controller_ menu];
 }
 
@@ -152,6 +165,20 @@ const CGFloat kRapidCloseDist = 2.5;
   for (NSWindow* window in [NSApp orderedWindows]) {
     if (window == dragWindow) continue;
     if (![window isVisible]) continue;
+    // Skip windows on the wrong space.
+    if ([window respondsToSelector:@selector(isOnActiveSpace)]) {
+      if (![window performSelector:@selector(isOnActiveSpace)])
+        continue;
+    } else {
+      // TODO(davidben): When we stop supporting 10.5, this can be
+      // removed.
+      //
+      // We don't cache the workspace of |dragWindow| because it may
+      // move around spaces.
+      if ([self getWorkspaceID:dragWindow useCache:NO] !=
+          [self getWorkspaceID:window useCache:YES])
+        continue;
+    }
     NSWindowController* controller = [window windowController];
     if ([controller isKindOfClass:[TabWindowController class]]) {
       TabWindowController* realController =
@@ -171,6 +198,7 @@ const CGFloat kRapidCloseDist = 2.5;
   sourceController_ = nil;
   sourceWindow_ = nil;
   targetController_ = nil;
+  workspaceIDCache_.clear();
 }
 
 // Sets whether the window background should be visible or invisible when
@@ -275,8 +303,6 @@ const CGFloat kRapidCloseDist = 2.5;
         [NSApp nextEventMatchingMask:NSLeftMouseUpMask | NSLeftMouseDraggedMask
                            untilDate:[NSDate distantFuture]
                               inMode:NSDefaultRunLoopMode dequeue:YES];
-    NSPoint thisPoint = [NSEvent mouseLocation];
-
     NSEventType type = [theEvent type];
     if (type == NSLeftMouseDragged) {
       [self mouseDragged:theEvent];
@@ -330,7 +356,6 @@ const CGFloat kRapidCloseDist = 2.5;
   tabWasDragged_ = YES;
 
   if (draggingWithinTabStrip_) {
-    NSRect frame = [self frame];
     NSPoint thisPoint = [NSEvent mouseLocation];
     CGFloat stretchiness = thisPoint.y - dragOrigin_.y;
     stretchiness = copysign(sqrtf(fabs(stretchiness))/sqrtf(kTearDistance),
@@ -356,9 +381,6 @@ const CGFloat kRapidCloseDist = 2.5;
       return;
     }
   }
-
-  NSPoint lastPoint =
-    [[theEvent window] convertBaseToScreen:[theEvent locationInWindow]];
 
   // Do not start dragging until the user has "torn" the tab off by
   // moving more than 3 pixels.
@@ -493,7 +515,6 @@ const CGFloat kRapidCloseDist = 2.5;
 
     // Compute where placeholder should go and insert it into the
     // destination tab strip.
-    NSRect dropTabFrame = [[targetController_ tabStripView] frame];
     TabView* draggedTabView = (TabView*)[draggedController_ selectedTabView];
     NSRect tabFrame = [draggedTabView frame];
     tabFrame.origin = [dragWindow_ convertBaseToScreen:tabFrame.origin];
@@ -501,9 +522,6 @@ const CGFloat kRapidCloseDist = 2.5;
                         convertScreenToBase:tabFrame.origin];
     tabFrame = [[targetController_ tabStripView]
                 convertRect:tabFrame fromView:nil];
-    NSPoint point =
-      [sourceWindow_ convertBaseToScreen:
-       [draggedTabView convertPoint:NSZeroPoint toView:nil]];
     [targetController_ insertPlaceholderForTab:self
                                          frame:tabFrame
                                  yStretchiness:0];
@@ -610,11 +628,11 @@ const CGFloat kRapidCloseDist = 2.5;
   BOOL active = [[self window] isKeyWindow] || [[self window] isMainWindow];
   BOOL selected = [self state];
 
-  // Inset by 0.5 in order to draw on pixels rather than on borders (which would
-  // cause blurry pixels). Decrease height by 1 in order to move away from the
-  // edge for the dark shadow.
+  // Outset by 0.5 in order to draw on pixels rather than on borders (which
+  // would cause blurry pixels). Subtract 1px of height to compensate, otherwise
+  // clipping will occur.
   rect = NSInsetRect(rect, -0.5, -0.5);
-  rect.origin.y -= 1;
+  rect.size.height -= 1.0;
 
   NSPoint bottomLeft = NSMakePoint(NSMinX(rect), NSMinY(rect) + 2);
   NSPoint bottomRight = NSMakePoint(NSMaxX(rect), NSMinY(rect) + 2);
@@ -757,23 +775,22 @@ const CGFloat kRapidCloseDist = 2.5;
   [path stroke];
   [context restoreGraphicsState];
 
-  // Draw the bottom border.
+  // Mimic the tab strip's bottom border, which consists of a dark border
+  // and light highlight.
   if (!selected) {
     [path addClip];
-    NSRect borderRect, contentRect;
-    NSDivideRect(rect, &borderRect, &contentRect, 2.5, NSMinYEdge);
-    [[NSColor colorWithDeviceWhite:0.0 alpha:active ? 0.3 : 0.15] set];
+    NSRect borderRect = rect;
+    borderRect.origin.y = 1;
+    borderRect.size.height = 1;
+    [[NSColor colorWithDeviceWhite:0.0 alpha:active ? 0.2 : 0.15] set];
+    NSRectFillUsingOperation(borderRect, NSCompositeSourceOver);
+
+    borderRect.origin.y = 0;
+    [[NSColor colorWithCalibratedWhite:0.96 alpha:1.0] set];
     NSRectFillUsingOperation(borderRect, NSCompositeSourceOver);
   }
-  [context restoreGraphicsState];
-}
 
-// Called when the user hits the right mouse button (or control-clicks) to
-// show a context menu.
-- (void)rightMouseDown:(NSEvent*)theEvent {
-  if ([self isClosing])
-    return;
-  [NSMenu popUpContextMenu:[self menu] withEvent:theEvent forView:self];
+  [context restoreGraphicsState];
 }
 
 - (void)viewDidMoveToWindow {
@@ -963,6 +980,54 @@ const CGFloat kRapidCloseDist = 2.5;
 
   [self resetLastGlowUpdateTime];
   [self setNeedsDisplay:YES];
+}
+
+// Returns the workspace id of |window|. If |useCache|, then lookup
+// and remember the value in |workspaceIDCache_| until the end of the
+// current drag.
+- (int)getWorkspaceID:(NSWindow*)window useCache:(BOOL)useCache {
+  CGWindowID windowID = [window windowNumber];
+  if (useCache) {
+    std::map<CGWindowID, int>::iterator iter =
+        workspaceIDCache_.find(windowID);
+    if (iter != workspaceIDCache_.end())
+      return iter->second;
+  }
+
+  int workspace = -1;
+  // It's possible to query in bulk, but probably not necessary.
+  scoped_cftyperef<CFArrayRef> windowIDs(CFArrayCreate(
+      NULL, reinterpret_cast<const void **>(&windowID), 1, NULL));
+  scoped_cftyperef<CFArrayRef> descriptions(
+      CGWindowListCreateDescriptionFromArray(windowIDs));
+  DCHECK(CFArrayGetCount(descriptions.get()) <= 1);
+  if (CFArrayGetCount(descriptions.get()) > 0) {
+    CFDictionaryRef dict = static_cast<CFDictionaryRef>(
+        CFArrayGetValueAtIndex(descriptions.get(), 0));
+    DCHECK(CFGetTypeID(dict) == CFDictionaryGetTypeID());
+
+    // Sanity check the ID.
+    CFNumberRef otherIDRef = (CFNumberRef)mac_util::GetValueFromDictionary(
+        dict, kCGWindowNumber, CFNumberGetTypeID());
+    CGWindowID otherID;
+    if (otherIDRef &&
+        CFNumberGetValue(otherIDRef, kCGWindowIDCFNumberType, &otherID) &&
+        otherID == windowID) {
+      // And then get the workspace.
+      CFNumberRef workspaceRef = (CFNumberRef)mac_util::GetValueFromDictionary(
+          dict, kCGWindowWorkspace, CFNumberGetTypeID());
+      if (!workspaceRef ||
+          !CFNumberGetValue(workspaceRef, kCFNumberIntType, &workspace)) {
+        workspace = -1;
+      }
+    } else {
+      NOTREACHED();
+    }
+  }
+  if (useCache) {
+    workspaceIDCache_[windowID] = workspace;
+  }
+  return workspace;
 }
 
 @end  // @implementation TabView(Private)

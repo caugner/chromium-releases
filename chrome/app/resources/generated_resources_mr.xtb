@@ -138,7 +138,6 @@
 <translation id="1486408090387743835"><ph name="PRODUCT_NAME"/> मध्ये आता <ph name="BEGIN_LINK"/>विस्तार<ph name="END_LINK"/> आणि <ph name="BEGIN_BUTTON"/>बुकमार्क समक्रमण<ph name="END_BUTTON"/> आहे. </translation>
 <translation id="4422347585044846479">या पृष्ठासाठी बुकमार्क संपादित करा</translation>
 <translation id="8546306075665861288">प्रतिमा कॅशे</translation>
-<translation id="3899346049825960202">Linux Proxy Configuration Help</translation>
 <translation id="1399076603473531278">लॉगिन तपशील कालबाह्य झाले आहेत.</translation>
 <translation id="3391060940042023865">निम्नलिखित प्लग-इन क्रॅश झाले आहे: <ph name="PLUGIN_NAME"/></translation>
 <translation id="5197255632782567636">इंटरनेट</translation>
@@ -148,20 +147,6 @@
 <translation id="1556537182262721003">प्रोफाइलमध्ये विस्तार निर्देशिका हलविणे शक्य नाही.</translation>
 <translation id="5866557323934807206">भविष्यातील भेटींसाठी या सेटिंग्ज साफ करा</translation>
 <translation id="6370820475163108109"><ph name="ORGANIZATION_NAME"/> (<ph name="DOMAIN_NAME"/>)</translation>
-<translation id="763276826334024854">समर्थित डेस्कटॉप वातावरणांतर्गत <ph name="PRODUCT_NAME"/> चालवित असताना, सिस्टम प्रॉक्सी सेटिंग्ज वापरली जातील. तथापि, एकतर आपली सिस्टम समर्थित नाही किंवा आपल्‍या सिस्टमचे कॉन्फिगरेशन लाँच करताना समस्या येत आहे. आपण आपली प्रॉक्सी कॉन्फिगर करण्यासाठी खालील वातावरण भिन्नता वापराव्यात:
-        <ph name="BEGIN_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>auto_proxy<ph name="END_CODE"/><ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST"/>
-            <ph name="BEGIN_LIST_ITEM"/>परिभाषित आणि रिक्त → स्वयंसापडणे<ph name="END_LIST_ITEM"/>
-            <ph name="BEGIN_LIST_ITEM"/>रिक्त-नसलेली → स्वयंकॉन्फिगरेशन URL निर्दिष्ट करते<ph name="END_LIST_ITEM"/>
-          <ph name="END_LIST"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>all_proxy<ph name="END_CODE"/>: सर्व प्रकारांसाठी वापरण्याकरिता प्रॉक्सी सर्व्हर<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>http_proxy<ph name="END_CODE"/>: HTTP प्रॉक्सी सर्व्हर<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>https_proxy<ph name="END_CODE"/>: HTTPS प्रॉक्सी सर्व्हर<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>ftp_proxy<ph name="END_CODE"/>: FTP प्रॉक्सी सर्व्हर<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>SOCKS_SERVER<ph name="END_CODE"/>: SOCKS प्रॉक्सी सर्व्हर (SOCKS v4 साठी डीफॉल्ट, SOCKS v5 वापरण्यासाठी SOCKS_VERSION=5 देखील निर्दिष्ट करा)<ph name="END_LIST_ITEM"/>
-          <ph name="BEGIN_LIST_ITEM"/><ph name="BEGIN_CODE"/>no_proxy<ph name="END_CODE"/>: प्रॉक्सी करणे सोडण्यासाठी होस्ट किंवा नमुन्यांची स्वल्पविरामाने विभक्त केलेली सूची<ph name="END_LIST_ITEM"/>
-        <ph name="END_LIST"/></translation>
 <translation id="2933933591993394296">या संगणकावरून बुकमार्क समक्रमण अक्षम केले गेले आहे. आपण <ph name="NAME_OF_EXTENSION"/> विस्थापित केल्यास आपण साधने मेनूमधुन &quot;समक्रमण सेट अप करा...&quot; निवडून बुकमार्क समक्रमण पुन्हा-सक्षम करू शकता.</translation>
 <translation id="8820817407110198400">बुकमार्क</translation>
 <translation id="5191625995327478163">&amp;भाषा सेटिंग्ज...</translation>
@@ -169,7 +154,6 @@
 <translation id="5585645215698205895">&amp;खाली</translation>
 <translation id="6596816719288285829">IP पत्ता</translation>
 <translation id="1674989413181946727">संगणक-व्यापी SSL सेटिंग्ज:</translation>
-<translation id="1452199478873730826">Flikr</translation>
 <translation id="8703575177326907206"><ph name="DOMAIN"/> चे आपले कनेक्शन कूटबद्ध केलेले नाही.</translation>
 <translation id="4197577448076628265">या विस्तारास आपल्या ब्राउझिंग इतिहास आणि <ph name="HOST"/> वरील खासगी डेटामध्ये प्रवेश असेल.</translation>
 <translation id="1644574205037202324">इतिहास</translation>
@@ -339,7 +323,6 @@
 <translation id="348620396154188443">सर्व साइट्सना डेस्कटॉप सूचना दर्शविण्याची परवानगी द्या</translation>
 <translation id="8214489666383623925">फाइल उघडा...</translation>
 <translation id="5230160809118287008">Goats Teleported</translation>
-<translation id="5296476177639202243">कोणतेही बुकमार्क '<ph name="SEARCH_TEXT"/>' क्वेरीशी जुळत नाहीत.</translation>
 <translation id="4495419450179050807">या पृष्ठावर दर्शवू नका</translation>
 <translation id="939736085109172342">नवीन फोल्‍डर</translation>
 <translation id="4933484234309072027"><ph name="URL"/> वर एम्बेड केलेले</translation>
@@ -379,7 +362,6 @@
 <translation id="1684861821302948641">पृष्ठे नष्ट करा</translation>
 <translation id="6802031077390104172"><ph name="USAGE"/> (<ph name="OID"/>)</translation>
 <translation id="857089571609443760">समक्रमण अकार्यक्षम आहे कारण सर्व्हरवर बर्‍याच विनंत्या पाठविल्या जात आहेत. असे वाटते की <ph name="NAME_OF_EXTENSION"/> आपल्या बुकमार्कवर बरेच बदल करत आहे.</translation>
-<translation id="5965640700983474726">शोधाकरिता टाइप करा</translation>
 <translation id="40334469106837974">पृष्ठ लेआउट बदला</translation>
 <translation id="2142570832281562688">प्रोफाइल नाव प्रविष्ट करा</translation>
 <translation id="5904714272463161824">बग किंवा तुटलेली वेबसाइट &amp;नोंदवा...</translation>
@@ -397,7 +379,6 @@
 <translation id="2620436844016719705">सिस्टम</translation>
 <translation id="5362741141255528695">खासगी की फाइल निवडा.</translation>
 <translation id="7012108905414904806">तथापि, या पृष्ठात सुरक्षित नसलेले इतर स्त्रोत समाविष्ट आहेत.  हे स्त्रोत संक्रमणादरम्यान इतरांद्वारे पाहिले जातील तसेच पृष्ठाचा देखावा किंवा व्यवहार बदलण्यासाठी आक्रमणकर्त्याद्वारे सुधा‍रित केले जाऊ शकतात.</translation>
-<translation id="644318894204114995">गुप्त विंडोमध्ये चालण्याची पुष्टी करा</translation>
 <translation id="7226140659422399856">ब्राउझर क्रॅश झाला... विस्ताराकडे जा</translation>
 <translation id="4515911410595374805">या पृष्ठावरील काही घटक असत्यापित स्त्रोतांद्वारे आले आहेत आणि ते प्रदर्शित केले गेलेले नाहीत.</translation>
 <translation id="1195447618553298278">अज्ञात त्रुटी.</translation>
@@ -406,7 +387,6 @@
 <translation id="6610600335992778838">Wifi</translation>
 <translation id="1087119889335281750">&amp;शब्दलेखन सूचना नाहीत</translation>
 <translation id="5228309736894624122">SSL प्रोटोकॉल त्रुटी.</translation>
-<translation id="718141787353053227">पृष्ठ सेटअप...</translation>
 <translation id="5076340679995252485">&amp;पेस्ट करा</translation>
 <translation id="5097982659374947325">केवळ मी भेट देत असलेल्या साइटवरून कुकीज स्वीकारा</translation>
 <translation id="14171126816530869"><ph name="ISSUER"/> द्वारे <ph name="LOCALITY"/> स्थित <ph name="ORGANIZATION"/> ची ओळख सत्यापित केली गेली आहे.</translation>
@@ -433,7 +413,6 @@
 <translation id="6786747875388722282">विस्तार</translation>
 <translation id="9053965862400494292">समक्रमण सेट अप करण्याचा प्रयत्न करीत असताना एक त्रुटी आली.</translation>
 <translation id="4636930964841734540">माहिती</translation>
-<translation id="2815500128677761940">बुकमार्क बार</translation>
 <translation id="4571852245489094179">बुकमार्क आणि सेटिंग्ज आयात करा</translation>
 <translation id="6514771739083339959">मुख्यपृष्ठ:</translation>
 <translation id="4421917670248123270">बंद करा आणि डाउनलोड रद्द करा</translation>
@@ -496,7 +475,6 @@
 <translation id="8425492902634685834">टास्कबारवर पिन करा</translation>
 <translation id="3234408098842461169">Down Arrow</translation>
 <translation id="825608351287166772">आपल्याकडे असलेल्या कोणत्याही ओळख दस्तऐवजाप्रमाणेच (जसे, पासपोर्ट) प्रमाणपत्रांचा वैधता अवधी असतो. आपल्या ब्राउझर समक्ष सादर केलेले प्रमाणपत्र अद्याप वैध नाही. जेव्हा प्रमाणपत्र त्याच्या वैधता अवधी बाहेर असते, तेव्हा प्रमाणपत्राच्या स्थितीची निश्चित माहितीची (ते निरस्त झालेले असेल आणि यापुढे विश्वासनीय नसले तरीही) देखभाल करणे आवश्यक नाही. त्याचप्रमाणे हे प्रमाणपत्र विश्वासानीय असल्याचे सत्यापित करणे शक्य नाही. आपण पुढे जाऊ नये.</translation>
-<translation id="8786172108436160456"><ph name="EXTENSION_NAME"/> ला गुप्त विंडोमध्ये चालण्याची परवानगी द्यायची?</translation>
 <translation id="5209518306177824490">SHA-1 बोटाचा ठसा</translation>
 <translation id="7154150278819212687">या विस्तारास आपल्या ब्राउझिंग इतिहासामध्ये प्रवेश असेल.</translation>
 <translation id="1553538517812678578">अमर्यादित</translation>
@@ -507,13 +485,11 @@
 <translation id="4874539263382920044">शीर्षकात किमान एक वर्ण असावा</translation>
 <translation id="2963998720451829125"><ph name="NAME_OF_EXTENSION"/> अक्षम केले गेले. आपण आपले बुकमार्क समक्रमित करणे थांबवित असल्यास, आपण साधने मेनूद्वारे प्रवेश करण्यायोग्य विस्तार पृष्ठावर, हा विस्तार पुन्हा-सक्षम करू शकता.</translation>
 <translation id="7344633671344536647">ब्राउझिंग डेटा:</translation>
-<translation id="2332311077028912338">आपली खात्री आहे की आपण या विस्तारास गुप्तपणे चालण्याची अनुमती देऊ इच्छिता? आपला ब्राउझिंग डेटा रेकॉर्ड करण्यापासून या विस्तारास <ph name="PRODUCT_NAME"/> प्रतिबंधित करू शकत नाही.</translation>
 <translation id="4250680216510889253">नाही</translation>
 <translation id="6291953229176937411">फाइंडर मध्ये &amp;दर्शवा</translation>
 <translation id="7905536804357499080">वर्तमान वापरा</translation>
 <translation id="8933960630081805351">फाइंडर मध्ये &amp;दर्शवा</translation>
 <translation id="3041612393474885105">प्रमाणपत्र माहिती...</translation>
-<translation id="7378810950367401542">/</translation>
 <translation id="3733127536501031542">स्टेप-अप सह SSL सर्व्हर</translation>
 <translation id="954586097957006897">आडनाव</translation>
 <translation id="5849941564644911027"><ph name="PRODUCT_NAME"/> आता <ph name="DEF_BROWSER"/> वरून आपले बुकमार्क आणि अन्य सेटिंग्ज आयात करेल आणि आपल्‍या संगणकावर शॉर्टकट तयार करेल.</translation>
@@ -568,7 +544,6 @@
 <translation id="39964277676607559">सामग्री स्क्रिप्टसाठी javascript '<ph name="RELATIVE_PATH"/>' लोड करणे शक्य नाही.</translation>
 <translation id="4378551569595875038">कनेक्ट करीत आहे...</translation>
 <translation id="7029809446516969842">संकेतशब्द</translation>
-<translation id="8211437954284917092">आपले बुकमार्क शोधण्यासाठी उपरोक्त मजकूर फील्डमध्ये क्वेरी प्रविष्ट करा.</translation>
 <translation id="4528378725264562960">(चालू आहे)</translation>
 <translation id="5958418293370246440"><ph name="SAVED_FILES"/> / <ph name="TOTAL_FILES"/> फाइल्स</translation>
 <translation id="2350172092385603347">अनुवाद वापरले, परंतु मॅनिफेस्टमध्ये डीफॉल्ट_लोकॅल निर्दिष्ट नाही.</translation>
@@ -627,7 +602,6 @@
 <translation id="149347756975725155">विस्तार प्रतीक '<ph name="ICON"/>' लोड करणे शक्य नाही.</translation>
 <translation id="3675321783533846350">नेटवर्कशी कनेक्ट करण्यासाठी प्रॉक्सी सेट करा.</translation>
 <translation id="1572103024875503863"><ph name="NUMBER_MANY"/> दिवस</translation>
-<translation id="181952314179848438">या विस्तारासाठी प्रवेश आवश्यक आहे:</translation>
 <translation id="8453184121293348016">कोणतीही निरस्तीकरण प्रणाली आढळली नाही</translation>
 <translation id="3481915276125965083">खालील पॉप-अप या पृष्ठावर अवरोधित केलेली आहेत:</translation>
 <translation id="3468298837301810372">लेबल</translation>
@@ -656,7 +630,6 @@
 <translation id="7965010376480416255">सामायिक मेमरी</translation>
 <translation id="6248988683584659830">शोध सेटिंग</translation>
 <translation id="7053983685419859001">अवरोधित करा</translation>
-<translation id="3425080561288944889">आपली खात्री आहे की आपण '<ph name="BOOKMARK_TITLE"/>' काढू इच्छिता?</translation>
 <translation id="2727712005121231835">वास्तविक आकार</translation>
 <translation id="8887733174653581061">नेहेमी शीर्षावर ठेवा</translation>
 <translation id="610886263749567451">Javascript चेतावणी</translation>
@@ -752,7 +725,6 @@
 <translation id="7629827748548208700">टॅब: <ph name="TAB_NAME"/></translation>
 <translation id="8449008133205184768">पेस्ट करा आणि शैली जुळवा</translation>
 <translation id="8028993641010258682">आकार</translation>
-<translation id="1383876407941801731">शोध</translation>
 <translation id="8398877366907290961">तरीही पुढे चला</translation>
 <translation id="6974053822202609517">उजवीकडून डावीकडे</translation>
 <translation id="290414493736480793">प्रतिदाने</translation>
@@ -819,14 +791,12 @@
 <translation id="5552632479093547648">मालवेअर आणि फिशिंग आढळले!</translation>
 <translation id="4988273303304146523"><ph name="NUMBER_DEFAULT"/> days ago</translation>
 <translation id="1588343679702972132">या साइटने विनंती केली आहे की आपण प्रमाणपत्रासह आपली ओळख पटवा:</translation>
-<translation id="7211994749225247711">हटवा...</translation>
 <translation id="2819994928625218237">शब्दलेखन सूचना &amp;नाहीत</translation>
 <translation id="4316305410440790958">फ्रेम नवीन &amp;टॅबमध्ये उघडा</translation>
 <translation id="9142623379911037913"><ph name="SITE"/> ना डेस्कटॉप सूचना दर्शविण्यास अनुमती द्यायची?</translation>
 <translation id="4196320913210960460">साधने मेनुमध्ये विस्तार वर क्लिक करुन आपण आपले स्थापित केलेले विस्तार व्यवस्थापित करू शकता. </translation>
 <translation id="9118804773997839291">खाली पृष्ठासाठी सर्व असुरक्षित घटकांची सूची आहे. थ्रेडच्या अधिक विशिष्ट घटकांच्या माहितीसाठी निदान दुव्यावर क्लिक करा.</translation>
 <translation id="7754704193130578113">डाउनलोड करण्यापूर्वी प्रत्येक फाइल कोठे जतन करावी ते विचारा</translation>
-<translation id="8155199869035534942">निवडलेले आयटम हटवा</translation>
 <translation id="2497284189126895209">सर्व फाइल</translation>
 <translation id="5360606537916580043">शेवटचा दिवस</translation>
 <translation id="1682548588986054654">नवीन गुप्त विंडो</translation>
@@ -979,7 +949,6 @@
 <translation id="7136984461011502314"><ph name="PRODUCT_NAME"/> मध्ये स्वागत आहे</translation>
 <translation id="1594030484168838125">निवडा</translation>
 <translation id="204497730941176055">Microsoft Certificate Template Name</translation>
-<translation id="4002066346123236978">शीर्षक</translation>
 <translation id="4087089424473531098">विस्तार तयार केला: <ph name="EXTENSION_FILE"/></translation>
 <translation id="9015241028623917394">वर्तमान पृष्ठ नियंत्रित करा</translation>
 <translation id="2378982052244864789">विस्तार निर्देशिका निवडा.</translation>
@@ -1060,7 +1029,6 @@
 <translation id="4608500690299898628">&amp;शोधा...</translation>
 <translation id="3574305903863751447"><ph name="CITY"/>, <ph name="STATE"/> <ph name="COUNTRY"/></translation>
 <translation id="8724859055372736596">फोल्डरमध्ये &amp;दर्शवा</translation>
-<translation id="5446294780224829982">हंगुल IME:</translation>
 <translation id="5554489410841842733">जेव्हा विस्तार वर्तमान पृष्ठावर कार्य करेल तेव्हा हे प्रतीक दृश्यमान होईल.</translation>
 <translation id="4862642413395066333">OCSP प्रतिसाद साइन करत आहे</translation>
 <translation id="4756388243121344051">&amp;इतिहास</translation>
@@ -1082,7 +1050,6 @@
 <translation id="7631887513477658702">&amp;नेहमी या प्रकारच्या फायली उघडा</translation>
 <translation id="8627795981664801467">केवळ सुरक्षित कनेक्शन</translation>
 <translation id="3921544830490870178">प्लग-इन सेटिंग्ज:</translation>
-<translation id="1387703718616631293">या विस्तारास गुप्त विंडोत चालवण्यास परवानगी द्या</translation>
 <translation id="2190355936436201913">(रिक्त)</translation>
 <translation id="5868426874618963178">वर्तमान पृष्ठाचा स्त्रोत पाठवा</translation>
 <translation id="5818003990515275822">कोरियन</translation>
@@ -1114,7 +1081,6 @@
 <translation id="8565745688101278215"><ph name="FIRSTNAME"/><ph name="SEPARATOR"/><ph name="LASTNAME"/></translation>
 <translation id="3927932062596804919">नकार द्या</translation>
 <translation id="6484929352454160200"><ph name="PRODUCT_NAME"/> ची नवीन आवृत्ती उपलब्ध आहे</translation>
-<translation id="7035824132811506448">अलीकडे जोडलेले</translation>
 <translation id="5827266244928330802">Safari</translation>
 <translation id="778881183694837592">आवश्यक फील्ड रिक्त ठेवता येणार नाही</translation>
 <translation id="6820686453637990663">CVC</translation>
@@ -1176,8 +1142,6 @@
 <translation id="2356070529366658676">विचारा</translation>
 <translation id="5731247495086897348">पे&amp;स्ट करा आणि जा</translation>
 <translation id="3413103074007669042">या पृष्ठात काही असुरक्षित सामग्री आहे</translation>
-<translation id="3866320199958134961"><ph name="MINUTES"/> पेक्षा कमी.
-         कृपया चार्जर कनेक्ट करा.</translation>
 <translation id="7635741716790924709">पत्ता ओळ 1</translation>
 <translation id="5285267187067365830">प्लग-इन स्थापित करा...</translation>
 <translation id="1166212789817575481">उजवीकडील टॅब बंद करा</translation>
@@ -1320,7 +1284,6 @@
 <translation id="1474307029659222435">फ्रेम नवीन &amp;विंडोमध्ये उघडा</translation>
 <translation id="1522474541175464402">प्रमाणपत्र अधिकृतता की ID</translation>
 <translation id="5976160379964388480">इतर</translation>
-<translation id="3527085408025491307">फोल्डर</translation>
 <translation id="3413808618118019351">बुकमार्क &amp;&amp; सेटिंग्ज &amp; आयात करा...</translation>
 <translation id="2635276683026132559">साइन करत आहे</translation>
 <translation id="4835836146030131423">साइन इन करताना त्रुटी.</translation>
@@ -1369,7 +1332,6 @@
 <translation id="4701488924964507374"><ph name="SENTENCE1"/> <ph name="SENTENCE2"/></translation>
 <translation id="1163931534039071049">फ्रेम स्त्रोत &amp;पहा</translation>
 <translation id="7564847347806291057">प्रक्रिया समाप्त करा</translation>
-<translation id="7851589172948533362"><ph name="ISSUER"/> द्वारा सत्यापित</translation>
 <translation id="7063412606254013905">फिशिंग स्कॅमबद्दल अधिक जाणून घ्या.</translation>
 <translation id="307767688111441685">पृष्ठ विचित्र दिसत आहे</translation>
 <translation id="5295309862264981122">नॅव्हिगेशनची पुष्टी करा</translation>
@@ -1488,7 +1450,6 @@
 <translation id="4910619056351738551">येथे काही सूचना आहेत:</translation>
 <translation id="5489059749897101717">&amp;शुद्धलेखन पॅनेल दर्शवा</translation>
 <translation id="1232569758102978740">अशीर्षकांकित</translation>
-<translation id="1851547963021150172">निवडलेल्या आयटमवर एखादी क्रिया करा</translation>
 <translation id="4362187533051781987">शहर/नगर</translation>
 <translation id="9149866541089851383">संपादन...</translation>
 <translation id="7000311294523403548">अशीर्षकांकित वेब पृष्ठ</translation>

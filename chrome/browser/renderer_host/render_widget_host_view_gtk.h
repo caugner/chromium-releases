@@ -24,7 +24,13 @@ class GpuViewHost;
 class GtkIMContextWrapper;
 class GtkKeyBindingsHandler;
 class MenuGtk;
-class NativeWebKeyboardEvent;
+struct NativeWebKeyboardEvent;
+
+#if defined(OS_CHROMEOS)
+namespace views {
+class TooltipWindowGtk;
+}
+#endif  // defined(OS_CHROMEOS)
 
 typedef struct _GtkClipboard GtkClipboard;
 typedef struct _GtkSelectionData GtkSelectionData;
@@ -59,9 +65,12 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView {
   virtual gfx::Rect GetViewBounds() const;
   virtual void UpdateCursor(const WebCursor& cursor);
   virtual void SetIsLoading(bool is_loading);
-  virtual void IMEUpdateStatus(int control, const gfx::Rect& caret_rect);
-  virtual void DidPaintBackingStoreRects(const std::vector<gfx::Rect>& rects);
-  virtual void DidScrollBackingStoreRect(const gfx::Rect& rect, int dx, int dy);
+  virtual void ImeUpdateTextInputState(WebKit::WebTextInputType type,
+                                       const gfx::Rect& caret_rect);
+  virtual void ImeCancelComposition();
+  virtual void DidUpdateBackingStore(
+      const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
+      const std::vector<gfx::Rect>& copy_rects);
   virtual void RenderViewGone();
   virtual void Destroy();
   virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) {}
@@ -179,6 +188,11 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView {
   // The size that we want the renderer to be.  We keep this in a separate
   // variable because resizing in GTK+ is async.
   gfx::Size requested_size_;
+
+#if defined(OS_CHROMEOS)
+  // Custimized tooltip window.
+  scoped_ptr<views::TooltipWindowGtk> tooltip_window_;
+#endif  // defined(OS_CHROMEOS)
 };
 
 #endif  // CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_GTK_H_

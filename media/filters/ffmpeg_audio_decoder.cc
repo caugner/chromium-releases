@@ -10,6 +10,17 @@
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/filters/ffmpeg_demuxer.h"
 
+#if !defined(USE_SSE)
+#if defined(__SSE__) || defined(ARCH_CPU_X86_64) || _M_IX86_FP==1
+#define USE_SSE 1
+#else
+#define USE_SSE 0
+#endif
+#endif
+#if USE_SSE
+#include <xmmintrin.h>
+#endif
+
 namespace media {
 
 // Size of the decoded audio buffer.
@@ -17,7 +28,8 @@ const size_t FFmpegAudioDecoder::kOutputBufferSize =
     AVCODEC_MAX_AUDIO_FRAME_SIZE;
 
 FFmpegAudioDecoder::FFmpegAudioDecoder()
-    : codec_context_(NULL) {
+    : codec_context_(NULL),
+      estimated_next_timestamp_(StreamSample::kInvalidTimestamp) {
 }
 
 FFmpegAudioDecoder::~FFmpegAudioDecoder() {
@@ -95,9 +107,54 @@ void FFmpegAudioDecoder::DoSeek(base::TimeDelta time, Task* done_cb) {
   delete done_cb;
 }
 
-void FFmpegAudioDecoder::DoDecode(Buffer* input, Task* done_cb) {
-  AutoTaskRunner done_runner(done_cb);
+// ConvertAudioF32ToS32() converts float audio (F32) to int (S32) in place.
+// This is a temporary solution.
+// The purpose of this short term fix is to enable WMApro, which decodes to
+// float.
+// The audio driver has been tested by passing the float audio thru.
+// FFmpeg for ChromeOS only exposes U8, S16 and F32.
+// To properly expose new audio sample types at the audio driver layer, a enum
+// should be created to represent all suppported types, including types
+// for Pepper.  FFmpeg should be queried for type and passed along.
 
+// TODO(fbarchard): Remove this function.  Expose all FFmpeg types to driver.
+// TODO(fbarchard): If this function is kept, move it to audio_util.cc
+
+#if USE_SSE
+const __m128 kFloatScaler = _mm_set1_ps( 2147483648.0f );
+static void FloatToIntSaturate(float* p) {
+  __m128 a = _mm_set1_ps(*p);
+  a = _mm_mul_ss(a, kFloatScaler);
+  *reinterpret_cast<int32*>(p) = _mm_cvtss_si32(a);
+}
+#else
+const float kFloatScaler = 2147483648.0f;
+const int kMinSample = std::numeric_limits<int32>::min();
+const int kMaxSample = std::numeric_limits<int32>::max();
+const float kMinSampleFloat =
+    static_cast<float>(std::numeric_limits<int32>::min());
+const float kMaxSampleFloat =
+    static_cast<float>(std::numeric_limits<int32>::max());
+static void FloatToIntSaturate(float* p) {
+  float f = *p * kFloatScaler + 0.5f;
+  int sample;
+  if (f <= kMinSampleFloat) {
+    sample = kMinSample;
+  } else if (f >= kMaxSampleFloat) {
+    sample = kMaxSample;
+  } else {
+    sample = static_cast<int32>(f);
+  }
+  *reinterpret_cast<int32*>(p) = sample;
+}
+#endif
+static void ConvertAudioF32ToS32(void* buffer, int buffer_size) {
+  for (int i = 0; i < buffer_size / 4; ++i) {
+    FloatToIntSaturate(reinterpret_cast<float*>(buffer) + i);
+  }
+}
+
+void FFmpegAudioDecoder::DoDecode(Buffer* input) {
   // Due to FFmpeg API changes we no longer have const read-only pointers.
   AVPacket packet;
   av_init_packet(&packet);
@@ -111,6 +168,10 @@ void FFmpegAudioDecoder::DoDecode(Buffer* input, Task* done_cb) {
                                      &output_buffer_size,
                                      &packet);
 
+  if (codec_context_->sample_fmt == SAMPLE_FMT_FLT) {
+    ConvertAudioF32ToS32(output_buffer, output_buffer_size);
+  }
+
   // TODO(ajwong): Consider if kOutputBufferSize should just be an int instead
   // of a size_t.
   if (result < 0 ||
@@ -122,6 +183,7 @@ void FFmpegAudioDecoder::DoDecode(Buffer* input, Task* done_cb) {
               << input->GetDuration().InMicroseconds() << " us"
               << " , packet size: "
               << input->GetDataSize() << " bytes";
+    DecoderBase<AudioDecoder, Buffer>::OnDecodeComplete();
     return;
   }
 
@@ -132,35 +194,27 @@ void FFmpegAudioDecoder::DoDecode(Buffer* input, Task* done_cb) {
     uint8* data = result_buffer->GetWritableData();
     memcpy(data, output_buffer, output_buffer_size);
 
-    // Determine the duration if the demuxer couldn't figure it out, otherwise
-    // copy it over.
-    if (input->GetDuration().ToInternalValue() == 0) {
-      result_buffer->SetDuration(CalculateDuration(output_buffer_size));
-    } else {
-      DCHECK(input->GetDuration() != StreamSample::kInvalidTimestamp);
-      result_buffer->SetDuration(input->GetDuration());
-    }
+    // We don't trust the demuxer, so always calculate the duration based on
+    // the actual number of samples decoded.
+    base::TimeDelta duration = CalculateDuration(output_buffer_size);
+    result_buffer->SetDuration(duration);
 
-    // Use our estimate for the timestamp if |input| does not have one.
-    // Otherwise, copy over the timestamp.
+    // Use an estimated timestamp unless the incoming buffer has a valid one.
     if (input->GetTimestamp() == StreamSample::kInvalidTimestamp) {
       result_buffer->SetTimestamp(estimated_next_timestamp_);
+
+      // Keep the estimated timestamp invalid until we get an incoming buffer
+      // with a valid timestamp.  This can happen during seeks, etc...
+      if (estimated_next_timestamp_ != StreamSample::kInvalidTimestamp) {
+        estimated_next_timestamp_ += duration;
+      }
     } else {
       result_buffer->SetTimestamp(input->GetTimestamp());
-    }
-
-    // Only use the timestamp of |result_buffer| to estimate the next timestamp
-    // if it is valid (i.e. != StreamSample::kInvalidTimestamp).  Otherwise the
-    // error will stack together and we will get a series of incorrect
-    // timestamps.  In this case, this will maintain a series of zero
-    // timestamps.
-    if (result_buffer->GetTimestamp() != StreamSample::kInvalidTimestamp) {
-      // Update our estimated timestamp for the next packet.
-      estimated_next_timestamp_ = result_buffer->GetTimestamp() +
-          result_buffer->GetDuration();
+      estimated_next_timestamp_ = input->GetTimestamp() + duration;
     }
 
     EnqueueResult(result_buffer);
+    DecoderBase<AudioDecoder, Buffer>::OnDecodeComplete();
     return;
   }
 
@@ -171,6 +225,7 @@ void FFmpegAudioDecoder::DoDecode(Buffer* input, Task* done_cb) {
       input->GetTimestamp() != StreamSample::kInvalidTimestamp &&
       input->GetDuration() != StreamSample::kInvalidTimestamp) {
     estimated_next_timestamp_ = input->GetTimestamp() + input->GetDuration();
+    DecoderBase<AudioDecoder, Buffer>::OnDecodeComplete();
     return;
   }
 
@@ -184,6 +239,7 @@ void FFmpegAudioDecoder::DoDecode(Buffer* input, Task* done_cb) {
     result_buffer->SetDuration(input->GetDuration());
     EnqueueResult(result_buffer);
   }
+  DecoderBase<AudioDecoder, Buffer>::OnDecodeComplete();
 }
 
 base::TimeDelta FFmpegAudioDecoder::CalculateDuration(size_t size) {

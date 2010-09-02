@@ -40,6 +40,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/string_util.h"
 #include "converter/cross/converter.h"
 #include "utils/cross/file_path_utils.h"
@@ -69,6 +70,13 @@ int CrossMain(int argc, char**argv) {
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
 
   FilePath in_filename, out_filename;
+  // Use the absolute path to the converter tool for the case that we
+  // are in the current working directory and "." is not on the PATH.
+  FilePath converter_dir = FilePath(argv[0]).DirName();
+  file_util::AbsolutePath(&converter_dir);
+  const FilePath converter_tool = converter_dir.Append(
+      o3d::UTF8ToFilePath("convert.py"));
+
 
   std::vector<std::wstring> values = command_line->GetLooseValues();
   if (values.size() == 1) {
@@ -103,8 +111,19 @@ int CrossMain(int argc, char**argv) {
         << "    they are used by a mesh that has no normals.\n"
         << "--no-binary\n"
         << "    Use JSON for buffers, skins, curves instead of binary\n"
-        << "--json-only\n"
-        << "    Don't make a gzipped tar file, just JSON.\n";
+        << "--no-archive\n"
+        << "    Don't make a gzipped tar file, just flat files. Still takes\n"
+        << "    the name of an archive file; for archive.o3dtgz, creates\n"
+        << "    directory named archive/ and writes files inside.\n"
+        << "--convert-dds-to-png\n"
+        << "    Convert all DDS textures to PNGs. For cube map textures,\n"
+        << "    writes six separate PNGs with suffixes _posx, _negx, etc.\n"
+        << "--convert-cg-to-glsl\n"
+        << "    Convert shaders using an external tool.\n"
+        << "    Requires python on PATH.\n"
+        << "--converter-tool=<filename> [default: "
+        << converter_tool.value() << "]\n"
+        << "    Specifies the shader converter tool.\n";
     return EXIT_FAILURE;
   }
 
@@ -112,7 +131,12 @@ int CrossMain(int argc, char**argv) {
   options.condition = !command_line->HasSwitch("no-condition");
   options.pretty_print = command_line->HasSwitch("pretty-print");
   options.binary = !command_line->HasSwitch("no-binary");
-  options.json_only = !command_line->HasSwitch("json-only");
+  options.archive = !command_line->HasSwitch("no-archive");
+  options.convert_dds_to_png = command_line->HasSwitch("convert-dds-to-png");
+  options.convert_cg_to_glsl = command_line->HasSwitch("convert-cg-to-glsl");
+  options.converter_tool = command_line->HasSwitch("converter-tool") ?
+      o3d::WideToFilePath(command_line->GetSwitchValue("converter-tool")) :
+      converter_tool;
   if (command_line->HasSwitch("base-path")) {
     options.base_path = o3d::WideToFilePath(
         command_line->GetSwitchValue("base-path"));

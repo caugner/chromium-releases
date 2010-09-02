@@ -4,52 +4,26 @@
 
 #include "chrome/common/database_util.h"
 
-#if defined(USE_SYSTEM_SQLITE)
-#include <sqlite3.h>
-#else
-#include "third_party/sqlite/preprocessed/sqlite3.h"
-#endif
-
 #include "chrome/common/child_thread.h"
 #include "chrome/common/render_messages.h"
 #include "ipc/ipc_sync_message_filter.h"
+#include "third_party/sqlite/preprocessed/sqlite3.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
 
 using WebKit::WebKitClient;
 using WebKit::WebString;
 
 WebKitClient::FileHandle DatabaseUtil::databaseOpenFile(
-    const WebString& vfs_file_name, int desired_flags,
-    WebKitClient::FileHandle* dir_handle) {
-  IPC::PlatformFileForTransit file_handle;
-#if defined(OS_WIN)
-  file_handle = base::kInvalidPlatformFileValue;
-#elif defined(OS_POSIX)
-  file_handle =
-      base::FileDescriptor(base::kInvalidPlatformFileValue, true);
-  base::FileDescriptor dir_handle_rv =
-      base::FileDescriptor(base::kInvalidPlatformFileValue, true);
-#endif
+    const WebString& vfs_file_name, int desired_flags) {
+  IPC::PlatformFileForTransit file_handle =
+      IPC::InvalidPlatformFileForTransit();
 
   scoped_refptr<IPC::SyncMessageFilter> filter =
       ChildThread::current()->sync_message_filter();
-
   filter->Send(new ViewHostMsg_DatabaseOpenFile(
-      vfs_file_name,
-      desired_flags,
-      &file_handle
-#if defined(OS_POSIX)
-      , &dir_handle_rv
-#endif
-      ));
+      vfs_file_name, desired_flags, &file_handle));
 
-#if defined(OS_WIN)
-  return file_handle;
-#elif defined(OS_POSIX)
-  if (dir_handle)
-    *dir_handle = dir_handle_rv.fd;
-  return file_handle.fd;
-#endif
+  return IPC::PlatformFileForTransitToPlatformFile(file_handle);
 }
 
 int DatabaseUtil::databaseDeleteFile(

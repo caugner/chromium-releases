@@ -21,21 +21,20 @@ class HttpAuthHandlerBasic : public HttpAuthHandler {
     virtual int CreateAuthHandler(HttpAuth::ChallengeTokenizer* challenge,
                                   HttpAuth::Target target,
                                   const GURL& origin,
-                                  scoped_refptr<HttpAuthHandler>* handler);
+                                  CreateReason reason,
+                                  int digest_nonce_count,
+                                  const BoundNetLog& net_log,
+                                  scoped_ptr<HttpAuthHandler>* handler);
   };
-
-  virtual int GenerateAuthToken(const std::wstring& username,
-                                const std::wstring& password,
-                                const HttpRequestInfo*,
-                                const ProxyInfo*,
-                                std::string* auth_token);
-
-  virtual int GenerateDefaultAuthToken(const HttpRequestInfo* request,
-                                       const ProxyInfo* proxy,
-                                       std::string* auth_token);
 
  protected:
   virtual bool Init(HttpAuth::ChallengeTokenizer* challenge);
+
+  virtual int GenerateAuthTokenImpl(const std::wstring* username,
+                                    const std::wstring* password,
+                                    const HttpRequestInfo* request,
+                                    CompletionCallback* callback,
+                                    std::string* auth_token);
 
  private:
   ~HttpAuthHandlerBasic() {}

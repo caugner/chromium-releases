@@ -14,22 +14,24 @@
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/singleton.h"
+#include "base/string_piece.h"
+#include "base/string_tokenizer.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/encoding_menu_controller.h"
 #include "chrome/browser/gtk/accelerators_gtk.h"
 #include "chrome/browser/gtk/browser_window_gtk.h"
 #include "chrome/browser/gtk/custom_button.h"
+#include "chrome/browser/gtk/gconf_titlebar_listener.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/menu_gtk.h"
 #include "chrome/browser/gtk/nine_box.h"
-#include "chrome/browser/gtk/standard_menus.h"
 #include "chrome/browser/gtk/tabs/tab_strip_gtk.h"
-#include "chrome/browser/page_menu_model.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/wrench_menu_model.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "gfx/gtk_util.h"
@@ -81,6 +83,10 @@ const int kButtonSpacing = 2;
 // Spacing around outside of titlebar buttons.
 const int kButtonOuterPadding = 2;
 
+// Spacing between tabstrip and window control buttons (when the window is
+// maximized).
+const int kMaximizedTabstripPadding = 16;
+
 gboolean OnMouseMoveEvent(GtkWidget* widget, GdkEventMotion* event,
                           BrowserWindowGtk* browser_window) {
   // Reset to the default mouse cursor.
@@ -127,9 +133,71 @@ GdkColor PickLuminosityContrastingColor(const GdkColor* base,
 
 }  // namespace
 
+////////////////////////////////////////////////////////////////////////////////
+// PopupPageMenuModel
+
+// A menu model that builds the contents of the menu shown for popups (when the
+// user clicks on the favicon) and all of its submenus.
+class PopupPageMenuModel : public menus::SimpleMenuModel {
+ public:
+  explicit PopupPageMenuModel(menus::SimpleMenuModel::Delegate* delegate,
+                              Browser* browser);
+  virtual ~PopupPageMenuModel() { }
+
+ private:
+  void Build();
+
+  // Models for submenus referenced by this model. SimpleMenuModel only uses
+  // weak references so these must be kept for the lifetime of the top-level
+  // model.
+  scoped_ptr<ZoomMenuModel> zoom_menu_model_;
+  scoped_ptr<EncodingMenuModel> encoding_menu_model_;
+  Browser* browser_;  // weak
+
+  DISALLOW_COPY_AND_ASSIGN(PopupPageMenuModel);
+};
+
+PopupPageMenuModel::PopupPageMenuModel(
+    menus::SimpleMenuModel::Delegate* delegate,
+    Browser* browser)
+    : menus::SimpleMenuModel(delegate), browser_(browser) {
+  Build();
+}
+
+void PopupPageMenuModel::Build() {
+  AddItemWithStringId(IDC_BACK, IDS_CONTENT_CONTEXT_BACK);
+  AddItemWithStringId(IDC_FORWARD, IDS_CONTENT_CONTEXT_FORWARD);
+  AddItemWithStringId(IDC_RELOAD, IDS_APP_MENU_RELOAD);
+  AddSeparator();
+  AddItemWithStringId(IDC_SHOW_AS_TAB, IDS_SHOW_AS_TAB);
+  AddSeparator();
+  AddItemWithStringId(IDC_CUT, IDS_CUT);
+  AddItemWithStringId(IDC_COPY, IDS_COPY);
+  AddItemWithStringId(IDC_PASTE, IDS_PASTE);
+  AddSeparator();
+  AddItemWithStringId(IDC_FIND, IDS_FIND);
+  AddItemWithStringId(IDC_PRINT, IDS_PRINT);
+  zoom_menu_model_.reset(new ZoomMenuModel(delegate()));
+  AddSubMenuWithStringId(IDC_ZOOM_MENU, IDS_ZOOM_MENU, zoom_menu_model_.get());
+
+  encoding_menu_model_.reset(new EncodingMenuModel(browser_));
+  AddSubMenuWithStringId(IDC_ENCODING_MENU, IDS_ENCODING_MENU,
+                         encoding_menu_model_.get());
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// BrowserTitlebar
+
 BrowserTitlebar::BrowserTitlebar(BrowserWindowGtk* browser_window,
                                  GtkWindow* window)
-    : browser_window_(browser_window), window_(window),
+    : browser_window_(browser_window),
+      window_(window),
+      titlebar_left_buttons_vbox_(NULL),
+      titlebar_right_buttons_vbox_(NULL),
+      titlebar_left_buttons_hbox_(NULL),
+      titlebar_right_buttons_hbox_(NULL),
+      top_padding_left_(NULL),
+      top_padding_right_(NULL),
       app_mode_favicon_(NULL),
       app_mode_title_(NULL),
       using_custom_frame_(false),
@@ -141,17 +209,37 @@ BrowserTitlebar::BrowserTitlebar(BrowserWindowGtk* browser_window,
 void BrowserTitlebar::Init() {
   // The widget hierarchy is shown below.
   //
-  // +- EventBox (container_) -------------------------------------------------+
-  // +- HBox (container_hbox) -------------------------------------------------+
-  // |+- Algn. -++- Alignment --------------++- VBox (titlebar_buttons_box_) -+|
-  // ||+ Image +||   (titlebar_alignment_)  ||+ - Fixed (top_padding_) ------+||
-  // |||       |||                          ||+- HBox -----------------------+||
-  // |||spy_guy|||                          |||+- button -++- button -+      |||
-  // |||       |||+- TabStripGtk  ---------+|||| minimize || restore  | ...  |||
-  // |||  )8\  |||| tab   tab   tabclose   ||||+----------++----------+      |||
-  // ||+-------+||+------------------------+||+------------------------------+||
-  // |+---------++--------------------------++--------------------------------+|
-  // +-------------------------------------------------------------------------+
+  // +- EventBox (container_) -------------------------------------+
+  // +- HBox (container_hbox_) ------------------------------------+
+  // |+ VBox ---++- Algn. -++- Alignment --------------++ VBox ---+|
+  // || titlebar||+ Image +||   (titlebar_alignment_)  || titlebar||
+  // || left    |||       |||                          || right   ||
+  // || button  |||spy_guy|||                          || button  ||
+  // || vbox    |||       |||+- TabStripGtk  ---------+|| vbox    ||
+  // ||         |||  )8\  |||| tab   tab   tabclose   |||         ||
+  // ||         ||+-------+||+------------------------+||         ||
+  // |+---------++---------++--------------------------++---------+|
+  // +-------------------------------------------------------------+
+  //
+  // There are two vboxes on either side of |container_hbox_| because when the
+  // desktop is GNOME, the button placement is configurable based on a metacity
+  // gconf key. We can't just have one vbox and move it back and forth because
+  // the gconf language allows you to place buttons on both sides of the
+  // window.  This being Linux, I'm sure there's a bunch of people who have
+  // already configured their window manager to do so and we don't want to get
+  // confused when that happens. The actual contents of these vboxes are lazily
+  // generated so they don't interfere with alignment when everything is
+  // stuffed in the other box.
+  //
+  // Each vbox has the contains the following hierarchy if it contains buttons:
+  //
+  // +- VBox (titlebar_{l,r}_buttons_vbox_) ---------+
+  // |+- Fixed (top_padding_{l,r}_) ----------------+|
+  // ||+- HBox (titlebar_{l,r}_buttons_hbox_ ------+||
+  // ||| (buttons of a configurable layout)        |||
+  // ||+-------------------------------------------+||
+  // |+---------------------------------------------+|
+  // +-----------------------------------------------+
   //
   // If we're a popup window or in app mode, we don't display the spy guy or
   // the tab strip.  Instead, put an hbox in titlebar_alignment_ in place of
@@ -164,17 +252,29 @@ void BrowserTitlebar::Init() {
   // ||+---------------++------------------------++----------------------+||
   // |+-------------------------------------------------------------------+|
   // +---------------------------------------------------------------------+
-  GtkWidget* container_hbox = gtk_hbox_new(FALSE, 0);
+  container_hbox_ = gtk_hbox_new(FALSE, 0);
 
   container_ = gtk_event_box_new();
   gtk_widget_set_name(container_, "chrome-browser-titlebar");
   gtk_event_box_set_visible_window(GTK_EVENT_BOX(container_), FALSE);
-  gtk_container_add(GTK_CONTAINER(container_), container_hbox);
+  gtk_container_add(GTK_CONTAINER(container_), container_hbox_);
 
-  g_signal_connect(container_, "scroll-event", G_CALLBACK(OnScroll), this);
+  g_signal_connect(container_, "scroll-event", G_CALLBACK(OnScrollThunk), this);
 
   g_signal_connect(window_, "window-state-event",
-                   G_CALLBACK(OnWindowStateChanged), this);
+                   G_CALLBACK(OnWindowStateChangedThunk), this);
+
+  // Allocate the two button boxes on the left and right parts of the bar.
+  titlebar_left_buttons_vbox_ = gtk_vbox_new(FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(container_hbox_), titlebar_left_buttons_vbox_,
+                     FALSE, FALSE, 0);
+  titlebar_right_buttons_vbox_ = gtk_vbox_new(FALSE, 0);
+  gtk_box_pack_end(GTK_BOX(container_hbox_), titlebar_right_buttons_vbox_,
+                   FALSE, FALSE, 0);
+
+  // Either read the gconf database and register for updates (on GNOME), or use
+  // the default value (anywhere else).
+  Singleton<GConfTitlebarListener>()->SetTitlebarButtons(this);
 
   if (browser_window_->browser()->profile()->IsOffTheRecord() &&
       browser_window_->browser()->type() == Browser::TYPE_NORMAL) {
@@ -187,13 +287,13 @@ void BrowserTitlebar::Init() {
         kOTRBottomSpacing, kOTRSideSpacing, kOTRSideSpacing);
     gtk_widget_set_size_request(spy_guy, -1, 0);
     gtk_container_add(GTK_CONTAINER(spy_frame), spy_guy);
-    gtk_box_pack_start(GTK_BOX(container_hbox), spy_frame, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(container_hbox_), spy_frame, FALSE, FALSE, 0);
   }
 
   // We use an alignment to control the titlebar height.
   titlebar_alignment_ = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
   if (browser_window_->browser()->type() == Browser::TYPE_NORMAL) {
-    gtk_box_pack_start(GTK_BOX(container_hbox), titlebar_alignment_, TRUE,
+    gtk_box_pack_start(GTK_BOX(container_hbox_), titlebar_alignment_, TRUE,
                        TRUE, 0);
 
     // Put the tab strip in the titlebar.
@@ -201,7 +301,7 @@ void BrowserTitlebar::Init() {
                       browser_window_->tabstrip()->widget());
   } else {
     // App mode specific widgets.
-    gtk_box_pack_start(GTK_BOX(container_hbox), titlebar_alignment_, TRUE,
+    gtk_box_pack_start(GTK_BOX(container_hbox_), titlebar_alignment_, TRUE,
                        TRUE, 0);
     GtkWidget* app_mode_hbox = gtk_hbox_new(FALSE, kIconTitleSpacing);
     gtk_container_add(GTK_CONTAINER(titlebar_alignment_), app_mode_hbox);
@@ -215,7 +315,7 @@ void BrowserTitlebar::Init() {
     GtkWidget* favicon_event_box = gtk_event_box_new();
     gtk_event_box_set_visible_window(GTK_EVENT_BOX(favicon_event_box), FALSE);
     g_signal_connect(favicon_event_box, "button-press-event",
-                     G_CALLBACK(OnButtonPressed), this);
+                     G_CALLBACK(OnButtonPressedThunk), this);
     gtk_box_pack_start(GTK_BOX(app_mode_hbox), favicon_event_box, FALSE,
                        FALSE, 0);
     // We use the app logo as a placeholder image so the title doesn't jump
@@ -243,41 +343,6 @@ void BrowserTitlebar::Init() {
     UpdateTitleAndIcon();
   }
 
-  // We put the min/max/restore/close buttons in a vbox so they are top aligned
-  // (up to padding) and don't vertically stretch.
-  titlebar_buttons_box_ = gtk_vbox_new(FALSE, 0);
-  GtkWidget* buttons_hbox = gtk_hbox_new(FALSE, kButtonSpacing);
-  top_padding_ = gtk_fixed_new();
-  gtk_widget_set_size_request(top_padding_, -1, kButtonOuterPadding);
-  gtk_box_pack_start(GTK_BOX(titlebar_buttons_box_), top_padding_, FALSE, FALSE,
-                     0);
-  gtk_box_pack_start(GTK_BOX(titlebar_buttons_box_), buttons_hbox, FALSE,
-                     FALSE, 0);
-
-  close_button_.reset(BuildTitlebarButton(IDR_CLOSE, IDR_CLOSE_P, IDR_CLOSE_H,
-                                          buttons_hbox,
-                                          IDS_XPFRAME_CLOSE_TOOLTIP));
-
-  restore_button_.reset(BuildTitlebarButton(IDR_RESTORE, IDR_RESTORE_P,
-                        IDR_RESTORE_H, buttons_hbox,
-                        IDS_XPFRAME_RESTORE_TOOLTIP));
-  maximize_button_.reset(BuildTitlebarButton(IDR_MAXIMIZE, IDR_MAXIMIZE_P,
-                         IDR_MAXIMIZE_H, buttons_hbox,
-                         IDS_XPFRAME_MAXIMIZE_TOOLTIP));
-  minimize_button_.reset(BuildTitlebarButton(IDR_MINIMIZE, IDR_MINIMIZE_P,
-                         IDR_MINIMIZE_H, buttons_hbox,
-                         IDS_XPFRAME_MINIMIZE_TOOLTIP));
-
-  gtk_util::SetButtonClickableByMouseButtons(maximize_button_->widget(),
-                                             true, true, true);
-
-  gtk_widget_size_request(close_button_->widget(), &close_button_req_);
-  gtk_widget_size_request(minimize_button_->widget(), &minimize_button_req_);
-  gtk_widget_size_request(restore_button_->widget(), &restore_button_req_);
-
-  gtk_box_pack_end(GTK_BOX(container_hbox), titlebar_buttons_box_, FALSE,
-                   FALSE, 0);
-
   gtk_widget_show_all(container_);
 
   ActiveWindowWatcherX::AddObserver(this);
@@ -285,6 +350,103 @@ void BrowserTitlebar::Init() {
 
 BrowserTitlebar::~BrowserTitlebar() {
   ActiveWindowWatcherX::RemoveObserver(this);
+  Singleton<GConfTitlebarListener>()->RemoveObserver(this);
+}
+
+void BrowserTitlebar::BuildButtons(const std::string& button_string) {
+  // Clear out all previous data.
+  close_button_.reset();
+  restore_button_.reset();
+  maximize_button_.reset();
+  minimize_button_.reset();
+  gtk_util::RemoveAllChildren(titlebar_left_buttons_vbox_);
+  gtk_util::RemoveAllChildren(titlebar_right_buttons_vbox_);
+  titlebar_left_buttons_hbox_ = NULL;
+  titlebar_right_buttons_hbox_ = NULL;
+  top_padding_left_ = NULL;
+  top_padding_right_ = NULL;
+
+  bool left_side = true;
+  StringTokenizer tokenizer(button_string, ":,");
+  tokenizer.set_options(StringTokenizer::RETURN_DELIMS);
+  while (tokenizer.GetNext()) {
+    if (tokenizer.token_is_delim()) {
+      if (*tokenizer.token_begin() == ':')
+        left_side = false;
+    } else {
+      base::StringPiece token = tokenizer.token_piece();
+      if (token == "minimize") {
+        GtkWidget* parent_box = GetButtonHBox(left_side);
+        minimize_button_.reset(
+            BuildTitlebarButton(IDR_MINIMIZE, IDR_MINIMIZE_P,
+                                IDR_MINIMIZE_H, parent_box,
+                                IDS_XPFRAME_MINIMIZE_TOOLTIP));
+
+        gtk_widget_size_request(minimize_button_->widget(),
+                                &minimize_button_req_);
+      } else if (token == "maximize") {
+        GtkWidget* parent_box = GetButtonHBox(left_side);
+        restore_button_.reset(
+            BuildTitlebarButton(IDR_RESTORE, IDR_RESTORE_P,
+                                IDR_RESTORE_H, parent_box,
+                                IDS_XPFRAME_RESTORE_TOOLTIP));
+        maximize_button_.reset(
+            BuildTitlebarButton(IDR_MAXIMIZE, IDR_MAXIMIZE_P,
+                                IDR_MAXIMIZE_H, parent_box,
+                                IDS_XPFRAME_MAXIMIZE_TOOLTIP));
+
+        gtk_util::SetButtonClickableByMouseButtons(maximize_button_->widget(),
+                                                   true, true, true);
+        gtk_widget_size_request(restore_button_->widget(),
+                                &restore_button_req_);
+      } else if (token == "close") {
+        GtkWidget* parent_box = GetButtonHBox(left_side);
+        close_button_.reset(
+            BuildTitlebarButton(IDR_CLOSE, IDR_CLOSE_P,
+                                IDR_CLOSE_H, parent_box,
+                                IDS_XPFRAME_CLOSE_TOOLTIP));
+        close_button_->set_flipped(left_side);
+
+        gtk_widget_size_request(close_button_->widget(), &close_button_req_);
+      }
+      // Ignore any other values like "pin" since we don't have images for
+      // those.
+    }
+  }
+
+  // Now show the correct widgets in the two hierarchies.
+  gtk_widget_show_all(titlebar_left_buttons_vbox_);
+  gtk_widget_show_all(titlebar_right_buttons_vbox_);
+  UpdateMaximizeRestoreVisibility();
+}
+
+GtkWidget* BrowserTitlebar::GetButtonHBox(bool left_side) {
+  if (left_side && titlebar_left_buttons_hbox_)
+    return titlebar_left_buttons_hbox_;
+  else if (!left_side && titlebar_right_buttons_hbox_)
+    return titlebar_right_buttons_hbox_;
+
+  // We put the min/max/restore/close buttons in a vbox so they are top aligned
+  // (up to padding) and don't vertically stretch.
+  GtkWidget* vbox = left_side ? titlebar_left_buttons_vbox_ :
+                    titlebar_right_buttons_vbox_;
+
+  GtkWidget* top_padding = gtk_fixed_new();
+  gtk_widget_set_size_request(top_padding, -1, kButtonOuterPadding);
+  gtk_box_pack_start(GTK_BOX(vbox), top_padding, FALSE, FALSE, 0);
+
+  GtkWidget* buttons_hbox = gtk_hbox_new(FALSE, kButtonSpacing);
+  gtk_box_pack_start(GTK_BOX(vbox), buttons_hbox, FALSE, FALSE, 0);
+
+  if (left_side) {
+    titlebar_left_buttons_hbox_ = buttons_hbox;
+    top_padding_left_ = top_padding;
+  } else {
+    titlebar_right_buttons_hbox_ = buttons_hbox;
+    top_padding_right_ = top_padding;
+  }
+
+  return buttons_hbox;
 }
 
 CustomDrawButton* BrowserTitlebar::BuildTitlebarButton(int image,
@@ -299,16 +461,23 @@ CustomDrawButton* BrowserTitlebar::BuildTitlebarButton(int image,
   std::string localized_tooltip = l10n_util::GetStringUTF8(tooltip);
   gtk_widget_set_tooltip_text(button->widget(),
                               localized_tooltip.c_str());
-  gtk_box_pack_end(GTK_BOX(box), button->widget(), FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(box), button->widget(), FALSE, FALSE, 0);
   return button;
 }
 
 void BrowserTitlebar::UpdateCustomFrame(bool use_custom_frame) {
   using_custom_frame_ = use_custom_frame;
-  if (use_custom_frame)
-    gtk_widget_show(titlebar_buttons_box_);
-  else
-    gtk_widget_hide(titlebar_buttons_box_);
+  if (use_custom_frame) {
+    if (titlebar_left_buttons_vbox_)
+      gtk_widget_show(titlebar_left_buttons_vbox_);
+    if (titlebar_right_buttons_vbox_)
+      gtk_widget_show(titlebar_right_buttons_vbox_);
+  } else {
+    if (titlebar_left_buttons_vbox_)
+      gtk_widget_hide(titlebar_left_buttons_vbox_);
+    if (titlebar_right_buttons_vbox_)
+      gtk_widget_hide(titlebar_right_buttons_vbox_);
+  }
   UpdateTitlebarAlignment();
 }
 
@@ -372,20 +541,30 @@ void BrowserTitlebar::UpdateThrobber(TabContents* tab_contents) {
 
 void BrowserTitlebar::UpdateTitlebarAlignment() {
   if (browser_window_->browser()->type() == Browser::TYPE_NORMAL) {
-    if (using_custom_frame_ && !browser_window_->IsMaximized()) {
-      gtk_alignment_set_padding(GTK_ALIGNMENT(titlebar_alignment_),
-          kTitlebarHeight, 0, kTabStripLeftPadding, 0);
-    } else {
-      gtk_alignment_set_padding(GTK_ALIGNMENT(titlebar_alignment_), 0, 0,
-                                kTabStripLeftPadding, 0);
-    }
+    int top_padding = 0;
+    int side_padding = 0;
+    int vertical_offset = kNormalVerticalOffset;
 
     if (using_custom_frame_) {
-      browser_window_->tabstrip()->SetVerticalOffset(
-          browser_window_->IsMaximized() ? 0 : kNormalVerticalOffset);
-    } else {
-      browser_window_->tabstrip()->SetVerticalOffset(kNormalVerticalOffset);
+      if (!browser_window_->IsMaximized()) {
+        top_padding = kTitlebarHeight;
+      } else if (using_custom_frame_ && browser_window_->IsMaximized()) {
+        vertical_offset = 0;
+        side_padding = kMaximizedTabstripPadding;
+      }
     }
+
+    int right_padding = 0;
+    int left_padding = kTabStripLeftPadding;
+    if (titlebar_right_buttons_hbox_)
+      right_padding = side_padding;
+    if (titlebar_left_buttons_hbox_)
+      left_padding = side_padding;
+
+    gtk_alignment_set_padding(GTK_ALIGNMENT(titlebar_alignment_),
+                              top_padding, 0,
+                              left_padding, right_padding);
+    browser_window_->tabstrip()->SetVerticalOffset(vertical_offset);
   } else {
     if (using_custom_frame_ && !browser_window_->IsFullscreen()) {
       gtk_alignment_set_padding(GTK_ALIGNMENT(titlebar_alignment_),
@@ -406,52 +585,64 @@ void BrowserTitlebar::UpdateTitlebarAlignment() {
     close_button_req.height += kButtonOuterPadding;
     minimize_button_req.height += kButtonOuterPadding;
     restore_button_req.height += kButtonOuterPadding;
-    gtk_widget_hide(top_padding_);
+    if (top_padding_left_)
+      gtk_widget_hide(top_padding_left_);
+    if (top_padding_right_)
+      gtk_widget_hide(top_padding_right_);
   } else {
-    gtk_widget_show(top_padding_);
+    if (top_padding_left_)
+      gtk_widget_show(top_padding_left_);
+    if (top_padding_right_)
+      gtk_widget_show(top_padding_right_);
   }
-  gtk_widget_set_size_request(close_button_->widget(),
-                              close_button_req.width, close_button_req.height);
-  gtk_widget_set_size_request(minimize_button_->widget(),
-                              minimize_button_req.width,
-                              minimize_button_req.height);
-  gtk_widget_set_size_request(restore_button_->widget(),
-                              restore_button_req.width,
-                              restore_button_req.height);
+  if (close_button_.get()) {
+    gtk_widget_set_size_request(close_button_->widget(),
+                                close_button_req.width,
+                                close_button_req.height);
+  }
+  if (minimize_button_.get()) {
+    gtk_widget_set_size_request(minimize_button_->widget(),
+                                minimize_button_req.width,
+                                minimize_button_req.height);
+  }
+  if (maximize_button_.get()) {
+    gtk_widget_set_size_request(restore_button_->widget(),
+                                restore_button_req.width,
+                                restore_button_req.height);
+  }
 }
 
 void BrowserTitlebar::UpdateTextColor() {
-  if (app_mode_title_) {
-    if (theme_provider_ && theme_provider_->UseGtkTheme()) {
-      // We don't really have any good options here.
-      //
-      // Colors from window manager themes aren't exposed in GTK; the window
-      // manager is a separate component and when there is information sharing
-      // (in the case of metacity), it's one way where the window manager reads
-      // data from the GTK theme (which allows us to do a decent job with
-      // picking the frame color).
-      //
-      // We probably won't match in the majority of cases, but we can at the
-      // very least make things legible. The default metacity and xfwm themes
-      // on ubuntu have white text hardcoded. Determine whether black or white
-      // has more luminosity contrast and then set that color as the text
-      // color.
-      GdkColor frame_color;
-      if (window_has_focus_) {
-        frame_color = theme_provider_->GetGdkColor(
+  if (!app_mode_title_)
+    return;
+
+  if (theme_provider_ && theme_provider_->UseGtkTheme()) {
+    // We don't really have any good options here.
+    //
+    // Colors from window manager themes aren't exposed in GTK; the window
+    // manager is a separate component and when there is information sharing
+    // (in the case of metacity), it's one way where the window manager reads
+    // data from the GTK theme (which allows us to do a decent job with
+    // picking the frame color).
+    //
+    // We probably won't match in the majority of cases, but we can at the
+    // very least make things legible. The default metacity and xfwm themes
+    // on ubuntu have white text hardcoded. Determine whether black or white
+    // has more luminosity contrast and then set that color as the text
+    // color.
+    GdkColor frame_color;
+    if (window_has_focus_) {
+      frame_color = theme_provider_->GetGdkColor(
           BrowserThemeProvider::COLOR_FRAME);
-      } else {
-        frame_color = theme_provider_->GetGdkColor(
-          BrowserThemeProvider::COLOR_FRAME_INACTIVE);
-      }
-      GdkColor text_color = PickLuminosityContrastingColor(
-          &frame_color, &gfx::kGdkWhite, &gfx::kGdkBlack);
-      gtk_util::SetLabelColor(app_mode_title_, &text_color);
     } else {
-      // TODO(tc): Seems like this color should be themable, but it's hardcoded
-      // to white on Windows.  http://crbug.com/18093
-      gtk_util::SetLabelColor(app_mode_title_, &gfx::kGdkWhite);
+      frame_color = theme_provider_->GetGdkColor(
+          BrowserThemeProvider::COLOR_FRAME_INACTIVE);
     }
+    GdkColor text_color = PickLuminosityContrastingColor(
+        &frame_color, &gfx::kGdkWhite, &gfx::kGdkBlack);
+    gtk_util::SetLabelColor(app_mode_title_, &text_color);
+  } else {
+    gtk_util::SetLabelColor(app_mode_title_, &gfx::kGdkWhite);
   }
 }
 
@@ -495,27 +686,28 @@ void BrowserTitlebar::MaximizeButtonClicked() {
   gdk_event_free(event);
 }
 
-// static
-gboolean BrowserTitlebar::OnWindowStateChanged(GtkWindow* window,
-    GdkEventWindowState* event, BrowserTitlebar* titlebar) {
-  // Update the maximize/restore button.
-  if (titlebar->browser_window_->IsMaximized()) {
-    gtk_widget_hide(titlebar->maximize_button_->widget());
-    gtk_widget_show(titlebar->restore_button_->widget());
-  } else {
-    gtk_widget_hide(titlebar->restore_button_->widget());
-    gtk_widget_show(titlebar->maximize_button_->widget());
+void BrowserTitlebar::UpdateMaximizeRestoreVisibility() {
+  if (maximize_button_.get()) {
+    if (browser_window_->IsMaximized()) {
+      gtk_widget_hide(maximize_button_->widget());
+      gtk_widget_show(restore_button_->widget());
+    } else {
+      gtk_widget_hide(restore_button_->widget());
+      gtk_widget_show(maximize_button_->widget());
+    }
   }
-  titlebar->UpdateTitlebarAlignment();
-  titlebar->UpdateTextColor();
+}
+
+gboolean BrowserTitlebar::OnWindowStateChanged(GtkWindow* window,
+                                               GdkEventWindowState* event) {
+  UpdateMaximizeRestoreVisibility();
+  UpdateTitlebarAlignment();
+  UpdateTextColor();
   return FALSE;
 }
 
-// static
-gboolean BrowserTitlebar::OnScroll(GtkWidget* widget, GdkEventScroll* event,
-                                   BrowserTitlebar* titlebar) {
-  TabStripModel* tabstrip_model =
-      titlebar->browser_window_->browser()->tabstrip_model();
+gboolean BrowserTitlebar::OnScroll(GtkWidget* widget, GdkEventScroll* event) {
+  TabStripModel* tabstrip_model = browser_window_->browser()->tabstrip_model();
   int index = tabstrip_model->selected_index();
   if (event->direction == GDK_SCROLL_LEFT ||
       event->direction == GDK_SCROLL_UP) {
@@ -529,25 +721,23 @@ gboolean BrowserTitlebar::OnScroll(GtkWidget* widget, GdkEventScroll* event,
 
 // static
 void BrowserTitlebar::OnButtonClicked(GtkWidget* button) {
-  if (close_button_->widget() == button) {
+  if (close_button_.get() && close_button_->widget() == button) {
     browser_window_->Close();
-  } else if (restore_button_->widget() == button) {
+  } else if (restore_button_.get() && restore_button_->widget() == button) {
     browser_window_->UnMaximize();
-  } else if (maximize_button_->widget() == button) {
+  } else if (maximize_button_.get() && maximize_button_->widget() == button) {
     MaximizeButtonClicked();
-  } else if (minimize_button_->widget() == button) {
+  } else if (minimize_button_.get() && minimize_button_->widget() == button) {
     gtk_window_iconify(window_);
   }
 }
 
-// static
 gboolean BrowserTitlebar::OnButtonPressed(GtkWidget* widget,
-                                          GdkEventButton* event,
-                                          BrowserTitlebar* titlebar) {
+                                          GdkEventButton* event) {
   if (event->button != 1)
     return FALSE;
 
-  titlebar->ShowFaviconMenu(event);
+  ShowFaviconMenu(event);
   return TRUE;
 }
 

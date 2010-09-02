@@ -41,15 +41,24 @@ using browser_sync::DataTypeController;
 using browser_sync::ModelAssociator;
 using browser_sync::SyncBackendHost;
 using browser_sync::SyncBackendHostMock;
+using browser_sync::UnrecoverableErrorHandler;
 using testing::_;
 using testing::Return;
+using testing::WithArg;
+using testing::Invoke;
 
-class TestBookmarkModelAssociator :
-    public TestModelAssociator<BookmarkModelAssociator> {
+class TestBookmarkModelAssociator : public BookmarkModelAssociator {
  public:
-  explicit TestBookmarkModelAssociator(ProfileSyncService* service)
-      : TestModelAssociator<BookmarkModelAssociator>(service, service) {
+  TestBookmarkModelAssociator(ProfileSyncService* service,
+      UnrecoverableErrorHandler* persist_ids_error_handler)
+      : BookmarkModelAssociator(service, persist_ids_error_handler),
+        helper_(new TestModelAssociatorHelper()) {
   }
+  virtual bool GetSyncIdForTaggedNode(const std::string& tag, int64* sync_id) {
+    return helper_->GetSyncIdForTaggedNode(this, tag, sync_id);
+  }
+ private:
+  scoped_ptr<TestModelAssociatorHelper> helper_;
 };
 
 // FakeServerChange constructs a list of sync_api::ChangeRecords while modifying
@@ -232,28 +241,26 @@ class ProfileSyncServiceTest : public testing::Test {
     if (!service_.get()) {
       service_.reset(new TestProfileSyncService(&factory_,
                                                 profile_.get(),
-                                                false));
+                                                false, false, NULL));
 
       // Register the bookmark data type.
-      model_associator_ = new TestBookmarkModelAssociator(service_.get());
+      model_associator_ = new TestBookmarkModelAssociator(service_.get(),
+                                                          service_.get());
       change_processor_ = new BookmarkChangeProcessor(model_associator_,
                                                       service_.get());
       EXPECT_CALL(factory_, CreateBookmarkSyncComponents(_, _)).
           WillOnce(Return(ProfileSyncFactory::SyncComponents(
               model_associator_, change_processor_)));
       EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).
-          WillOnce(MakeDataTypeManager(&backend_mock_));
+          WillOnce(ReturnNewDataTypeManager());
 
       service_->RegisterDataTypeController(
           new browser_sync::BookmarkDataTypeController(&factory_,
                                                        profile_.get(),
                                                        service_.get()));
       service_->Initialize();
+      MessageLoop::current()->Run();
     }
-    // The service may have already started sync automatically if it's already
-    // enabled by user once.
-    if (!service_->HasSyncSetupCompleted())
-      service_->EnableForUser();
   }
 
   void StopSyncService(SaveOption save) {
@@ -428,7 +435,6 @@ class ProfileSyncServiceTest : public testing::Test {
   scoped_ptr<TestProfileSyncService> service_;
   scoped_ptr<TestingProfile> profile_;
   ProfileSyncFactoryMock factory_;
-  SyncBackendHostMock backend_mock_;
   BookmarkModel* model_;
   TestBookmarkModelAssociator* model_associator_;
   BookmarkChangeProcessor* change_processor_;
@@ -438,6 +444,12 @@ TEST_F(ProfileSyncServiceTest, InitialState) {
   LoadBookmarkModel(DELETE_EXISTING_STORAGE, DONT_SAVE_TO_STORAGE);
   StartSyncService();
 
+  EXPECT_TRUE(
+    service_->sync_service_url_.spec() ==
+        ProfileSyncService::kSyncServerUrl ||
+    service_->sync_service_url_.spec() ==
+        ProfileSyncService::kDevServerUrl);
+
   EXPECT_TRUE(other_bookmarks_id());
   EXPECT_TRUE(bookmark_bar_id());
 
@@ -445,9 +457,11 @@ TEST_F(ProfileSyncServiceTest, InitialState) {
 }
 
 TEST_F(ProfileSyncServiceTest, AbortedByShutdown) {
-  service_.reset(new TestProfileSyncService(&factory_, profile_.get(), false));
+  service_.reset(new TestProfileSyncService(&factory_, profile_.get(),
+                                            false, true, NULL));
+  service_->set_num_expected_resumes(0);
   EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).
-      WillOnce(MakeDataTypeManager(&backend_mock_));
+      WillOnce(ReturnNewDataTypeManager());
   EXPECT_CALL(factory_, CreateBookmarkSyncComponents(_, _)).Times(0);
   service_->RegisterDataTypeController(
       new browser_sync::BookmarkDataTypeController(&factory_,
@@ -1299,17 +1313,9 @@ TEST_F(ProfileSyncServiceTestWithData, RecoverAfterDeletingSyncDataDirectory) {
   ExpectModelMatch();
 }
 
-#if defined(OS_MACOSX)
-// TODO(dantasse) This test fails on the mac. See http://crbug.com/33443
-#define MAYBE_TestStartupWithOldSyncData DISABLED_TestStartupWithOldSyncData
-#else
-#define MAYBE_TestStartupWithOldSyncData TestStartupWithOldSyncData
-#endif
-
 // Make sure that things still work if sync is not enabled, but some old sync
 // databases are lingering in the "Sync Data" folder.
-
-TEST_F(ProfileSyncServiceTestWithData, MAYBE_TestStartupWithOldSyncData) {
+TEST_F(ProfileSyncServiceTestWithData, TestStartupWithOldSyncData) {
   const char* nonsense1 = "reginald";
   const char* nonsense2 = "beartato";
   const char* nonsense3 = "harrison";
@@ -1326,17 +1332,19 @@ TEST_F(ProfileSyncServiceTestWithData, MAYBE_TestStartupWithOldSyncData) {
   LoadBookmarkModel(LOAD_FROM_STORAGE, SAVE_TO_STORAGE);
   if (!service_.get()) {
     service_.reset(
-        new TestProfileSyncService(&factory_, profile_.get(), false));
+        new TestProfileSyncService(&factory_, profile_.get(),
+                                   false, true, NULL));
     profile_->GetPrefs()->SetBoolean(prefs::kSyncHasSetupCompleted, false);
 
-    model_associator_ = new TestBookmarkModelAssociator(service_.get());
+    model_associator_ = new TestBookmarkModelAssociator(service_.get(),
+                                                        service_.get());
     change_processor_ = new BookmarkChangeProcessor(model_associator_,
                                                     service_.get());
     EXPECT_CALL(factory_, CreateBookmarkSyncComponents(_, _)).
         WillOnce(Return(ProfileSyncFactory::SyncComponents(
             model_associator_, change_processor_)));
     EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).
-        WillOnce(MakeDataTypeManager(&backend_mock_));
+        WillOnce(ReturnNewDataTypeManager());
 
     service_->RegisterDataTypeController(
         new browser_sync::BookmarkDataTypeController(&factory_,
@@ -1351,7 +1359,12 @@ TEST_F(ProfileSyncServiceTestWithData, MAYBE_TestStartupWithOldSyncData) {
   ASSERT_FALSE(service_->HasSyncSetupCompleted());
 
   // This will actually start up the sync service.
-  service_->EnableForUser();
+  service_->EnableForUser(NULL);
+  syncable::ModelTypeSet set;
+  set.insert(syncable::BOOKMARKS);
+  service_->OnUserChoseDatatypes(false, set);
+
+  MessageLoop::current()->Run();
 
   // Stop the service so we can read the new Sync Data files that were created.
   service_.reset();

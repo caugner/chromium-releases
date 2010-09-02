@@ -6,11 +6,10 @@
   'target_defaults': {
     'variables': {
       'base_target': 0,
+      'base_extra_target': 0,
     },
     'target_conditions': [
-      # This part is shared between the targets defined below. Only files and
-      # settings relevant for building the Win64 target should be added here.
-      # All the rest should be added to the 'base' target below.
+      # This part is shared between the targets defined below.
       ['base_target==1', {
         'sources': [
           '../build/build_config.h',
@@ -71,23 +70,29 @@
           'event_trace_controller_win.h',
           'event_trace_provider_win.cc',
           'event_trace_provider_win.h',
+          'event_synthesis_gtk.cc',
+          'event_synthesis_gtk.h',
           'file_path.cc',
           'file_path.h',
           'file_util.cc',
           'file_util.h',
           'file_util_deprecated.h',
-          'file_util_linux.cc',
           'file_util_mac.mm',
           'file_util_posix.cc',
           'file_util_win.cc',
-          'file_version_info.cc',
           'file_version_info.h',
+          'file_version_info_mac.h',
           'file_version_info_mac.mm',
+          'file_version_info_win.cc',
+          'file_version_info_win.h',
           'fix_wp64.h',
           'float_util.h',
           'foundation_utils_mac.h',
           'global_descriptors_posix.cc',
           'global_descriptors_posix.h',
+          'gtest_prod_util.h',
+          'gtk_util.cc',
+          'gtk_util.h',
           'hash_tables.h',
           'histogram.cc',
           'histogram.h',
@@ -116,13 +121,16 @@
           'memory_debug.h',
           'message_loop.cc',
           'message_loop.h',
+          'message_loop_proxy.h',
+          'message_loop_proxy_impl.cc',
+          'message_loop_proxy_impl.h',
           'message_pump.h',
           'message_pump_default.cc',
           'message_pump_default.h',
           'message_pump_win.cc',
           'message_pump_win.h',
           'mime_util.h',
-          'mime_util_linux.cc',
+          'mime_util_xdg.cc',
           'move.h',
           'native_library.h',
           'native_library_linux.cc',
@@ -152,6 +160,7 @@
           'process.h',
           'process_linux.cc',
           'process_posix.cc',
+          'process_util.cc',
           'process_util.h',
           'process_util_linux.cc',
           'process_util_mac.mm',
@@ -179,7 +188,6 @@
           'scoped_cftyperef.h',
           'scoped_comptr_win.h',
           'scoped_handle.h',
-          'scoped_handle_gtk.h',
           'scoped_handle_win.h',
           'scoped_nsautorelease_pool.h',
           'scoped_nsautorelease_pool.mm',
@@ -192,8 +200,9 @@
           'scoped_variant_win.cc',
           'scoped_variant_win.h',
           'scoped_vector.h',
-          'sha1.cc',
           'sha1.h',
+          'sha1_portable.cc',
+          'sha1_win.cc',
           'shared_memory.h',
           'shared_memory_posix.cc',
           'shared_memory_win.cc',
@@ -226,7 +235,9 @@
           'sys_string_conversions_linux.cc',
           'sys_string_conversions_mac.mm',
           'sys_string_conversions_win.cc',
+          'task.cc',
           'task.h',
+          'template_util.h',
           'thread.cc',
           'thread.h',
           'thread_collision_warner.cc',
@@ -242,6 +253,7 @@
           'time_win.cc',
           'timer.cc',
           'timer.h',
+          'trace_event_win.cc',
           'trace_event.cc',
           'trace_event.h',
           'tracked.cc',
@@ -266,6 +278,7 @@
           'waitable_event_win.cc',
           'watchdog.cc',
           'watchdog.h',
+          'weak_ptr.cc',
           'weak_ptr.h',
           'win_util.cc',
           'win_util.h',
@@ -278,6 +291,8 @@
           'worker_pool_mac.h',
           'worker_pool_mac.mm',
           'worker_pool_win.cc',
+          'xdg_util.h',
+          'xdg_util.cc',
         ],
         'include_dirs': [
           '..',
@@ -292,19 +307,21 @@
         'conditions': [
           [ 'OS != "linux" and OS != "freebsd" and OS != "openbsd" and OS != "solaris"', {
               'sources/': [
-                ['exclude', '/xdg_user_dirs/'],
-                ['exclude', '_nss\.cc$'],
+                ['exclude', '/xdg_[^/]*\\.cc$'],
               ],
               'sources!': [
                 'atomicops_internals_x86_gcc.cc',
                 'base_paths_posix.cc',
-                'linux_util.cc',
                 'message_pump_glib.cc',
+                'xdg_util.cc',
               ],
-          },],
+          }],
           [ 'OS != "linux"', {
               'sources!': [
                 # Not automatically excluded by the *linux.cc rules.
+                'gtk_util.cc',
+                'gtk_util.h',
+                'linux_util.cc',
                 'setproctitle_linux.c',
                 'setproctitle_linux.h',
               ],
@@ -320,19 +337,6 @@
               'sources/': [ ['exclude', '_openbsd\\.cc$'] ],
             },
           ],
-          [ 'OS == "mac"', {
-              'sources!': [
-                # TODO(wtc): Remove nss_util.{cc,h} when http://crbug.com/30689
-                # is fixed.
-                'nss_util.cc',
-                'nss_util.h',
-              ],
-          }, {  # OS != "mac"
-              'sources!': [
-                'crypto/cssm_init.cc',
-                'crypto/cssm_init.h',
-              ],
-          },],
           [ 'OS == "win"', {
               'include_dirs': [
                 '<(DEPTH)/third_party/wtl/include',
@@ -341,7 +345,158 @@
                 'event_recorder_stubs.cc',
                 'file_descriptor_shuffle.cc',
                 'message_pump_libevent.cc',
+                # Not using sha1_win.cc because it may have caused a
+                # regression to page cycler moz.
+                'sha1_win.cc',
                 'string16.cc',
+                'trace_event.cc',
+              ],
+          },],
+        ],
+      }],
+      ['base_extra_target==1', {
+        'sources': [
+          'crypto/capi_util.cc',
+          'crypto/capi_util.h',
+          'crypto/cssm_init.cc',
+          'crypto/cssm_init.h',
+          'crypto/encryptor.h',
+          'crypto/encryptor_mac.cc',
+          'crypto/encryptor_nss.cc',
+          'crypto/encryptor_win.cc',
+          'crypto/rsa_private_key.h',
+          'crypto/rsa_private_key.cc',
+          'crypto/rsa_private_key_mac.cc',
+          'crypto/rsa_private_key_nss.cc',
+          'crypto/rsa_private_key_win.cc',
+          'crypto/signature_creator.h',
+          'crypto/signature_creator_mac.cc',
+          'crypto/signature_creator_nss.cc',
+          'crypto/signature_creator_win.cc',
+          'crypto/signature_verifier.h',
+          'crypto/signature_verifier_mac.cc',
+          'crypto/signature_verifier_nss.cc',
+          'crypto/signature_verifier_win.cc',
+          'crypto/symmetric_key.h',
+          'crypto/symmetric_key_mac.cc',
+          'crypto/symmetric_key_nss.cc',
+          'crypto/symmetric_key_win.cc',
+          'third_party/nspr/prcpucfg.h',
+          'third_party/nspr/prcpucfg_win.h',
+          'third_party/nspr/prtypes.h',
+          'third_party/nss/blapi.h',
+          'third_party/nss/blapit.h',
+          'third_party/nss/sha256.h',
+          'third_party/nss/sha512.cc',
+          'third_party/purify/pure.h',
+          'third_party/purify/pure_api.c',
+          'third_party/xdg_user_dirs/xdg_user_dir_lookup.cc',
+          'third_party/xdg_user_dirs/xdg_user_dir_lookup.h',
+          'auto_reset.h',
+          'base64.cc',
+          'base64.h',
+          'base_drag_source.cc',
+          'base_drag_source.h',
+          'base_drop_target.cc',
+          'base_drop_target.h',
+          'data_pack.cc',
+          'event_recorder.cc',
+          'event_recorder.h',
+          'event_recorder_stubs.cc',
+          'field_trial.cc',
+          'field_trial.h',
+          'file_descriptor_shuffle.cc',
+          'file_descriptor_shuffle.h',
+          'hmac.h',
+          'hmac_mac.cc',
+          'hmac_nss.cc',
+          'hmac_win.cc',
+          'image_util.cc',
+          'image_util.h',
+          'json/json_reader.cc',
+          'json/json_reader.h',
+          'json/json_writer.cc',
+          'json/json_writer.h',
+          'json/string_escape.cc',
+          'json/string_escape.h',
+          'keyboard_code_conversion_gtk.cc',
+          'keyboard_code_conversion_gtk.h',
+          'keyboard_codes.h',
+          'keyboard_codes_win.h',
+          'keyboard_codes_posix.h',
+          'linux_util.cc',
+          'linux_util.h',
+          'md5.cc',
+          'md5.h',
+          'message_pump_glib.cc',
+          'message_pump_glib.h',
+          'message_pump_libevent.cc',
+          'message_pump_libevent.h',
+          'message_pump_mac.h',
+          'message_pump_mac.mm',
+          'nsimage_cache_mac.h',
+          'nsimage_cache_mac.mm',
+          'nss_util.cc',
+          'nss_util.h',
+          'setproctitle_linux.c',
+          'setproctitle_linux.h',
+          'sha2.cc',
+          'sha2.h',
+          'string16.cc',
+          'string16.h',
+          'sync_socket.h',
+          'sync_socket_win.cc',
+          'sync_socket_posix.cc',
+          'time_mac.cc',
+          'time_posix.cc',
+          'version.cc',
+          'version.h',
+        ],
+        'conditions': [
+          [ 'OS == "linux" or OS == "freebsd" or OS == "openbsd" or OS == "solaris"', {
+            'conditions': [
+              [ 'chromeos==1', {
+                  'sources/': [ ['include', '_chromeos\\.cc$'] ]
+                },
+              ],
+            ],
+            'defines': [
+              'USE_SYMBOLIZE',
+            ],
+            'cflags': [
+              '-Wno-write-strings',
+            ],
+          }, {  # OS != "linux" and OS != "freebsd" and OS != "openbsd" and OS != "solaris"
+              'sources/': [
+                ['exclude', '/xdg_user_dirs/'],
+                ['exclude', '_nss\.cc$'],
+              ],
+          }],
+          [ 'OS != "mac"', {
+              'sources!': [
+                'crypto/cssm_init.cc',
+                'crypto/cssm_init.h',
+              ],
+          },],
+          [ 'OS != "win"', {
+              'sources!': [
+                'third_party/purify/pure_api.c',
+                'base_drag_source.cc',
+                'base_drop_target.cc',
+                'cpu.cc',
+                'crypto/capi_util.h',
+                'crypto/capi_util.cc',
+                'debug_on_start.cc',
+                'event_recorder.cc',
+                'file_version_info.cc',
+                'iat_patch.cc',
+                'image_util.cc',
+                'object_watcher.cc',
+                'pe_image.cc',
+                'registry.cc',
+                'resource_util.cc',
+                'win_util.cc',
+                'wmi_util.cc',
               ],
           },],
         ],
@@ -355,9 +510,11 @@
       'msvs_guid': '1832A374-8A74-4F9E-B536-69A699B3E165',
       'variables': {
         'base_target': 1,
+        'base_extra_target': 1,
       },
       'dependencies': [
         '../third_party/modp_b64/modp_b64.gyp:modp_b64',
+        'third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
       ],
       # TODO(gregoryd): direct_dependent_settings should be shared with the
       #  64-bit target, but it doesn't work due to a bug in gyp
@@ -366,14 +523,9 @@
           '..',
         ],
       },
-      # Conditions that are not relevant for Win64 build
       'conditions': [
         [ 'OS == "linux" or OS == "freebsd" or OS == "openbsd"', {
           'conditions': [
-            [ 'chromeos==1', {
-                'sources/': [ ['include', '_chromeos\\.cc$'] ]
-              },
-            ],
             [ 'linux_use_tcmalloc==0', {
                 'defines': [
                   'NO_TCMALLOC',
@@ -391,175 +543,56 @@
                 ],
               },
             ],
-            [ 'OS == "linux"', {
-              'link_settings': {
-                'libraries': [
-                  # We need rt for clock_gettime().
-                  '-lrt',
-                  # For 'native_library_linux.cc'
-                  '-ldl',
-                ],
-              },
-            }],
           ],
           'dependencies': [
+            'symbolize',
             '../build/util/build_util.gyp:lastchange',
             '../build/linux/system.gyp:gtk',
             '../build/linux/system.gyp:nss',
-            'symbolize',
             'xdg_mime',
-          ],
-          'defines': [
-            'USE_SYMBOLIZE',
-          ],
-          'cflags': [
-            '-Wno-write-strings',
           ],
           'export_dependent_settings': [
             '../build/linux/system.gyp:gtk',
           ],
         },],
         [ 'OS == "freebsd" or OS == "openbsd"', {
-            'link_settings': {
-              'libraries': [
-                '-L/usr/local/lib -lexecinfo',
+          'link_settings': {
+            'libraries': [
+              '-L/usr/local/lib -lexecinfo',
               ],
             },
           },
         ],
+        [ 'OS == "linux"', {
+          'link_settings': {
+             'libraries': [
+             # We need rt for clock_gettime().
+             '-lrt',
+             # For 'native_library_linux.cc'
+             '-ldl',
+           ],
+         },
+        }],
         [ 'OS == "mac"', {
-            'link_settings': {
-              'libraries': [
-                '$(SDKROOT)/System/Library/Frameworks/AppKit.framework',
-                '$(SDKROOT)/System/Library/Frameworks/Carbon.framework',
-                '$(SDKROOT)/System/Library/Frameworks/CoreFoundation.framework',
-                '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
-                '$(SDKROOT)/System/Library/Frameworks/IOKit.framework',
-                '$(SDKROOT)/System/Library/Frameworks/Security.framework',
-              ],
-            },
+          'link_settings': {
+            'libraries': [
+              '$(SDKROOT)/System/Library/Frameworks/AppKit.framework',
+              '$(SDKROOT)/System/Library/Frameworks/Carbon.framework',
+              '$(SDKROOT)/System/Library/Frameworks/CoreFoundation.framework',
+              '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
+              '$(SDKROOT)/System/Library/Frameworks/IOKit.framework',
+              '$(SDKROOT)/System/Library/Frameworks/Security.framework',
+            ],
+          },
         },],
-        [ 'OS == "win"', {
+        [ 'OS == "mac" or OS == "win"', {
             'dependencies': [
               '../third_party/nss/nss.gyp:nss',
             ],
-        }, {  # OS != "win"
-            'dependencies': ['../third_party/libevent/libevent.gyp:libevent'],
-            'sources!': [
-              'third_party/purify/pure_api.c',
-              'base_drag_source.cc',
-              'base_drop_target.cc',
-              'cpu.cc',
-              'debug_on_start.cc',
-              'event_recorder.cc',
-              'file_version_info.cc',
-              'iat_patch.cc',
-              'image_util.cc',
-              'object_watcher.cc',
-              'pe_image.cc',
-              'registry.cc',
-              'resource_util.cc',
-              'win_util.cc',
-              'wmi_util.cc',
-            ],
         },],
-      ],
-      'sources': [
-        'crypto/cssm_init.cc',
-        'crypto/cssm_init.h',
-        'crypto/encryptor.h',
-        'crypto/encryptor_mac.cc',
-        'crypto/encryptor_nss.cc',
-        'crypto/encryptor_win.cc',
-        'crypto/rsa_private_key.h',
-        'crypto/rsa_private_key.cc',
-        'crypto/rsa_private_key_mac.cc',
-        'crypto/rsa_private_key_nss.cc',
-        'crypto/rsa_private_key_win.cc',
-        'crypto/signature_creator.h',
-        'crypto/signature_creator_mac.cc',
-        'crypto/signature_creator_nss.cc',
-        'crypto/signature_creator_win.cc',
-        'crypto/signature_verifier.h',
-        'crypto/signature_verifier_mac.cc',
-        'crypto/signature_verifier_nss.cc',
-        'crypto/signature_verifier_win.cc',
-        'crypto/symmetric_key.h',
-        'crypto/symmetric_key_mac.cc',
-        'crypto/symmetric_key_nss.cc',
-        'crypto/symmetric_key_win.cc',
-        'third_party/nspr/prcpucfg.h',
-        'third_party/nspr/prcpucfg_win.h',
-        'third_party/nspr/prtypes.h',
-        'third_party/nss/blapi.h',
-        'third_party/nss/blapit.h',
-        'third_party/nss/sha256.h',
-        'third_party/nss/sha512.cc',
-        'third_party/purify/pure.h',
-        'third_party/purify/pure_api.c',
-        'third_party/xdg_user_dirs/xdg_user_dir_lookup.cc',
-        'third_party/xdg_user_dirs/xdg_user_dir_lookup.h',
-        'auto_reset.h',
-        'base64.cc',
-        'base64.h',
-        'base_drag_source.cc',
-        'base_drag_source.h',
-        'base_drop_target.cc',
-        'base_drop_target.h',
-        'data_pack.cc',
-        'dynamic_annotations.h',
-        'dynamic_annotations.cc',
-        'event_recorder.cc',
-        'event_recorder.h',
-        'event_recorder_stubs.cc',
-        'field_trial.cc',
-        'field_trial.h',
-        'file_descriptor_shuffle.cc',
-        'file_descriptor_shuffle.h',
-        'hmac.h',
-        'hmac_mac.cc',
-        'hmac_nss.cc',
-        'hmac_win.cc',
-        'image_util.cc',
-        'image_util.h',
-        'json/json_reader.cc',
-        'json/json_reader.h',
-        'json/json_writer.cc',
-        'json/json_writer.h',
-        'json/string_escape.cc',
-        'json/string_escape.h',
-        'keyboard_code_conversion_gtk.cc',
-        'keyboard_code_conversion_gtk.h',
-        'keyboard_codes.h',
-        'keyboard_codes_win.h',
-        'keyboard_codes_posix.h',
-        'linux_util.cc',
-        'linux_util.h',
-        'md5.cc',
-        'md5.h',
-        'message_pump_glib.cc',
-        'message_pump_glib.h',
-        'message_pump_libevent.cc',
-        'message_pump_libevent.h',
-        'message_pump_mac.h',
-        'message_pump_mac.mm',
-        'nsimage_cache_mac.h',
-        'nsimage_cache_mac.mm',
-        'nss_util.cc',
-        'nss_util.h',
-        'setproctitle_linux.c',
-        'setproctitle_linux.h',
-        'sha2.cc',
-        'sha2.h',
-        'string16.cc',
-        'string16.h',
-        'sync_socket.h',
-        'sync_socket_win.cc',
-        'sync_socket_posix.cc',
-        'time_mac.cc',
-        'time_posix.cc',
-        'version.cc',
-        'version.h',
+        [ 'OS != "win"', {
+            'dependencies': ['../third_party/libevent/libevent.gyp:libevent'],
+        },],
       ],
     },
   ],
@@ -573,6 +606,9 @@
           'variables': {
             'base_target': 1,
           },
+          'dependencies': [
+            'third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations_win64',
+          ],
           # TODO(gregoryd): direct_dependent_settings should be shared with the
           # 32-bit target, but it doesn't work due to a bug in gyp
           'direct_dependent_settings': {
@@ -591,6 +627,62 @@
               'msvs_target_platform': 'x64',
             },
           },
+        },
+      ],
+    }],
+    [ 'OS == "linux" and internal_pdf', {
+      'targets': [
+        {
+          'target_name': 'base_fpic',
+          'type': '<(library)',
+          'variables': {
+            'base_target': 1,
+            'base_extra_target': 1,
+          },
+          'cflags': [
+            '-fPIC',
+          ],
+          # Official builds set -gstabs, which fails when building with -fPIC.
+          # It's useless on 64 bits anyways because breakpad doesn't work then.
+          'cflags!': [
+            '-gstabs',
+          ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '..',
+            ],
+          },
+          'conditions': [
+            [ 'OS == "linux" or OS == "freebsd" or OS == "openbsd"', {
+              'dependencies': [
+                '../build/util/build_util.gyp:lastchange',
+                '../build/linux/system.gyp:gtk',
+                '../build/linux/system.gyp:nss',
+                'xdg_mime',
+              ],
+              'export_dependent_settings': [
+                '../build/linux/system.gyp:gtk',
+              ],
+            },],
+            ['OS == "linux"', {
+              'link_settings': {
+                'libraries': [
+                  # We need rt for clock_gettime().
+                  '-lrt',
+                  # For 'native_library_linux.cc'
+                  '-ldl',
+                ],
+              },
+            }],
+            [ 'OS == "mac" or OS == "win"', {
+                'dependencies': [
+                  '../third_party/nss/nss.gyp:nss',
+                ],
+            },],
+            [ 'OS != "win"', {
+                'dependencies': ['../third_party/libevent/libevent.gyp:libevent'],
+            },],
+          ],
         },
       ],
     }],

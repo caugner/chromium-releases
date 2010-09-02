@@ -121,7 +121,8 @@ bool importSettingsDialogVisible = false;
   NSMutableArray* browserProfiles =
       [NSMutableArray arrayWithCapacity:profilesCount];
   for (int i = 0; i < profilesCount; ++i) {
-    const importer::ProfileInfo& sourceProfile = importerList.GetSourceProfileInfoAt(i);
+    const importer::ProfileInfo& sourceProfile =
+        importerList.GetSourceProfileInfoAt(i);
     NSString* browserName =
         base::SysWideToNSString(sourceProfile.description);
     uint16 browserServices = sourceProfile.services_supported;
@@ -178,7 +179,7 @@ bool importSettingsDialogVisible = false;
   int16 servicesToImport = static_cast<int16>(items & [self servicesToImport]);
   if (servicesToImport) {
     if (profile_) {
-      ImporterHost* importerHost = new ImporterHost;
+      ImporterHost* importerHost = new ExternalProcessImporterHost;
       // Note that a side effect of the following call is to cause the
       // importerHost to be disposed once the import has completed.
       StartImportingWithUI(nil, servicesToImport, importerHost,

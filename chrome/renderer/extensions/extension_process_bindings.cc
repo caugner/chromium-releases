@@ -11,10 +11,12 @@
 
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
+#include "base/scoped_ptr.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
@@ -23,6 +25,7 @@
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/renderer/user_script_slave.h"
+#include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
 #include "grit/common_resources.h"
 #include "grit/renderer_resources.h"
@@ -68,6 +71,22 @@ const char* kExtensionDeps[] = {
   ExtensionApiTestV8Extension::kName,
 };
 
+// A list of the API packages which have no associated permission.
+// TODO(erikkay) It might be nice if for consistency we could merge these with
+// the permissions list, or at least have them in one place.
+const char* kNonPermissionExtensionPackages[] = {
+  "extension",
+  // TODO(erikkay): We're inconsistent about the the package name in the events
+  // for pageAction and browserAction.
+  "pageAction",
+  "pageActions",
+  "browserAction",
+  "browserActions",
+  "i18n",
+  "devtools",
+  "test"
+};
+
 struct SingletonData {
   std::set<std::string> function_names_;
   PageActionIdMap page_action_ids_;
@@ -87,7 +106,7 @@ static PermissionsMap* GetPermissionsMap(const std::string& extension_id) {
   return &Singleton<SingletonData>()->permissions_[extension_id];
 }
 
-static std::map<std::string, bool>* GetIncognitoEnabledMap() {
+static IncognitoEnabledMap* GetIncognitoEnabledMap() {
   return &Singleton<SingletonData>()->incognito_enabled_map_;
 }
 
@@ -138,8 +157,9 @@ class ExtensionViewAccumulator : public RenderViewVisitor {
     // match that of the arguments to the accumulator.
     // See bug:  http://crbug.com/29646
     if (!(view_type_ == ViewType::EXTENSION_POPUP &&
-          render_view->browser_window_id() == -1)) {
-      if (browser_window_id_ != -1 &&
+          render_view->browser_window_id() ==
+               extension_misc::kUnknownWindowId)) {
+      if (browser_window_id_ != extension_misc::kUnknownWindowId &&
           render_view->browser_window_id() != browser_window_id_) {
         return true;
       }
@@ -246,6 +266,8 @@ class ExtensionImpl : public ExtensionBase {
       return v8::FunctionTemplate::New(GetPopupParentWindow);
     } else if (name->Equals(v8::String::New("SetExtensionActionIcon"))) {
       return v8::FunctionTemplate::New(SetExtensionActionIcon);
+    } else if (name->Equals(v8::String::New("IsExtensionProcess"))) {
+      return v8::FunctionTemplate::New(IsExtensionProcess);
     }
 
     return ExtensionBase::GetNativeFunction(name);
@@ -294,7 +316,7 @@ class ExtensionImpl : public ExtensionBase {
 
     if (0 == popup_matcher.views()->Length())
       return v8::Undefined();
-    DCHECK(popup_matcher.views()->Has(0));
+    DCHECK(1 == popup_matcher.views()->Length());
 
     // Return the first view found.
     return popup_matcher.views()->Get(v8::Integer::New(0));
@@ -315,8 +337,8 @@ class ExtensionImpl : public ExtensionBase {
     if (!args[0]->IsInt32() || !args[1]->IsString())
       return v8::Undefined();
 
-    // |browser_window_id| == -1 means getting views attached to any browser
-    // window.
+    // |browser_window_id| == extension_misc::kUnknownWindowId means getting
+    // views attached to any browser window.
     int browser_window_id = args[0]->Int32Value();
 
     std::string view_type_string = *v8::String::Utf8Value(args[1]->ToString());
@@ -404,7 +426,7 @@ class ExtensionImpl : public ExtensionBase {
   // Common code for starting an API request to the browser. |value_args|
   // contains the request's arguments.
   static v8::Handle<v8::Value> StartRequestCommon(
-      const v8::Arguments& args, Value* value_args) {
+      const v8::Arguments& args, const ListValue& value_args) {
     // Get the current RenderView so that we can send a routed IPC message from
     // the correct source.
     RenderView* renderview = bindings_utils::GetRenderViewForCurrentContext();
@@ -429,18 +451,13 @@ class ExtensionImpl : public ExtensionBase {
     int request_id = args[2]->Int32Value();
     bool has_callback = args[3]->BooleanValue();
 
-    // Put the args in a 1-element list for easier serialization. Maybe all
-    // requests should have a list of args?
-    ListValue args_holder;
-    args_holder.Append(value_args);
-
     v8::Persistent<v8::Context> current_context =
         v8::Persistent<v8::Context>::New(v8::Context::GetCurrent());
     DCHECK(!current_context.IsEmpty());
     GetPendingRequestMap()[request_id].reset(new PendingRequest(
         current_context, name));
 
-    renderview->SendExtensionRequest(name, args_holder, source_url,
+    renderview->SendExtensionRequest(name, value_args, source_url,
                                      request_id, has_callback);
 
     return v8::Undefined();
@@ -451,16 +468,18 @@ class ExtensionImpl : public ExtensionBase {
   static v8::Handle<v8::Value> StartRequest(const v8::Arguments& args) {
     std::string str_args = *v8::String::Utf8Value(args[1]);
     base::JSONReader reader;
-    Value* value_args = reader.JsonToValue(str_args, false, false);
+    scoped_ptr<Value> value_args;
+    value_args.reset(reader.JsonToValue(str_args, false, false));
 
     // Since we do the serialization in the v8 extension, we should always get
     // valid JSON.
-    if (!value_args) {
+    if (!value_args.get() || !value_args->IsType(Value::TYPE_LIST)) {
       NOTREACHED() << "Invalid JSON passed to StartRequest.";
       return v8::Undefined();
     }
 
-    return StartRequestCommon(args, value_args);
+    return StartRequestCommon(args, static_cast<const ListValue&>(
+        *value_args.get()));
   }
 
   // A special request for setting the extension action icon. This function
@@ -468,7 +487,9 @@ class ExtensionImpl : public ExtensionBase {
   // before sending the request to the browser.
   static v8::Handle<v8::Value> SetExtensionActionIcon(
       const v8::Arguments& args) {
-    v8::Local<v8::Object> details = args[1]->ToObject();
+    v8::Local<v8::Object> extension_args = args[1]->ToObject();
+    v8::Local<v8::Object> details =
+        extension_args->Get(v8::String::New("0"))->ToObject();
     v8::Local<v8::Object> image_data =
         details->Get(v8::String::New("imageData"))->ToObject();
     v8::Local<v8::Object> data =
@@ -511,7 +532,10 @@ class ExtensionImpl : public ExtensionBase {
                        details->Get(v8::String::New("tabId"))->Int32Value());
     }
 
-    return StartRequestCommon(args, dict);
+    ListValue list_value;
+    list_value.Append(dict);
+
+    return StartRequestCommon(args, list_value);
   }
 
   static v8::Handle<v8::Value> GetRenderViewId(const v8::Arguments& args) {
@@ -519,6 +543,13 @@ class ExtensionImpl : public ExtensionBase {
     if (!renderview)
       return v8::Undefined();
     return v8::Integer::New(renderview->routing_id());
+  }
+
+  static v8::Handle<v8::Value> IsExtensionProcess(const v8::Arguments& args) {
+    bool retval = false;
+    if (EventBindings::GetRenderThread())
+      retval = EventBindings::GetRenderThread()->IsExtensionProcess();
+    return v8::Boolean::New(retval);
   }
 };
 
@@ -613,35 +644,54 @@ void ExtensionProcessBindings::SetHostPermissions(
     const GURL& extension_url,
     const std::vector<URLPattern>& permissions) {
   for (size_t i = 0; i < permissions.size(); ++i) {
-    WebSecurityPolicy::whiteListAccessFromOrigin(
-        extension_url,
-        WebKit::WebString::fromUTF8(permissions[i].scheme()),
-        WebKit::WebString::fromUTF8(permissions[i].host()),
-        permissions[i].match_subdomains());
+    const char* schemes[] = {
+      chrome::kHttpScheme,
+      chrome::kHttpsScheme,
+      chrome::kFileScheme,
+      chrome::kChromeUIScheme,
+    };
+    for (size_t j = 0; j < arraysize(schemes); ++j) {
+      if (permissions[i].MatchesScheme(schemes[j])) {
+        WebSecurityPolicy::addOriginAccessWhitelistEntry(
+            extension_url,
+            WebKit::WebString::fromUTF8(schemes[j]),
+            WebKit::WebString::fromUTF8(permissions[i].host()),
+            permissions[i].match_subdomains());
+      }
+    }
   }
-}
-
-// Given a name like "tabs.onConnect", return the permission name required
-// to access that API ("tabs" in this example).
-static std::string GetPermissionName(const std::string& function_name) {
-  size_t first_dot = function_name.find('.');
-  std::string permission_name = function_name.substr(0, first_dot);
-  if (permission_name == "windows")
-    return "tabs";  // windows and tabs are the same permission.
-  return permission_name;
 }
 
 // static
 bool ExtensionProcessBindings::CurrentContextHasPermission(
     const std::string& function_name) {
   std::string extension_id = ExtensionImpl::ExtensionIdForCurrentContext();
-  PermissionsMap& permissions_map = *GetPermissionsMap(extension_id);
-  std::string permission_name = GetPermissionName(function_name);
-  PermissionsMap::iterator it = permissions_map.find(permission_name);
+  return HasPermission(extension_id, function_name);
+}
 
-  // We explicitly check if the permission entry is present and false, because
-  // some APIs do not have a required permission entry (ie, "chrome.extension").
-  return (it == permissions_map.end() || it->second);
+// static
+bool ExtensionProcessBindings::HasPermission(const std::string& extension_id,
+                                             const std::string& permission) {
+  std::string permission_name = permission;
+
+  // See if this is a function or event name first and strip out the package.
+  // Functions will be of the form package.function
+  // Events will be of the form package/id or package.optional.stuff
+  size_t separator = permission.find_first_of("./");
+  if (separator != std::string::npos)
+    permission_name = permission.substr(0, separator);
+
+  // windows and tabs are the same permission.
+  if (permission_name == "windows")
+    permission_name = Extension::kTabPermission;
+
+  for (size_t i = 0; i < arraysize(kNonPermissionExtensionPackages); ++i)
+    if (permission_name == kNonPermissionExtensionPackages[i])
+      return true;
+
+  PermissionsMap& permissions_map = *GetPermissionsMap(extension_id);
+  PermissionsMap::iterator it = permissions_map.find(permission_name);
+  return (it != permissions_map.end() && it->second);
 }
 
 // static
@@ -649,10 +699,9 @@ v8::Handle<v8::Value>
     ExtensionProcessBindings::ThrowPermissionDeniedException(
       const std::string& function_name) {
   static const char kMessage[] =
-      "You do not have permission to use 'chrome.%s'. Be sure to declare"
+      "You do not have permission to use '%s'. Be sure to declare"
       " in your manifest what permissions you need.";
-  std::string permission_name = GetPermissionName(function_name);
-  std::string error_msg = StringPrintf(kMessage, permission_name.c_str());
+  std::string error_msg = StringPrintf(kMessage, function_name.c_str());
 
   return v8::ThrowException(v8::Exception::Error(
       v8::String::New(error_msg.c_str())));

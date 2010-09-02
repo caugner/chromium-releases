@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 
 #include "base/eintr_wrapper.h"
+#include "base/logging.h"
+#include "base/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "skia/ext/platform_canvas.h"
 
@@ -32,6 +34,11 @@ TransportDIB* TransportDIB::Create(size_t size, uint32 sequence_num) {
     return NULL;
   }
 
+  if (!dib->shared_memory_.Map(size)) {
+    delete dib;
+    return NULL;
+  }
+
   dib->size_ = size;
   return dib;
 }
@@ -46,7 +53,8 @@ TransportDIB* TransportDIB::Map(TransportDIB::Handle handle) {
   if ((fstat(handle.fd, &st) != 0) ||
       (!dib->shared_memory_.Map(st.st_size))) {
     delete dib;
-    HANDLE_EINTR(close(handle.fd));
+    if (HANDLE_EINTR(close(handle.fd)) < 0)
+      PLOG(ERROR) << "close";
     return NULL;
   }
 
@@ -60,8 +68,10 @@ bool TransportDIB::is_valid(Handle dib) {
 }
 
 skia::PlatformCanvas* TransportDIB::GetPlatformCanvas(int w, int h) {
-  return new skia::PlatformCanvas(w, h, true,
-                                  reinterpret_cast<uint8_t*>(memory()));
+  scoped_ptr<skia::PlatformCanvas> canvas(new skia::PlatformCanvas);
+  if (!canvas->initialize(w, h, true, reinterpret_cast<uint8_t*>(memory())))
+    return NULL;
+  return canvas.release();
 }
 
 void* TransportDIB::memory() const {

@@ -1,10 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/at_exit.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/env_var.h"
 #include "base/event_recorder.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -90,8 +91,9 @@ int main(int argc, char* argv[]) {
   // directly, its constructor sets up some necessary state.
   MessageLoopForUI main_message_loop;
 
+  scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
   bool suppress_error_dialogs = (
-       base::SysInfo::HasEnvVar(L"CHROME_HEADLESS") ||
+       env->HasEnv("CHROME_HEADLESS") ||
        parsed_command_line.HasSwitch(test_shell::kNoErrorDialogs) ||
        parsed_command_line.HasSwitch(test_shell::kLayoutTests));
   bool layout_test_mode =
@@ -110,6 +112,10 @@ int main(int argc, char* argv[]) {
   bool enable_gp_fault_error_box = false;
   enable_gp_fault_error_box =
       parsed_command_line.HasSwitch(test_shell::kGPFaultErrorBox);
+  
+  bool allow_external_pages = 
+      parsed_command_line.HasSwitch(test_shell::kAllowExternalPages);
+  
   TestShell::InitLogging(suppress_error_dialogs,
                          layout_test_mode,
                          enable_gp_fault_error_box);
@@ -160,8 +166,7 @@ int main(int argc, char* argv[]) {
 
   // Initializing with a default context, which means no on-disk cookie DB,
   // and no support for directory listings.
-  SimpleResourceLoaderBridge::Init(
-      new TestShellRequestContext(cache_path, cache_mode, layout_test_mode));
+  SimpleResourceLoaderBridge::Init(cache_path, cache_mode, layout_test_mode);
 
   // Load ICU data tables
   icu_util::Initialize();
@@ -175,7 +180,11 @@ int main(int argc, char* argv[]) {
 
   platform.InitializeGUI();
 
-  TestShell::InitializeTestShell(layout_test_mode);
+  if (parsed_command_line.HasSwitch(test_shell::kEnableLegacyParser)) {
+    TestShell::disable_html5_parser();
+  }
+
+  TestShell::InitializeTestShell(layout_test_mode, allow_external_pages);
 
   if (parsed_command_line.HasSwitch(test_shell::kAllowScriptsToCloseWindows))
     TestShell::SetAllowScriptsToCloseWindows();
@@ -220,9 +229,10 @@ int main(int argc, char* argv[]) {
     if (url.is_valid()) {
       starting_url = url;
     } else {
-      // Treat as a file path
-      starting_url =
-          net::FilePathToFileURL(FilePath::FromWStringHack(loose_values[0]));
+      // Treat as a relative file path.
+      FilePath path = FilePath::FromWStringHack(loose_values[0]);
+      file_util::AbsolutePath(&path);
+      starting_url = net::FilePathToFileURL(path);
     }
   }
 
@@ -295,9 +305,9 @@ int main(int argc, char* argv[]) {
       if (parsed_command_line.HasSwitch(test_shell::kDumpPixels)) {
         // The pixel test flag also gives the image file name to use.
         params.dump_pixels = true;
-        params.pixel_file_name = parsed_command_line.GetSwitchValue(
+        params.pixel_file_name = parsed_command_line.GetSwitchValuePath(
             test_shell::kDumpPixels);
-        if (params.pixel_file_name.size() == 0) {
+        if (params.pixel_file_name.empty()) {
           fprintf(stderr, "No file specified for pixel tests");
           exit(1);
         }

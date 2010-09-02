@@ -50,6 +50,9 @@
           'dependencies': [
             'breakpad_utilities',
           ],
+          'include_dirs': [
+            'src/common/mac',
+          ],
           'sources': [
             'src/client/mac/crash_generation/Inspector.mm',
             'src/client/mac/crash_generation/InspectorMain.mm',
@@ -64,6 +67,9 @@
           'target_name': 'crash_report_sender',
           'type': 'executable',
           'mac_bundle': 1,
+          'include_dirs': [
+            'src/common/mac',
+          ],
           'sources': [
             'src/common/mac/HTTPMultipartUpload.m',
             'src/client/mac/sender/crash_report_sender.m',
@@ -72,7 +78,7 @@
           'mac_bundle_resources': [
             'src/client/mac/sender/English.lproj/Localizable.strings',
             'src/client/mac/sender/crash_report_sender.icns',
-            'src/client/mac/sender/Breakpad.nib',
+            'src/client/mac/sender/Breakpad.xib',
             'src/client/mac/sender/crash_report_sender-Info.plist',
           ],
           'mac_bundle_resources!': [
@@ -95,15 +101,28 @@
           'include_dirs': [
             'src/common/mac',
           ],
-          'dependencies': [
-            'breakpad_utilities',
-          ],
           'sources': [
-            'src/common/dwarf/bytereader.cc',
+            'src/common/dwarf/dwarf2diehandler.cc',
             'src/common/dwarf/dwarf2reader.cc',
-            'src/common/dwarf/functioninfo.cc',
+            'src/common/dwarf/bytereader.cc',
+            'src/common/dwarf_cfi_to_module.cc',
+            'src/common/dwarf_cu_to_module.cc',
+            'src/common/dwarf_line_to_module.cc',
+            'src/common/language.cc',
+            'src/common/module.cc',
             'src/common/mac/dump_syms.mm',
+            'src/common/mac/file_id.cc',
+            'src/common/mac/macho_id.cc',
+            'src/common/mac/macho_reader.cc',
+            'src/common/mac/macho_utilities.cc',
+            'src/common/mac/macho_walker.cc',
+            'src/common/stabs_reader.cc',
+            'src/common/stabs_to_module.cc',
             'src/tools/mac/dump_syms/dump_syms_tool.mm',
+          ],
+          'defines': [
+            # For src/common/stabs_reader.h.
+            'HAVE_MACH_O_NLIST_H',
           ],
           'xcode_settings': {
             # The DWARF utilities require -funsigned-char.
@@ -114,6 +133,7 @@
           'link_settings': {
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
+              '$(SDKROOT)/usr/lib/libcrypto.dylib',
             ],
           },
           'configurations': {
@@ -209,8 +229,6 @@
               'cflags_cc!': ['-fno-rtti'],
 
               'sources': [
-                'src/common/dump_stabs.cc',
-                'src/common/dump_stabs.h',
                 'src/common/dwarf/bytereader.cc',
                 'src/common/dwarf/cfi_assembler.cc',
                 'src/common/dwarf_cfi_to_module.cc',
@@ -233,7 +251,16 @@
                 'src/common/module.h',
                 'src/common/stabs_reader.cc',
                 'src/common/stabs_reader.h',
+                'src/common/stabs_to_module.cc',
+                'src/common/stabs_to_module.h',
                 'src/tools/linux/dump_syms/dump_syms.cc',
+              ],
+
+              # Breakpad rev 583 introduced this flag.
+              # Using this define, stabs_reader.h will include a.out.h to 
+              # build on Linux.
+              'defines': [
+                'HAVE_A_OUT_H',
               ],
 
               'include_dirs': [
@@ -264,10 +291,14 @@
             'src/client/minidump_file_writer.h',
             'src/common/convert_UTF.c',
             'src/common/convert_UTF.h',
-            'src/common/linux/file_id.h',
             'src/common/linux/file_id.cc',
+            'src/common/linux/file_id.h',
+            'src/common/linux/google_crashdump_uploader.cc',
+            'src/common/linux/google_crashdump_uploader.h',
             'src/common/linux/guid_creator.cc',
             'src/common/linux/guid_creator.h',
+            'src/common/linux/libcurl_wrapper.cc',
+            'src/common/linux/libcurl_wrapper.h',
             'src/common/linux/linux_libc_support.h',
             'src/common/linux/linux_syscall_support.h',
             'src/common/linux/memory.h',
@@ -275,8 +306,16 @@
             'src/common/string_conversion.h',
           ],
 
+          'link_settings': {
+            'libraries': [
+              '-ldl',
+            ],
+          },
+
           'include_dirs': [
             'src',
+            'src/client',
+            'src/third_party/linux/include',
             '..',
             '.',
           ],

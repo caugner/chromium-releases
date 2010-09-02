@@ -8,14 +8,14 @@
 
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
-#include "app/win/window_impl.h"
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/font.h"
 #include "gfx/rect.h"
+#include "gfx/window_impl.h"
 #include "views/accelerator.h"
 
 namespace views {
@@ -62,7 +62,7 @@ static int ChromeGetMenuItemID(HMENU hMenu, int pos) {
 // to intercept right clicks on the HMENU and notify the delegate as well as
 // for drawing icons.
 //
-class MenuHostWindow : public app::WindowImpl {
+class MenuHostWindow : public gfx::WindowImpl {
  public:
   MenuHostWindow(MenuWin* menu, HWND parent_window) : menu_(menu) {
     int extended_style = 0;
@@ -184,7 +184,7 @@ class MenuHostWindow : public app::WindowImpl {
       // Draw the icon after the label, otherwise it would be covered
       // by the label.
       if (data->icon.width() != 0 && data->icon.height() != 0) {
-        gfx::Canvas canvas(data->icon.width(), data->icon.height(), false);
+        gfx::CanvasSkia canvas(data->icon.width(), data->icon.height(), false);
         canvas.drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
         canvas.DrawBitmapInt(data->icon, 0, 0);
         canvas.getTopPlatformDevice().drawToHDC(hDC, lpdis->rcItem.left +

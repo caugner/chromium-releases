@@ -13,7 +13,7 @@ import os
 import re
 
 import common
-import google.path_utils
+import path_utils
 import suppressions
 
 
@@ -40,7 +40,7 @@ class HeapcheckWrapper(object):
   def Execute(self):
     """Executes the app to be tested."""
     logging.info('starting execution...')
-    proc = ['sh', google.path_utils.ScriptDir() + '/heapcheck_std.sh']
+    proc = ['sh', path_utils.ScriptDir() + '/heapcheck_std.sh']
     proc += self._args
     self.PutEnvAndLog('G_SLICE', 'always-malloc')
     self.PutEnvAndLog('NSS_DISABLE_ARENA_FREE_LIST', '1')
@@ -48,7 +48,7 @@ class HeapcheckWrapper(object):
     self.PutEnvAndLog('HEAPCHECK', self._mode)
     self.PutEnvAndLog('HEAP_CHECK_MAX_LEAKS', '-1')
     self.PutEnvAndLog('PPROF_PATH',
-        google.path_utils.ScriptDir() +
+        path_utils.ScriptDir() +
         '/../../third_party/tcmalloc/chromium/src/pprof')
     self.PutEnvAndLog('LD_PRELOAD', '/usr/lib/debug/libstdc++.so')
 
@@ -82,7 +82,7 @@ class HeapcheckWrapper(object):
     """
     leak_report = re.compile(
         'Leak of ([0-9]*) bytes in ([0-9]*) objects allocated from:')
-    stack_line = re.compile('\s*@\s*(?:0x)?[0-9a-fA-F]*\s*([^\n]*)')
+    stack_line = re.compile('\s*@\s*(?:0x)?[0-9a-fA-F]+\s*([^\n]*)')
     return_code = 0
     # leak signature: [number of bytes, number of objects]
     cur_leak_signature = None
@@ -108,11 +108,29 @@ class HeapcheckWrapper(object):
               description = supp.description
               break
           if cur_stack:
-            # Print the report and set the return code to 1.
+            if not cur_leak_signature:
+              print 'Missing leak signature for the following stack: '
+              for frame in cur_stack:
+                print '   ' + frame
+              print 'Aborting...'
+              return 3
+           # Print the report and set the return code to 1.
             print ('Leak of %d bytes in %d objects allocated from:'
                    % tuple(cur_leak_signature))
             print '\n'.join(cur_report)
             return_code = 1
+            # Generate the suppression iff the stack contains more than one
+            # frame (otherwise it's likely to be broken)
+            if len(cur_stack) > 1:
+              print '\nSuppression:\n{'
+              print '   <insert_a_suppression_name_here>'
+              print '   Heapcheck:Leak'
+              for frame in cur_stack:
+                print '   fun:' + frame
+              print '}\n\n\n'
+            else:
+              print ('This stack may be broken due to omitted frame pointers. '
+                     'It is not recommended to suppress it.')
           else:
             # Update the suppressions histogram.
             if description in used_suppressions:

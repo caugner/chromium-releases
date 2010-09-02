@@ -1,20 +1,46 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 #include "chrome_frame/test/test_with_web_server.h"
 
 #include "base/file_version_info.h"
+#include "base/utf_string_conversions.h"
+#include "base/win_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome_frame/utils.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
+#include "chrome_frame/test/mock_ie_event_sink_actions.h"
+#include "net/base/mime_util.h"
+
+using chrome_frame_test::kChromeFrameLongNavigationTimeoutInSeconds;
+using testing::_;
+using testing::StrCaseEq;
 
 const wchar_t kDocRoot[] = L"chrome_frame\\test\\data";
 const int kLongWaitTimeout = 60 * 1000;
 const int kShortWaitTimeout = 25 * 1000;
-const int kChromeFrameLaunchDelay = 5;
-const int kChromeFrameLongNavigationTimeoutInSeconds = 10;
+
+namespace {
+
+// Helper method for creating the appropriate HTTP response headers.
+std::string CreateHttpHeaders(CFInvocation invocation,
+                              bool add_no_cache_header,
+                              const std::string& content_type) {
+  std::ostringstream ss;
+  ss << "HTTP/1.1 200 OK\r\n"
+     << "Connection: close\r\n"
+     << "Content-Type: " << content_type << "\r\n";
+  if (invocation.type() == CFInvocation::HTTP_HEADER)
+    ss << "X-UA-Compatible: chrome=1\r\n";
+  if (add_no_cache_header)
+    ss << "Cache-Control: no-cache\r\n";
+  return ss.str();
+}
+
+}  // namespace
 
 class ChromeFrameTestEnvironment: public testing::Environment {
  public:
@@ -38,8 +64,10 @@ void ChromeFrameTestWithWebServer::CloseAllBrowsers() {
   base::KillProcesses(chrome_frame_test::kSafariImageName, 0, NULL);
 
   // Endeavour to only kill off Chrome Frame derived Chrome processes.
-  KillAllNamedProcessesWithArgument(chrome_frame_test::kChromeImageName,
-                                    UTF8ToWide(switches::kChromeFrame));
+  KillAllNamedProcessesWithArgument(
+      UTF8ToWide(chrome_frame_test::kChromeImageName),
+      UTF8ToWide(switches::kChromeFrame));
+  base::KillProcesses(chrome_frame_test::kChromeLauncher, 0, NULL);
 }
 
 void ChromeFrameTestWithWebServer::SetUp() {
@@ -55,8 +83,11 @@ void ChromeFrameTestWithWebServer::SetUp() {
       .Append(FILE_PATH_LITERAL("data"));
 
   server_.SetUp();
-  results_dir_ = server_.GetDataDir();
-  file_util::AppendToPath(&results_dir_, L"dump");
+  EXPECT_TRUE(server_.server() != NULL);
+  if (server_.server()) {
+    results_dir_ = server_.GetDataDir();
+    results_dir_ = results_dir_.AppendASCII("dump");
+  }
 }
 
 void ChromeFrameTestWithWebServer::TearDown() {
@@ -67,6 +98,7 @@ void ChromeFrameTestWithWebServer::TearDown() {
 
 bool ChromeFrameTestWithWebServer::LaunchBrowser(BrowserKind browser,
                                                  const wchar_t* page) {
+  EXPECT_TRUE(server_.server() != NULL);
   std::wstring url = page;
   if (url.find(L"files/") != std::wstring::npos)
     url = UTF8ToWide(server_.Resolve(page).spec());
@@ -129,6 +161,7 @@ bool ChromeFrameTestWithWebServer::BringBrowserToTop() {
 }
 
 bool ChromeFrameTestWithWebServer::WaitForTestToComplete(int milliseconds) {
+  EXPECT_TRUE(server_.server() != NULL);
   return server_.WaitToFinish(milliseconds);
 }
 
@@ -151,9 +184,9 @@ bool ChromeFrameTestWithWebServer::WaitForOnLoad(int milliseconds) {
 }
 
 bool ChromeFrameTestWithWebServer::ReadResultFile(const std::wstring& file_name,
-                                                std::string* data) {
-  std::wstring full_path = results_dir_;
-  file_util::AppendToPath(&full_path, file_name);
+                                                  std::string* data) {
+  FilePath full_path(results_dir_);
+  full_path = full_path.Append(file_name);
   return file_util::ReadFileToString(full_path, data);
 }
 
@@ -191,10 +224,10 @@ void ChromeFrameTestWithWebServer::OptionalBrowserTest(BrowserKind browser,
 
 void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
     const wchar_t* page, const wchar_t* result_file_to_check) {
-  std::wstring plugin_path;
+  FilePath plugin_path;
   PathService::Get(base::DIR_MODULE, &plugin_path);
-  file_util::AppendToPath(&plugin_path, L"servers");
-  file_util::AppendToPath(&plugin_path, kChromeFrameDllName);
+  plugin_path = plugin_path.AppendASCII("servers");
+  plugin_path = plugin_path.Append(kChromeFrameDllName);
 
   static FileVersionInfo* version_info =
       FileVersionInfo::CreateFileVersionInfo(plugin_path);
@@ -211,10 +244,11 @@ void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
     ASSERT_TRUE(ver_system || ver_user);
 
     bool system_install = ver_system ? true : false;
-    std::wstring cf_dll_path(installer::GetChromeInstallPath(system_install));
-    file_util::AppendToPath(&cf_dll_path,
+    FilePath cf_dll_path = FilePath::FromWStringHack(
+        installer::GetChromeInstallPath(system_install));
+    cf_dll_path = cf_dll_path.Append(
         ver_system ? ver_system->GetString() : ver_user->GetString());
-    file_util::AppendToPath(&cf_dll_path, kChromeFrameDllName);
+    cf_dll_path = cf_dll_path.Append(kChromeFrameDllName);
     version_info = FileVersionInfo::CreateFileVersionInfo(cf_dll_path);
     if (version_info)
       version = version_info->product_version();
@@ -225,6 +259,64 @@ void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
   EXPECT_TRUE(LaunchBrowser(browser, page));
   ASSERT_TRUE(WaitForTestToComplete(kLongWaitTimeout));
   ASSERT_TRUE(CheckResultFile(result_file_to_check, WideToUTF8(version)));
+}
+
+// MockWebServer methods
+void MockWebServer::ExpectAndServeRequest(CFInvocation invocation,
+                                          const std::wstring& url) {
+  EXPECT_CALL(*this, Get(_, chrome_frame_test::UrlPathEq(url), _))
+      .WillOnce(SendResponse(this, invocation));
+}
+
+void MockWebServer::ExpectAndServeRequestAllowCache(CFInvocation invocation,
+                                                    const std::wstring &url) {
+  EXPECT_CALL(*this, Get(_, chrome_frame_test::UrlPathEq(url), _))
+      .WillOnce(SendResponse(this, invocation));
+}
+
+void MockWebServer::ExpectAndServeRequestAnyNumberTimes(
+    CFInvocation invocation, const std::wstring& path_prefix) {
+  EXPECT_CALL(*this, Get(_, testing::StartsWith(path_prefix), _))
+      .WillRepeatedly(SendResponse(this, invocation));
+}
+
+void MockWebServer::SendResponseHelper(
+    test_server::ConfigurableConnection* connection,
+    const std::wstring& request_uri,
+    CFInvocation invocation,
+    bool add_no_cache_header) {
+  // Convert |request_uri| to a path.
+  std::wstring path = request_uri;
+  size_t query_index = request_uri.find(L"?");
+  if (query_index != std::string::npos) {
+    path = path.erase(query_index);
+  }
+  FilePath file_path = root_dir_;
+  if (path.size())
+    file_path = file_path.Append(path.substr(1));  // remove first '/'
+
+  std::string headers, body;
+  if (file_util::PathExists(file_path)) {
+    std::string content_type;
+    EXPECT_TRUE(net::GetMimeTypeFromFile(file_path, &content_type));
+    DLOG(INFO) << "Going to send file (" << WideToUTF8(file_path.value())
+               << ") with content type (" << content_type << ")";
+    headers = CreateHttpHeaders(invocation, add_no_cache_header, content_type);
+
+    EXPECT_TRUE(file_util::ReadFileToString(file_path, &body))
+        << "Could not read file (" << WideToUTF8(file_path.value()) << ")";
+    if (invocation.type() == CFInvocation::META_TAG &&
+        StartsWithASCII(content_type, "text/html", false)) {
+      EXPECT_TRUE(chrome_frame_test::AddCFMetaTag(&body)) << "Could not add "
+          << "meta tag to HTML file.";
+    }
+  } else {
+    DLOG(INFO) << "Going to send 404 for non-existent file ("
+               << WideToUTF8(file_path.value()) << ")";
+    headers = "HTTP/1.1 404 Not Found";
+    body = "";
+  }
+  connection->Send(headers, body);
 }
 
 const wchar_t kPostMessageBasicPage[] = L"files/postmessage_basic_host.html";
@@ -720,6 +812,29 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_XHRTest) {
   ASSERT_TRUE(CheckResultFile(L"FullTab_XMLHttpRequestTest", "OK"));
 }
 
+const wchar_t kInstallFlowTestUrl[] =
+    L"files/install_flow_test.html";
+
+TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_InstallFlowTest) {
+  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA) {
+    chrome_frame_test::TimedMsgLoop loop;
+    ScopedChromeFrameRegistrar::UnregisterAtPath(
+        ScopedChromeFrameRegistrar::GetChromeFrameBuildPath().value());
+
+    ASSERT_TRUE(LaunchBrowser(IE, kInstallFlowTestUrl));
+
+    loop.RunFor(kChromeFrameLongNavigationTimeoutInSeconds);
+
+    ScopedChromeFrameRegistrar::RegisterAtPath(
+        ScopedChromeFrameRegistrar::GetChromeFrameBuildPath().value());
+
+    loop.RunFor(kChromeFrameLongNavigationTimeoutInSeconds);
+
+    chrome_frame_test::CloseAllIEWindows();
+    ASSERT_TRUE(CheckResultFile(L"FullTab_InstallFlowTest", "OK"));
+  }
+}
+
 const wchar_t kMultipleCFInstancesTestUrl[] =
     L"files/multiple_cf_instances_main.html";
 
@@ -768,6 +883,11 @@ const wchar_t kAnchorUrlNavigate[] =
 // http://code.google.com/p/chromium/issues/detail?id=35341
 TEST_F(ChromeFrameTestWithWebServer,
        FLAKY_FullTabModeIE_AnchorUrlNavigateTest) {
+  if (IsIBrowserServicePatchEnabled()) {
+    LOG(ERROR) << "Not running test. IBrowserServicePatch is in place.";
+    return;
+  }
+
   chrome_frame_test::TimedMsgLoop loop;
   ASSERT_TRUE(LaunchBrowser(IE, kAnchorUrlNavigate));
 
@@ -780,8 +900,10 @@ TEST_F(ChromeFrameTestWithWebServer,
 // Test whether POST-ing a form from an mshtml page to a CF page will cause
 // the request to get reissued.  It should not.
 TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestPostReissue) {
-  if (!MonikerPatchEnabled())
+  if (IsIBrowserServicePatchEnabled()) {
+    LOG(ERROR) << "Not running test. IBrowserServicePatch is in place.";
     return;
+  }
 
   chrome_frame_test::TimedMsgLoop loop;  // must come before the server.
 
@@ -799,11 +921,12 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestPostReissue) {
 
   loop.RunFor(kChromeFrameLongNavigationTimeoutInSeconds);
 
-  // Check if the last request to /quit gave us the OK signal.
-  const test_server::Request& r = server.last_request();
-  EXPECT_EQ("OK", r.arguments());
+  const test_server::Request* request = NULL;
+  server.FindRequest("/quit?OK", &request);
+  ASSERT_TRUE(request != NULL);
+  EXPECT_EQ("OK", request->arguments());
 
-  if (r.arguments().compare("OK") == 0) {
+  if (request->arguments().compare("OK") == 0) {
     // Check how many requests we got for the cf page.  Also expect it to be
     // a POST.
     int requests = server.GetRequestCountForPage(kPages[1], "POST");
@@ -814,8 +937,10 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestPostReissue) {
 // Test whether following a link from an mshtml page to a CF page will cause
 // multiple network requests.  It should not.
 TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestMultipleGet) {
-  if (!MonikerPatchEnabled())
+  if (IsIBrowserServicePatchEnabled()) {
+    LOG(ERROR) << "Not running test. IBrowserServicePatch is in place.";
     return;
+  }
 
   chrome_frame_test::TimedMsgLoop loop;  // must come before the server.
 
@@ -827,17 +952,19 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestMultipleGet) {
   };
 
   SimpleWebServerTest server(46664);
+
   server.PopulateStaticFileList(kPages, arraysize(kPages), GetCFTestFilePath());
 
   ASSERT_TRUE(LaunchBrowser(IE, server.FormatHttpPath(kPages[0]).c_str()));
 
   loop.RunFor(kChromeFrameLongNavigationTimeoutInSeconds);
 
-  // Check if the last request to /quit gave us the OK signal.
-  const test_server::Request& r = server.last_request();
-  EXPECT_EQ("OK", r.arguments());
+  const test_server::Request* request = NULL;
+  server.FindRequest("/quit?OK", &request);
+  ASSERT_TRUE(request != NULL);
+  EXPECT_EQ("OK", request->arguments());
 
-  if (r.arguments().compare("OK") == 0) {
+  if (request->arguments().compare("OK") == 0) {
     // Check how many requests we got for the cf page and check that it was
     // a GET.
     int requests = server.GetRequestCountForPage(kPages[1], "GET");
@@ -856,5 +983,19 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_SetCookieTest) {
 
   chrome_frame_test::CloseAllIEWindows();
   ASSERT_TRUE(CheckResultFile(L"FullTab_SetCookieTest", "OK"));
+}
+
+const wchar_t kXHRConditionalHeaderTestUrl[] =
+    L"files/xmlhttprequest_conditional_header_test.html";
+
+TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_XHRConditionalHeaderTest) {
+  chrome_frame_test::TimedMsgLoop loop;
+  ASSERT_TRUE(LaunchBrowser(IE, kXHRConditionalHeaderTestUrl));
+
+  loop.RunFor(kChromeFrameLongNavigationTimeoutInSeconds);
+
+  chrome_frame_test::CloseAllIEWindows();
+  ASSERT_TRUE(CheckResultFile(L"FullTab_XMLHttpRequestConditionalHeaderTest",
+                              "OK"));
 }
 

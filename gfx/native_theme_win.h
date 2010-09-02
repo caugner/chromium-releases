@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -43,6 +43,8 @@ class NativeTheme {
     TEXTFIELD,
     TRACKBAR,
     WINDOW,
+    PROGRESS,
+    SPIN,
     LAST
   };
 
@@ -51,6 +53,12 @@ class NativeTheme {
   enum MenuArrowDirection {
     LEFT_POINTING_ARROW,
     RIGHT_POINTING_ARROW
+  };
+
+  enum ControlState {
+    CONTROL_NORMAL,
+    CONTROL_HIGHLIGHTED,
+    CONTROL_DISABLED
   };
 
   typedef HRESULT (WINAPI* DrawThemeBackgroundPtr)(HANDLE theme,
@@ -114,7 +122,7 @@ class NativeTheme {
                          int state_id,
                          RECT* rect,
                          MenuArrowDirection arrow_direction,
-                         bool is_highlighted) const;
+                         ControlState state) const;
 
   HRESULT PaintMenuBackground(ThemeName theme,
                               HDC hdc,
@@ -127,7 +135,7 @@ class NativeTheme {
                          int part_id,
                          int state_id,
                          RECT* rect,
-                         bool is_highlighted) const;
+                         ControlState state) const;
 
   HRESULT PaintMenuCheckBackground(ThemeName theme,
                                    HDC hdc,
@@ -183,6 +191,12 @@ class NativeTheme {
                               int classic_state,
                               RECT* rect) const;
 
+  HRESULT PaintSpinButton(HDC hdc,
+                          int part_id,
+                          int state_id,
+                          int classic_state,
+                          RECT* rect) const;
+
   HRESULT PaintStatusGripper(HDC hdc,
                              int part_id,
                              int state_id,
@@ -206,6 +220,13 @@ class NativeTheme {
                         int classic_state,
                         RECT* rect,
                         skia::PlatformCanvas* canvas) const;
+
+  HRESULT PaintProgressBar(HDC hdc,
+                           RECT* bar_rect,
+                           RECT* value_rect,
+                           bool determinate,
+                           double animated_seconds,
+                           skia::PlatformCanvas* canvas) const;
 
   bool IsThemingActive() const;
 
@@ -254,6 +275,9 @@ class NativeTheme {
   // for a theme change.
   void CloseHandles() const;
 
+  // Returns true if classic theme is in use.
+  bool IsClassicTheme(ThemeName name) const;
+
   // Gets our singleton instance.
   static const NativeTheme* instance();
 
@@ -265,7 +289,7 @@ class NativeTheme {
                             RECT* rect,
                             UINT type,
                             UINT state,
-                            bool is_highlighted) const;
+                            ControlState control_state) const;
 
   // Returns a handle to the theme data.
   HANDLE GetThemeHandle(ThemeName theme_name) const;

@@ -8,6 +8,7 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/stl_util-inl.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/gtk/gtk_tree.h"
 #include "chrome/browser/gtk/gtk_util.h"
@@ -69,6 +70,7 @@ PasswordsExceptionsPageGtk::PasswordsExceptionsPageGtk(Profile* profile)
 }
 
 PasswordsExceptionsPageGtk::~PasswordsExceptionsPageGtk() {
+  STLDeleteElements(&exception_list_);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -90,7 +92,7 @@ void PasswordsExceptionsPageGtk::InitExceptionTree() {
   gtk_tree_selection_set_mode(exception_selection_,
                               GTK_SELECTION_SINGLE);
   g_signal_connect(exception_selection_, "changed",
-                   G_CALLBACK(OnExceptionSelectionChanged), this);
+                   G_CALLBACK(OnExceptionSelectionChangedThunk), this);
 
   GtkTreeViewColumn* column = gtk_tree_view_column_new_with_attributes(
       l10n_util::GetStringUTF8(IDS_PASSWORDS_PAGE_VIEW_SITE_COLUMN).c_str(),
@@ -109,18 +111,16 @@ PasswordStore* PasswordsExceptionsPageGtk::GetPasswordStore() {
 
 void PasswordsExceptionsPageGtk::SetExceptionList(
     const std::vector<webkit_glue::PasswordForm*>& result) {
-  std::wstring languages =
-      profile_->GetPrefs()->GetString(prefs::kAcceptLanguages);
+  std::wstring languages = UTF8ToWide(
+      profile_->GetPrefs()->GetString(prefs::kAcceptLanguages));
   gtk_list_store_clear(exception_list_store_);
-  exception_list_.resize(result.size());
+  STLDeleteElements(&exception_list_);
+  exception_list_ = result;
   for (size_t i = 0; i < result.size(); ++i) {
-    exception_list_[i] = *result[i];
-    std::wstring formatted = net::FormatUrl(result[i]->origin, languages,
-        false, UnescapeRule::NONE, NULL, NULL, NULL);
-    std::string site = WideToUTF8(formatted);
     GtkTreeIter iter;
     gtk_list_store_insert_with_values(exception_list_store_, &iter, (gint) i,
-                                      COL_SITE, site.c_str(), -1);
+        COL_SITE,
+        WideToUTF8(net::FormatUrl(result[i]->origin, languages)).c_str(), -1);
   }
   gtk_widget_set_sensitive(remove_all_button_, result.size() > 0);
 }
@@ -145,7 +145,8 @@ void PasswordsExceptionsPageGtk::OnRemoveButtonClicked(GtkWidget* widget) {
 
   // Remove from GTK list, DB, and vector.
   gtk_list_store_remove(exception_list_store_, &child_iter);
-  GetPasswordStore()->RemoveLogin(exception_list_[index]);
+  GetPasswordStore()->RemoveLogin(*exception_list_[index]);
+  delete exception_list_[index];
   exception_list_.erase(exception_list_.begin() + index);
 
   gtk_widget_set_sensitive(remove_all_button_, exception_list_.size() > 0);
@@ -155,23 +156,20 @@ void PasswordsExceptionsPageGtk::OnRemoveAllButtonClicked(GtkWidget* widget) {
   // Remove from GTK list, DB, and vector.
   PasswordStore* store = GetPasswordStore();
   gtk_list_store_clear(exception_list_store_);
-  for (size_t i = 0; i < exception_list_.size(); ++i) {
-    store->RemoveLogin(exception_list_[i]);
-  }
-  exception_list_.clear();
+  for (size_t i = 0; i < exception_list_.size(); ++i)
+    store->RemoveLogin(*exception_list_[i]);
+  STLDeleteElements(&exception_list_);
   gtk_widget_set_sensitive(remove_all_button_, FALSE);
 }
 
-// static
 void PasswordsExceptionsPageGtk::OnExceptionSelectionChanged(
-    GtkTreeSelection* selection,
-    PasswordsExceptionsPageGtk* page) {
+    GtkTreeSelection* selection) {
   GtkTreeIter iter;
   if (!gtk_tree_selection_get_selected(selection, NULL, &iter)) {
-    gtk_widget_set_sensitive(page->remove_button_, FALSE);
+    gtk_widget_set_sensitive(remove_button_, FALSE);
     return;
   }
-  gtk_widget_set_sensitive(page->remove_button_, TRUE);
+  gtk_widget_set_sensitive(remove_button_, TRUE);
 }
 
 // static
@@ -182,8 +180,8 @@ gint PasswordsExceptionsPageGtk::CompareSite(GtkTreeModel* model,
   int row2 = gtk_tree::GetRowNumForIter(model, b);
   PasswordsExceptionsPageGtk* page =
       reinterpret_cast<PasswordsExceptionsPageGtk*>(window);
-  return page->exception_list_[row1].origin.spec().compare(
-         page->exception_list_[row2].origin.spec());
+  return page->exception_list_[row1]->origin.spec().compare(
+         page->exception_list_[row2]->origin.spec());
 }
 
 void PasswordsExceptionsPageGtk::ExceptionListPopulater::populate() {

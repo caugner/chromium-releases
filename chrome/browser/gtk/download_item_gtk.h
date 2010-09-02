@@ -10,9 +10,10 @@
 #include <string>
 
 #include "app/animation.h"
+#include "app/gtk_signal.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
-#include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -52,7 +53,10 @@ class DownloadItemGtk : public DownloadItem::Observer,
 
   // Called when the icon manager has finished loading the icon. We take
   // ownership of |icon_bitmap|.
-  void OnLoadIconComplete(IconManager::Handle handle, SkBitmap* icon_bitmap);
+  void OnLoadSmallIconComplete(IconManager::Handle handle,
+                               SkBitmap* icon_bitmap);
+  void OnLoadLargeIconComplete(IconManager::Handle handle,
+                               SkBitmap* icon_bitmap);
 
   // Returns the DownloadItem model object belonging to this item.
   DownloadItem* get_download();
@@ -76,12 +80,14 @@ class DownloadItemGtk : public DownloadItem::Observer,
   // Ask the icon manager to asynchronously start loading the icon for the file.
   void LoadIcon();
 
+  // Sets the tooltip on the download button.
+  void UpdateTooltip();
+
   // Sets the name label to the correct color.
   void UpdateNameLabel();
 
-  // Sets the text with the correct color if |status_label| exists.
-  void UpdateStatusLabel(GtkWidget* status_label,
-                         const std::string& status_text);
+  // Sets the text of |status_label_| with the correct color.
+  void UpdateStatusLabel(const std::string& status_text);
 
   // Sets the components of the danger warning.
   void UpdateDangerWarning();
@@ -89,32 +95,27 @@ class DownloadItemGtk : public DownloadItem::Observer,
   static void InitNineBoxes();
 
   // Draws everything in GTK rendering mode.
-  static gboolean OnHboxExpose(GtkWidget* widget, GdkEventExpose* e,
-                               DownloadItemGtk* download_item);
+  CHROMEGTK_CALLBACK_1(DownloadItemGtk, gboolean, OnHboxExpose,
+                       GdkEventExpose*);
 
   // Used for the download item's body and menu button in chrome theme mode.
-  static gboolean OnExpose(GtkWidget* widget, GdkEventExpose* e,
-                           DownloadItemGtk* download_item);
+  CHROMEGTK_CALLBACK_1(DownloadItemGtk, gboolean, OnExpose, GdkEventExpose*);
 
   // Called when |body_| is clicked.
-  static void OnClick(GtkWidget* widget, DownloadItemGtk* item);
+  CHROMEGTK_CALLBACK_0(DownloadItemGtk, void, OnClick);
 
   // Used for the download icon.
-  static gboolean OnProgressAreaExpose(GtkWidget* widget,
-                                       GdkEventExpose* e,
-                                       DownloadItemGtk* download_item);
+  CHROMEGTK_CALLBACK_1(DownloadItemGtk, gboolean, OnProgressAreaExpose,
+                       GdkEventExpose*);
 
-  static gboolean OnMenuButtonPressEvent(GtkWidget* button,
-                                         GdkEvent* event,
-                                         DownloadItemGtk* item);
+  CHROMEGTK_CALLBACK_1(DownloadItemGtk, gboolean, OnMenuButtonPressEvent,
+                       GdkEvent*);
 
   // Dangerous download related. -----------------------------------------------
-  static gboolean OnDangerousPromptExpose(GtkWidget* widget,
-                                         GdkEventExpose* event,
-                                         DownloadItemGtk* item);
-
-  static void OnDangerousAccept(GtkWidget* button, DownloadItemGtk* item);
-  static void OnDangerousDecline(GtkWidget* button, DownloadItemGtk* item);
+  CHROMEGTK_CALLBACK_1(DownloadItemGtk, gboolean, OnDangerousPromptExpose,
+                       GdkEventExpose*);
+  CHROMEGTK_CALLBACK_0(DownloadItemGtk, void, OnDangerousAccept);
+  CHROMEGTK_CALLBACK_0(DownloadItemGtk, void, OnDangerousDecline);
 
   // Nineboxes for the body area.
   static NineBox* body_nine_box_normal_;
@@ -195,8 +196,10 @@ class DownloadItemGtk : public DownloadItem::Observer,
   // Animation for download complete.
   scoped_ptr<SlideAnimation> complete_animation_;
 
-  // The file icon for the download. May be null.
-  SkBitmap* icon_;
+  // The file icon for the download. May be null. The small version is used
+  // for display in the shelf; the large version is for use as a drag icon.
+  SkBitmap* icon_small_;
+  SkBitmap* icon_large_;
 
   // The last download file path for which we requested an icon.
   FilePath icon_filepath_;

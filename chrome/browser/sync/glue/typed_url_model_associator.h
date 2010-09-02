@@ -12,6 +12,7 @@
 
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
+#include "base/string16.h"
 #include "base/task.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/history/history_types.h"
@@ -47,15 +48,16 @@ extern const char kTypedUrlTag[];
 class TypedUrlModelAssociator
   : public PerDataTypeAssociatorInterface<std::string, std::string> {
  public:
-  typedef std::vector<std::pair<GURL, std::wstring> > TypedUrlTitleVector;
+  typedef std::vector<std::pair<GURL, string16> > TypedUrlTitleVector;
   typedef std::vector<history::URLRow> TypedUrlVector;
   typedef std::vector<std::pair<history::URLID, history::URLRow> >
-    TypedUrlUpdateVector;
+      TypedUrlUpdateVector;
+  typedef std::vector<std::pair<GURL, std::vector<base::Time> > >
+      TypedUrlVisitVector;
 
   static syncable::ModelType model_type() { return syncable::TYPED_URLS; }
   TypedUrlModelAssociator(ProfileSyncService* sync_service,
-                          history::HistoryBackend* history_backend,
-                          UnrecoverableErrorHandler* error_handler);
+                          history::HistoryBackend* history_backend);
   virtual ~TypedUrlModelAssociator() { }
 
   // PerDataTypeAssociatorInterface implementation.
@@ -72,10 +74,6 @@ class TypedUrlModelAssociator
   // The has_nodes out param is true if the sync model has nodes other
   // than the permanent tagged nodes.
   virtual bool SyncModelHasUserCreatedNodes(bool* has_nodes);
-
-  // The has_nodes out param is true if the autofill model has any
-  // user-defined typed_url entries.
-  virtual bool ChromeModelHasUserCreatedNodes(bool* has_nodes);
 
   virtual void AbortAssociation() {
     // TODO(zork): Implement this.
@@ -106,22 +104,33 @@ class TypedUrlModelAssociator
   // |sync_id| with that node's id.
   virtual bool GetSyncIdForTaggedNode(const std::string& tag, int64* sync_id);
 
-  void WriteToHistoryBackend(const TypedUrlTitleVector* titles,
+  bool WriteToHistoryBackend(const TypedUrlTitleVector* titles,
                              const TypedUrlVector* new_urls,
-                             const TypedUrlUpdateVector* updated_urls);
+                             const TypedUrlUpdateVector* updated_urls,
+                             const TypedUrlVisitVector* new_visits,
+                             const history::VisitVector* deleted_visits);
 
   enum {
     DIFF_NONE           = 0x0000,
     DIFF_NODE_CHANGED   = 0x0001,
     DIFF_TITLE_CHANGED  = 0x0002,
     DIFF_ROW_CHANGED    = 0x0004,
+    DIFF_VISITS_ADDED   = 0x0008,
   };
 
   static int MergeUrls(const sync_pb::TypedUrlSpecifics& typed_url,
                        const history::URLRow& url,
-                       history::URLRow* new_url);
+                       history::VisitVector* visits,
+                       history::URLRow* new_url,
+                       std::vector<base::Time>* new_visits);
   static void WriteToSyncNode(const history::URLRow& url,
+                              const history::VisitVector& visits,
                               sync_api::WriteNode* node);
+
+  static void DiffVisits(const history::VisitVector& old_visits,
+                         const sync_pb::TypedUrlSpecifics& new_url,
+                         std::vector<base::Time>* new_visits,
+                         history::VisitVector* removed_visits);
 
  protected:
   // Returns sync service instance.
@@ -133,7 +142,6 @@ class TypedUrlModelAssociator
 
   ProfileSyncService* sync_service_;
   history::HistoryBackend* history_backend_;
-  UnrecoverableErrorHandler* error_handler_;
   int64 typed_url_node_id_;
 
   MessageLoop* expected_loop_;

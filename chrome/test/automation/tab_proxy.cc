@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/logging.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/test/automation/automation_constants.h"
 #include "chrome/test/automation/automation_messages.h"
@@ -94,28 +95,6 @@ AutomationMsg_NavigationResponseValues
   }
 
   return navigate_response;
-}
-
-AutomationMsg_NavigationResponseValues TabProxy::NavigateInExternalTab(
-    const GURL& url, const GURL& referrer) {
-  if (!is_valid())
-    return AUTOMATION_MSG_NAVIGATION_ERROR;
-
-  AutomationMsg_NavigationResponseValues rv = AUTOMATION_MSG_NAVIGATION_ERROR;
-  sender_->Send(new AutomationMsg_NavigateInExternalTab(0, handle_, url,
-                                                        referrer, &rv));
-  return rv;
-}
-
-AutomationMsg_NavigationResponseValues TabProxy::NavigateExternalTabAtIndex(
-    int index) {
-  if (!is_valid())
-    return AUTOMATION_MSG_NAVIGATION_ERROR;
-
-  AutomationMsg_NavigationResponseValues rv = AUTOMATION_MSG_NAVIGATION_ERROR;
-  sender_->Send(new AutomationMsg_NavigateExternalTabAtIndex(0, handle_, index,
-                                                             &rv));
-  return rv;
 }
 
 bool TabProxy::SetAuth(const std::wstring& username,
@@ -221,7 +200,25 @@ bool TabProxy::NavigateToURLAsync(const GURL& url) {
     return false;
 
   bool status = false;
-  sender_->Send(new AutomationMsg_NavigationAsync(0, handle_, url, &status));
+  sender_->Send(new AutomationMsg_NavigationAsync(0,
+                                                  handle_,
+                                                  url,
+                                                  &status));
+  return status;
+}
+
+bool TabProxy::NavigateToURLAsyncWithDisposition(
+    const GURL& url,
+    WindowOpenDisposition disposition) {
+  if (!is_valid())
+    return false;
+
+  bool status = false;
+  sender_->Send(new AutomationMsg_NavigationAsyncWithDisposition(0,
+                                                                 handle_,
+                                                                 url,
+                                                                 disposition,
+                                                                 &status));
   return status;
 }
 
@@ -345,6 +342,16 @@ bool TabProxy::ExecuteAndExtractValue(const std::wstring& frame_xpath,
   return *value != NULL;
 }
 
+DOMElementProxyRef TabProxy::GetDOMDocument() {
+  if (!is_valid())
+    return NULL;
+
+  int element_handle;
+  if (!ExecuteJavaScriptAndGetReturn("document", &element_handle))
+    return NULL;
+  return GetObjectProxy<DOMElementProxy>(element_handle);
+}
+
 bool TabProxy::SetEnableExtensionAutomation(
     const std::vector<std::string>& functions_enabled) {
   if (!is_valid())
@@ -369,12 +376,14 @@ bool TabProxy::GetConstrainedWindowCount(int* count) const {
 
 bool TabProxy::WaitForChildWindowCountToChange(int count, int* new_count,
                                                int wait_timeout) {
-  int intervals = std::min(wait_timeout/automation::kSleepTime, 1);
+  int intervals = std::max(wait_timeout / automation::kSleepTime, 1);
   for (int i = 0; i < intervals; ++i) {
     PlatformThread::Sleep(automation::kSleepTime);
     bool succeeded = GetConstrainedWindowCount(new_count);
-    if (!succeeded) return false;
-    if (count != *new_count) return true;
+    if (!succeeded)
+      return false;
+    if (count != *new_count)
+      return true;
   }
   // Constrained Window count did not change, return false.
   return false;
@@ -395,13 +404,15 @@ bool TabProxy::GetBlockedPopupCount(int* count) const {
 
 bool TabProxy::WaitForBlockedPopupCountToChangeTo(int target_count,
                                                   int wait_timeout) {
-  int intervals = std::min(wait_timeout/automation::kSleepTime, 1);
+  int intervals = std::max(wait_timeout / automation::kSleepTime, 1);
   for (int i = 0; i < intervals; ++i) {
     PlatformThread::Sleep(automation::kSleepTime);
     int new_count = -1;
     bool succeeded = GetBlockedPopupCount(&new_count);
-    if (!succeeded) return false;
-    if (target_count == new_count) return true;
+    if (!succeeded)
+      return false;
+    if (target_count == new_count)
+      return true;
   }
   // Constrained Window count did not change, return false.
   return false;
@@ -439,6 +450,19 @@ bool TabProxy::SetCookie(const GURL& url, const std::string& value) {
   int response_value = 0;
   return sender_->Send(new AutomationMsg_SetCookie(0, url, value, handle_,
                                                    &response_value));
+}
+
+bool TabProxy::DeleteCookie(const GURL& url, const std::string& name) {
+  bool succeeded;
+  sender_->Send(new AutomationMsg_DeleteCookie(0, url, name, handle_,
+                                               &succeeded));
+  return succeeded;
+}
+
+bool TabProxy::ShowCollectedCookiesDialog() {
+  bool succeeded = false;
+  return sender_->Send(new AutomationMsg_ShowCollectedCookiesDialog(
+                       0, handle_, &succeeded)) && succeeded;
 }
 
 int TabProxy::InspectElement(int x, int y) {
@@ -497,24 +521,58 @@ bool TabProxy::Close(bool wait_until_closed) {
 }
 
 #if defined(OS_WIN)
-// TODO(port): Remove windowsisms.
 bool TabProxy::ProcessUnhandledAccelerator(const MSG& msg) {
   if (!is_valid())
     return false;
+
   return sender_->Send(
       new AutomationMsg_ProcessUnhandledAccelerator(0, handle_, msg));
   // This message expects no response
 }
-#endif  // defined(OS_WIN)
 
 bool TabProxy::SetInitialFocus(bool reverse, bool restore_focus_to_view) {
   if (!is_valid())
     return false;
+
   return sender_->Send(
       new AutomationMsg_SetInitialFocus(0, handle_, reverse,
                                         restore_focus_to_view));
   // This message expects no response
 }
+
+AutomationMsg_NavigationResponseValues TabProxy::NavigateInExternalTab(
+    const GURL& url, const GURL& referrer) {
+  if (!is_valid())
+    return AUTOMATION_MSG_NAVIGATION_ERROR;
+
+  AutomationMsg_NavigationResponseValues rv = AUTOMATION_MSG_NAVIGATION_ERROR;
+  sender_->Send(new AutomationMsg_NavigateInExternalTab(0, handle_, url,
+                                                        referrer, &rv));
+  return rv;
+}
+
+AutomationMsg_NavigationResponseValues TabProxy::NavigateExternalTabAtIndex(
+    int index) {
+  if (!is_valid())
+    return AUTOMATION_MSG_NAVIGATION_ERROR;
+
+  AutomationMsg_NavigationResponseValues rv = AUTOMATION_MSG_NAVIGATION_ERROR;
+  sender_->Send(new AutomationMsg_NavigateExternalTabAtIndex(0, handle_, index,
+                                                             &rv));
+  return rv;
+}
+
+void TabProxy::HandleMessageFromExternalHost(const std::string& message,
+                                             const std::string& origin,
+                                             const std::string& target) {
+  if (!is_valid())
+    return;
+
+  sender_->Send(
+      new AutomationMsg_HandleMessageFromExternalHost(
+          0, handle_, message, origin, target));
+}
+#endif  // defined(OS_WIN)
 
 bool TabProxy::WaitForTabToBeRestored(uint32 timeout_ms) {
   if (!is_valid())
@@ -524,8 +582,8 @@ bool TabProxy::WaitForTabToBeRestored(uint32 timeout_ms) {
 
 bool TabProxy::GetSecurityState(SecurityStyle* security_style,
                                 int* ssl_cert_status,
-                                int* mixed_content_state) {
-  DCHECK(security_style && ssl_cert_status && mixed_content_state);
+                                int* insecure_content_status) {
+  DCHECK(security_style && ssl_cert_status && insecure_content_status);
 
   if (!is_valid())
     return false;
@@ -534,7 +592,7 @@ bool TabProxy::GetSecurityState(SecurityStyle* security_style,
 
   sender_->Send(new AutomationMsg_GetSecurityState(
       0, handle_, &succeeded, security_style, ssl_cert_status,
-      mixed_content_state));
+      insecure_content_status));
 
   return succeeded;
 }
@@ -591,18 +649,6 @@ bool TabProxy::SavePage(const FilePath& file_name,
   return succeeded;
 }
 
-void TabProxy::HandleMessageFromExternalHost(const std::string& message,
-                                             const std::string& origin,
-                                             const std::string& target) {
-  if (!is_valid())
-    return;
-
-  bool succeeded =
-      sender_->Send(new AutomationMsg_HandleMessageFromExternalHost(0, handle_,
-          message, origin, target));
-  DCHECK(succeeded);
-}
-
 bool TabProxy::GetInfoBarCount(int* count) {
   if (!is_valid())
     return false;
@@ -611,7 +657,7 @@ bool TabProxy::GetInfoBarCount(int* count) {
 }
 
 bool TabProxy::WaitForInfoBarCount(int target_count, int wait_timeout) {
-  int intervals = std::min(wait_timeout/automation::kSleepTime, 1);
+  int intervals = std::max(wait_timeout / automation::kSleepTime, 1);
   for (int i = 0; i < intervals; ++i) {
     PlatformThread::Sleep(automation::kSleepTime);
     int new_count = -1;
@@ -753,4 +799,25 @@ void TabProxy::OnMessageReceived(const IPC::Message& message) {
 void TabProxy::OnChannelError() {
   AutoLock lock(list_lock_);
   FOR_EACH_OBSERVER(TabProxyDelegate, observers_list_, OnChannelError(this));
+}
+
+bool TabProxy::ExecuteJavaScriptAndGetJSON(const std::string& script,
+                                           std::string* json) {
+  if (!is_valid())
+    return false;
+  if (!json) {
+    NOTREACHED();
+    return false;
+  }
+  return sender_->Send(new AutomationMsg_DomOperation(0, handle_, L"",
+                                                      UTF8ToWide(script),
+                                                      json));
+}
+
+void TabProxy::FirstObjectAdded() {
+  AddRef();
+}
+
+void TabProxy::LastObjectRemoved() {
+  Release();
 }

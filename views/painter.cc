@@ -7,6 +7,7 @@
 #include "app/resource_bundle.h"
 #include "base/logging.h"
 #include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/insets.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
@@ -43,8 +44,9 @@ class GradientPainter : public Painter {
     // Need to unref shader, otherwise never deleted.
     s->unref();
 
-    canvas->drawRectCoords(SkIntToScalar(0), SkIntToScalar(0),
-                           SkIntToScalar(w), SkIntToScalar(h), paint);
+    canvas->AsCanvasSkia()->drawRectCoords(
+        SkIntToScalar(0), SkIntToScalar(0), SkIntToScalar(w), SkIntToScalar(h),
+        paint);
   }
 
  private:
@@ -123,7 +125,7 @@ class ImagePainter : public Painter {
     if (paint_center_) {
       canvas->DrawBitmapInt(
           image_,
-          insets_.top(), insets_.left(),
+          insets_.left(), insets_.top(),
           image_.width() - insets_.width(), image_.height() - insets_.height(),
           insets_.left(), insets_.top(),
           w - insets_.width(), h - insets_.height(), true);
@@ -146,10 +148,10 @@ void Painter::PaintPainterAt(int x, int y, int w, int h,
   DCHECK(canvas && painter);
   if (w < 0 || h < 0)
     return;
-  canvas->save();
+  canvas->Save();
   canvas->TranslateInt(x, y);
   painter->Paint(w, h, canvas);
-  canvas->restore();
+  canvas->Restore();
 }
 
 // static

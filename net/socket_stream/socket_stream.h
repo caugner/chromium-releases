@@ -280,7 +280,7 @@ class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
   ProxyInfo proxy_info_;
 
   HttpAuthCache auth_cache_;
-  scoped_refptr<HttpAuthHandler> auth_handler_;
+  scoped_ptr<HttpAuthHandler> auth_handler_;
   HttpAuth::Identity auth_identity_;
   scoped_refptr<AuthChallengeInfo> auth_info_;
 
@@ -317,6 +317,8 @@ class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
   int write_buf_offset_;
   int write_buf_size_;
   PendingDataQueue pending_write_bufs_;
+
+  bool closing_;
 
   scoped_ptr<SocketStreamMetrics> metrics_;
 

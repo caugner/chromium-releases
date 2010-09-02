@@ -28,12 +28,6 @@
             'tree_model.h',
             'tree_node_iterator.h',
             'tree_node_model.h',
-            'win/window_impl.cc',
-            'win/window_impl.h',
-        ],
-        'include_dirs': [
-          '..',
-          '<(DEPTH)/third_party/wtl/include',
         ],
         'conditions': [
           ['OS=="win"', {
@@ -48,6 +42,8 @@
               'gtk_dnd_util.cc',
               'gtk_dnd_util.h',
               'gtk_signal.h',
+              'gtk_signal_registrar.cc',
+              'gtk_signal_registrar.h',
               'gtk_util.cc',
               'gtk_util.h',
               'x11_util.cc',
@@ -66,6 +62,7 @@
       'msvs_guid': '4631946D-7D5F-44BD-A5A8-504C0A7033BE',
       'variables': {
         'app_base_target': 1,
+        'gl_binding_output_dir': '<(SHARED_INTERMEDIATE_DIR)/app',
       },
       'dependencies': [
         # app resources and app_strings should be shared with the 64-bit
@@ -84,11 +81,17 @@
         '../third_party/sqlite/sqlite.gyp:sqlite',
         '../third_party/zlib/zlib.gyp:zlib',
       ],
+      'include_dirs': [
+        '../third_party/mesa/MesaLib/include',
+        '<(gl_binding_output_dir)',
+      ],
       # TODO(gregoryd): The direct_dependent_settings should be shared with
       # the 64-bit target, but it doesn't work due to a bug in gyp
       'direct_dependent_settings': {
         'include_dirs': [
           '..',
+          '../third_party/mesa/MesaLib/include',
+          '<(gl_binding_output_dir)',
         ],
       },
       'sources': [
@@ -116,9 +119,29 @@
         'file_download_interface.h',
         'gfx/font_util.h',
         'gfx/font_util.cc',
+        'gfx/gl/gl_bindings.h',
+        'gfx/gl/gl_context.cc',
+        'gfx/gl/gl_context.h',
+        'gfx/gl/gl_context_linux.cc',
+        'gfx/gl/gl_context_mac.cc',
+        'gfx/gl/gl_context_osmesa.cc',
+        'gfx/gl/gl_context_osmesa.h',
+        'gfx/gl/gl_context_stub.h',
+        'gfx/gl/gl_context_win.cc',
+        'gfx/gl/gl_headers.h',
+        'gfx/gl/gl_implementation.cc',
+        'gfx/gl/gl_implementation.h',
+        'gfx/gl/gl_implementation_linux.cc',
+        'gfx/gl/gl_implementation_mac.cc',
+        'gfx/gl/gl_implementation_win.cc',
+        'gfx/gl/gl_interface.h',
+        'gfx/gl/gl_interface.cc',
+        'gfx/gl/gl_mock.h',
         'gtk_dnd_util.cc',
         'gtk_dnd_util.h',
         'gtk_signal.h',
+        'gtk_signal_registrar.cc',
+        'gtk_signal_registrar.h',
         'gtk_util.cc',
         'gtk_util.h',
         'l10n_util.cc',
@@ -128,13 +151,20 @@
         'l10n_util_posix.cc',
         'l10n_util_win.cc',
         'l10n_util_win.h',
+        'linear_animation.cc',
+        'linear_animation.h',
         'menus/accelerator.h',
         'menus/accelerator_gtk.h',
+        'menus/accelerator_cocoa.h',
+        'menus/button_menu_item_model.cc',
+        'menus/button_menu_item_model.h',
         'menus/menu_model.cc',
         'menus/menu_model.h',
         'menus/simple_menu_model.cc',
         'menus/simple_menu_model.h',
         'message_box_flags.h',
+        'multi_animation.cc',
+        'multi_animation.h',
         'os_exchange_data_provider_gtk.cc',
         'os_exchange_data_provider_gtk.h',
         'os_exchange_data_provider_win.cc',
@@ -176,9 +206,47 @@
         'theme_provider.h',
         'throb_animation.cc',
         'throb_animation.h',
+        'tween.cc',
+        'tween.h',
         'x11_util.cc',
         'x11_util.h',
         'x11_util_internal.h',
+        '<(gl_binding_output_dir)/gl_bindings_autogen_gl.cc',
+        '<(gl_binding_output_dir)/gl_bindings_autogen_gl.h',
+        '<(gl_binding_output_dir)/gl_bindings_autogen_mock.cc',
+        '<(gl_binding_output_dir)/gl_bindings_autogen_osmesa.cc',
+        '<(gl_binding_output_dir)/gl_bindings_autogen_osmesa.h',
+      ],
+      # hard_dependency is necessary for this target because it has actions
+      # that generate header files included by dependent targtets. The header
+      # files must be generated before the dependents are compiled. The usual
+      # semantics are to allow the two targets to build concurrently.
+      'hard_dependency': 1,
+      'actions': [
+        {
+          'action_name': 'generate_gl_bindings',
+          'inputs': [
+            'gfx/gl/generate_bindings.py',
+          ],
+          'outputs': [
+            '<(gl_binding_output_dir)/gl_bindings_autogen_egl.cc',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_egl.h',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_gl.cc',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_gl.h',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_glx.cc',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_glx.h',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_mock.cc',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_osmesa.cc',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_osmesa.h',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_wgl.cc',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_wgl.h',
+          ],
+          'action': [
+            'python',
+            'gfx/gl/generate_bindings.py',
+            '<(gl_binding_output_dir)',
+          ],
+        },
       ],
       'conditions': [
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
@@ -188,9 +256,15 @@
             '../build/linux/system.gyp:fontconfig',
             '../build/linux/system.gyp:gtk',
             '../build/linux/system.gyp:x11',
+            '../build/linux/system.gyp:xext',
           ],
+          'link_settings': {
+            'libraries': [
+              '-lXrender',  # For XRender* function calls in x11_util.cc.
+            ],
+          },
           'conditions': [
-            ['toolkit_views==0 and chromeos==0', {
+            ['toolkit_views==0', {
               # Note: because of gyp predence rules this has to be defined as
               # 'sources/' rather than 'sources!'.
               'sources/': [
@@ -201,7 +275,7 @@
                 ['exclude', '^drag_drop_types_gtk.cc'],
               ],
             }],
-            ['toolkit_views==1 or chromeos==1', {
+            ['toolkit_views==1', {
               # Note: because of gyp predence rules this has to be defined as
               # 'sources/' rather than 'sources!'.
               'sources/': [
@@ -220,8 +294,54 @@
             'gfx/native_theme_win.cc',
             'gfx/native_theme_win.h',
             'os_exchange_data.cc',
-            'win/window_impl.cc',
-            'win/window_impl.h',
+          ],
+        }],
+        ['OS=="linux"', {
+          'sources': [
+            'gfx/gl/gl_context_egl.cc',
+            'gfx/gl/gl_context_egl.h',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_egl.cc',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_egl.h',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_glx.cc',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_glx.h',
+          ],
+          'include_dirs': [
+            # We don't use angle, but pull the EGL/GLES headers from there.
+            '../third_party/angle/include',
+          ],
+          'all_dependent_settings': {
+            'defines': [
+              'GL_GLEXT_PROTOTYPES',
+            ],
+            'ldflags': [
+              '-L<(PRODUCT_DIR)',
+            ],
+            'link_settings': {
+              'libraries': [
+                '-lX11',
+                '-ldl',
+              ],
+            },
+          },
+        }],
+        ['OS=="mac"', {
+          'link_settings': {
+            'libraries': [
+              '$(SDKROOT)/System/Library/Frameworks/OpenGL.framework',
+            ],
+          },
+        }],
+        ['OS=="win"', {
+          'include_dirs': [
+            '../third_party/angle/include',
+          ],
+          'sources': [
+            'gfx/gl/gl_context_egl.cc',
+            'gfx/gl/gl_context_egl.h',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_egl.cc',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_egl.h',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_wgl.cc',
+            '<(gl_binding_output_dir)/gl_bindings_autogen_wgl.h',
           ],
         }],
       ],

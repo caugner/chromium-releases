@@ -42,8 +42,10 @@ namespace history {
 
 namespace {
 
-static const int kCurrentVersionNumber = 1;
-static const int kCompatibleVersionNumber = 1;
+// Version 1 uses FTS2 for index files.
+// Version 2 uses FTS3.
+static const int kCurrentVersionNumber = 2;
+static const int kCompatibleVersionNumber = 2;
 
 // Snippet computation relies on the index of the columns in the original
 // create statement. These are the 0-based indices (as strings) of the
@@ -169,7 +171,7 @@ void TextDatabase::CommitTransaction() {
 bool TextDatabase::CreateTables() {
   // FTS table of page contents.
   if (!db_.DoesTableExist("pages")) {
-    if (!db_.Execute("CREATE VIRTUAL TABLE pages USING fts2("
+    if (!db_.Execute("CREATE VIRTUAL TABLE pages USING fts3("
                      "TOKENIZE icu,"
                      "url LONGVARCHAR,"
                      "title LONGVARCHAR,"
@@ -337,7 +339,7 @@ void TextDatabase::GetTextMatches(const std::string& query,
     Match& match = results->at(results->size() - 1);
     match.url.Swap(&url);
 
-    match.title = UTF8ToWide(statement.ColumnString(1));
+    match.title = statement.ColumnString16(1);
     match.time = base::Time::FromInternalValue(statement.ColumnInt64(2));
 
     // Extract any matches in the title.

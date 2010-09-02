@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,6 @@
 #include "grit/generated_resources.h"
 
 @interface BookmarkEditorBaseController ()
-
-@property (retain, readwrite) NSArray* folderTreeArray;
 
 // Return the folder tree object for the given path.
 - (BookmarkFolderInfo*)folderForIndexPath:(NSIndexPath*)path;
@@ -59,24 +57,21 @@ void BookmarkEditor::Show(gfx::NativeWindow parent_hwnd,
                           Profile* profile,
                           const BookmarkNode* parent,
                           const EditDetails& details,
-                          Configuration configuration,
-                          Handler* handler) {
+                          Configuration configuration) {
   BookmarkEditorBaseController* controller = nil;
   if (details.type == EditDetails::NEW_FOLDER) {
     controller = [[BookmarkAllTabsController alloc]
                   initWithParentWindow:parent_hwnd
                                profile:profile
                                 parent:parent
-                         configuration:configuration
-                               handler:handler];
+                         configuration:configuration];
   } else {
     controller = [[BookmarkEditorController alloc]
                   initWithParentWindow:parent_hwnd
                                profile:profile
                                 parent:parent
                                   node:details.existing_node
-                         configuration:configuration
-                               handler:handler];
+                         configuration:configuration];
   }
   [controller runAsModalSheet];
 }
@@ -164,8 +159,7 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
                    nibName:(NSString*)nibName
                    profile:(Profile*)profile
                     parent:(const BookmarkNode*)parent
-             configuration:(BookmarkEditor::Configuration)configuration
-                   handler:(BookmarkEditor::Handler*)handler {
+             configuration:(BookmarkEditor::Configuration)configuration {
   NSString* nibpath = [mac_util::MainAppBundle()
                         pathForResource:nibName
                                  ofType:@"nib"];
@@ -174,7 +168,6 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
     profile_ = profile;
     parentNode_ = parent;
     configuration_ = configuration;
-    handler_.reset(handler);
     initialName_ = [@"" retain];
     observer_.reset(new BookmarkEditorBaseControllerBridge(self));
     [self bookmarkModel]->AddObserver(observer_.get());
@@ -335,17 +328,8 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
   return selectedNode;
 }
 
-- (void)notifyHandlerCreatedNode:(const BookmarkNode*)node {
-  if (handler_.get())
-    handler_->NodeCreated(node);
-}
-
 - (NSArray*)folderTreeArray {
   return folderTreeArray_.get();
-}
-
-- (void)setFolderTreeArray:(NSArray*)folderTreeArray {
-  folderTreeArray_.reset([folderTreeArray retain]);
 }
 
 - (NSArray*)tableSelectionPaths {
@@ -432,7 +416,9 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
   const BookmarkNode* rootNode = model->root_node();
   NSMutableArray* baseArray = [self addChildFoldersFromNode:rootNode];
   DCHECK(baseArray);
-  [self setFolderTreeArray:baseArray];
+  [self willChangeValueForKey:@"folderTreeArray"];
+  folderTreeArray_.reset([baseArray retain]);
+  [self didChangeValueForKey:@"folderTreeArray"];
 }
 
 - (void)modelChangedPreserveSelection:(BOOL)preserve {
@@ -478,7 +464,6 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
       const BookmarkNode* newFolder =
       model->AddGroup(parentNode, i,
                       base::SysNSStringToWide([subFolderInfo folderName]));
-      [self notifyHandlerCreatedNode:newFolder];
       // Update our dictionary with the actual folder node just created.
       [subFolderInfo setFolderNode:newFolder];
       [subFolderInfo setNewFolder:NO];
@@ -526,12 +511,16 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
 }
 
 - (void)createNewFolders {
+  // Turn off notifications while "importing" folders (as created in the sheet).
+  observer_->BookmarkImportBeginning([self bookmarkModel]);
   // Scan the tree looking for nodes marked 'newFolder' and create those nodes.
   NSArray* folderTreeArray = [self folderTreeArray];
   for (BookmarkFolderInfo *folderInfo in folderTreeArray) {
     [self createNewFoldersForFolder:folderInfo
                  selectedFolderInfo:[self selectedFolder]];
   }
+  // Notifications back on.
+  observer_->BookmarkImportEnding([self bookmarkModel]);
 }
 
 #pragma mark For Unit Test Use Only

@@ -15,6 +15,7 @@
 
 #include "base/basictypes.h"
 #include "base/condition_variable.h"
+#include "base/gtest_prod_util.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/thread.h"
@@ -25,8 +26,7 @@
 #include "chrome/browser/sync/engine/idle_query_linux.h"
 #endif
 #include "chrome/browser/sync/sessions/sync_session.h"
-#include "chrome/browser/sync/util/event_sys-inl.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"  // For FRIEND_TEST
+#include "chrome/common/deprecated/event_sys-inl.h"
 
 class EventListenerHookup;
 
@@ -40,22 +40,24 @@ namespace browser_sync {
 class ModelSafeWorker;
 class ServerConnectionManager;
 class Syncer;
-class TalkMediator;
 class URLFactory;
 struct ServerConnectionEvent;
 struct SyncerEvent;
 struct SyncerShutdownEvent;
-struct TalkMediatorEvent;
 
 class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
-                     public sessions::SyncSession::Delegate {
-  FRIEND_TEST(SyncerThreadTest, CalculateSyncWaitTime);
-  FRIEND_TEST(SyncerThreadTest, CalculatePollingWaitTime);
-  FRIEND_TEST(SyncerThreadWithSyncerTest, Polling);
-  FRIEND_TEST(SyncerThreadWithSyncerTest, Nudge);
-  FRIEND_TEST(SyncerThreadWithSyncerTest, Throttling);
-  FRIEND_TEST(SyncerThreadWithSyncerTest, AuthInvalid);
-  FRIEND_TEST(SyncerThreadWithSyncerTest, DISABLED_Pause);
+                     public sessions::SyncSession::Delegate,
+                     public ChannelEventHandler<SyncerEvent> {
+  FRIEND_TEST_ALL_PREFIXES(SyncerThreadTest, CalculateSyncWaitTime);
+  FRIEND_TEST_ALL_PREFIXES(SyncerThreadTest, CalculatePollingWaitTime);
+  FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, Polling);
+  FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, Nudge);
+  FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, Throttling);
+  FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, AuthInvalid);
+  FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, Pause);
+  FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, StartWhenNotConnected);
+  FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, PauseWhenNotConnected);
+  FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, StopSyncPermanently);
   friend class SyncerThreadWithSyncerTest;
   friend class SyncerThreadFactory;
  public:
@@ -131,8 +133,7 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
   // from the SyncerThread's controller and will cause a mutex lock.
   virtual void NudgeSyncer(int milliseconds_from_now, NudgeSource source);
 
-  // Registers this thread to watch talk mediator events.
-  virtual void WatchTalkMediator(TalkMediator* talk_mediator);
+  void SetNotificationsEnabled(bool notifications_enabled);
 
   virtual SyncerEventChannel* relay_channel();
 
@@ -182,8 +183,11 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
     // False when we want to stop the thread.
     bool stop_syncer_thread_;
 
-    // True when the thread should pause itself.
-    bool pause_;
+    // True when a pause was requested.
+    bool pause_requested_;
+
+    // True when the thread is paused.
+    bool paused_;
 
     Syncer* syncer_;
 
@@ -203,7 +207,8 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
 
     ProtectedFields()
         : stop_syncer_thread_(false),
-          pause_(false),
+          pause_requested_(false),
+          paused_(false),
           syncer_(NULL),
           connected_(false) {}
   } vault_;
@@ -223,7 +228,7 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
   void* Run();
   void HandleDirectoryManagerEvent(
       const syncable::DirectoryManagerEvent& event);
-  void HandleSyncerEvent(const SyncerEvent& event);
+  void HandleChannelEvent(const SyncerEvent& event);
 
   // SyncSession::Delegate implementation.
   virtual void OnSilencedUntil(const base::TimeTicks& silenced_until);
@@ -232,10 +237,9 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
       const base::TimeDelta& new_interval);
   virtual void OnReceivedLongPollIntervalUpdate(
       const base::TimeDelta& new_interval);
+  virtual void OnShouldStopSyncingPermanently();
 
   void HandleServerConnectionEvent(const ServerConnectionEvent& event);
-
-  void HandleTalkMediatorEvent(const TalkMediatorEvent& event);
 
   void SyncMain(Syncer* syncer);
 
@@ -273,12 +277,23 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
 
   int UserIdleTime();
 
+  void WaitUntilConnectedOrQuit();
+
   // The thread will remain in this method until a resume is requested
   // or shutdown is started.
   void PauseUntilResumedOrQuit();
 
+  void EnterPausedState();
+
+  void ExitPausedState();
+
   // For unit tests only.
   virtual void DisableIdleDetection() { disable_idle_detection_ = true; }
+
+  // This sets all conditions for syncer thread termination but does not
+  // actually join threads.  It is expected that Stop will be called at some
+  // time after to fully stop and clean up.
+  void RequestSyncerExitAndSetThreadStopConditions();
 
   // State of the notification framework is tracked by these values.
   bool p2p_authenticated_;
@@ -306,9 +321,8 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
   // this is called.
   void NudgeSyncImpl(int milliseconds_from_now, NudgeSource source);
 
-  scoped_ptr<EventListenerHookup> talk_mediator_hookup_;
   scoped_ptr<EventListenerHookup> directory_manager_hookup_;
-  scoped_ptr<EventListenerHookup> syncer_events_;
+  scoped_ptr<ChannelHookup<SyncerEvent> > syncer_events_;
 
 #if defined(OS_LINUX)
   // On Linux, we need this information in order to query idle time.

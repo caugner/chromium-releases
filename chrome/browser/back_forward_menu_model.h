@@ -9,8 +9,8 @@
 
 #include "app/menus/menu_model.h"
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/string16.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"  // For FRIEND_TEST
 #include "webkit/glue/window_open_disposition.h"
 
 class Browser;
@@ -53,6 +53,7 @@ class BackForwardMenuModel : public menus::MenuModel {
   virtual bool IsItemCheckedAt(int index) const;
   virtual int GetGroupIdAt(int index) const;
   virtual bool GetIconAt(int index, SkBitmap* icon) const;
+  virtual menus::ButtonMenuItemModel* GetButtonMenuItemAt(int index) const;
   virtual bool IsEnabledAt(int index) const;
   virtual MenuModel* GetSubmenuModelAt(int index) const;
   virtual void HighlightChangedTo(int index);
@@ -163,9 +164,9 @@ class BackForwardMenuModel : public menus::MenuModel {
   ModelType model_type_;
 
   friend class BackFwdMenuModelTest;
-  FRIEND_TEST(BackFwdMenuModelTest, BasicCase);
-  FRIEND_TEST(BackFwdMenuModelTest, MaxItemsTest);
-  FRIEND_TEST(BackFwdMenuModelTest, ChapterStops);
+  FRIEND_TEST_ALL_PREFIXES(BackFwdMenuModelTest, BasicCase);
+  FRIEND_TEST_ALL_PREFIXES(BackFwdMenuModelTest, MaxItemsTest);
+  FRIEND_TEST_ALL_PREFIXES(BackFwdMenuModelTest, ChapterStops);
 
   DISALLOW_COPY_AND_ASSIGN(BackForwardMenuModel);
 };

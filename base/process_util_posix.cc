@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,6 @@
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/scoped_ptr.h"
-#include "base/sys_info.h"
 #include "base/time.h"
 #include "base/waitable_event.h"
 
@@ -103,6 +102,7 @@ int WaitpidWithTimeout(ProcessHandle handle, int64 wait_milliseconds,
 }
 
 void StackDumpSignalHandler(int signal) {
+  LOG(ERROR) << "Received signal " << signal;
   StackTrace().PrintBacktrace();
   _exit(1);
 }
@@ -158,6 +158,15 @@ bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
       if (pid == process_id) {
         exited = true;
         break;
+      }
+      if (pid == -1) {
+        if (errno == ECHILD) {
+          // The wait may fail with ECHILD if another process also waited for
+          // the same pid, causing the process state to get cleaned up.
+          exited = true;
+          break;
+        }
+        DPLOG(ERROR) << "Error waiting for process " << process_id;
       }
 
       sleep(1);
@@ -510,6 +519,13 @@ bool LaunchApp(
     RestoreDefaultExceptionHandler();
 #endif
 
+    // The previous signal handlers are likely to be meaningless in the child's
+    // context so we reset them to the defaults for now. http://crbug.com/44953
+    // These signal handlers are setup in browser_main.cc:BrowserMain
+    signal(SIGTERM, SIG_DFL);
+    signal(SIGHUP, SIG_DFL);
+    signal(SIGINT, SIG_DFL);
+
 #if 0
     // When debugging it can be helpful to check that we really aren't making
     // any hidden calls to malloc.
@@ -577,37 +593,6 @@ bool LaunchApp(const CommandLine& cl,
   return LaunchApp(cl.argv(), no_files, wait, process_handle);
 }
 
-#if !defined(OS_MACOSX)
-ProcessMetrics::ProcessMetrics(ProcessHandle process)
-#else
-ProcessMetrics::ProcessMetrics(ProcessHandle process,
-                               ProcessMetrics::PortProvider* port_provider)
-#endif
-    : process_(process),
-      last_time_(0),
-      last_system_time_(0)
-#if defined(OS_MACOSX)
-      , port_provider_(port_provider)
-#elif defined(OS_POSIX)
-      , last_cpu_(0)
-#endif
-{
-  processor_count_ = base::SysInfo::NumberOfProcessors();
-}
-
-// static
-#if !defined(OS_MACOSX)
-ProcessMetrics* ProcessMetrics::CreateProcessMetrics(ProcessHandle process) {
-  return new ProcessMetrics(process);
-}
-#else
-ProcessMetrics* ProcessMetrics::CreateProcessMetrics(
-    ProcessHandle process,
-    ProcessMetrics::PortProvider* port_provider) {
-  return new ProcessMetrics(process, port_provider);
-}
-#endif
-
 ProcessMetrics::~ProcessMetrics() { }
 
 void EnableTerminationOnHeapCorruption() {
@@ -624,11 +609,13 @@ bool EnableInProcessStackDumping() {
   sigemptyset(&action.sa_mask);
   bool success = (sigaction(SIGPIPE, &action, NULL) == 0);
 
-  // TODO(phajdan.jr): Catch other crashy signals, like SIGABRT.
-  success &= (signal(SIGSEGV, &StackDumpSignalHandler) != SIG_ERR);
   success &= (signal(SIGILL, &StackDumpSignalHandler) != SIG_ERR);
-  success &= (signal(SIGBUS, &StackDumpSignalHandler) != SIG_ERR);
+  success &= (signal(SIGABRT, &StackDumpSignalHandler) != SIG_ERR);
   success &= (signal(SIGFPE, &StackDumpSignalHandler) != SIG_ERR);
+  success &= (signal(SIGBUS, &StackDumpSignalHandler) != SIG_ERR);
+  success &= (signal(SIGSEGV, &StackDumpSignalHandler) != SIG_ERR);
+  success &= (signal(SIGSYS, &StackDumpSignalHandler) != SIG_ERR);
+
   return success;
 }
 
@@ -757,7 +744,6 @@ int64 TimeValToMicroseconds(const struct timeval& tv) {
 // specify the path of the application, and |envp| will be used as the
 // environment. Redirects stderr to /dev/null. Returns true on success
 // (application launched and exited cleanly, with exit code indicating success).
-// |output| is modified only when the function finished successfully.
 static bool GetAppOutputInternal(const CommandLine& cl, char* const envp[],
                                  std::string* output, size_t max_output,
                                  bool do_search_path) {
@@ -829,8 +815,8 @@ static bool GetAppOutputInternal(const CommandLine& cl, char* const envp[],
         // write to the pipe).
         close(pipe_fd[1]);
 
+        output->clear();
         char buffer[256];
-        std::string output_buf;
         size_t output_buf_left = max_output;
         ssize_t bytes_read = 1;  // A lie to properly handle |max_output == 0|
                                  // case in the logic below.
@@ -840,7 +826,7 @@ static bool GetAppOutputInternal(const CommandLine& cl, char* const envp[],
                                     std::min(output_buf_left, sizeof(buffer))));
           if (bytes_read <= 0)
             break;
-          output_buf.append(buffer, bytes_read);
+          output->append(buffer, bytes_read);
           output_buf_left -= static_cast<size_t>(bytes_read);
         }
         close(pipe_fd[0]);
@@ -856,7 +842,6 @@ static bool GetAppOutputInternal(const CommandLine& cl, char* const envp[],
             return false;
         }
 
-        output->swap(output_buf);
         return true;
       }
   }
@@ -875,28 +860,6 @@ bool GetAppOutputRestricted(const CommandLine& cl,
   // Run |execve()| with the empty environment.
   char* const empty_environ = NULL;
   return GetAppOutputInternal(cl, &empty_environ, output, max_output, false);
-}
-
-int GetProcessCount(const std::wstring& executable_name,
-                    const ProcessFilter* filter) {
-  int count = 0;
-
-  NamedProcessIterator iter(executable_name, filter);
-  while (iter.NextProcessEntry())
-    ++count;
-  return count;
-}
-
-bool KillProcesses(const std::wstring& executable_name, int exit_code,
-                   const ProcessFilter* filter) {
-  bool result = true;
-  const ProcessEntry* entry;
-
-  NamedProcessIterator iter(executable_name, filter);
-  while ((entry = iter.NextProcessEntry()) != NULL)
-    result = KillProcess((*entry).pid, exit_code, true) && result;
-
-  return result;
 }
 
 bool WaitForProcessesToExit(const std::wstring& executable_name,

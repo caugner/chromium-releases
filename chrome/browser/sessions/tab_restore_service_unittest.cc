@@ -127,11 +127,11 @@ TEST_F(TabRestoreServiceTest, Basic) {
   ASSERT_EQ(TabRestoreService::TAB, entry->type);
   TabRestoreService::Tab* tab = static_cast<TabRestoreService::Tab*>(entry);
   EXPECT_FALSE(tab->pinned);
-  EXPECT_TRUE(tab->app_extension_id.empty());
+  EXPECT_TRUE(tab->extension_app_id.empty());
   ASSERT_EQ(3U, tab->navigations.size());
-  EXPECT_TRUE(url1_ == tab->navigations[0].url());
-  EXPECT_TRUE(url2_ == tab->navigations[1].url());
-  EXPECT_TRUE(url3_ == tab->navigations[2].url());
+  EXPECT_TRUE(url1_ == tab->navigations[0].virtual_url());
+  EXPECT_TRUE(url2_ == tab->navigations[1].virtual_url());
+  EXPECT_TRUE(url3_ == tab->navigations[2].virtual_url());
   EXPECT_EQ(2, tab->current_navigation_index);
   EXPECT_EQ(time_factory_->TimeNow().ToInternalValue(),
             tab->timestamp.ToInternalValue());
@@ -150,9 +150,9 @@ TEST_F(TabRestoreServiceTest, Basic) {
   tab = static_cast<TabRestoreService::Tab*>(entry);
   EXPECT_FALSE(tab->pinned);
   ASSERT_EQ(3U, tab->navigations.size());
-  EXPECT_TRUE(url1_ == tab->navigations[0].url());
-  EXPECT_TRUE(url2_ == tab->navigations[1].url());
-  EXPECT_TRUE(url3_ == tab->navigations[2].url());
+  EXPECT_TRUE(url1_ == tab->navigations[0].virtual_url());
+  EXPECT_TRUE(url2_ == tab->navigations[1].virtual_url());
+  EXPECT_TRUE(url3_ == tab->navigations[2].virtual_url());
   EXPECT_EQ(1, tab->current_navigation_index);
   EXPECT_EQ(time_factory_->TimeNow().ToInternalValue(),
             tab->timestamp.ToInternalValue());
@@ -184,9 +184,9 @@ TEST_F(TabRestoreServiceTest, Restore) {
   TabRestoreService::Tab* tab = static_cast<TabRestoreService::Tab*>(entry);
   EXPECT_FALSE(tab->pinned);
   ASSERT_EQ(3U, tab->navigations.size());
-  EXPECT_TRUE(url1_ == tab->navigations[0].url());
-  EXPECT_TRUE(url2_ == tab->navigations[1].url());
-  EXPECT_TRUE(url3_ == tab->navigations[2].url());
+  EXPECT_TRUE(url1_ == tab->navigations[0].virtual_url());
+  EXPECT_TRUE(url2_ == tab->navigations[1].virtual_url());
+  EXPECT_TRUE(url3_ == tab->navigations[2].virtual_url());
   EXPECT_EQ(2, tab->current_navigation_index);
   EXPECT_EQ(time_factory_->TimeNow().ToInternalValue(),
             tab->timestamp.ToInternalValue());
@@ -208,8 +208,8 @@ TEST_F(TabRestoreServiceTest, RestorePinnedAndApp) {
   ASSERT_EQ(TabRestoreService::TAB, entry->type);
   TabRestoreService::Tab* tab = static_cast<TabRestoreService::Tab*>(entry);
   tab->pinned = true;
-  const std::string app_extension_id("test");
-  tab->app_extension_id = app_extension_id;
+  const std::string extension_app_id("test");
+  tab->extension_app_id = extension_app_id;
 
   // Recreate the service and have it load the tabs.
   RecreateService();
@@ -223,15 +223,22 @@ TEST_F(TabRestoreServiceTest, RestorePinnedAndApp) {
   tab = static_cast<TabRestoreService::Tab*>(entry);
   EXPECT_TRUE(tab->pinned);
   ASSERT_EQ(3U, tab->navigations.size());
-  EXPECT_TRUE(url1_ == tab->navigations[0].url());
-  EXPECT_TRUE(url2_ == tab->navigations[1].url());
-  EXPECT_TRUE(url3_ == tab->navigations[2].url());
+  EXPECT_TRUE(url1_ == tab->navigations[0].virtual_url());
+  EXPECT_TRUE(url2_ == tab->navigations[1].virtual_url());
+  EXPECT_TRUE(url3_ == tab->navigations[2].virtual_url());
   EXPECT_EQ(2, tab->current_navigation_index);
-  EXPECT_TRUE(app_extension_id == tab->app_extension_id);
+  EXPECT_TRUE(extension_app_id == tab->extension_app_id);
 }
 
+// Crashes, http://crbug.com/45977.
+#if defined(OS_WIN)
+#define MAYBE_DontPersistPostData DISABLED_DontPersistPostData
+#else
+#define MAYBE_DontPersistPostData DontPersistPostData
+#endif  // defined(OS_WIN)
+
 // Make sure we persist entries to disk that have post data.
-TEST_F(TabRestoreServiceTest, DontPersistPostData) {
+TEST_F(TabRestoreServiceTest, MAYBE_DontPersistPostData) {
   AddThreeNavigations();
   controller().GetEntryAtIndex(0)->set_has_post_data(true);
   controller().GetEntryAtIndex(1)->set_has_post_data(true);
@@ -297,7 +304,7 @@ TEST_F(TabRestoreServiceTest, LoadPreviousSession) {
   ASSERT_EQ(1U, window->tabs[0].navigations.size());
   EXPECT_EQ(0, window->tabs[0].current_navigation_index);
   EXPECT_EQ(0, window->tabs[0].timestamp.ToInternalValue());
-  EXPECT_TRUE(url1_ == window->tabs[0].navigations[0].url());
+  EXPECT_TRUE(url1_ == window->tabs[0].navigations[0].virtual_url());
 }
 
 // Makes sure we don't attempt to load previous sessions after a restore.
@@ -352,7 +359,7 @@ TEST_F(TabRestoreServiceTest, LoadPreviousSessionAndTabs) {
   ASSERT_EQ(1U, window->tabs[0].navigations.size());
   EXPECT_EQ(0, window->tabs[0].current_navigation_index);
   EXPECT_EQ(0, window->tabs[0].timestamp.ToInternalValue());
-  EXPECT_TRUE(url1_ == window->tabs[0].navigations[0].url());
+  EXPECT_TRUE(url1_ == window->tabs[0].navigations[0].virtual_url());
 
   // Then the closed tab.
   entry = *(++service_->entries().begin());
@@ -363,9 +370,9 @@ TEST_F(TabRestoreServiceTest, LoadPreviousSessionAndTabs) {
   EXPECT_EQ(2, tab->current_navigation_index);
   EXPECT_EQ(time_factory_->TimeNow().ToInternalValue(),
             tab->timestamp.ToInternalValue());
-  EXPECT_TRUE(url1_ == tab->navigations[0].url());
-  EXPECT_TRUE(url2_ == tab->navigations[1].url());
-  EXPECT_TRUE(url3_ == tab->navigations[2].url());
+  EXPECT_TRUE(url1_ == tab->navigations[0].virtual_url());
+  EXPECT_TRUE(url2_ == tab->navigations[1].virtual_url());
+  EXPECT_TRUE(url3_ == tab->navigations[2].virtual_url());
 }
 
 // Make sure pinned state is correctly loaded from session service.
@@ -393,7 +400,7 @@ TEST_F(TabRestoreServiceTest, LoadPreviousSessionAndTabsPinned) {
   EXPECT_TRUE(window->tabs[0].pinned);
   ASSERT_EQ(1U, window->tabs[0].navigations.size());
   EXPECT_EQ(0, window->tabs[0].current_navigation_index);
-  EXPECT_TRUE(url1_ == window->tabs[0].navigations[0].url());
+  EXPECT_TRUE(url1_ == window->tabs[0].navigations[0].virtual_url());
 
   // Then the closed tab.
   entry = *(++service_->entries().begin());
@@ -402,9 +409,9 @@ TEST_F(TabRestoreServiceTest, LoadPreviousSessionAndTabsPinned) {
   ASSERT_FALSE(tab->pinned);
   ASSERT_EQ(3U, tab->navigations.size());
   EXPECT_EQ(2, tab->current_navigation_index);
-  EXPECT_TRUE(url1_ == tab->navigations[0].url());
-  EXPECT_TRUE(url2_ == tab->navigations[1].url());
-  EXPECT_TRUE(url3_ == tab->navigations[2].url());
+  EXPECT_TRUE(url1_ == tab->navigations[0].virtual_url());
+  EXPECT_TRUE(url2_ == tab->navigations[1].virtual_url());
+  EXPECT_TRUE(url3_ == tab->navigations[2].virtual_url());
 }
 
 // Creates TabRestoreService::kMaxEntries + 1 windows in the session service
@@ -438,7 +445,7 @@ TEST_F(TabRestoreServiceTest, ManyWindowsInSessionService) {
   ASSERT_EQ(1U, window->tabs[0].navigations.size());
   EXPECT_EQ(0, window->tabs[0].current_navigation_index);
   EXPECT_EQ(0, window->tabs[0].timestamp.ToInternalValue());
-  EXPECT_TRUE(url1_ == window->tabs[0].navigations[0].url());
+  EXPECT_TRUE(url1_ == window->tabs[0].navigations[0].virtual_url());
 }
 
 // Makes sure we restore the time stamp correctly.
@@ -475,4 +482,3 @@ TEST_F(TabRestoreServiceTest, TimestampSurvivesRestore) {
   EXPECT_EQ(tab_timestamp.ToInternalValue(),
             restored_tab->timestamp.ToInternalValue());
 }
-

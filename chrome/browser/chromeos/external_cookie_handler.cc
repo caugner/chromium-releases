@@ -7,29 +7,14 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "chrome/browser/chromeos/pipe_reader.h"
-#include "chrome/browser/net/url_request_context_getter.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/url_request_context_getter.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/cookie_store.h"
 #include "net/url_request/url_request_context.h"
 
 namespace chromeos {
-
-void ExternalCookieHandler::GetCookies(const CommandLine& parsed_command_line,
-                                       Profile* profile) {
-  // If there are Google External SSO cookies, add them to the cookie store.
-  if (parsed_command_line.HasSwitch(switches::kCookiePipe)) {
-    FilePath cookie_pipe =
-        parsed_command_line.GetSwitchValuePath(switches::kCookiePipe);
-    if (file_util::PathExists(cookie_pipe)) {
-      ExternalCookieHandler cookie_handler(new PipeReader(cookie_pipe));
-      cookie_handler.HandleCookies(
-          profile->GetRequestContext()->GetCookieStore());
-      file_util::Delete(cookie_pipe, false);
-    }
-  }
-}
 
 // static
 const char ExternalCookieHandler::kGoogleAccountsUrl[] =

@@ -1,8 +1,8 @@
 include_rules = [
-  # notifier depends on libjingle.
-  "+talk/base",
+  # sync_notifier depends on cacheinvalidation.
+  "+google/cacheinvalidation",
+  # sync_notifier depends on the common jingle notifier classes.
+  "+jingle/notifier",
+  # sync_notifier depends on the xmpp part of libjingle.
   "+talk/xmpp",
-  "+talk/xmllite",
-  "+talk/p2p/base",  # TODO(ncarter): Determine if this is necessary/proper.
-
 ]

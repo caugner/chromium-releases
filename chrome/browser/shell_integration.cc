@@ -18,13 +18,15 @@ std::string ShellIntegration::GetCommandLineArgumentsCommon(const GURL& url,
   std::wstring arguments_w;
 
   // Use the same UserDataDir for new launches that we currently have set.
-  std::wstring user_data_dir = cmd.GetSwitchValue(switches::kUserDataDir);
-  if (!user_data_dir.empty()) {
+  FilePath user_data_dir = cmd.GetSwitchValuePath(switches::kUserDataDir);
+  if (!user_data_dir.value().empty()) {
     // Make sure user_data_dir is an absolute path.
     if (file_util::AbsolutePath(&user_data_dir) &&
-        file_util::PathExists(FilePath::FromWStringHack(user_data_dir))) {
+        file_util::PathExists(user_data_dir)) {
+      // TODO: This is wrong in pathological quoting scenarios; we shouldn't be
+      // passing around command lines as strings at all.
       arguments_w += std::wstring(L"--") + ASCIIToWide(switches::kUserDataDir) +
-                     L"=\"" + user_data_dir + L"\" ";
+                     L"=\"" + user_data_dir.ToWStringHack() + L"\" ";
     }
   }
 
@@ -39,11 +41,10 @@ std::string ShellIntegration::GetCommandLineArgumentsCommon(const GURL& url,
   // If |extension_app_id| is present, we use the kAppId switch rather than
   // the kApp switch (the launch url will be read from the extension app
   // during launch.
-  if (cmd.HasSwitch(switches::kEnableExtensionApps) &&
-      !extension_app_id.empty()) {
+  if (cmd.HasSwitch(switches::kEnableApps) && !extension_app_id.empty()) {
     arguments_w += std::wstring(L"--") + ASCIIToWide(switches::kAppId) +
         L"=\"" + ASCIIToWide(UTF16ToASCII(extension_app_id)) + L"\" --" +
-        ASCIIToWide(switches::kEnableExtensionApps);
+        ASCIIToWide(switches::kEnableApps);
   } else {
     // Use '--app=url' instead of just 'url' to launch the browser with minimal
     // chrome.

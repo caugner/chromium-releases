@@ -6,8 +6,10 @@
 #define CHROME_BROWSER_NET_CHROME_NET_LOG_H_
 
 #include "base/observer_list.h"
+#include "base/scoped_ptr.h"
 #include "net/base/net_log.h"
 
+class LoadTimingObserver;
 class PassiveLogCollector;
 
 // ChromeNetLog is an implementation of NetLog that dispatches network log
@@ -29,7 +31,7 @@ class ChromeNetLog : public net::NetLog {
                             const base::TimeTicks& time,
                             const Source& source,
                             EventPhase phase,
-                            EventParameters* extra_parameters) = 0;
+                            EventParameters* params) = 0;
   };
 
   ChromeNetLog();
@@ -40,8 +42,8 @@ class ChromeNetLog : public net::NetLog {
                         const base::TimeTicks& time,
                         const Source& source,
                         EventPhase phase,
-                        EventParameters* extra_parameters);
-  virtual int NextID();
+                        EventParameters* params);
+  virtual uint32 NextID();
   virtual bool HasListener() const;
 
   void AddObserver(Observer* observer);
@@ -51,9 +53,14 @@ class ChromeNetLog : public net::NetLog {
     return passive_collector_.get();
   }
 
+  LoadTimingObserver* load_timing_observer() {
+    return load_timing_observer_.get();
+  }
+
  private:
-  int next_id_;
+  uint32 next_id_;
   scoped_ptr<PassiveLogCollector> passive_collector_;
+  scoped_ptr<LoadTimingObserver> load_timing_observer_;
   ObserverList<Observer, true> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeNetLog);

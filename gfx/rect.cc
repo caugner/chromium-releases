@@ -15,6 +15,7 @@
 #include <iostream>
 
 #include "base/logging.h"
+#include "gfx/insets.h"
 
 namespace {
 
@@ -35,15 +36,16 @@ namespace gfx {
 Rect::Rect() {
 }
 
-Rect::Rect(int width, int height) {
-  set_width(width);
-  set_height(height);
+Rect::Rect(int width, int height)
+    : size_(width, height) {
 }
 
 Rect::Rect(int x, int y, int width, int height)
-    : origin_(x, y) {
-  set_width(width);
-  set_height(height);
+    : origin_(x, y), size_(width, height) {
+}
+
+Rect::Rect(const gfx::Size& size)
+    : size_(size) {
 }
 
 Rect::Rect(const gfx::Point& origin, const gfx::Size& size)
@@ -91,17 +93,14 @@ Rect& Rect::operator=(const GdkRectangle& r) {
 }
 #endif
 
-void Rect::set_width(int width) {
-  size_.set_width(width);
-}
-void Rect::set_height(int height) {
-  size_.set_height(height);
-}
-
 void Rect::SetRect(int x, int y, int width, int height) {
   origin_.SetPoint(x, y);
   set_width(width);
   set_height(height);
+}
+
+void Rect::Inset(const gfx::Insets& insets) {
+  Inset(insets.left(), insets.top(), insets.right(), insets.bottom());
 }
 
 void Rect::Inset(int left, int top, int right, int bottom) {

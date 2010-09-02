@@ -15,6 +15,13 @@
 #include "net/url_request/url_request_unittest.h"
 #include "views/event.h"
 
+#if defined(OS_LINUX)
+// http://crbug.com/47575
+#define SKIP_LINUX(test) DISABLED_##test
+#else
+#define SKIP_LINUX(test) test
+#endif
+
 const std::string NOLISTENERS_HTML =
     "<html><head><title>nolisteners</title></head><body></body></html>";
 
@@ -85,9 +92,9 @@ const std::string TWO_SECOND_BEFORE_UNLOAD_ALERT_HTML =
 
 const std::string CLOSE_TAB_WHEN_OTHER_TAB_HAS_LISTENER =
     "<html><head><title>only_one_unload</title></head>"
-    "<body onload=\"window.open('data:text/html,"
+    "<body onclick=\"window.open('data:text/html,"
     "<html><head><title>popup</title></head></body>')\" "
-    "onbeforeunload='return;'"
+    "onbeforeunload='return;'>"
     "</body></html>";
 
 class UnloadTest : public UITest {
@@ -105,21 +112,21 @@ class UnloadTest : public UITest {
 
   void WaitForBrowserClosed() {
     const int kCheckDelayMs = 100;
-    int max_wait_time = action_max_timeout_ms();
-    while (max_wait_time > 0) {
-      max_wait_time -= kCheckDelayMs;
-      PlatformThread::Sleep(kCheckDelayMs);
+    for (int max_wait_time = action_max_timeout_ms();
+         max_wait_time > 0; max_wait_time -= kCheckDelayMs) {
+      CrashAwareSleep(kCheckDelayMs);
       if (!IsBrowserRunning())
         break;
     }
+
+    EXPECT_FALSE(IsBrowserRunning());
   }
 
   void CheckTitle(const std::wstring& expected_title) {
     const int kCheckDelayMs = 100;
-    int max_wait_time = action_max_timeout_ms();
-    while (max_wait_time > 0) {
-      max_wait_time -= kCheckDelayMs;
-      PlatformThread::Sleep(kCheckDelayMs);
+    for (int max_wait_time = action_max_timeout_ms();
+         max_wait_time > 0; max_wait_time -= kCheckDelayMs) {
+      CrashAwareSleep(kCheckDelayMs);
       if (expected_title == GetActiveTabTitle())
         break;
     }
@@ -166,7 +173,6 @@ class UnloadTest : public UITest {
   }
 
   void ClickModalDialogButton(MessageBoxFlags::DialogButton button) {
-#if defined(OS_WIN) || defined(OS_LINUX)
     bool modal_dialog_showing = false;
     MessageBoxFlags::DialogButton available_buttons;
     EXPECT_TRUE(automation()->WaitForAppModalDialog());
@@ -175,11 +181,6 @@ class UnloadTest : public UITest {
     ASSERT_TRUE(modal_dialog_showing);
     EXPECT_TRUE((button & available_buttons) != 0);
     EXPECT_TRUE(automation()->ClickAppModalDialogButton(button));
-#else
-    // TODO(port): port this function if and when the tests that use it are
-    // enabled (currently they are not being run even on windows).
-    NOTIMPLEMENTED();
-#endif
   }
 };
 
@@ -188,7 +189,7 @@ class UnloadTest : public UITest {
 // we don't get confused and think we're closing the tab.
 //
 // This test is flaky on the valgrind UI bots. http://crbug.com/39057
-TEST_F(UnloadTest, FLAKY_CrossSiteInfiniteUnloadAsync) {
+TEST_F(UnloadTest, DISABLED_CrossSiteInfiniteUnloadAsync) {
   // Tests makes no sense in single-process mode since the renderer is hung.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
@@ -220,8 +221,8 @@ TEST_F(UnloadTest, CrossSiteInfiniteUnloadSync) {
 // Then an async crosssite request followed by an input event to ensure that
 // the short unload timeout (not the long input event timeout) is used.
 // See crbug.com/11007.
-TEST_F(UnloadTest, DISABLED_CrossSiteInfiniteUnloadAsyncInputEvent) {
-  // Tests makes no sense in single-process mode since the renderer is hung.
+TEST_F(UnloadTest, FLAKY_CrossSiteInfiniteUnloadAsyncInputEvent) {
+  // Tests makes no sense in single-process mode since the renderer is hung.c
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
 
@@ -277,18 +278,17 @@ TEST_F(UnloadTest, CrossSiteInfiniteBeforeUnloadSync) {
 }
 
 // Tests closing the browser on a page with no unload listeners registered.
-TEST_F(UnloadTest, BrowserCloseNoUnloadListeners) {
+TEST_F(UnloadTest, SKIP_LINUX(BrowserCloseNoUnloadListeners)) {
   LoadUrlAndQuitBrowser(NOLISTENERS_HTML, L"nolisteners");
 }
 
 // Tests closing the browser on a page with an unload listener registered.
-TEST_F(UnloadTest, BrowserCloseUnload) {
+TEST_F(UnloadTest, SKIP_LINUX(BrowserCloseUnload)) {
   LoadUrlAndQuitBrowser(UNLOAD_HTML, L"unload");
 }
 
 // Tests closing the browser with a beforeunload handler and clicking
 // OK in the beforeunload confirm dialog.
-#if !defined(OS_LINUX)
 TEST_F(UnloadTest, BrowserCloseBeforeUnloadOK) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
@@ -297,7 +297,6 @@ TEST_F(UnloadTest, BrowserCloseBeforeUnloadOK) {
   CloseBrowserAsync(browser.get());
   ClickModalDialogButton(MessageBoxFlags::DIALOGBUTTON_OK);
   WaitForBrowserClosed();
-  EXPECT_FALSE(IsBrowserRunning());
 }
 
 // Tests closing the browser with a beforeunload handler and clicking
@@ -309,18 +308,28 @@ TEST_F(UnloadTest, BrowserCloseBeforeUnloadCancel) {
 
   CloseBrowserAsync(browser.get());
   ClickModalDialogButton(MessageBoxFlags::DIALOGBUTTON_CANCEL);
-  WaitForBrowserClosed();
-  EXPECT_TRUE(IsBrowserRunning());
+  // There's no real graceful way to wait for something _not_ to happen, so
+  // we just wait a short period.
+  CrashAwareSleep(500);
+  ASSERT_TRUE(IsBrowserRunning());
 
   CloseBrowserAsync(browser.get());
   ClickModalDialogButton(MessageBoxFlags::DIALOGBUTTON_OK);
   WaitForBrowserClosed();
-  EXPECT_FALSE(IsBrowserRunning());
 }
+
+#if defined(OS_LINUX)
+// Fails sometimes on Linux valgrind. http://crbug.com/32615
+#define MAYBE_BrowserCloseWithInnerFocusedFrame \
+    FLAKY_BrowserCloseWithInnerFocusedFrame
+#else
+#define MAYBE_BrowserCloseWithInnerFocusedFrame \
+    BrowserCloseWithInnerFocusedFrame
+#endif
 
 // Tests closing the browser and clicking OK in the beforeunload confirm dialog
 // if an inner frame has the focus.  See crbug.com/32615.
-TEST_F(UnloadTest, BrowserCloseWithInnerFocusedFrame) {
+TEST_F(UnloadTest, MAYBE_BrowserCloseWithInnerFocusedFrame) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
 
@@ -329,22 +338,18 @@ TEST_F(UnloadTest, BrowserCloseWithInnerFocusedFrame) {
   CloseBrowserAsync(browser.get());
   ClickModalDialogButton(MessageBoxFlags::DIALOGBUTTON_OK);
   WaitForBrowserClosed();
-  EXPECT_FALSE(IsBrowserRunning());
 }
-#endif  // !defined(OS_LINUX)
 
 // Tests closing the browser with a beforeunload handler that takes
 // two seconds to run.
-TEST_F(UnloadTest, BrowserCloseTwoSecondBeforeUnload) {
+TEST_F(UnloadTest, SKIP_LINUX(BrowserCloseTwoSecondBeforeUnload)) {
   LoadUrlAndQuitBrowser(TWO_SECOND_BEFORE_UNLOAD_HTML,
                         L"twosecondbeforeunload");
 }
 
-// TODO(estade): On linux, the renderer process doesn't seem to quit and pegs
-// CPU.
 // Tests closing the browser on a page with an unload listener registered where
 // the unload handler has an infinite loop.
-TEST_F(UnloadTest, BrowserCloseInfiniteUnload) {
+TEST_F(UnloadTest, SKIP_LINUX(BrowserCloseInfiniteUnload)) {
   // Tests makes no sense in single-process mode since the renderer is hung.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
@@ -353,7 +358,7 @@ TEST_F(UnloadTest, BrowserCloseInfiniteUnload) {
 }
 
 // Tests closing the browser with a beforeunload handler that hangs.
-TEST_F(UnloadTest, BrowserCloseInfiniteBeforeUnload) {
+TEST_F(UnloadTest, SKIP_LINUX(BrowserCloseInfiniteBeforeUnload)) {
   // Tests makes no sense in single-process mode since the renderer is hung.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
@@ -363,7 +368,7 @@ TEST_F(UnloadTest, BrowserCloseInfiniteBeforeUnload) {
 
 // Tests closing the browser on a page with an unload listener registered where
 // the unload handler has an infinite loop followed by an alert.
-TEST_F(UnloadTest, BrowserCloseInfiniteUnloadAlert) {
+TEST_F(UnloadTest, SKIP_LINUX(BrowserCloseInfiniteUnloadAlert)) {
   // Tests makes no sense in single-process mode since the renderer is hung.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
@@ -373,7 +378,7 @@ TEST_F(UnloadTest, BrowserCloseInfiniteUnloadAlert) {
 
 // Tests closing the browser with a beforeunload handler that hangs then
 // pops up an alert.
-TEST_F(UnloadTest, BrowserCloseInfiniteBeforeUnloadAlert) {
+TEST_F(UnloadTest, SKIP_LINUX(BrowserCloseInfiniteBeforeUnloadAlert)) {
   // Tests makes no sense in single-process mode since the renderer is hung.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
@@ -384,53 +389,62 @@ TEST_F(UnloadTest, BrowserCloseInfiniteBeforeUnloadAlert) {
 
 // Tests closing the browser on a page with an unload listener registered where
 // the unload handler has an 2 second long loop followed by an alert.
-TEST_F(UnloadTest, BrowserCloseTwoSecondUnloadAlert) {
+TEST_F(UnloadTest, SKIP_LINUX(BrowserCloseTwoSecondUnloadAlert)) {
   LoadUrlAndQuitBrowser(TWO_SECOND_UNLOAD_ALERT_HTML, L"twosecondunloadalert");
 }
 
 // Tests closing the browser with a beforeunload handler that takes
 // two seconds to run then pops up an alert.
-TEST_F(UnloadTest, BrowserCloseTwoSecondBeforeUnloadAlert) {
+TEST_F(UnloadTest, SKIP_LINUX(BrowserCloseTwoSecondBeforeUnloadAlert)) {
   LoadUrlAndQuitBrowser(TWO_SECOND_BEFORE_UNLOAD_ALERT_HTML,
                         L"twosecondbeforeunloadalert");
 }
 
-// TODO(brettw) bug 12913 this test was broken by WebKit merge 42202:44252.
-// Apparently popup titles are broken somehow.
+#if defined(OS_MACOSX)
+// http://crbug.com/45162
+#define MAYBE_BrowserCloseTabWhenOtherTabHasListener \
+    DISABLED_BrowserCloseTabWhenOtherTabHasListener
+#elif defined(OS_WIN)
+// http://crbug.com/45281
+#define MAYBE_BrowserCloseTabWhenOtherTabHasListener \
+    FAILS_BrowserCloseTabWhenOtherTabHasListener
+#else
+// Flaky on Linux as well. http://crbug.com/45562
+#define MAYBE_BrowserCloseTabWhenOtherTabHasListener \
+    FLAKY_BrowserCloseTabWhenOtherTabHasListener
+#endif
 
 // Tests that if there's a renderer process with two tabs, one of which has an
 // unload handler, and the other doesn't, the tab that doesn't have an unload
-// handler can be closed.  If this test fails, the Close() call will hang.
-TEST_F(UnloadTest, DISABLED_BrowserCloseTabWhenOtherTabHasListener) {
+// handler can be closed.
+TEST_F(UnloadTest, MAYBE_BrowserCloseTabWhenOtherTabHasListener) {
   NavigateToDataURL(CLOSE_TAB_WHEN_OTHER_TAB_HAS_LISTENER, L"only_one_unload");
-  int window_count;
-  ASSERT_TRUE(automation()->GetBrowserWindowCount(&window_count));
-  ASSERT_EQ(2, window_count);
 
-  scoped_refptr<BrowserProxy> popup_browser_proxy(
-      automation()->GetBrowserWindow(1));
-  ASSERT_TRUE(popup_browser_proxy.get());
-  int popup_tab_count;
-  EXPECT_TRUE(popup_browser_proxy->GetTabCount(&popup_tab_count));
-  EXPECT_EQ(1, popup_tab_count);
-  scoped_refptr<TabProxy> popup_tab(popup_browser_proxy->GetActiveTab());
+  scoped_refptr<BrowserProxy> browser = automation()->GetBrowserWindow(0);
+  ASSERT_TRUE(browser.get());
+  scoped_refptr<WindowProxy> window = browser->GetWindow();
+  ASSERT_TRUE(window.get());
+
+  gfx::Rect tab_view_bounds;
+  ASSERT_TRUE(window->GetViewBounds(VIEW_ID_TAB_CONTAINER,
+              &tab_view_bounds, true));
+  // Simulate a click to force user_gesture to true; if we don't, the resulting
+  // popup will be constrained, which isn't what we want to test.
+  ASSERT_TRUE(window->SimulateOSClick(tab_view_bounds.CenterPoint(),
+                                      views::Event::EF_LEFT_BUTTON_DOWN));
+  ASSERT_TRUE(browser->WaitForTabCountToBecome(2, action_timeout_ms()));
+
+  scoped_refptr<TabProxy> popup_tab(browser->GetActiveTab());
   ASSERT_TRUE(popup_tab.get());
   std::wstring popup_title;
-  ASSERT_TRUE(popup_tab.get() != NULL);
   EXPECT_TRUE(popup_tab->GetTabTitle(&popup_title));
   EXPECT_EQ(std::wstring(L"popup"), popup_title);
   EXPECT_TRUE(popup_tab->Close(true));
 
-  scoped_refptr<BrowserProxy> main_browser_proxy(
-      automation()->GetBrowserWindow(0));
-  ASSERT_TRUE(main_browser_proxy.get());
-  int main_tab_count;
-  EXPECT_TRUE(main_browser_proxy->GetTabCount(&main_tab_count));
-  EXPECT_EQ(1, main_tab_count);
-  scoped_refptr<TabProxy> main_tab(main_browser_proxy->GetActiveTab());
+  ASSERT_TRUE(browser->WaitForTabCountToBecome(1, action_timeout_ms()));
+  scoped_refptr<TabProxy> main_tab(browser->GetActiveTab());
   ASSERT_TRUE(main_tab.get());
   std::wstring main_title;
-  ASSERT_TRUE(main_tab.get() != NULL);
   EXPECT_TRUE(main_tab->GetTabTitle(&main_title));
   EXPECT_EQ(std::wstring(L"only_one_unload"), main_title);
 }

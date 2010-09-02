@@ -211,6 +211,7 @@ static bool UpdateGLImageFromBitmap(GLenum target,
   GLenum gl_data_type = 0;
   GLenum gl_format = GLFormatFromO3DFormat(bitmap.format(), &gl_internal_format,
                                            &gl_data_type);
+  FlushGlErrors();
   if (gl_format) {
     glTexSubImage2D(target, level, 0, 0, mip_width, mip_height,
                     gl_format, gl_data_type, mip_data);
@@ -253,6 +254,7 @@ static bool CreateGLImages(GLenum target,
   memset(temp_data.get(), 0, size);
 
   for (int i = 0; i < levels; ++i) {
+    FlushGlErrors();
     if (gl_format) {
       glTexImage2D(target, i, internal_format, mip_width, mip_height,
                    0, gl_format, type, temp_data.get());
@@ -319,6 +321,7 @@ Texture2DGLES2* Texture2DGLES2::Create(ServiceLocator* service_locator,
                                        bool enable_render_surfaces) {
   DLOG(INFO) << "Texture2DGLES2 Create";
   DCHECK_NE(format, Texture::UNKNOWN_FORMAT);
+  DCHECK_GE(levels, 0);
   RendererGLES2 *renderer = static_cast<RendererGLES2 *>(
       service_locator->GetService<Renderer>());
   renderer->MakeCurrentLazy();
@@ -806,7 +809,7 @@ void TextureCUBEGLES2::SetRect(TextureCUBE::CubeFace face,
   } else {
     // TODO(gman): Should this bind be using a FACE id?
     renderer_->MakeCurrentLazy();
-    glBindTexture(GL_TEXTURE_2D, gl_texture_);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, gl_texture_);
     GLenum gl_internal_format = 0;
     GLenum gl_data_type = 0;
     GLenum gl_format = GLFormatFromO3DFormat(format(), &gl_internal_format,

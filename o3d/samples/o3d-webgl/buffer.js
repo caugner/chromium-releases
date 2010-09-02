@@ -37,17 +37,17 @@
  * @constructor
  */
 o3d.Buffer = function() {
-  this.fields_ = [];
+  this.fields = [];
   this.array_ = null;
 };
 o3d.inherit('Buffer', 'NamedObject');
 
 
 /**
- * A private array to hold the fields.
+ * The fields currently set on the buffer.
  * @type {!Array.<o3d.Field>}
  */
-o3d.Buffer.prototype.fields_ = [];
+o3d.Buffer.prototype.fields = [];
 
 
 /**
@@ -68,22 +68,35 @@ o3d.Buffer.prototype.gl_buffer_ = 0;
  */
 o3d.Buffer.prototype.ArrayType = WebGLFloatArray;
 
+o3d.Buffer.prototype.__defineGetter__('numElements',
+    function() {
+      return (!this.array_) ? 0 : this.array_.length / this.totalComponents;
+    }
+);
+
+/**
+ * Computes and stores the correct total components from the
+ * fields so far.
+ */
+o3d.Buffer.prototype.updateTotalComponents_ = function() {
+  var total = 0;
+  for (var i = 0; i < this.fields.length; ++i) {
+    this.fields[i].offset_ = total;
+    total += this.fields[i].numComponents;
+  }
+  this.totalComponents = total;
+};
+
 /**
  * Allocates memory for the data to be stored in the buffer based on
  * the types of fields set on the buffer.
- * 
+ *
  * @param {number} numElements Number of elements to allocate..
  * @return {boolean}  True if operation was successful.
  */
 o3d.Buffer.prototype.allocateElements =
     function(numElements) {
-  var total = 0;
-  for (var i = 0; i < this.fields_.length; ++i) {
-    this.fields_[i].offset_ = total;
-    total += this.fields_[i].numComponents;
-  }
-  this.totalComponents = total;
-
+  this.updateTotalComponents_();
   this.resize(numElements * this.totalComponents);
 };
 
@@ -93,16 +106,18 @@ o3d.Buffer.prototype.allocateElements =
  */
 o3d.Buffer.prototype.resize = function(numElements) {
   this.gl_buffer_ = this.gl.createBuffer();
-  this.array_ = new this.ArrayType(numElements);
+  // Callers (in particular the deserializer) occasionally call this
+  // with floating-point numbers.
+  this.array_ = new this.ArrayType(Math.floor(numElements));
 };
 
 /**
  * Defines a field on this buffer.
- * 
+ *
  * Note: Creating a field after having allocated the buffer is an expensive
  * operation as the data currently in the buffer has to be shuffled around
  * to make room for the new field.
- * 
+ *
  * @param {string} field_type type of data in the field. Valid types
  *     are "FloatField", "UInt32Field", and "UByteNField".
  * @param {number} num_components number of components in the field.
@@ -110,36 +125,77 @@ o3d.Buffer.prototype.resize = function(numElements) {
  */
 o3d.Buffer.prototype.createField =
     function(fieldType, numComponents) {
+  // Check if array has already been allocated. If so, we need to reshuffle
+  // the data currently stored.
+  var alreadyAllocated = this.array_ && this.array_.length > 0;
+  var savedData = [];
+  var numElements = this.numElements;
+
+  // Make copies of the existing field data.
+  if (alreadyAllocated) {
+    for (var i = 0; i < this.fields.length; i++) {
+      savedData[i] = this.fields[i].getAt(0, numElements);
+    }
+  }
+
+  // Create the new field.
   var f = new o3d.Field();
   f.buffer = this;
   f.numComponents = numComponents;
   f.size = numComponents * (fieldType=='UByteNField' ? 1 : 4);
-  this.fields_.push(f);
+  this.fields.push(f);
+  this.updateTotalComponents_();
+
+  // Resize the buffer with the new field, and replace data.
+  if (alreadyAllocated) {
+    this.allocateElements(numElements);
+    for (var i = 0; i < this.fields.length; i++) {
+      var fieldData = savedData[i];
+      if (fieldData) {
+        this.fields[i].setAt(0, fieldData);
+      }
+    }
+  }
+
   return f;
 };
 
 
 /**
  * Removes a field from this buffer.
- * 
+ *
  * Note: Removing a field after having allocated the buffer is an expensive
  * operation as the data currently in the buffer has to be shuffled around
  * to remove the old field.
- * 
+ *
  * @param {!o3d.Field} field field to remove.
  */
 o3d.Buffer.prototype.removeField =
     function(field) {
-  var i = 0;
-  for (var j = 0; j < this.fields_.length; ++j) {
-    if (this.fields_[i] == field)
-      j++;
-    this.fields_[j] = this.fields_[i];
-    i++;
+  o3d.removeFromArray(this.fields, field);
+  // TODO(petersont): Have this function actually shuffle the buffer around to
+  // remove the field properly.
+  this.updateTotalComponents_();
+};
+
+
+/**
+ * Helper function for buffer's and field's getAt functions.  Gets elements in
+ * the buffer as an array.
+ * @param {number} start_index Index of the first element value to get.
+ * @param {number} num_elements the number of elements to get.
+ * @return {!Array.<number>}  An array of values.
+ */
+o3d.Buffer.prototype.getAtHelper_ =
+    function(start_index, num_elements, offset, num_components) {
+  var values = [];
+  for (var i = 0; i < num_elements; ++i) {
+    for (var c = 0; c < num_components; ++c) {
+      values.push(this.array_[(start_index + i) *
+          this.totalComponents + offset + c]);
+    }
   }
-  if (this.fields_.length > i) {
-    this.fields_.pop();
-  }
+  return values;
 };
 
 
@@ -162,15 +218,17 @@ o3d.Buffer.prototype.unlock = function() {
 
 /**
  * Sets the values in the buffer given array.
- * TODO(petersont): This should take other kinds of arguments, like RawData.
- * 
+ *
  * @param {!Array.<number>} values contains data to assign to the Buffer
  *     data itself.
  * @return {boolean}  True if operation was successful.
  */
 o3d.Buffer.prototype.set =
     function(values) {
-  if (this.array_ == null) {
+  if (!values.length) {
+    o3d.notImplemented();
+  }
+  if (this.array_ == null || this.array_.length != values.length) {
     this.resize(values.length);
   }
   this.lock();
@@ -179,13 +237,6 @@ o3d.Buffer.prototype.set =
   }
   this.unlock();
 };
-
-
-/**
- * The total components in all fields in this buffer.
- * @type {number}
- */
-o3d.Buffer.prototype.total_components = 0;
 
 
 /**
@@ -203,20 +254,22 @@ o3d.inherit('VertexBufferBase', 'Buffer');
  * Modifying this copy has no effect on the buffer.
  */
 o3d.VertexBufferBase.prototype.get = function() {
-  o3d.notImplemented();
+  return this.getAtHelper_(0, this.numElements,
+      0, this.totalComponents);
 };
 
 
 /**
  * Gets a copy of a sub range of the values in the data stored in the buffer.
  * Modifying this copy has no effect on the buffer.
- * 
+ *
  * @param {number} start_index index of the element value to get.
- * @param {number} numElements the number of elements to get.
+ * @param {number} num_elements the number of elements to get.
  * @return {!Array.<number>}  An array of values.
  */
 o3d.VertexBufferBase.prototype.getAt =
-    function(start_index, numElements) {
+    function(start_index, num_elements) {
+  return this.getAtHelper_(start_index, num_elements, 0, this.totalComponents);
 };
 
 
@@ -241,7 +294,7 @@ o3d.VertexBuffer.prototype.className = "o3d.VertexBuffer";
 /**
  * SourceBuffer is a Buffer object used for storing vertex data for
  * geometry. (e.g. vertex positions, normals, colors, etc).
- * 
+ *
  * A SourceBuffer is the source for operations like skinning and morph
  * targets. It can not be directly rendered by the GPU.
  * @constructor

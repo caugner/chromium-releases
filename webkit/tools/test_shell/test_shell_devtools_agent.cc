@@ -18,6 +18,30 @@ using WebKit::WebDevToolsMessageData;
 using WebKit::WebString;
 using WebKit::WebView;
 
+namespace {
+
+class WebKitClientMessageLoopImpl
+    : public WebKit::WebDevToolsAgentClient::WebKitClientMessageLoop {
+ public:
+  WebKitClientMessageLoopImpl() : message_loop_(MessageLoop::current()) { }
+  virtual ~WebKitClientMessageLoopImpl() {
+    message_loop_ = NULL;
+  }
+  virtual void run() {
+    bool old_state = message_loop_->NestableTasksAllowed();
+    message_loop_->SetNestableTasksAllowed(true);
+    message_loop_->Run();
+    message_loop_->SetNestableTasksAllowed(old_state);
+  }
+  virtual void quitNow() {
+    message_loop_->QuitNow();
+  }
+ private:
+  MessageLoop* message_loop_;
+};
+
+} //  namespace
+
 // static
 void TestShellDevToolsAgent::DispatchMessageLoop() {
   MessageLoop* current = MessageLoop::current();
@@ -33,17 +57,18 @@ void TestShellDevToolsAgent::DispatchMessageLoop() {
 #pragma warning(disable : 4355)
 #endif // defined(OS_WIN)
 
-TestShellDevToolsAgent::TestShellDevToolsAgent(WebView* web_view)
+TestShellDevToolsAgent::TestShellDevToolsAgent()
     : call_method_factory_(this),
-      dev_tools_client_(NULL),
-      web_view_(web_view) {
+      dev_tools_client_(NULL) {
   static int dev_tools_agent_counter;
   routing_id_ = ++dev_tools_agent_counter;
   if (routing_id_ == 1)
     WebDevToolsAgent::setMessageLoopDispatchHandler(
         &TestShellDevToolsAgent::DispatchMessageLoop);
-  web_dev_tools_agent_ = WebDevToolsAgent::create(web_view_, this);
-  web_view_->setDevToolsAgent(web_dev_tools_agent_);
+}
+
+void TestShellDevToolsAgent::SetWebView(WebKit::WebView* web_view) {
+  web_view_ = web_view;
 }
 
 void TestShellDevToolsAgent::sendMessageToFrontend(
@@ -63,13 +88,24 @@ void TestShellDevToolsAgent::runtimeFeatureStateChanged(
 WebCString TestShellDevToolsAgent::injectedScriptSource() {
   base::StringPiece injectjsWebkit =
       webkit_glue::GetDataResource(IDR_DEVTOOLS_INJECT_WEBKIT_JS);
-  return WebCString(injectjsWebkit.as_string().c_str());
+  return WebCString(injectjsWebkit.data(), injectjsWebkit.length());
 }
 
 WebCString TestShellDevToolsAgent::injectedScriptDispatcherSource() {
   base::StringPiece injectDispatchjs =
       webkit_glue::GetDataResource(IDR_DEVTOOLS_INJECT_DISPATCH_JS);
-  return WebCString(injectDispatchjs.as_string().c_str());
+  return WebCString(injectDispatchjs.data(), injectDispatchjs.length());
+}
+
+WebCString TestShellDevToolsAgent::debuggerScriptSource() {
+  base::StringPiece debuggerScriptjs =
+      webkit_glue::GetDataResource(IDR_DEVTOOLS_DEBUGGER_SCRIPT_JS);
+  return WebCString(debuggerScriptjs.data(), debuggerScriptjs.length());
+}
+
+WebKit::WebDevToolsAgentClient::WebKitClientMessageLoop*
+    TestShellDevToolsAgent::createClientMessageLoop() {
+  return new WebKitClientMessageLoopImpl();
 }
 
 void TestShellDevToolsAgent::AsyncCall(const TestShellDevToolsCallArgs &args) {
@@ -126,10 +162,4 @@ bool TestShellDevToolsAgent::evaluateInWebInspector(
     return false;
   agent->evaluateInWebInspector(call_id, WebString::fromUTF8(script));
   return true;
-}
-
-// static
-void WebKit::WebDevToolsAgentClient::sendMessageToFrontendOnIOThread(
-    WebKit::WebDevToolsMessageData const &) {
-  NOTIMPLEMENTED();
 }

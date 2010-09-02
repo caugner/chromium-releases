@@ -5,6 +5,7 @@
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 
 #include "base/singleton.h"
+#include "chrome/common/render_messages.h"
 #include "chrome/common/renderer_preferences.h"
 #include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
@@ -30,6 +31,11 @@ RenderViewHostDelegate::GetBrowserIntegrationDelegate() {
 
 RenderViewHostDelegate::Resource*
 RenderViewHostDelegate::GetResourceDelegate() {
+  return NULL;
+}
+
+RenderViewHostDelegate::ContentSettings*
+RenderViewHostDelegate::GetContentSettingsDelegate() {
   return NULL;
 }
 
@@ -79,12 +85,13 @@ GURL RenderViewHostDelegate::GetAlternateErrorPageURL() const {
   return GURL();
 }
 
-WebPreferences RenderViewHostDelegate::GetWebkitPrefs() {
-  return WebPreferences();
+ViewHostMsg_GetSearchProviderInstallState_Params
+RenderViewHostDelegate::GetSearchProviderInstallState(const GURL& url) {
+  return ViewHostMsg_GetSearchProviderInstallState_Params::Denied();
 }
 
-bool RenderViewHostDelegate::CanBlur() const {
-  return true;
+WebPreferences RenderViewHostDelegate::GetWebkitPrefs() {
+  return WebPreferences();
 }
 
 gfx::Rect RenderViewHostDelegate::GetRootWindowResizerRect() const {

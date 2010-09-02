@@ -102,6 +102,9 @@ class LayoutTestController : public CppBoundClass {
   // Shows DevTools window.
   void showWebInspector(const CppArgumentList& args, CppVariant* result);
 
+  // Close DevTools window.
+  void closeWebInspector(const CppArgumentList& args, CppVariant* result);
+
   // Gives focus to the window.
   void setWindowIsKey(const CppArgumentList& args, CppVariant* result);
 
@@ -113,6 +116,9 @@ class LayoutTestController : public CppBoundClass {
   // style sheet.
   void setUserStyleSheetEnabled(const CppArgumentList& args, CppVariant* result);
   void setUserStyleSheetLocation(const CppArgumentList& args, CppVariant* result);
+
+  // Passes this preference through to WebPreferences.
+  void setAuthorAndUserStylesEnabled(const CppArgumentList& args, CppVariant* result);
 
   // Puts Webkit in "dashboard compatibility mode", which is used in obscure
   // Mac-only circumstances. It's not really necessary, and will most likely
@@ -187,6 +193,10 @@ class LayoutTestController : public CppBoundClass {
 
   void dumpSelectionRect(const CppArgumentList& args, CppVariant* result);
 
+  // Grants permission for desktop notifications to an origin
+  void grantDesktopNotificationPermission(const CppArgumentList& args,
+                                          CppVariant* result);
+
   // The following are only stubs.  TODO(pamg): Implement any of these that
   // are needed to pass the layout tests.
   void dumpAsWebArchive(const CppArgumentList& args, CppVariant* result);
@@ -206,6 +216,7 @@ class LayoutTestController : public CppBoundClass {
   void setCallCloseOnWebViews(const CppArgumentList& args, CppVariant* result);
   void setPrivateBrowsingEnabled(const CppArgumentList& args, CppVariant* result);
 
+  void setJavaScriptCanAccessClipboard(const CppArgumentList& args, CppVariant* result);
   void setXSSAuditorEnabled(const CppArgumentList& args, CppVariant* result);
   void evaluateScriptInIsolatedWorld(const CppArgumentList& args, CppVariant* result);
   void overridePreference(const CppArgumentList& args, CppVariant* result);
@@ -219,8 +230,11 @@ class LayoutTestController : public CppBoundClass {
   // that case (as the Mac does).
   void fallbackMethod(const CppArgumentList& args, CppVariant* result);
 
-  // Allows layout tests to call SecurityOrigin::whiteListAccessFromOrigin().
-  void whiteListAccessFromOrigin(const CppArgumentList& args, CppVariant* result);
+  // Allows layout tests to manage origins' whitelisting.
+  void addOriginAccessWhitelistEntry(
+      const CppArgumentList& args, CppVariant* result);
+  void removeOriginAccessWhitelistEntry(
+      const CppArgumentList& args, CppVariant* result);
 
   // Clears all databases.
   void clearAllDatabases(const CppArgumentList& args, CppVariant* result);
@@ -242,6 +256,10 @@ class LayoutTestController : public CppBoundClass {
   // Gets the number of pages to be printed.
   void numberOfPages(const CppArgumentList& args, CppVariant* result);
 
+  // Allows layout tests to control JavaScript profiling.
+  void setJavaScriptProfilingEnabled(const CppArgumentList& args,
+                                     CppVariant* result);
+
   // Allows layout tests to start Timeline profiling.
   void setTimelineProfilingEnabled(const CppArgumentList& args,
                                    CppVariant* result);
@@ -253,8 +271,17 @@ class LayoutTestController : public CppBoundClass {
   void forceRedSelectionColors(const CppArgumentList& args,
                                CppVariant* result);
 
-  // Adds a user script to be injected into new documents.
+  // Adds a user script or user style sheet to be injected into new documents.
   void addUserScript(const CppArgumentList& args, CppVariant* result);
+  void addUserStyleSheet(const CppArgumentList& args, CppVariant* result);
+
+  // Geolocation related functions.
+  void setGeolocationPermission(const CppArgumentList& args,
+                                CppVariant* result);
+  void setMockGeolocationPosition(const CppArgumentList& args,
+                                  CppVariant* result);
+  void setMockGeolocationError(const CppArgumentList& args,
+                               CppVariant* result);
 
  public:
   // The following methods are not exposed to JavaScript.

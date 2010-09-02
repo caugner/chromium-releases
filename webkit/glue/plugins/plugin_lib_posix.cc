@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,14 @@
 #include <sys/exec_elf.h>
 #else
 #include <elf.h>
+#include <fcntl.h>
 #endif
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
+#include "base/eintr_wrapper.h"
+#include "base/file_util.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -21,6 +27,8 @@
 #include "base/third_party/nspr/prcpucfg_linux.h"
 
 namespace {
+
+using NPAPI::PluginList;
 
 // Copied from nsplugindefs.h instead of including the file since it has a bunch
 // of dependencies.
@@ -33,16 +41,22 @@ enum nsPluginVariable {
 // the current architecture (e.g. 32-bit ELF on 32-bit build).
 // Returns false on other errors as well.
 bool ELFMatchesCurrentArchitecture(const FilePath& filename) {
-  FILE* file = fopen(filename.value().c_str(), "rb");
-  if (!file)
+  // First make sure we can open the file and it is in fact, a regular file.
+  struct stat stat_buf;
+  // Open with O_NONBLOCK so we don't block on pipes.
+  int fd = open(filename.value().c_str(), O_RDONLY|O_NONBLOCK);
+  if (fd < 0)
+    return false;
+  bool ret = (fstat(fd, &stat_buf) >= 0 && S_ISREG(stat_buf.st_mode));
+  if (HANDLE_EINTR(close(fd)) < 0)
+    return false;
+  if (!ret)
     return false;
 
-  char buffer[5];
-  if (fread(buffer, 5, 1, file) != 1) {
-    fclose(file);
+  const size_t kELFBufferSize = 5;
+  char buffer[kELFBufferSize];
+  if (!file_util::ReadFile(filename, buffer, kELFBufferSize))
     return false;
-  }
-  fclose(file);
 
   if (buffer[0] != ELFMAG0 ||
       buffer[1] != ELFMAG1 ||
@@ -104,10 +118,16 @@ void UnwrapNSPluginWrapper(void **dl, FilePath* unwrapped_path) {
   if (!newdl) {
     // We couldn't load the unwrapped plugin for some reason, despite
     // being able to load the wrapped one.  Just use the wrapped one.
+    LOG_IF(INFO, PluginList::DebugPluginLoading())
+        << "Could not use unwrapped nspluginwrapper plugin "
+        << unwrapped_path->value() << ", using the wrapped one.";
     return;
   }
 
   // Unload the wrapped plugin, and use the wrapped plugin instead.
+  LOG_IF(INFO, PluginList::DebugPluginLoading())
+      << "Using unwrapped version " << unwrapped_path->value()
+      << " of nspluginwrapper-wrapped plugin.";
   base::UnloadNativeLibrary(*dl);
   *dl = newdl;
   *unwrapped_path = path;
@@ -123,12 +143,20 @@ bool PluginLib::ReadWebPluginInfo(const FilePath& filename,
   // http://mxr.mozilla.org/firefox/source/modules/plugin/base/src/nsPluginsDirUnix.cpp
 
   // Skip files that aren't appropriate for our architecture.
-  if (!ELFMatchesCurrentArchitecture(filename))
+  if (!ELFMatchesCurrentArchitecture(filename)) {
+    LOG_IF(INFO, PluginList::DebugPluginLoading())
+        << "Skipping plugin " << filename.value()
+        << " because it doesn't match the current architecture.";
     return false;
+  }
 
   void* dl = base::LoadNativeLibrary(filename);
-  if (!dl)
+  if (!dl) {
+    LOG_IF(INFO, PluginList::DebugPluginLoading())
+        << "While reading plugin info, unable to load library "
+        << filename.value() << ", skipping.";
     return false;
+  }
 
   info->path = filename;
   info->enabled = true;
@@ -158,12 +186,21 @@ bool PluginLib::ReadWebPluginInfo(const FilePath& filename,
     const char* name = NULL;
     NP_GetValue(NULL, nsPluginVariable_NameString, &name);
     if (name)
-      info->name = UTF8ToWide(name);
+      info->name = UTF8ToUTF16(name);
 
     const char* description = NULL;
     NP_GetValue(NULL, nsPluginVariable_DescriptionString, &description);
     if (description)
-      info->desc = UTF8ToWide(description);
+      info->desc = UTF8ToUTF16(description);
+
+    LOG_IF(INFO, PluginList::DebugPluginLoading())
+        << "Got info for plugin " << filename.value()
+        << " Name = \"" << UTF16ToUTF8(info->name)
+        << "\", Description = \"" << UTF16ToUTF8(info->desc) << "\".";
+  } else {
+    LOG_IF(INFO, PluginList::DebugPluginLoading())
+        << "Plugin " << filename.value()
+        << " has no GetValue() and probably won't work.";
   }
 
   // Intentionally not unloading the plugin here, it can lead to crashes.
@@ -204,9 +241,9 @@ void PluginLib::ParseMIMEDescription(
     // It's ok for end to run off the string here.  If there's no
     // trailing semicolon we consume the remainder of the string.
     if (end != std::string::npos) {
-      mime_type.description = UTF8ToWide(description.substr(ofs, end - ofs));
+      mime_type.description = UTF8ToUTF16(description.substr(ofs, end - ofs));
     } else {
-      mime_type.description = UTF8ToWide(description.substr(ofs));
+      mime_type.description = UTF8ToUTF16(description.substr(ofs));
     }
     mime_types->push_back(mime_type);
     if (end == std::string::npos)

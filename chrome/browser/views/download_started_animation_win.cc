@@ -1,10 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/download/download_started_animation.h"
 
-#include "app/animation.h"
+#include "app/linear_animation.h"
 #include "app/resource_bundle.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_registrar.h"
@@ -32,7 +32,7 @@ namespace {
 // provided on the constructor, while simultaneously fading it out.  To use,
 // simply call "new DownloadStartAnimation"; the class cleans itself up when it
 // finishes animating.
-class DownloadStartedAnimationWin : public Animation,
+class DownloadStartedAnimationWin : public LinearAnimation,
                                     public NotificationObserver,
                                     public views::ImageView {
  public:
@@ -74,7 +74,7 @@ class DownloadStartedAnimationWin : public Animation,
 
 DownloadStartedAnimationWin::DownloadStartedAnimationWin(
     TabContents* tab_contents)
-    : Animation(kMoveTimeMs, kFrameRateHz, NULL),
+    : LinearAnimation(kMoveTimeMs, kFrameRateHz, NULL),
       popup_(NULL),
       tab_contents_(tab_contents) {
   static SkBitmap* kDownloadImage = NULL;
@@ -121,7 +121,7 @@ void DownloadStartedAnimationWin::Reposition() {
   // Align the image with the bottom left of the web contents (so that it
   // points to the newly created download).
   gfx::Size size = GetPreferredSize();
-  int x = UILayoutIsRightToLeft() ?
+  int x = base::i18n::IsRTL() ?
       tab_contents_bounds_.right() - size.width() : tab_contents_bounds_.x();
   popup_->MoveWindow(
       x,

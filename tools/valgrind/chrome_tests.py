@@ -14,13 +14,15 @@ import os
 import stat
 import sys
 
-import google.logging_utils
-import google.path_utils
+import logging_utils
+import path_utils
 
 import common
 import valgrind_test
 
 class TestNotFound(Exception): pass
+
+class MultipleGTestFiltersSpecified(Exception): pass
 
 def Dir2IsNewer(dir1, dir2):
   if dir2 == None or not os.path.isdir(dir2):
@@ -58,33 +60,23 @@ def FindDirContainingNewestFile(dirs, file):
 
 class ChromeTests:
   def __init__(self, options, args, test):
-    # The known list of tests.
-    # Recognise the original abbreviations as well as full executable names.
-    self._test_list = {
-      "base": self.TestBase,            "base_unittests": self.TestBase,
-      "browser": self.TestBrowser,      "browser_tests": self.TestBrowser,
-      "googleurl": self.TestGURL,       "googleurl_unittests": self.TestGURL,
-      "ipc": self.TestIpc,              "ipc_tests": self.TestIpc,
-      "layout": self.TestLayout,        "layout_tests": self.TestLayout,
-      "media": self.TestMedia,          "media_unittests": self.TestMedia,
-      "net": self.TestNet,              "net_unittests": self.TestNet,
-      "printing": self.TestPrinting,    "printing_unittests": self.TestPrinting,
-      "startup": self.TestStartup,      "startup_tests": self.TestStartup,
-      "sync": self.TestSync,            "sync_unit_tests": self.TestSync,
-      "test_shell": self.TestTestShell, "test_shell_tests": self.TestTestShell,
-      "ui": self.TestUI,                "ui_tests": self.TestUI,
-      "unit": self.TestUnit,            "unit_tests": self.TestUnit,
-      "app": self.TestApp,              "app_unittests": self.TestApp,
-    }
+    if ':' in test:
+      (self._test, self._gtest_filter) = test.split(':', 1)
+    else:
+      self._test = test
+      self._gtest_filter = options.gtest_filter
 
-    if test not in self._test_list:
+    if self._test not in self._test_list:
       raise TestNotFound("Unknown test: %s" % test)
+
+    if options.gtest_filter and options.gtest_filter != self._gtest_filter:
+      raise MultipleGTestFiltersSpecified("Can not specify both --gtest_filter "
+                                          "and --test %s" % test)
 
     self._options = options
     self._args = args
-    self._test = test
 
-    script_dir = google.path_utils.ScriptDir()
+    script_dir = path_utils.ScriptDir()
     # Compute the top of the tree (the "source dir") from the script dir (where
     # this script lives).  We assume that the script dir is in tools/valgrind/
     # relative to the top of the tree.
@@ -103,7 +95,7 @@ class ChromeTests:
     # We need multiple data dirs, the current script directory and a module
     # specific one. The global suppression file lives in our directory, and the
     # module specific suppression file lives with the module.
-    self._data_dirs = [google.path_utils.ScriptDir()]
+    self._data_dirs = [path_utils.ScriptDir()]
 
     if module == "chrome":
       # unfortunately, not all modules have the same directory structure
@@ -163,7 +155,7 @@ class ChromeTests:
   def Run(self):
     ''' Runs the test specified by command-line argument --test '''
     logging.info("running test %s" % (self._test))
-    return self._test_list[self._test]()
+    return self._test_list[self._test](self)
 
   def _ReadGtestFilterFile(self, name, cmd):
     '''Read a file which is a list of tests to filter out with --gtest_filter
@@ -188,8 +180,19 @@ class ChromeTests:
             if line.startswith("#") or line.startswith("//") or line.isspace():
               continue
             line = line.rstrip()
+            test_prefixes = ["FLAKY", "FAILS"]
+            for p in test_prefixes:
+              # Strip prefixes from the test names.
+              line = line.replace(".%s_" % p, ".")
+            # Exclude the original test name.
             filters.append(line)
-    gtest_filter = self._options.gtest_filter
+            if line[-2:] != ".*":
+              # List all possible prefixes if line doesn't end with ".*".
+              for p in test_prefixes:
+                filters.append(line.replace(".", ".%s_" % p))
+    # Get rid of duplicates.
+    filters = set(filters)
+    gtest_filter = self._gtest_filter
     if len(filters):
       if gtest_filter:
         gtest_filter += ":"
@@ -226,11 +229,17 @@ class ChromeTests:
   def TestGURL(self):
     return self.SimpleTest("chrome", "googleurl_unittests")
 
+  def TestCourgette(self):
+    return self.SimpleTest("courgette", "courgette_unittests")
+
   def TestMedia(self):
     return self.SimpleTest("chrome", "media_unittests")
 
   def TestPrinting(self):
     return self.SimpleTest("chrome", "printing_unittests")
+
+  def TestRemoting(self):
+    return self.SimpleTest("chrome", "remoting_unittests")
 
   def TestIpc(self):
     return self.SimpleTest("ipc", "ipc_tests",
@@ -265,9 +274,10 @@ class ChromeTests:
                             "--trace_children",
                             "--indirect"],
                            cmd_args=[
-                            "--ui-test-timeout=180000",
+                            "--ui-test-timeout=240000",
                             "--ui-test-action-timeout=120000",
-                            "--ui-test-action-max-timeout=180000",
+                            "--ui-test-action-max-timeout=280000",
+                            "--ui-test-sleep-timeout=120000",
                             "--ui-test-terminate-timeout=120000"])
 
   def TestSync(self):
@@ -293,7 +303,7 @@ class ChromeTests:
     # Store each chunk in its own directory so that we can find the data later
     chunk_dir = os.path.join("layout", "chunk_%05d" % chunk_num)
     test_shell = os.path.join(self._options.build_dir, "test_shell")
-    out_dir = os.path.join(google.path_utils.ScriptDir(), "latest")
+    out_dir = os.path.join(path_utils.ScriptDir(), "latest")
     out_dir = os.path.join(out_dir, chunk_dir)
     if os.path.exists(out_dir):
       old_files = glob.glob(os.path.join(out_dir, "*.txt"))
@@ -373,14 +383,36 @@ class ChromeTests:
     # summary list for long, but will be useful for someone reviewing this bot.
     return ret
 
+  # The known list of tests.
+  # Recognise the original abbreviations as well as full executable names.
+  _test_list = {
+    "base": TestBase,            "base_unittests": TestBase,
+    "browser": TestBrowser,      "browser_tests": TestBrowser,
+    "googleurl": TestGURL,       "googleurl_unittests": TestGURL,
+    "courgette": TestCourgette,  "courgette_unittests": TestCourgette,
+    "ipc": TestIpc,              "ipc_tests": TestIpc,
+    "layout": TestLayout,        "layout_tests": TestLayout,
+    "media": TestMedia,          "media_unittests": TestMedia,
+    "net": TestNet,              "net_unittests": TestNet,
+    "printing": TestPrinting,    "printing_unittests": TestPrinting,
+    "remoting": TestRemoting,    "remoting_unittests": TestRemoting,
+    "startup": TestStartup,      "startup_tests": TestStartup,
+    "sync": TestSync,            "sync_unit_tests": TestSync,
+    "test_shell": TestTestShell, "test_shell_tests": TestTestShell,
+    "ui": TestUI,                "ui_tests": TestUI,
+    "unit": TestUnit,            "unit_tests": TestUnit,
+    "app": TestApp,              "app_unittests": TestApp,
+  }
+
 def _main(_):
   parser = optparse.OptionParser("usage: %prog -b <dir> -t <test> "
                                  "[-t <test> ...]")
   parser.disable_interspersed_args()
   parser.add_option("-b", "--build_dir",
                     help="the location of the output of the compiler output")
-  parser.add_option("-t", "--test", action="append",
-                    help="which test to run")
+  parser.add_option("-t", "--test", action="append", default=[],
+                    help="which test to run, supports test:gtest_filter format "
+                         "as well.")
   parser.add_option("", "--baseline", action="store_true", default=False,
                     help="generate baseline data instead of validating")
   parser.add_option("", "--gtest_filter",
@@ -403,12 +435,15 @@ def _main(_):
   options, args = parser.parse_args()
 
   if options.verbose:
-    google.logging_utils.config_root(logging.DEBUG)
+    logging_utils.config_root(logging.DEBUG)
   else:
-    google.logging_utils.config_root()
+    logging_utils.config_root()
 
-  if not options.test or not len(options.test):
+  if not options.test:
     parser.error("--test not specified")
+
+  if len(options.test) != 1 and options.gtest_filter:
+    parser.error("--gtest_filter and multiple tests don't make sense together")
 
   for t in options.test:
     tests = ChromeTests(options, args, t)

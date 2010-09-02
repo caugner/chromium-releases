@@ -5,8 +5,8 @@
 #ifndef GPU_PGL_PGL_H
 #define GPU_PGL_PGL_H
 
-#include "npapi.h"
-#include "npapi_extensions.h"
+#include <npapi.h>
+#include <npapi_extensions.h>
 
 #define PGL_TRUE          1
 #define PGL_FALSE         0
@@ -19,7 +19,7 @@ extern "C" {
 
 typedef void* PGLContext;
 typedef unsigned int PGLBoolean;
-typedef int32 PGLInt;
+typedef int32_t PGLInt;
 
 // These are the same error codes as used by EGL.
 enum {
@@ -48,6 +48,9 @@ PGLBoolean pglMakeCurrent(PGLContext pgl_context);
 
 // Get the calling thread's current PGL context.
 PGLContext pglGetCurrentContext(void);
+
+// Gets the address of a function.
+void (*pglGetProcAddress(char const * procname))();
 
 // Display everything that has been rendered since the last call.
 PGLBoolean pglSwapBuffers(void);

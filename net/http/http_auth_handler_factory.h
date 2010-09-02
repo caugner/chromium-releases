@@ -16,6 +16,7 @@ class GURL;
 
 namespace net {
 
+class BoundNetLog;
 class HttpAuthHandler;
 class HttpAuthHandlerRegistryFactory;
 
@@ -27,15 +28,19 @@ class HttpAuthHandlerFactory {
 
   // Sets an URL security manager.  HttpAuthHandlerFactory doesn't own the URL
   // security manager, and the URL security manager should outlive this object.
-  void set_url_security_manager(
-      const URLSecurityManager* url_security_manager) {
+  void set_url_security_manager(URLSecurityManager* url_security_manager) {
     url_security_manager_ = url_security_manager;
   }
 
   // Retrieves the associated URL security manager.
-  const URLSecurityManager* url_security_manager() const {
+  URLSecurityManager* url_security_manager() {
     return url_security_manager_;
   }
+
+  enum CreateReason {
+    CREATE_CHALLENGE,  // Create a handler in response to a challenge.
+    CREATE_PREEMPTIVE,    // Create a handler preemptively.
+  };
 
   // Creates an HttpAuthHandler object based on the authentication
   // challenge specified by |*challenge|. |challenge| must point to a valid
@@ -50,6 +55,13 @@ class HttpAuthHandlerFactory {
   // If |*challenge| is improperly formed, |*handler| is set to NULL and
   // ERR_INVALID_RESPONSE is returned.
   //
+  // |create_reason| indicates why the handler is being created. This is used
+  // since NTLM and Negotiate schemes do not support preemptive creation.
+  //
+  // |digest_nonce_count| is specifically intended for the Digest authentication
+  // scheme, and indicates the number of handlers generated for a particular
+  // server nonce challenge.
+  //
   // For the NTLM and Negotiate handlers:
   // If |origin| does not match the authentication method's filters for
   // the specified |target|, ERR_INVALID_AUTH_CREDENTIALS is returned.
@@ -59,7 +71,10 @@ class HttpAuthHandlerFactory {
   virtual int CreateAuthHandler(HttpAuth::ChallengeTokenizer* challenge,
                                 HttpAuth::Target target,
                                 const GURL& origin,
-                                scoped_refptr<HttpAuthHandler>* handler) = 0;
+                                CreateReason create_reason,
+                                int digest_nonce_count,
+                                const BoundNetLog& net_log,
+                                scoped_ptr<HttpAuthHandler>* handler) = 0;
 
   // Creates an HTTP authentication handler based on the authentication
   // challenge string |challenge|.
@@ -69,7 +84,21 @@ class HttpAuthHandlerFactory {
   int CreateAuthHandlerFromString(const std::string& challenge,
                                   HttpAuth::Target target,
                                   const GURL& origin,
-                                  scoped_refptr<HttpAuthHandler>* handler);
+                                  const BoundNetLog& net_log,
+                                  scoped_ptr<HttpAuthHandler>* handler);
+
+  // Creates an HTTP authentication handler based on the authentication
+  // challenge string |challenge|.
+  // This is a convenience function which creates a ChallengeTokenizer for
+  // |challenge| and calls |CreateAuthHandler|. See |CreateAuthHandler| for
+  // more details on return values.
+  int CreatePreemptiveAuthHandlerFromString(
+      const std::string& challenge,
+      HttpAuth::Target target,
+      const GURL& origin,
+      int digest_nonce_count,
+      const BoundNetLog& net_log,
+      scoped_ptr<HttpAuthHandler>* handler);
 
   // Creates a standard HttpAuthHandlerRegistryFactory. The caller is
   // responsible for deleting the factory.
@@ -78,7 +107,7 @@ class HttpAuthHandlerFactory {
 
  private:
   // The URL security manager
-  const URLSecurityManager* url_security_manager_;
+  URLSecurityManager* url_security_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpAuthHandlerFactory);
 };
@@ -92,7 +121,7 @@ class HttpAuthHandlerRegistryFactory : public HttpAuthHandlerFactory {
 
   // Sets an URL security manager into the factory associated with |scheme|.
   void SetURLSecurityManager(const std::string& scheme,
-                             const URLSecurityManager* url_security_manager);
+                             URLSecurityManager* url_security_manager);
 
   // Registers a |factory| that will be used for a particular HTTP
   // authentication scheme such as Basic, Digest, or Negotiate.
@@ -117,7 +146,10 @@ class HttpAuthHandlerRegistryFactory : public HttpAuthHandlerFactory {
   virtual int CreateAuthHandler(HttpAuth::ChallengeTokenizer* challenge,
                                 HttpAuth::Target target,
                                 const GURL& origin,
-                                scoped_refptr<HttpAuthHandler>* handler);
+                                CreateReason reason,
+                                int digest_nonce_count,
+                                const BoundNetLog& net_log,
+                                scoped_ptr<HttpAuthHandler>* handler);
 
  private:
   typedef std::map<std::string, HttpAuthHandlerFactory*> FactoryMap;

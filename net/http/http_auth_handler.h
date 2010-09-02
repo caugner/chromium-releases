@@ -7,22 +7,27 @@
 
 #include <string>
 
-#include "base/ref_counted.h"
+#include "base/time.h"
 #include "net/base/completion_callback.h"
+#include "net/base/net_log.h"
 #include "net/http/http_auth.h"
+
+class Histogram;
 
 namespace net {
 
-class BoundNetLog;
 class HostResolver;
-class HttpRequestInfo;
 class ProxyInfo;
+struct HttpRequestInfo;
 
 // HttpAuthHandler is the interface for the authentication schemes
 // (basic, digest, NTLM, Negotiate).
 // HttpAuthHandler objects are typically created by an HttpAuthHandlerFactory.
-class HttpAuthHandler : public base::RefCounted<HttpAuthHandler> {
+class HttpAuthHandler {
  public:
+  HttpAuthHandler();
+  virtual ~HttpAuthHandler();
+
   // Initializes the handler using a challenge issued by a server.
   // |challenge| must be non-NULL and have already tokenized the
   // authentication scheme, but none of the tokens occuring after the
@@ -30,7 +35,32 @@ class HttpAuthHandler : public base::RefCounted<HttpAuthHandler> {
   // for later use, and are not part of the initial challenge.
   bool InitFromChallenge(HttpAuth::ChallengeTokenizer* challenge,
                          HttpAuth::Target target,
-                         const GURL& origin);
+                         const GURL& origin,
+                         const BoundNetLog& net_log);
+
+  // Generates an authentication token, potentially asynchronously.
+  //
+  // When |username| and |password| are NULL, the default credentials for
+  // the currently logged in user are used. |AllowsDefaultCredentials()| MUST be
+  // true in this case.
+  //
+  // |request|, |callback|, and |auth_token| must be non-NULL.
+  //
+  // The return value is a net error code.
+  // If |OK| is returned, |*auth_token| is filled in with an authentication
+  // token which can be inserted in the HTTP request.
+  // If |ERR_IO_PENDING| is returned, |*auth_token| will be filled in
+  // asynchronously and |callback| will be invoked. The lifetime of
+  // |request|, |callback|, and |auth_token| must last until |callback| is
+  // invoked, but |username| and |password| are only used during the initial
+  // call.
+  // Otherwise, there was a problem generating a token synchronously, and the
+  // value of |*auth_token| is unspecified.
+  int GenerateAuthToken(const std::wstring* username,
+                        const std::wstring* password,
+                        const HttpRequestInfo* request,
+                        CompletionCallback* callback,
+                        std::string* auth_token);
 
   // Lowercase name of the auth scheme
   const std::string& scheme() const {
@@ -40,6 +70,11 @@ class HttpAuthHandler : public base::RefCounted<HttpAuthHandler> {
   // The realm value that was parsed during Init().
   const std::string& realm() const {
     return realm_;
+  }
+
+  // The challenge which was issued when creating the handler.
+  const std::string challenge() const {
+    return auth_challenge_;
   }
 
   // Numeric rank based on the challenge's security level. Higher
@@ -84,50 +119,11 @@ class HttpAuthHandler : public base::RefCounted<HttpAuthHandler> {
   // TODO(cbentzel): Add a pointer to Firefox documentation about risk.
   virtual bool AllowsDefaultCredentials() { return false; }
 
-  // Returns whether the canonical DNS name for the origin host needs to be
-  // resolved. The Negotiate auth scheme typically uses the canonical DNS
-  // name when constructing the Kerberos SPN.
-  virtual bool NeedsCanonicalName() { return false; }
-
-  // TODO(cbentzel): Separate providing credentials from generating the
-  // authentication token in the API.
-
-  // Generates an authentication token.
-  // The return value is an error code. If the code is not |OK|, the value of
-  // |*auth_token| is unspecified.
-  // |auth_token| is a return value and must be non-NULL.
-  virtual int GenerateAuthToken(const std::wstring& username,
-                                const std::wstring& password,
-                                const HttpRequestInfo* request,
-                                const ProxyInfo* proxy,
-                                std::string* auth_token) = 0;
-
-  // Generates an authentication token using default credentials.
-  // The return value is an error code. If the code is not |OK|, the value of
-  // |*auth_token| is unspecified.
-  // |auth_token| is a return value and must be non-NULL.
-  // This should only be called if |SupportsDefaultCredentials| returns true.
-  virtual int GenerateDefaultAuthToken(const HttpRequestInfo* request,
-                                       const ProxyInfo* proxy,
-                                       std::string* auth_token) = 0;
-
-  // Resolves the canonical name for the |origin_| host. The canonical
-  // name is used by the Negotiate scheme to generate a valid Kerberos
-  // SPN.
-  // The return value is a net error code.
-  virtual int ResolveCanonicalName(HostResolver* host_resolver,
-                                   CompletionCallback* callback,
-                                   const BoundNetLog& net_log);
-
  protected:
   enum Property {
     ENCRYPTS_IDENTITY = 1 << 0,
     IS_CONNECTION_BASED = 1 << 1,
   };
-
-  friend class base::RefCounted<HttpAuthHandler>;
-
-  virtual ~HttpAuthHandler() { }
 
   // Initializes the handler using a challenge issued by a server.
   // |challenge| must be non-NULL and have already tokenized the
@@ -137,11 +133,23 @@ class HttpAuthHandler : public base::RefCounted<HttpAuthHandler> {
   // scheme_, realm_, score_, properties_
   virtual bool Init(HttpAuth::ChallengeTokenizer* challenge) = 0;
 
+  // |GenerateAuthTokenImpl()} is the auth-scheme specific implementation
+  // of generating the next auth token. Callers sohuld use |GenerateAuthToken()|
+  // which will in turn call |GenerateAuthTokenImpl()|
+  virtual int GenerateAuthTokenImpl(const std::wstring* username,
+                                    const std::wstring* password,
+                                    const HttpRequestInfo* request,
+                                    CompletionCallback* callback,
+                                    std::string* auth_token) = 0;
+
   // The lowercase auth-scheme {"basic", "digest", "ntlm", "negotiate"}
   std::string scheme_;
 
   // The realm.  Used by "basic" and "digest".
   std::string realm_;
+
+  // The auth challenge.
+  std::string auth_challenge_;
 
   // The {scheme, host, port} for the authentication target.  Used by "ntlm"
   // and "negotiate" to construct the service principal name.
@@ -156,6 +164,19 @@ class HttpAuthHandler : public base::RefCounted<HttpAuthHandler> {
 
   // A bitmask of the properties of the authentication scheme.
   int properties_;
+
+  BoundNetLog net_log_;
+
+ private:
+  void OnGenerateAuthTokenComplete(int rv);
+  void FinishGenerateAuthToken();
+  static std::string GenerateHistogramNameFromScheme(const std::string& scheme);
+
+  CompletionCallback* original_callback_;
+  CompletionCallbackImpl<HttpAuthHandler> wrapper_callback_;
+  // When GenerateAuthToken was called.
+  base::TimeTicks generate_auth_token_start_;
+  scoped_refptr<Histogram> histogram_;
 };
 
 }  // namespace net

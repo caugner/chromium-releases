@@ -8,12 +8,6 @@
 #include "base/file_descriptor_posix.h"
 #endif
 
-#if defined(USE_SYSTEM_SQLITE)
-#include <sqlite3.h>
-#else
-#include "third_party/sqlite/preprocessed/sqlite3.h"
-#endif
-
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "chrome/browser/browser_process.h"
@@ -24,6 +18,7 @@
 #include "chrome/browser/renderer_host/database_permission_request.h"
 #include "chrome/common/render_messages.h"
 #include "googleurl/src/gurl.h"
+#include "third_party/sqlite/preprocessed/sqlite3.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "webkit/database/database_util.h"
 #include "webkit/database/vfs_backend.h"
@@ -62,6 +57,7 @@ void DatabaseDispatcherHost::Shutdown() {
   shutdown_ = true;
   message_sender_ = NULL;
   if (observer_added_) {
+    observer_added_ = false;
     ChromeThread::PostTask(
         ChromeThread::FILE, FROM_HERE,
         NewRunnableMethod(this, &DatabaseDispatcherHost::RemoveObserver));
@@ -156,14 +152,19 @@ void DatabaseDispatcherHost::DatabaseOpenFile(const string16& vfs_file_name,
                                               int desired_flags,
                                               IPC::Message* reply_msg) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
+  base::PlatformFile file_handle = base::kInvalidPlatformFileValue;
   base::PlatformFile target_handle = base::kInvalidPlatformFileValue;
-  base::PlatformFile target_dir_handle = base::kInvalidPlatformFileValue;
   string16 origin_identifier;
   string16 database_name;
+
+  // When in incognito mode, we want to make sure that all DB files are
+  // removed when the incognito profile goes away, so we add the
+  // SQLITE_OPEN_DELETEONCLOSE flag when opening all files, and keep
+  // open handles to them in the database tracker to make sure they're
+  // around for as long as needed.
   if (vfs_file_name.empty()) {
     VfsBackend::OpenTempFileInDirectory(db_tracker_->DatabaseDirectory(),
-                                        desired_flags, process_handle_,
-                                        &target_handle, &target_dir_handle);
+                                        desired_flags, &file_handle);
   } else if (DatabaseUtil::CrackVfsFileName(vfs_file_name, &origin_identifier,
                                             &database_name, NULL) &&
              !db_tracker_->IsDatabaseScheduledForDeletion(origin_identifier,
@@ -171,24 +172,35 @@ void DatabaseDispatcherHost::DatabaseOpenFile(const string16& vfs_file_name,
       FilePath db_file =
           DatabaseUtil::GetFullFilePathForVfsFile(db_tracker_, vfs_file_name);
       if (!db_file.empty()) {
-        VfsBackend::OpenFile(db_file, desired_flags, process_handle_,
-                             &target_handle, &target_dir_handle);
+        if (db_tracker_->IsIncognitoProfile()) {
+          db_tracker_->GetIncognitoFileHandle(vfs_file_name, &file_handle);
+          if (file_handle == base::kInvalidPlatformFileValue) {
+            VfsBackend::OpenFile(db_file,
+                                 desired_flags | SQLITE_OPEN_DELETEONCLOSE,
+                                 &file_handle);
+            if (VfsBackend::FileTypeIsMainDB(desired_flags) ||
+                VfsBackend::FileTypeIsJournal(desired_flags))
+              db_tracker_->SaveIncognitoFileHandle(vfs_file_name, file_handle);
+          }
+        } else {
+          VfsBackend::OpenFile(db_file, desired_flags, &file_handle);
+        }
       }
   }
 
-#if defined(OS_POSIX)
-  if (target_dir_handle >= 0)
-    close(target_dir_handle);
-  target_dir_handle = -1;
-#endif
+  // Then we duplicate the file handle to make it useable in the renderer
+  // process. The original handle is closed, unless we saved it in the
+  // database tracker.
+  bool auto_close = !db_tracker_->HasSavedIncognitoFileHandle(vfs_file_name);
+  VfsBackend::GetFileHandleForProcess(process_handle_, file_handle,
+                                      &target_handle, auto_close);
 
   ViewHostMsg_DatabaseOpenFile::WriteReplyParams(
       reply_msg,
 #if defined(OS_WIN)
       target_handle
 #elif defined(OS_POSIX)
-      base::FileDescriptor(target_handle, true),
-      base::FileDescriptor(target_dir_handle, true)
+      base::FileDescriptor(target_handle, auto_close)
 #endif
       );
   Send(reply_msg);
@@ -223,7 +235,15 @@ void DatabaseDispatcherHost::DatabaseDeleteFile(const string16& vfs_file_name,
   FilePath db_file =
       DatabaseUtil::GetFullFilePathForVfsFile(db_tracker_, vfs_file_name);
   if (!db_file.empty()) {
-    error_code = VfsBackend::DeleteFile(db_file, sync_dir);
+    // In order to delete a journal file in incognito mode, we only need to
+    // close the open handle to it that's stored in the database tracker.
+    if (db_tracker_->IsIncognitoProfile()) {
+      if (db_tracker_->CloseIncognitoFileHandle(vfs_file_name))
+        error_code = SQLITE_OK;
+    } else {
+      error_code = VfsBackend::DeleteFile(db_file, sync_dir);
+    }
+
     if ((error_code == SQLITE_IOERR_DELETE) && reschedule_count) {
       // If the file could not be deleted, try again.
       ChromeThread::PostDelayedTask(
@@ -396,9 +416,10 @@ void DatabaseDispatcherHost::OnAllowDatabase(const std::string& origin_url,
 void DatabaseDispatcherHost::AllowDatabaseResponse(
     IPC::Message* reply_msg, ContentSetting content_setting) {
   DCHECK((content_setting == CONTENT_SETTING_ALLOW) ||
-         (content_setting == CONTENT_SETTING_BLOCK));
+         (content_setting == CONTENT_SETTING_BLOCK) ||
+         (content_setting == CONTENT_SETTING_SESSION_ONLY));
   ViewHostMsg_AllowDatabase::WriteReplyParams(
-      reply_msg, content_setting == CONTENT_SETTING_ALLOW);
+      reply_msg, content_setting != CONTENT_SETTING_BLOCK);
   Send(reply_msg);
 }
 

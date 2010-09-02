@@ -9,6 +9,7 @@
 // This file needs to be included again, even though we're actually included
 // from it via utility_messages.h.
 #include "base/shared_memory.h"
+#include "chrome/common/gpu_info.h"
 #include "gfx/size.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
@@ -83,11 +84,6 @@ IPC_END_MESSAGES(Gpu)
 // These are messages from the GPU process to the browser.
 IPC_BEGIN_MESSAGES(GpuHost)
 
-  // This message is sent in response to BackingStoreMsg_New to tell the host
-  // about the child window that was just created.
-  IPC_MESSAGE_ROUTED1(GpuHostMsg_CreatedRenderWidgetHostView,
-                      gfx::NativeViewId)
-
   // Sent in response to GpuMsg_PaintToBackingStore, see that for more.
   IPC_MESSAGE_ROUTED0(GpuHostMsg_PaintToBackingStore_ACK)
 
@@ -95,11 +91,19 @@ IPC_BEGIN_MESSAGES(GpuHost)
   IPC_MESSAGE_ROUTED0(GpuHostMsg_PaintToVideoLayer_ACK)
 
   // Response to a GpuHostMsg_EstablishChannel message.
-  IPC_MESSAGE_CONTROL1(GpuHostMsg_ChannelEstablished,
-                       IPC::ChannelHandle /* channel_handle */)
+  IPC_MESSAGE_CONTROL2(GpuHostMsg_ChannelEstablished,
+                       IPC::ChannelHandle, /* channel_handle */
+                       GPUInfo /* GPU logging stats */)
 
   // Response to a GpuMsg_Synchronize message.
   IPC_MESSAGE_CONTROL0(GpuHostMsg_SynchronizeReply)
+
+#if defined(OS_LINUX)
+  // Get the XID for a view ID.
+  IPC_SYNC_MESSAGE_CONTROL1_1(GpuHostMsg_GetViewXID,
+                              gfx::NativeViewId, /* view */
+                              unsigned long /* xid */)
+#endif
 
 IPC_END_MESSAGES(GpuHost)
 

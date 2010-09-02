@@ -7,6 +7,7 @@
 #include "app/l10n_util_mac.h"
 #include "app/resource_bundle.h"
 #include "app/text_elider.h"
+#include "base/histogram.h"
 #include "base/mac_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -17,6 +18,7 @@
 #import "chrome/browser/cocoa/download_shelf_controller.h"
 #import "chrome/browser/cocoa/themed_window.h"
 #import "chrome/browser/cocoa/ui_localizer.h"
+#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/download/download_util.h"
@@ -35,6 +37,10 @@ const int kTextWidth = 140;            // Pixels
 // The maximum number of characters we show in a file name when displaying the
 // dangerous download message.
 const int kFileNameMaxLength = 20;
+
+// The maximum width in pixels for the file name tooltip.
+const int kToolTipMaxWidth = 900;
+
 
 // Helper to widen a view.
 void WidenView(NSView* view, CGFloat widthChange) {
@@ -150,6 +156,7 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
   [image_ setImage:alertIcon];
 
   bridge_->LoadIcon();
+  [self updateToolTip];
 }
 
 - (void)setStateFromDownload:(BaseDownloadItemModel*)downloadModel {
@@ -252,6 +259,13 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
 
 - (DownloadItem*)download {
   return bridge_->download_model()->download();
+}
+
+- (void)updateToolTip {
+  std::wstring elidedFilename = gfx::ElideFilename(
+      [self download]->GetFileName(),
+      gfx::Font(), kToolTipMaxWidth);
+  [progressView_ setToolTip:base::SysWideToNSString(elidedFilename)];
 }
 
 - (void)clearDangerousMode {

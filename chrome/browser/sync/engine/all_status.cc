@@ -10,15 +10,14 @@
 #include "base/port.h"
 #include "base/rand_util.h"
 #include "chrome/browser/sync/engine/auth_watcher.h"
-#include "chrome/browser/sync/engine/net/gaia_authenticator.h"
 #include "chrome/browser/sync/engine/net/server_connection_manager.h"
 #include "chrome/browser/sync/engine/syncer.h"
 #include "chrome/browser/sync/engine/syncer_thread.h"
-#include "chrome/browser/sync/notifier/listener/talk_mediator.h"
 #include "chrome/browser/sync/protocol/service_constants.h"
 #include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
-#include "chrome/browser/sync/util/event_sys-inl.h"
+#include "chrome/common/deprecated/event_sys-inl.h"
+#include "jingle/notifier/listener/talk_mediator.h"
 
 namespace browser_sync {
 
@@ -51,6 +50,7 @@ AllStatus::AllStatus() : status_(init_status),
 }
 
 AllStatus::~AllStatus() {
+  syncer_thread_hookup_.reset();
   delete channel_;
 }
 
@@ -59,21 +59,9 @@ void AllStatus::WatchConnectionManager(ServerConnectionManager* conn_mgr) {
                          &AllStatus::HandleServerConnectionEvent));
 }
 
-void AllStatus::WatchAuthenticator(GaiaAuthenticator* gaia) {
-  gaia_hookup_.reset(NewEventListenerHookup(gaia->channel(), this,
-                     &AllStatus::HandleGaiaAuthEvent));
-}
-
-void AllStatus::WatchAuthWatcher(AuthWatcher* auth_watcher) {
-  authwatcher_hookup_.reset(
-      NewEventListenerHookup(auth_watcher->channel(), this,
-                             &AllStatus::HandleAuthWatcherEvent));
-}
-
 void AllStatus::WatchSyncerThread(SyncerThread* syncer_thread) {
-  syncer_thread_hookup_.reset(
-      NewEventListenerHookup(syncer_thread->relay_channel(), this,
-                             &AllStatus::HandleSyncerEvent));
+  syncer_thread_hookup_.reset(syncer_thread == NULL ? NULL :
+      syncer_thread->relay_channel()->AddObserver(this));
 }
 
 AllStatus::Status AllStatus::CreateBlankStatus() const {
@@ -171,21 +159,6 @@ int AllStatus::CalcStatusChanges(Status* old_status) {
   return what_changed;
 }
 
-void AllStatus::HandleGaiaAuthEvent(const GaiaAuthEvent& gaia_event) {
-  ScopedStatusLockWithNotify lock(this);
-  switch (gaia_event.what_happened) {
-    case GaiaAuthEvent::GAIA_AUTH_FAILED:
-      status_.authenticated = false;
-      break;
-    case GaiaAuthEvent::GAIA_AUTH_SUCCEEDED:
-      status_.authenticated = true;
-      break;
-    default:
-      lock.set_notify_plan(DONT_NOTIFY);
-      break;
-  }
-}
-
 void AllStatus::HandleAuthWatcherEvent(const AuthWatcherEvent& auth_event) {
   ScopedStatusLockWithNotify lock(this);
   switch (auth_event.what_happened) {
@@ -214,7 +187,7 @@ void AllStatus::HandleAuthWatcherEvent(const AuthWatcherEvent& auth_event) {
   }
 }
 
-void AllStatus::HandleSyncerEvent(const SyncerEvent& event) {
+void AllStatus::HandleChannelEvent(const SyncerEvent& event) {
   ScopedStatusLockWithNotify lock(this);
   switch (event.what_happened) {
     case SyncerEvent::COMMITS_SUCCEEDED:
@@ -227,20 +200,21 @@ void AllStatus::HandleSyncerEvent(const SyncerEvent& event) {
       // We're safe to use this value here because we don't call into the syncer
       // or block on any processes.
       lock.set_notify_plan(DONT_NOTIFY);
+      syncer_thread_hookup_.reset();
       break;
     case SyncerEvent::OVER_QUOTA:
       LOG(WARNING) << "User has gone over quota.";
       lock.NotifyOverQuota();
       break;
     case SyncerEvent::REQUEST_SYNC_NUDGE:
-      lock.set_notify_plan(DONT_NOTIFY);
-      break;
     case SyncerEvent::PAUSED:
-      lock.set_notify_plan(DONT_NOTIFY);
-      break;
     case SyncerEvent::RESUMED:
-      lock.set_notify_plan(DONT_NOTIFY);
-      break;
+    case SyncerEvent::WAITING_FOR_CONNECTION:
+    case SyncerEvent::CONNECTED:
+    case SyncerEvent::STOP_SYNCING_PERMANENTLY:
+    case SyncerEvent::SYNCER_THREAD_EXITING:
+       lock.set_notify_plan(DONT_NOTIFY);
+       break;
     default:
       LOG(ERROR) << "Unrecognized Syncer Event: " << event.what_happened;
       lock.set_notify_plan(DONT_NOTIFY);
@@ -254,38 +228,6 @@ void AllStatus::HandleServerConnectionEvent(
     ScopedStatusLockWithNotify lock(this);
     status_.server_up = IsGoodReplyFromServer(event.connection_code);
     status_.server_reachable = event.server_reachable;
-  }
-}
-
-void AllStatus::WatchTalkMediator(const TalkMediator* mediator) {
-  status_.notifications_enabled = false;
-  talk_mediator_hookup_.reset(
-      NewEventListenerHookup(mediator->channel(), this,
-                             &AllStatus::HandleTalkMediatorEvent));
-}
-
-void AllStatus::HandleTalkMediatorEvent(
-    const TalkMediatorEvent& event) {
-  ScopedStatusLockWithNotify lock(this);
-  switch (event.what_happened) {
-    case TalkMediatorEvent::SUBSCRIPTIONS_ON:
-      status_.notifications_enabled = true;
-      break;
-    case TalkMediatorEvent::LOGOUT_SUCCEEDED:
-    case TalkMediatorEvent::SUBSCRIPTIONS_OFF:
-    case TalkMediatorEvent::TALKMEDIATOR_DESTROYED:
-      status_.notifications_enabled = false;
-      break;
-    case TalkMediatorEvent::NOTIFICATION_RECEIVED:
-      status_.notifications_received++;
-      break;
-    case TalkMediatorEvent::NOTIFICATION_SENT:
-      status_.notifications_sent++;
-      break;
-    case TalkMediatorEvent::LOGIN_SUCCEEDED:
-    default:
-      lock.set_notify_plan(DONT_NOTIFY);
-      break;
   }
 }
 
@@ -317,6 +259,21 @@ int AllStatus::GetRecommendedDelaySeconds(int base_delay_seconds) {
 
 int AllStatus::GetRecommendedDelay(int base_delay_ms) const {
   return GetRecommendedDelaySeconds(base_delay_ms / 1000) * 1000;
+}
+
+void AllStatus::SetNotificationsEnabled(bool notifications_enabled) {
+  ScopedStatusLockWithNotify lock(this);
+  status_.notifications_enabled = notifications_enabled;
+}
+
+void AllStatus::IncrementNotificationsSent() {
+  ScopedStatusLockWithNotify lock(this);
+  ++status_.notifications_sent;
+}
+
+void AllStatus::IncrementNotificationsReceived() {
+  ScopedStatusLockWithNotify lock(this);
+  ++status_.notifications_received;
 }
 
 ScopedStatusLockWithNotify::ScopedStatusLockWithNotify(AllStatus* allstatus)

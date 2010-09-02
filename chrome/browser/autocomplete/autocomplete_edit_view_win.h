@@ -69,7 +69,7 @@ class AutocompleteEditViewWin
                           Profile* profile,
                           CommandUpdater* command_updater,
                           bool popup_window_mode,
-                          const BubblePositioner* bubble_positioner);
+                          const views::View* location_bar);
   ~AutocompleteEditViewWin();
 
   views::View* parent_view() const { return parent_view_; }
@@ -90,6 +90,9 @@ class AutocompleteEditViewWin
                        const std::wstring& keyword);
 
   virtual std::wstring GetText() const;
+
+  virtual bool IsEditingOrEmpty() const;
+  virtual int GetIcon() const;
 
   virtual void SetUserText(const std::wstring& text) {
     SetUserText(text, text, true);
@@ -167,15 +170,17 @@ class AutocompleteEditViewWin
     MSG_WM_LBUTTONDBLCLK(OnLButtonDblClk)
     MSG_WM_LBUTTONDOWN(OnLButtonDown)
     MSG_WM_LBUTTONUP(OnLButtonUp)
-    MSG_WM_MBUTTONDOWN(OnNonLButtonDown)
-    MSG_WM_MBUTTONUP(OnNonLButtonUp)
+    MSG_WM_MBUTTONDBLCLK(OnMButtonDblClk)
+    MSG_WM_MBUTTONDOWN(OnMButtonDown)
+    MSG_WM_MBUTTONUP(OnMButtonUp)
     MSG_WM_MOUSEACTIVATE(OnMouseActivate)
     MSG_WM_MOUSEMOVE(OnMouseMove)
     MSG_WM_MOUSEWHEEL(OnMouseWheel)
     MSG_WM_PAINT(OnPaint)
     MSG_WM_PASTE(OnPaste)
-    MSG_WM_RBUTTONDOWN(OnNonLButtonDown)
-    MSG_WM_RBUTTONUP(OnNonLButtonUp)
+    MSG_WM_RBUTTONDBLCLK(OnRButtonDblClk)
+    MSG_WM_RBUTTONDOWN(OnRButtonDown)
+    MSG_WM_RBUTTONUP(OnRButtonUp)
     MSG_WM_SETFOCUS(OnSetFocus)
     MSG_WM_SETTEXT(OnSetText)
     MSG_WM_SYSCHAR(OnSysChar)  // WM_SYSxxx == WM_xxx with ALT down
@@ -195,6 +200,11 @@ class AutocompleteEditViewWin
   virtual void ExecuteCommand(int command_id);
 
  private:
+  enum MouseButton {
+    kLeft  = 0,
+    kRight = 1,
+  };
+
   // This object freezes repainting of the edit until the object is destroyed.
   // Some methods of the CRichEditCtrl draw synchronously to the screen.  If we
   // don't freeze, the user will see a rapid series of calls to these as
@@ -253,13 +263,17 @@ class AutocompleteEditViewWin
   void OnLButtonDblClk(UINT keys, const CPoint& point);
   void OnLButtonDown(UINT keys, const CPoint& point);
   void OnLButtonUp(UINT keys, const CPoint& point);
+  void OnMButtonDblClk(UINT keys, const CPoint& point);
+  void OnMButtonDown(UINT keys, const CPoint& point);
+  void OnMButtonUp(UINT keys, const CPoint& point);
   LRESULT OnMouseActivate(HWND window, UINT hit_test, UINT mouse_message);
   void OnMouseMove(UINT keys, const CPoint& point);
   BOOL OnMouseWheel(UINT flags, short delta, CPoint point);
-  void OnNonLButtonDown(UINT keys, const CPoint& point);
-  void OnNonLButtonUp(UINT keys, const CPoint& point);
   void OnPaint(HDC bogus_hdc);
   void OnPaste();
+  void OnRButtonDblClk(UINT keys, const CPoint& point);
+  void OnRButtonDown(UINT keys, const CPoint& point);
+  void OnRButtonUp(UINT keys, const CPoint& point);
   void OnSetFocus(HWND focus_wnd);
   LRESULT OnSetText(const wchar_t* text);
   void OnSysChar(TCHAR ch, UINT repeat_count, UINT flags);
@@ -358,10 +372,6 @@ class AutocompleteEditViewWin
   // user moves the mouse far enough to start a drag.
   void OnPossibleDrag(const CPoint& point);
 
-  // Invoked when a mouse button is released. If none of the buttons are still
-  // down, this sets possible_drag_ to false.
-  void UpdateDragDone(UINT keys);
-
   // Redraws the necessary region for a drop highlight at the specified
   // position. This does nothing if position is beyond the bounds of the
   // text.
@@ -369,6 +379,9 @@ class AutocompleteEditViewWin
 
   // Generates the context menu for the edit field.
   void BuildContextMenu();
+
+  void SelectAllIfNecessary(MouseButton button, const CPoint& point);
+  void TrackMousePosition(MouseButton button, const CPoint& point);
 
   scoped_ptr<AutocompleteEditModel> model_;
 
@@ -409,12 +422,13 @@ class AutocompleteEditViewWin
 
   // When the user clicks to give us focus, we watch to see if they're clicking
   // or dragging.  When they're clicking, we select nothing until mouseup, then
-  // select all the text in the edit.  During this process, tracking_click_ is
-  // true and mouse_down_point_ holds the original click location.  At other
-  // times, tracking_click_ is false, and the contents of mouse_down_point_
-  // should be ignored.
-  bool tracking_click_;
-  CPoint mouse_down_point_;
+  // select all the text in the edit.  During this process, tracking_click_[X]
+  // is true and click_point_[X] holds the original click location.
+  // At other times, tracking_click_[X] is false, and the contents of
+  // click_point_[X] should be ignored. The arrays hold the state for the
+  // left and right mouse buttons, and are indexed using the MouseButton enum.
+  bool tracking_click_[2];
+  CPoint click_point_[2];
 
   // We need to know if the user triple-clicks, so track double click points
   // and times so we can see if subsequent clicks are actually triple clicks.
@@ -454,8 +468,6 @@ class AutocompleteEditViewWin
   // every time we paint.  |font_y_adjustment_| is the number of pixels we need
   // to shift the font vertically in order to make its baseline be at our
   // desired baseline in the edit.
-  int font_ascent_;
-  int font_descent_;
   int font_x_height_;
   int font_y_adjustment_;
 
@@ -476,7 +488,7 @@ class AutocompleteEditViewWin
 
   // Security UI-related data.
   COLORREF background_color_;
-  ToolbarModel::SecurityLevel scheme_security_level_;
+  ToolbarModel::SecurityLevel security_level_;
 
   // This interface is useful for accessing the CRichEditCtrl at a low level.
   mutable ITextDocument* text_object_model_;

@@ -30,7 +30,7 @@ class PluginReleaseTask : public Task {
 };
 
 // How long we wait before releasing the plugin process.
-static const int kPluginReleaseTimeMS = 10000;
+static const int kPluginReleaseTimeMS = 5 * 60 * 1000;  // 5 minutes
 
 
 // If a sync call to the renderer results in a modal dialog, we need to have a
@@ -220,7 +220,7 @@ void PluginChannel::OnCreateInstance(const std::string& mime_type,
   *instance_id = GenerateRouteID();
   scoped_refptr<WebPluginDelegateStub> stub = new WebPluginDelegateStub(
       mime_type, *instance_id, this);
-  AddRoute(*instance_id, stub, false);
+  AddRoute(*instance_id, stub, NULL);
   plugin_stubs_.push_back(stub);
 }
 
@@ -326,7 +326,8 @@ bool PluginChannel::Init(MessageLoop* ipc_message_loop, bool create_pipe_now) {
 #if defined(OS_POSIX)
 void PluginChannel::CloseRendererFD() {
   if (renderer_fd_ != -1) {
-    HANDLE_EINTR(close(renderer_fd_));
+    if (HANDLE_EINTR(close(renderer_fd_)) < 0)
+      PLOG(ERROR) << "close";
     renderer_fd_ = -1;
   }
 }

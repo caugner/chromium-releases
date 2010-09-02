@@ -21,6 +21,7 @@ class ContactInfo : public FormGroup {
   virtual FormGroup* Clone() const;
   virtual void GetPossibleFieldTypes(const string16& text,
                                      FieldTypeSet* possible_types) const;
+  virtual void GetAvailableFieldTypes(FieldTypeSet* available_types) const;
   virtual void FindInfoMatches(const AutoFillType& type,
                                const string16& info,
                                std::vector<string16>* matched_text) const;
@@ -28,6 +29,7 @@ class ContactInfo : public FormGroup {
   virtual void SetInfo(const AutoFillType& type, const string16& value);
 
  private:
+  friend class ContactInfoTest;
   explicit ContactInfo(const ContactInfo& contact_info);
   void operator=(const ContactInfo& info);
 
@@ -88,6 +90,10 @@ class ContactInfo : public FormGroup {
   // Sets |last_| to |last| and |last_tokens_| to the set of tokens in |last|,
   // made lowercase.
   void SetLast(const string16& last);
+
+  // Sets |first_|, |middle_|, |last_| and |*_tokens_| to the tokenized
+  // |full|. It is tokenized on a space only.
+  void SetFullName(const string16& full);
 
   void set_suffix(const string16& suffix) { suffix_ = suffix; }
 

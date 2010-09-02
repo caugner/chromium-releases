@@ -7,10 +7,36 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
+#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/profile.h"
 
-void AsyncExtensionFunction::SetArgs(const Value* args) {
+ExtensionFunction::ExtensionFunction()
+    : request_id_(-1), name_(""), has_callback_(false) {
+}
+
+ExtensionFunction::~ExtensionFunction() {
+}
+
+Extension* ExtensionFunction::GetExtension() {
+  ExtensionsService* service = profile_->GetExtensionsService();
+  DCHECK(service);
+  return service->GetExtensionById(extension_id_, false);
+}
+
+Browser* ExtensionFunction::GetCurrentBrowser() {
+  return dispatcher()->GetCurrentBrowser(include_incognito_);
+}
+
+AsyncExtensionFunction::AsyncExtensionFunction()
+    : args_(NULL), bad_message_(false) {
+}
+
+AsyncExtensionFunction::~AsyncExtensionFunction() {
+}
+
+void AsyncExtensionFunction::SetArgs(const ListValue* args) {
   DCHECK(!args_.get());  // Should only be called once.
-  args_.reset(args->DeepCopy());
+  args_.reset(static_cast<ListValue*>(args->DeepCopy()));
 }
 
 const std::string AsyncExtensionFunction::GetResult() {
@@ -19,6 +45,15 @@ const std::string AsyncExtensionFunction::GetResult() {
   if (result_.get())
     base::JSONWriter::Write(result_.get(), false, &json);
   return json;
+}
+
+const std::string AsyncExtensionFunction::GetError() {
+  return error_;
+}
+
+void AsyncExtensionFunction::Run() {
+  if (!RunImpl())
+    SendResponse(false);
 }
 
 void AsyncExtensionFunction::SendResponse(bool success) {
@@ -32,8 +67,16 @@ void AsyncExtensionFunction::SendResponse(bool success) {
 }
 
 bool AsyncExtensionFunction::HasOptionalArgument(size_t index) {
-  DCHECK(args_->IsType(Value::TYPE_LIST));
-  ListValue* args_list = static_cast<ListValue*>(args_.get());
   Value* value;
-  return args_list->Get(index, &value) && !value->IsType(Value::TYPE_NULL);
+  return args_->Get(index, &value) && !value->IsType(Value::TYPE_NULL);
+}
+
+SyncExtensionFunction::SyncExtensionFunction() {
+}
+
+SyncExtensionFunction::~SyncExtensionFunction() {
+}
+
+void SyncExtensionFunction::Run() {
+  SendResponse(RunImpl());
 }

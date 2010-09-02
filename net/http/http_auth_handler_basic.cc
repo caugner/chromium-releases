@@ -41,30 +41,21 @@ bool HttpAuthHandlerBasic::Init(HttpAuth::ChallengeTokenizer* challenge) {
   return challenge->valid();
 }
 
-int HttpAuthHandlerBasic::GenerateAuthToken(
-    const std::wstring& username,
-    const std::wstring& password,
+int HttpAuthHandlerBasic::GenerateAuthTokenImpl(
+    const std::wstring* username,
+    const std::wstring* password,
     const HttpRequestInfo*,
-    const ProxyInfo*,
+    CompletionCallback*,
     std::string* auth_token) {
   // TODO(eroman): is this the right encoding of username/password?
   std::string base64_username_password;
-  if (!base::Base64Encode(WideToUTF8(username) + ":" + WideToUTF8(password),
+  if (!base::Base64Encode(WideToUTF8(*username) + ":" + WideToUTF8(*password),
                           &base64_username_password)) {
     LOG(ERROR) << "Unexpected problem Base64 encoding.";
     return ERR_UNEXPECTED;
   }
   *auth_token = "Basic " + base64_username_password;
   return OK;
-}
-
-int HttpAuthHandlerBasic::GenerateDefaultAuthToken(
-    const HttpRequestInfo* request,
-    const ProxyInfo* proxy,
-    std::string* auth_token) {
-  NOTREACHED();
-  LOG(ERROR) << ErrorToString(ERR_NOT_IMPLEMENTED);
-  return ERR_NOT_IMPLEMENTED;
 }
 
 HttpAuthHandlerBasic::Factory::Factory() {
@@ -77,11 +68,14 @@ int HttpAuthHandlerBasic::Factory::CreateAuthHandler(
     HttpAuth::ChallengeTokenizer* challenge,
     HttpAuth::Target target,
     const GURL& origin,
-    scoped_refptr<HttpAuthHandler>* handler) {
+    CreateReason reason,
+    int digest_nonce_count,
+    const BoundNetLog& net_log,
+    scoped_ptr<HttpAuthHandler>* handler) {
   // TODO(cbentzel): Move towards model of parsing in the factory
   //                 method and only constructing when valid.
-  scoped_refptr<HttpAuthHandler> tmp_handler(new HttpAuthHandlerBasic());
-  if (!tmp_handler->InitFromChallenge(challenge, target, origin))
+  scoped_ptr<HttpAuthHandler> tmp_handler(new HttpAuthHandlerBasic());
+  if (!tmp_handler->InitFromChallenge(challenge, target, origin, net_log))
     return ERR_INVALID_RESPONSE;
   handler->swap(tmp_handler);
   return OK;

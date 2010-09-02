@@ -20,6 +20,8 @@ class Size;
 
 namespace chromeos {
 
+class BalloonViewImpl;
+
 // A balloon collection represents a set of notification balloons being
 // shown in the chromeos notification panel. Unlike other platforms,
 // chromeos shows the all notifications in the notification panel, and
@@ -34,12 +36,18 @@ class BalloonCollectionImpl : public BalloonCollection,
     NotificationUI() {}
     virtual ~NotificationUI() {}
 
-    // Add, remove and resize the balloon.
+    // Add, remove, resize and show the balloon.
     virtual void Add(Balloon* balloon) = 0;
     virtual bool Update(Balloon* balloon) = 0;
     virtual void Remove(Balloon* balloon) = 0;
+    virtual void Show(Balloon* balloon) = 0;
+
+    // Resize notification from webkit.
     virtual void ResizeNotification(Balloon* balloon,
                                     const gfx::Size& size) = 0;
+
+    // Sets the active view.
+    virtual void SetActiveView(BalloonViewImpl* view) = 0;
    private:
     DISALLOW_COPY_AND_ASSIGN(NotificationUI);
   };
@@ -69,11 +77,17 @@ class BalloonCollectionImpl : public BalloonCollection,
   void AddSystemNotification(const Notification& notification,
                              Profile* profile, bool sticky, bool controls);
 
-  // Update the notification's content. It uses
+  // Updates the notification's content. It uses
   // NotificationDelegate::id() to check the equality of notifications.
   // Returns true if the notification has been updated. False if
-  // no corresponding notification is found.
+  // no corresponding notification is found. This will not change the
+  // visibility of the notification.
   bool UpdateNotification(const Notification& notification);
+
+  // Updates and shows the notification. It will open the notification panel
+  // if it's closed or minimized, and scroll the viewport so that
+  // the updated notification is visible.
+  bool UpdateAndShowNotification(const Notification& notification);
 
   // Injects notification ui. Used to inject a mock implementation in tests.
   void set_notification_ui(NotificationUI* ui) {
@@ -84,10 +98,6 @@ class BalloonCollectionImpl : public BalloonCollection,
     return notification_ui_.get();
   }
 
-  // The width and the minimum hight of a balloon.
-  static const int kBalloonWidth;
-  static const int kBalloonMinHeight;
-
  protected:
   // Creates a new balloon. Overridable by unit tests.  The caller is
   // responsible for freeing the pointer returned.
@@ -95,6 +105,8 @@ class BalloonCollectionImpl : public BalloonCollection,
                                Profile* profile);
 
  private:
+  friend class NotificationPanelTester;
+
   // Shutdown the notification ui.
   void Shutdown();
 

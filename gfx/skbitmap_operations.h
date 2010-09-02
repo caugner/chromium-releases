@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef APP_GFX_SKBITMAP_OPERATIONS_H_
-#define APP_GFX_SKBITMAP_OPERATIONS_H_
+#ifndef GFX_SKBITMAP_OPERATIONS_H_
+#define GFX_SKBITMAP_OPERATIONS_H_
 
 #include "gfx/color_utils.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
@@ -78,16 +78,21 @@ class SkBitmapOperations {
   static SkBitmap DownsampleByTwoUntilSize(const SkBitmap& bitmap,
                                            int min_w, int min_h);
 
- private:
-  SkBitmapOperations();  // Class for scoping only.
-
   // Makes a bitmap half has large in each direction by averaging groups of
   // 4 pixels. This is one step in generating a mipmap.
   static SkBitmap DownsampleByTwo(const SkBitmap& bitmap);
+
+  // Unpremultiplies all pixels in |bitmap|. You almost never want to call
+  // this, as |SkBitmap|s are always premultiplied by conversion. Call this
+  // only if you will pass the bitmap's data into a system function that
+  // doesn't expect premultiplied colors.
+  static SkBitmap UnPreMultiply(const SkBitmap& bitmap);
+
+ private:
+  SkBitmapOperations();  // Class for scoping only.
 
   FRIEND_TEST(SkBitmapOperationsTest, DownsampleByTwo);
   FRIEND_TEST(SkBitmapOperationsTest, DownsampleByTwoSmall);
 };
 
-#endif  // APP_GFX_SKBITMAP_OPERATIONS_H_
-
+#endif  // GFX_SKBITMAP_OPERATIONS_H_

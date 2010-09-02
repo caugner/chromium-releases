@@ -33,53 +33,51 @@
 /**
  * EffectParameterInfo holds information about the Parameters an Effect needs.
  * o3d.Effect.getParameterInfo
+ * @param {string} name Tne name of the parameter.
+ * @param {string} className The param class name.
+ * @param {number} numElements The number of Elements if the param is an array.
+ * @param {string} sasClassName The sas class name if the param is an sas type.
+ * @param {string} semantic The relevant semantic.
  */
-o3d.EffectParameterInfo = function() { };
+o3d.EffectParameterInfo =
+    function(name, className, numElements, semantic, sasClassName) {
+  /**
+   * The name of the parameter.
+   * @type {string}
+   */
+  this.name = name || '';
+
+  /**
+   * The type of the parameter.
+   * @type {string}
+   */
+  this.className = className || '';
+
+  /**
+   * The number of elements.  Non-zero for array types, zero for non-array
+   * types.
+   * @type {number}
+   */
+  this.numElements = numElements || 0;
+
+  /**
+   * The semantic of the parameter. This is always in UPPERCASE.
+   * @type {string}
+   */
+  this.semantic = semantic || '';
+
+  /**
+   * If this is a standard parameter (SAS) this will be the name of the type
+   * of Param needed. Otherwise it will be the empty string.
+   *
+   * Standard Parameters are generally handled automatically by o3d but you
+   * can supply your own if you have a unique situation.
+   *
+   * @type {string}
+   */
+  this.sasClassName = sasClassName || '';
+};
 o3d.inherit('EffectParameterInfo', 'NamedObject');
-
-
-/**
- * The name of the parameter.
- * @type {string}
- */
-o3d.EffectParameterInfo.prototype.name = '';
-
-
-
-/**
- * The type of the parameter.
- * @type {string}
- */
-o3d.EffectParameterInfo.prototype.className = '';
-
-
-
-/**
- * The number of elements.  Non-zero for array types, zero for non-array types.
- * @type {number}
- */
-o3d.EffectParameterInfo.prototype.numElements = 0;
-
-
-
-/**
- * The semantic of the parameter. This is always in UPPERCASE.
- * @type {o3d.Stream.Semantic}
- */
-o3d.EffectParameterInfo.prototype.semantic = o3d.Stream.UNKNOWN_SEMANTIC;
-
-
-/**
- * If this is a standard parameter (SAS) this will be the name of the type
- * of Param needed. Otherwise it will be the empty string.
- *
- * Standard Parameters are generally handled automatically by o3d but you
- * can supply your own if you have a unique situation.
- *
- * @type {string}
- */
-o3d.EffectParameterInfo.prototype.sas_class_name = '';
-
 
 
 /**
@@ -129,6 +127,8 @@ o3d.Effect = function() {
 };
 o3d.inherit('Effect', 'ParamObject');
 
+o3d.Effect.HELPER_CONSTANT_NAME = 'dx_clipping';
+
 
 /**
  * An object mapping the names of uniform variables to objects containing
@@ -171,13 +171,17 @@ o3d.Effect.prototype.fragmentShaderLoaded_ = false;
  */
 o3d.Effect.prototype.bindAttributesAndLinkIfReady = function() {
   if (this.vertexShaderLoaded_ && this.fragmentShaderLoaded_) {
-    var attributes = ['position', 'normal', 'tangent', 'binormal', 'color',
-                      'texCoord0', 'texCoord1', 'texCoord2', 'texCoord3',
-                      'texCoord4', 'texCoord5', 'texCoord6', 'texCoord7'];
-    for (var i = 0; i < attributes.length; ++i) {
-      this.gl.bindAttribLocation(this.program_, i, attributes[i]);
+    var semanticMap = o3d.Effect.semanticMap_;
+    for (var name in semanticMap) {
+      this.gl.bindAttribLocation(
+          this.program_, semanticMap[name].gl_index, name);
     }
     this.gl.linkProgram(this.program_);
+    if (!this.gl.getProgramParameter(this.program_, this.gl.LINK_STATUS)) {
+      var log = this.gl.getShaderInfoLog(this.program_);
+      this.gl.client.error_callback(
+          'Program link failed with error log:\n' + log);
+    }
     this.getUniforms_();
     this.getAttributes_();
   }
@@ -203,9 +207,9 @@ o3d.Effect.prototype.loadShaderFromString = function(shaderString, type) {
   this.gl.shaderSource(shader, shaderString);
   this.gl.compileShader(shader);
 
-  var log = this.gl.getShaderInfoLog(shader);
-  if (log != '') {
+  if (!this.gl.getShaderParameter(shader, this.gl.COMPILE_STATUS)) {
     success = false;
+    var log = this.gl.getShaderInfoLog(shader);
     this.gl.client.error_callback(
         'Shader compile failed with error log:\n' + log);
   }
@@ -262,6 +266,24 @@ o3d.Effect.prototype.loadFromFXString =
 
 
 /**
+ * Generates an array of indexed strings. For example, given 'arr' and a size
+ * of 10, generates 'arr[0]', 'arr[1]', 'arr[2]' up to 'arr[9]'.
+ *
+ * @param {string} base The name of the array.
+ * @param {number} size The number of elements in the array.
+ * @return {!Array.<string>}
+ * @private
+ */
+o3d.Effect.prototype.getParamArrayNames_ = function(base, size) {
+  var names = [];
+  for (var i = 0; i < size; i++) {
+    names[i] = base + '[' + i + ']';
+  }
+  return names;
+}
+
+
+/**
  * Iterates through the active uniforms of the program and gets the
  * location of each one and stores them by name in the uniforms
  * object.
@@ -274,15 +296,35 @@ o3d.Effect.prototype.getUniforms_ =
       this.program_, this.gl.ACTIVE_UNIFORMS);
   for (var i = 0; i < numUniforms; ++i) {
     var info = this.gl.getActiveUniform(this.program_, i);
-    this.uniforms_[info.name] = {info:info,
-        location:this.gl.getUniformLocation(this.program_, info.name)};
+    if (info.name.indexOf('[') != -1) {
+      // This is an array param and we need to individually query each item in
+      // the array to get its location.
+      var baseName = info.name.substring(0, info.name.indexOf('['));
+      var names = this.getParamArrayNames_(baseName, info.size);
+      var locations = [];
+      for (var j = 0; j < names.length; j++) {
+        locations[j] = this.gl.getUniformLocation(this.program_, names[j]);
+      }
+      this.uniforms_[baseName] = {
+          info: {name: baseName, size: info.size, type: info.type},
+          kind: o3d.Effect.ARRAY,
+          locations: locations /* mind the s */
+      };
+    } else {
+      // Not an array param.
+      this.uniforms_[info.name] = {
+          info: info,
+          kind: o3d.Effect.ELEMENT,
+          location: this.gl.getUniformLocation(this.program_, info.name)
+      };
+    }
   }
 };
 
 
 /**
- * Iterates through the active uniforms of the program and gets the
- * location of each one and stores them by name in the uniforms
+ * Iterates through the active attributes of the program and gets the
+ * location of each one and stores them by name in the attributes
  * object.
  * @private
  */
@@ -294,8 +336,62 @@ o3d.Effect.prototype.getAttributes_ =
   for (var i = 0; i < numAttributes; ++i) {
     var info = this.gl.getActiveAttrib(this.program_, i);
     this.attributes_[info.name] = {info:info,
-        location:this.gl.getUniformLocation(this.program_, info.name)};
+        location:this.gl.getAttribLocation(this.program_, info.name)};
   }
+};
+
+
+/**
+ * A map linking the WebGL type of a uniform to the appropriate param type.
+ * This gets memoized in the function createUniformParameters.
+ * @private
+ */
+o3d.Effect.paramTypes_ = null;
+
+/**
+ * Accesses the paramTypes map, builds it if it isn't already built.
+ * @private;
+ */
+o3d.Effect.getParamTypes_ = function(gl)  {
+  // Even though these constants should be the same for different webgl
+  // contexts, we can't create this table until the context is loaded, so
+  // we initialize it here rather than when the file loads.
+  if (!o3d.Effect.paramTypes_) {
+    o3d.Effect.paramTypes_ = {};
+    o3d.Effect.paramTypes_[gl.FLOAT] = 'ParamFloat';
+    o3d.Effect.paramTypes_[gl.FLOAT_VEC2] = 'ParamFloat2';
+    o3d.Effect.paramTypes_[gl.FLOAT_VEC3] = 'ParamFloat3';
+    o3d.Effect.paramTypes_[gl.FLOAT_VEC4] = 'ParamFloat4';
+    o3d.Effect.paramTypes_[gl.INT] = 'ParamInteger';
+    o3d.Effect.paramTypes_[gl.BOOL] = 'ParamBoolean';
+    o3d.Effect.paramTypes_[gl.FLOAT_MAT4] = 'ParamMatrix4';
+    o3d.Effect.paramTypes_[gl.SAMPLER_2D] = 'ParamSampler';
+    o3d.Effect.paramTypes_[gl.SAMPLER_CUBE] = 'ParamSampler';
+  }
+
+  return o3d.Effect.paramTypes_;
+}
+
+
+/**
+ * A map linking names of certain attributes in the shader to the corresponding
+ * semantic and semantic index.
+ * @private
+ */
+o3d.Effect.semanticMap_ = {
+  'position': {semantic: o3d.Stream.POSITION, index: 0, gl_index: 0},
+  'normal': {semantic: o3d.Stream.NORMAL, index: 0, gl_index: 1},
+  'tangent': {semantic: o3d.Stream.TANGENT, index: 0, gl_index: 2},
+  'binormal': {semantic: o3d.Stream.BINORMAL, index: 0, gl_index: 3},
+  'color': {semantic: o3d.Stream.COLOR, index: 0, gl_index: 4},
+  'texCoord0': {semantic: o3d.Stream.TEXCOORD, index: 0, gl_index: 5},
+  'texCoord1': {semantic: o3d.Stream.TEXCOORD, index: 1, gl_index: 6},
+  'texCoord2': {semantic: o3d.Stream.TEXCOORD, index: 2, gl_index: 7},
+  'texCoord3': {semantic: o3d.Stream.TEXCOORD, index: 3, gl_index: 8},
+  'texCoord4': {semantic: o3d.Stream.TEXCOORD, index: 4, gl_index: 9},
+  'texCoord5': {semantic: o3d.Stream.TEXCOORD, index: 5, gl_index: 10},
+  'texCoord6': {semantic: o3d.Stream.TEXCOORD, index: 6, gl_index: 11},
+  'texCoord7': {semantic: o3d.Stream.TEXCOORD, index: 7, gl_index: 12}
 };
 
 
@@ -316,69 +412,24 @@ o3d.Effect.prototype.getAttributes_ =
  */
 o3d.Effect.prototype.createUniformParameters =
     function(param_object) {
-  var sasNames = {'world': true,
-                  'view': true,
-                  'projection': true,
-                  'worldView': true,
-                  'worldProjection': true,
-                  'worldViewProjection': true,
-                  'worldInverse': true,
-                  'viewInverse': true,
-                  'projectionInverse': true,
-                  'worldViewInverse': true,
-                  'worldProjectionInverse': true,
-                  'worldViewProjectionInverse': true,
-                  'worldTranspose': true,
-                  'viewTranspose': true,
-                  'projectionTranspose': true,
-                  'worldViewTranspose': true,
-                  'worldProjectionTranspose': true,
-                  'worldViewProjectionTranspose': true,
-                  'worldInverseTranspose': true,
-                  'viewInverseTranspose': true,
-                  'projectionInverseTranspose': true,
-                  'worldViewInverseTranspose': true,
-                  'worldProjectionInverseTranspose': true,
-                  'worldViewProjectionInverseTranspose': true};
-
-  for (name in this.uniforms_) {
-    var info = this.uniforms_[name].info;
-
-    if (sasNames[name])
-      continue;
-
-    var paramType = '';
-    switch (info.type) {
-      case this.gl.FLOAT:
-        paramType = 'ParamFloat';
-        break;
-      case this.gl.FLOAT_VEC2:
-        paramType = 'ParamFloat2';
-        break;
-      case this.gl.FLOAT_VEC3:
-        paramType = 'ParamFloat3';
-        break;
-      case this.gl.FLOAT_VEC4:
-        paramType = 'ParamFloat4';
-        break;
-      case this.gl.INT:
-        paramType = 'ParamInteger';
-        break;
-      case this.gl.BOOL:
-        paramType = 'ParamBoolean';
-        break;
-      case this.gl.FLOAT_MAT4:
-        paramType = 'ParamMatrix4';
-        break;
-      case this.gl.SAMPLER_2D:
-        paramType = 'ParamSampler';
-        break;
-      case this.gl.SAMPLER_CUBE:
-        paramType = 'ParamSampler';
-        break;
+  var sasTypes = o3d.Param.sasTypes_;
+  var paramTypes = o3d.Effect.getParamTypes_(this.gl);
+  for (var name in this.uniforms_) {
+    var uniformData = this.uniforms_[name];
+    if (!sasTypes[name]) {
+      switch (uniformData.kind) {
+        case o3d.Effect.ARRAY:
+          param_object.createParam(name, 'ParamParamArray');
+          break;
+        case o3d.Effect.STRUCT:
+          o3d.notImplemented();
+          break;
+        case o3d.Effect.ELEMENT:
+        default:
+          param_object.createParam(name, paramTypes[uniformData.info.type]);
+          break;
+      }
     }
-
-    param_object.createParam(info.name, paramType);
   }
 };
 
@@ -401,7 +452,14 @@ o3d.Effect.prototype.createUniformParameters =
  */
 o3d.Effect.prototype.createSASParameters =
     function(param_object) {
-  o3d.notImplemented();
+  var sasTypes = o3d.Param.sasTypes_;
+  for (var name in this.uniforms_) {
+    var info = this.uniforms_[name].info;
+    var sasType = sasTypes[name];
+    if (sasType) {
+      param_object.createParam(info.name, sasType);
+    }
+  }
 };
 
 
@@ -411,8 +469,23 @@ o3d.Effect.prototype.createSASParameters =
  *     EffectParameterInfo objects.
  */
 o3d.Effect.prototype.getParameterInfo = function() {
-  o3d.notImplemented();
-  return [];
+  var infoArray = [];
+  var sasTypes = o3d.Param.sasTypes_;
+  var semanticMap = o3d.Effect.semanticMap_;
+  var paramTypes = o3d.Effect.getParamTypes_(this.gl);
+
+  for (var name in this.uniforms_) {
+    var uniformData = this.uniforms_[name];
+    var sasClassName = sasTypes[name] || '';
+    var dataType = paramTypes[uniformData.info.type] || '';
+    var numElements = (uniformData.kind == o3d.Effect.ARRAY) ?
+        uniformData.info.size : 0; // 0 if a non-array type.
+    var semantic = semanticMap[name] ? name : '';
+    infoArray.push(new o3d.EffectParameterInfo(
+      name, dataType, numElements, semantic.toUpperCase(), sasClassName));
+  }
+
+  return infoArray;
 };
 
 
@@ -425,21 +498,7 @@ o3d.Effect.prototype.getStreamInfo = function() {
   var infoList = [];
 
   for (var name in this.attributes_) {
-    var attributes = {
-      'position': {semantic: o3d.Stream.POSITION, index: 0},
-      'normal': {semantic: o3d.Stream.NORMAL, index: 0},
-      'tangent': {semantic: o3d.Stream.TANGENT, index: 0},
-      'binormal': {semantic: o3d.Stream.BINORMAL, index: 0},
-      'color': {semantic: o3d.Stream.COLOR, index: 0},
-      'texCoord0': {semantic: o3d.Stream.TEXCOORD, index: 0},
-      'texCoord1': {semantic: o3d.Stream.TEXCOORD, index: 1},
-      'texCoord2': {semantic: o3d.Stream.TEXCOORD, index: 2},
-      'texCoord3': {semantic: o3d.Stream.TEXCOORD, index: 3},
-      'texCoord4': {semantic: o3d.Stream.TEXCOORD, index: 4},
-      'texCoord5': {semantic: o3d.Stream.TEXCOORD, index: 5},
-      'texCoord6': {semantic: o3d.Stream.TEXCOORD, index: 6},
-      'texCoord7': {semantic: o3d.Stream.TEXCOORD, index: 7}};
-    var semantic_index_pair = attributes[name];
+    var semantic_index_pair = o3d.Effect.semanticMap_[name];
     infoList.push(new o3d.EffectStreamInfo(
         semantic_index_pair.semantic, semantic_index_pair.index));
   }
@@ -450,40 +509,84 @@ o3d.Effect.prototype.getStreamInfo = function() {
 /**
  * Searches the objects in the given list for parameters to apply to the
  * uniforms defined on this effects program, and applies them, favoring
- * the objects nearer the begining of the list.
+ * the objects nearer the beginning of the list.
  *
  * @param {!Array.<!o3d.ParamObject>} object_list The param objects to search.
  * @private
  */
 o3d.Effect.prototype.searchForParams_ = function(object_list) {
   var filled_map = {};
-  for (name in this.uniforms_) {
+  for (var name in this.uniforms_) {
     filled_map[name] = false;
   }
   this.gl.useProgram(this.program_);
   o3d.Param.texture_index_ = 0;
   for (var i = 0; i < object_list.length; ++i) {
     var obj = object_list[i];
-    for (name in this.uniforms_) {
+    for (var name in this.uniforms_) {
       var uniformInfo = this.uniforms_[name];
       if (filled_map[name]) {
         continue;
       }
       var param = obj.getParam(name);
       if (param) {
-        param.applyToLocation(this.gl, uniformInfo.location);
+        if (uniformInfo.kind == o3d.Effect.ARRAY) {
+          param.applyToLocations(this.gl, uniformInfo.locations);
+        } else {
+          param.applyToLocation(this.gl, uniformInfo.location);
+        }
         filled_map[name] = true;
       }
     }
   }
 
-  for (name in this.uniforms_) {
+  this.updateHelperConstants_(this.gl.displayInfo.width,
+                              this.gl.displayInfo.height);
+  filled_map[o3d.Effect.HELPER_CONSTANT_NAME] = true;
+  for (var name in this.uniforms_) {
     if (!filled_map[name]) {
-      throw ('Uniform param not filled: '+name);
+      if (this.uniforms_[name].info.type == this.gl.SAMPLER_2D) {
+        if (this.gl.client.reportErrors_()) {
+          this.gl.client.error_callback("Missing ParamSampler");
+        }
+        var defaultParamSampler = o3d.ParamSampler.defaultParamSampler_;
+        defaultParamSampler.gl = this.gl;
+        defaultParamSampler.applyToLocation(this.gl,
+            this.uniforms_[name].location);
+      } else {
+        throw ('Uniform param not filled: "'+ name + '"');
+      }
     }
   }
 };
 
+
+/**
+ * Updates certain parameters used to make the GLSL shaders have the
+ * same clipping semantics as D3D's.
+ * @param {number} width width of the viewport in pixels
+ * @param {number} height height of the viewport in pixels
+ * @private
+ */
+o3d.Effect.prototype.updateHelperConstants_ = function(width, height) {
+  var uniformInfo = this.uniforms_[o3d.Effect.HELPER_CONSTANT_NAME];
+  var dx_clipping = [ 0.0, 0.0, 0.0, 0.0 ];
+  if (uniformInfo) {
+    // currentRenderSurfaceSet is set in render_surface_set.js.
+    dx_clipping[0] = 1.0 / width;
+    dx_clipping[1] = -1.0 / height;
+    dx_clipping[2] = 2.0;
+    if (this.gl.currentRenderSurfaceSet) {
+      dx_clipping[3] = -1.0;
+    } else {
+      dx_clipping[3] = 1.0;
+    }
+
+    this.gl.uniform4f(uniformInfo.location,
+                      dx_clipping[0], dx_clipping[1],
+                      dx_clipping[2], dx_clipping[3]);
+  }
+};
 
 /**
  * @type {number}
@@ -501,6 +604,17 @@ o3d.Effect.COLUMN_MAJOR = 1;
 
 
 /**
+ * UniformType,
+ * ELEMENT,   the param is a single gl.* element
+ * ARRAY,   the param is an array of same-typed elements
+ * STRUCT,   not implemented
+ */
+o3d.Effect.ELEMENT = 0;
+o3d.Effect.ARRAY = 1;
+o3d.Effect.STRUCT = 2;
+
+
+/**
  * The order in which matrix data is loaded to the GPU.
  * @type {o3d.Effect.MatrixLoadOrder}
  */
@@ -512,5 +626,3 @@ o3d.Effect.prototype.matrix_load_order_ = o3d.Effect.ROW_MAJOR;
  * @type {string}
  */
 o3d.Effect.prototype.source_ = '';
-
-

@@ -4,11 +4,12 @@ BrowserTest.ThirtyFourTabs
 SessionRestoreUITest.*
 # Buggy test; see http://crbug.com/6522
 DownloadTest.UnknownSize
-# Flakily hangs on Linux
+# Flakily hang on Linux, see http://crbug.com/46643
 ErrorPageTest.DNSError_GoBack2AndForward
-# Flaky timeout on Linux; see http://crbug.com/22927
-UnloadTest.BrowserCloseInfiniteBeforeUnload
-UnloadTest.BrowserCloseInfiniteBeforeUnloadAlert
+ErrorPageTest.DNSError_GoBack2Forward2
+
+# Flaky timeout on Linux; see http://crbug.com/46781
+UnloadTest.*
 
 # Don't run reference tests under Valgrind
 # On the Mac, they don't have symbols, even, so suppressions don't work
@@ -32,70 +33,20 @@ TabRestoreUITest.*
 # See http://crbug.com/25176
 ProcessSingletonLinuxTest.NotifyOtherProcessFailure
 ProcessSingletonLinuxTest.NotifyOtherProcessDifferingHost
+ProcessSingletonLinuxTest.NotifyOtherProcessOrCreate_DifferingHost
 
 # These tests fail under valgrind.
-# See http://crbug.com/29579.
+# See http://crbug.com/29579
 AutomationProxyTest.NavigateToURLWithTimeout1
 AutomationProxyTest.NavigateToURLWithTimeout2
-# See http://crbug.com/29586.
+# See http://crbug.com/29586
 NewTabUITest.ChromeInternalLoadsNTP
+# See http://crbug.com/42205
+DownloadTest.*
+# See http://crbug.com/45792
+DefaultPluginUITest.DefaultPluginLoadTest
+# See http://crbug.com/38575
+WorkerTest.*
 
-##############################################################################
-# We have a special section dedicated to WorkerTest because it's so
-# problematic. Please check here before adding duplicate test exclusions to
-# ui_tests.gtest_linux.txt and ui_tests.gtest_mac.txt.
-#
-# As of 2010/03/18, thestig is disabling all WorkerTests and listing them
-# individually below. Please test them / fix them under Valgrind, and
-# re-enable them one at a time.
-#
-# See: http://crbug.com/38575
-##############################################################################
-
-WorkerTest.IncognitoSharedWorkers
-WorkerTest.FLAKY_IncognitoSharedWorkers
-WorkerTest.LimitPerPage
-WorkerTest.LimitTotal
-WorkerTest.FLAKY_LimitTotal
-WorkerTest.MessagePorts
-WorkerTest.FLAKY_MessagePorts
-WorkerTest.MultipleSharedWorkers
-WorkerTest.MultipleTabsQueuedSharedWorker
-WorkerTest.MultipleWorkers
-WorkerTest.QueuedSharedWorkerShutdown
-WorkerTest.QueuedSharedWorkerStartedFromOtherTab
-WorkerTest.SharedWorkerFastLayoutTests
-WorkerTest.FLAKY_SharedWorkerFastLayoutTests
-WorkerTest.SharedWorkerHttpAuth
-WorkerTest.SharedWorkerInIframe
-WorkerTest.SingleSharedWorker
-WorkerTest.SingleWorker
-WorkerTest.StressJSExecution
-WorkerTest.UseMachineStack
-WorkerTest.WorkerCall
-WorkerTest.WorkerClonePort
-WorkerTest.WorkerClose
-WorkerTest.WorkerCloseFast
-WorkerTest.WorkerConstructor
-WorkerTest.WorkerContextGc
-WorkerTest.WorkerContextMultiPort
-WorkerTest.WorkerEventListener
-WorkerTest.WorkerGC
-WorkerTest.WorkerHttpAuth
-WorkerTest.WorkerHttpLayoutTests
-WorkerTest.FLAKY_WorkerHttpLayoutTests
-WorkerTest.WorkerLifecycle
-WorkerTest.WorkerLocation
-WorkerTest.WorkerMapGc
-WorkerTest.WorkerMessagePort
-WorkerTest.WorkerMessagePortGC
-WorkerTest.WorkerMultiPort
-WorkerTest.WorkerNavigator
-WorkerTest.WorkerReplaceGlobalConstructor
-WorkerTest.WorkerReplaceSelf
-WorkerTest.WorkerScriptError
-WorkerTest.WorkerTerminate
-WorkerTest.WorkerTimeout
-WorkerTest.WorkerWebSocketLayoutTests
-WorkerTest.FLAKY_WorkerWebSocketLayoutTests
-WorkerTest.WorkerXhrHttpLayoutTests
+# Mac: See http://crbug.com/30661, Linux/CrOS: http://crbug.com/49576.
+NPAPITester.NPObjectReleasedOnDestruction

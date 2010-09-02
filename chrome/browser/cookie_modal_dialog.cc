@@ -86,8 +86,9 @@ bool CookiePromptModalDialog::IsValid() {
           origin_, CONTENT_SETTINGS_TYPE_COOKIES);
   if (content_setting != CONTENT_SETTING_ASK) {
     if (content_setting == CONTENT_SETTING_ALLOW) {
-      // If it's remembered as allow, then we assume session_expire is false.
       AllowSiteData(false, false);
+    } else if (content_setting == CONTENT_SETTING_SESSION_ONLY) {
+      AllowSiteData(false, true);
     } else {
       DCHECK(content_setting == CONTENT_SETTING_BLOCK);
       BlockSiteData(false);
@@ -99,11 +100,16 @@ bool CookiePromptModalDialog::IsValid() {
 
 void CookiePromptModalDialog::AllowSiteData(bool remember,
                                             bool session_expire) {
-  DCHECK(!remember || DecisionPersistable());
-  if (remember && DecisionPersistable()) {
+  if (remember) {
+    // Make sure there is no entry that would override the pattern we are about
+    // to insert for exactly this URL.
+    host_content_settings_map_->SetContentSetting(
+        HostContentSettingsMap::Pattern::FromURLNoWildcard(origin_),
+        CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_DEFAULT);
     host_content_settings_map_->SetContentSetting(
         HostContentSettingsMap::Pattern::FromURL(origin_),
-        CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_ALLOW);
+        CONTENT_SETTINGS_TYPE_COOKIES,
+        session_expire ? CONTENT_SETTING_SESSION_ONLY : CONTENT_SETTING_ALLOW);
   }
 
   if (delegate_) {
@@ -113,8 +119,12 @@ void CookiePromptModalDialog::AllowSiteData(bool remember,
 }
 
 void CookiePromptModalDialog::BlockSiteData(bool remember) {
-  DCHECK(!remember || DecisionPersistable());
-  if (remember && DecisionPersistable()) {
+  if (remember) {
+    // Make sure there is no entry that would override the pattern we are about
+    // to insert for exactly this URL.
+    host_content_settings_map_->SetContentSetting(
+        HostContentSettingsMap::Pattern::FromURLNoWildcard(origin_),
+        CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_DEFAULT);
     host_content_settings_map_->SetContentSetting(
         HostContentSettingsMap::Pattern::FromURL(origin_),
         CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_BLOCK);
@@ -127,7 +137,7 @@ void CookiePromptModalDialog::BlockSiteData(bool remember) {
 }
 
 // static
-void CookiePromptModalDialog::RegisterPrefs(PrefService* prefs) {
+void CookiePromptModalDialog::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kCookiePromptExpanded, false);
 }
 
@@ -135,8 +145,4 @@ int CookiePromptModalDialog::GetDialogButtons() {
   // Enable the automation interface to accept/dismiss this dialog.
   return MessageBoxFlags::DIALOGBUTTON_OK |
          MessageBoxFlags::DIALOGBUTTON_CANCEL;
-}
-
-bool CookiePromptModalDialog::DecisionPersistable() {
-  return !host_content_settings_map_->IsOffTheRecord();
 }

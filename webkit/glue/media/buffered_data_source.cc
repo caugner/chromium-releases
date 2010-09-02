@@ -69,7 +69,6 @@ bool IsDataProtocol(const GURL& url) {
 }  // namespace
 
 namespace webkit_glue {
-
 /////////////////////////////////////////////////////////////////////////////
 // BufferedResourceLoader
 BufferedResourceLoader::BufferedResourceLoader(
@@ -79,6 +78,7 @@ BufferedResourceLoader::BufferedResourceLoader(
     int64 last_byte_position)
     : buffer_(new media::SeekableBuffer(kBackwardCapcity, kForwardCapacity)),
       deferred_(false),
+      defer_allowed_(true),
       completed_(false),
       range_requested_(false),
       partial_response_(false),
@@ -225,6 +225,11 @@ int64 BufferedResourceLoader::GetBufferedLastBytePosition() {
   return kPositionNotSpecified;
 }
 
+void BufferedResourceLoader::SetAllowDefer(bool is_allowed) {
+  defer_allowed_ = is_allowed;
+  DisableDeferIfNeeded();
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // BufferedResourceLoader,
 //     webkit_glue::ResourceLoaderBridge::Peer implementations
@@ -321,11 +326,20 @@ void BufferedResourceLoader::OnReceivedData(const char* data, int len) {
     return;
 
   // Writes more data to |buffer_|.
-  buffer_->Append(len, reinterpret_cast<const uint8*>(data));
+  buffer_->Append(reinterpret_cast<const uint8*>(data), len);
 
   // If there is an active read request, try to fulfill the request.
   if (HasPendingRead() && CanFulfillRead()) {
     ReadInternal();
+  } else if (!defer_allowed_) {
+    // If we're not allowed to defer, slide the buffer window forward instead
+    // of deferring.
+    if (buffer_->forward_bytes() > buffer_->forward_capacity()) {
+      size_t excess = buffer_->forward_bytes() - buffer_->forward_capacity();
+      bool success = buffer_->Seek(excess);
+      DCHECK(success);
+      offset_ += first_offset_ + excess;
+    }
   }
 
   // At last see if the buffer is full and we need to defer the downloading.
@@ -381,6 +395,9 @@ void BufferedResourceLoader::OnCompletedRequest(
 /////////////////////////////////////////////////////////////////////////////
 // BufferedResourceLoader, private
 void BufferedResourceLoader::EnableDeferIfNeeded() {
+  if (!defer_allowed_)
+    return;
+
   if (!deferred_ &&
       buffer_->forward_bytes() >= buffer_->forward_capacity()) {
     deferred_ = true;
@@ -394,7 +411,8 @@ void BufferedResourceLoader::EnableDeferIfNeeded() {
 
 void BufferedResourceLoader::DisableDeferIfNeeded() {
   if (deferred_ &&
-      buffer_->forward_bytes() < buffer_->forward_capacity() / 2) {
+      (!defer_allowed_ ||
+       buffer_->forward_bytes() < buffer_->forward_capacity() / 2)) {
     deferred_ = false;
 
     if (bridge_.get())
@@ -451,7 +469,7 @@ void BufferedResourceLoader::ReadInternal() {
   DCHECK(ret);
 
   // Then do the read.
-  int read = static_cast<int>(buffer_->Read(read_size_, read_buffer_));
+  int read = static_cast<int>(buffer_->Read(read_buffer_, read_size_));
   offset_ += first_offset_ + read;
 
   // And report with what we have read.
@@ -539,7 +557,8 @@ BufferedDataSource::BufferedDataSource(
       intermediate_read_buffer_size_(kInitialReadBufferSize),
       render_loop_(render_loop),
       stop_signal_received_(false),
-      stopped_on_render_loop_(false) {
+      stopped_on_render_loop_(false),
+      media_is_paused_(true) {
 }
 
 BufferedDataSource::~BufferedDataSource() {
@@ -592,13 +611,23 @@ void BufferedDataSource::Initialize(const std::string& url,
       NewRunnableMethod(this, &BufferedDataSource::InitializeTask));
 }
 
-void BufferedDataSource::Stop() {
+void BufferedDataSource::Stop(media::FilterCallback* callback) {
   {
     AutoLock auto_lock(lock_);
     stop_signal_received_ = true;
   }
+  if (callback) {
+    callback->Run();
+    delete callback;
+  }
   render_loop_->PostTask(FROM_HERE,
-      NewRunnableMethod(this, &BufferedDataSource::StopTask));
+      NewRunnableMethod(this, &BufferedDataSource::CleanupTask));
+}
+
+void BufferedDataSource::SetPlaybackRate(float playback_rate) {
+  render_loop_->PostTask(FROM_HERE,
+      NewRunnableMethod(this, &BufferedDataSource::SetPlaybackRateTask,
+                        playback_rate));
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -664,7 +693,7 @@ void BufferedDataSource::ReadTask(
      media::DataSource::ReadCallback* read_callback) {
   DCHECK(MessageLoop::current() == render_loop_);
 
-  // If StopTask() was executed we should return immediately. We check this
+  // If CleanupTask() was executed we should return immediately. We check this
   // variable to prevent doing any actual work after clean up was done. We do
   // not check |stop_signal_received_| because anything use of it has to be
   // within |lock_| which is not desirable.
@@ -686,7 +715,7 @@ void BufferedDataSource::ReadTask(
   ReadInternal();
 }
 
-void BufferedDataSource::StopTask() {
+void BufferedDataSource::CleanupTask() {
   DCHECK(MessageLoop::current() == render_loop_);
   DCHECK(!stopped_on_render_loop_);
 
@@ -712,11 +741,11 @@ void BufferedDataSource::StopTask() {
 void BufferedDataSource::RestartLoadingTask() {
   DCHECK(MessageLoop::current() == render_loop_);
 
-  // This variable is set in StopTask(). We check this and do an early return.
-  // The sequence of actions which enable this conditions is:
+  // This variable is set in CleanupTask(). We check this and do an early
+  // return. The sequence of actions which enable this conditions is:
   // 1. Stop() is called from the pipeline.
   // 2. ReadCallback() is called from the resource loader.
-  // 3. StopTask() is executed.
+  // 3. CleanupTask() is executed.
   // 4. RestartLoadingTask() is executed.
   if (stopped_on_render_loop_)
     return;
@@ -726,6 +755,7 @@ void BufferedDataSource::RestartLoadingTask() {
     return;
 
   loader_ = CreateResourceLoader(read_position_, -1);
+  loader_->SetAllowDefer(!media_is_paused_);
   loader_->Start(
       NewCallback(this, &BufferedDataSource::PartialReadStartCallback),
       NewCallback(this, &BufferedDataSource::NetworkEventCallback));
@@ -756,9 +786,26 @@ void BufferedDataSource::WatchDogTask() {
   // retry the request.
   loader_->Stop();
   loader_ = CreateResourceLoader(read_position_, -1);
+  loader_->SetAllowDefer(!media_is_paused_);
   loader_->Start(
       NewCallback(this, &BufferedDataSource::PartialReadStartCallback),
       NewCallback(this, &BufferedDataSource::NetworkEventCallback));
+}
+
+void BufferedDataSource::SetPlaybackRateTask(float playback_rate) {
+  DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(loader_.get());
+
+  bool previously_paused = media_is_paused_;
+  media_is_paused_ = (playback_rate == 0.0);
+
+  // Disallow deferring data when we are pausing, allow deferring data
+  // when we resume playing.
+  if (previously_paused && !media_is_paused_) {
+    loader_->SetAllowDefer(true);
+  } else if (!previously_paused && media_is_paused_) {
+    loader_->SetAllowDefer(false);
+  }
 }
 
 // This method is the place where actual read happens, |loader_| must be valid

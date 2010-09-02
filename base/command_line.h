@@ -35,6 +35,7 @@ class CommandLine {
   // A constructor for CommandLines that are used only to carry arguments.
   enum ArgumentsOnly { ARGUMENTS_ONLY };
   explicit CommandLine(ArgumentsOnly args_only);
+  ~CommandLine();
 
 #if defined(OS_WIN)
   // The type of native command line arguments.
@@ -129,8 +130,11 @@ class CommandLine {
   // Get the number of switches in this process.
   size_t GetSwitchCount() const { return switches_.size(); }
 
+  // The type of map for parsed-out switch key and values.
+  typedef std::map<std::string, StringType> SwitchMap;
+
   // Get a copy of all switches, along with their values
-  std::map<std::string, StringType> GetSwitches() const {
+  SwitchMap GetSwitches() const {
     return switches_;
   }
 
@@ -148,6 +152,9 @@ class CommandLine {
   const std::vector<std::string>& argv() const {
     return argv_;
   }
+  // Try to match the same result as command_line_string() would get you
+  // on windows.
+  std::string command_line_string() const;
 #endif
 
   // Returns the program part of the command line string (the first item).
@@ -197,7 +204,7 @@ class CommandLine {
  private:
   friend class InProcessBrowserTest;
 
-  CommandLine() {}
+  CommandLine();
 
   // Used by InProcessBrowserTest.
   static CommandLine* ForCurrentProcessMutable() {
@@ -229,7 +236,7 @@ class CommandLine {
                        StringType* switch_value);
 
   // Parsed-out values.
-  std::map<std::string, StringType> switches_;
+  SwitchMap switches_;
 
   // Non-switch command-line arguments.
   std::vector<StringType> loose_values_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,14 +15,18 @@
 #include "base/i18n/rtl.h"
 #include "base/singleton.h"
 #include "base/thread.h"
+#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/dom_ui/app_launcher_handler.h"
 #include "chrome/browser/dom_ui/dom_ui_theme_source.h"
 #include "chrome/browser/dom_ui/most_visited_handler.h"
 #include "chrome/browser/dom_ui/new_tab_page_sync_handler.h"
 #include "chrome/browser/dom_ui/ntp_resource_cache.h"
 #include "chrome/browser/dom_ui/shown_sections_handler.h"
 #include "chrome/browser/dom_ui/tips_handler.h"
+#include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
@@ -36,6 +40,11 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
+
+#if defined(OS_WIN)
+#include "chrome/browser/views/importer_view.h"
+#include "views/window/window.h"
+#endif
 
 namespace {
 
@@ -110,37 +119,6 @@ class PaintTimer : public RenderWidgetHost::PaintObserver {
 
   DISALLOW_COPY_AND_ASSIGN(PaintTimer);
 };
-
-///////////////////////////////////////////////////////////////////////////////
-// PromotionalMessageHandler
-
-class PromotionalMessageHandler : public DOMMessageHandler {
- public:
-  PromotionalMessageHandler() {}
-  virtual ~PromotionalMessageHandler() {}
-
-  // DOMMessageHandler implementation.
-  virtual void RegisterMessages();
-
-  // Zero promotional message counter.
-  void HandleClosePromotionalMessage(const Value* content);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(PromotionalMessageHandler);
-};
-
-void PromotionalMessageHandler::RegisterMessages() {
-  dom_ui_->RegisterMessageCallback("stopPromoLineMessage",
-      NewCallback(this,
-                  &PromotionalMessageHandler::HandleClosePromotionalMessage));
-}
-
-void PromotionalMessageHandler::HandleClosePromotionalMessage(
-    const Value* content) {
-  dom_ui_->GetProfile()->GetPrefs()->SetInteger(
-      prefs::kNTPPromoLineRemaining, 0);
-}
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // RecentlyClosedTabsHandler
@@ -301,11 +279,11 @@ bool RecentlyClosedTabsHandler::TabToValue(
 
   const TabNavigation& current_navigation =
       tab.navigations.at(tab.current_navigation_index);
-  if (current_navigation.url() == GURL(chrome::kChromeUINewTabURL))
+  if (current_navigation.virtual_url() == GURL(chrome::kChromeUINewTabURL))
     return false;
 
   NewTabUI::SetURLTitleAndDirection(dictionary, current_navigation.title(),
-                                    current_navigation.url());
+                                    current_navigation.virtual_url());
   dictionary->SetString(L"type", L"tab");
   dictionary->SetReal(L"timestamp", tab.timestamp.ToDoubleT());
   return true;
@@ -459,6 +437,43 @@ void NewTabPageSetHomePageHandler::HandleSetHomePage(
   dom_ui_->CallJavascriptFunction(L"onHomePageSet", list_value);
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// NewTabPageImportBookmarksHandler
+class NewTabPageImportBookmarksHandler : public DOMMessageHandler {
+ public:
+  NewTabPageImportBookmarksHandler() {}
+  virtual ~NewTabPageImportBookmarksHandler() {}
+
+  // DOMMessageHandler implementation.
+  virtual void RegisterMessages();
+
+  // Callback for "importBookmarks".
+  void HandleImportBookmarks(const Value* value);
+ private:
+
+  DISALLOW_COPY_AND_ASSIGN(NewTabPageImportBookmarksHandler);
+};
+
+void NewTabPageImportBookmarksHandler::RegisterMessages() {
+  dom_ui_->RegisterMessageCallback("importBookmarks", NewCallback(
+      this, &NewTabPageImportBookmarksHandler::HandleImportBookmarks));
+}
+
+void NewTabPageImportBookmarksHandler::HandleImportBookmarks(
+    const Value* value) {
+  Browser* browser = NULL;
+  TabContentsDelegate* delegate = dom_ui_->tab_contents()->delegate();
+  if (delegate)
+    browser = delegate->GetBrowser();
+  DCHECK(browser);
+#if defined(OS_WIN)
+  views::Window::CreateChromeWindow(
+      browser->window()->GetNativeHandle(),
+      gfx::Rect(),
+      new ImporterView(dom_ui_->GetProfile(), importer::FAVORITES))->Show();
+#endif
+}
+
 }  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -485,28 +500,32 @@ NewTabUI::NewTabUI(TabContents* contents)
   static bool first_view = true;
   if (first_view) {
     Profile* profile = GetProfile();
-    // Decrement ntp promo counters; the default values are specified in
-    // Browser::RegisterUserPrefs.
-    profile->GetPrefs()->SetInteger(prefs::kNTPPromoLineRemaining,
-        profile->GetPrefs()->GetInteger(prefs::kNTPPromoLineRemaining) - 1);
-    profile->GetPrefs()->SetInteger(prefs::kNTPPromoImageRemaining,
-        profile->GetPrefs()->GetInteger(prefs::kNTPPromoImageRemaining) - 1);
+    profile->GetPrefs()->SetInteger(prefs::kNTPPromoViewsRemaining,
+        profile->GetPrefs()->GetInteger(prefs::kNTPPromoViewsRemaining) - 1);
+    profile->GetBookmarkModel()->AddObserver(this);
     first_view = false;
   }
 
   if (!GetProfile()->IsOffTheRecord()) {
-    AddMessageHandler((new ShownSectionsHandler())->Attach(this));
+    PrefService* pref_service = GetProfile()->GetPrefs();
+    AddMessageHandler((new ShownSectionsHandler(pref_service))->Attach(this));
     AddMessageHandler((new MostVisitedHandler())->Attach(this));
     AddMessageHandler((new RecentlyClosedTabsHandler())->Attach(this));
     AddMessageHandler((new MetricsHandler())->Attach(this));
     if (WebResourcesEnabled())
       AddMessageHandler((new TipsHandler())->Attach(this));
-    if (ProfileSyncService::IsSyncEnabled()) {
+    if (GetProfile()->IsSyncAccessible())
       AddMessageHandler((new NewTabPageSyncHandler())->Attach(this));
+    if (Extension::AppsAreEnabled()) {
+      ExtensionsService* service = GetProfile()->GetExtensionsService();
+      // We might not have an ExtensionsService (on ChromeOS when not logged in
+      // for example).
+      if (service)
+        AddMessageHandler((new AppLauncherHandler(service))->Attach(this));
     }
 
     AddMessageHandler((new NewTabPageSetHomePageHandler())->Attach(this));
-    AddMessageHandler((new PromotionalMessageHandler())->Attach(this));
+    AddMessageHandler((new NewTabPageImportBookmarksHandler())->Attach(this));
   }
 
   // Initializing the CSS and HTML can require some CPU, so do it after
@@ -531,6 +550,9 @@ NewTabUI::NewTabUI(TabContents* contents)
 }
 
 NewTabUI::~NewTabUI() {
+  BookmarkModel* bookmark_model = GetProfile()->GetBookmarkModel();
+  if (bookmark_model)
+    bookmark_model->RemoveObserver(this);
 }
 
 void NewTabUI::RenderViewCreated(RenderViewHost* render_view_host) {
@@ -539,6 +561,14 @@ void NewTabUI::RenderViewCreated(RenderViewHost* render_view_host) {
 
 void NewTabUI::RenderViewReused(RenderViewHost* render_view_host) {
   render_view_host->set_paint_observer(new PaintTimer);
+}
+
+void NewTabUI::BookmarkNodeAdded(BookmarkModel* model,
+                                 const BookmarkNode* parent,
+                                 int index) {
+  // Stop showing the promo, and no longer observe the bookmark model.
+  GetProfile()->GetPrefs()->SetInteger(prefs::kNTPPromoViewsRemaining, 0);
+  GetProfile()->GetBookmarkModel()->RemoveObserver(this);
 }
 
 void NewTabUI::Observe(NotificationType type,
@@ -674,7 +704,8 @@ void NewTabUI::NewTabHTMLSource::StartDataRequest(const std::string& path,
                                                   bool is_off_the_record,
                                                   int request_id) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
-  if (!path.empty()) {
+
+  if (!path.empty() && path[0] != '#') {
     // A path under new-tab was requested; it's likely a bad relative
     // URL from the new tab page, but in any case it's an error.
     NOTREACHED();

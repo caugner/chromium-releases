@@ -114,7 +114,8 @@ BrowsingHistoryHandler::BrowsingHistoryHandler()
 }
 
 BrowsingHistoryHandler::~BrowsingHistoryHandler() {
-  cancelable_consumer_.CancelAllRequests();
+  cancelable_search_consumer_.CancelAllRequests();
+  cancelable_delete_consumer_.CancelAllRequests();
 }
 
 DOMMessageHandler* BrowsingHistoryHandler::Attach(DOMUI* dom_ui) {
@@ -145,7 +146,7 @@ void BrowsingHistoryHandler::RegisterMessages() {
 
 void BrowsingHistoryHandler::HandleGetHistory(const Value* value) {
   // Anything in-flight is invalid.
-  cancelable_consumer_.CancelAllRequests();
+  cancelable_search_consumer_.CancelAllRequests();
 
   // Get arguments (if any).
   int day = 0;
@@ -159,23 +160,23 @@ void BrowsingHistoryHandler::HandleGetHistory(const Value* value) {
   options.end_time -= base::TimeDelta::FromDays(day - 1);
 
   // Need to remember the query string for our results.
-  search_text_ = std::wstring();
+  search_text_ = string16();
 
   HistoryService* hs =
       dom_ui_->GetProfile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
   hs->QueryHistory(search_text_,
       options,
-      &cancelable_consumer_,
+      &cancelable_search_consumer_,
       NewCallback(this, &BrowsingHistoryHandler::QueryComplete));
 }
 
 void BrowsingHistoryHandler::HandleSearchHistory(const Value* value) {
   // Anything in-flight is invalid.
-  cancelable_consumer_.CancelAllRequests();
+  cancelable_search_consumer_.CancelAllRequests();
 
   // Get arguments (if any).
   int month = 0;
-  std::wstring query;
+  string16 query;
   ExtractSearchHistoryArguments(value, &month, &query);
 
   // Set the query ranges for the given month.
@@ -190,12 +191,12 @@ void BrowsingHistoryHandler::HandleSearchHistory(const Value* value) {
       dom_ui_->GetProfile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
   hs->QueryHistory(search_text_,
       options,
-      &cancelable_consumer_,
+      &cancelable_search_consumer_,
       NewCallback(this, &BrowsingHistoryHandler::QueryComplete));
 }
 
 void BrowsingHistoryHandler::HandleRemoveURLsOnOneDay(const Value* value) {
-  if (cancelable_consumer_.HasPendingRequests()) {
+  if (cancelable_delete_consumer_.HasPendingRequests()) {
     dom_ui_->CallJavascriptFunction(L"deleteFailed");
     return;
   }
@@ -228,14 +229,12 @@ void BrowsingHistoryHandler::HandleRemoveURLsOnOneDay(const Value* value) {
 
   HistoryService* hs =
       dom_ui_->GetProfile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
-  hs->ExpireHistoryBetween(urls, begin_time, end_time, &cancelable_consumer_,
+  hs->ExpireHistoryBetween(
+      urls, begin_time, end_time, &cancelable_delete_consumer_,
       NewCallback(this, &BrowsingHistoryHandler::RemoveComplete));
 }
 
 void BrowsingHistoryHandler::HandleClearBrowsingData(const Value* value) {
-  // Anything in-flight is invalid.
-  cancelable_consumer_.CancelAllRequests();
-
   dom_ui_->tab_contents()->delegate()->GetBrowser()->
       OpenClearBrowsingDataDialog();
 }
@@ -279,7 +278,7 @@ void BrowsingHistoryHandler::QueryComplete(
     } else {
       page_value->SetString(L"dateShort",
           base::TimeFormatShortDate(page.visit_time()));
-      page_value->SetString(L"snippet", page.snippet().text());
+      page_value->SetStringFromUTF16(L"snippet", page.snippet().text());
     }
     page_value->SetBoolean(L"starred",
         dom_ui_->GetProfile()->GetBookmarkModel()->IsBookmarked(page.url()));
@@ -287,7 +286,7 @@ void BrowsingHistoryHandler::QueryComplete(
   }
 
   DictionaryValue info_value;
-  info_value.SetString(L"term", search_text_);
+  info_value.SetStringFromUTF16(L"term", search_text_);
   info_value.SetBoolean(L"finished", results->reached_beginning());
 
   dom_ui_->CallJavascriptFunction(L"historyResult", info_value, results_value);
@@ -299,7 +298,8 @@ void BrowsingHistoryHandler::RemoveComplete() {
 }
 
 void BrowsingHistoryHandler::ExtractSearchHistoryArguments(const Value* value,
-    int* month, std::wstring* query) {
+                                                           int* month,
+                                                           string16* query) {
   *month = 0;
 
   if (value && value->GetType() == Value::TYPE_LIST) {
@@ -311,7 +311,7 @@ void BrowsingHistoryHandler::ExtractSearchHistoryArguments(const Value* value,
         list_member->GetType() == Value::TYPE_STRING) {
       const StringValue* string_value =
         static_cast<const StringValue*>(list_member);
-      string_value->GetAsString(query);
+      string_value->GetAsUTF16(query);
     }
 
     // Get search month.
@@ -402,9 +402,9 @@ HistoryUI::HistoryUI(TabContents* contents) : DOMUI(contents) {
 }
 
 // static
-const GURL HistoryUI::GetHistoryURLWithSearchText(const std::wstring& text) {
+const GURL HistoryUI::GetHistoryURLWithSearchText(const string16& text) {
   return GURL(std::string(chrome::kChromeUIHistoryURL) + "#q=" +
-              EscapeQueryParamValue(WideToUTF8(text), true));
+              EscapeQueryParamValue(UTF16ToUTF8(text), true));
 }
 
 // static

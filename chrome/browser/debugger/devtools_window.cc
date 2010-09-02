@@ -7,6 +7,7 @@
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/debugger/devtools_window.h"
@@ -56,12 +57,12 @@ DevToolsWindow::DevToolsWindow(Profile* profile,
       browser_(NULL),
       docked_(docked),
       is_loaded_(false),
-      open_console_on_load_(false) {
+      action_on_load_(DEVTOOLS_TOGGLE_ACTION_NONE) {
   // Create TabContents with devtools.
   tab_contents_ = new TabContents(profile, NULL, MSG_ROUTING_NONE, NULL);
-  GURL url(std::string(chrome::kChromeUIDevToolsURL) + "devtools.html");
   tab_contents_->render_view_host()->AllowBindings(BindingsPolicy::DOM_UI);
-  tab_contents_->controller().LoadURL(url, GURL(), PageTransition::START_PAGE);
+  tab_contents_->controller().LoadURL(
+      GetDevToolsUrl(), GURL(), PageTransition::START_PAGE);
 
   // Wipe out page icon so that the default application icon is used.
   NavigationEntry* entry = tab_contents_->controller().GetActiveEntry();
@@ -75,7 +76,8 @@ DevToolsWindow::DevToolsWindow(Profile* profile,
   registrar_.Add(this,
                  NotificationType::TAB_CLOSING,
                  Source<NavigationController>(&tab_contents_->controller()));
-
+  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
+                 NotificationService::AllSources());
   inspected_tab_ = inspected_rvh->delegate()->GetAsTabContents();
 }
 
@@ -114,7 +116,7 @@ void DevToolsWindow::InspectedTabClosing() {
   }
 }
 
-void DevToolsWindow::Show(bool open_console) {
+void DevToolsWindow::Show(DevToolsToggleAction action) {
   if (docked_) {
     // Just tell inspected browser to update splitter.
     BrowserWindow* inspected_window = GetInspectedBrowserWindow();
@@ -123,8 +125,7 @@ void DevToolsWindow::Show(bool open_console) {
       inspected_window->UpdateDevTools();
       SetAttachedWindow();
       tab_contents_->view()->SetInitialFocus();
-      if (open_console)
-        ScheduleOpenConsole();
+      ScheduleAction(action);
       return;
     } else {
       // Sometimes we don't know where to dock. Stay undocked.
@@ -135,12 +136,17 @@ void DevToolsWindow::Show(bool open_console) {
   if (!browser_)
     CreateDevToolsBrowser();
 
-  browser_->window()->Show();
+  // Avoid consecutive window switching if the devtools window has been opened
+  // and the Inspect Element shortcut is pressed in the inspected tab.
+  bool should_show_window =
+      !browser_ || action != DEVTOOLS_TOGGLE_ACTION_INSPECT;
+  if (should_show_window)
+    browser_->window()->Show();
   SetAttachedWindow();
-  tab_contents_->view()->SetInitialFocus();
+  if (should_show_window)
+    tab_contents_->view()->SetInitialFocus();
 
-  if (open_console)
-    ScheduleOpenConsole();
+  ScheduleAction(action);
 }
 
 void DevToolsWindow::Activate() {
@@ -151,14 +157,13 @@ void DevToolsWindow::Activate() {
   } else {
     BrowserWindow* inspected_window = GetInspectedBrowserWindow();
     if (inspected_window)
-      inspected_window->FocusDevTools();
+      tab_contents_->view()->Focus();
   }
 }
 
 void DevToolsWindow::SetDocked(bool docked) {
-  if (docked_ == docked) {
+  if (docked_ == docked)
     return;
-  }
   if (docked && !GetInspectedBrowserWindow()) {
     // Cannot dock, avoid window flashing due to close-reopen cycle.
     return;
@@ -180,7 +185,7 @@ void DevToolsWindow::SetDocked(bool docked) {
       inspected_window = NULL;
     }
   }
-  Show(false);
+  Show(DEVTOOLS_TOGGLE_ACTION_NONE);
 }
 
 RenderViewHost* DevToolsWindow::GetRenderViewHost() {
@@ -212,7 +217,8 @@ void DevToolsWindow::CreateDevToolsBrowser() {
 
   browser_ = Browser::CreateForDevTools(profile_);
   browser_->tabstrip_model()->AddTabContents(
-      tab_contents_, -1, false, PageTransition::START_PAGE, true);
+      tab_contents_, -1, PageTransition::START_PAGE,
+      TabStripModel::ADD_SELECTED);
 }
 
 BrowserWindow* DevToolsWindow::GetInspectedBrowserWindow() {
@@ -242,10 +248,8 @@ void DevToolsWindow::Observe(NotificationType type,
   if (type == NotificationType::LOAD_STOP) {
     SetAttachedWindow();
     is_loaded_ = true;
-    if (open_console_on_load_) {
-      DoOpenConsole();
-      open_console_on_load_ = false;
-    }
+    UpdateTheme();
+    DoAction();
   } else if (type == NotificationType::TAB_CLOSING) {
     if (Source<NavigationController>(source).ptr() ==
             &tab_contents_->controller()) {
@@ -256,19 +260,77 @@ void DevToolsWindow::Observe(NotificationType type,
       NotifyCloseListener();
       delete this;
     }
+  } else if (type == NotificationType::BROWSER_THEME_CHANGED) {
+    UpdateTheme();
   }
 }
 
-void DevToolsWindow::ScheduleOpenConsole() {
+void DevToolsWindow::ScheduleAction(DevToolsToggleAction action) {
+  action_on_load_ = action;
   if (is_loaded_)
-    DoOpenConsole();
-  else
-    open_console_on_load_ = true;
+    DoAction();
 }
 
-void DevToolsWindow::DoOpenConsole() {
+void DevToolsWindow::DoAction() {
+  // TODO: these messages should be pushed through the WebKit API instead.
+  switch (action_on_load_) {
+    case DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE:
+      tab_contents_->render_view_host()->
+          ExecuteJavascriptInWebFrame(L"", L"WebInspector.showConsole();");
+      break;
+    case DEVTOOLS_TOGGLE_ACTION_INSPECT:
+      tab_contents_->render_view_host()->
+          ExecuteJavascriptInWebFrame(
+              L"", L"WebInspector.toggleSearchingForNode();");
+    case DEVTOOLS_TOGGLE_ACTION_NONE:
+      // Do nothing.
+      break;
+    default:
+      NOTREACHED();
+  }
+  action_on_load_ = DEVTOOLS_TOGGLE_ACTION_NONE;
+}
+
+std::string SkColorToRGBAString(SkColor color) {
+  // We convert the alpha using DoubleToString because StringPrintf will use
+  // locale specific formatters (e.g., use , instead of . in German).
+  return StringPrintf("rgba(%d,%d,%d,%s)", SkColorGetR(color),
+      SkColorGetG(color), SkColorGetB(color),
+      DoubleToString(SkColorGetA(color) / 255.0).c_str());
+}
+
+GURL DevToolsWindow::GetDevToolsUrl() {
+  BrowserThemeProvider* tp = profile_->GetThemeProvider();
+  CHECK(tp);
+
+  SkColor color_toolbar =
+      tp->GetColor(BrowserThemeProvider::COLOR_TOOLBAR);
+  SkColor color_tab_text =
+      tp->GetColor(BrowserThemeProvider::COLOR_BOOKMARK_TEXT);
+
+  std::string url_string = StringPrintf(
+      "%sdevtools.html?docked=%s&toolbar_color=%s&text_color=%s",
+      chrome::kChromeUIDevToolsURL,
+      docked_ ? "true" : "false",
+      SkColorToRGBAString(color_toolbar).c_str(),
+      SkColorToRGBAString(color_tab_text).c_str());
+  return GURL(url_string);
+}
+
+void DevToolsWindow::UpdateTheme() {
+  BrowserThemeProvider* tp = profile_->GetThemeProvider();
+  CHECK(tp);
+
+  SkColor color_toolbar =
+      tp->GetColor(BrowserThemeProvider::COLOR_TOOLBAR);
+  SkColor color_tab_text =
+      tp->GetColor(BrowserThemeProvider::COLOR_BOOKMARK_TEXT);
+  std::string command = StringPrintf(
+      "WebInspector.setToolbarColors(\"%s\", \"%s\")",
+      SkColorToRGBAString(color_toolbar).c_str(),
+      SkColorToRGBAString(color_tab_text).c_str());
   tab_contents_->render_view_host()->
-      ExecuteJavascriptInWebFrame(L"", L"WebInspector.showConsole();");
+      ExecuteJavascriptInWebFrame(L"", UTF8ToWide(command));
 }
 
 bool DevToolsWindow::PreHandleKeyboardEvent(

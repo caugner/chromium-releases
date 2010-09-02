@@ -24,6 +24,10 @@
           # platforms, including both 32-bit and 64-bit Windows.
           # Test files are also not included.
           'nacl/nacl_main.cc',
+          'nacl/nacl_main_platform_delegate.h',
+          'nacl/nacl_main_platform_delegate_linux.cc',
+          'nacl/nacl_main_platform_delegate_mac.mm',
+          'nacl/nacl_main_platform_delegate_win.cc',
           'nacl/nacl_thread.cc',
           'nacl/nacl_thread.h',
           'nacl/sel_main.cc',
@@ -69,7 +73,7 @@
         'chrome_strings',
         'common',
         '../third_party/npapi/npapi.gyp:npapi',
-        '../webkit/webkit.gyp:glue',
+        '../webkit/support/webkit_support.gyp:glue',
         '../native_client/src/trusted/plugin/plugin.gyp:npGoogleNaClPluginChrome',
         '../native_client/src/trusted/service_runtime/service_runtime.gyp:sel',
         '../native_client/src/trusted/validator_x86/validator_x86.gyp:ncvalidate',

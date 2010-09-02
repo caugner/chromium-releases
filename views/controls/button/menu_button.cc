@@ -49,11 +49,14 @@ MenuButton::MenuButton(ButtonListener* listener,
       menu_delegate_(menu_delegate),
       show_menu_marker_(show_menu_marker),
       menu_marker_(ResourceBundle::GetSharedInstance().GetBitmapNamed(
-          IDR_MENU_DROPARROW)) {
+                       IDR_MENU_DROPARROW)),
+      destroyed_flag_(NULL) {
   set_alignment(TextButton::ALIGN_LEFT);
 }
 
 MenuButton::~MenuButton() {
+  if (destroyed_flag_)
+    *destroyed_flag_ = true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -122,11 +125,11 @@ bool MenuButton::Activate() {
     // The position of the menu depends on whether or not the locale is
     // right-to-left.
     gfx::Point menu_position(lb.right(), lb.bottom());
-    if (UILayoutIsRightToLeft())
+    if (base::i18n::IsRTL())
       menu_position.set_x(lb.x());
 
     View::ConvertPointToScreen(this, &menu_position);
-    if (UILayoutIsRightToLeft())
+    if (base::i18n::IsRTL())
       menu_position.Offset(2, -4);
     else
       menu_position.Offset(-2, -4);
@@ -145,7 +148,19 @@ bool MenuButton::Activate() {
     GetRootView()->SetMouseHandler(NULL);
 
     menu_visible_ = true;
+
+    bool destroyed = false;
+    destroyed_flag_ = &destroyed;
+
     menu_delegate_->RunMenu(this, menu_position);
+
+    if (destroyed) {
+      // The menu was deleted while showing. Don't attempt any processing.
+      return false;
+    }
+
+    destroyed_flag_ = NULL;
+
     menu_visible_ = false;
     menu_closed_time_ = Time::Now();
 
@@ -198,17 +213,24 @@ void MenuButton::OnMouseReleased(const MouseEvent& e,
   }
 }
 
-// When the space bar or the enter key is pressed we need to show the menu.
-bool MenuButton::OnKeyReleased(const KeyEvent& e) {
-#if defined(OS_WIN)
-  if ((e.GetKeyCode() == base::VKEY_SPACE) ||
-      (e.GetKeyCode() == base::VKEY_RETURN)) {
-    return Activate();
+bool MenuButton::OnKeyPressed(const KeyEvent& e) {
+  if (e.GetKeyCode() == base::VKEY_SPACE ||
+      e.GetKeyCode() == base::VKEY_RETURN ||
+      e.GetKeyCode() == base::VKEY_UP ||
+      e.GetKeyCode() == base::VKEY_DOWN) {
+    bool result = Activate();
+    if (GetFocusManager()->GetFocusedView() == NULL)
+      RequestFocus();
+    return result;
   }
-#else
-  NOTIMPLEMENTED();
-#endif
-  return true;
+  return false;
+}
+
+bool MenuButton::OnKeyReleased(const KeyEvent& e) {
+  // Override CustomButton's implementation, which presses the button when
+  // you press space and clicks it when you release space.  For a MenuButton
+  // we always activate the menu on key press.
+  return false;
 }
 
 // The reason we override View::OnMouseExited is because we get this event when

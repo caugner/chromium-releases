@@ -10,7 +10,7 @@
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/language_library.h"
+#include "chrome/browser/chromeos/cros/input_method_library.h"
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/browser/profile.h"
@@ -30,7 +30,7 @@ class HangulKeyboardComboboxModel : public ComboboxModel {
   HangulKeyboardComboboxModel() {
     for (size_t i = 0; i < arraysize(kHangulKeyboardNameIDPairs); ++i) {
       layouts_.push_back(std::make_pair(
-          kHangulKeyboardNameIDPairs[i].keyboard_name,
+          l10n_util::GetStringUTF8(kHangulKeyboardNameIDPairs[i].message_id),
           kHangulKeyboardNameIDPairs[i].keyboard_id));
     }
   }
@@ -46,15 +46,15 @@ class HangulKeyboardComboboxModel : public ComboboxModel {
       LOG(ERROR) << "Index is out of bounds: " << index;
       return L"";
     }
-    return layouts_.at(index).first;
+    return UTF8ToWide(layouts_.at(index).first);
   }
 
   // Gets a keyboard layout ID (e.g. "2", "3f", ..) for an item at zero-origin
   // |index|. This function is NOT part of the ComboboxModel interface.
-  std::wstring GetItemIDAt(int index) {
+  std::string GetItemIDAt(int index) {
     if (index < 0 || index > GetItemCount()) {
       LOG(ERROR) << "Index is out of bounds: " << index;
-      return L"";
+      return "";
     }
     return layouts_.at(index).second;
   }
@@ -62,7 +62,7 @@ class HangulKeyboardComboboxModel : public ComboboxModel {
   // Gets an index (>= 0) of an item whose keyboard layout ID is |layout_ld|.
   // Returns -1 if such item is not found. This function is NOT part of the
   // ComboboxModel interface.
-  int GetIndexFromID(const std::wstring& layout_id) {
+  int GetIndexFromID(const std::string& layout_id) {
     for (size_t i = 0; i < layouts_.size(); ++i) {
       if (GetItemIDAt(i) == layout_id) {
         return static_cast<int>(i);
@@ -72,7 +72,7 @@ class HangulKeyboardComboboxModel : public ComboboxModel {
   }
 
  private:
-  std::vector<std::pair<std::wstring, std::wstring> > layouts_;
+  std::vector<std::pair<std::string, std::string> > layouts_;
   DISALLOW_COPY_AND_ASSIGN(HangulKeyboardComboboxModel);
 };
 
@@ -90,8 +90,8 @@ LanguageHangulConfigView::~LanguageHangulConfigView() {
 
 void LanguageHangulConfigView::ItemChanged(
     views::Combobox* sender, int prev_index, int new_index) {
-  const std::wstring id
-      = hangul_keyboard_combobox_model_->GetItemIDAt(new_index);
+  const std::string id =
+      hangul_keyboard_combobox_model_->GetItemIDAt(new_index);
   LOG(INFO) << "Changing Hangul keyboard pref to " << id;
   keyboard_pref_.SetValue(id);
 }
@@ -99,6 +99,18 @@ void LanguageHangulConfigView::ItemChanged(
 void LanguageHangulConfigView::Layout() {
   // Not sure why but this is needed to show contents in the dialog.
   contents_->SetBounds(0, 0, width(), height());
+}
+
+int LanguageHangulConfigView::GetDialogButtons() const {
+  return MessageBoxFlags::DIALOGBUTTON_OK;
+}
+
+std::wstring LanguageHangulConfigView::GetDialogButtonLabel(
+    MessageBoxFlags::DialogButton button) const {
+  if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
+    return l10n_util::GetString(IDS_OK);
+  }
+  return L"";
 }
 
 std::wstring LanguageHangulConfigView::GetWindowTitle() const {
@@ -109,8 +121,8 @@ std::wstring LanguageHangulConfigView::GetWindowTitle() const {
 gfx::Size LanguageHangulConfigView::GetPreferredSize() {
   // TODO(satorux): Create our own localized content size once the UI is done.
   return gfx::Size(views::Window::GetLocalizedContentsSize(
-      IDS_FONTSLANG_DIALOG_WIDTH_CHARS,
-      IDS_FONTSLANG_DIALOG_HEIGHT_LINES));
+      IDS_LANGUAGES_INPUT_DIALOG_WIDTH_CHARS,
+      IDS_LANGUAGES_INPUT_DIALOG_HEIGHT_LINES));
 }
 
 void LanguageHangulConfigView::InitControlLayout() {
@@ -160,12 +172,11 @@ void LanguageHangulConfigView::Observe(NotificationType type,
 }
 
 void LanguageHangulConfigView::NotifyPrefChanged() {
-  const std::wstring id = keyboard_pref_.GetValue();
-  const int index
-      = hangul_keyboard_combobox_model_->GetIndexFromID(id);
-  if (index >= 0) {
+  const std::string id = keyboard_pref_.GetValue();
+  const int index =
+      hangul_keyboard_combobox_model_->GetIndexFromID(id);
+  if (index >= 0)
     hangul_keyboard_combobox_->SetSelectedItem(index);
-  }
 }
 
 }  // namespace chromeos

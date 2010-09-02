@@ -6,6 +6,7 @@
 #define CHROME_WORKER_WORKER_WEBKITCLIENT_IMPL_H_
 
 #include "third_party/WebKit/WebKit/chromium/public/WebMimeRegistry.h"
+#include "webkit/glue/webfilesystem_impl.h"
 #include "webkit/glue/webkitclient_impl.h"
 
 class WorkerWebKitClientImpl : public webkit_glue::WebKitClientImpl,
@@ -14,6 +15,7 @@ class WorkerWebKitClientImpl : public webkit_glue::WebKitClientImpl,
   // WebKitClient methods:
   virtual WebKit::WebClipboard* clipboard();
   virtual WebKit::WebMimeRegistry* mimeRegistry();
+  virtual WebKit::WebFileSystem* fileSystem();
   virtual WebKit::WebSandboxSupport* sandboxSupport();
   virtual bool sandboxEnabled();
   virtual unsigned long long visitedLinkHash(const char* canonicalURL,
@@ -38,8 +40,7 @@ class WorkerWebKitClientImpl : public webkit_glue::WebKitClientImpl,
   virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository();
 
   virtual WebKit::WebKitClient::FileHandle databaseOpenFile(
-      const WebKit::WebString& vfs_file_name, int desired_flags,
-      WebKit::WebKitClient::FileHandle* dir_handle);
+      const WebKit::WebString& vfs_file_name, int desired_flags);
   virtual int databaseDeleteFile(const WebKit::WebString& vfs_file_name,
                                  bool sync_dir);
   virtual long databaseGetFileAttributes(
@@ -62,6 +63,9 @@ class WorkerWebKitClientImpl : public webkit_glue::WebKitClientImpl,
   virtual WebKit::WebString mimeTypeFromFile(const WebKit::WebString&);
   virtual WebKit::WebString preferredExtensionForMIMEType(
       const WebKit::WebString&);
+
+ private:
+  webkit_glue::WebFileSystemImpl file_system_;
 };
 
 #endif  // CHROME_WORKER_WORKER_WEBKITCLIENT_IMPL_H_

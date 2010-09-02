@@ -12,14 +12,14 @@
 #include <string>
 
 #include "base/atomicops.h"
+#include "base/gtest_prod_util.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/thread.h"
-#include "chrome/browser/sync/engine/net/gaia_authenticator.h"
 #include "chrome/browser/sync/protocol/service_constants.h"
-#include "chrome/browser/sync/util/event_sys.h"
 #include "chrome/browser/sync/util/sync_types.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"  // For FRIEND_TEST
+#include "chrome/common/deprecated/event_sys.h"
+#include "chrome/common/net/gaia/gaia_authenticator.h"
 
 namespace syncable {
 struct DirectoryManagerEvent;
@@ -28,10 +28,8 @@ class DirectoryManager;
 
 namespace browser_sync {
 
-class AllStatus;
 class AuthWatcher;
 class ServerConnectionManager;
-class TalkMediator;
 class URLFactory;
 class UserSettings;
 struct ServerConnectionEvent;
@@ -50,15 +48,17 @@ struct AuthWatcherEvent {
     ILLEGAL_VALUE,
   };
   WhatHappened what_happened;
-  const GaiaAuthenticator::AuthResults* auth_results;
+  const gaia::GaiaAuthenticator::AuthResults* auth_results;
   // use AuthWatcherEvent as its own traits type in hookups.
   typedef AuthWatcherEvent EventType;
   static inline bool IsChannelShutdownEvent(const AuthWatcherEvent& event) {
     return event.what_happened == AUTHWATCHER_DESTROYED;
   }
 
-  // Used for AUTH_SUCCEEDED notification
+  // Used for AUTH_SUCCEEDED/AUTH_RENEWED notification.
   std::string user_email;
+  // May be empty if we're only locally authenticated.
+  std::string auth_token;
 
   // How was this auth attempt initiated?
   enum AuthenticationTrigger {
@@ -77,7 +77,7 @@ struct AuthWatcherEvent {
 // invoked authentication.
 class AuthWatcher : public base::RefCountedThreadSafe<AuthWatcher> {
  friend class AuthWatcherTest;
- FRIEND_TEST(AuthWatcherTest, Construction);
+ FRIEND_TEST_ALL_PREFIXES(AuthWatcherTest, Construction);
  public:
   // Normal progression is local -> gaia -> token.
   enum Status { LOCALLY_AUTHENTICATED, GAIA_AUTHENTICATED, NOT_AUTHENTICATED };
@@ -86,13 +86,11 @@ class AuthWatcher : public base::RefCountedThreadSafe<AuthWatcher> {
 
   AuthWatcher(DirectoryManager* dirman,
               ServerConnectionManager* scm,
-              AllStatus* allstatus,
               const std::string& user_agent,
               const std::string& service_id,
               const std::string& gaia_url,
               UserSettings* user_settings,
-              GaiaAuthenticator* gaia_auth,
-              TalkMediator* talk_mediator);
+              gaia::GaiaAuthenticator* gaia_auth);
   ~AuthWatcher();
 
   typedef EventChannel<AuthWatcherEvent, Lock> Channel;
@@ -108,17 +106,15 @@ class AuthWatcher : public base::RefCountedThreadSafe<AuthWatcher> {
   // convenience in the common case so the token doesn't have to be plumbed
   // everywhere.
   void Authenticate(const std::string& email, const std::string& password,
-      const std::string& captcha_token, const std::string& captcha_value,
-      bool persist_creds_to_disk);
+      const std::string& captcha_token, const std::string& captcha_value);
 
   void Authenticate(const std::string& email, const std::string& password,
       bool persist_creds_to_disk) {
-    Authenticate(email, password, "", "", persist_creds_to_disk);
+    Authenticate(email, password, "", "");
   }
 
   // Use this to update only the token of the current email address.
   void RenewAuthToken(const std::string& updated_token);
-  void DoRenewAuthToken(const std::string& updated_token);
 
   // Use this version when you don't need the gaia authentication step because
   // you already have a valid LSID cookie for |gaia_email|.
@@ -136,23 +132,24 @@ class AuthWatcher : public base::RefCountedThreadSafe<AuthWatcher> {
   std::string email() const;
   syncable::DirectoryManager* dirman() const { return dirman_; }
   ServerConnectionManager* scm() const { return scm_; }
-  AllStatus* allstatus() const { return allstatus_; }
   UserSettings* settings() const { return user_settings_; }
   Status status() const { return (Status)status_; }
 
- protected:
+ private:
   void ClearAuthenticationData();
 
-  void NotifyAuthSucceeded(const std::string& email);
+  void NotifyAuthChanged(const std::string& email,
+                         const std::string& auth_token,
+                         bool renewed);
   void HandleServerConnectionEvent(const ServerConnectionEvent& event);
 
   void SaveUserSettings(const std::string& username,
-                        const std::string& auth_token,
-                        const bool save_credentials);
+                        const std::string& auth_token);
 
   MessageLoop* message_loop() { return auth_backend_thread_.message_loop(); }
 
- private:
+  void DoRenewAuthToken(const std::string& updated_token);
+
   // These two helpers should only be called from the auth function.
   // Called when authentication with gaia succeeds, to save credential info.
   void PersistCredentials();
@@ -202,14 +199,12 @@ class AuthWatcher : public base::RefCountedThreadSafe<AuthWatcher> {
       const ServerConnectionEvent& event,
       const std::string& auth_token_snapshot);
 
-  scoped_ptr<GaiaAuthenticator> const gaia_;
+  scoped_ptr<gaia::GaiaAuthenticator> const gaia_;
   syncable::DirectoryManager* const dirman_;
   ServerConnectionManager* const scm_;
   scoped_ptr<EventListenerHookup> connmgr_hookup_;
-  AllStatus* const allstatus_;
   Status status_;
   UserSettings* const user_settings_;
-  TalkMediator* talk_mediator_;  // Interface to the notifications engine.
   scoped_ptr<Channel> channel_;
 
   base::Thread auth_backend_thread_;

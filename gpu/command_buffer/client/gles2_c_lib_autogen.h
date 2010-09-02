@@ -329,6 +329,9 @@ void GLES2ReadPixels(
     void* pixels) {
   gles2::GetGLContext()->ReadPixels(x, y, width, height, format, type, pixels);
 }
+void GLES2ReleaseShaderCompiler() {
+  gles2::GetGLContext()->ReleaseShaderCompiler();
+}
 void GLES2RenderbufferStorage(
     GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {
   gles2::GetGLContext()->RenderbufferStorage(
@@ -339,6 +342,12 @@ void GLES2SampleCoverage(GLclampf value, GLboolean invert) {
 }
 void GLES2Scissor(GLint x, GLint y, GLsizei width, GLsizei height) {
   gles2::GetGLContext()->Scissor(x, y, width, height);
+}
+void GLES2ShaderBinary(
+    GLsizei n, const GLuint* shaders, GLenum binaryformat, const void* binary,
+    GLsizei length) {
+  gles2::GetGLContext()->ShaderBinary(
+      n, shaders, binaryformat, binary, length);
 }
 void GLES2ShaderSource(
     GLuint shader, GLsizei count, const char** str, const GLint* length) {
@@ -493,6 +502,41 @@ void GLES2Viewport(GLint x, GLint y, GLsizei width, GLsizei height) {
 }
 void GLES2SwapBuffers() {
   gles2::GetGLContext()->SwapBuffers();
+}
+GLuint GLES2GetMaxValueInBuffer(
+    GLuint buffer_id, GLsizei count, GLenum type, GLuint offset) {
+  return gles2::GetGLContext()->GetMaxValueInBuffer(
+      buffer_id, count, type, offset);
+}
+void GLES2GenSharedIds(
+    GLuint namespace_id, GLuint id_offset, GLsizei n, GLuint* ids) {
+  gles2::GetGLContext()->GenSharedIds(namespace_id, id_offset, n, ids);
+}
+void GLES2DeleteSharedIds(GLuint namespace_id, GLsizei n, const GLuint* ids) {
+  gles2::GetGLContext()->DeleteSharedIds(namespace_id, n, ids);
+}
+void GLES2RegisterSharedIds(
+    GLuint namespace_id, GLsizei n, const GLuint* ids) {
+  gles2::GetGLContext()->RegisterSharedIds(namespace_id, n, ids);
+}
+GLboolean GLES2CommandBufferEnable(const char* feature) {
+  return gles2::GetGLContext()->CommandBufferEnable(feature);
+}
+void* GLES2MapBufferSubData(
+    GLuint target, GLintptr offset, GLsizeiptr size, GLenum access) {
+  return gles2::GetGLContext()->MapBufferSubData(target, offset, size, access);
+}
+void GLES2UnmapBufferSubData(const void* mem) {
+  gles2::GetGLContext()->UnmapBufferSubData(mem);
+}
+void* GLES2MapTexSubImage2D(
+    GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
+    GLsizei height, GLenum format, GLenum type, GLenum access) {
+  return gles2::GetGLContext()->MapTexSubImage2D(
+      target, level, xoffset, yoffset, width, height, format, type, access);
+}
+void GLES2UnmapTexSubImage2D(const void* mem) {
+  gles2::GetGLContext()->UnmapTexSubImage2D(mem);
 }
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_C_LIB_AUTOGEN_H_

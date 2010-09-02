@@ -31,25 +31,22 @@
         '<(DEPTH)/app/app.gyp:app_base',
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/base/base.gyp:base_i18n',
+        '<(DEPTH)/gpu/gpu.gyp:gles2_c_lib',
         '<(DEPTH)/media/media.gyp:media',
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/testing/gmock.gyp:gmock',
         '<(DEPTH)/testing/gtest.gyp:gtest',
+        '<(DEPTH)/third_party/WebKit/WebKit/chromium/WebKit.gyp:inspector_resources',
         '<(DEPTH)/third_party/WebKit/WebKit/chromium/WebKit.gyp:webkit',
-        '<(DEPTH)/webkit/webkit.gyp:appcache',
-        '<(DEPTH)/webkit/webkit.gyp:database',
-        '<(DEPTH)/webkit/webkit.gyp:glue',
-        '<(DEPTH)/webkit/webkit.gyp:inspector_resources',
-        '<(DEPTH)/webkit/webkit.gyp:webkit_resources',
-        '<(DEPTH)/webkit/webkit.gyp:webkit_support',
-        'npapi_layout_test_plugin',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:appcache',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:database',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_support',
       ],
       'msvs_guid': '77C32787-1B96-CB84-B905-7F170629F0AC',
       'sources': [
-        'mac/accelerated_surface_stub.cc',
-        'mac/DumpRenderTreePasteboard.h',
-        'mac/DumpRenderTreePasteboard.m',
         'mac/test_shell_webview.h',
         'mac/test_shell_webview.mm',
         'mac/test_webview_delegate.mm',
@@ -70,9 +67,13 @@
         'layout_test_controller.h',
         'mock_spellcheck.cc',
         'mock_spellcheck.h',
+        'notification_presenter.cc',
+        'notification_presenter.h',
         'plain_text_controller.cc',
         'plain_text_controller.h',
         'resource.h',
+        'test_geolocation_service.cc',
+        'test_geolocation_service.h',
         'test_navigation_controller.cc',
         'test_navigation_controller.h',
         'test_shell.cc',
@@ -93,9 +94,8 @@
         'test_shell_switches.cc',
         'test_shell_switches.h',
         'test_shell_win.cc',
+        'test_shell_webkit_init.cc',
         'test_shell_webkit_init.h',
-        'test_shell_webmimeregistry_impl.cc',
-        'test_shell_webmimeregistry_impl.h',
         'test_shell_webthemecontrol.h',
         'test_shell_webthemecontrol.cc',
         'test_shell_webthemeengine.h',
@@ -118,7 +118,7 @@
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/third_party/WebKit/WebKit/chromium/WebKit.gyp:webkit',
-        '<(DEPTH)/webkit/webkit.gyp:glue',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
       ],
       'conditions': [
         # http://code.google.com/p/chromium/issues/detail?id=18337
@@ -136,15 +136,6 @@
           # for:  test_shell_gtk.cc
           'cflags': ['-Wno-multichar'],
         }],
-        ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
-          # See below TODO in the Windows branch.
-          'copies': [
-            {
-              'destination': '<(PRODUCT_DIR)/plugins',
-              'files': ['<(PRODUCT_DIR)/libnpapi_layout_test_plugin.so'],
-            },
-          ],
-        }],
         ['OS=="win"', {
           'msvs_disabled_warnings': [ 4800 ],
           'link_settings': {
@@ -158,21 +149,6 @@
           ],
           'dependencies': [
             '<(DEPTH)/breakpad/breakpad.gyp:breakpad_handler',
-            '<(DEPTH)/webkit/default_plugin/default_plugin.gyp:default_plugin',
-          ],
-          # TODO(bradnelson):
-          # This should really be done in the 'npapi_layout_test_plugin'
-          # target, but the current VS generator handles 'copies'
-          # settings as AdditionalDependencies, which means that
-          # when it's over there, it tries to do the copy *before*
-          # the file is built, instead of after.  We work around this
-          # by attaching the copy here, since it depends on that
-          # target.
-          'copies': [
-            {
-              'destination': '<(PRODUCT_DIR)/plugins',
-              'files': ['<(PRODUCT_DIR)/npapi_layout_test_plugin.dll'],
-            },
           ],
         }, {  # else: OS!=win
           'sources/': [
@@ -238,6 +214,7 @@
         '<(DEPTH)/net/net.gyp:net_test_support',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/tools/imagediff/image_diff.gyp:image_diff',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:copy_npapi_layout_test_plugin',
       ],
       'defines': [
         # Technically not a unit test but require functions available only to
@@ -250,7 +227,7 @@
       'mac_bundle_resources': [
         '../../data/test_shell/',
         'mac/English.lproj/InfoPlist.strings',
-        'mac/English.lproj/MainMenu.nib',
+        'mac/English.lproj/MainMenu.xib',
         'mac/Info.plist',
         'mac/test_shell.icns',
         'resources/AHEM____.TTF',
@@ -331,12 +308,6 @@
             },
           ],
           'copies': [
-            {
-              'destination': '<(PRODUCT_DIR)/TestShell.app/Contents/PlugIns/',
-              'files': [
-                '<(PRODUCT_DIR)/TestNetscapePlugIn.plugin/',
-              ],
-            },
             # TODO(ajwong): This, and the parallel chromium stanza below
             # really should find a way to share file paths with
             # ffmpeg.gyp so they don't diverge. (BUG=23602)
@@ -350,8 +321,8 @@
         }, { # OS != "mac"
           'dependencies': [
             '<(DEPTH)/net/net.gyp:net_resources',
-            '<(DEPTH)/webkit/webkit.gyp:webkit_resources',
-            '<(DEPTH)/webkit/webkit.gyp:webkit_strings',
+            '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
+            '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_strings',
           ]
         }],
       ],
@@ -467,6 +438,7 @@
           ],
           'sources': [
             '../../../skia/ext/skia_utils_mac_unittest.mm',
+            '../../../skia/ext/bitmap_platform_device_mac_unittest.cc',
           ],
         }],
         ['OS=="win"', {
@@ -484,87 +456,6 @@
               ],
             }],
           ],
-        }],
-      ],
-    },
-    {
-      'target_name': 'npapi_layout_test_plugin',
-      'type': 'loadable_module',
-      'variables': {
-        'chromium_code': 1,
-      },
-      'mac_bundle': 1,
-      'msvs_guid': 'BE6D5659-A8D5-4890-A42C-090DD10EF62C',
-      'sources': [
-        '../npapi_layout_test_plugin/PluginObject.cpp',
-        '../npapi_layout_test_plugin/TestObject.cpp',
-        '../npapi_layout_test_plugin/main.cpp',
-        '../npapi_layout_test_plugin/npapi_layout_test_plugin.def',
-        '../npapi_layout_test_plugin/npapi_layout_test_plugin.rc',
-      ],
-      'include_dirs': [
-        '../../..',
-      ],
-      'dependencies': [
-        '<(DEPTH)/third_party/npapi/npapi.gyp:npapi',
-        '<(DEPTH)/third_party/WebKit/JavaScriptCore/JavaScriptCore.gyp/JavaScriptCore.gyp:wtf',
-      ],
-      'msvs_disabled_warnings': [ 4996 ],
-      'mac_bundle_resources': [
-        '../npapi_layout_test_plugin/Info.r',
-      ],
-      'xcode_settings': {
-        'INFOPLIST_FILE': '<(DEPTH)/webkit/tools/npapi_layout_test_plugin/Info.plist',
-      },
-      'conditions': [
-        ['OS!="win"', {
-          'sources!': [
-            '../npapi_layout_test_plugin/npapi_layout_test_plugin.def',
-            '../npapi_layout_test_plugin/npapi_layout_test_plugin.rc',
-          ],
-        # TODO(bradnelson):
-        # This copy should really live here, as a post-build step,
-        # but it's currently being implemented via
-        # AdditionalDependencies, which tries to do the copy before
-        # the file is built...
-        #
-        }, { # OS == "win"
-        #  # The old VS build would explicitly copy the .dll into the
-        #  # plugins subdirectory like this.  It might be possible to
-        #  # use the 'product_dir' setting to build directly into
-        #  # plugins/ (as is done on Linux), but we'd need to verify
-        #  # that nothing breaks first.
-        #  'copies': [
-        #    {
-        #      'destination': '<(PRODUCT_DIR)/plugins',
-        #      'files': ['<(PRODUCT_DIR)/npapi_layout_test_plugin.dll'],
-        #    },
-        #  ],
-          'variables': {
-            # This is not a relative pathname.  Avoid pathname relativization
-            # by sticking it in a variable that isn't recognized as one
-            # containing pathnames, and by using the >(late) form of variable
-            # expansion.
-            'winmm_lib': 'winmm.lib',
-          },
-          'link_settings': {
-            'libraries': [
-              '>(winmm_lib)',
-            ],
-          },
-        }],
-        ['OS=="mac"', {
-          'product_name': 'TestNetscapePlugIn',
-          'product_extension': 'plugin',
-          'link_settings': {
-            'libraries': [
-              '$(SDKROOT)/System/Library/Frameworks/Carbon.framework',
-            ],
-          },
-        }],
-        ['(OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris") and (target_arch=="x64" or target_arch=="arm")', {
-          # Shared libraries need -fPIC on x86-64
-          'cflags': ['-fPIC']
         }],
       ],
     },
@@ -710,6 +601,9 @@
                 '../npapi_pepper_test_plugin/plugin.rc',
               ],
             }],
+            ['OS=="mac"', {
+              'product_extension': 'plugin',
+            }],
           ],
           'xcode_settings': {
             'INFOPLIST_FILE': '<(DEPTH)/webkit/tools/npapi_pepper_test_plugin/Info.plist',
@@ -732,7 +626,6 @@
               },
               'inputs': [
                 '<(input_path)',
-                'resources/linux-fontconfig-config',
               ],
               'outputs': [
                 '<(out_dir)/grit/test_shell_resources.h',

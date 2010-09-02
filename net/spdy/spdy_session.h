@@ -11,10 +11,12 @@
 #include <queue>
 #include <string>
 
+#include "base/linked_ptr.h"
 #include "base/ref_counted.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_states.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_log.h"
 #include "net/base/request_priority.h"
 #include "net/base/ssl_config_service.h"
 #include "net/base/upload_data_stream.h"
@@ -25,19 +27,26 @@
 #include "net/spdy/spdy_io_buffer.h"
 #include "net/spdy/spdy_protocol.h"
 #include "net/spdy/spdy_session_pool.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"  // For FRIEND_TEST
 
 namespace net {
 
+class SpdyHttpStream;
 class SpdyStream;
 class HttpNetworkSession;
-class HttpRequestInfo;
-class HttpResponseInfo;
 class BoundNetLog;
 class SSLInfo;
 
 class SpdySession : public base::RefCounted<SpdySession>,
                     public spdy::SpdyFramerVisitorInterface {
  public:
+  // Create a new SpdySession.
+  // |host_port_pair| is the host/port that this session connects to.
+  // |session| is the HttpNetworkSession.  |net_log| is the NetLog that we log
+  // network events to.
+  SpdySession(const HostPortPair& host_port_pair, HttpNetworkSession* session,
+              NetLog* net_log);
+
   const HostPortPair& host_port_pair() const { return host_port_pair_; }
 
   // Connect the Spdy Socket.
@@ -45,26 +54,52 @@ class SpdySession : public base::RefCounted<SpdySession>,
   // Note that this call does not wait for the connect to complete. Callers can
   // immediately start using the SpdySession while it connects.
   net::Error Connect(const std::string& group_name,
-                     const TCPSocketParams& destination,
-                     RequestPriority priority,
-                     const BoundNetLog& net_log);
+                     const scoped_refptr<TCPSocketParams>& destination,
+                     RequestPriority priority);
 
-  // Get a stream for a given |request|.  In the typical case, this will involve
-  // the creation of a new stream (and will send the SYN frame).  If the server
-  // initiates a stream, it might already exist for a given path.  The server
-  // might also not have initiated the stream yet, but indicated it will via
-  // X-Associated-Content.
-  // Returns the new or existing stream.  Never returns NULL.
-  scoped_refptr<SpdyStream> GetOrCreateStream(const HttpRequestInfo& request,
-      const UploadDataStream* upload_data, const BoundNetLog& log);
+  // Get a pushed stream for a given |url|.
+  // If the server initiates a stream, it might already exist for a given path.
+  // The server might also not have initiated the stream yet, but indicated it
+  // will via X-Associated-Content.  Writes the stream out to |spdy_stream|.
+  // Returns a net error code.
+  int GetPushStream(
+      const GURL& url,
+      scoped_refptr<SpdyStream>* spdy_stream,
+      const BoundNetLog& stream_net_log);
+
+  // Create a new stream for a given |url|.  Writes it out to |spdy_stream|.
+  // Returns a net error code, possibly ERR_IO_PENDING.
+  int CreateStream(
+      const GURL& url,
+      RequestPriority priority,
+      scoped_refptr<SpdyStream>* spdy_stream,
+      const BoundNetLog& stream_net_log,
+      CompletionCallback* callback,
+      const SpdyHttpStream* spdy_http_stream);
+
+  // Remove PendingCreateStream objects on transaction deletion
+  void CancelPendingCreateStreams(const SpdyHttpStream* trans);
+
+  // Used by SpdySessionPool to initialize with a pre-existing SSL socket.
+  // Returns OK on success, or an error on failure.
+  net::Error InitializeWithSSLSocket(ClientSocketHandle* connection,
+                                     int certificate_error_code);
+
+  // Send the SYN frame for |stream_id|.
+  int WriteSynStream(
+      spdy::SpdyStreamId stream_id,
+      RequestPriority priority,
+      spdy::SpdyControlFlags flags,
+      const linked_ptr<spdy::SpdyHeaderBlock>& headers);
 
   // Write a data frame to the stream.
   // Used to create and queue a data frame for the given stream.
   int WriteStreamData(spdy::SpdyStreamId stream_id, net::IOBuffer* data,
-                      int len);
+                      int len,
+                      spdy::SpdyDataFlags flags);
 
-  // Cancel a stream.
-  bool CancelStream(spdy::SpdyStreamId stream_id);
+  // Close a stream.
+  void CloseStream(spdy::SpdyStreamId stream_id, int status);
 
   // Check if a stream is active.
   bool IsStreamActive(spdy::SpdyStreamId stream_id) const;
@@ -73,12 +108,25 @@ class SpdySession : public base::RefCounted<SpdySession>,
   // status, such as "resolving host", "connecting", etc.
   LoadState GetLoadState() const;
 
+  // Fills SSL info in |ssl_info| and returns true when SSL is in use.
+  bool GetSSLInfo(SSLInfo* ssl_info, bool* was_npn_negotiated);
+
   // Enable or disable SSL.
   static void SetSSLMode(bool enable) { use_ssl_ = enable; }
   static bool SSLMode() { return use_ssl_; }
 
- protected:
-  friend class SpdySessionPool;
+  // If session is closed, no new streams/transactions should be created.
+  bool IsClosed() const { return state_ == CLOSED; }
+
+  // Closes this session.  This will close all active streams and mark
+  // the session as permanently closed.
+  // |err| should not be OK; this function is intended to be called on
+  // error.
+  void CloseSessionOnError(net::Error err);
+
+ private:
+  friend class base::RefCounted<SpdySession>;
+  FRIEND_TEST(SpdySessionTest, GetActivePushStream);
 
   enum State {
     IDLE,
@@ -87,29 +135,42 @@ class SpdySession : public base::RefCounted<SpdySession>,
     CLOSED
   };
 
-  // Provide access to the framer for testing.
-  spdy::SpdyFramer* GetFramer() { return &spdy_framer_; }
+  enum { kDefaultMaxConcurrentStreams = 100 };  // TODO(mbelshe) remove this
 
-  // Create a new SpdySession.
-  // |host_port_pair| is the host/port that this session connects to.
-  // |session| is the HttpNetworkSession
-  SpdySession(const HostPortPair& host_port_pair, HttpNetworkSession* session);
+  struct PendingCreateStream {
+    const GURL* url;
+    RequestPriority priority;
+    scoped_refptr<SpdyStream>* spdy_stream;
+    const BoundNetLog* stream_net_log;
+    CompletionCallback* callback;
 
-  // Closes all open streams.  Used as part of shutdown.
-  void CloseAllStreams(net::Error code);
+    const SpdyHttpStream* spdy_http_stream;
 
- private:
-  friend class base::RefCounted<SpdySession>;
-
+    PendingCreateStream(const GURL& url, RequestPriority priority,
+                        scoped_refptr<SpdyStream>* spdy_stream,
+                        const BoundNetLog& stream_net_log,
+                        CompletionCallback* callback,
+                        const SpdyHttpStream* spdy_http_stream)
+        : url(&url), priority(priority), spdy_stream(spdy_stream),
+          stream_net_log(&stream_net_log), callback(callback),
+          spdy_http_stream(spdy_http_stream) { }
+  };
+  typedef std::queue<PendingCreateStream, std::list< PendingCreateStream> >
+      PendingCreateStreamQueue;
   typedef std::map<int, scoped_refptr<SpdyStream> > ActiveStreamMap;
-  typedef std::list<scoped_refptr<SpdyStream> > ActiveStreamList;
+  // Only HTTP push a stream.
+  typedef std::list<scoped_refptr<SpdyStream> > ActivePushedStreamList;
   typedef std::map<std::string, scoped_refptr<SpdyStream> > PendingStreamMap;
   typedef std::priority_queue<SpdyIOBuffer> OutputQueue;
 
   virtual ~SpdySession();
 
-  // Used by SpdySessionPool to initialize with a pre-existing SSL socket.
-  void InitializeWithSSLSocket(ClientSocketHandle* connection);
+  void ProcessPendingCreateStreams();
+  int CreateStreamImpl(
+      const GURL& url,
+      RequestPriority priority,
+      scoped_refptr<SpdyStream>* spdy_stream,
+      const BoundNetLog& stream_net_log);
 
   // SpdyFramerVisitorInterface
   virtual void OnError(spdy::SpdyFramer*);
@@ -120,9 +181,9 @@ class SpdySession : public base::RefCounted<SpdySession>,
 
   // Control frame handlers.
   void OnSyn(const spdy::SpdySynStreamControlFrame& frame,
-             const spdy::SpdyHeaderBlock& headers);
+             const linked_ptr<spdy::SpdyHeaderBlock>& headers);
   void OnSynReply(const spdy::SpdySynReplyControlFrame& frame,
-                  const spdy::SpdyHeaderBlock& headers);
+                  const linked_ptr<spdy::SpdyHeaderBlock>& headers);
   void OnFin(const spdy::SpdyRstStreamControlFrame& frame);
   void OnGoAway(const spdy::SpdyGoAwayControlFrame& frame);
   void OnSettings(const spdy::SpdySettingsControlFrame& frame);
@@ -136,8 +197,13 @@ class SpdySession : public base::RefCounted<SpdySession>,
   // Send relevant SETTINGS.  This is generally called on connection setup.
   void SendSettings();
 
+  // Handle SETTINGS.  Either when we send settings, or when we receive a
+  // SETTINGS ontrol frame, update our SpdySession accordingly.
+  void HandleSettings(const spdy::SpdySettings& settings);
+
   // Start reading from the socket.
-  void ReadSocket();
+  // Returns OK on success, or an error on failure.
+  net::Error ReadSocket();
 
   // Write current data to the socket.
   void WriteSocketLater();
@@ -153,27 +219,27 @@ class SpdySession : public base::RefCounted<SpdySession>,
   void QueueFrame(spdy::SpdyFrame* frame, spdy::SpdyPriority priority,
                   SpdyStream* stream);
 
-  // Closes this session.  This will close all active streams and mark
-  // the session as permanently closed.
-  // |err| should not be OK; this function is intended to be called on
-  // error.
-  void CloseSessionOnError(net::Error err);
-
   // Track active streams in the active stream list.
   void ActivateStream(SpdyStream* stream);
-  void DeactivateStream(spdy::SpdyStreamId id);
+  void DeleteStream(spdy::SpdyStreamId id, int status);
+
+  // Removes this session from the session pool.
+  void RemoveFromPool();
 
   // Check if we have a pending pushed-stream for this url
   // Returns the stream if found (and returns it from the pending
   // list), returns NULL otherwise.
-  scoped_refptr<SpdyStream> GetPushStream(const std::string& url);
+  scoped_refptr<SpdyStream> GetActivePushStream(const std::string& url);
 
-  // Creates an HttpResponseInfo instance, and calls OnResponseReceived().
+  // Calls OnResponseReceived().
   // Returns true if successful.
   bool Respond(const spdy::SpdyHeaderBlock& headers,
                const scoped_refptr<SpdyStream> stream);
 
-  void GetSSLInfo(SSLInfo* ssl_info);
+  void RecordHistograms();
+
+  // Closes all streams.  Used as part of shutdown.
+  void CloseAllStreams(net::Error status);
 
   // Callbacks for the Spdy session.
   CompletionCallbackImpl<SpdySession> connect_callback_;
@@ -197,6 +263,10 @@ class SpdySession : public base::RefCounted<SpdySession>,
 
   int stream_hi_water_mark_;  // The next stream id to use.
 
+  // Queue, for each priority, of pending Create Streams that have not
+  // yet been satisfied
+  PendingCreateStreamQueue create_stream_queues_[NUM_PRIORITIES];
+
   // TODO(mbelshe): We need to track these stream lists better.
   //                I suspect it is possible to remove a stream from
   //                one list, but not the other.
@@ -212,7 +282,7 @@ class SpdySession : public base::RefCounted<SpdySession>,
   ActiveStreamMap active_streams_;
   // List of all the streams that have already started to be pushed by the
   // server, but do not have consumers yet.
-  ActiveStreamList pushed_streams_;
+  ActivePushedStreamList pushed_streams_;
   // List of streams declared in X-Associated-Content headers, but do not have
   // consumers yet.
   // The key is a string representing the path of the URI being pushed.
@@ -231,6 +301,9 @@ class SpdySession : public base::RefCounted<SpdySession>,
   // Flag if we're using an SSL connection for this SpdySession.
   bool is_secure_;
 
+  // Certificate error code when using a secure connection.
+  int certificate_error_code_;
+
   // Spdy Frame state.
   spdy::SpdyFramer spdy_framer_;
 
@@ -240,11 +313,21 @@ class SpdySession : public base::RefCounted<SpdySession>,
   net::Error error_;
   State state_;
 
+  // Limits
+  size_t max_concurrent_streams_;  // 0 if no limit
+
   // Some statistics counters for the session.
   int streams_initiated_count_;
   int streams_pushed_count_;
   int streams_pushed_and_claimed_count_;
   int streams_abandoned_count_;
+  bool sent_settings_;      // Did this session send settings when it started.
+  bool received_settings_;  // Did this session receive at least one settings
+                            // frame.
+
+  bool in_session_pool_;  // True if the session is currently in the pool.
+
+  BoundNetLog net_log_;
 
   static bool use_ssl_;
 };

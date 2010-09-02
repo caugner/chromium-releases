@@ -33,7 +33,7 @@ class AudioRendererBase : public AudioRenderer {
   // MediaFilter implementation.
   virtual void Play(FilterCallback* callback);
   virtual void Pause(FilterCallback* callback);
-  virtual void Stop();
+  virtual void Stop(FilterCallback* callback);
 
   virtual void Seek(base::TimeDelta time, FilterCallback* callback);
 
@@ -55,9 +55,9 @@ class AudioRendererBase : public AudioRenderer {
   // this time, such as stopping any running threads.
   virtual void OnStop() = 0;
 
-  // Called when a AudioDecoder::Read() completes and decrements
+  // Called when a AudioDecoder completes decoding and decrements
   // |pending_reads_|.
-  virtual void OnReadComplete(Buffer* buffer_in);
+  virtual void OnFillBufferDone(scoped_refptr<Buffer> buffer_in);
 
   // Fills the given buffer with audio data by delegating to its |algorithm_|.
   // FillBuffer() also takes care of updating the clock. Returns the number of

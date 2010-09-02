@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,12 @@
 #ifndef CHROME_BROWSER_GTK_BOOKMARK_BUBBLE_GTK_H_
 #define CHROME_BROWSER_GTK_BOOKMARK_BUBBLE_GTK_H_
 
-#include <gtk/gtk.h>
-
 #include <string>
 #include <vector>
 
 #include "app/gtk_signal.h"
 #include "base/basictypes.h"
+#include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "chrome/browser/gtk/info_bubble_gtk.h"
 #include "chrome/common/notification_observer.h"
@@ -27,6 +26,10 @@
 
 class BookmarkNode;
 class Profile;
+class RecentlyUsedFoldersComboModel;
+
+typedef struct _GtkWidget GtkWidget;
+typedef struct _GParamSpec GParamSpec;
 
 class BookmarkBubbleGtk : public InfoBubbleGtkDelegate,
                           public NotificationObserver {
@@ -74,6 +77,8 @@ class BookmarkBubbleGtk : public InfoBubbleGtkDelegate,
   // Return the UTF8 encoded title for the current |url_|.
   std::string GetTitle();
 
+  void InitFolderComboModel();
+
   // The URL of the bookmark.
   GURL url_;
   // Our current profile (used to access the bookmark system).
@@ -101,9 +106,7 @@ class BookmarkBubbleGtk : public InfoBubbleGtkDelegate,
 
   // The combo box for selecting the bookmark folder.
   GtkWidget* folder_combo_;
-
-  // The bookmark nodes in |folder_combo_|.
-  std::vector<const BookmarkNode*> folder_nodes_;
+  scoped_ptr<RecentlyUsedFoldersComboModel> folder_combo_model_;
 
   InfoBubbleGtk* bubble_;
 

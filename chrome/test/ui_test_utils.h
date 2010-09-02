@@ -5,6 +5,7 @@
 #ifndef CHROME_TEST_UI_TEST_UTILS_H_
 #define CHROME_TEST_UI_TEST_UTILS_H_
 
+#include <map>
 #include <string>
 #include <set>
 
@@ -20,6 +21,8 @@
 #include "chrome/test/automation/dom_element_proxy.h"
 
 class AppModalDialog;
+class BookmarkModel;
+class BookmarkNode;
 class Browser;
 class CommandLine;
 class DownloadManager;
@@ -156,10 +159,6 @@ void WaitForFocusChange(RenderViewHost* rvh);
 // traversal).
 void WaitForFocusInBrowser(Browser* browser);
 
-// Waits for the language of the page to have been detected and returns it.
-// This should be called right after a navigation notification was received.
-std::string WaitForLanguageDetection(TabContents* tab_contents);
-
 // Performs a find in the page of the specified tab. Returns the number of
 // matches found.  |ordinal| is an optional parameter which is set to the index
 // of the current match.
@@ -183,6 +182,9 @@ void WaitForNotification(NotificationType::Type type);
 void RegisterAndWait(NotificationObserver* observer,
                      NotificationType::Type type,
                      const NotificationSource& source);
+
+// Blocks until |model| finishes loading.
+void WaitForBookmarkModelToLoad(BookmarkModel* model);
 
 // Run a message loop only for the specified amount of time.
 class TimedMessageLoopRunner {
@@ -222,8 +224,7 @@ class TimedMessageLoopRunner {
 // object, and is stopped when the destructor is called. Note that
 // because of the underlying script that is used:
 //
-//    third_paty/WebKit/WebKitTools/Scripts/webkitpy/layout_tests/port/
-//        websocket_server.py
+//    third_paty/WebKit/WebKitTools/Scripts/new-run-webkit-websocketserver
 //
 // Only *_wsh.py handlers found under "websocket/tests" from the
 // |root_directory| will be found and active while running the test
@@ -379,6 +380,40 @@ class WindowedNotificationObserver : public NotificationObserver {
   NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowedNotificationObserver);
+};
+
+// Similar to WindowedNotificationObserver but also provides a way of retrieving
+// the details associated with the notification.
+// Note that in order to use that class the details class should be copiable,
+// which is the case with most notifications.
+template <class T, class U>
+class WindowedNotificationObserverWithDetails
+    : public WindowedNotificationObserver<T> {
+ public:
+  WindowedNotificationObserverWithDetails(NotificationType notification_type,
+                                          T* source)
+      : WindowedNotificationObserver<T>(notification_type, source) {}
+
+  // Fills |details| with the details of the notification received for |source|.
+  bool GetDetailsFor(T* source, U* details) {
+    typename std::map<T*, U>::const_iterator iter = details_.find(source);
+    if (iter == details_.end())
+      return false;
+    *details = iter->second;
+    return true;
+  }
+
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) {
+    details_[Source<T>(source).ptr()] = *Details<U>(details).ptr();
+    WindowedNotificationObserver<T>::Observe(type, source, details);
+  }
+
+ private:
+  std::map<T*, U> details_;
+
+  DISALLOW_COPY_AND_ASSIGN(WindowedNotificationObserverWithDetails);
 };
 
 }  // namespace ui_test_utils

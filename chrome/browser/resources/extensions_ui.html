@@ -140,7 +140,7 @@ html[dir=rtl] .developer-mode {
 }
 
 .extension_disabled td {
-  background: url('gray.png') 0px 0px;
+  background-color: #f0f0f0;
   color: #a0a0a0;
   padding-bottom: 4px;
   padding-top: 5px;
@@ -323,6 +323,19 @@ html[dir=rtl] #dialogContentFooter {
 .inspectPopupNote {
   color: grey;
 }
+
+.incognitoWarning {
+  margin: 0.75em 0;
+  display: none;
+  opacity: 0;
+  -webkit-transition: opacity .2s ease-out;
+}
+
+.incognitoWarning .yellow {
+  background:#fff299;
+  padding:2px 5px;
+  border-radius:3px;
+}
 </style>
 <script>
 /**
@@ -339,6 +352,8 @@ var extensionDataFormat = {
       'version': '1.0.231',
       'enabled': 'true',
       'enabledIncognito': 'false',
+      'wantsFileAccess': 'false',
+      'allowFileAccess': 'false',
       'allow_reload': true,
       'order': 1,
       'options_url': 'options.html',
@@ -379,6 +394,8 @@ var extensionDataFormat = {
       'version': '1.0.231',
       'enabled': 'true',
       'enabledIncognito': 'false',
+      'wantsFileAccess': 'false',
+      'allowFileAccess': 'false',
       'allow_reload': false,
       'order': 2,
       'icon': '',
@@ -486,6 +503,20 @@ function returnExtensionsData(extensionsData){
   for (var i = 0; i < slidables.length; i++)
     slidables[i].style.height = slidables[i].offsetHeight + 'px';
 
+  // Hide all the incognito warnings that are attached to the wrong extension
+  // ID, which can happen when an extension is added or removed.
+  var warnings = document.getElementsByClassName('incognitoWarning');
+  for (var i = 0; i < warnings.length; i++) {
+    var extension = warnings[i];
+    while (extension.className != "extension")
+      extension = extension.parentNode;
+
+    if (extension.extensionId != warnings[i].attachedExtensionId) {
+      warnings[i].style.display = "none";
+      warnings[i].style.opacity = "0";
+    }
+  }
+
   // Reset visibility of page based on the current dev mode.
   document.getElementById('collapse').style.display =
      devModeExpanded ? 'inline' : 'none';
@@ -543,22 +574,41 @@ function handleEnableExtension(node, enable) {
 /**
  * Handles the 'enableIncognito' checkbox getting changed.
  */
-function handleToggleExtensionIncognito(node, toggleCheckbox) {
-  var enable = toggleCheckbox ? !node.checked : node.checked;
+function handleToggleExtensionIncognito(node) {
+  var warning = node;
 
-  // This is kinda cheesy, but if we're enabling, we have to wait for the
-  // prompt, so don't show as enabled until the user says OK.
-  node.checked = false;
+  while (warning.className != "extension")
+    warning = warning.parentNode;
 
-  chrome.send('enableIncognito', [node.extensionId, String(enable)]);
-  requestExtensionsData();
+  warning = warning.getElementsByClassName("incognitoWarning")[0];
+  if (!node.checked) {
+    warning.style.display = "none";
+    warning.style.opacity = "0";
+  } else {
+    warning.attachedExtensionId = node.extensionId;
+    warning.style.display = "block";
+
+    // Must set the opacity later. Otherwise, the fact that the display is
+    // changing causes the animation to not happen.
+    window.setTimeout(function() {
+      warning.style.opacity = "1";
+    }, 0);
+  }
+
+  chrome.send('enableIncognito', [node.extensionId, String(node.checked)]);
+}
+
+/**
+ * Handles the 'allowFileAccess' checkbox getting changed.
+ */
+function handleToggleAllowFileAccess(node) {
+  chrome.send('allowFileAccess', [node.extensionId, String(node.checked)]);
 }
 
 /**
  * Handles an 'uninstall' button getting clicked.
  */
 function handleUninstallExtension(node) {
-  // Tell the C++ ExtensionDOMHandler to uninstall an extension.
   chrome.send('uninstall', [node.extensionId]);
 }
 
@@ -735,9 +785,9 @@ document.addEventListener('DOMContentLoaded', requestExtensionsData);
             <td width="18" padding="">
               <img id="collapse" class="developer-mode-image"
                    style="display:none" onclick="toggleDeveloperMode();"
-                   src="minus.png">
+                   src="shared/images/minus.png">
               <img id="expand" class="developer-mode-image"
-                   onclick="toggleDeveloperMode();" src="plus.png">
+                   onclick="toggleDeveloperMode();" src="shared/images/plus.png">
             </td>
             <td width="50" align="right">
               <div class="developer-mode-link">
@@ -770,7 +820,7 @@ document.addEventListener('DOMContentLoaded', requestExtensionsData);
         </div>
 
         <div jsdisplay="extensions.length > 0">
-        <div class="extension" jsselect="extensions">
+        <div class="extension" jsselect="extensions" jsvalues=".extensionId:id">
           <table width="100%" cellpadding="2" cellspacing="0">
           <tr jsvalues=".className:enabled ? 'extension_enabled' : 'extension_disabled'">
           <td width="62" height="50" align="center" valign="top">
@@ -779,7 +829,12 @@ document.addEventListener('DOMContentLoaded', requestExtensionsData);
           </td>
           <td valign="top">
             <div>
+              <a jsdisplay="galleryUrl.length > 0"
+                 jsvalues=".href:galleryUrl">
               <span class="extension-name"
+                    jscontent="name">EXTENSION NAME</span></a>
+              <span class="extension-name"
+                    jsdisplay="galleryUrl.length == 0"
                     jscontent="name">EXTENSION NAME</span>
               - <span i18n-content="extensionVersion">VERSION</span>
               <span jscontent="version">x.x.x.x</span>
@@ -851,17 +906,26 @@ document.addEventListener('DOMContentLoaded', requestExtensionsData);
                   href="javascript:void 0;"
                   i18n-content="options"
                   >OPTIONS</a>
+                <label
+                  jsdisplay="enabled">
                 <input type="checkbox"
                   jsvalues=".extensionId:id;.enabled:enabled"
                   jsdisplay="enabled"
                   jseval="this.checked = enabledIncognito"
-                  onchange="handleToggleExtensionIncognito(this, false)">
+                  onchange="handleToggleExtensionIncognito(this)">
+                <span i18n-content="enableIncognito">ALLOW THIS EXTENSION TO RUN IN INCOGNITO</span></label>
                 <label
-                  jsdisplay="enabled"
-                  onclick="handleToggleExtensionIncognito(this.previousSibling.previousSibling, true)"
-                  i18n-content="enableIncognito">
-                  ALLOW THIS EXTENSION TO RUN IN INCOGNITO</label>
+                  jsdisplay="enabled && wantsFileAccess">
+                <input type="checkbox"
+                  jsvalues=".extensionId:id;.enabled:enabled;.wantsFileAccess:wantsFileAccess"
+                  jsdisplay="enabled && wantsFileAccess"
+                  jseval="this.checked = allowFileAccess"
+                  onchange="handleToggleAllowFileAccess(this)">
+                <span i18n-content="allowFileAccess">ALLOW THIS EXTENSION ACCESS TO FILE URLS</span></label>
               </span>
+            </div>
+            <div class="incognitoWarning">
+              <span class="yellow" i18n-values=".innerHTML:incognitoWarning">WARNING - CHROME CANNOT PREVENT THIS EXTENSION FROM RECORDING YOUR BROWSING HISTORY</span>
             </div>
           </td>
           </tr>

@@ -15,6 +15,7 @@
 #include "app/sql/connection.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
@@ -34,6 +35,7 @@
 #include "chrome/test/automation/automation_messages.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
+#include "chrome/test/automation/javascript_execution_controller.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/chrome_process_util.h"
@@ -51,11 +53,11 @@ using base::TimeTicks;
 
 // Delay to let browser complete a requested action.
 static const int kWaitForActionMsec = 2000;
-static const int kWaitForActionMaxMsec = 60000;
+static const int kWaitForActionMaxMsec = 15000;
 // Command execution timeout passed to AutomationProxy.
-static const int kCommandExecutionTimeout = 30000;
+static const int kCommandExecutionTimeout = 25000;
 // Delay to let the browser shut down before trying more brutal methods.
-static const int kWaitForTerminateMsec = 30000;
+static const int kWaitForTerminateMsec = 15000;
 // Passed as value of kTestType.
 static const char kUITestType[] = "ui";
 
@@ -75,12 +77,11 @@ bool UITestBase::no_sandbox_ = false;
 bool UITestBase::full_memory_dump_ = false;
 bool UITestBase::safe_plugins_ = false;
 bool UITestBase::show_error_dialogs_ = true;
-bool UITestBase::default_use_existing_browser_ = false;
 bool UITestBase::dump_histograms_on_exit_ = false;
 bool UITestBase::enable_dcheck_ = false;
 bool UITestBase::silent_dump_on_dcheck_ = false;
 bool UITestBase::disable_breakpad_ = false;
-int UITestBase::timeout_ms_ = 20 * 60 * 1000;
+int UITestBase::timeout_ms_ = 10 * 60 * 1000;
 std::wstring UITestBase::js_flags_ = L"";
 std::wstring UITestBase::log_level_ = L"";
 
@@ -111,12 +112,11 @@ UITestBase::UITestBase()
       homepage_(L"about:blank"),
       wait_for_initial_loads_(true),
       dom_automation_enabled_(false),
-      process_(0),  // NULL on Windows, 0 PID on POSIX.
+      process_(base::kNullProcessHandle),
       process_id_(-1),
       show_window_(false),
       clear_profile_(true),
       include_testing_id_(true),
-      use_existing_browser_(default_use_existing_browser_),
       enable_file_cookies_(true),
       profile_type_(UITestBase::DEFAULT_THEME),
       shutdown_type_(UITestBase::WINDOW_CLOSE),
@@ -137,12 +137,11 @@ UITestBase::UITestBase(MessageLoop::Type msg_loop_type)
       homepage_(L"about:blank"),
       wait_for_initial_loads_(true),
       dom_automation_enabled_(false),
-      process_(0),  // NULL on Windows, 0 PID on POSIX.
+      process_(base::kNullProcessHandle),
       process_id_(-1),
       show_window_(false),
       clear_profile_(true),
       include_testing_id_(true),
-      use_existing_browser_(default_use_existing_browser_),
       enable_file_cookies_(true),
       profile_type_(UITestBase::DEFAULT_THEME),
       shutdown_type_(UITestBase::WINDOW_CLOSE),
@@ -160,12 +159,11 @@ UITestBase::~UITestBase() {
 }
 
 void UITestBase::SetUp() {
-  if (!use_existing_browser_) {
-    AssertAppNotRunning(L"Please close any other instances "
-                        L"of the app before testing.");
-  }
+  AssertAppNotRunning(L"Please close any other instances "
+                      L"of the app before testing.");
 
   InitializeTimeouts();
+  JavaScriptExecutionController::set_timeout(action_max_timeout_ms_);
   LaunchBrowserAndServer();
 }
 
@@ -280,19 +278,7 @@ void UITestBase::CloseBrowserAndServer() {
 }
 
 static CommandLine* CreatePythonCommandLine() {
-#if defined(OS_WIN)
-  // Get path to python interpreter
-  FilePath python_runtime;
-  if (!PathService::Get(base::DIR_SOURCE_ROOT, &python_runtime))
-    return NULL;
-  python_runtime = python_runtime
-      .Append(FILE_PATH_LITERAL("third_party"))
-      .Append(FILE_PATH_LITERAL("python_24"))
-      .Append(FILE_PATH_LITERAL("python.exe"));
-  return new CommandLine(python_runtime);
-#elif defined(OS_POSIX)
-  return new CommandLine(FilePath("python"));
-#endif
+  return new CommandLine(FilePath(FILE_PATH_LITERAL("python")));
 }
 
 static CommandLine* CreateHttpServerCommandLine() {
@@ -410,14 +396,13 @@ void UITestBase::LaunchBrowser(const CommandLine& arguments,
     UpdateHistoryDates();
   }
 
-  ASSERT_TRUE(LaunchBrowserHelper(arguments, use_existing_browser_, false,
-                                  &process_));
+  ASSERT_TRUE(LaunchBrowserHelper(arguments, false, &process_));
   process_id_ = base::GetProcId(process_);
 }
 
 bool UITestBase::LaunchAnotherBrowserBlockUntilClosed(
     const CommandLine& cmdline) {
-  return LaunchBrowserHelper(cmdline, false, true, NULL);
+  return LaunchBrowserHelper(cmdline, true, NULL);
 }
 
 void UITestBase::QuitBrowser() {
@@ -635,7 +620,10 @@ bool UITestBase::WaitForDownloadShelfVisibilityChange(BrowserProxy* browser,
   const int kCycles = 10;
   for (int i = 0; i < kCycles; i++) {
     // Give it a chance to catch up.
-    PlatformThread::Sleep(sleep_timeout_ms() / kCycles);
+    bool browser_survived = CrashAwareSleep(sleep_timeout_ms() / kCycles);
+    EXPECT_TRUE(browser_survived);
+    if (!browser_survived)
+      return false;
 
     bool visible = !wait_for_open;
     if (!browser->IsShelfVisible(&visible))
@@ -643,6 +631,8 @@ bool UITestBase::WaitForDownloadShelfVisibilityChange(BrowserProxy* browser,
     if (visible == wait_for_open)
       return true;  // Got the download shelf.
   }
+
+  ADD_FAILURE() << "Timeout reached in WaitForDownloadShelfVisibilityChange";
   return false;
 }
 
@@ -657,8 +647,13 @@ bool UITestBase::WaitForFindWindowVisibilityChange(BrowserProxy* browser,
       return true;  // Find window visibility change complete.
 
     // Give it a chance to catch up.
-    PlatformThread::Sleep(sleep_timeout_ms() / kCycles);
+    bool browser_survived = CrashAwareSleep(sleep_timeout_ms() / kCycles);
+    EXPECT_TRUE(browser_survived);
+    if (!browser_survived)
+      return false;
   }
+
+  ADD_FAILURE() << "Timeout reached in WaitForFindWindowVisibilityChange";
   return false;
 }
 
@@ -674,8 +669,13 @@ bool UITestBase::WaitForBookmarkBarVisibilityChange(BrowserProxy* browser,
       return true;  // Bookmark bar visibility change complete.
 
     // Give it a chance to catch up.
-    PlatformThread::Sleep(sleep_timeout_ms() / kCycles);
+    bool browser_survived = CrashAwareSleep(sleep_timeout_ms() / kCycles);
+    EXPECT_TRUE(browser_survived);
+    if (!browser_survived)
+      return false;
   }
+
+  ADD_FAILURE() << "Timeout reached in WaitForBookmarkBarVisibilityChange";
   return false;
 }
 
@@ -790,6 +790,7 @@ bool UITestBase::WaitUntilCookieValue(TabProxy* tab,
       return true;
   }
 
+  ADD_FAILURE() << "Timeout reached in WaitUntilCookieValue";
   return false;
 }
 
@@ -812,6 +813,7 @@ std::string UITestBase::WaitUntilCookieNonEmpty(TabProxy* tab,
       return cookie_value;
   }
 
+  ADD_FAILURE() << "Timeout reached in WaitUntilCookieNonEmpty";
   return std::string();
 }
 
@@ -839,16 +841,24 @@ bool UITestBase::WaitUntilJavaScriptCondition(TabProxy* tab,
       return true;
   }
 
+  ADD_FAILURE() << "Timeout reached in WaitUntilJavaScriptCondition";
   return false;
 }
 
 void UITestBase::WaitUntilTabCount(int tab_count) {
-  for (int i = 0; i < 10; ++i) {
-    PlatformThread::Sleep(sleep_timeout_ms() / 10);
+  const int kMaxIntervals = 10;
+  const int kIntervalMs = sleep_timeout_ms() / kMaxIntervals;
+
+  for (int i = 0; i < kMaxIntervals; ++i) {
+    bool browser_survived = CrashAwareSleep(kIntervalMs);
+    EXPECT_TRUE(browser_survived);
+    if (!browser_survived)
+      return;
     if (GetTabCount() == tab_count)
-      break;
+      return;
   }
-  EXPECT_EQ(tab_count, GetTabCount());
+
+  ADD_FAILURE() << "Timeout reached in WaitUntilTabCount";
 }
 
 FilePath UITestBase::GetDownloadDirectory() {
@@ -909,11 +919,10 @@ void UITestBase::WaitForFinish(const std::string &name,
 
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
-  bool test_result = WaitUntilCookieValue(tab.get(), url,
-                                          cookie_name.c_str(),
-                                          wait_time,
-                                          expected_cookie_value.c_str());
-  EXPECT_EQ(true, test_result);
+  std::string cookie_value = WaitUntilCookieNonEmpty(tab.get(), url,
+                                                     cookie_name.c_str(),
+                                                     wait_time);
+  EXPECT_EQ(expected_cookie_value, cookie_value);
 }
 
 void UITestBase::PrintResult(const std::string& measurement,
@@ -1044,11 +1053,12 @@ FilePath UITestBase::ComputeTypicalUserDataSource(ProfileType profile_type) {
   return source_history_file;
 }
 
-void UITestBase::WaitForGeneratedFileAndCheck(const FilePath& generated_file,
-                                          const FilePath& original_file,
-                                          bool compare_files,
-                                          bool need_equal,
-                                          bool delete_generated_file) {
+void UITestBase::WaitForGeneratedFileAndCheck(
+    const FilePath& generated_file,
+    const FilePath& original_file,
+    bool compare_files,
+    bool need_equal,
+    bool delete_generated_file) {
   // Check whether the target file has been generated.
   file_util::FileInfo previous, current;
   bool exist = false;
@@ -1088,9 +1098,8 @@ void UITestBase::WaitForGeneratedFileAndCheck(const FilePath& generated_file,
 }
 
 bool UITestBase::LaunchBrowserHelper(const CommandLine& arguments,
-                                 bool use_existing_browser,
-                                 bool wait,
-                                 base::ProcessHandle* process) {
+                                     bool wait,
+                                     base::ProcessHandle* process) {
   FilePath command = browser_directory_.Append(
       FilePath::FromWStringHack(chrome::kBrowserProcessExecutablePath));
   CommandLine command_line(command);
@@ -1125,18 +1134,8 @@ bool UITestBase::LaunchBrowserHelper(const CommandLine& arguments,
     command_line.AppendSwitch(switches::kDomAutomationController);
 
   if (include_testing_id_) {
-    if (use_existing_browser) {
-      // TODO(erikkay): The new switch depends on a browser instance already
-      // running, it won't open a new browser window if it's not.  We could fix
-      // this by passing an url (e.g. about:blank) on the command line, but
-      // I decided to keep using the old switch in the existing use case to
-      // minimize changes in behavior.
-      command_line.AppendSwitchWithValue(switches::kAutomationClientChannelID,
-                                         ASCIIToWide(server_->channel_id()));
-    } else {
-      command_line.AppendSwitchWithValue(switches::kTestingChannelID,
-                                         ASCIIToWide(server_->channel_id()));
-    }
+    command_line.AppendSwitchWithValue(switches::kTestingChannelID,
+                                       ASCIIToWide(server_->channel_id()));
   }
 
   if (!show_error_dialogs_ &&
@@ -1191,6 +1190,9 @@ bool UITestBase::LaunchBrowserHelper(const CommandLine& arguments,
   // The tests assume that file:// URIs can freely access other file:// URIs.
   command_line.AppendSwitch(switches::kAllowFileAccessFromFiles);
 
+  // Disable TabCloseableStateWatcher for tests.
+  command_line.AppendSwitch(switches::kDisableTabCloseableStateWatcher);
+
   DebugFlags::ProcessDebugFlags(
       &command_line, ChildProcessInfo::UNKNOWN_PROCESS, false);
   command_line.AppendArguments(arguments, false);
@@ -1220,28 +1222,8 @@ bool UITestBase::LaunchBrowserHelper(const CommandLine& arguments,
                                  wait,
                                  process);
 #endif
-  if (!started)
-    return false;
 
-  if (use_existing_browser) {
-#if defined(OS_WIN)
-    DWORD pid = 0;
-    HWND hwnd = FindWindowEx(HWND_MESSAGE, NULL, chrome::kMessageWindowClass,
-                             user_data_dir_.value().c_str());
-    GetWindowThreadProcessId(hwnd, &pid);
-    // This mode doesn't work if we wound up launching a new browser ourselves.
-    EXPECT_NE(pid, base::GetProcId(*process));
-    CloseHandle(*process);
-    *process = OpenProcess(SYNCHRONIZE, false, pid);
-#else
-  // TODO(port): above code is very Windows-specific; we need to
-  // figure out and abstract out how we'll handle finding any existing
-  // running process, etc. on other platforms.
-  NOTIMPLEMENTED();
-#endif
-  }
-
-  return true;
+  return started;
 }
 
 void UITestBase::UpdateHistoryDates() {

@@ -47,11 +47,14 @@
 #include "base/string_util.h"
 #include "base/test/test_file_util.h"
 #include "base/time.h"
+#include "chrome/app/chrome_version_info.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/json_pref_store.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -160,9 +163,10 @@ class PageLoadTest : public UITest {
 #if defined(OS_WIN)
     file_info.reset(FileVersionInfo::CreateFileVersionInfo(kChromeDll));
 #elif defined(OS_LINUX) || defined(OS_MACOSX)
-    // TODO(fmeawad): the version retrieved here belongs to the test module and
-    // not the chrome binary, need to be changed to chrome binary instead.
-    file_info.reset(FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+    // TODO(fmeawad): On Mac, the version retrieved here belongs to the test
+    // module and not the chrome binary, need to be changed to chrome binary
+    // instead.
+    file_info.reset(chrome_app::GetChromeVersionInfo());
 #endif  // !defined(OS_WIN)
     std::wstring last_change = file_info->last_change();
     test_log << "Last Change: ";
@@ -269,8 +273,10 @@ class PageLoadTest : public UITest {
       }
     }
 
+#if !defined(OS_MACOSX)  // Not used by mac chromebot.
     // Get stability metrics recorded by Chrome itself.
     GetStabilityMetrics(&metrics);
+#endif
 
     if (log_file.is_open()) {
       log_file << " " << metrics.browser_crash_count \
@@ -524,7 +530,8 @@ class PageLoadTest : public UITest {
     FilePath local_state_path = user_data_dir()
         .Append(chrome::kLocalStateFilename);
 
-    PrefService* local_state(new PrefService(local_state_path));
+    PrefService* local_state = PrefService::CreateUserPrefService(
+        local_state_path);
     return local_state;
   }
 

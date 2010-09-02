@@ -24,6 +24,7 @@
 #include "chrome/browser/views/tab_contents/tab_contents_view_win.h"
 #include "chrome/common/url_constants.h"
 #include "net/base/net_util.h"
+#include "views/drag_utils.h"
 #include "webkit/glue/webdropdata.h"
 
 using WebKit::WebDragOperationsMask;
@@ -103,12 +104,13 @@ TabContentsDragWin::TabContentsDragWin(TabContentsViewWin* view)
 
 TabContentsDragWin::~TabContentsDragWin() {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
-  DCHECK(!drag_source_.get());
   DCHECK(!drag_drop_thread_.get());
 }
 
 void TabContentsDragWin::StartDragging(const WebDropData& drop_data,
-                                       WebDragOperationsMask ops) {
+                                       WebDragOperationsMask ops,
+                                       const SkBitmap& image,
+                                       const gfx::Point& image_offset) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
 
   drag_source_ = new WebDragSource(view_->GetNativeView(),
@@ -119,7 +121,7 @@ void TabContentsDragWin::StartDragging(const WebDropData& drop_data,
 
   // If it is not drag-out, do the drag-and-drop in the current UI thread.
   if (drop_data.download_metadata.empty()) {
-    DoDragging(drop_data, ops, page_url, page_encoding);
+    DoDragging(drop_data, ops, page_url, page_encoding, image, image_offset);
     EndDragging(false);
     return;
   }
@@ -141,7 +143,9 @@ void TabContentsDragWin::StartDragging(const WebDropData& drop_data,
                           drop_data,
                           ops,
                           page_url,
-                          page_encoding));
+                          page_encoding,
+                          image,
+                          image_offset));
   }
 
   // Install a hook procedure to monitor the messages so that we can forward
@@ -163,10 +167,12 @@ void TabContentsDragWin::StartBackgroundDragging(
     const WebDropData& drop_data,
     WebDragOperationsMask ops,
     const GURL& page_url,
-    const std::string& page_encoding) {
+    const std::string& page_encoding,
+    const SkBitmap& image,
+    const gfx::Point& image_offset) {
   drag_drop_thread_id_ = PlatformThread::CurrentId();
 
-  DoDragging(drop_data, ops, page_url, page_encoding);
+  DoDragging(drop_data, ops, page_url, page_encoding, image, image_offset);
   ChromeThread::PostTask(
       ChromeThread::UI, FROM_HERE,
       NewRunnableMethod(this, &TabContentsDragWin::EndDragging, true));
@@ -260,10 +266,10 @@ void TabContentsDragWin::PrepareDragForUrl(const WebDropData& drop_data,
 void TabContentsDragWin::DoDragging(const WebDropData& drop_data,
                                     WebDragOperationsMask ops,
                                     const GURL& page_url,
-                                    const std::string& page_encoding) {
+                                    const std::string& page_encoding,
+                                    const SkBitmap& image,
+                                    const gfx::Point& image_offset) {
   OSExchangeData data;
-
-  // TODO(tc): Generate an appropriate drag image.
 
   if (!drop_data.download_metadata.empty()) {
     PrepareDragForDownload(drop_data, &data, page_url, page_encoding);
@@ -284,9 +290,11 @@ void TabContentsDragWin::DoDragging(const WebDropData& drop_data,
       data.SetString(drop_data.plain_text);
   }
 
-  // Keep a local reference to drag_source_ in case that EndDragging is called
-  // before DoDragDrop returns.
-  scoped_refptr<WebDragSource> drag_source(drag_source_);
+  // Set drag image.
+  if (!image.isNull()) {
+    drag_utils::SetDragImageOnDataObject(
+        image, gfx::Size(image.width(), image.height()), image_offset, &data);
+  }
 
   // We need to enable recursive tasks on the message loop so we can get
   // updates while in the system DoDragDrop loop.
@@ -299,7 +307,7 @@ void TabContentsDragWin::DoDragging(const WebDropData& drop_data,
 
   // This works because WebDragSource::OnDragSourceDrop uses PostTask to
   // dispatch the actual event.
-  drag_source->set_effect(effect);
+  drag_source_->set_effect(effect);
 }
 
 void TabContentsDragWin::EndDragging(bool restore_suspended_state) {
@@ -311,8 +319,6 @@ void TabContentsDragWin::EndDragging(bool restore_suspended_state) {
 
   if (restore_suspended_state)
     view_->drop_target()->set_suspended(old_drop_target_suspended_state_);
-
-  drag_source_ = NULL;
 
   if (msg_hook) {
     AttachThreadInput(drag_out_thread_id, GetCurrentThreadId(), FALSE);

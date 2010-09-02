@@ -41,7 +41,7 @@
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/canvas_paint.h"
+#include "gfx/canvas_skia_paint.h"
 #include "gfx/gtk_util.h"
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
@@ -133,6 +133,7 @@ BookmarkBarGtk::BookmarkBarGtk(BrowserWindowGtk* window,
       instructions_(NULL),
       sync_service_(NULL),
       dragged_node_(NULL),
+      drag_icon_(NULL),
       toolbar_drop_item_(NULL),
       theme_provider_(GtkThemeProvider::GetFrom(profile)),
       show_instructions_(true),
@@ -391,7 +392,7 @@ int BookmarkBarGtk::GetHeight() {
 }
 
 bool BookmarkBarGtk::IsAnimating() {
-  return slide_animation_->IsAnimating();
+  return slide_animation_->is_animating();
 }
 
 bool BookmarkBarGtk::OnNewTabPage() {
@@ -678,7 +679,7 @@ void BookmarkBarGtk::UpdateFloatingState() {
     if (floating_ && widget()->parent) {
       // Only connect once.
       if (g_signal_handler_find(widget()->parent, G_SIGNAL_MATCH_FUNC,
-          0, NULL, NULL, reinterpret_cast<gpointer>(OnParentSizeAllocateThunk),
+          0, 0, NULL, reinterpret_cast<gpointer>(OnParentSizeAllocateThunk),
           NULL) == 0) {
         g_signal_connect(widget()->parent, "size-allocate",
                          G_CALLBACK(OnParentSizeAllocateThunk), this);
@@ -808,8 +809,18 @@ void BookmarkBarGtk::AnimationProgressed(const Animation* animation) {
 void BookmarkBarGtk::AnimationEnded(const Animation* animation) {
   DCHECK_EQ(animation, slide_animation_.get());
 
-  if (!slide_animation_->IsShowing())
+  if (!slide_animation_->IsShowing()) {
     gtk_widget_hide(bookmark_hbox_);
+
+    // We can be windowless during unit tests.
+    if (window_) {
+      // Because of our constant resizing and our toolbar/bookmark bar overlap
+      // shenanigans, gtk+ gets confused, partially draws parts of the bookmark
+      // bar into the toolbar and than doesn't queue a redraw to fix it. So do
+      // it manually by telling the toolbar area to redraw itself.
+      window_->QueueToolbarRedraw();
+    }
+  }
 }
 
 void BookmarkBarGtk::Observe(NotificationType type,
@@ -959,8 +970,7 @@ void BookmarkBarGtk::PopupMenuForNode(GtkWidget* sender,
   GtkWindow* window = GTK_WINDOW(gtk_widget_get_toplevel(sender));
   current_context_menu_controller_.reset(
       new BookmarkContextMenuController(
-          window, this, profile_, page_navigator_, parent, nodes,
-          BookmarkContextMenuController::BOOKMARK_BAR));
+          window, this, profile_, page_navigator_, parent, nodes));
   current_context_menu_.reset(
       new MenuGtk(NULL, current_context_menu_controller_->menu_model()));
   current_context_menu_->PopupAsContext(event->time);
@@ -968,7 +978,9 @@ void BookmarkBarGtk::PopupMenuForNode(GtkWidget* sender,
 
 gboolean BookmarkBarGtk::OnButtonPressed(GtkWidget* sender,
                                          GdkEventButton* event) {
-  if (event->button == 3) {
+  last_pressed_coordinates_ = gfx::Point(event->x, event->y);
+
+  if (event->button == 3 && GTK_WIDGET_VISIBLE(bookmark_hbox_)) {
     const BookmarkNode* node = GetNodeForToolButton(sender);
     DCHECK(node);
     DCHECK(page_navigator_);
@@ -981,8 +993,8 @@ gboolean BookmarkBarGtk::OnButtonPressed(GtkWidget* sender,
 gboolean BookmarkBarGtk::OnSyncErrorButtonPressed(GtkWidget* sender,
                                                   GdkEventButton* event) {
   if (sender == sync_error_button_) {
-    DCHECK(sync_service_);
-    sync_service_->ShowLoginDialog();
+    DCHECK(sync_service_ && !sync_service_->IsManaged());
+    sync_service_->ShowLoginDialog(NULL);
   }
 
   return FALSE;
@@ -1014,11 +1026,20 @@ void BookmarkBarGtk::OnButtonDragBegin(GtkWidget* button,
   dragged_node_ = node;
   DCHECK(dragged_node_);
 
-  GtkWidget* window = bookmark_utils::GetDragRepresentation(
+  drag_icon_ = bookmark_utils::GetDragRepresentationForNode(
       node, model_, theme_provider_);
-  gint x, y;
-  gtk_widget_get_pointer(button, &x, &y);
-  gtk_drag_set_icon_widget(drag_context, window, x, y);
+
+  // We have to jump through some hoops to get the drag icon to line up because
+  // it is a different size than the button.
+  GtkRequisition req;
+  gtk_widget_size_request(drag_icon_, &req);
+  gfx::Rect button_rect = gtk_util::WidgetBounds(button);
+  gfx::Point drag_icon_relative =
+      gfx::Rect(req.width, req.height).CenterPoint().Add(
+          (last_pressed_coordinates_.Subtract(button_rect.CenterPoint())));
+  gtk_drag_set_icon_widget(drag_context, drag_icon_,
+                           drag_icon_relative.x(),
+                           drag_icon_relative.y());
 
   // Hide our node, but reserve space for it on the toolbar.
   int index = gtk_toolbar_get_item_index(GTK_TOOLBAR(bookmark_toolbar_.get()),
@@ -1040,10 +1061,16 @@ void BookmarkBarGtk::OnButtonDragEnd(GtkWidget* button,
   if (toolbar_drop_item_) {
     g_object_unref(toolbar_drop_item_);
     toolbar_drop_item_ = NULL;
+    gtk_toolbar_set_drop_highlight_item(GTK_TOOLBAR(bookmark_toolbar_.get()),
+                                        NULL, 0);
   }
 
   DCHECK(dragged_node_);
   dragged_node_ = NULL;
+
+  DCHECK(drag_icon_);
+  gtk_widget_destroy(drag_icon_);
+  drag_icon_ = NULL;
 
   g_object_unref(button->parent);
 }
@@ -1240,7 +1267,7 @@ gboolean BookmarkBarGtk::OnEventBoxExpose(GtkWidget* widget,
     gfx::Size tab_contents_size;
     if (!GetTabContentsSize(&tab_contents_size))
       return FALSE;
-    gfx::CanvasPaint canvas(event, true);
+    gfx::CanvasSkiaPaint canvas(event, true);
 
     gfx::Rect area = GTK_WIDGET_NO_WINDOW(widget) ?
         gfx::Rect(widget->allocation) :
@@ -1298,13 +1325,11 @@ void BookmarkBarGtk::PopupForButton(GtkWidget* button) {
   }
 
   current_menu_.reset(
-      new BookmarkMenuController(browser_, profile_,
-                                 page_navigator_,
+      new BookmarkMenuController(browser_, profile_, page_navigator_,
                                  GTK_WINDOW(gtk_widget_get_toplevel(button)),
                                  node,
                                  button == overflow_button_ ?
-                                     first_hidden : 0,
-                                 false));
+                                     first_hidden : 0));
   menu_bar_helper_.MenuStartedShowing(button, current_menu_->widget());
   GdkEvent* event = gtk_get_current_event();
   current_menu_->Popup(button, event->button.button, event->button.time);

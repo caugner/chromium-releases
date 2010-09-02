@@ -27,7 +27,7 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
 #include "skia/ext/skia_utils_mac.h"
-#import "third_party/mozilla/include/NSPasteboard+Utils.h"
+#import "third_party/mozilla/NSPasteboard+Utils.h"
 
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
@@ -63,7 +63,8 @@ TabContentsView* TabContentsView::Create(TabContents* tab_contents) {
 }
 
 TabContentsViewMac::TabContentsViewMac(TabContents* tab_contents)
-    : TabContentsView(tab_contents) {
+    : TabContentsView(tab_contents),
+      preferred_width_(0) {
   registrar_.Add(this, NotificationType::TAB_CONTENTS_CONNECTED,
                  Source<TabContents>(tab_contents));
 }
@@ -153,10 +154,10 @@ void TabContentsViewMac::StartDragging(
 }
 
 void TabContentsViewMac::RenderViewCreated(RenderViewHost* host) {
-  // We want updates whenever the intrinsic width of the webpage
-  // changes. Put the RenderView into that mode.
-  int routing_id = host->routing_id();
-  host->Send(new ViewMsg_EnablePreferredSizeChangedMode(routing_id));
+  // We want updates whenever the intrinsic width of the webpage changes.
+  // Put the RenderView into that mode. The preferred width is used for example
+  // when the "zoom" button in the browser window is clicked.
+  host->EnablePreferredSizeChangedMode(kPreferredSizeWidth);
 }
 
 void TabContentsViewMac::SetPageTitle(const std::wstring& title) {
@@ -217,6 +218,11 @@ void TabContentsViewMac::RestoreFocus() {
   }
 
   focus_tracker_.reset(nil);
+}
+
+void TabContentsViewMac::UpdatePreferredSize(const gfx::Size& pref_size) {
+  preferred_width_ = pref_size.width();
+  TabContentsView::UpdatePreferredSize(pref_size);
 }
 
 void TabContentsViewMac::UpdateDragCursor(WebDragOperation operation) {

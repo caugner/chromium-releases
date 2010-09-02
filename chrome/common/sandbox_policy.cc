@@ -1,8 +1,10 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/sandbox_policy.h"
+
+#include <string>
 
 #include "app/win_util.h"
 #include "base/command_line.h"
@@ -20,7 +22,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/debug_flags.h"
 #include "sandbox/src/sandbox.h"
-#include "webkit/glue/plugins/plugin_list.h"
 
 static sandbox::BrokerServices* g_broker_services = NULL;
 
@@ -176,20 +177,6 @@ void AddDllEvictionPolicy(sandbox::TargetPolicy* policy) {
   }
 }
 
-bool Is64BitWindows()
-{
-#if defined(_WIN64)
-  return true;  // 64-bit programs run only on Win64
-#elif defined(_WIN32)
-  // 32-bit programs run on both 32-bit and 64-bit Windows
-  // so must sniff.
-  BOOL f64 = FALSE;
-  return IsWow64Process(GetCurrentProcess(), &f64) && f64;
-#else
-  return false;  // no other code can run on 64-bit Windows
-#endif
-}
-
 // Adds the generic policy rules to a sandbox TargetPolicy.
 bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
   sandbox::ResultCode result;
@@ -201,13 +188,11 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
   if (result != sandbox::SBOX_ALL_OK)
     return false;
 
-  if (Is64BitWindows()) {
-    result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
-                             sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
-                             L"\\\\.\\pipe\\chrome.nacl.*");
-    if (result != sandbox::SBOX_ALL_OK)
-      return false;
-  }
+  result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
+                           sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
+                           L"\\\\.\\pipe\\chrome.nacl.*");
+  if (result != sandbox::SBOX_ALL_OK)
+    return false;
 
   // Add the policy for debug message only in debug
 #ifndef NDEBUG
@@ -429,6 +414,11 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
     in_sandbox = false;
   }
 #endif
+  if (browser_command_line.HasSwitch(switches::kEnableExperimentalWebGL) &&
+      browser_command_line.HasSwitch(switches::kInProcessWebGL)) {
+    // In process WebGL won't work if the sandbox is enabled.
+    in_sandbox = false;
+  }
 
   // Propagate the Chrome Frame flag to sandboxed processes if present.
   if (browser_command_line.HasSwitch(switches::kChromeFrame)) {
@@ -440,6 +430,11 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   bool child_needs_help =
       DebugFlags::ProcessDebugFlags(cmd_line, type, in_sandbox);
 
+  // Prefetch hints on windows:
+  // Using a different prefetch profile per process type will allow Windows
+  // to create separate pretetch settings for browser, renderer etc.
+  cmd_line->AppendLooseValue(StringPrintf(L"/prefetch:%d", type));
+
   if (!in_sandbox) {
     base::LaunchApp(*cmd_line, false, false, &process);
     return process;
@@ -450,8 +445,6 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   sandbox::TargetPolicy* policy = g_broker_services->CreatePolicy();
 
   bool on_sandbox_desktop = false;
-  // TODO(gregoryd): try locked-down policy for sel_ldr after we fix IMC.
-  // TODO(gregoryd): do we need a new desktop for sel_ldr?
   if (type == ChildProcessInfo::PLUGIN_PROCESS) {
     if (!AddPolicyForPlugin(cmd_line, policy))
       return 0;
@@ -507,4 +500,4 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   return process;
 }
 
-} // namespace sandbox
+}  // namespace sandbox

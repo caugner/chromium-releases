@@ -22,10 +22,12 @@ class ImageButton : public CustomButton {
   virtual ~ImageButton();
 
   // Set the image the button should use for the provided state.
-  virtual void SetImage(ButtonState aState, SkBitmap* anImage);
+  virtual void SetImage(ButtonState aState, const SkBitmap* anImage);
 
   // Set the background details.
-  virtual void SetBackground(SkColor color, SkBitmap* image, SkBitmap* mask);
+  void SetBackground(SkColor color,
+                     const SkBitmap* image,
+                     const SkBitmap* mask);
 
   enum HorizontalAlignment { ALIGN_LEFT = 0,
                              ALIGN_CENTER,
@@ -43,6 +45,12 @@ class ImageButton : public CustomButton {
   virtual gfx::Size GetPreferredSize();
   virtual void Paint(gfx::Canvas* canvas);
 
+  // Sets preferred size, so it could be correctly positioned in layout even if
+  // it is NULL.
+  void SetPreferredSize(const gfx::Size& preferred_size) {
+    preferred_size_ = preferred_size;
+  }
+
  protected:
   // Returns the image to paint. This is invoked from paint and returns a value
   // from images.
@@ -58,6 +66,7 @@ class ImageButton : public CustomButton {
   // Image alignment.
   HorizontalAlignment h_alignment_;
   VerticalAlignment v_alignment_;
+  gfx::Size preferred_size_;
 
   DISALLOW_COPY_AND_ASSIGN(ImageButton);
 };
@@ -77,16 +86,16 @@ class ToggleImageButton : public ImageButton {
   // Change the toggled state.
   void SetToggled(bool toggled);
 
-  // Like Button::SetImage(), but to set the graphics used for the
+  // Like ImageButton::SetImage(), but to set the graphics used for the
   // "has been toggled" state.  Must be called for each button state
   // before the button is toggled.
-  void SetToggledImage(ButtonState state, SkBitmap* image);
+  void SetToggledImage(ButtonState state, const SkBitmap* image);
 
   // Set the tooltip text displayed when the button is toggled.
   void SetToggledTooltipText(const std::wstring& tooltip);
 
   // Overridden from ImageButton:
-  virtual void SetImage(ButtonState aState, SkBitmap* anImage);
+  virtual void SetImage(ButtonState aState, const SkBitmap* anImage);
 
   // Overridden from View:
   virtual bool GetTooltipText(const gfx::Point& p, std::wstring* tooltip);

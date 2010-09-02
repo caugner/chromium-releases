@@ -195,7 +195,7 @@ TEST_F(WebSocketThrottleTest, Throttle) {
 
   // Receive partial response on w1, still connecting.
   DLOG(INFO) << "socket1 1";
-  static const char kHeader[] = "HTTP/1.1 101 Web Socket Protocol\r\n";
+  static const char kHeader[] = "HTTP/1.1 101 WebSocket Protocol\r\n";
   w1->OnReceivedData(s1.get(), kHeader, sizeof(kHeader) - 1);
   EXPECT_FALSE(callback_s2.have_result());
   EXPECT_FALSE(callback_s3.have_result());
@@ -208,9 +208,10 @@ TEST_F(WebSocketThrottleTest, Throttle) {
   static const char kHeader2[] =
       "Upgrade: WebSocket\r\n"
       "Connection: Upgrade\r\n"
-      "WebSocket-Origin: http://www.google.com\r\n"
-      "WebSocket-Location: ws://websocket.chromium.org\r\n"
-      "\r\n";
+      "Sec-WebSocket-Origin: http://www.google.com\r\n"
+      "Sec-WebSocket-Location: ws://websocket.chromium.org\r\n"
+      "\r\n"
+      "8jKS'y:G*Co,Wxa-";
   w1->OnReceivedData(s1.get(), kHeader2, sizeof(kHeader2) - 1);
   MessageLoopForIO::current()->RunAllPending();
   // Now, w1 is open.
@@ -275,6 +276,31 @@ TEST_F(WebSocketThrottleTest, Throttle) {
   s3->DetachDelegate();
   w4->OnClose(s4.get());
   s4->DetachDelegate();
+  DLOG(INFO) << "Done";
+  MessageLoopForIO::current()->RunAllPending();
+}
+
+TEST_F(WebSocketThrottleTest, NoThrottleForDuplicateAddress) {
+  DummySocketStreamDelegate delegate;
+
+  // For localhost: 127.0.0.1, 127.0.0.1
+  struct addrinfo* addr = AddAddr(127, 0, 0, 1, NULL);
+  addr = AddAddr(127, 0, 0, 1, addr);
+  scoped_refptr<WebSocketJob> w1 = new WebSocketJob(&delegate);
+  scoped_refptr<SocketStream> s1 =
+      new SocketStream(GURL("ws://localhost/"), w1.get());
+  w1->InitSocketStream(s1.get());
+  WebSocketThrottleTest::MockSocketStreamConnect(s1, addr);
+  DeleteAddrInfo(addr);
+
+  DLOG(INFO) << "socket1";
+  TestCompletionCallback callback_s1;
+  // Trying to open connection to localhost will start without wait.
+  EXPECT_EQ(OK, w1->OnStartOpenConnection(s1, &callback_s1));
+
+  DLOG(INFO) << "socket1 close";
+  w1->OnClose(s1.get());
+  s1->DetachDelegate();
   DLOG(INFO) << "Done";
   MessageLoopForIO::current()->RunAllPending();
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,19 +11,17 @@
 
 #include <vector>
 
-#include "app/combobox_model.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_collator.h"
 #include "app/resource_bundle.h"
 #include "base/file_util.h"
 #include "base/string_util.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/character_encoding.h"
+#include "chrome/browser/default_encoding_combo_model.h"
 #include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/shell_dialogs.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/font.h"
 #include "gfx/native_theme_win.h"
 #include "grit/generated_resources.h"
@@ -34,66 +32,6 @@
 #include "views/grid_layout.h"
 #include "views/standard_layout.h"
 #include "views/widget/widget.h"
-
-namespace {
-
-static std::vector<CharacterEncoding::EncodingInfo> sorted_encoding_list;
-
-}  // namespace
-
-class DefaultEncodingComboboxModel : public ComboboxModel {
- public:
-  DefaultEncodingComboboxModel() {
-    canonical_encoding_names_length_ =
-        CharacterEncoding::GetSupportCanonicalEncodingCount();
-    // Initialize the vector of all sorted encodings according to current
-    // UI locale.
-    if (!sorted_encoding_list.size()) {
-      std::string locale = g_browser_process->GetApplicationLocale();
-      for (int i = 0; i < canonical_encoding_names_length_; i++) {
-        sorted_encoding_list.push_back(CharacterEncoding::EncodingInfo(
-            CharacterEncoding::GetEncodingCommandIdByIndex(i)));
-      }
-      l10n_util::SortVectorWithStringKey(locale, &sorted_encoding_list, true);
-    }
-  }
-
-  virtual ~DefaultEncodingComboboxModel() {}
-
-  // Overridden from ComboboxModel.
-  virtual int GetItemCount() {
-    return canonical_encoding_names_length_;
-  }
-
-  virtual std::wstring GetItemAt(int index) {
-    DCHECK(index >= 0 && canonical_encoding_names_length_ > index);
-    return sorted_encoding_list[index].encoding_display_name;
-  }
-
-  std::string GetEncodingCharsetByIndex(int index) {
-    DCHECK(index >= 0 && canonical_encoding_names_length_ > index);
-    int encoding_id = sorted_encoding_list[index].encoding_id;
-    return CharacterEncoding::GetCanonicalEncodingNameByCommandId(encoding_id);
-  }
-
-  int GetSelectedEncodingIndex(Profile* profile) {
-    StringPrefMember current_encoding_string;
-    current_encoding_string.Init(prefs::kDefaultCharset,
-                                 profile->GetPrefs(),
-                                 NULL);
-    const std::wstring current_encoding = current_encoding_string.GetValue();
-    for (int i = 0; i < canonical_encoding_names_length_; i++) {
-      if (GetEncodingCharsetByIndex(i) == WideToASCII(current_encoding))
-        return i;
-    }
-
-    return 0;
-  }
-
- private:
-  int canonical_encoding_names_length_;
-  DISALLOW_COPY_AND_ASSIGN(DefaultEncodingComboboxModel);
-};
 
 ////////////////////////////////////////////////////////////////////////////////
 // FontDisplayView
@@ -127,7 +65,7 @@ class FontDisplayView : public views::View {
   static const int kFontDisplayMaxHeightChars = 1;
   static const int kFontDisplayLabelPadding = 5;
 
-  DISALLOW_EVIL_CONSTRUCTORS(FontDisplayView);
+  DISALLOW_COPY_AND_ASSIGN(FontDisplayView);
 };
 
 FontDisplayView::FontDisplayView()
@@ -158,12 +96,12 @@ void FontDisplayView::SetFontType(const std::wstring& font_name,
 }
 
 void FontDisplayView::Paint(gfx::Canvas* canvas) {
-  HDC dc = canvas->beginPlatformPaint();
+  HDC dc = canvas->BeginPlatformPaint();
   RECT rect = { 0, 0, width(), height() };
   gfx::NativeTheme::instance()->PaintTextField(
       dc, EP_BACKGROUND, EBS_NORMAL, 0, &rect, ::GetSysColor(COLOR_3DFACE),
       true, true);
-  canvas->endPlatformPaint();
+  canvas->EndPlatformPaint();
 }
 
 void FontDisplayView::Layout() {
@@ -302,16 +240,18 @@ void FontsPageView::FontSelected(const gfx::Font& const_font, void* params) {
 void FontsPageView::SaveChanges() {
   // Set Fonts.
   if (font_changed_) {
-    serif_name_.SetValue(serif_font_display_view_->font_name());
+    serif_name_.SetValue(WideToUTF8(serif_font_display_view_->font_name()));
     serif_size_.SetValue(serif_font_size_pixel_);
-    sans_serif_name_.SetValue(sans_serif_font_display_view_->font_name());
+    sans_serif_name_.SetValue(
+        WideToUTF8(sans_serif_font_display_view_->font_name()));
     sans_serif_size_.SetValue(sans_serif_font_size_pixel_);
-    fixed_width_name_.SetValue(fixed_width_font_display_view_->font_name());
+    fixed_width_name_.SetValue(WideToUTF8(
+        fixed_width_font_display_view_->font_name()));
     fixed_width_size_.SetValue(fixed_width_font_size_pixel_);
   }
   // Set Encoding.
   if (default_encoding_changed_)
-    default_encoding_.SetValue(ASCIIToWide(default_encoding_selected_));
+    default_encoding_.SetValue(default_encoding_selected_);
 }
 
 void FontsPageView::InitControlLayout() {
@@ -358,19 +298,19 @@ void FontsPageView::NotifyPrefChanged(const std::wstring* pref_name) {
   if (!pref_name || *pref_name == prefs::kWebKitFixedFontFamily) {
     fixed_width_font_size_pixel_ = fixed_width_size_.GetValue();
     fixed_width_font_display_view_->SetFontType(
-        fixed_width_name_.GetValue(),
+        UTF8ToWide(fixed_width_name_.GetValue()),
         fixed_width_font_size_pixel_);
   }
   if (!pref_name || *pref_name == prefs::kWebKitSerifFontFamily) {
     serif_font_size_pixel_ = serif_size_.GetValue();
     serif_font_display_view_->SetFontType(
-        serif_name_.GetValue(),
+        UTF8ToWide(serif_name_.GetValue()),
         serif_font_size_pixel_);
   }
   if (!pref_name || *pref_name == prefs::kWebKitSansSerifFontFamily) {
     sans_serif_font_size_pixel_ = sans_serif_size_.GetValue();
     sans_serif_font_display_view_->SetFontType(
-        sans_serif_name_.GetValue(),
+        UTF8ToWide(sans_serif_name_.GetValue()),
         sans_serif_font_size_pixel_);
   }
 }

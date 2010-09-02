@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,9 +37,17 @@ class NavigationEntry {
    public:
     // Flags used for the page security content status.
     enum ContentStatusFlags {
-      NORMAL_CONTENT = 0,       // Neither of the 2 cases below.
-      MIXED_CONTENT  = 1 << 0,  // https page containing http resources.
-      UNSAFE_CONTENT = 1 << 1   // https page containing broken https resources.
+      // HTTP page, or HTTPS page with no insecure content.
+      NORMAL_CONTENT             = 0,
+
+      // HTTPS page containing "displayed" HTTP resources (e.g. images, CSS).
+      DISPLAYED_INSECURE_CONTENT = 1 << 0,
+
+      // HTTPS page containing "executed" HTTP resources (i.e. script).
+      // Also currently used for HTTPS page containing broken-HTTPS resources;
+      // this is wrong and should be fixed (see comments in
+      // SSLPolicy::OnRequestStarted()).
+      RAN_INSECURE_CONTENT       = 1 << 1,
     };
 
     SSLStatus();
@@ -80,22 +88,25 @@ class NavigationEntry {
       return security_bits_;
     }
 
-    // Mixed content means that this page which is served over https contains
-    // http sub-resources.
-    void set_has_mixed_content() {
-      content_status_ |= MIXED_CONTENT;
+    void set_displayed_insecure_content() {
+      content_status_ |= DISPLAYED_INSECURE_CONTENT;
     }
-    bool has_mixed_content() const {
-      return (content_status_ & MIXED_CONTENT) != 0;
+    bool displayed_insecure_content() const {
+      return (content_status_ & DISPLAYED_INSECURE_CONTENT) != 0;
     }
 
-    // Unsafe content means that this page is served over https but contains
-    // https sub-resources with cert errors.
-    void set_has_unsafe_content() {
-      content_status_ |= UNSAFE_CONTENT;
+    void set_ran_insecure_content() {
+      content_status_ |= RAN_INSECURE_CONTENT;
     }
-    bool has_unsafe_content() const {
-      return (content_status_ & UNSAFE_CONTENT) != 0;
+    bool ran_insecure_content() const {
+      return (content_status_ & RAN_INSECURE_CONTENT) != 0;
+    }
+
+    void set_connection_status(int connection_status) {
+        connection_status_ = connection_status;
+    }
+    int connection_status() const {
+      return connection_status_;
     }
 
     // Raw accessors for all the content status flags. This contains a
@@ -115,6 +126,7 @@ class NavigationEntry {
     int cert_id_;
     int cert_status_;
     int security_bits_;
+    int connection_status_;
     int content_status_;
 
     // Copy and assignment is explicitly allowed for this class.

@@ -126,6 +126,15 @@
     ],
   },
   'conditions': [
+    [ 'OS=="freebsd" or OS=="openbsd"', {
+      # GYP requires that each file have at least one target defined.
+      'targets': [
+        {
+          'target_name': 'sandbox',
+          'type': 'settings',
+        },
+      ],
+    }],
     [ 'OS=="linux" and selinux==0', {
       'targets': [
         {
@@ -149,58 +158,12 @@
         {
           'target_name': 'sandbox',
           'type': '<(library)',
-          'dependencies': [
-            '../base/base.gyp:base',
-          ],
           'conditions': [
             ['target_arch!="arm"', {
-              'sources': [
-                'linux/seccomp/access.cc',
-                'linux/seccomp/allocator.cc',
-                'linux/seccomp/allocator.h',
-                'linux/seccomp/clone.cc',
-                'linux/seccomp/exit.cc',
-                'linux/seccomp/debug.cc',
-                'linux/seccomp/getpid.cc',
-                'linux/seccomp/gettid.cc',
-                'linux/seccomp/ioctl.cc',
-                'linux/seccomp/ipc.cc',
-                'linux/seccomp/library.cc',
-                'linux/seccomp/library.h',
-                'linux/seccomp/linux_syscall_support.h',
-                'linux/seccomp/madvise.cc',
-                'linux/seccomp/maps.cc',
-                'linux/seccomp/maps.h',
-                'linux/seccomp/mmap.cc',
-                'linux/seccomp/mprotect.cc',
-                'linux/seccomp/munmap.cc',
-                'linux/seccomp/mutex.h',
-                'linux/seccomp/open.cc',
-                'linux/seccomp/sandbox.cc',
-                'linux/seccomp/sandbox.h',
-                'linux/seccomp/sandbox_impl.h',
-                'linux/seccomp/securemem.cc',
-                'linux/seccomp/securemem.h',
-                'linux/seccomp/socketcall.cc',
-                'linux/seccomp/stat.cc',
-                'linux/seccomp/syscall.cc',
-                'linux/seccomp/syscall.h',
-                'linux/seccomp/syscall_table.c',
-                'linux/seccomp/syscall_table.h',
-                'linux/seccomp/tls.h',
-                'linux/seccomp/trusted_process.cc',
-                'linux/seccomp/trusted_thread.cc',
-                'linux/seccomp/x86_decode.cc',
-                'linux/seccomp/x86_decode.h',
-              ],
-            },
-          ],
-        ]},
-        {
-          'target_name': 'timestats',
-          'type': 'executable',
-          'sources': [
-            'linux/seccomp/timestats.cc',
+               'dependencies': [
+                 'linux/seccomp/seccomp.gyp:seccomp_sandbox',
+               ]},
+            ],
           ],
         },
       ],

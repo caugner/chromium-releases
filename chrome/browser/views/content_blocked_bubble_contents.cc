@@ -102,7 +102,8 @@ ContentSettingBubbleContents::ContentSettingBubbleContents(
       info_bubble_(NULL),
       close_button_(NULL),
       manage_link_(NULL),
-      clear_link_(NULL) {
+      clear_link_(NULL),
+      info_link_(NULL) {
   registrar_.Add(this, NotificationType::TAB_CONTENTS_DESTROYED,
                  Source<TabContents>(tab_contents));
 }
@@ -120,6 +121,7 @@ void ContentSettingBubbleContents::ViewHierarchyChanged(bool is_add,
 void ContentSettingBubbleContents::ButtonPressed(views::Button* sender,
                                                  const views::Event& event) {
   if (sender == close_button_) {
+    info_bubble_->set_fade_away_on_close(true);
     info_bubble_->Close();  // CAREFUL: This deletes us.
     return;
   }
@@ -137,6 +139,7 @@ void ContentSettingBubbleContents::ButtonPressed(views::Button* sender,
 void ContentSettingBubbleContents::LinkActivated(views::Link* source,
                                                  int event_flags) {
   if (source == manage_link_) {
+    info_bubble_->set_fade_away_on_close(true);
     content_setting_bubble_model_->OnManageLinkClicked();
     // CAREFUL: Showing the settings window activates it, which deactivates the
     // info bubble, which causes it to close, which deletes us.
@@ -144,6 +147,13 @@ void ContentSettingBubbleContents::LinkActivated(views::Link* source,
   }
   if (source == clear_link_) {
     content_setting_bubble_model_->OnClearLinkClicked();
+    info_bubble_->set_fade_away_on_close(true);
+    info_bubble_->Close();  // CAREFUL: This deletes us.
+    return;
+  }
+  if (source == info_link_) {
+    content_setting_bubble_model_->OnInfoLinkClicked();
+    info_bubble_->set_fade_away_on_close(true);
     info_bubble_->Close();  // CAREFUL: This deletes us.
     return;
   }
@@ -222,7 +232,6 @@ void ContentSettingBubbleContents::InitControlLayout() {
        i != radio_group.radio_items.end(); ++i) {
     views::RadioButton* radio = new views::RadioButton(UTF8ToWide(*i), 0);
     radio->set_listener(this);
-    radio->SetEnabled(radio_group.is_mutable);
     radio_group_.push_back(radio);
     layout->StartRow(0, single_column_set_id);
     layout->AddView(radio);
@@ -273,6 +282,19 @@ void ContentSettingBubbleContents::InitControlLayout() {
     clear_link_->SetController(this);
     layout->StartRow(0, single_column_set_id);
     layout->AddView(clear_link_);
+
+    layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+    layout->StartRow(0, single_column_set_id);
+    layout->AddView(new views::Separator, 1, 1,
+                    GridLayout::FILL, GridLayout::FILL);
+    layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+  }
+
+  if (!bubble_content.info_link.empty()) {
+    info_link_ = new views::Link(UTF8ToWide(bubble_content.info_link));
+    info_link_->SetController(this);
+    layout->StartRow(0, single_column_set_id);
+    layout->AddView(info_link_);
 
     layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
     layout->StartRow(0, single_column_set_id);

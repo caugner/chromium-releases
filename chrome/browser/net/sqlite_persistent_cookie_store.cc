@@ -231,7 +231,9 @@ void SQLitePersistentCookieStore::Backend::Commit() {
         break;
     }
   }
-  transaction.Commit();
+  bool succeeded = transaction.Commit();
+  UMA_HISTOGRAM_ENUMERATION("net.CookieBackingStoreUpdateResults",
+                            succeeded ? 0 : 1, 2);
 }
 
 // Fire off a close message to the background thread.  We could still have a
@@ -336,6 +338,7 @@ bool SQLitePersistentCookieStore::Load(
         new net::CookieMonster::CanonicalCookie(
             smt.ColumnString(2),                            // name
             smt.ColumnString(3),                            // value
+            smt.ColumnString(1),                            // domain
             smt.ColumnString(4),                            // path
             smt.ColumnInt(6) != 0,                          // secure
             smt.ColumnInt(7) != 0,                          // httponly

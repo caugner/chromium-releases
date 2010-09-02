@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H__
 
 #include <string>
+#include <vector>
 
 #include "app/message_box_flags.h"
 #include "base/basictypes.h"
@@ -114,7 +115,7 @@ class AutomationProxy : public IPC::Channel::Listener,
   bool GetShowingAppModalDialog(bool* showing_app_modal_dialog,
       MessageBoxFlags::DialogButton* button) WARN_UNUSED_RESULT;
 
-  // Simulates a click on a dialog button.
+  // Simulates a click on a dialog button. Synchronous.
   bool ClickAppModalDialogButton(
       MessageBoxFlags::DialogButton button) WARN_UNUSED_RESULT;
 
@@ -182,10 +183,12 @@ class AutomationProxy : public IPC::Channel::Listener,
   // sent.
   bool SavePackageShouldPromptUser(bool should_prompt) WARN_UNUSED_RESULT;
 
-  // Installs the extension crx. Returns the ExtensionProxy for the
-  // installed extension, or NULL on failure.
+  // Installs the extension crx. If |with_ui| is true an install confirmation
+  // and notification UI is shown, otherwise the install is silent. Returns the
+  // ExtensionProxy for the installed extension, or NULL on failure.
   // Note: Overinstalls and downgrades will return NULL.
-  scoped_refptr<ExtensionProxy> InstallExtension(const FilePath& crx_file);
+  scoped_refptr<ExtensionProxy> InstallExtension(const FilePath& crx_file,
+                                                 bool with_ui);
 
   // Asserts that the next extension test result is true.
   void EnsureExtensionTestResult();
@@ -193,6 +196,9 @@ class AutomationProxy : public IPC::Channel::Listener,
   // Gets a list of all enabled extensions' base directories.
   // Returns true on success.
   bool GetEnabledExtensions(std::vector<FilePath>* extension_directories);
+
+  // Resets to the default theme. Returns true on success.
+  bool ResetToDefaultTheme();
 
 #if defined(OS_CHROMEOS)
   // Logs in through the Chrome OS login wizard with given |username|

@@ -23,6 +23,7 @@
 #include "chrome_frame/chrome_frame_delegate.h"
 #include "chrome_frame/chrome_frame_histograms.h"
 #include "chrome_frame/plugin_url_request.h"
+#include "chrome_frame/sync_msg_reply_dispatcher.h"
 
 // By a convoluated route, this timeout also winds up being the sync automation
 // message timeout. See the ChromeFrameAutomationProxyImpl ctor and the
@@ -35,8 +36,10 @@ enum AutomationPageFontSize;
 struct DECLSPEC_NOVTABLE ChromeFrameAutomationProxy {  // NOLINT
   virtual bool Send(IPC::Message* msg) = 0;
 
-  virtual void SendAsAsync(IPC::SyncMessage* msg, void* callback,
-                           void* key) = 0;
+  virtual void SendAsAsync(
+      IPC::SyncMessage* msg,
+      SyncMessageReplyDispatcher::SyncMessageCallContext* context,
+      void* key) = 0;
   virtual void CancelAsync(void* key) = 0;
   virtual scoped_refptr<TabProxy> CreateTabProxy(int handle) = 0;
   virtual void ReleaseTabProxy(AutomationHandle handle) = 0;
@@ -55,7 +58,10 @@ class ChromeFrameAutomationProxyImpl : public ChromeFrameAutomationProxy,
   // .. and non-public inheritance is verboten.
   public AutomationProxy {
  public:
-  virtual void SendAsAsync(IPC::SyncMessage* msg, void* callback, void* key);
+  virtual void SendAsAsync(
+      IPC::SyncMessage* msg,
+      SyncMessageReplyDispatcher::SyncMessageCallContext* context,
+      void* key);
 
   virtual void CancelAsync(void* key);
 
@@ -267,9 +273,9 @@ class ChromeFrameAutomationClient
   // For IDeleteBrowsingHistorySupport
   void RemoveBrowsingData(int remove_mask);
 
-  ChromeFrameAutomationProxy* automation_server() {
-    return automation_server_;
-  }
+  // Sends an IPC message to the external tab container requesting it to run
+  // unload handlers on the page.
+  void RunUnloadHandlers(HWND notification_window, int notification_message);
 
  protected:
   // ChromeFrameAutomationProxy::LaunchDelegate implementation.
@@ -280,8 +286,9 @@ class ChromeFrameAutomationClient
   virtual void OnChannelError(TabProxy* tab);
 
   void CreateExternalTab();
-  void CreateExternalTabComplete(HWND chrome_window, HWND tab_window,
-                                 int tab_handle);
+  AutomationLaunchResult CreateExternalTabComplete(HWND chrome_window,
+                                                   HWND tab_window,
+                                                   int tab_handle);
   // Called in UI thread. Here we fire event to the client notifying for
   // the result of Initialize() method call.
   void InitializeComplete(AutomationLaunchResult result);
@@ -310,6 +317,7 @@ class ChromeFrameAutomationClient
 
   void* automation_server_id_;
   ChromeFrameAutomationProxy* automation_server_;
+
   HWND chrome_window_;
   scoped_refptr<TabProxy> tab_;
   ChromeFrameDelegate* chrome_frame_delegate_;
@@ -361,6 +369,9 @@ class ChromeFrameAutomationClient
   virtual void OnResponseEnd(int request_id, const URLRequestStatus& status);
   virtual void OnCookiesRetrieved(bool success, const GURL& url,
       const std::string& cookie_string, int cookie_id);
+
+  friend class BeginNavigateContext;
+  friend class CreateExternalTabContext;
 
  public:
   void SetUrlFetcher(PluginUrlRequestManager* url_fetcher) {

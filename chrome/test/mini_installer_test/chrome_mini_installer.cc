@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -351,18 +351,6 @@ bool ChromeMiniInstaller::CloseChromeBrowser() {
   return true;
 }
 
-// Closes the First Run UI dialog.
-void ChromeMiniInstaller::CloseFirstRunUIDialog(bool over_install) {
-  MiniInstallerTestUtil::VerifyProcessLaunch(installer_util::kChromeExe, true);
-  if (!over_install) {
-    ASSERT_TRUE(MiniInstallerTestUtil::CloseWindow(
-        mini_installer_constants::kChromeFirstRunUI, WM_CLOSE));
-  } else {
-    ASSERT_TRUE(MiniInstallerTestUtil::CloseWindow(
-        mini_installer_constants::kBrowserTabName, WM_CLOSE));
-  }
-}
-
 // Checks for Chrome registry keys.
 bool ChromeMiniInstaller::CheckRegistryKey(const std::wstring& key_path) {
   RegKey key;
@@ -409,26 +397,26 @@ void ChromeMiniInstaller::DeleteFolder(const wchar_t* folder_name) {
 
 // Will delete user data profile.
 void ChromeMiniInstaller::DeleteUserDataFolder() {
-  std::wstring path = GetUserDataDirPath();
-  if (file_util::PathExists(FilePath::FromWStringHack(path.c_str())))
-    ASSERT_TRUE(file_util::Delete(path.c_str(), true));
+  FilePath path = GetUserDataDirPath();
+  if (file_util::PathExists(path))
+    ASSERT_TRUE(file_util::Delete(path, true));
 }
 
 // Gets user data directory path
-std::wstring ChromeMiniInstaller::GetUserDataDirPath() {
+FilePath ChromeMiniInstaller::GetUserDataDirPath() {
   FilePath path;
   PathService::Get(base::DIR_LOCAL_APP_DATA, &path);
-  std::wstring profile_path = path.ToWStringHack();
+  FilePath profile_path = path;
   if (is_chrome_frame_) {
-    file_util::AppendToPath(&profile_path,
+    profile_path = profile_path.Append(
         mini_installer_constants::kChromeFrameAppDir);
   } else {
-    file_util::AppendToPath(&profile_path,
+    profile_path = profile_path.Append(
         mini_installer_constants::kChromeAppDir);
   }
-  file_util::UpOneDirectory(&profile_path);
-  file_util::AppendToPath(&profile_path,
-                          mini_installer_constants::kChromeUserDataDir);
+  profile_path = profile_path.DirName();
+  profile_path = profile_path.Append(
+      mini_installer_constants::kChromeUserDataDir);
   return profile_path;
 }
 
@@ -572,8 +560,10 @@ bool ChromeMiniInstaller::GetChromeLaunchPath(std::wstring* launch_path) {
 void ChromeMiniInstaller::LaunchAndCloseChrome(bool over_install) {
   VerifyChromeLaunch(true);
   if ((install_type_ == mini_installer_constants::kSystemInstall) &&
-      (!over_install))
-    CloseFirstRunUIDialog(over_install);
+      (!over_install)) {
+    MiniInstallerTestUtil::VerifyProcessLaunch(
+        installer_util::kChromeExe, true);
+  }
   MiniInstallerTestUtil::CloseProcesses(installer_util::kChromeExe);
 }
 
@@ -590,8 +580,10 @@ void ChromeMiniInstaller::VerifyInstall(bool over_install) {
     VerifyChromeFrameInstall();
   } else {
     if ((install_type_ == mini_installer_constants::kUserInstall) &&
-        (!over_install))
-      CloseFirstRunUIDialog(over_install);
+        (!over_install)) {
+      MiniInstallerTestUtil::VerifyProcessLaunch(
+          installer_util::kChromeExe, true);
+    }
     PlatformThread::Sleep(800);
     FindChromeShortcut();
     LaunchAndCloseChrome(over_install);
@@ -620,9 +612,9 @@ void ChromeMiniInstaller::VerifyChromeFrameInstall() {
   PlatformThread::Sleep(1500);
 
   // Verify if IExplore folder got created
-  std::wstring path = GetUserDataDirPath();
-  file_util::AppendToPath(&path, L"IEXPLORE");
-  ASSERT_TRUE(file_util::PathExists(FilePath::FromWStringHack(path.c_str())));
+  FilePath path = GetUserDataDirPath();
+  path = path.AppendASCII("IEXPLORE");
+  ASSERT_TRUE(file_util::PathExists(path));
 }
 
 // This method will launch any requested browser.

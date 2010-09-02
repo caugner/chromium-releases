@@ -18,11 +18,6 @@
 #include "base/message_loop.h"
 #include "base/message_pump_libevent.h"
 #include "net/base/net_errors.h"
-#if defined(USE_SYSTEM_LIBEVENT)
-#include <event.h>
-#else
-#include "third_party/libevent/event.h"
-#endif
 #endif
 
 #include "base/eintr_wrapper.h"
@@ -40,16 +35,14 @@
 #define SOCKET int
 const int INVALID_SOCKET = -1;
 const int SOCKET_ERROR = -1;
-struct event;  // From libevent
 #endif
 
 const int kReadBufSize = 200;
 
 DevToolsRemoteListenSocket::DevToolsRemoteListenSocket(
     SOCKET s,
-    ListenSocketDelegate* del,
     DevToolsRemoteListener* message_listener)
-        : ListenSocket(s, del),
+        : ALLOW_THIS_IN_INITIALIZER_LIST(ListenSocket(s, this)),
           state_(HANDSHAKE),
           remaining_payload_length_(0),
           message_listener_(message_listener),
@@ -92,55 +85,30 @@ DevToolsRemoteListenSocket::~DevToolsRemoteListenSocket() {}
 DevToolsRemoteListenSocket*
     DevToolsRemoteListenSocket::Listen(const std::string& ip,
                                        int port,
-                                       ListenSocketDelegate* del,
                                        DevToolsRemoteListener* listener) {
   SOCKET s = ListenSocket::Listen(ip, port);
   if (s == INVALID_SOCKET) {
     // TODO(apavlov): error handling
   } else {
     DevToolsRemoteListenSocket* sock =
-        new DevToolsRemoteListenSocket(s, del, listener);
+        new DevToolsRemoteListenSocket(s, listener);
     sock->Listen();
     return sock;
   }
   return NULL;
 }
 
-void DevToolsRemoteListenSocket::Read() {
-  char buf[kReadBufSize];
-  int len;
-  do {
-    len = HANDLE_EINTR(recv(socket_, buf, kReadBufSize, 0));
-    if (len == SOCKET_ERROR) {
-#if defined(OS_WIN)
-      int err = WSAGetLastError();
-      if (err == WSAEWOULDBLOCK) {
-#elif defined(OS_POSIX)
-      if (errno == EWOULDBLOCK || errno == EAGAIN) {
-#endif
-        break;
-      } else {
-        // TODO(apavlov): some error handling required here
-        break;
-      }
-    } else if (len == 0) {
-      // In Windows, Close() is called by OnObjectSignaled.  In POSIX, we need
-      // to call it here.
-#if defined(OS_POSIX)
-      Close();
-#endif
-    } else {
-      // TODO(apavlov): maybe change DidRead to take a length instead
-      DCHECK(len > 0 && len <= kReadBufSize);
-      this->DispatchRead(buf, len);
-    }
-  } while (len == kReadBufSize);
+void DevToolsRemoteListenSocket::DidAccept(ListenSocket *server,
+                                           ListenSocket *connection) {
+  connection->AddRef();
+  message_listener_->OnAcceptConnection(connection);
 }
 
 // Dispatches data from socket to socket_delegate_, extracting messages
 // delimited by newlines.
-void DevToolsRemoteListenSocket::DispatchRead(char* buf, int len) {
-  char* pBuf = buf;
+void DevToolsRemoteListenSocket::DidRead(ListenSocket* connection,
+                                         const char* pBuf,
+                                         int len) {
   while (len > 0) {
     if (state_ != PAYLOAD) {
       if (cr_received_ && *pBuf == '\n') {
@@ -177,6 +145,11 @@ void DevToolsRemoteListenSocket::DispatchRead(char* buf, int len) {
       }
     }
   }
+}
+
+void DevToolsRemoteListenSocket::DidClose(ListenSocket *connection) {
+  message_listener_->OnConnectionLost();
+  connection->Release();
 }
 
 void DevToolsRemoteListenSocket::DispatchField() {
@@ -237,7 +210,6 @@ void DevToolsRemoteListenSocket::Accept() {
   if (conn != INVALID_SOCKET) {
     scoped_refptr<DevToolsRemoteListenSocket> sock =
         new DevToolsRemoteListenSocket(conn,
-                                       socket_delegate_,
                                        message_listener_);
     // it's up to the delegate to AddRef if it wants to keep it around
 #if defined(OS_POSIX)

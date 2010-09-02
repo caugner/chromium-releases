@@ -20,6 +20,7 @@ class PhoneNumber : public FormGroup {
   virtual FormGroup* Clone() const = 0;
   virtual void GetPossibleFieldTypes(const string16& text,
                                      FieldTypeSet* possible_types) const;
+  virtual void GetAvailableFieldTypes(FieldTypeSet* available_types) const;
   virtual void FindInfoMatches(const AutoFillType& type,
                                const string16& info,
                                std::vector<string16>* matched_text) const;
@@ -30,7 +31,8 @@ class PhoneNumber : public FormGroup {
   // returns the trailing 7 digits, |city_code| returns the next 3 digits, and
   // |country_code| returns any remaining digits.
   // Separator characters are stripped before parsing the digits.
-  static void ParsePhoneNumber(const string16& value,
+  // Returns true if parsing was successful, false otherwise.
+  static bool ParsePhoneNumber(const string16& value,
                                string16* number,
                                string16* city_code,
                                string16* country_code);
@@ -39,6 +41,9 @@ class PhoneNumber : public FormGroup {
   explicit PhoneNumber(const PhoneNumber& phone_number);
 
  private:
+  // For test.
+  friend class PhoneNumberTest;
+
   void operator=(const PhoneNumber& phone_number);
 
   const string16& country_code() const { return country_code_; }

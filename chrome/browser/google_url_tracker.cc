@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,8 @@ const char GoogleURLTracker::kDefaultGoogleHomepage[] =
     "http://www.google.com/";
 
 GoogleURLTracker::GoogleURLTracker()
-    : google_url_(WideToUTF8(g_browser_process->local_state()->GetString(
-          prefs::kLastKnownGoogleURL))),
+    : google_url_(g_browser_process->local_state()->GetString(
+          prefs::kLastKnownGoogleURL)),
       ALLOW_THIS_IN_INITIALIZER_LIST(fetcher_factory_(this)),
       in_startup_sleep_(true),
       already_fetched_(false),
@@ -63,7 +63,7 @@ void GoogleURLTracker::RequestServerCheck() {
 // static
 void GoogleURLTracker::RegisterPrefs(PrefService* prefs) {
   prefs->RegisterStringPref(prefs::kLastKnownGoogleURL,
-                            ASCIIToWide(kDefaultGoogleHomepage));
+                            kDefaultGoogleHomepage);
 }
 
 // static
@@ -79,14 +79,22 @@ bool GoogleURLTracker::CheckAndConvertToGoogleBaseURL(const GURL& url,
   SplitStringDontTrim(url.host(), '.', &host_components);
   if (host_components.size() < 2)
     return false;
-  std::string& component = host_components[host_components.size() - 2];
+  size_t google_component = host_components.size() - 2;
+  const std::string& component = host_components[google_component];
   if (component != "google") {
     if ((host_components.size() < 3) ||
         ((component != "co") && (component != "com")))
       return false;
-    if (host_components[host_components.size() - 3] != "google")
+    google_component = host_components.size() - 3;
+    if (host_components[google_component] != "google")
       return false;
   }
+  // For Google employees only: If the URL appears to be on
+  // [*.]corp.google.com, it's likely a doorway (e.g.
+  // wifi.corp.google.com), so ignore it.
+  if ((google_component > 0) &&
+      (host_components[google_component - 1] == "corp"))
+    return false;
 
   // If the url's path does not begin "/intl/", reset it to "/".  Other paths
   // represent services such as iGoogle that are irrelevant to the baseURL.
@@ -150,7 +158,7 @@ void GoogleURLTracker::OnURLFetchComplete(const URLFetcher* source,
     return;
 
   // Update the saved base URL if it has changed.
-  const std::wstring base_url_str(UTF8ToWide(base_url.spec()));
+  const std::string base_url_str(base_url.spec());
   if (g_browser_process->local_state()->GetString(prefs::kLastKnownGoogleURL) !=
       base_url_str) {
     g_browser_process->local_state()->SetString(prefs::kLastKnownGoogleURL,

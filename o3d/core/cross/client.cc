@@ -65,6 +65,25 @@ using std::vector;
 using std::make_pair;
 
 namespace o3d {
+// If Renderer::max_fps has been set, rendering is driven by incoming new
+// textures. We draw on each new texture as long as not exceeding max_fps.
+//
+// If we are in RENDERMODE_ON_DEMAND mode, Client::Render() can still set dirty
+// specifically.
+//
+// If we are in RENDERMODE_CONTINUOUS mode, we do NOT set dirty on each tick any
+// more (since it is already driven by new textures.).
+// There is one problem here: what if new texture don't come in for some reason?
+// If that happened, no rendering callback will be invoked and this can cause
+// problem sometimes. For example, some UI may depend on the rendering callback
+// to work correctly.
+// So, in RENDERMODE_CONTINUOUS mode, if we have set max_fps but haven't
+// received any new texture for a while, we draw anyway to trigger the rendering
+// callback.
+// This value defines the minimum number of draws per seconds in
+// RENDERMODE_CONTINUOUS mode.
+static const float kContinuousModeMinDrawPerSecond = 15;
+// TODO(zhurunz) Tuning this value.
 
 // Client constructor.  Creates the default root node for the scenegraph
 Client::Client(ServiceLocator* service_locator)
@@ -80,10 +99,9 @@ Client::Client(ServiceLocator* service_locator)
       evaluation_counter_(service_locator),
       render_tree_called_(false),
       render_mode_(RENDERMODE_CONTINUOUS),
-#ifdef O3D_PLUGIN_SUPPORT_SET_MAX_FPS
       texture_on_hold_(false),
-#endif  // O3D_PLUGIN_SUPPORT_SET_MAX_FPS
       event_manager_(),
+      is_ticking_(false),
       last_tick_time_(0),
       root_(NULL),
 #ifdef OS_WIN
@@ -177,6 +195,7 @@ void Client::ClearTickCallback() {
 }
 
 bool Client::Tick() {
+  is_ticking_ = true;
   ElapsedTimeTimer timer;
   float seconds_elapsed = tick_elapsed_time_timer_.GetElapsedTimeAndReset();
   tick_event_.set_elapsed_time(seconds_elapsed);
@@ -206,19 +225,19 @@ bool Client::Tick() {
 
   last_tick_time_ = timer.GetElapsedTimeAndReset();
 
-#ifdef O3D_PLUGIN_SUPPORT_SET_MAX_FPS
   texture_on_hold_ |= has_new_texture;
-  int max_fps = renderer_->max_fps();
-  if (max_fps > 0 &&
-      texture_on_hold_ &&
-      render_mode() == RENDERMODE_ON_DEMAND &&
-      render_elapsed_time_timer_.GetElapsedTimeWithoutClearing()
+  if (texture_on_hold_ && renderer_.IsAvailable()) {
+    int max_fps = renderer_->max_fps();
+    if (max_fps > 0 &&
+        render_mode() == RENDERMODE_ON_DEMAND &&
+        render_elapsed_time_timer_.GetElapsedTimeWithoutClearing()
         > 1.0/max_fps) {
-    renderer_->set_need_to_render(true);
-    texture_on_hold_ = false;
+      renderer_->set_need_to_render(true);
+      texture_on_hold_ = false;
+    }
   }
-#endif  // O3D_PLUGIN_SUPPORT_SET_MAX_FPS
 
+  is_ticking_ = false;
   return message_check_ok;
 }
 
@@ -252,6 +271,16 @@ void Client::RenderClientInner(bool present, bool send_callback) {
     profiler_->ProfileStart("Render callback");
     if (send_callback)
       render_callback_manager_.Run(render_event_);
+
+    // Calling back to JavaScript may have caused the plugin to be
+    // torn down. Guard carefully against this.
+    if (!profiler_.IsAvailable()) {
+      if (renderer_.IsAvailable()) {
+        renderer_->FinishRendering();
+      }
+      return;
+    }
+
     profiler_->ProfileStop("Render callback");
 
     if (!render_tree_called_) {
@@ -340,6 +369,31 @@ void Client::RenderClient(bool send_callback) {
     renderer_->SetRenderSurfaces(NULL, NULL, false);
     renderer_->FinishRendering();
   }
+}
+
+bool Client::IsRendering() {
+  return (renderer_.IsAvailable() && renderer_->rendering());
+}
+
+bool Client::NeedsContinuousRender() {
+  bool needRender = false;
+  // Only may happen in RENDERMODE_CONTINUOUS mode.
+  if (render_mode() == RENDERMODE_CONTINUOUS) {
+    // Always need a draw in normal RENDERMODE_CONTINUOUS mode.
+    needRender = true;
+
+    if (renderer_.IsAvailable()) {
+      // If max_fps has been set, only need a draw when "long time no draw".
+      int max_fps = renderer_->max_fps();
+      if (max_fps > 0 &&
+          render_elapsed_time_timer_.GetElapsedTimeWithoutClearing() <
+          1.0/kContinuousModeMinDrawPerSecond)
+      {
+        needRender = false;
+      }
+    }
+  }
+  return needRender;
 }
 
 // Executes draw calls for all visible shapes in a subtree

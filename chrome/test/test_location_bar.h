@@ -35,7 +35,6 @@ class TestLocationBar : public LocationBar {
   }
   virtual PageTransition::Type GetPageTransition() const { return transition_; }
   virtual void AcceptInput() {}
-  virtual void AcceptInputWithDisposition(WindowOpenDisposition) {}
   virtual void FocusLocation(bool select_all) {}
   virtual void FocusSearch() {}
   virtual void UpdateContentSettingsIcons() {}
@@ -43,9 +42,14 @@ class TestLocationBar : public LocationBar {
   virtual void InvalidatePageActions() {}
   virtual void SaveStateToContents(TabContents* contents) {}
   virtual void Revert() {}
+  virtual const AutocompleteEditView* location_entry() const {
+    return NULL;
+  }
   virtual AutocompleteEditView* location_entry() {
     return NULL;
   }
+  virtual void PushForceHidden() {}
+  virtual void PopForceHidden() {}
   virtual LocationBarTesting* GetLocationBarForTesting() {
     return NULL;
   }

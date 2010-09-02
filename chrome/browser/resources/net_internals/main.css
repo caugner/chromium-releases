@@ -87,8 +87,16 @@ body {
   color: blue;
 }
 
+#requestsListTableBody .source_SOCKET {
+  color: purple;
+}
+
 #requestsListTableBody .source_INIT_PROXY_RESOLVER {
-  color: orange;
+  color: green;
+}
+
+#requestsListTableBody .source_NONE {
+  color: red;
 }
 
 .tabSwitcher {
@@ -143,6 +151,7 @@ body {
 #categoryTabHandles {
   border-bottom: 1px solid #555;
   background: #aaa;
+  overflow: hidden;
 }
 
 #categoryTabHandles li {
@@ -153,9 +162,12 @@ body {
 #categoryTabHandles a {
   text-decoration: none;
   text-align: center;
-  display: block;
-  width: 9em;
-  padding: 5px;
+  display: inline-block;
+  margin-top: 4px;
+  padding: 5px 10px 3px 10px;
+  -webkit-border-top-right-radius: 8px;
+  -webkit-border-top-left-radius: 8px;
+  background-clip: border-box;
   background: #ccc;
 }
 
@@ -174,22 +186,40 @@ body {
 
 #categoryTabHandles a.selected {
   position:relative;
-  top: 1px;
-  font-weight: bold;
+  top: 3px;
   color: black;
 }
 
 #detailsLogBox,
 #detailsTimelineBox,
-#proxyTabContent {
+#httpCacheTabContent,
+#proxyTabContent,
+#dataTabContent,
+#dnsTabContent,
+#testTabContent {
   overflow: auto;
-}
-
-#proxyTabContent {
-  padding-left: 20px;
+  padding: 10px;
 }
 
 #proxyTabContent td,
 #proxyTabContent th {
   font-size: 12px;
 }
+
+/*
+ * Styles for TABLE that uses a thin collapsed border.
+ */
+table.styledTable {
+  border-collapse:collapse;
+}
+
+table.styledTable,
+.styledTable th,
+.styledTable td {
+  border: 1px solid #777;
+}
+
+.styledTable th {
+  background: rgb(224,236,255);
+}
+

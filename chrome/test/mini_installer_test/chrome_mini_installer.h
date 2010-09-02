@@ -11,6 +11,8 @@
 #include "base/basictypes.h"
 #include "base/string_util.h"
 
+class FilePath;
+
 // This class has methods to install and uninstall Chrome mini installer.
 class ChromeMiniInstaller {
  public:
@@ -85,9 +87,6 @@ class ChromeMiniInstaller {
   // Will clean up the machine if Chrome install is messed up.
   void CleanChromeInstall();
 
-  // Closes First Run UI dialog.
-  void CloseFirstRunUIDialog(bool over_install);
-
   // Closes Chrome uninstall confirm dialog window.
   bool CloseUninstallWindow();
 
@@ -125,7 +124,7 @@ class ChromeMiniInstaller {
   std::wstring GetUninstallPath();
 
   // Get user data directory path.
-  std::wstring GetUserDataDirPath();
+  FilePath GetUserDataDirPath();
 
   // Gets the path to launch Chrome.
   bool GetChromeLaunchPath(std::wstring* launch_path);

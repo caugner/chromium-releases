@@ -13,6 +13,7 @@
 #include "media/base/media.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebData.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDatabase.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
@@ -21,6 +22,7 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebStorageEventDispatcher.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebStorageNamespace.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebThemeEngine.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/database/vfs_backend.h"
@@ -32,6 +34,7 @@
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webkitclient_impl.h"
 #include "webkit/support/test_webkit_client.h"
+#include "webkit/support/weburl_loader_mock_factory.h"
 #include "webkit/tools/test_shell/mock_webclipboard_impl.h"
 #include "webkit/tools/test_shell/simple_appcache_system.h"
 #include "webkit/tools/test_shell/simple_database_system.h"
@@ -41,7 +44,6 @@
 #include "v8/include/v8.h"
 
 #if defined(OS_WIN)
-#include "third_party/WebKit/WebKit/chromium/public/win/WebThemeEngine.h"
 #include "webkit/tools/test_shell/test_shell_webthemeengine.h"
 #endif
 #if defined(OS_MACOSX)
@@ -50,7 +52,8 @@
 
 using WebKit::WebScriptController;
 
-TestWebKitClient::TestWebKitClient() {
+TestWebKitClient::TestWebKitClient(bool unit_test_mode)
+      : unit_test_mode_(unit_test_mode) {
   v8::V8::SetCounterFunction(StatsTable::FindLocation);
 
   WebKit::initialize(this);
@@ -67,6 +70,10 @@ TestWebKitClient::TestWebKitClient() {
   WebKit::WebRuntimeFeatures::enableSockets(true);
   WebKit::WebRuntimeFeatures::enableApplicationCache(true);
   WebKit::WebRuntimeFeatures::enableDatabase(true);
+  WebKit::WebRuntimeFeatures::enableWebGL(true);
+  WebKit::WebRuntimeFeatures::enablePushState(true);
+  WebKit::WebRuntimeFeatures::enableNotifications(true);
+  WebKit::WebRuntimeFeatures::enableTouch(true);
 
   // Load libraries for media and enable the media player.
   bool enable_media = false;
@@ -99,6 +106,8 @@ TestWebKitClient::TestWebKitClient() {
 
   WebKit::WebDatabase::setObserver(&database_system_);
 
+  file_system_.set_sandbox_enabled(false);
+
 #if defined(OS_WIN)
   // Ensure we pick up the default theme engine.
   SetThemeEngine(NULL);
@@ -109,8 +118,7 @@ TestWebKitClient::TestWebKitClient() {
 
   // Initializing with a default context, which means no on-disk cookie DB,
   // and no support for directory listings.
-  SimpleResourceLoaderBridge::Init(
-      new TestShellRequestContext(FilePath(), cache_mode, true));
+  SimpleResourceLoaderBridge::Init(FilePath(), cache_mode, true);
 
   // Test shell always exposes the GC.
   webkit_glue::SetJavaScriptFlags(L" --expose-gc");
@@ -132,6 +140,10 @@ WebKit::WebClipboard* TestWebKitClient::clipboard() {
   return &mock_clipboard_;
 }
 
+WebKit::WebFileSystem* TestWebKitClient::fileSystem() {
+  return &file_system_;
+}
+
 WebKit::WebSandboxSupport* TestWebKitClient::sandboxSupport() {
   return NULL;
 }
@@ -145,10 +157,9 @@ bool TestWebKitClient::sandboxEnabled() {
 }
 
 WebKit::WebKitClient::FileHandle TestWebKitClient::databaseOpenFile(
-    const WebKit::WebString& vfs_file_name, int desired_flags,
-    WebKit::WebKitClient::FileHandle* dir_handle) {
+    const WebKit::WebString& vfs_file_name, int desired_flags) {
   return SimpleDatabaseSystem::GetInstance()->OpenFile(
-      vfs_file_name, desired_flags, dir_handle);
+      vfs_file_name, desired_flags);
 }
 
 int TestWebKitClient::databaseDeleteFile(const WebKit::WebString& vfs_file_name,
@@ -167,12 +178,6 @@ long long TestWebKitClient::databaseGetFileSize(
   return SimpleDatabaseSystem::GetInstance()->GetFileSize(vfs_file_name);
 }
 
-bool TestWebKitClient::getFileSize(const WebKit::WebString& path, long long& result) {
-  return file_util::GetFileSize(
-      webkit_glue::WebStringToFilePath(path),
-      reinterpret_cast<int64*>(&result));
-}
-
 unsigned long long TestWebKitClient::visitedLinkHash(const char* canonicalURL,
                                                      size_t length) {
   return 0;
@@ -187,6 +192,13 @@ WebKit::WebMessagePortChannel* TestWebKitClient::createMessagePortChannel() {
 }
 
 void TestWebKitClient::prefetchHostName(const WebKit::WebString&) {
+}
+
+WebKit::WebURLLoader* TestWebKitClient::createURLLoader() {
+  if (!unit_test_mode_)
+    return webkit_glue::WebKitClientImpl::createURLLoader();
+  return url_loader_factory_.CreateURLLoader(
+      webkit_glue::WebKitClientImpl::createURLLoader());
 }
 
 WebKit::WebData TestWebKitClient::loadResource(const char* name) {
@@ -225,11 +237,6 @@ void TestWebKitClient::dispatchStorageEvent(const WebKit::WebString& key,
   // The event is dispatched by the proxy.
 }
 
-WebKit::WebApplicationCacheHost* TestWebKitClient::createApplicationCacheHost(
-    WebKit::WebApplicationCacheHostClient* client) {
-  return SimpleAppCacheSystem::CreateApplicationCacheHost(client);
-}
-
 #if defined(OS_WIN)
 void TestWebKitClient::SetThemeEngine(WebKit::WebThemeEngine* engine) {
   active_theme_engine_ = engine ? engine : WebKitClientImpl::themeEngine();
@@ -242,4 +249,8 @@ WebKit::WebThemeEngine* TestWebKitClient::themeEngine() {
 
 WebKit::WebSharedWorkerRepository* TestWebKitClient::sharedWorkerRepository() {
   return NULL;
+}
+
+WebKit::WebGraphicsContext3D* TestWebKitClient::createGraphicsContext3D() {
+  return WebKit::WebGraphicsContext3D::createDefault();
 }

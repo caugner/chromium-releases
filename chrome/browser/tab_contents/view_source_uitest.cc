@@ -1,8 +1,9 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/app/chrome_dll_resource.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
@@ -14,23 +15,22 @@ const wchar_t kDocRoot[] = L"chrome/test/data";
 
 class ViewSourceTest : public UITest {
  protected:
-  ViewSourceTest() : UITest() {
-    test_html_ = L"files/viewsource/test.html";
+  ViewSourceTest() : test_html_("files/viewsource/test.html") {
   }
 
-  bool IsPageMenuCommandEnabled(int command) {
+  bool IsMenuCommandEnabled(int command) {
     scoped_refptr<BrowserProxy> window_proxy(automation()->GetBrowserWindow(0));
     EXPECT_TRUE(window_proxy.get());
     if (!window_proxy.get())
       return false;
 
     bool enabled;
-    EXPECT_TRUE(window_proxy->IsPageMenuCommandEnabled(command, &enabled));
+    EXPECT_TRUE(window_proxy->IsMenuCommandEnabled(command, &enabled));
     return enabled;
   }
 
  protected:
-  std::wstring test_html_;
+  std::string test_html_;
 };
 
 // This test renders a page in view-source and then checks to see if a cookie
@@ -43,15 +43,15 @@ TEST_F(ViewSourceTest, DoesBrowserRenderInViewSource) {
   std::string cookie = "viewsource_cookie";
   std::string cookie_data = "foo";
 
-  // First we navigate to our view-source test page
-  GURL url = server->TestServerPageW(test_html_);
-  url = GURL("view-source:" + url.spec());
+  // First we navigate to our view-source test page.
+  GURL url(chrome::kViewSourceScheme + std::string(":") +
+      server->TestServerPage(test_html_).spec());
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
   ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(url));
 
-  // Try to retrieve the cookie that the page sets
-  // It should not be there (because we are in view-source mode
+  // Try to retrieve the cookie that the page sets.  It should not be there
+  // (because we are in view-source mode).
   std::string cookie_found;
   ASSERT_TRUE(tab->GetCookieByName(url, cookie, &cookie_found));
   EXPECT_NE(cookie_data, cookie_found);
@@ -66,45 +66,44 @@ TEST_F(ViewSourceTest, DoesBrowserConsumeViewSourcePrefix) {
       HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
 
-  // First we navigate to google.html
-  GURL url = server->TestServerPageW(test_html_);
+  // First we navigate to google.html.
+  GURL url(server->TestServerPage(test_html_));
   NavigateToURL(url);
 
-  // Then we navigate to the SAME url but with the view-source: prefix
-  GURL url_viewsource = GURL("view-source:" + url.spec());
+  // Then we navigate to the same url but with the "view-source:" prefix.
+  GURL url_viewsource(chrome::kViewSourceScheme + std::string(":") +
+      url.spec());
   NavigateToURL(url_viewsource);
 
-  // The URL should still be prefixed with view-source:
+  // The URL should still be prefixed with "view-source:".
   EXPECT_EQ(url_viewsource.spec(), GetActiveTabURL().spec());
 }
 
-// Make sure that when looking at the actual page, we can select
-// "View Source" from the Page menu.
-TEST_F(ViewSourceTest, ViewSourceInPageMenuEnabledOnANormalPage) {
+// Make sure that when looking at the actual page, we can select "View Source"
+// from the menu.
+TEST_F(ViewSourceTest, ViewSourceInMenuEnabledOnANormalPage) {
   scoped_refptr<HTTPTestServer> server =
       HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
 
-  // First we navigate to google.html
-  GURL url = server->TestServerPageW(test_html_);
+  GURL url(server->TestServerPage(test_html_));
   NavigateToURL(url);
 
-  EXPECT_TRUE(IsPageMenuCommandEnabled(IDC_VIEW_SOURCE));
+  EXPECT_TRUE(IsMenuCommandEnabled(IDC_VIEW_SOURCE));
 }
 
-// Make sure that when looking at the page source, we can't select
-// "View Source" from the Page menu.
-TEST_F(ViewSourceTest, ViewSourceInPageMenuDisabledWhileViewingSource) {
+// Make sure that when looking at the page source, we can't select "View Source"
+// from the menu.
+TEST_F(ViewSourceTest, ViewSourceInMenuDisabledWhileViewingSource) {
   scoped_refptr<HTTPTestServer> server =
       HTTPTestServer::CreateServer(kDocRoot, NULL);
   ASSERT_TRUE(NULL != server.get());
 
-  // First we navigate to google.html
-  GURL url = server->TestServerPageW(test_html_);
-  GURL url_viewsource = GURL("view-source:" + url.spec());
+  GURL url_viewsource(chrome::kViewSourceScheme + std::string(":") +
+      server->TestServerPage(test_html_).spec());
   NavigateToURL(url_viewsource);
 
-  EXPECT_FALSE(IsPageMenuCommandEnabled(IDC_VIEW_SOURCE));
+  EXPECT_FALSE(IsMenuCommandEnabled(IDC_VIEW_SOURCE));
 }
 
 }  // namespace

@@ -14,6 +14,7 @@
 #include "webkit/appcache/appcache_interfaces.h"
 #include "webkit/appcache/appcache_service.h"
 #include "webkit/appcache/appcache_storage.h"
+#include "webkit/glue/resource_type.h"
 
 class URLRequest;
 
@@ -56,6 +57,9 @@ class AppCacheHost : public AppCacheStorage::Delegate,
   void SelectCache(const GURL& document_url,
                    const int64 cache_document_was_loaded_from,
                    const GURL& manifest_url);
+  void SelectCacheForWorker(int parent_process_id,
+                            int parent_host_id);
+  void SelectCacheForSharedWorker(int64 appcache_id);
   void MarkAsForeignEntry(const GURL& document_url,
                           int64 cache_document_was_loaded_from);
   void GetStatusWithCallback(GetStatusCallback* callback,
@@ -66,9 +70,9 @@ class AppCacheHost : public AppCacheStorage::Delegate,
                              void* callback_param);
 
   // Support for loading resources out of the appcache.
-  // Returns NULL if the host is not associated with a complete cache.
-  AppCacheRequestHandler* CreateRequestHandler(URLRequest* request,
-                                               bool is_main_request);
+  // May return NULL if the request isn't subject to retrieval from an appache.
+  AppCacheRequestHandler* CreateRequestHandler(
+      URLRequest* request, ResourceType::Type resource_type);
 
   // Establishes an association between this host and a cache. 'cache' may be
   // NULL to break any existing association. Associations are established
@@ -84,8 +88,8 @@ class AppCacheHost : public AppCacheStorage::Delegate,
   void LoadMainResourceCache(int64 cache_id);
 
   // Used to notify the host that the main resource was blocked by a policy. To
-  // work properly, this method needs to by invokde prior to cache selection.
-  void NotifyMainResourceBlocked();
+  // work properly, this method needs to by invoked prior to cache selection.
+  void NotifyMainResourceBlocked(const GURL& manifest_url);
 
   // Used by the update job to keep track of which hosts are associated
   // with which pending master entries.
@@ -124,8 +128,25 @@ class AppCacheHost : public AppCacheStorage::Delegate,
   virtual void OnContentBlocked(AppCacheGroup* group);
   virtual void OnUpdateComplete(AppCacheGroup* group);
 
+  // Returns true if this host is for a dedicated worker context.
+  bool is_for_dedicated_worker() const {
+    return parent_host_id_ != kNoHostId;
+  }
+
+  // Returns the parent context's host instance. This is only valid
+  // to call when this instance is_for_dedicated_worker.
+  AppCacheHost* GetParentAppCacheHost() const;
+
   // Identifies the corresponding appcache host in the child process.
   int host_id_;
+
+  // Hosts for dedicated workers are special cased to shunt
+  // request handling off to the dedicated worker's parent.
+  // The scriptable api is not accessible in dedicated workers
+  // so the other aspects of this class are not relevant for
+  // these special case instances.
+  int parent_host_id_;
+  int parent_process_id_;
 
   // The cache associated with this host, if any.
   scoped_refptr<AppCache> associated_cache_;
@@ -176,6 +197,8 @@ class AppCacheHost : public AppCacheStorage::Delegate,
 
   // True if requests for this host were blocked by a policy.
   bool main_resource_blocked_;
+  GURL blocked_manifest_url_;
+
 
   // List of objects observing us.
   ObserverList<Observer> observers_;
@@ -190,6 +213,7 @@ class AppCacheHost : public AppCacheStorage::Delegate,
   FRIEND_TEST(AppCacheHostTest, FailedCacheLoad);
   FRIEND_TEST(AppCacheHostTest, FailedGroupLoad);
   FRIEND_TEST(AppCacheHostTest, SetSwappableCache);
+  FRIEND_TEST(AppCacheHostTest, ForDedicatedWorker);
   FRIEND_TEST(AppCacheGroupTest, QueueUpdate);
   DISALLOW_COPY_AND_ASSIGN(AppCacheHost);
 };

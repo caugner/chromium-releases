@@ -1,4 +1,4 @@
-// Copyright (c) 2008-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,9 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/ssl_cert_request_info.h"
+#include "net/base/ssl_connection_status_flags.h"
 #include "net/base/ssl_info.h"
+#include "net/socket/client_socket_handle.h"
 
 // Welcome to Mac SSL. We've been waiting for you.
 //
@@ -432,7 +434,6 @@ X509Certificate* GetServerCert(SSLContextRef ssl_context) {
 
   SecCertificateRef server_cert = static_cast<SecCertificateRef>(
       const_cast<void*>(CFArrayGetValueAtIndex(certs, 0)));
-  CFRetain(server_cert);
   return X509Certificate::CreateFromHandle(
       server_cert, X509Certificate::SOURCE_FROM_NETWORK, intermediate_ca_certs);
 }
@@ -497,7 +498,7 @@ EnabledCipherSuites::EnabledCipherSuites() {
 
 //-----------------------------------------------------------------------------
 
-SSLClientSocketMac::SSLClientSocketMac(ClientSocket* transport_socket,
+SSLClientSocketMac::SSLClientSocketMac(ClientSocketHandle* transport_socket,
                                        const std::string& hostname,
                                        const SSLConfig& ssl_config)
     : handshake_io_callback_(this, &SSLClientSocketMac::OnHandshakeIOComplete),
@@ -518,34 +519,33 @@ SSLClientSocketMac::SSLClientSocketMac(ClientSocket* transport_socket,
       handshake_interrupted_(false),
       client_cert_requested_(false),
       ssl_context_(NULL),
-      pending_send_error_(OK) {
+      pending_send_error_(OK),
+      net_log_(transport_socket->socket()->NetLog()) {
 }
 
 SSLClientSocketMac::~SSLClientSocketMac() {
   Disconnect();
 }
 
-int SSLClientSocketMac::Connect(CompletionCallback* callback,
-                                const BoundNetLog& net_log) {
+int SSLClientSocketMac::Connect(CompletionCallback* callback) {
   DCHECK(transport_.get());
   DCHECK(next_handshake_state_ == STATE_NONE);
   DCHECK(!user_connect_callback_);
 
-  net_log.BeginEvent(NetLog::TYPE_SSL_CONNECT);
+  net_log_.BeginEvent(NetLog::TYPE_SSL_CONNECT, NULL);
 
   int rv = InitializeSSLContext();
   if (rv != OK) {
-    net_log.EndEvent(NetLog::TYPE_SSL_CONNECT);
+    net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT, NULL);
     return rv;
   }
 
   next_handshake_state_ = STATE_HANDSHAKE_START;
   rv = DoHandshakeLoop(OK);
   if (rv == ERR_IO_PENDING) {
-    net_log_ = net_log;
     user_connect_callback_ = callback;
   } else {
-    net_log.EndEvent(NetLog::TYPE_SSL_CONNECT);
+    net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT, NULL);
   }
   return rv;
 }
@@ -562,7 +562,7 @@ void SSLClientSocketMac::Disconnect() {
 
   // Shut down anything that may call us back.
   verifier_.reset();
-  transport_->Disconnect();
+  transport_->socket()->Disconnect();
 }
 
 bool SSLClientSocketMac::IsConnected() const {
@@ -572,7 +572,7 @@ bool SSLClientSocketMac::IsConnected() const {
   // layer (HttpNetworkTransaction) needs to handle a persistent connection
   // closed by the server when we send a request anyway, a false positive in
   // exchange for simpler code is a good trade-off.
-  return completed_handshake_ && transport_->IsConnected();
+  return completed_handshake_ && transport_->socket()->IsConnected();
 }
 
 bool SSLClientSocketMac::IsConnectedAndIdle() const {
@@ -581,13 +581,14 @@ bool SSLClientSocketMac::IsConnectedAndIdle() const {
   // Strictly speaking, we should check if we have received the close_notify
   // alert message from the server, and return false in that case.  Although
   // the close_notify alert message means EOF in the SSL layer, it is just
-  // bytes to the transport layer below, so transport_->IsConnectedAndIdle()
-  // returns the desired false when we receive close_notify.
-  return completed_handshake_ && transport_->IsConnectedAndIdle();
+  // bytes to the transport layer below, so
+  // transport_->socket()->IsConnectedAndIdle() returns the desired false
+  // when we receive close_notify.
+  return completed_handshake_ && transport_->socket()->IsConnectedAndIdle();
 }
 
 int SSLClientSocketMac::GetPeerAddress(AddressList* address) const {
-  return transport_->GetPeerAddress(address);
+  return transport_->socket()->GetPeerAddress(address);
 }
 
 int SSLClientSocketMac::Read(IOBuffer* buf, int buf_len,
@@ -629,11 +630,11 @@ int SSLClientSocketMac::Write(IOBuffer* buf, int buf_len,
 }
 
 bool SSLClientSocketMac::SetReceiveBufferSize(int32 size) {
-  return transport_->SetReceiveBufferSize(size);
+  return transport_->socket()->SetReceiveBufferSize(size);
 }
 
 bool SSLClientSocketMac::SetSendBufferSize(int32 size) {
-  return transport_->SetSendBufferSize(size);
+  return transport_->socket()->SetSendBufferSize(size);
 }
 
 void SSLClientSocketMac::GetSSLInfo(SSLInfo* ssl_info) {
@@ -654,6 +655,9 @@ void SSLClientSocketMac::GetSSLInfo(SSLInfo* ssl_info) {
   OSStatus status = SSLGetNegotiatedCipher(ssl_context_, &suite);
   if (!status)
     ssl_info->security_bits = KeySizeOfCipherSuite(suite);
+
+  if (ssl_config_.ssl3_fallback)
+    ssl_info->connection_status |= SSL_CONNECTION_SSL3_FALLBACK;
 }
 
 void SSLClientSocketMac::GetSSLCertRequestInfo(
@@ -807,7 +811,7 @@ int SSLClientSocketMac::InitializeSSLContext() {
     // different peers, which puts us through certificate validation again
     // and catches hostname/certificate name mismatches.
     AddressList address;
-    int rv = transport_->GetPeerAddress(&address);
+    int rv = transport_->socket()->GetPeerAddress(&address);
     if (rv != OK)
       return rv;
     const struct addrinfo* ai = address.head();
@@ -867,8 +871,7 @@ void SSLClientSocketMac::OnHandshakeIOComplete(int result) {
   DCHECK(next_handshake_state_ != STATE_NONE);
   int rv = DoHandshakeLoop(result);
   if (rv != ERR_IO_PENDING) {
-    net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT);
-    net_log_ = BoundNetLog();
+    net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT, NULL);
     DoConnectCallback(rv);
   }
 }
@@ -884,8 +887,7 @@ void SSLClientSocketMac::OnTransportReadComplete(int result) {
   if (next_handshake_state_ != STATE_NONE) {
     int rv = DoHandshakeLoop(result);
     if (rv != ERR_IO_PENDING) {
-      net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT);
-      net_log_ = BoundNetLog();
+      net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT, NULL);
       DoConnectCallback(rv);
     }
     return;
@@ -1221,9 +1223,9 @@ OSStatus SSLClientSocketMac::SSLReadCallback(SSLConnectionRef connection,
   int rv = 1;  // any old value to spin the loop below
   while (rv > 0 && total_read < *data_length) {
     us->read_io_buf_ = new IOBuffer(*data_length - total_read);
-    rv = us->transport_->Read(us->read_io_buf_,
-                              *data_length - total_read,
-                              &us->transport_read_callback_);
+    rv = us->transport_->socket()->Read(us->read_io_buf_,
+                                        *data_length - total_read,
+                                        &us->transport_read_callback_);
 
     if (rv >= 0) {
       us->recv_buffer_.insert(us->recv_buffer_.end(),
@@ -1283,9 +1285,9 @@ OSStatus SSLClientSocketMac::SSLWriteCallback(SSLConnectionRef connection,
     us->write_io_buf_ = new IOBuffer(us->send_buffer_.size());
     memcpy(us->write_io_buf_->data(), &us->send_buffer_[0],
            us->send_buffer_.size());
-    rv = us->transport_->Write(us->write_io_buf_,
-                               us->send_buffer_.size(),
-                               &us->transport_write_callback_);
+    rv = us->transport_->socket()->Write(us->write_io_buf_,
+                                         us->send_buffer_.size(),
+                                         &us->transport_write_callback_);
     if (rv > 0) {
       us->send_buffer_.erase(us->send_buffer_.begin(),
                              us->send_buffer_.begin() + rv);

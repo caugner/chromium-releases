@@ -9,10 +9,11 @@
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/extensions/extension_infobar_delegate.h"
 #include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/platform_util.h"
-#include "gfx/canvas.h"
+#include "chrome/common/extensions/extension_resource.h"
+#include "gfx/canvas_skia.h"
 #include "grit/theme_resources.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/menu/menu_2.h"
@@ -66,6 +67,14 @@ ExtensionInfoBar::~ExtensionInfoBar() {
 
 void ExtensionInfoBar::OnExtensionPreferredSizeChanged(ExtensionView* view) {
   DCHECK(view == delegate_->extension_host()->view());
+  
+  // When the infobar is closed, it animates to 0 vertical height. We'll
+  // continue to get size changed notifications from the ExtensionView, but we
+  // need to ignore them otherwise we'll try to re-animate open (and leak the
+  // infobar view).
+  if (delegate_->closing())
+    return;
+
   delegate_->extension_host()->view()->SetVisible(true);
 
   gfx::Size sz = view->GetPreferredSize();
@@ -114,9 +123,10 @@ void ExtensionInfoBar::OnImageLoaded(
   SkBitmap* drop_image = rb.GetBitmapNamed(IDR_APP_DROPARROW);
 
   int image_size = Extension::EXTENSION_ICON_BITTY;
-  scoped_ptr<gfx::Canvas> canvas(
-      new gfx::Canvas(image_size + kDropArrowLeftMargin + drop_image->width(),
-      image_size, false));
+  scoped_ptr<gfx::CanvasSkia> canvas(
+      new gfx::CanvasSkia(
+          image_size + kDropArrowLeftMargin + drop_image->width(),
+          image_size, false));
   canvas->DrawBitmapInt(*icon,
                         0, 0, icon->width(), icon->height(),
                         0, 0, image_size, image_size,

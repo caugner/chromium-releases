@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "app/win_util.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
-#include "gfx/canvas.h"
+#include "gfx/canvas_skia.h"
 #include "gfx/native_theme_win.h"
 #include "gfx/path.h"
 #include "views/accessibility/view_accessibility.h"
@@ -57,7 +57,9 @@ WidgetWin::WidgetWin()
       is_mouse_down_(false),
       is_window_(false),
       restore_focus_when_enabled_(false),
-      delegate_(NULL) {
+      delegate_(NULL),
+      accessibility_view_events_index_(-1),
+      accessibility_view_events_(kMaxAccessibilityViewEvents) {
 }
 
 WidgetWin::~WidgetWin() {
@@ -65,6 +67,11 @@ WidgetWin::~WidgetWin() {
 
 // static
 WidgetWin* WidgetWin::GetWidget(HWND hwnd) {
+  // TODO(jcivelli): http://crbug.com/44499 We need a way to test that hwnd is
+  //                 associated with a WidgetWin (it might be a pure
+  //                 WindowImpl).
+  if (!WindowImpl::IsWindowImpl(hwnd))
+    return NULL;
   return reinterpret_cast<WidgetWin*>(win_util::GetWindowUserData(hwnd));
 }
 
@@ -105,6 +112,31 @@ void WidgetWin::SetUseLayeredBuffer(bool use_layered_buffer) {
     LayoutRootView();
   else
     contents_.reset(NULL);
+}
+
+View* WidgetWin::GetAccessibilityViewEventAt(int id) {
+  // Convert from MSAA child id.
+  id = -(id + 1);
+  DCHECK(id >= 0 && id < kMaxAccessibilityViewEvents);
+  return accessibility_view_events_[id];
+}
+
+int WidgetWin::AddAccessibilityViewEvent(View* view) {
+  accessibility_view_events_index_ =
+      (accessibility_view_events_index_ + 1) % kMaxAccessibilityViewEvents;
+  accessibility_view_events_[accessibility_view_events_index_] = view;
+
+  // Convert to MSAA child id.
+  return -(accessibility_view_events_index_ + 1);
+}
+
+void WidgetWin::ClearAccessibilityViewEvent(View* view) {
+  for (std::vector<View*>::iterator it = accessibility_view_events_.begin();
+      it != accessibility_view_events_.end();
+      ++it) {
+    if (*it == view)
+      *it = NULL;
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -163,6 +195,10 @@ void WidgetWin::Init(gfx::NativeView parent, const gfx::Rect& bounds) {
   // Bug 964884: detach the IME attached to this window.
   // We should attach IMEs only when we need to input CJK strings.
   ImmAssociateContextEx(hwnd(), NULL, 0);
+}
+
+void WidgetWin::InitWithWidget(Widget* parent, const gfx::Rect& bounds) {
+  Init(parent->GetNativeView(), bounds);
 }
 
 WidgetDelegate* WidgetWin::GetWidgetDelegate() {
@@ -419,6 +455,9 @@ void WidgetWin::ViewHierarchyChanged(bool is_add, View *parent,
                                      View *child) {
   if (drop_target_.get())
     drop_target_->ResetTargetViewIfEquals(child);
+
+  if (!is_add)
+    ClearAccessibilityViewEvent(child);
 }
 
 
@@ -458,16 +497,8 @@ void WidgetWin::DidProcessMessage(const MSG& msg) {
 ////////////////////////////////////////////////////////////////////////////////
 // FocusTraversable
 
-View* WidgetWin::FindNextFocusableView(
-    View* starting_view, bool reverse, Direction direction,
-    bool check_starting_view, FocusTraversable** focus_traversable,
-    View** focus_traversable_view) {
-  return root_view_->FindNextFocusableView(starting_view,
-                                           reverse,
-                                           direction,
-                                           check_starting_view,
-                                           focus_traversable,
-                                           focus_traversable_view);
+FocusSearch* WidgetWin::GetFocusSearch() {
+  return root_view_->GetFocusSearch();
 }
 
 FocusTraversable* WidgetWin::GetFocusTraversableParent() {
@@ -889,6 +920,8 @@ LRESULT WidgetWin::OnSetText(const wchar_t* text) {
 }
 
 void WidgetWin::OnSettingChange(UINT flags, const wchar_t* section) {
+  if (flags == SPI_SETWORKAREA && GetWidgetDelegate())
+    GetWidgetDelegate()->WorkAreaChanged();
   SetMsgHandled(FALSE);
 }
 
@@ -1088,9 +1121,9 @@ Window* WidgetWin::GetWindowImpl(HWND hwnd) {
 }
 
 void WidgetWin::SizeContents(const gfx::Size& window_size) {
-  contents_.reset(new gfx::Canvas(window_size.width(),
-                                  window_size.height(),
-                                  false));
+  contents_.reset(new gfx::CanvasSkia(window_size.width(),
+                                      window_size.height(),
+                                      false));
 }
 
 void WidgetWin::PaintLayeredWindow() {
@@ -1332,6 +1365,11 @@ Widget* Widget::GetWidgetFromNativeView(gfx::NativeView native_view) {
 // static
 Widget* Widget::GetWidgetFromNativeWindow(gfx::NativeWindow native_window) {
   return Widget::GetWidgetFromNativeView(native_window);
+}
+
+// static
+void Widget::NotifyLocaleChanged() {
+  NOTIMPLEMENTED();
 }
 
 }  // namespace views

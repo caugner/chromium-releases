@@ -16,85 +16,17 @@
 
 #include "base/base64.h"
 #include "base/basictypes.h"
+#include "base/crypto/capi_util.h"
 #include "base/logging.h"
 #include "base/string_piece.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 
 namespace net {
 
-// TODO(rsleevi): The following encoding functions are adapted from
-// base/crypto/rsa_private_key.h and can/should probably be refactored.
-static const uint8 kSequenceTag = 0x30;
-
-void PrependLength(size_t size, std::list<BYTE>* data) {
-  // The high bit is used to indicate whether additional octets are needed to
-  // represent the length.
-  if (size < 0x80) {
-    data->push_front(static_cast<BYTE>(size));
-  } else {
-    uint8 num_bytes = 0;
-    while (size > 0) {
-      data->push_front(static_cast<BYTE>(size & 0xFF));
-      size >>= 8;
-      num_bytes++;
-    }
-    CHECK_LE(num_bytes, 4);
-    data->push_front(0x80 | num_bytes);
-  }
-}
-
-void PrependTypeHeaderAndLength(uint8 type, uint32 length,
-                                std::vector<BYTE>* output) {
-  std::list<BYTE> type_and_length;
-
-  PrependLength(length, &type_and_length);
-  type_and_length.push_front(type);
-
-  output->insert(output->begin(), type_and_length.begin(),
-                 type_and_length.end());
-}
-
-bool EncodeAndAppendType(LPCSTR type, const void* to_encode,
-                         std::vector<BYTE>* output) {
-  BOOL ok;
-  DWORD size = 0;
-  ok = CryptEncodeObject(X509_ASN_ENCODING, type, to_encode, NULL, &size);
-  DCHECK(ok);
-  if (!ok)
-    return false;
-
-  std::vector<BYTE>::size_type old_size = output->size();
-  output->resize(old_size + size);
-
-  ok = CryptEncodeObject(X509_ASN_ENCODING, type, to_encode,
-                         &(*output)[old_size], &size);
-  DCHECK(ok);
-  if (!ok)
-    return false;
-
-  // Sometimes the initial call to CryptEncodeObject gave a generous estimate
-  // of the size, so shrink back to what was actually used.
-  output->resize(old_size + size);
-
-  return true;
-}
-
-// Appends a DER IA5String containing |challenge| to |output|.
-// Returns true if encoding was successful.
-bool EncodeChallenge(const std::string& challenge, std::vector<BYTE>* output) {
-  CERT_NAME_VALUE challenge_nv;
-  challenge_nv.dwValueType = CERT_RDN_IA5_STRING;
-  challenge_nv.Value.pbData = const_cast<BYTE*>(
-      reinterpret_cast<const BYTE*>(challenge.data()));
-  challenge_nv.Value.cbData = challenge.size();
-
-  return EncodeAndAppendType(X509_ANY_STRING, &challenge_nv, output);
-}
-
-// Appends a DER SubjectPublicKeyInfo structure for the signing key in |prov|
-// to |output|.
-// Returns true if encoding was successful.
-bool EncodeSubjectPublicKeyInfo(HCRYPTPROV prov, std::vector<BYTE>* output) {
+// Assigns the contents of a CERT_PUBLIC_KEY_INFO structure for the signing
+// key in |prov| to |output|. Returns true if encoding was successful.
+bool GetSubjectPublicKeyInfo(HCRYPTPROV prov, std::vector<BYTE>* output) {
   BOOL ok;
   DWORD size = 0;
 
@@ -107,9 +39,10 @@ bool EncodeSubjectPublicKeyInfo(HCRYPTPROV prov, std::vector<BYTE>* output) {
   if (!ok)
     return false;
 
-  std::vector<BYTE> public_key_info(size);
+  output->resize(size);
+
   PCERT_PUBLIC_KEY_INFO public_key_casted =
-      reinterpret_cast<PCERT_PUBLIC_KEY_INFO>(&public_key_info[0]);
+      reinterpret_cast<PCERT_PUBLIC_KEY_INFO>(&(*output)[0]);
   ok = CryptExportPublicKeyInfoEx(prov, AT_KEYEXCHANGE, X509_ASN_ENCODING,
                                   szOID_RSA_RSA, 0, NULL, public_key_casted,
                                   &size);
@@ -117,84 +50,59 @@ bool EncodeSubjectPublicKeyInfo(HCRYPTPROV prov, std::vector<BYTE>* output) {
   if (!ok)
     return false;
 
-  public_key_info.resize(size);
+  output->resize(size);
 
-  return EncodeAndAppendType(X509_PUBLIC_KEY_INFO, &public_key_info[0],
-                             output);
-}
-
-// Generates an ASN.1 DER representation of the PublicKeyAndChallenge structure
-// from the signing key of |prov| and the specified |challenge| and appends it
-// to |output|.
-// True if the the encoding was successfully generated.
-bool GetPublicKeyAndChallenge(HCRYPTPROV prov, const std::string& challenge,
-                              std::vector<BYTE>* output) {
-  if (!EncodeSubjectPublicKeyInfo(prov, output) ||
-      !EncodeChallenge(challenge, output)) {
-    return false;
-  }
-
-  PrependTypeHeaderAndLength(kSequenceTag, output->size(), output);
   return true;
 }
 
 // Generates a DER encoded SignedPublicKeyAndChallenge structure from the
-// signing key of |prov| and the specified |challenge| string and appends it
-// to |output|.
+// signing key of |prov| and the specified ASCII |challenge| string and
+// appends it to |output|.
 // True if the encoding was successfully generated.
 bool GetSignedPublicKeyAndChallenge(HCRYPTPROV prov,
                                     const std::string& challenge,
                                     std::string* output) {
-  std::vector<BYTE> pkac;
-  if (!GetPublicKeyAndChallenge(prov, challenge, &pkac))
+  std::wstring wide_challenge = ASCIIToWide(challenge);
+  std::vector<BYTE> spki;
+
+  if (!GetSubjectPublicKeyInfo(prov, &spki))
     return false;
 
-  std::vector<BYTE> signature;
-  std::vector<BYTE> signed_pkac;
-  DWORD size = 0;
+  // PublicKeyAndChallenge ::= SEQUENCE {
+  //     spki SubjectPublicKeyInfo,
+  //     challenge IA5STRING
+  // }
+  CERT_KEYGEN_REQUEST_INFO pkac;
+  pkac.dwVersion = CERT_KEYGEN_REQUEST_V1;
+  pkac.SubjectPublicKeyInfo =
+      *reinterpret_cast<PCERT_PUBLIC_KEY_INFO>(&spki[0]);
+  pkac.pwszChallengeString = const_cast<wchar_t*>(wide_challenge.c_str());
+
+  CRYPT_ALGORITHM_IDENTIFIER sig_alg;
+  memset(&sig_alg, 0, sizeof(sig_alg));
+  sig_alg.pszObjId = szOID_RSA_MD5RSA;
+
   BOOL ok;
-
-  // While the MSDN documentation states that CERT_SIGNED_CONTENT_INFO should
-  // be an X.509 certificate type, for encoding this is not necessary. The
-  // result of encoding this structure will be a DER-encoded structure with
-  // the ASN.1 equivalent of
-  //  ::= SEQUENCE {
-  //    ToBeSigned IMPLICIT OCTET STRING,
-  //    SignatureAlgorithm AlgorithmIdentifier,
-  //    Signature BIT STRING
-  //  }
-  //
-  // This happens to be the same naive type as an SPKAC, so this works.
-  CERT_SIGNED_CONTENT_INFO info;
-  info.ToBeSigned.cbData = pkac.size();
-  info.ToBeSigned.pbData = &pkac[0];
-  info.SignatureAlgorithm.pszObjId = szOID_RSA_MD5RSA;
-  info.SignatureAlgorithm.Parameters.cbData = 0;
-  info.SignatureAlgorithm.Parameters.pbData = NULL;
-
-  ok = CryptSignCertificate(prov, AT_KEYEXCHANGE, X509_ASN_ENCODING,
-                            info.ToBeSigned.pbData, info.ToBeSigned.cbData,
-                            &info.SignatureAlgorithm, NULL, NULL, &size);
+  DWORD size = 0;
+  std::vector<BYTE> signed_pkac;
+  ok = CryptSignAndEncodeCertificate(prov, AT_KEYEXCHANGE, X509_ASN_ENCODING,
+                                     X509_KEYGEN_REQUEST_TO_BE_SIGNED,
+                                     &pkac, &sig_alg, NULL,
+                                     NULL, &size);
   DCHECK(ok);
   if (!ok)
     return false;
 
-  signature.resize(size);
-  info.Signature.cbData = signature.size();
-  info.Signature.pbData = &signature[0];
-  info.Signature.cUnusedBits = 0;
-
-  ok = CryptSignCertificate(prov, AT_KEYEXCHANGE, X509_ASN_ENCODING,
-                            info.ToBeSigned.pbData, info.ToBeSigned.cbData,
-                            &info.SignatureAlgorithm, NULL,
-                            info.Signature.pbData, &info.Signature.cbData);
+  signed_pkac.resize(size);
+  ok = CryptSignAndEncodeCertificate(prov, AT_KEYEXCHANGE, X509_ASN_ENCODING,
+                                     X509_KEYGEN_REQUEST_TO_BE_SIGNED,
+                                     &pkac, &sig_alg, NULL,
+                                     &signed_pkac[0], &size);
   DCHECK(ok);
-  if (!ok || !EncodeAndAppendType(X509_CERT, &info, &signed_pkac))
+  if (!ok)
     return false;
 
-  output->assign(reinterpret_cast<char*>(&signed_pkac[0]),
-                 signed_pkac.size());
-
+  output->assign(reinterpret_cast<char*>(&signed_pkac[0]), size);
   return true;
 }
 
@@ -220,62 +128,6 @@ std::wstring GetNewKeyContainerId() {
   RpcStringFree(&rpc_string);
 
   return result;
-}
-
-void StoreKeyLocationInCache(HCRYPTPROV prov) {
-  BOOL ok;
-  DWORD size = 0;
-
-  // Though it is known the container and provider name, as they are supplied
-  // during GenKeyAndSignChallenge, explicitly resolving them via
-  // CryptGetProvParam ensures that any defaults (such as provider name being
-  // NULL) or any CSP modifications to the container name are properly
-  // reflected.
-
-  // Find the container name. Though the MSDN documentation states it will
-  // return the exact same value as supplied when the provider was aquired, it
-  // also notes the return type will be CHAR, /not/ WCHAR.
-  ok = CryptGetProvParam(prov, PP_CONTAINER, NULL, &size, 0);
-  if (!ok)
-    return;
-
-  std::vector<BYTE> buffer(size);
-  ok = CryptGetProvParam(prov, PP_CONTAINER, &buffer[0], &size, 0);
-  if (!ok)
-    return;
-
-  KeygenHandler::KeyLocation key_location;
-  UTF8ToWide(reinterpret_cast<char*>(&buffer[0]), size,
-             &key_location.container_name);
-
-  // Get the provider name. This will always resolve, even if NULL (indicating
-  // the default provider) was supplied to the CryptAcquireContext.
-  size = 0;
-  ok = CryptGetProvParam(prov, PP_NAME, NULL, &size, 0);
-  if (!ok)
-    return;
-
-  buffer.resize(size);
-  ok = CryptGetProvParam(prov, PP_NAME, &buffer[0], &size, 0);
-  if (!ok)
-    return;
-
-  UTF8ToWide(reinterpret_cast<char*>(&buffer[0]), size,
-             &key_location.provider_name);
-
-  std::vector<BYTE> public_key_info;
-  if (!EncodeSubjectPublicKeyInfo(prov, &public_key_info))
-    return;
-
-  KeygenHandler::Cache* cache = KeygenHandler::Cache::GetInstance();
-  cache->Insert(std::string(public_key_info.begin(), public_key_info.end()),
-                key_location);
-}
-
-bool KeygenHandler::KeyLocation::Equals(
-    const KeygenHandler::KeyLocation& location) const {
-  return container_name == location.container_name &&
-         provider_name == location.provider_name;
 }
 
 std::string KeygenHandler::GenKeyAndSignChallenge() {
@@ -306,8 +158,9 @@ std::string KeygenHandler::GenKeyAndSignChallenge() {
 
     // Only create new key containers, so that existing key containers are not
     // overwritten.
-    ok = CryptAcquireContext(&prov, new_key_id.c_str(), NULL, PROV_RSA_FULL,
-                             CRYPT_SILENT | CRYPT_NEWKEYSET);
+    ok = base::CryptAcquireContextLocked(&prov, new_key_id.c_str(), NULL,
+                                         PROV_RSA_FULL,
+                                         CRYPT_SILENT | CRYPT_NEWKEYSET);
 
     if (ok || GetLastError() != NTE_BAD_KEYSET)
       break;
@@ -337,8 +190,6 @@ std::string KeygenHandler::GenKeyAndSignChallenge() {
     goto failure;
   }
 
-  StoreKeyLocationInCache(prov);
-
  failure:
   if (!is_success) {
     LOG(ERROR) << "SSL Keygen failed";
@@ -357,8 +208,9 @@ std::string KeygenHandler::GenKeyAndSignChallenge() {
     prov = NULL;
     if (!stores_key_) {
       // Fully destroys any of the keys that were created and releases prov.
-      CryptAcquireContext(&prov, new_key_id.c_str(), NULL, PROV_RSA_FULL,
-                          CRYPT_SILENT | CRYPT_DELETEKEYSET);
+      base::CryptAcquireContextLocked(&prov, new_key_id.c_str(), NULL,
+                                      PROV_RSA_FULL,
+                                      CRYPT_SILENT | CRYPT_DELETEKEYSET);
     }
   }
 

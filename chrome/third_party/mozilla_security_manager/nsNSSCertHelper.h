@@ -57,6 +57,17 @@ typedef scoped_ptr_malloc<PRArenaPool, FreePRArenaPool> ScopedPRArenaPool;
 
 namespace mozilla_security_manager {
 
+// Constants to classify the type of a certificate. (In Mozilla this is actually
+// defined in nsIX509Cert.idl)
+enum CertType {
+  UNKNOWN_CERT,
+  CA_CERT,
+  USER_CERT,
+  EMAIL_CERT,
+  SERVER_CERT,
+  NUM_CERT_TYPES
+};
+
 extern SECOidTag ms_cert_ext_certtype;
 extern SECOidTag ms_certsrv_ca_version;
 extern SECOidTag ms_nt_principal_name;
@@ -69,6 +80,11 @@ std::string ProcessRawBytes(SECItem* data);
 
 // For fields which have the length specified in bits, rather than bytes.
 std::string ProcessRawBits(SECItem* data);
+
+// For host values, if they contain IDN Punycode-encoded A-labels, this will
+// return a string suitable for display that contains both the original and the
+// decoded U-label form.  Otherwise, the string will be returned as is.
+std::string ProcessIDN(const std::string& input);
 
 std::string DumpOidString(SECItem* oid);
 std::string GetOIDText(SECItem* oid);
@@ -93,6 +109,8 @@ std::string ProcessKeyUsageExtension(SECItem* extension_data);
 std::string ProcessExtKeyUsage(SECItem* extension_data);
 std::string ProcessExtensionData(SECOidTag oid_tag, SECItem* extension_data);
 std::string ProcessSubjectPublicKeyInfo(CERTSubjectPublicKeyInfo* spki);
+
+CertType GetCertType(CERTCertificate *cert);
 
 }  // namespace mozilla_security_manager
 

@@ -6,6 +6,9 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_dom_ui.h"
+#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/pref_service.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/ui_test_utils.h"
@@ -73,7 +76,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, OverrideNewtabIncognito) {
                SchemeIs(chrome::kExtensionScheme));
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, OverrideHistory) {
+// Times out consistently on Win, http://crbug.com/45173.
+#if defined(OS_WIN)
+#define MAYBE_OverrideHistory DISABLED_OverrideHistory
+#else
+#define MAYBE_OverrideHistory OverrideHistory
+#endif  // defined(OS_WIN)
+
+IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, MAYBE_OverrideHistory) {
   ASSERT_TRUE(RunExtensionTest("override/history")) << message_;
   {
     ResultCatcher catcher;

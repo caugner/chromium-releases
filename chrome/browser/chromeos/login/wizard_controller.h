@@ -7,19 +7,27 @@
 
 #include <string>
 
+#include "base/gtest_prod_util.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "chrome/browser/chromeos/login/view_screen.h"
 #include "chrome/browser/chromeos/login/wizard_screen.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
+class PrefService;
 class WizardContentsView;
 class WizardScreen;
 
 namespace chromeos {
 class AccountScreen;
 class BackgroundView;
+class EulaScreen;
+class LoginScreen;
 class NetworkScreen;
+class RegistrationScreen;
+class StartupCustomizationDocument;
 class UpdateScreen;
+class UserImageScreen;
 }
 
 namespace gfx {
@@ -45,13 +53,10 @@ class WizardController : public chromeos::ScreenObserver,
   }
 
   // Shows the first screen defined by |first_screen_name| or by default
-  // if the parameter is empty. |paint_background| indicates whether a
-  // background should be painted. If |paint_background| is false, the window is
-  // made transparent. |screen_bounds| are used to calculate position of the
-  // wizard screen.
+  // if the parameter is empty. |screen_bounds| are used to calculate position
+  // of the wizard screen.
   void Init(const std::string& first_screen_name,
-            const gfx::Rect& screen_bounds,
-            bool paint_background);
+            const gfx::Rect& screen_bounds);
 
   // Returns the view that contains all the other views.
   views::View* contents() { return contents_; }
@@ -68,29 +73,51 @@ class WizardController : public chromeos::ScreenObserver,
 
   // Lazy initializers and getters for screens.
   chromeos::NetworkScreen* GetNetworkScreen();
-  LoginScreen* GetLoginScreen();
+  chromeos::LoginScreen* GetLoginScreen();
   chromeos::AccountScreen* GetAccountScreen();
   chromeos::UpdateScreen* GetUpdateScreen();
+  chromeos::UserImageScreen* GetUserImageScreen();
+  chromeos::EulaScreen* GetEulaScreen();
+  chromeos::RegistrationScreen* GetRegistrationScreen();
+
+  // Show specific screen.
+  void ShowNetworkScreen();
+  void ShowLoginScreen();
+  void ShowAccountScreen();
+  void ShowUpdateScreen();
+  void ShowUserImageScreen();
+  void ShowEulaScreen();
+  void ShowRegistrationScreen();
 
   // Returns a pointer to the current screen or NULL if there's no such
   // screen.
   WizardScreen* current_screen() const { return current_screen_; }
-  // Switches from one screen to another.
-  void SetCurrentScreen(WizardScreen* screen);
 
   // Overrides observer for testing.
   void set_observer(ScreenObserver* observer) { observer_ = observer; }
+
+  // Sets partner startup customization. WizardController takes ownership
+  // of the document object.
+  void SetCustomization(
+      const chromeos::StartupCustomizationDocument* customization);
+
+  // Registers OOBE preferences.
+  static void RegisterPrefs(PrefService* local_state);
 
   static const char kNetworkScreenName[];
   static const char kLoginScreenName[];
   static const char kAccountScreenName[];
   static const char kUpdateScreenName[];
+  static const char kUserImageScreenName[];
+  static const char kRegistrationScreenName[];
   static const char kOutOfBoxScreenName[];
   static const char kTestNoScreenName[];
+  static const char kEulaScreenName[];
 
  private:
   // Exit handlers:
   void OnLoginSignInSelected();
+  void OnLoginGuestUser();
   void OnLoginCreateAccount();
   void OnNetworkConnected();
   void OnNetworkOffline();
@@ -98,12 +125,22 @@ class WizardController : public chromeos::ScreenObserver,
   void OnAccountCreated();
   void OnConnectionFailed();
   void OnUpdateCompleted();
-  void OnUpdateNetworkError();
+  void OnEulaAccepted();
+  void OnUpdateErrorCheckingForUpdate();
+  void OnUpdateErrorUpdating();
+  void OnUserImageSelected();
+  void OnUserImageSkipped();
+  void OnRegistrationSuccess();
+  void OnRegistrationSkipped();
+
+  // Switches from one screen to another.
+  void SetCurrentScreen(WizardScreen* screen);
+
+  // Changes status area visibility.
+  void SetStatusAreaVisible(bool visible);
 
   // Overridden from chromeos::ScreenObserver:
   virtual void OnExit(ExitCodes exit_code);
-  virtual void OnSwitchLanguage(const std::string& lang,
-                                ScreenObserver::ExitCodes new_state);
   virtual void OnSetUserNamePassword(const std::string& username,
                                      const std::string& password);
 
@@ -114,6 +151,9 @@ class WizardController : public chromeos::ScreenObserver,
   // Determines which screen to show first by the parameter, shows it and
   // sets it as the current one.
   void ShowFirstScreen(const std::string& first_screen_name);
+
+  // Marks OOBE process as completed.
+  void MarkOobeCompleted();
 
   // Widget we're showing in.
   views::Widget* widget_;
@@ -127,9 +167,12 @@ class WizardController : public chromeos::ScreenObserver,
 
   // Screens.
   scoped_ptr<chromeos::NetworkScreen> network_screen_;
-  scoped_ptr<LoginScreen> login_screen_;
+  scoped_ptr<chromeos::LoginScreen> login_screen_;
   scoped_ptr<chromeos::AccountScreen> account_screen_;
   scoped_ptr<chromeos::UpdateScreen> update_screen_;
+  scoped_ptr<chromeos::UserImageScreen> user_image_screen_;
+  scoped_ptr<chromeos::EulaScreen> eula_screen_;
+  scoped_ptr<chromeos::RegistrationScreen> registration_screen_;
 
   // Screen that's currently active.
   WizardScreen* current_screen_;
@@ -140,19 +183,29 @@ class WizardController : public chromeos::ScreenObserver,
   // True if full OOBE flow should be shown.
   bool is_out_of_box_;
 
+  // True if this is run under automation test and we need to show only
+  // login screen.
+  bool is_test_mode_;
+
   // NULL by default - controller itself is observer. Mock could be assigned.
   ScreenObserver* observer_;
 
   // Default WizardController.
   static WizardController* default_controller_;
 
-  FRIEND_TEST(WizardControllerFlowTest, ControlFlowErrorNetwork);
-  FRIEND_TEST(WizardControllerFlowTest, ControlFlowErrorUpdate);
-  FRIEND_TEST(WizardControllerFlowTest, ControlFlowLanguageOnLogin);
-  FRIEND_TEST(WizardControllerFlowTest, ControlFlowLanguageOnNetwork);
-  FRIEND_TEST(WizardControllerFlowTest, ControlFlowMain);
-  FRIEND_TEST(WizardControllerTest, SwitchLanguage);
+  // Partner startup customizations.
+  scoped_ptr<const chromeos::StartupCustomizationDocument> customization_;
+
+  FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, ControlFlowErrorNetwork);
+  FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, ControlFlowErrorUpdate);
+  FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest,
+                           ControlFlowLanguageOnLogin);
+  FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest,
+                           ControlFlowLanguageOnNetwork);
+  FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, ControlFlowMain);
+  FRIEND_TEST_ALL_PREFIXES(WizardControllerTest, SwitchLanguage);
   friend class WizardControllerFlowTest;
+
   DISALLOW_COPY_AND_ASSIGN(WizardController);
 };
 

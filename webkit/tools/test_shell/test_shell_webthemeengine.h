@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@
 #define WEBKIT_TOOLS_TEST_SHELL_TEST_SHELL_WEBTHEMEENGINE_H_
 
 #include "base/basictypes.h"
-#include "third_party/WebKit/WebKit/chromium/public/win/WebThemeEngine.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebThemeEngine.h"
 
 namespace TestShellWebTheme {
 
@@ -53,6 +53,10 @@ class Engine : public WebKit::WebThemeEngine {
   virtual void paintTrackbar(
       WebKit::WebCanvas*, int part, int state, int classic_state,
       const WebKit::WebRect&);
+  virtual void paintProgressBar(
+      WebKit::WebCanvas*, const WebKit::WebRect& barRect,
+      const WebKit::WebRect& valueRect,
+      bool determinate, double time);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Engine);

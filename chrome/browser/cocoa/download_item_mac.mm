@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "chrome/browser/browser_process.h"
 #import "chrome/browser/cocoa/download_item_controller.h"
 #include "chrome/browser/cocoa/download_util_mac.h"
+#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "skia/ext/skia_utils_mac.h"
 
@@ -39,6 +40,8 @@ void DownloadItemMac::OnDownloadUpdated(DownloadItem* download) {
     // another thread, so reload the icon if the download filename changes.
     LoadIcon();
     lastFilePath_ = download->full_path();
+
+    [item_controller_ updateToolTip];
   }
 
   switch (download->state()) {

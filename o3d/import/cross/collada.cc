@@ -35,7 +35,8 @@
 
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/string_util.h"
+#include "base/process_util.h"
+#include "base/utf_string_conversions.h"
 #include "core/cross/class_manager.h"
 #include "core/cross/curve.h"
 #include "core/cross/error.h"
@@ -56,7 +57,9 @@
 #include "import/cross/collada_conditioner.h"
 #include "import/cross/collada_zip_archive.h"
 #include "import/cross/destination_buffer.h"
+#include "import/cross/file_output_stream_processor.h"
 #include "utils/cross/file_path_utils.h"
+#include "third_party/libtxc_dxtn/files/txc_dxtn.h"
 
 #define COLLADA_NAMESPACE "collada"
 #define COLLADA_NAMESPACE_SEPARATOR "."
@@ -506,6 +509,44 @@ void BindParams(Param* input_param,
 
   bool ok = input_param->Bind(output_param);
   DCHECK_EQ(ok, true);
+}
+
+// Runs effect_string through the filter, replacing it in place.
+bool ConvertCgToGlsl(const FilePath& converter, String* effect_string) {
+  FilePath temporary_file_name;
+  FILE* temporary_file = file_util::CreateAndOpenTemporaryFile(
+      &temporary_file_name);
+  if (!temporary_file)
+    return false;
+
+  fwrite(effect_string->c_str(), 1, effect_string->length(), temporary_file);
+  effect_string->clear();
+  file_util::CloseFile(temporary_file);
+
+#if defined(OS_WIN)
+  // Assumes python.exe is in PATH. Doesn't seem there's an easy way
+  // to test whether it is without launching a process.
+  FilePath python(FILE_PATH_LITERAL("python.exe"));
+  CommandLine cmd_line(python);
+  cmd_line.AppendLooseValue(FilePathToWide(converter));
+#else
+  CommandLine cmd_line(converter);
+#endif
+
+  cmd_line.AppendLooseValue(L"-i");
+  std::wstring temporary_file_string =
+      o3d::FilePathToWide(temporary_file_name);
+#if defined(OS_WIN)
+  // Quote to be safe. Note that this breaks on POSIX platforms.
+  std::wstring quote(L"\"");
+  temporary_file_string =
+      quote + temporary_file_string + quote;
+#endif
+  cmd_line.AppendLooseValue(temporary_file_string);
+  bool rc = ::base::GetAppOutput(cmd_line, effect_string);
+
+  file_util::Delete(temporary_file_name, false);
+  return rc;
 }
 }  // namespace anonymous
 
@@ -1698,7 +1739,147 @@ Texture* Collada::BuildTextureFromImage(FCDImage* image) {
       tex->set_name(WideToUTF8(name.c_str()));
     }
 
-    if (options_.keep_original_data) {
+    bool inserted_original_data = false;
+    bool is_dds = uri.MatchesExtension(UTF8ToFilePathStringType(".dds"));
+
+    if (is_dds &&
+        options_.convert_dds_to_png &&
+        options_.keep_original_data) {
+      // The Texture stubs used by the converter don't have a working
+      // PlatformSpecificLock, so we need to reload the images using
+      // the Bitmap class. We also need to do the DXTn decompression
+      // on the CPU because D3D wouldn't provide access to the
+      // decompressed data anyway.
+
+      // These need to match the order of TextureCUBE::CubeFace.
+      static const char* cube_suffixes[6] = {
+        "_posx", "_negx", "_posy", "_negy", "_posz", "_negz"
+      };
+      static const char* cube_prefixes[6] = {
+        "posx_", "negx_", "posy_", "negy_", "posz_", "negz_"
+      };
+
+      BitmapRefArray bitmaps;
+      bool is_cube_map = false;
+      if (Bitmap::LoadFromFile(service_locator_, file_path,
+                               image::UNKNOWN, &bitmaps)) {
+        is_cube_map = bitmaps.size() == 6;
+        for (unsigned int i = 0; i < bitmaps.size(); i++) {
+          bool is_compressed =
+              (tex->format() == Texture::DXT1 ||
+               tex->format() == Texture::DXT3 ||
+               tex->format() == Texture::DXT5);
+          Bitmap::Ref src_bitmap = bitmaps[i];
+          int pitch = src_bitmap->GetMipPitch(0);
+          if (is_compressed) {
+            // TODO(kbr): there is a bug somewhere in
+            // Bitmap::GetMipPitch for compressed textures where its
+            // result is off by a factor of two, at least for DXT1
+            // textures. Don't have time to debug it right now.
+            pitch /= 2;
+          }
+          uint8* data = src_bitmap->GetMipData(0);
+          int width = src_bitmap->width();
+          int height = src_bitmap->height();
+          int row_width = width * 4;
+          int decompressed_size = width * height * 4;
+          scoped_array<uint8> decompressed_data(new uint8[decompressed_size]);
+          memset(decompressed_data.get(), 0, decompressed_size);
+          if (is_compressed) {
+            for (int src_y = 0; src_y < height; src_y++) {
+              int dest_y = src_y;
+              if (is_cube_map) {
+                dest_y = height - src_y - 1;
+              }
+              for (int x = 0; x < width; x++) {
+                uint8* ptr =
+                    &decompressed_data.get()[row_width * dest_y + 4 * x];
+                switch (src_bitmap->format()) {
+                  case Texture::DXT1: {
+                    fetch_2d_texel_rgba_dxt1(pitch, data, x, src_y, ptr);
+                    break;
+                  }
+                  case Texture::DXT3: {
+                    fetch_2d_texel_rgba_dxt3(pitch, data, x, src_y, ptr);
+                    break;
+                  }
+                  case Texture::DXT5: {
+                    fetch_2d_texel_rgba_dxt5(pitch, data, x, src_y, ptr);
+                    break;
+                  }
+                  default:
+                    DLOG(ERROR) << "Unsupported DDS compressed texture format "
+                                << src_bitmap->format();
+                    break;
+                }
+                // Need to swap the red and blue channels.
+                std::swap(ptr[0], ptr[2]);
+              }
+            }
+          } else if (src_bitmap->format() == Texture::XRGB8 ||
+                     src_bitmap->format() == Texture::ARGB8) {
+            for (int src_y = 0; src_y < height; src_y++) {
+              int dest_y = src_y;
+              if (is_cube_map) {
+                dest_y = height - src_y - 1;
+              }
+              memcpy(decompressed_data.get() + row_width * dest_y,
+                     data + pitch * src_y,
+                     row_width);
+            }
+          } else {
+            DLOG(ERROR) << "Unsupported DDS uncompressed texture format "
+                        << src_bitmap->format();
+            return NULL;
+          }
+          Bitmap::Ref bitmap(new Bitmap(service_locator_));
+          bitmap->Allocate(Texture::ARGB8,
+                           width,
+                           height,
+                           1,
+                           Bitmap::IMAGE);
+          bitmap->SetRect(0, 0, 0, width, height,
+                          decompressed_data.get(),
+                          row_width);
+          std::vector<uint8> png_data;
+          if (!bitmap->WriteToPNGStream(&png_data)) {
+            DLOG(ERROR) << "Error writing PNG file for cube map";
+          }
+          FilePath png_uri = uri;
+          if (is_cube_map) {
+            png_uri = png_uri.InsertBeforeExtensionASCII(cube_suffixes[i]);
+          }
+          png_uri = png_uri.ReplaceExtension(UTF8ToFilePathStringType(".png"));
+          std::string contents;
+          contents.append(reinterpret_cast<char*>(&png_data.front()),
+                          png_data.size());
+          original_data_map_.AddData(png_uri, contents, service_locator_);
+          inserted_original_data = true;
+
+          // We need to rewrite the o3d.uri param in the Texture as
+          // well. For cube map textures, we insert six params named
+          // "o3d.negx_uri", etc. and remove the "o3d.uri" param.
+          ParamString* uri_param = NULL;
+          if (is_cube_map) {
+            String name(O3D_STRING_CONSTANT(""));
+            name = name.append(cube_prefixes[i]).append("uri");
+            uri_param = tex->CreateParam<ParamString>(name);
+          } else {
+            uri_param = tex->GetParam<ParamString>(O3D_STRING_CONSTANT("uri"));
+          }
+          DCHECK(uri_param != NULL);
+          uri_param->set_value(FilePathToUTF8(png_uri));
+        }
+      }
+      if (is_cube_map) {
+        ParamString* uri_param =
+            tex->GetParam<ParamString>(O3D_STRING_CONSTANT("uri"));
+        DCHECK(uri_param != NULL);
+        tex->RemoveParam(uri_param);
+      }
+    }
+
+    if (options_.keep_original_data && !inserted_original_data) {
       // Cache the original data by URI so we can recover it later.
       std::string contents;
       file_util::ReadFileToString(file_path, &contents);
@@ -2036,6 +2217,12 @@ Effect* Collada::BuildEffect(FCDocument* doc, FCDEffect* collada_effect) {
                                     << "'";
         return NULL;
       }
+
+      if (options_.convert_cg_to_glsl) {
+        if (!ConvertCgToGlsl(options_.converter_tool, &effect_string))
+          O3D_ERROR(service_locator_) << "Shader conversion failed.";
+      }
+
       if (options_.keep_original_data) {
         // Cache the original data by URI so we can recover it later.
         original_data_map_.AddData(file_path, effect_string, service_locator_);

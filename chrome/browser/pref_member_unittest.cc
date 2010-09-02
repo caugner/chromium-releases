@@ -3,8 +3,10 @@
 // found in the LICENSE file.
 
 #include "base/file_path.h"
+#include "chrome/browser/dummy_pref_store.h"
 #include "chrome/browser/pref_member.h"
 #include "chrome/browser/pref_service.h"
+#include "chrome/browser/pref_value_store.h"
 #include "chrome/common/notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -19,7 +21,7 @@ void RegisterTestPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(kBoolPref, false);
   prefs->RegisterIntegerPref(kIntPref, 0);
   prefs->RegisterRealPref(kRealPref, 0.0);
-  prefs->RegisterStringPref(kStringPref, L"default");
+  prefs->RegisterStringPref(kStringPref, "default");
 }
 
 class PrefMemberTestClass : public NotificationObserver {
@@ -51,7 +53,8 @@ class PrefMemberTestClass : public NotificationObserver {
 }  // anonymous namespace
 
 TEST(PrefMemberTest, BasicGetAndSet) {
-  PrefService prefs((FilePath()));
+  PrefService prefs(new PrefValueStore(NULL, NULL, NULL, new DummyPrefStore(),
+      NULL));
   RegisterTestPrefs(&prefs);
 
   // Test bool
@@ -122,26 +125,27 @@ TEST(PrefMemberTest, BasicGetAndSet) {
   string.Init(kStringPref, &prefs, NULL);
 
   // Check the defaults
-  EXPECT_EQ(L"default", prefs.GetString(kStringPref));
-  EXPECT_EQ(L"default", string.GetValue());
-  EXPECT_EQ(L"default", *string);
+  EXPECT_EQ("default", prefs.GetString(kStringPref));
+  EXPECT_EQ("default", string.GetValue());
+  EXPECT_EQ("default", *string);
 
   // Try changing through the member variable.
-  string.SetValue(L"foo");
-  EXPECT_EQ(L"foo", string.GetValue());
-  EXPECT_EQ(L"foo", prefs.GetString(kStringPref));
-  EXPECT_EQ(L"foo", *string);
+  string.SetValue("foo");
+  EXPECT_EQ("foo", string.GetValue());
+  EXPECT_EQ("foo", prefs.GetString(kStringPref));
+  EXPECT_EQ("foo", *string);
 
   // Try changing back through the pref.
-  prefs.SetString(kStringPref, L"bar");
-  EXPECT_EQ(L"bar", prefs.GetString(kStringPref));
-  EXPECT_EQ(L"bar", string.GetValue());
-  EXPECT_EQ(L"bar", *string);
+  prefs.SetString(kStringPref, "bar");
+  EXPECT_EQ("bar", prefs.GetString(kStringPref));
+  EXPECT_EQ("bar", string.GetValue());
+  EXPECT_EQ("bar", *string);
 }
 
 TEST(PrefMemberTest, TwoPrefs) {
   // Make sure two RealPrefMembers stay in sync.
-  PrefService prefs((FilePath()));
+  PrefService prefs(new PrefValueStore(NULL, NULL, NULL, new DummyPrefStore(),
+      NULL));
   RegisterTestPrefs(&prefs);
 
   RealPrefMember pref1;
@@ -161,30 +165,31 @@ TEST(PrefMemberTest, TwoPrefs) {
 }
 
 TEST(PrefMemberTest, Observer) {
-  PrefService prefs((FilePath()));
+  PrefService prefs(new PrefValueStore(NULL, NULL, NULL, new DummyPrefStore(),
+      NULL));
   RegisterTestPrefs(&prefs);
 
   PrefMemberTestClass test_obj(&prefs);
-  EXPECT_EQ(L"default", *test_obj.str_);
+  EXPECT_EQ("default", *test_obj.str_);
 
   // Calling SetValue should not fire the observer.
-  test_obj.str_.SetValue(L"hello");
+  test_obj.str_.SetValue("hello");
   EXPECT_EQ(0, test_obj.observe_cnt_);
-  EXPECT_EQ(L"hello", prefs.GetString(kStringPref));
+  EXPECT_EQ("hello", prefs.GetString(kStringPref));
 
   // Changing the pref does fire the observer.
-  prefs.SetString(kStringPref, L"world");
+  prefs.SetString(kStringPref, "world");
   EXPECT_EQ(1, test_obj.observe_cnt_);
-  EXPECT_EQ(L"world", *(test_obj.str_));
+  EXPECT_EQ("world", *(test_obj.str_));
 
   // Not changing the value should not fire the observer.
-  prefs.SetString(kStringPref, L"world");
+  prefs.SetString(kStringPref, "world");
   EXPECT_EQ(1, test_obj.observe_cnt_);
-  EXPECT_EQ(L"world", *(test_obj.str_));
+  EXPECT_EQ("world", *(test_obj.str_));
 
-  prefs.SetString(kStringPref, L"hello");
+  prefs.SetString(kStringPref, "hello");
   EXPECT_EQ(2, test_obj.observe_cnt_);
-  EXPECT_EQ(L"hello", prefs.GetString(kStringPref));
+  EXPECT_EQ("hello", prefs.GetString(kStringPref));
 }
 
 TEST(PrefMemberTest, NoInit) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -96,6 +96,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
+#include "base/scoped_ptr.h"
 #include "base/task.h"
 
 class CancelableRequestBase;
@@ -153,7 +154,7 @@ class CancelableRequestProvider {
   // The next handle value we will return. Protected by the |lock_|.
   int next_handle_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(CancelableRequestProvider);
+  DISALLOW_COPY_AND_ASSIGN(CancelableRequestProvider);
 };
 
 // CancelableRequestConsumer --------------------------------------------------
@@ -192,7 +193,7 @@ class CancelableRequestConsumerBase {
 };
 
 // Template for clients to use. It allows them to associate random "client
-// data" with a specific request. The default value for this type is NULL.
+// data" with a specific request. The default value for this type is 0.
 // The type T should be small and easily copyable (like a pointer
 // or an integer).
 template<class T>
@@ -280,7 +281,7 @@ class CancelableRequestConsumerTSimple : public CancelableRequestConsumerBase {
   typedef std::map<PendingRequest, T> PendingRequestList;
 
   virtual T get_initial_t() const {
-    return NULL;
+    return 0;
   }
 
   virtual void OnRequestAdded(CancelableRequestProvider* provider,
@@ -436,7 +437,7 @@ class CancelableRequestBase
   base::CancellationFlag canceled_;
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(CancelableRequestBase);
+  DISALLOW_COPY_AND_ASSIGN(CancelableRequestBase);
 };
 
 // Templatized class. This is the one you should use directly or inherit from.

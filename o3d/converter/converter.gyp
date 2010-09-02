@@ -14,6 +14,7 @@
       '..',
       '../..',
       '../../<(gtestdir)',
+      '../<(txcdir)',
     ],
   },
   'targets': [
@@ -35,6 +36,7 @@
         '../import/import.gyp:o3dImport',
         '../serializer/serializer.gyp:o3dSerializer',
         '../utils/utils.gyp:o3dUtils',
+        'cgToGLSLConverterScript',
       ],
       'sources': [
         'cross/buffer_stub.cc',
@@ -53,6 +55,7 @@
         'cross/stream_bank_stub.h',
         'cross/texture_stub.cc',
         'cross/texture_stub.h',
+        '../<(txcdir)/txc_fetch_dxtn.cc',
       ],
       'conditions' : [
         ['renderer == "gl"',
@@ -118,6 +121,18 @@
           },
         ],
       ],
+    },
+    {
+      'target_name': 'cgToGLSLConverterScript',
+      'type': 'none',
+      'copies': [
+        {
+          'destination': '<(PRODUCT_DIR)',
+          'files': [
+            '../cg_to_glsl/convert.py',
+          ]
+        },
+      ]
     },
   ],
 }

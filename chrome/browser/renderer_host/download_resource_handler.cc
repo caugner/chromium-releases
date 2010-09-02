@@ -6,8 +6,9 @@
 
 #include "base/logging.h"
 #include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/download/download_file.h"
-#include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/download/download_item.h"
+#include "chrome/browser/download/download_file_manager.h"
+#include "chrome/browser/history/download_types.h"
 #include "chrome/browser/renderer_host/global_request_id.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/common/resource_response.h"
@@ -77,7 +78,15 @@ bool DownloadResourceHandler::OnResponseStarted(int request_id,
   info->request_id = global_id_.request_id;
   info->content_disposition = content_disposition_;
   info->mime_type = response->response_head.mime_type;
-  info->save_as = save_as_ && save_info_.file_path.empty();
+
+  std::string content_type_header;
+  if (!response->response_head.headers ||
+      !response->response_head.headers->GetMimeType(&content_type_header))
+    content_type_header = "";
+  info->original_mime_type = content_type_header;
+
+  info->prompt_user_for_save_location =
+      save_as_ && save_info_.file_path.empty();
   info->is_dangerous = false;
   info->referrer_charset = request_->context()->referrer_charset();
   info->save_info = save_info_;

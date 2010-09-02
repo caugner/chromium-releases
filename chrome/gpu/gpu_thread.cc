@@ -4,12 +4,16 @@
 
 #include "chrome/gpu/gpu_thread.h"
 
-#include "build/build_config.h"
+#include <string>
+#include <vector>
 
+#include "app/gfx/gl/gl_context.h"
 #include "base/command_line.h"
+#include "build/build_config.h"
 #include "chrome/common/child_process.h"
+#include "chrome/common/gpu_info.h"
 #include "chrome/common/gpu_messages.h"
-#include "chrome/gpu/gpu_config.h"
+#include "chrome/gpu/gpu_info_collector.h"
 
 #if defined(OS_WIN)
 #include "chrome/gpu/gpu_view_win.h"
@@ -52,6 +56,7 @@ GpuThread::GpuThread() {
     for (size_t i = 0; i < args.size(); ++i) {
       free(argv[i]);
     }
+    x11_util::SetX11ErrorHandlers();
   }
 #endif
 }
@@ -67,6 +72,10 @@ GpuBackingStoreGLXContext* GpuThread::GetGLXContext() {
 }
 #endif
 
+void GpuThread::RemoveChannel(int renderer_id) {
+  gpu_channels_.erase(renderer_id);
+}
+
 void GpuThread::OnControlMessageReceived(const IPC::Message& msg) {
   bool msg_is_ok = true;
   IPC_BEGIN_MESSAGE_MAP_EX(GpuThread, msg, msg_is_ok)
@@ -81,36 +90,41 @@ void GpuThread::OnControlMessageReceived(const IPC::Message& msg) {
 
 void GpuThread::OnEstablishChannel(int renderer_id) {
   scoped_refptr<GpuChannel> channel;
-
-  GpuChannelMap::const_iterator iter = gpu_channels_.find(renderer_id);
-  if (iter == gpu_channels_.end()) {
-    channel = new GpuChannel(renderer_id);
-  } else {
-    channel = iter->second;
-  }
-
-  DCHECK(channel != NULL);
-
-  if (channel->Init()) {
-    // TODO(apatrick): figure out when to remove channels from the map. They
-    // will never be destroyed otherwise.
-    gpu_channels_[renderer_id] = channel;
-  } else {
-    channel = NULL;
-  }
-
   IPC::ChannelHandle channel_handle;
-  if (channel.get()) {
-    channel_handle.name = channel->GetChannelName();
+
+  // Fail to establish a channel if some implementation of GL cannot be
+  // initialized.
+  if (gfx::GLContext::InitializeOneOff()) {
+    GpuChannelMap::const_iterator iter = gpu_channels_.find(renderer_id);
+    if (iter == gpu_channels_.end()) {
+      channel = new GpuChannel(renderer_id);
+    } else {
+      channel = iter->second;
+    }
+
+    DCHECK(channel != NULL);
+
+    if (channel->Init()) {
+      gpu_channels_[renderer_id] = channel;
+    } else {
+      channel = NULL;
+    }
+
+    if (channel.get()) {
+      channel_handle.name = channel->GetChannelName();
 #if defined(OS_POSIX)
-    // On POSIX, pass the renderer-side FD. Also mark it as auto-close so that
-    // it gets closed after it has been sent.
-    int renderer_fd = channel->DisownRendererFd();
-    channel_handle.socket = base::FileDescriptor(renderer_fd, true);
+      // On POSIX, pass the renderer-side FD. Also mark it as auto-close so that
+      // it gets closed after it has been sent.
+      int renderer_fd = channel->DisownRendererFd();
+      channel_handle.socket = base::FileDescriptor(renderer_fd, true);
 #endif
+    }
   }
 
-  Send(new GpuHostMsg_ChannelEstablished(channel_handle));
+  GPUInfo gpu_info;
+  gpu_info_collector::CollectGraphicsInfo(gpu_info);
+
+  Send(new GpuHostMsg_ChannelEstablished(channel_handle, gpu_info));
 }
 
 void GpuThread::OnSynchronize() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,7 +70,7 @@ static void DispatchOnConnect(const ExtensionMessageService::MessagePort& port,
   args.Set(4, Value::CreateStringValue(target_extension_id));
   CHECK(port.sender);
   port.sender->Send(new ViewMsg_ExtensionMessageInvoke(port.routing_id,
-       ExtensionMessageService::kDispatchOnConnect, args, false));
+       ExtensionMessageService::kDispatchOnConnect, args, false, GURL()));
 }
 
 static void DispatchOnDisconnect(
@@ -78,7 +78,7 @@ static void DispatchOnDisconnect(
   ListValue args;
   args.Set(0, Value::CreateIntegerValue(source_port_id));
   port.sender->Send(new ViewMsg_ExtensionMessageInvoke(port.routing_id,
-      ExtensionMessageService::kDispatchOnDisconnect, args, false));
+      ExtensionMessageService::kDispatchOnDisconnect, args, false, GURL()));
 }
 
 static void DispatchOnMessage(const ExtensionMessageService::MessagePort& port,
@@ -87,18 +87,20 @@ static void DispatchOnMessage(const ExtensionMessageService::MessagePort& port,
   args.Set(0, Value::CreateStringValue(message));
   args.Set(1, Value::CreateIntegerValue(source_port_id));
   port.sender->Send(new ViewMsg_ExtensionMessageInvoke(port.routing_id,
-      ExtensionMessageService::kDispatchOnMessage, args, false));
+      ExtensionMessageService::kDispatchOnMessage, args, false, GURL()));
 }
 
 static void DispatchEvent(const ExtensionMessageService::MessagePort& port,
                           const std::string& event_name,
                           const std::string& event_args,
-                          bool has_incognito_data) {
+                          bool has_incognito_data,
+                          const GURL& event_url) {
   ListValue args;
   args.Set(0, Value::CreateStringValue(event_name));
   args.Set(1, Value::CreateStringValue(event_args));
   port.sender->Send(new ViewMsg_ExtensionMessageInvoke(port.routing_id,
-      ExtensionMessageService::kDispatchEvent, args, has_incognito_data));
+      ExtensionMessageService::kDispatchEvent, args, has_incognito_data,
+      event_url));
 }
 
 }  // namespace
@@ -111,6 +113,14 @@ const char ExtensionMessageService::kDispatchOnMessage[] =
     "Port.dispatchOnMessage";
 const char ExtensionMessageService::kDispatchEvent[] =
     "Event.dispatchJSON";
+
+// static
+std::string ExtensionMessageService::GetPerExtensionEventName(
+    const std::string& event_name, const std::string& extension_id) {
+  // This should match the method we use in extension_process_binding.js when
+  // setting up the corresponding chrome.Event object.
+  return event_name + "/" + extension_id;
+}
 
 ExtensionMessageService::ExtensionMessageService(Profile* profile)
     : profile_(profile),
@@ -173,6 +183,12 @@ void ExtensionMessageService::RemoveEventListener(const std::string& event_name,
     extension_devtools_manager_->RemoveEventListener(event_name,
                                                      render_process_id);
   }
+}
+
+bool ExtensionMessageService::HasEventListener(
+    const std::string& event_name) {
+  return (listeners_.find(event_name) != listeners_.end() &&
+          !listeners_[event_name].empty());
 }
 
 void ExtensionMessageService::AllocatePortIdPair(int* port1, int* port2) {
@@ -456,10 +472,13 @@ void ExtensionMessageService::PostMessageFromRenderer(
 
 void ExtensionMessageService::DispatchEventToRenderers(
     const std::string& event_name, const std::string& event_args,
-    bool has_incognito_data) {
+    bool has_incognito_data, const GURL& event_url) {
   DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
+  ListenerMap::iterator it = listeners_.find(event_name);
+  if (it == listeners_.end())
+    return;
 
-  std::set<int>& pids = listeners_[event_name];
+  std::set<int>& pids = it->second;
 
   // Send the event only to renderers that are listening for it.
   for (std::set<int>::iterator pid = pids.begin(); pid != pids.end(); ++pid) {
@@ -472,8 +491,17 @@ void ExtensionMessageService::DispatchEventToRenderers(
       continue;
     }
 
-    DispatchEvent(renderer, event_name, event_args, has_incognito_data);
+    DispatchEvent(
+        renderer, event_name, event_args, has_incognito_data, event_url);
   }
+}
+
+void ExtensionMessageService::DispatchEventToExtension(
+    const std::string& extension_id,
+    const std::string& event_name, const std::string& event_args,
+    bool has_incognito_data, const GURL& event_url) {
+  DispatchEventToRenderers(GetPerExtensionEventName(event_name, extension_id),
+                           event_args, has_incognito_data, event_url);
 }
 
 void ExtensionMessageService::Observe(NotificationType type,
@@ -510,9 +538,9 @@ void ExtensionMessageService::Observe(NotificationType type,
         MessageChannelMap::iterator current = it++;
         int debug_info = current->second->receiver.debug_info;
         if (current->second->opener.sender == sender) {
-          CHECK(false) << "Shouldn't happen:" << debug_info;
+          LOG(FATAL) << "Shouldn't happen:" << debug_info;
         } else if (current->second->receiver.sender == sender) {
-          CHECK(false) << "Shouldn't happen either: " << debug_info;
+          LOG(FATAL) << "Shouldn't happen either: " << debug_info;
         }
       }
       OnSenderClosed(sender);

@@ -10,6 +10,7 @@
 
 #include "base/callback.h"
 #include "base/file_util.h"
+#include "base/histogram.h"
 #include "base/message_loop.h"
 #include "base/pickle.h"
 #include "base/scoped_vector.h"
@@ -56,7 +57,7 @@ static const SessionCommand::id_type kCommandSetWindowBounds2 = 10;
 static const SessionCommand::id_type
     kCommandTabNavigationPathPrunedFromFront = 11;
 static const SessionCommand::id_type kCommandSetPinnedState = 12;
-static const SessionCommand::id_type kCommandSetAppExtensionID = 13;
+static const SessionCommand::id_type kCommandSetExtensionAppID = 13;
 
 // Every kWritesPerReset commands triggers recreating the file.
 static const int kWritesPerReset = 250;
@@ -130,14 +131,20 @@ struct PinnedStatePayload {
 SessionService::SessionService(Profile* profile)
     : BaseSessionService(SESSION_RESTORE, profile, FilePath()),
       has_open_trackable_browsers_(false),
-      move_on_new_browser_(false) {
+      move_on_new_browser_(false),
+      save_delay_in_millis_(base::TimeDelta::FromMilliseconds(2500)),
+      save_delay_in_mins_(base::TimeDelta::FromMinutes(10)),
+      save_delay_in_hrs_(base::TimeDelta::FromHours(8)) {
   Init();
 }
 
 SessionService::SessionService(const FilePath& save_path)
     : BaseSessionService(SESSION_RESTORE, NULL, save_path),
       has_open_trackable_browsers_(false),
-      move_on_new_browser_(false) {
+      move_on_new_browser_(false),
+      save_delay_in_millis_(base::TimeDelta::FromMilliseconds(2500)),
+      save_delay_in_mins_(base::TimeDelta::FromMinutes(10)),
+      save_delay_in_hrs_(base::TimeDelta::FromHours(8)) {
   Init();
 }
 
@@ -205,7 +212,8 @@ void SessionService::SetPinnedState(const SessionID& window_id,
 }
 
 void SessionService::TabClosed(const SessionID& window_id,
-                               const SessionID& tab_id) {
+                               const SessionID& tab_id,
+                               bool closed_by_user_gesture) {
   if (!ShouldTrackChangesToWindow(window_id))
     return;
 
@@ -221,10 +229,13 @@ void SessionService::TabClosed(const SessionID& window_id,
     pending_tab_close_ids_.insert(tab_id.id());
   } else if (find(window_closing_ids_.begin(), window_closing_ids_.end(),
                   window_id.id()) != window_closing_ids_.end() ||
-             !IsOnlyOneTabLeft()) {
-    // Tab closure is the result of a window close (and it isn't the last
-    // window), or closing a tab and there are other windows/tabs open. Mark the
-    // tab as closed.
+             !IsOnlyOneTabLeft() ||
+             closed_by_user_gesture) {
+    // Close is the result of one of the following:
+    // . window close (and it isn't the last window).
+    // . closing a tab and there are other windows/tabs open.
+    // . closed by a user gesture.
+    // In all cases we need to mark the tab as explicitly closed.
     ScheduleCommand(CreateTabClosedCommand(tab_id.id()));
   } else {
     // User closed the last tab in the last tabbed browser. Don't mark the
@@ -424,6 +435,19 @@ SessionService::Handle SessionService::GetCurrentSession(
   }
 }
 
+void SessionService::Save() {
+  bool had_commands = !pending_commands().empty();
+  BaseSessionService::Save();
+  if (had_commands) {
+    RecordSessionUpdateHistogramData(NotificationType::SESSION_SERVICE_SAVED,
+        &last_updated_save_time_);
+    NotificationService::current()->Notify(
+        NotificationType::SESSION_SERVICE_SAVED,
+        NotificationService::AllSources(),
+        NotificationService::NoDetails());
+  }
+}
+
 void SessionService::Init() {
   // Register for the notifications we're interested in.
   registrar_.Add(this, NotificationType::TAB_PARENTED,
@@ -492,11 +516,11 @@ void SessionService::Observe(NotificationType type,
       NavigationController* controller =
           Source<NavigationController>(source).ptr();
       SetTabWindow(controller->window_id(), controller->session_id());
-      if (controller->tab_contents()->app_extension()) {
-        SetTabAppExtensionID(
+      if (controller->tab_contents()->extension_app()) {
+        SetTabExtensionAppID(
             controller->window_id(),
             controller->session_id(),
-            controller->tab_contents()->app_extension()->id());
+            controller->tab_contents()->extension_app()->id());
       }
       break;
     }
@@ -504,7 +528,10 @@ void SessionService::Observe(NotificationType type,
     case NotificationType::TAB_CLOSED: {
       NavigationController* controller =
           Source<NavigationController>(source).ptr();
-      TabClosed(controller->window_id(), controller->session_id());
+      TabClosed(controller->window_id(), controller->session_id(),
+                controller->tab_contents()->closed_by_user_gesture());
+      RecordSessionUpdateHistogramData(NotificationType::TAB_CLOSED,
+          &last_updated_tab_closed_time_);
       break;
     }
 
@@ -521,6 +548,8 @@ void SessionService::Observe(NotificationType type,
                                         controller->session_id(),
                                         controller->entry_count());
       }
+      RecordSessionUpdateHistogramData(NotificationType::NAV_LIST_PRUNED,
+          &last_updated_nav_list_pruned_time_);
       break;
     }
 
@@ -543,16 +572,22 @@ void SessionService::Observe(NotificationType type,
       UpdateTabNavigation(controller->window_id(), controller->session_id(),
                           current_entry_index,
                           *controller->GetEntryAtIndex(current_entry_index));
+      Details<NavigationController::LoadCommittedDetails> changed(details);
+      if (changed->type == NavigationType::NEW_PAGE ||
+        changed->type == NavigationType::EXISTING_PAGE) {
+        RecordSessionUpdateHistogramData(NotificationType::NAV_ENTRY_COMMITTED,
+            &last_updated_nav_entry_commit_time_);
+      }
       break;
     }
 
     case NotificationType::TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED: {
       TabContents* tab_contents = Source<TabContents>(source).ptr();
       DCHECK(tab_contents);
-      if (tab_contents->app_extension()) {
-        SetTabAppExtensionID(tab_contents->controller().window_id(),
+      if (tab_contents->extension_app()) {
+        SetTabExtensionAppID(tab_contents->controller().window_id(),
                              tab_contents->controller().session_id(),
-                             tab_contents->app_extension()->id());
+                             tab_contents->extension_app()->id());
       }
       break;
     }
@@ -562,17 +597,17 @@ void SessionService::Observe(NotificationType type,
   }
 }
 
-void SessionService::SetTabAppExtensionID(
+void SessionService::SetTabExtensionAppID(
     const SessionID& window_id,
     const SessionID& tab_id,
-    const std::string& app_extension_id) {
+    const std::string& extension_app_id) {
   if (!ShouldTrackChangesToWindow(window_id))
     return;
 
-  ScheduleCommand(CreateSetTabAppExtensionIDCommand(
-                      kCommandSetAppExtensionID,
+  ScheduleCommand(CreateSetTabExtensionAppIDCommand(
+                      kCommandSetExtensionAppID,
                       tab_id.id(),
-                      app_extension_id));
+                      extension_app_id));
 }
 
 SessionCommand* SessionService::CreateSetSelectedTabInWindow(
@@ -798,7 +833,8 @@ void SessionService::SortTabsBasedOnVisualOrderAndPrune(
   std::map<int, SessionWindow*>::iterator i = windows->begin();
   while (i != windows->end()) {
     if (i->second->tabs.empty() || i->second->is_constrained ||
-        !should_track_changes_for_browser_type(i->second->type)) {
+        !should_track_changes_for_browser_type(
+            static_cast<Browser::Type>(i->second->type))) {
       delete i->second;
       windows->erase(i++);
     } else {
@@ -991,15 +1027,15 @@ bool SessionService::CreateTabsAndWindows(
         break;
       }
 
-      case kCommandSetAppExtensionID: {
+      case kCommandSetExtensionAppID: {
         SessionID::id_type tab_id;
-        std::string app_extension_id;
-        if (!RestoreSetTabAppExtensionIDCommand(
-                *command, &tab_id, &app_extension_id)) {
+        std::string extension_app_id;
+        if (!RestoreSetTabExtensionAppIDCommand(
+                *command, &tab_id, &extension_app_id)) {
           return true;
         }
 
-        GetTab(tab_id, tabs)->app_extension_id.swap(app_extension_id);
+        GetTab(tab_id, tabs)->extension_app_id.swap(extension_app_id);
         break;
       }
 
@@ -1034,12 +1070,12 @@ void SessionService::BuildCommandsForTab(
     commands->push_back(
         CreatePinnedStateCommand(controller->session_id(), true));
   }
-  if (controller->tab_contents()->app_extension()) {
+  if (controller->tab_contents()->extension_app()) {
     commands->push_back(
-        CreateSetTabAppExtensionIDCommand(
-            kCommandSetAppExtensionID,
+        CreateSetTabExtensionAppIDCommand(
+            kCommandSetExtensionAppID,
             controller->session_id().id(),
-            controller->tab_contents()->app_extension()->id()));
+            controller->tab_contents()->extension_app()->id()));
   }
   for (int i = min_index; i < max_index; ++i) {
     const NavigationEntry* entry = (i == pending_index) ?
@@ -1303,3 +1339,134 @@ Browser::Type SessionService::BrowserTypeForWindowType(
       return Browser::TYPE_NORMAL;
   }
 }
+
+void SessionService::RecordSessionUpdateHistogramData(NotificationType type,
+    base::TimeTicks* last_updated_time) {
+  if (!last_updated_time->is_null()) {
+    base::TimeDelta delta = base::TimeTicks::Now() - *last_updated_time;
+    // We're interested in frequent updates periods longer than
+    // 10 minutes.
+    bool use_long_period = false;
+    if (delta >= save_delay_in_mins_) {
+      use_long_period = true;
+    }
+    switch (type.value) {
+      case NotificationType::SESSION_SERVICE_SAVED :
+        RecordUpdatedSaveTime(delta, use_long_period);
+        RecordUpdatedSessionNavigationOrTab(delta, use_long_period);
+        break;
+      case NotificationType::TAB_CLOSED:
+        RecordUpdatedTabClosed(delta, use_long_period);
+        RecordUpdatedSessionNavigationOrTab(delta, use_long_period);
+        break;
+      case NotificationType::NAV_LIST_PRUNED:
+        RecordUpdatedNavListPruned(delta, use_long_period);
+        RecordUpdatedSessionNavigationOrTab(delta, use_long_period);
+        break;
+      case NotificationType::NAV_ENTRY_COMMITTED:
+        RecordUpdatedNavEntryCommit(delta, use_long_period);
+        RecordUpdatedSessionNavigationOrTab(delta, use_long_period);
+        break;
+      default:
+        NOTREACHED() << "Bad type sent to RecordSessionUpdateHistogramData";
+        break;
+    }
+  }
+  (*last_updated_time) = base::TimeTicks::Now();
+}
+
+void SessionService::RecordUpdatedTabClosed(base::TimeDelta delta,
+                                            bool use_long_period) {
+  std::string name("SessionRestore.TabClosedPeriod");
+  UMA_HISTOGRAM_CUSTOM_TIMES(name,
+      delta,
+      // 2500ms is the default save delay.
+      save_delay_in_millis_,
+      save_delay_in_mins_,
+      50);
+  if (use_long_period) {
+    std::string long_name_("SessionRestore.TabClosedLongPeriod");
+    UMA_HISTOGRAM_CUSTOM_TIMES(long_name_,
+        delta,
+        save_delay_in_mins_,
+        save_delay_in_hrs_,
+        50);
+  }
+}
+
+void SessionService::RecordUpdatedNavListPruned(base::TimeDelta delta,
+                                                bool use_long_period) {
+  std::string name("SessionRestore.NavigationListPrunedPeriod");
+  UMA_HISTOGRAM_CUSTOM_TIMES(name,
+      delta,
+      // 2500ms is the default save delay.
+      save_delay_in_millis_,
+      save_delay_in_mins_,
+      50);
+  if (use_long_period) {
+    std::string long_name_("SessionRestore.NavigationListPrunedLongPeriod");
+    UMA_HISTOGRAM_CUSTOM_TIMES(long_name_,
+        delta,
+        save_delay_in_mins_,
+        save_delay_in_hrs_,
+        50);
+  }
+}
+
+void SessionService::RecordUpdatedNavEntryCommit(base::TimeDelta delta,
+                                                 bool use_long_period) {
+  std::string name("SessionRestore.NavEntryCommittedPeriod");
+  UMA_HISTOGRAM_CUSTOM_TIMES(name,
+      delta,
+      // 2500ms is the default save delay.
+      save_delay_in_millis_,
+      save_delay_in_mins_,
+      50);
+  if (use_long_period) {
+    std::string long_name_("SessionRestore.NavEntryCommittedLongPeriod");
+    UMA_HISTOGRAM_CUSTOM_TIMES(long_name_,
+        delta,
+        save_delay_in_mins_,
+        save_delay_in_hrs_,
+        50);
+  }
+}
+
+void SessionService::RecordUpdatedSessionNavigationOrTab(base::TimeDelta delta,
+                                                         bool use_long_period) {
+  std::string name("SessionRestore.NavOrTabUpdatePeriod");
+  UMA_HISTOGRAM_CUSTOM_TIMES(name,
+      delta,
+      // 2500ms is the default save delay.
+      save_delay_in_millis_,
+      save_delay_in_mins_,
+      50);
+  if (use_long_period) {
+    std::string long_name_("SessionRestore.NavOrTabUpdateLongPeriod");
+    UMA_HISTOGRAM_CUSTOM_TIMES(long_name_,
+        delta,
+        save_delay_in_mins_,
+        save_delay_in_hrs_,
+        50);
+  }
+}
+
+void SessionService::RecordUpdatedSaveTime(base::TimeDelta delta,
+                                           bool use_long_period) {
+  std::string name("SessionRestore.SavePeriod");
+  UMA_HISTOGRAM_CUSTOM_TIMES(name,
+      delta,
+      // 2500ms is the default save delay.
+      save_delay_in_millis_,
+      save_delay_in_mins_,
+      50);
+  if (use_long_period) {
+    std::string long_name_("SessionRestore.SaveLongPeriod");
+    UMA_HISTOGRAM_CUSTOM_TIMES(long_name_,
+        delta,
+        save_delay_in_mins_,
+        save_delay_in_hrs_,
+        50);
+  }
+}
+

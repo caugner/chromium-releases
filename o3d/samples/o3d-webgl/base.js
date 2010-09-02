@@ -121,6 +121,19 @@ o3d.writeScriptTag_ = function(src) {
 };
 
 /**
+ * Filters any "o3d." prefix from the given type name.
+ * @param {string} type_name The type name to filter.
+ * @return {string} Filtered type name.
+ * @private
+ */
+o3d.filterTypeName_ = function(type_name) {
+  if (type_name.length >= 4 && type_name.substr(0, 4) == 'o3d.') {
+    type_name = type_name.substr(4);
+  }
+  return type_name;
+};
+
+/**
  * Includes the file indicated by the rule by adding a script tag.
  * @param {string} rule Rule to include, in the form o3d.package.part.
  */
@@ -163,7 +176,40 @@ o3d.removeFromArray = function(array, object) {
   if (i >= 0) {
     array.splice(i, 1);
   }
-}
+};
+
+
+/**
+ * Determine whether a value is an array. Do not use instanceof because that
+ * will not work for V8 arrays (the browser thinks they are Objects).
+ * @param {*} value A value.
+ * @return {boolean} Whether the value is an array.
+ */
+o3d.isArray_ = function(value) {
+  var valueAsObject = /** @type {!Object} **/ (value);
+  return typeof(value) === 'object' && value !== null &&
+      'length' in valueAsObject && 'splice' in valueAsObject;
+};
+
+
+/**
+ * Utility function to clone an object.
+ *
+ * @param {Object} object The object to clone.
+ * @return {Object} A clone of that object.
+ */
+o3d.clone = function(object) {
+  var result = o3d.isArray_(object) ? [] : {};
+  for (var name in object) {
+    var property = object[name];
+    if (typeof property == 'Object') {
+      result[name] = o3d.clone(property);
+    } else {
+      result[name] = property;
+    }
+  }
+  return result;
+};
 
 
 /**
@@ -188,6 +234,7 @@ o3d.include('object_base');
 o3d.include('named_object_base');
 o3d.include('named_object');
 o3d.include('param_object');
+o3d.include('param_array');
 o3d.include('param');
 o3d.include('event');
 o3d.include('raw_data');
@@ -206,6 +253,7 @@ o3d.include('render_surface_set');
 o3d.include('render_surface');
 o3d.include('state');
 o3d.include('draw_context');
+o3d.include('ray_intersection_info');
 o3d.include('sampler');
 o3d.include('transform');
 o3d.include('pack');
@@ -220,5 +268,10 @@ o3d.include('primitive');
 o3d.include('shape');
 o3d.include('effect');
 o3d.include('material');
+o3d.include('archive_request');
+o3d.include('param_operation');
+o3d.include('function');
+o3d.include('counter');
+o3d.include('curve');
 
 

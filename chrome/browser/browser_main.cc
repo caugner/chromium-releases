@@ -24,12 +24,11 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/time.h"
-#include "base/tracked_objects.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_main_win.h"
 #include "chrome/browser/browser_init.h"
-#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_prefs.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_impl.h"
@@ -42,12 +41,13 @@
 #include "chrome/browser/jankometer.h"
 #include "chrome/browser/metrics/histogram_synchronizer.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/net/dns_global.h"
+#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/metadata_url_request.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/net/websocket_experiment/websocket_experiment_runner.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/pref_service.h"
+#include "chrome/browser/pref_value_store.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
@@ -56,10 +56,11 @@
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/translate/translate_manager.h"
-#include "chrome/browser/user_data_manager.h"
+#include "chrome/common/child_process.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/json_pref_store.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/main_function_params.h"
 #include "chrome/common/net/net_resource_provider.h"
@@ -72,19 +73,12 @@
 #include "grit/generated_resources.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/net_module.h"
+#include "net/base/network_change_notifier.h"
+#include "net/http/http_network_layer.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_network_transaction.h"
 #include "net/socket/client_socket_pool_base.h"
 #include "net/spdy/spdy_session_pool.h"
-
-#if defined(OS_POSIX)
-// TODO(port): get rid of this include. It's used just to provide declarations
-// and stub definitions for classes we encouter during the porting effort.
-#include <errno.h>
-#include <signal.h>
-#include <sys/resource.h>
-#include "base/eintr_wrapper.h"
-#endif
 
 #if defined(USE_LINUX_BREAKPAD)
 #include "base/linux_util.h"
@@ -93,6 +87,10 @@
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "chrome/browser/gtk/gtk_util.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/boot_times_loader.h"
 #endif
 
 // TODO(port): several win-only methods have been pulled out of this, but
@@ -107,7 +105,6 @@
 
 #include "app/l10n_util_win.h"
 #include "app/win_util.h"
-#include "base/nss_util.h"
 #include "base/registry.h"
 #include "base/win_util.h"
 #include "chrome/browser/browser.h"
@@ -124,7 +121,6 @@
 #include "chrome/installer/util/version.h"
 #include "net/base/net_util.h"
 #include "net/base/sdch_manager.h"
-#include "net/base/winsock_init.h"
 #include "net/socket/ssl_client_socket_nss_factory.h"
 #include "printing/printed_document.h"
 #include "sandbox/src/sandbox.h"
@@ -133,6 +129,11 @@
 #if defined(OS_MACOSX)
 #include <Security/Security.h>
 #include "chrome/browser/cocoa/install_from_dmg.h"
+#include "net/socket/ssl_client_socket_mac_factory.h"
+#endif
+
+#if defined(OS_MACOSX) || defined(OS_WIN)
+#include "base/nss_util.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS)
@@ -142,10 +143,182 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/screen_lock_library.h"
+#include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/external_metrics.h"
+#include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/views/browser_dialogs.h"
 #endif
+
+// BrowserMainParts ------------------------------------------------------------
+
+BrowserMainParts::BrowserMainParts(const MainFunctionParams& parameters)
+    : parameters_(parameters),
+      parsed_command_line_(parameters.command_line_) {
+}
+
+// BrowserMainParts: EarlyInitialization() and related -------------------------
+
+void BrowserMainParts::EarlyInitialization() {
+  PreEarlyInitialization();
+
+  ConnectionFieldTrial();
+  SocketTimeoutFieldTrial();
+  SpdyFieldTrial();
+  InitializeSSL();  // TODO(viettrungluu): move to platform-specific method(s)
+
+  PostEarlyInitialization();
+}
+
+// This is an A/B test for the maximum number of persistent connections per
+// host. Currently Chrome, Firefox, and IE8 have this value set at 6. Safari
+// uses 4, and Fasterfox (a plugin for Firefox that supposedly configures it to
+// run faster) uses 8. We would like to see how much of an effect this value has
+// on browsing. Too large a value might cause us to run into SYN flood detection
+// mechanisms.
+void BrowserMainParts::ConnectionFieldTrial() {
+  const FieldTrial::Probability kConnDivisor = 100;
+  const FieldTrial::Probability kConn16 = 10;  // 10% probability
+  const FieldTrial::Probability kRemainingConn = 30;  // 30% probability
+
+  scoped_refptr<FieldTrial> conn_trial =
+      new FieldTrial("ConnCountImpact", kConnDivisor);
+
+  const int conn_16 = conn_trial->AppendGroup("_conn_count_16", kConn16);
+  const int conn_4 = conn_trial->AppendGroup("_conn_count_4", kRemainingConn);
+  const int conn_8 = conn_trial->AppendGroup("_conn_count_8", kRemainingConn);
+  const int conn_6 = conn_trial->AppendGroup("_conn_count_6",
+      FieldTrial::kAllRemainingProbability);
+
+  const int conn_trial_grp = conn_trial->group();
+
+  if (conn_trial_grp == conn_4) {
+    net::HttpNetworkSession::set_max_sockets_per_group(4);
+  } else if (conn_trial_grp == conn_6) {
+    // This (6) is the current default value.
+    net::HttpNetworkSession::set_max_sockets_per_group(6);
+  } else if (conn_trial_grp == conn_8) {
+    net::HttpNetworkSession::set_max_sockets_per_group(8);
+  } else if (conn_trial_grp == conn_16) {
+    net::HttpNetworkSession::set_max_sockets_per_group(16);
+  } else {
+    NOTREACHED();
+  }
+}
+
+// A/B test for determining a value for unused socket timeout. Currently the
+// timeout defaults to 10 seconds. Having this value set too low won't allow us
+// to take advantage of idle sockets. Setting it to too high could possibly
+// result in more ERR_CONNECT_RESETs, requiring one RTT to receive the RST
+// packet and possibly another RTT to re-establish the connection.
+void BrowserMainParts::SocketTimeoutFieldTrial() {
+  const FieldTrial::Probability kIdleSktToDivisor = 100;  // Idle socket timeout
+  const FieldTrial::Probability kSktToProb = 25;  // 25% probability
+
+  scoped_refptr<FieldTrial> socket_timeout_trial =
+      new FieldTrial("IdleSktToImpact", kIdleSktToDivisor);
+
+  const int socket_timeout_5 =
+      socket_timeout_trial->AppendGroup("_idle_timeout_5", kSktToProb);
+  const int socket_timeout_10 =
+      socket_timeout_trial->AppendGroup("_idle_timeout_10", kSktToProb);
+  const int socket_timeout_20 =
+      socket_timeout_trial->AppendGroup("_idle_timeout_20", kSktToProb);
+  const int socket_timeout_60 =
+      socket_timeout_trial->AppendGroup("_idle_timeout_60",
+                                        FieldTrial::kAllRemainingProbability);
+
+  const int idle_to_trial_grp = socket_timeout_trial->group();
+
+  if (idle_to_trial_grp == socket_timeout_5) {
+    net::ClientSocketPool::set_unused_idle_socket_timeout(5);
+  } else if (idle_to_trial_grp == socket_timeout_10) {
+    // This (10 seconds) is the current default value.
+    net::ClientSocketPool::set_unused_idle_socket_timeout(10);
+  } else if (idle_to_trial_grp == socket_timeout_20) {
+    net::ClientSocketPool::set_unused_idle_socket_timeout(20);
+  } else if (idle_to_trial_grp == socket_timeout_60) {
+    net::ClientSocketPool::set_unused_idle_socket_timeout(60);
+  } else {
+    NOTREACHED();
+  }
+}
+
+// When --use-spdy not set, users will be in A/B test for spdy.
+// group A (npn_with_spdy): this means npn and spdy are enabled. In case server
+//                          supports spdy, browser will use spdy.
+// group B (npn_with_http): this means npn is enabled but spdy won't be used.
+//                          Http is still used for all requests.
+//           default group: no npn or spdy is involved. The "old" non-spdy
+//                          chrome behavior.
+void BrowserMainParts::SpdyFieldTrial() {
+  bool is_spdy_trial = false;
+  if (parsed_command_line().HasSwitch(switches::kUseSpdy)) {
+    std::string spdy_mode =
+        parsed_command_line().GetSwitchValueASCII(switches::kUseSpdy);
+    net::HttpNetworkLayer::EnableSpdy(spdy_mode);
+  } else {
+    const FieldTrial::Probability kSpdyDivisor = 1000;
+    // To enable 100% npn_with_spdy, set npnhttp_probability = 0 and set
+    // npnspdy_probability = FieldTrial::kAllRemainingProbability.
+    // To collect stats, make sure that FieldTrial are distributed among
+    // all the three groups:
+    // npn_with_spdy : 50%, npn_with_http : 25%, default (no npn, no spdy): 25%.
+    // a. npn_with_spdy and default: these are used to collect stats for
+    //    alternate protocol with spdy vs. no alternate protocol case.
+    // b. npn_with_spdy and npn_with_http: these are used to collect stats for
+    //    https vs. https over spdy case.
+    FieldTrial::Probability npnhttp_probability = 250;
+    FieldTrial::Probability npnspdy_probability = 500;
+    scoped_refptr<FieldTrial> trial =
+        new FieldTrial("SpdyImpact", kSpdyDivisor);
+    // npn with only http support, no spdy.
+    int npn_http_grp =
+        trial->AppendGroup("_npn_with_http", npnhttp_probability);
+    // npn with spdy support.
+    int npn_spdy_grp =
+        trial->AppendGroup("_npn_with_spdy", npnspdy_probability);
+    int trial_grp = trial->group();
+    if (trial_grp == npn_http_grp) {
+      is_spdy_trial = true;
+      net::HttpNetworkLayer::EnableSpdy("npn-http");
+    } else if (trial_grp == npn_spdy_grp) {
+      is_spdy_trial = true;
+      net::HttpNetworkLayer::EnableSpdy("npn");
+    } else {
+      CHECK(!is_spdy_trial);
+    }
+  }
+}
+
+// TODO(viettrungluu): move to platform-specific methods
+void BrowserMainParts::InitializeSSL() {
+  // Use NSS for SSL by default.
+#if defined(OS_MACOSX)
+  // The default client socket factory uses NSS for SSL by default on Mac.
+  if (parsed_command_line().HasSwitch(switches::kUseSystemSSL)) {
+    net::ClientSocketFactory::SetSSLClientSocketFactory(
+        net::SSLClientSocketMacFactory);
+  } else {
+    // We want to be sure to init NSPR on the main thread.
+    base::EnsureNSPRInit();
+  }
+#elif defined(OS_WIN)
+  // Because of a build system issue (http://crbug.com/43461), the default
+  // client socket factory uses SChannel (the system SSL library) for SSL by
+  // default on Windows.
+  if (!parsed_command_line().HasSwitch(switches::kUseSystemSSL)) {
+    net::ClientSocketFactory::SetSSLClientSocketFactory(
+        net::SSLClientSocketNSSFactory);
+    // We want to be sure to init NSPR on the main thread.
+    base::EnsureNSPRInit();
+  }
+#endif
+}
+
+// -----------------------------------------------------------------------------
+// TODO(viettrungluu): move more/rest of BrowserMain() into above structure
 
 namespace {
 
@@ -183,141 +356,6 @@ void RunUIMessageLoop(BrowserProcess* browser_process) {
 #endif
 }
 
-#if defined(OS_POSIX)
-// See comment in BrowserMain, where sigaction is called.
-void SIGCHLDHandler(int signal) {
-}
-
-int g_shutdown_pipe_write_fd = -1;
-int g_shutdown_pipe_read_fd = -1;
-
-// Common code between SIG{HUP, INT, TERM}Handler.
-void GracefulShutdownHandler(int signal) {
-  // Reinstall the default handler.  We had one shot at graceful shutdown.
-  struct sigaction action;
-  memset(&action, 0, sizeof(action));
-  action.sa_handler = SIG_DFL;
-  RAW_CHECK(sigaction(signal, &action, NULL) == 0);
-
-  RAW_CHECK(g_shutdown_pipe_write_fd != -1);
-  RAW_CHECK(g_shutdown_pipe_read_fd != -1);
-  size_t bytes_written = 0;
-  do {
-    int rv = HANDLE_EINTR(
-        write(g_shutdown_pipe_write_fd,
-              reinterpret_cast<const char*>(&signal) + bytes_written,
-              sizeof(signal) - bytes_written));
-    RAW_CHECK(rv >= 0);
-    bytes_written += rv;
-  } while (bytes_written < sizeof(signal));
-
-  RAW_LOG(INFO,
-          "Successfully wrote to shutdown pipe, resetting signal handler.");
-}
-
-// See comment in BrowserMain, where sigaction is called.
-void SIGHUPHandler(int signal) {
-  RAW_CHECK(signal == SIGHUP);
-  RAW_LOG(INFO, "Handling SIGHUP.");
-  GracefulShutdownHandler(signal);
-}
-
-// See comment in BrowserMain, where sigaction is called.
-void SIGINTHandler(int signal) {
-  RAW_CHECK(signal == SIGINT);
-  RAW_LOG(INFO, "Handling SIGINT.");
-  GracefulShutdownHandler(signal);
-}
-
-// See comment in BrowserMain, where sigaction is called.
-void SIGTERMHandler(int signal) {
-  RAW_CHECK(signal == SIGTERM);
-  RAW_LOG(INFO, "Handling SIGTERM.");
-  GracefulShutdownHandler(signal);
-}
-
-class ShutdownDetector : public PlatformThread::Delegate {
- public:
-  explicit ShutdownDetector(int shutdown_fd);
-
-  virtual void ThreadMain();
-
- private:
-  const int shutdown_fd_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShutdownDetector);
-};
-
-ShutdownDetector::ShutdownDetector(int shutdown_fd)
-    : shutdown_fd_(shutdown_fd) {
-  CHECK_NE(shutdown_fd_, -1);
-}
-
-void ShutdownDetector::ThreadMain() {
-  int signal;
-  size_t bytes_read = 0;
-  ssize_t ret;
-  do {
-    ret = HANDLE_EINTR(
-        read(shutdown_fd_,
-             reinterpret_cast<char*>(&signal) + bytes_read,
-             sizeof(signal) - bytes_read));
-    if (ret < 0) {
-      NOTREACHED() << "Unexpected error: " << strerror(errno);
-      break;
-    } else if (ret == 0) {
-      NOTREACHED() << "Unexpected closure of shutdown pipe.";
-      break;
-    }
-    bytes_read += ret;
-  } while (bytes_read < sizeof(signal));
-
-  LOG(INFO) << "Handling shutdown for signal " << signal << ".";
-
-  if (!ChromeThread::PostTask(
-      ChromeThread::UI, FROM_HERE,
-      NewRunnableFunction(BrowserList::CloseAllBrowsersAndExit))) {
-    // Without a UI thread to post the exit task to, there aren't many
-    // options.  Raise the signal again.  The default handler will pick it up
-    // and cause an ungraceful exit.
-    RAW_LOG(WARNING, "No UI thread, exiting ungracefully.");
-    kill(getpid(), signal);
-
-    // The signal may be handled on another thread.  Give that a chance to
-    // happen.
-    sleep(3);
-
-    // We really should be dead by now.  For whatever reason, we're not. Exit
-    // immediately, with the exit status set to the signal number with bit 8
-    // set.  On the systems that we care about, this exit status is what is
-    // normally used to indicate an exit by this signal's default handler.
-    // This mechanism isn't a de jure standard, but even in the worst case, it
-    // should at least result in an immediate exit.
-    RAW_LOG(WARNING, "Still here, exiting really ungracefully.");
-    _exit(signal | (1 << 7));
-  }
-}
-
-// Sets the file descriptor soft limit to |max_descriptors| or the OS hard
-// limit, whichever is lower.
-void SetFileDescriptorLimit(unsigned int max_descriptors) {
-  struct rlimit limits;
-  if (getrlimit(RLIMIT_NOFILE, &limits) == 0) {
-    unsigned int new_limit = max_descriptors;
-    if (limits.rlim_max > 0 && limits.rlim_max < max_descriptors) {
-      new_limit = limits.rlim_max;
-    }
-    limits.rlim_cur = new_limit;
-    if (setrlimit(RLIMIT_NOFILE, &limits) != 0) {
-      PLOG(INFO) << "Failed to set file descriptor limit";
-    }
-  } else {
-    PLOG(INFO) << "Failed to get file descriptor limit";
-  }
-}
-#endif
-
-#if !defined(OS_MACOSX)
 void AddFirstRunNewTabs(BrowserInit* browser_init,
                         const std::vector<GURL>& new_tabs) {
   for (std::vector<GURL>::const_iterator it = new_tabs.begin();
@@ -326,12 +364,6 @@ void AddFirstRunNewTabs(BrowserInit* browser_init,
       browser_init->AddFirstRunTab(*it);
   }
 }
-#else  // OS_MACOSX
-// TODO(cpu): implement first run experience for other platforms.
-void AddFirstRunNewTabs(BrowserInit* browser_init,
-                        const std::vector<GURL>& new_tabs) {
-}
-#endif
 
 #if defined(USE_LINUX_BREAKPAD)
 class GetLinuxDistroTask : public Task {
@@ -366,6 +398,10 @@ void InitializeNetworkOptions(const CommandLine& parsed_command_line) {
   if (parsed_command_line.HasSwitch(switches::kIgnoreCertificateErrors))
     net::HttpNetworkTransaction::IgnoreCertificateErrors(true);
 
+  if (parsed_command_line.HasSwitch(switches::kHostRules))
+    net::HttpNetworkTransaction::SetHostMappingRules(
+        parsed_command_line.GetSwitchValueASCII(switches::kHostRules));
+
   if (parsed_command_line.HasSwitch(switches::kMaxSpdySessionsPerDomain)) {
     int value = StringToInt(
         parsed_command_line.GetSwitchValueASCII(
@@ -381,6 +417,7 @@ void CreateChildThreads(BrowserProcessImpl* process) {
   process->db_thread();
   process->file_thread();
   process->process_launcher_thread();
+  process->cache_thread();
   process->io_thread();
 }
 
@@ -399,7 +436,7 @@ PrefService* InitializeLocalState(const CommandLine& parsed_command_line,
   // Initialize ResourceBundle which handles files loaded from external
   // sources. This has to be done before uninstall code path and before prefs
   // are registered.
-  local_state->RegisterStringPref(prefs::kApplicationLocale, L"");
+  local_state->RegisterStringPref(prefs::kApplicationLocale, "");
   local_state->RegisterBooleanPref(prefs::kMetricsReportingEnabled,
       GoogleUpdateSettings::GetCollectStatsConsent());
 
@@ -410,8 +447,10 @@ PrefService* InitializeLocalState(const CommandLine& parsed_command_line,
     // becomes our default language in the prefs.
     // Other platforms obey the system locale.
     std::wstring install_lang;
-    if (GoogleUpdateSettings::GetLanguage(&install_lang))
-      local_state->SetString(prefs::kApplicationLocale, install_lang);
+    if (GoogleUpdateSettings::GetLanguage(&install_lang)) {
+      local_state->SetString(prefs::kApplicationLocale,
+                             WideToASCII(install_lang));
+    }
 #endif  // defined(OS_WIN)
   }
 
@@ -427,13 +466,14 @@ PrefService* InitializeLocalState(const CommandLine& parsed_command_line,
       parsed_command_line.HasSwitch(switches::kParentProfile)) {
     FilePath parent_profile =
         parsed_command_line.GetSwitchValuePath(switches::kParentProfile);
-    PrefService parent_local_state(parent_profile);
-    parent_local_state.RegisterStringPref(prefs::kApplicationLocale,
-                                          std::wstring());
+    scoped_ptr<PrefService> parent_local_state(
+        PrefService::CreatePrefService(parent_profile));
+    parent_local_state->RegisterStringPref(prefs::kApplicationLocale,
+                                           std::string());
     // Right now, we only inherit the locale setting from the parent profile.
     local_state->SetString(
         prefs::kApplicationLocale,
-        parent_local_state.GetString(prefs::kApplicationLocale));
+        parent_local_state->GetString(prefs::kApplicationLocale));
   }
 
   return local_state;
@@ -583,6 +623,7 @@ void InitializeToolkit() {
 #endif
 
 #if defined(OS_CHROMEOS)
+
 void OptionallyRunChromeOSLoginManager(const CommandLine& parsed_command_line) {
   if (parsed_command_line.HasSwitch(switches::kLoginManager)) {
     std::string first_screen =
@@ -602,11 +643,44 @@ void OptionallyRunChromeOSLoginManager(const CommandLine& parsed_command_line) {
     browser::ShowLoginWizard(first_screen, size);
   }
 }
+
+bool OptionallyApplyServicesCustomizationFromCommandLine(
+    const CommandLine& parsed_command_line,
+    BrowserInit* browser_init) {
+  // For Chrome OS, we may need to fetch OEM partner's services customization
+  // manifest and apply the customizations. This happens on the very first run
+  // or if startup manifest is passed on the command line.
+  scoped_ptr<chromeos::ServicesCustomizationDocument> customization;
+  customization.reset(new chromeos::ServicesCustomizationDocument());
+  bool manifest_loaded = false;
+  if (parsed_command_line.HasSwitch(switches::kServicesManifest)) {
+    // Load manifest from file specified by command line switch.
+    FilePath manifest_path =
+        parsed_command_line.GetSwitchValuePath(switches::kServicesManifest);
+    manifest_loaded = customization->LoadManifestFromFile(manifest_path);
+    DCHECK(manifest_loaded) << manifest_path.value();
+  }
+  // If manifest was loaded successfully, apply the customizations.
+  if (manifest_loaded) {
+    browser_init->ApplyServicesCustomization(customization.get());
+  }
+  return manifest_loaded;
+}
+
 #else
+
 void OptionallyRunChromeOSLoginManager(const CommandLine& parsed_command_line) {
   // Dummy empty function for non-ChromeOS builds to avoid extra ifdefs below.
 }
-#endif
+
+bool OptionallyApplyServicesCustomizationFromCommandLine(
+    const CommandLine& parsed_command_line,
+    BrowserInit* browser_init) {
+  // Dummy empty function for non-ChromeOS builds to avoid extra ifdefs below.
+  return false;
+}
+
+#endif  // defined(OS_CHROMEOS)
 
 #if defined(OS_MACOSX)
 OSStatus KeychainCallback(SecKeychainEvent keychain_event,
@@ -617,8 +691,27 @@ OSStatus KeychainCallback(SecKeychainEvent keychain_event,
 
 }  // namespace
 
+#if defined(OS_WIN)
+#define DLLEXPORT __declspec(dllexport)
+
+// We use extern C for the prototype DLLEXPORT to avoid C++ name mangling.
+extern "C" {
+DLLEXPORT void __cdecl RelaunchChromeBrowserWithNewCommandLineIfNeeded();
+}
+
+DLLEXPORT void __cdecl RelaunchChromeBrowserWithNewCommandLineIfNeeded() {
+  Upgrade::RelaunchChromeBrowserWithNewCommandLineIfNeeded();
+}
+#endif
+
 // Main routine for running as the Browser process.
 int BrowserMain(const MainFunctionParams& parameters) {
+  scoped_ptr<BrowserMainParts>
+      parts(BrowserMainParts::CreateBrowserMainParts(parameters));
+
+  parts->EarlyInitialization();
+
+  // TODO(viettrungluu): put the remainder into BrowserMainParts
   const CommandLine& parsed_command_line = parameters.command_line_;
   base::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool_;
 
@@ -629,68 +722,6 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // TODO(beng, brettw): someday, break this out into sub functions with well
   //                     defined roles (e.g. pre/post-profile startup, etc).
 
-#ifdef TRACK_ALL_TASK_OBJECTS
-  // Start tracking the creation and deletion of Task instance.
-  // This construction MUST be done before main_message_loop, so that it is
-  // destroyed after the main_message_loop.
-  tracked_objects::AutoTracking tracking_objects;
-#endif
-
-#if defined(OS_POSIX)
-  // We need to accept SIGCHLD, even though our handler is a no-op because
-  // otherwise we cannot wait on children. (According to POSIX 2001.)
-  struct sigaction action;
-  memset(&action, 0, sizeof(action));
-  action.sa_handler = SIGCHLDHandler;
-  CHECK(sigaction(SIGCHLD, &action, NULL) == 0);
-
-  // We need to handle SIGTERM, because that is how many POSIX-based distros ask
-  // processes to quit gracefully at shutdown time.
-  memset(&action, 0, sizeof(action));
-  action.sa_handler = SIGTERMHandler;
-  CHECK(sigaction(SIGTERM, &action, NULL) == 0);
-  // Also handle SIGINT - when the user terminates the browser via Ctrl+C.
-  // If the browser process is being debugged, GDB will catch the SIGINT first.
-  action.sa_handler = SIGINTHandler;
-  CHECK(sigaction(SIGINT, &action, NULL) == 0);
-  // And SIGHUP, for when the terminal disappears. On shutdown, many Linux
-  // distros send SIGHUP, SIGTERM, and then SIGKILL.
-  action.sa_handler = SIGHUPHandler;
-  CHECK(sigaction(SIGHUP, &action, NULL) == 0);
-
-  const std::wstring fd_limit_string =
-      parsed_command_line.GetSwitchValue(switches::kFileDescriptorLimit);
-  int fd_limit = 0;
-  if (!fd_limit_string.empty()) {
-    StringToInt(WideToUTF16Hack(fd_limit_string), &fd_limit);
-  }
-#if defined(OS_MACOSX)
-  // We use quite a few file descriptors for our IPC, and the default limit on
-  // the Mac is low (256), so bump it up if there is no explicit override.
-  if (fd_limit == 0) {
-    fd_limit = 1024;
-  }
-#endif  // OS_MACOSX
-  if (fd_limit > 0) {
-    SetFileDescriptorLimit(fd_limit);
-  }
-#endif  // OS_POSIX
-
-#if defined(OS_WIN)
-  // Initialize Winsock.
-  net::EnsureWinsockInit();
-#endif  // defined(OS_WIN)
-
-#if defined(OS_WIN)
-  if (parsed_command_line.HasSwitch(switches::kUseNSSForSSL) ||
-      parsed_command_line.HasSwitch(switches::kUseSpdy)) {
-    net::ClientSocketFactory::SetSSLClientSocketFactory(
-        net::SSLClientSocketNSSFactory);
-    // We want to be sure to init NSPR on the main thread.
-    base::EnsureNSPRInit();
-  }
-#endif
-
   // Do platform-specific things (such as finishing initializing Cocoa)
   // prior to instantiating the message loop. This could be turned into a
   // broadcast notification.
@@ -700,36 +731,18 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   SystemMonitor system_monitor;
   HighResolutionTimerManager hi_res_timer_manager;
+  scoped_ptr<net::NetworkChangeNotifier> network_change_notifier(
+      net::NetworkChangeNotifier::Create());
 
-  // Initialize statistical testing infrastructure for entire browser.
-  FieldTrialList field_trial;
-
-  std::wstring app_name = chrome::kBrowserAppName;
-  std::string thread_name_string = WideToASCII(app_name + L"_BrowserMain");
-
-  const char* thread_name = thread_name_string.c_str();
-  PlatformThread::SetName(thread_name);
-  main_message_loop.set_thread_name(thread_name);
+  const char* kThreadName = "CrBrowserMain";
+  PlatformThread::SetName(kThreadName);
+  main_message_loop.set_thread_name(kThreadName);
 
   // Register the main thread by instantiating it, but don't call any methods.
   ChromeThread main_thread(ChromeThread::UI, MessageLoop::current());
 
-#if defined(OS_POSIX)
-  int pipefd[2];
-  int ret = pipe(pipefd);
-  if (ret < 0) {
-    PLOG(DFATAL) << "Failed to create pipe";
-  } else {
-    g_shutdown_pipe_read_fd = pipefd[0];
-    g_shutdown_pipe_write_fd = pipefd[1];
-    const size_t kShutdownDetectorThreadStackSize = 4096;
-    if (!PlatformThread::CreateNonJoinable(
-        kShutdownDetectorThreadStackSize,
-        new ShutdownDetector(g_shutdown_pipe_read_fd))) {
-      LOG(DFATAL) << "Failed to create shutdown detector task.";
-    }
-  }
-#endif  // defined(OS_POSIX)
+  // TODO(viettrungluu): temporary while I refactor BrowserMain()
+  parts->TemporaryPosix_1();
 
   FilePath user_data_dir;
 #if defined(OS_WIN)
@@ -764,6 +777,11 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // BrowserProcessImpl's constructor should set g_browser_process.
   DCHECK(g_browser_process);
 
+  // This forces the TabCloseableStateWatcher to be created and, on chromeos,
+  // register for the notifications it needs to track the closeable state of
+  // tabs.
+  g_browser_process->tab_closeable_state_watcher();
+
 #if defined(USE_LINUX_BREAKPAD)
   // Needs to be called after we have chrome::DIR_USER_DATA and
   // g_browser_process.
@@ -794,9 +812,15 @@ int BrowserMain(const MainFunctionParams& parameters) {
 #if defined(OS_MACOSX)
     g_browser_process->SetApplicationLocale(l10n_util::GetLocaleOverride());
 #else
+    // On a POSIX OS other than ChromeOS, the parameter that is passed to the
+    // method InitSharedInstance is ignored.
     std::string app_locale = ResourceBundle::InitSharedInstance(
-        local_state->GetString(prefs::kApplicationLocale));
+        ASCIIToWide(local_state->GetString(prefs::kApplicationLocale)));
     g_browser_process->SetApplicationLocale(app_locale);
+
+    FilePath resources_pack_path;
+    PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
+    ResourceBundle::AddDataPackToSharedInstance(resources_pack_path);
 #endif  // !defined(OS_MACOSX)
   }
 
@@ -822,15 +846,14 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   BrowserInit browser_init;
 
-  // On first run, we need to process the master preferences before the
+  // On first run, we need to process the predictor preferences before the
   // browser's profile_manager object is created, but after ResourceBundle
   // is initialized.
-  FirstRun::MasterPrefs master_prefs = {0};
+  FirstRun::MasterPrefs master_prefs = { 0 };
   bool first_run_ui_bypass = false;  // True to skip first run UI.
   if (is_first_run) {
     first_run_ui_bypass =
-        !FirstRun::ProcessMasterPreferences(user_data_dir,
-                                            FilePath(), &master_prefs);
+        !FirstRun::ProcessMasterPreferences(user_data_dir, &master_prefs);
     AddFirstRunNewTabs(&browser_init, master_prefs.new_tabs);
 
     // If we are running in App mode, we do not want to show the importer
@@ -841,6 +864,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
       first_run_ui_bypass = true;
   }
 
+  // TODO(viettrungluu): why don't we run this earlier?
   if (!parsed_command_line.HasSwitch(switches::kNoErrorDialogs))
     WarnAboutMinimumSystemRequirements();
 
@@ -855,9 +879,6 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // will not be deleted after the Task is executed.
   scoped_refptr<HistogramSynchronizer> histogram_synchronizer =
       new HistogramSynchronizer();
-
-  // Initialize the shared instance of user data manager.
-  scoped_ptr<UserDataManager> user_data_manager(UserDataManager::Create());
 
   // Initialize the prefs of the local state.
   browser::RegisterLocalState(local_state);
@@ -884,6 +905,11 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   CreateChildThreads(browser_process.get());
 
+#if defined(OS_CHROMEOS)
+  // Now that the file thread exists we can record our stats.
+  chromeos::BootTimesLoader::RecordChromeMainStats();
+#endif
+
   // Record last shutdown time into a histogram.
   browser_shutdown::ReadLastShutdownInfo();
 
@@ -907,28 +933,19 @@ int BrowserMain(const MainFunctionParams& parameters) {
         ResultCodes::NORMAL_EXIT : ResultCodes::SHELL_INTEGRATION_FAILED;
   }
 
-#if defined(OS_CHROMEOS)
-  if (parsed_command_line.HasSwitch(switches::kLoginUser)) {
-    std::string username =
-        parsed_command_line.GetSwitchValueASCII(switches::kLoginUser);
-    LOG(INFO) << "Relaunching browser for user: " << username;
-    chromeos::UserManager::Get()->UserLoggedIn(username);
-  }
-#endif
-
 #if !defined(OS_MACOSX)
   // In environments other than Mac OS X we support import of settings
   // from other browsers. In case this process is a short-lived "import"
   // process that another browser runs just to import the settings, we
   // don't want to be checking for another browser process, by design.
-  if (!parsed_command_line.HasSwitch(switches::kImport) ||
-      parsed_command_line.HasSwitch(switches::kImportFromFile)) {
+  if (!(parsed_command_line.HasSwitch(switches::kImport) ||
+        parsed_command_line.HasSwitch(switches::kImportFromFile))) {
 #endif
     // When another process is running, use that process instead of starting a
     // new one. NotifyOtherProcess will currently give the other process up to
     // 20 seconds to respond. Note that this needs to be done before we attempt
     // to read the profile.
-    switch (process_singleton.NotifyOtherProcess()) {
+    switch (process_singleton.NotifyOtherProcessOrCreate()) {
       case ProcessSingleton::PROCESS_NONE:
         // No process already running, fall through to starting a new one.
         break;
@@ -943,6 +960,14 @@ int BrowserMain(const MainFunctionParams& parameters) {
       case ProcessSingleton::PROFILE_IN_USE:
         return ResultCodes::PROFILE_IN_USE;
 
+      case ProcessSingleton::LOCK_ERROR:
+        LOG(ERROR) << "Failed to create a ProcessSingleton for your profile "
+                      "directory. This means that running multiple instances "
+                      "would start multiple browser processes rather than "
+                      "opening a new window in the existing process. Aborting "
+                      "now to avoid profile corruption.";
+        return ResultCodes::PROFILE_IN_USE;
+
       default:
         NOTREACHED();
     }
@@ -951,6 +976,23 @@ int BrowserMain(const MainFunctionParams& parameters) {
 #endif
 
   // Profile creation ----------------------------------------------------------
+
+#if defined(OS_CHROMEOS)
+  // Initialize the screen locker now so that it can receive
+  // LOGIN_USER_CHANGED notification from UserManager.
+  chromeos::ScreenLocker::InitClass();
+
+  // This forces the ProfileManager to be created and register for the
+  // notification it needs to track the logged in user.
+  g_browser_process->profile_manager()->GetDefaultProfile();
+
+  if (parsed_command_line.HasSwitch(switches::kLoginUser)) {
+    std::string username =
+        parsed_command_line.GetSwitchValueASCII(switches::kLoginUser);
+    LOG(INFO) << "Relaunching browser for user: " << username;
+    chromeos::UserManager::Get()->UserLoggedIn(username);
+  }
+#endif
 
   Profile* profile = CreateProfile(parameters, user_data_dir);
   if (!profile)
@@ -993,15 +1035,6 @@ int BrowserMain(const MainFunctionParams& parameters) {
   if (CheckMachineLevelInstall())
     return ResultCodes::MACHINE_LEVEL_INSTALL_EXISTS;
 
-  if (!process_singleton.Create()) {
-    LOG(ERROR) << "Failed to create a ProcessSingleton for your profile "
-                  "directory. This means that running multiple instances "
-                  "would start multiple browser processes rather than opening "
-                  "a new window in the existing process. Aborting now to "
-                  "avoid profile corruption.";
-    return ResultCodes::PROFILE_IN_USE;
-  }
-
   // Create the TranslateManager singleton.
   Singleton<TranslateManager>::get();
 
@@ -1024,15 +1057,25 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // touches reads preferences.
   if (is_first_run) {
     if (!first_run_ui_bypass) {
+#if defined(OS_WIN)
+      FirstRun::AutoImport(profile,
+                           master_prefs.homepage_defined,
+                           master_prefs.do_import_items,
+                           master_prefs.dont_import_items,
+                           master_prefs.run_search_engine_experiment,
+                           master_prefs.randomize_search_engine_experiment,
+                           &process_singleton);
+#else
       if (!OpenFirstRunDialog(profile,
                               master_prefs.homepage_defined,
                               master_prefs.do_import_items,
                               master_prefs.dont_import_items,
                               master_prefs.run_search_engine_experiment,
+                              master_prefs.randomize_search_engine_experiment,
                               &process_singleton)) {
-        // The user cancelled the first run dialog box, we should exit Chrome.
         return ResultCodes::NORMAL_EXIT;
       }
+#endif
 #if defined(OS_POSIX)
       // On Windows, the download is tagged with enable/disable stats so there
       // is no need for this code.
@@ -1042,7 +1085,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
       if (GoogleUpdateSettings::GetCollectStatsConsent())
         local_state->SetBoolean(prefs::kMetricsReportingEnabled, true);
 #endif  // OS_POSIX
-    }
+    }  // if (!first_run_ui_bypass)
 
     Browser::SetNewHomePagePrefs(user_prefs);
   }
@@ -1052,9 +1095,15 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // testing against a bunch of special cases that are taken care early on.
   PrepareRestartOnCrashEnviroment(parsed_command_line);
 
-  // Initialize and maintain DNS prefetcher module. Also registers an observer
-  // to clear the host cache when closing incognito mode.
-  chrome_browser_net::DnsGlobalInit dns_prefetch(user_prefs, local_state);
+  // Initialize and maintain network predictor module, which handles DNS
+  // pre-resolution, as well as TCP/IP connection pre-warming.
+  // This also registers an observer to discard data when closing incognito
+  // mode.
+  chrome_browser_net::PredictorInit dns_prefetch(
+      user_prefs,
+      local_state,
+      parsed_command_line.HasSwitch(switches::kEnablePreconnect),
+      parsed_command_line.HasSwitch(switches::kPreconnectDespiteProxy));
 
 #if defined(OS_WIN)
   win_util::ScopedCOMInitializer com_initializer;
@@ -1062,8 +1111,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // Init the RLZ library. This just binds the dll and schedules a task on the
   // file thread to be run sometime later. If this is the first run we record
   // the installation event.
-  RLZTracker::InitRlzDelayed(base::DIR_MODULE, is_first_run,
-                             master_prefs.ping_delay);
+  RLZTracker::InitRlzDelayed(is_first_run, master_prefs.ping_delay);
 #endif
 
   // Configure the network module so it has access to resources.
@@ -1074,6 +1122,12 @@ int BrowserMain(const MainFunctionParams& parameters) {
   RegisterURLRequestChromeJob();
   RegisterExtensionProtocols();
   RegisterMetadataURLRequestHandler();
+
+  // If path to partner services customization document was passed on command
+  // line, apply the customizations (Chrome OS only).
+  // TODO(denisromanov): Remove this when not needed for testing.
+  OptionallyApplyServicesCustomizationFromCommandLine(parsed_command_line,
+                                                      &browser_init);
 
   // In unittest mode, this will do nothing.  In normal mode, this will create
   // the global GoogleURLTracker and IntranetRedirectDetector instances, which
@@ -1138,26 +1192,41 @@ int BrowserMain(const MainFunctionParams& parameters) {
   browser_process->CheckForInspectorFiles();
 
 #if defined(OS_CHROMEOS)
-  metrics->StartExternalMetrics(profile);
+  metrics->StartExternalMetrics();
 #endif
 
-  // This will initialize bookmarks. Call it after bookmark import is done.
-  // See issue 40144.
-  profile->GetExtensionsService()->InitEventRouters();
+  if (profile->GetExtensionsService()) {
+    // This will initialize bookmarks. Call it after bookmark import is done.
+    // See issue 40144.
+    profile->GetExtensionsService()->InitEventRouters();
+  }
+
+#if defined(OS_WIN)
+  // We check this here because if the profile is OTR (chromeos possibility)
+  // it won't still be accessible after browser is destroyed.
+  bool record_search_engine = is_first_run && !profile->IsOffTheRecord();
+#endif
+
+    // ChildProcess:: is a misnomer unless you consider context.  Use
+    // of --wait-for-debugger only makes sense when Chrome itself is a
+    // child process (e.g. when launched by PyAuto).
+  if (parsed_command_line.HasSwitch(switches::kWaitForDebugger)) {
+    ChildProcess::WaitForDebugger(L"Browser");
+  }
 
   int result_code = ResultCodes::NORMAL_EXIT;
   if (parameters.ui_task) {
     // We are in test mode. Run one task and enter the main message loop.
     if (pool)
       pool->Recycle();
-    MessageLoopForUI::current()->PostTask(FROM_HERE, parameters.ui_task);
-    RunUIMessageLoop(browser_process.get());
+    parameters.ui_task->Run();
+    delete parameters.ui_task;
   } else {
     // We are in regular browser boot sequence. Open initial stabs and enter
     // the main message loop.
     if (browser_init.Start(parsed_command_line, std::wstring(), profile,
                            &result_code)) {
-#if defined(OS_WIN)
+#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
       // Initialize autoupdate timer. Timer callback costs basically nothing
       // when browser is not in persistent mode, so it's OK to let it ride on
       // the main thread. This needs to be done here because we don't want
@@ -1165,7 +1234,15 @@ int BrowserMain(const MainFunctionParams& parameters) {
       g_browser_process->StartAutoupdateTimer();
 #endif
 
-      // Record now as the last succesful chrome start.
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+      // On Linux, the running exe will be updated if an upgrade becomes
+      // available while the browser is running.  We need to save the last
+      // modified time of the exe, so we can compare to determine if there is
+      // an upgrade while the browser is kept alive by a persistent extension.
+      Upgrade::SaveLastModifiedTimeOfExe();
+#endif
+
+      // Record now as the last successful chrome start.
       GoogleUpdateSettings::SetLastRunTime();
       // Call Recycle() here as late as possible, before going into the loop
       // because Start() will add things to it while creating the main window.
@@ -1180,15 +1257,33 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // shutdown because otherwise we can't be sure the user has finished
   // selecting a search engine through the dialog reached from the first run
   // bubble link.
-  if (FirstRun::InSearchExperimentLocale() && is_first_run) {
+  if (FirstRun::InSearchExperimentLocale() && record_search_engine) {
     const TemplateURL* default_search_engine =
         profile->GetTemplateURLModel()->GetDefaultSearchProvider();
+    // Record the search engine chosen.
     if (master_prefs.run_search_engine_experiment) {
       UMA_HISTOGRAM_ENUMERATION(
           "Chrome.SearchSelectExperiment",
           TemplateURLPrepopulateData::GetSearchEngineType(
-              default_search_engine),
+          default_search_engine),
           TemplateURLPrepopulateData::SEARCH_ENGINE_MAX);
+      // If the selection has been randomized, also record the winner by slot.
+      if (master_prefs.randomize_search_engine_experiment) {
+        size_t engine_pos = profile->GetTemplateURLModel()->
+            GetSearchEngineDialogSlot();
+        if (engine_pos < 4) {
+          std::string experiment_type = "Chrome.SearchSelectExperimentSlot";
+          // Nicer in UMA if slots are 1-based.
+          experiment_type.push_back('1' + engine_pos);
+          UMA_HISTOGRAM_ENUMERATION(
+              experiment_type,
+              TemplateURLPrepopulateData::GetSearchEngineType(
+              default_search_engine),
+              TemplateURLPrepopulateData::SEARCH_ENGINE_MAX);
+        } else {
+          NOTREACHED() << "Invalid search engine selection slot.";
+        }
+      }
     } else {
       UMA_HISTOGRAM_ENUMERATION(
           "Chrome.SearchSelectExempt",
@@ -1207,7 +1302,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   // browser_shutdown takes care of deleting browser_process, so we need to
   // release it.
-  browser_process.release();
+  ignore_result(browser_process.release());
   browser_shutdown::Shutdown();
 
   return result_code;

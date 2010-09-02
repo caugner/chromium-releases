@@ -131,9 +131,7 @@
         'chrome_exe_target': 1,
       },
       'dependencies': [
-        # Copy Flash Player files to PRODUCT_DIR if applicable.
-        # Let the .gyp file decide what to do on a per-OS basis.
-        '../third_party/adobe/flash/flash_player.gyp:flash_player',
+        'chrome_version_info',
       ],
       'conditions': [
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
@@ -185,11 +183,12 @@
             # On Linux, link the dependencies (libraries) that make up actual
             # Chromium functionality directly into the executable.
             '<@(chromium_dependencies)',
-            # Needed for chrome_dll_main.cc #include of gtk/gtk.h
+            # Needed for chrome_dll_main.cc initialization of libraries.
+            '../build/linux/system.gyp:dbus-glib',
             '../build/linux/system.gyp:gtk',
             'packed_resources',
             # Needed to use the master_preferences functions
-            'installer/installer.gyp:installer_util',
+            'installer_util',
           ],
           'sources': [
             'app/chrome_dll_main.cc',
@@ -213,21 +212,7 @@
             },
           ],
         }],
-        ['OS=="linux" and (toolkit_views==1 or chromeos==1)', {
-          'dependencies': [
-            '../views/views.gyp:views',
-          ],
-        }],
         ['OS=="mac"', {
-          'variables': {
-            'mac_packaging_dir':
-                '<(PRODUCT_DIR)/<(mac_product_name) Packaging',
-            # <(PRODUCT_DIR) expands to $(BUILT_PRODUCTS_DIR), which doesn't
-            # work properly in a shell script, where ${BUILT_PRODUCTS_DIR} is
-            # needed.
-            'mac_packaging_sh_dir':
-                '${BUILT_PRODUCTS_DIR}/<(mac_product_name) Packaging',
-          },
           # 'branding' is a variable defined in common.gypi
           # (e.g. "Chromium", "Chrome")
           'conditions': [
@@ -279,50 +264,6 @@
                 }],
               ],
             }],  # mac_breakpad
-            ['mac_keystone==1', {
-              'copies': [
-                {
-                  # Put keystone_install.sh where the packaging system will
-                  # find it.  The packager will copy this script to the
-                  # correct location on the disk image.
-                  'destination': '<(mac_packaging_dir)',
-                  'files': [
-                    'tools/build/mac/keystone_install.sh',
-                  ],
-                },
-              ],
-            }],  # mac_keystone
-            ['buildtype=="Official"', {
-              'actions': [
-                {
-                  # Create sign.sh, the script that the packaging system will
-                  # use to sign the .app bundle.
-                  'action_name': 'Make sign.sh',
-                  'variables': {
-                    'make_sign_sh_path': 'tools/build/mac/make_sign_sh',
-                    'sign_sh_in_path': 'tools/build/mac/sign.sh.in',
-                    'app_resource_rules_in_path':
-                        'tools/build/mac/app_resource_rules.plist.in',
-                  },
-                  'inputs': [
-                    '<(make_sign_sh_path)',
-                    '<(sign_sh_in_path)',
-                    '<(app_resource_rules_in_path)',
-                    '<(version_path)',
-                  ],
-                  'outputs': [
-                    '<(mac_packaging_dir)/sign.sh',
-                    '<(mac_packaging_dir)/app_resource_rules.plist',
-                  ],
-                  'action': [
-                    '<(make_sign_sh_path)',
-                    '<(mac_packaging_sh_dir)',
-                    '<(mac_product_name)',
-                    '<(version_full)',
-                  ],
-                },
-              ],
-            }],  # buildtype=="Official"
           ],
           'product_name': '<(mac_product_name)',
           'xcode_settings': {
@@ -343,7 +284,7 @@
           'actions': [
             {
               # Generate the InfoPlist.strings file
-              'action_name': 'Generating InfoPlist.strings files',
+              'action_name': 'Generate InfoPlist.strings files',
               'variables': {
                 'tool_path': '<(PRODUCT_DIR)/infoplist_strings_tool',
                 # Unique dir to write to so the [lang].lproj/InfoPlist.strings
@@ -383,20 +324,37 @@
               'message': 'Generating the language InfoPlist.strings files',
               'process_outputs_as_mac_bundle_resources': 1,
             },
+            {
+              # Massage the manifest and add it as a resource
+              'action_name': 'Generate MCX manifest file',
+              'variables': {
+                'tool_path': 'tools/build/mac/copy_mcx_manifest.sh',
+                'input_path': 'app/policy/mac/app-Manifest.plist',
+                'output_path': '<(INTERMEDIATE_DIR)/<(mac_bundle_id).manifest',
+              },
+              'inputs': [
+                '<(tool_path)',
+                '<(input_path)',
+              ],
+              'outputs': [
+                '<(output_path)',
+              ],
+              'action': [
+                '<(tool_path)',
+                '<(mac_product_name)',
+                '<(mac_bundle_id)',
+                '<(input_path)',
+                '<(output_path)',
+              ],
+              'message': 'Generating the MCX policy manifest file',
+              'process_outputs_as_mac_bundle_resources': 1,
+            },
           ],
           'copies': [
             {
               'destination': '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Versions/<(version_full)',
               'files': [
                 '<(PRODUCT_DIR)/<(mac_product_name) Helper.app',
-              ],
-              'conditions': [
-                [ 'branding == "Chrome"', {
-                  'files': [
-                    '<(PRODUCT_DIR)/Flash Player Plugin for Chrome.plugin',
-                    '<(PRODUCT_DIR)/plugin.vch',
-                  ],
-                }],
               ],
             },
           ],
@@ -414,9 +372,11 @@
               # is needed.  This is also done in the helper_app and chrome_dll
               # targets.  Use -b0 to not include any Breakpad information; that
               # all goes into the framework's Info.plist.  Keystone information
-              # is included if Keystone is enabled because the ticket will
-              # reference this Info.plist to determine the tag of the installed
-              # product.  Use -s1 to include Subversion information.
+              # is included if Keystone is enabled.  The application reads
+              # Keystone keys from this plist and not the framework's, and
+              # the ticket will reference this Info.plist to determine the tag
+              # of the installed product.  Use -s1 to include Subversion
+              # information.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['<(tweak_info_plist_path)',
                          '-b0',
@@ -438,7 +398,7 @@
           'conditions': [
             ['branding=="Chrome"', {
               'dependencies': [
-                'installer/installer.gyp:linux_installer_configs',
+                'linux_installer_configs',
               ],
             }],
             ['selinux==0', {
@@ -467,6 +427,19 @@
               # etc.; should we try to extract from there instead?
               'product_name': 'chrome'
             }],
+            # On Mac, this is done in chrome_dll.gypi.
+            ['internal_pdf', {
+              'dependencies': [
+                '../pdf/pdf.gyp:pdf',
+              ],
+            }],
+          ],
+          'dependencies': [
+            'packed_extra_resources',
+            # Copy Flash Player files to PRODUCT_DIR if applicable. Let the .gyp
+            # file decide what to do on a per-OS basis; on Mac, internal plugins
+            # go inside the framework, so this dependency is in chrome_dll.gypi.
+            '../third_party/adobe/flash/flash_player.gyp:flash_player',
           ],
         }],
         ['OS=="mac" or OS=="win"', {
@@ -478,8 +451,8 @@
         }],
         ['OS=="win"', {
           'dependencies': [
-            'installer/installer.gyp:installer_util',
-            'installer/installer.gyp:installer_util_strings',
+            'installer_util',
+            'installer_util_strings',
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../breakpad/breakpad.gyp:breakpad_sender',
             '../sandbox/sandbox.gyp:sandbox',
@@ -494,6 +467,68 @@
         }],
       ],
     },
+    {
+      'target_name': 'chrome_version_info',
+      'type': '<(library)',
+      'sources': [
+        'app/chrome_version_info.cc',
+        'app/chrome_version_info.h',
+      ],
+      'include_dirs': [
+        '<(DEPTH)',
+      ],
+      'conditions': [
+        [ 'OS == "linux" or OS == "freebsd" or OS == "openbsd" or OS == "solaris"', {
+          'include_dirs': [
+            '<(SHARED_INTERMEDIATE_DIR)',
+          ],
+          'actions': [
+            {
+              'action_name': 'posix_version',
+              'variables': {
+                'lastchange_path':
+                  '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
+                'version_py_path': 'tools/build/version.py',
+                'version_path': 'VERSION',
+                'template_input_path': 'app/chrome_version_info_posix.h.version',
+              },
+              'conditions': [
+                [ 'branding == "Chrome"', {
+                  'variables': {
+                     'branding_path':
+                       'app/theme/google_chrome/BRANDING',
+                  },
+                }, { # else branding!="Chrome"
+                  'variables': {
+                     'branding_path':
+                       'app/theme/chromium/BRANDING',
+                  },
+                }],
+              ],
+              'inputs': [
+                '<(template_input_path)',
+                '<(version_path)',
+                '<(branding_path)',
+                '<(lastchange_path)',
+              ],
+              'outputs': [
+                '<(SHARED_INTERMEDIATE_DIR)/chrome/app/chrome_version_info_posix.h',
+              ],
+              'action': [
+                'python',
+                '<(version_py_path)',
+                '-f', '<(version_path)',
+                '-f', '<(branding_path)',
+                '-f', '<(lastchange_path)',
+                '<(template_input_path)',
+                '<@(_outputs)',
+              ],
+              'message': 'Generating version information',
+            },
+          ],
+        }],
+      ]
+    }
   ],
   'conditions': [
     ['OS=="win"', {
@@ -511,7 +546,7 @@
             # which contains all of the library code with Chromium
             # functionality.
             'chrome_dll_nacl_win64',
-            'installer/installer.gyp:installer_util_nacl_win64',
+            'installer_util_nacl_win64',
             'common_constants_win64',
             '../breakpad/breakpad.gyp:breakpad_handler_win64',
             '../breakpad/breakpad.gyp:breakpad_sender_win64',

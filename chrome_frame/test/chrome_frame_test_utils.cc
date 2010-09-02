@@ -13,7 +13,10 @@
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/platform_thread.h"
+#include "base/process_util.h"
 #include "base/registry.h"   // to find IE and firefox
+#include "base/scoped_bstr_win.h"
 #include "base/scoped_handle.h"
 #include "base/scoped_comptr_win.h"
 #include "base/utf_string_conversions.h"
@@ -34,8 +37,10 @@ const wchar_t kIEBrokerImageName[] = L"ieuser.exe";
 const wchar_t kFirefoxImageName[] = L"firefox.exe";
 const wchar_t kOperaImageName[] = L"opera.exe";
 const wchar_t kSafariImageName[] = L"safari.exe";
-const wchar_t kChromeImageName[] = L"chrome.exe";
+const char kChromeImageName[] = "chrome.exe";
 const wchar_t kIEProfileName[] = L"iexplore";
+const wchar_t kChromeLauncher[] = L"chrome_launcher.exe";
+const int kChromeFrameLongNavigationTimeoutInSeconds = 10;
 
 // Callback function for EnumThreadWindows.
 BOOL CALLBACK CloseWindowsThreadCallback(HWND hwnd, LPARAM param) {
@@ -136,15 +141,19 @@ base::ProcessHandle LaunchExecutable(const std::wstring& executable,
   if (path.empty()) {
     path = FormatCommandForApp(executable, argument);
     if (path.empty()) {
-      DLOG(ERROR) << "Failed to find executable: " << executable;
+      LOG(ERROR) << "Failed to find executable: " << executable;
     } else {
       CommandLine cmdline = CommandLine::FromString(path);
-      base::LaunchApp(cmdline, false, false, &process);
+      if (!base::LaunchApp(cmdline, false, false, &process)) {
+        LOG(ERROR) << "LaunchApp failed: " << ::GetLastError();
+      }
     }
   } else {
     CommandLine cmdline((FilePath(path)));
     cmdline.AppendLooseValue(argument);
-    base::LaunchApp(cmdline, false, false, &process);
+    if (!base::LaunchApp(cmdline, false, false, &process)) {
+      LOG(ERROR) << "LaunchApp failed: " << ::GetLastError();
+    }
   }
   return process;
 }
@@ -158,12 +167,11 @@ base::ProcessHandle LaunchSafari(const std::wstring& url) {
 }
 
 base::ProcessHandle LaunchChrome(const std::wstring& url) {
-  std::wstring path;
+  FilePath path;
   PathService::Get(base::DIR_MODULE, &path);
-  file_util::AppendToPath(&path, kChromeImageName);
+  path = path.AppendASCII(kChromeImageName);
 
-  FilePath exe_path(path);
-  CommandLine cmd(exe_path);
+  CommandLine cmd(path);
   std::wstring args = L"--";
   args += ASCIIToWide(switches::kNoFirstRun);
   args += L" ";
@@ -195,13 +203,19 @@ base::ProcessHandle LaunchIEOnVista(const std::wstring& url) {
   PROCESS_INFORMATION pi = {0};
   IELAUNCHURLINFO  info = {sizeof info, 0};
   HMODULE h = LoadLibrary(L"ieframe.dll");
-  if (!h)
+  if (!h) {
+    LOG(ERROR) << "Failed to load ieframe.dll: " << ::GetLastError();
     return NULL;
+  }
   launch = reinterpret_cast<IELaunchURLPtr>(GetProcAddress(h, "IELaunchURL"));
+  CHECK(launch);
   HRESULT hr = launch(url.c_str(), &pi, &info);
   FreeLibrary(h);
-  if (SUCCEEDED(hr))
+  if (SUCCEEDED(hr)) {
     CloseHandle(pi.hThread);
+  } else {
+    LOG(ERROR) << ::StringPrintf("IELaunchURL failed: 0x%08X", hr);
+  }
   return pi.hProcess;
 }
 
@@ -283,8 +297,8 @@ BOOL LowIntegrityToken::Impersonate() {
     return ok;
   }
 
-  // TODO: sandbox/src/restricted_token_utils.cc has SetTokenIntegrityLevel
-  // function already.
+  // TODO(stoyan): sandbox/src/restricted_token_utils.cc has
+  // SetTokenIntegrityLevel function already.
   ScopedHandle impersonation_token(impersonation_token_handle);
   PSID integrity_sid = NULL;
   TOKEN_MANDATORY_LABEL tml = {0};
@@ -342,7 +356,8 @@ HRESULT LaunchIEAsComServer(IWebBrowser2** web_browser) {
   // This causes the IWebBrowser2 interface which is returned to be useless,
   // i.e it does not receive any events, etc. Our workaround for this is
   // to impersonate a low integrity token and then launch IE.
-  if (win_util::GetWinVersion() == win_util::WINVERSION_VISTA) {
+  if (win_util::GetWinVersion() == win_util::WINVERSION_VISTA &&
+      GetInstalledIEVersion() == IE_7) {
     // Create medium integrity browser that will launch IE broker.
     ScopedComPtr<IWebBrowser2> medium_integrity_browser;
     hr = medium_integrity_browser.CreateInstance(CLSID_InternetExplorer, NULL,
@@ -448,7 +463,10 @@ void WebBrowserEventSink::Attach(IDispatch* browser_disp) {
 void WebBrowserEventSink::Uninitialize() {
   DisconnectFromChromeFrame();
   if (web_browser2_.get()) {
-    DispEventUnadvise(web_browser2_);
+    if (m_dwEventCookie != 0xFEFEFEFE) {
+      CoDisconnectObject(this, 0);
+      DispEventUnadvise(web_browser2_);
+    }
 
     ScopedHandle process;
     // process_id_to_wait_for_ is set when we receive OnQuit.
@@ -494,7 +512,7 @@ void WebBrowserEventSink::Uninitialize() {
         base::TimeDelta elapsed = base::Time::Now() - start;
         ULARGE_INTEGER ms;
         ms.QuadPart = elapsed.InMilliseconds();
-        DCHECK(ms.HighPart == 0);
+        DCHECK_EQ(ms.HighPart, 0U);
         if (ms.LowPart > max_wait) {
           DLOG(ERROR) << "Wait for IE timed out (2)";
           break;
@@ -514,7 +532,7 @@ STDMETHODIMP WebBrowserEventSink::OnBeforeNavigate2Internal(
       << StringPrintf("%ls - 0x%08X", url->bstrVal, this);
   // Reset any existing reference to chrome frame since this is a new
   // navigation.
-  chrome_frame_ = NULL;
+  DisconnectFromChromeFrame();
   OnBeforeNavigate2(dispatch, url, flags, target_frame_name, post_data,
                     headers, cancel);
   return S_OK;
@@ -571,18 +589,31 @@ STDMETHODIMP_(void) WebBrowserEventSink::OnNewWindow3Internal(
 
 HRESULT WebBrowserEventSink::OnLoadInternal(const VARIANT* param) {
   DLOG(INFO) << __FUNCTION__ << " " << param->bstrVal;
-  OnLoad(param->bstrVal);
+  if (chrome_frame_) {
+    OnLoad(param->bstrVal);
+  } else {
+    DLOG(WARNING) << "Invalid chrome frame pointer";
+  }
   return S_OK;
 }
 
 HRESULT WebBrowserEventSink::OnLoadErrorInternal(const VARIANT* param) {
   DLOG(INFO) << __FUNCTION__ << " " << param->bstrVal;
-  OnLoadError(param->bstrVal);
+  if (chrome_frame_) {
+    OnLoadError(param->bstrVal);
+  } else {
+    DLOG(WARNING) << "Invalid chrome frame pointer";
+  }
   return S_OK;
 }
 
 HRESULT WebBrowserEventSink::OnMessageInternal(const VARIANT* param) {
   DLOG(INFO) << __FUNCTION__ << " " << param;
+  if (!chrome_frame_.get()) {
+    DLOG(WARNING) << "Invalid chrome frame pointer";
+    return S_OK;
+  }
+
   ScopedVariant data, origin, source;
   if (param && (V_VT(param) == VT_DISPATCH)) {
     wchar_t* properties[] = { L"data", L"origin", L"source" };
@@ -620,6 +651,8 @@ HRESULT WebBrowserEventSink::LaunchIEAndNavigate(
     EXPECT_TRUE(hr == S_OK);
     hr = Navigate(navigate_url);
   }
+
+  DLOG_IF(WARNING, FAILED(hr)) << "Failed to launch IE. Error:" << hr;
   return hr;
 }
 
@@ -646,6 +679,11 @@ void WebBrowserEventSink::SendKeys(const wchar_t* input_string) {
 void WebBrowserEventSink::SendMouseClick(int x, int y,
                                          simulate_input::MouseButton button) {
   simulate_input::SendMouseClick(GetRendererWindow(), x, y, button);
+}
+
+void WebBrowserEventSink::SendMouseClickToIE(int x, int y,
+    simulate_input::MouseButton button) {
+  simulate_input::SendMouseClick(GetIERendererWindow(), x, y, button);
 }
 
 void WebBrowserEventSink::ConnectToChromeFrame() {
@@ -677,11 +715,15 @@ void WebBrowserEventSink::ConnectToChromeFrame() {
 
 void WebBrowserEventSink::DisconnectFromChromeFrame() {
   if (chrome_frame_) {
-    ScopedVariant dummy(static_cast<IDispatch*>(NULL));
-    chrome_frame_->put_onmessage(dummy);
-    chrome_frame_->put_onload(dummy);
-    chrome_frame_->put_onloaderror(dummy);
+    // Use a local ref counted copy of the IChromeFrame interface as the
+    // outgoing calls could cause the interface to be deleted due to a message
+    // pump running in the context of the outgoing call.
+    ScopedComPtr<IChromeFrame> chrome_frame(chrome_frame_);
     chrome_frame_.Release();
+    ScopedVariant dummy(static_cast<IDispatch*>(NULL));
+    chrome_frame->put_onmessage(dummy);
+    chrome_frame->put_onload(dummy);
+    chrome_frame->put_onloaderror(dummy);
   }
 }
 
@@ -707,6 +749,24 @@ HWND WebBrowserEventSink::GetRendererWindow() {
   return renderer_window;
 }
 
+HWND WebBrowserEventSink::GetIERendererWindow() {
+  DCHECK(web_browser2_);
+  HWND renderer_window = NULL;
+  ScopedComPtr<IDispatch> doc;
+  HRESULT hr = web_browser2_->get_Document(doc.Receive());
+  EXPECT_HRESULT_SUCCEEDED(hr);
+  EXPECT_TRUE(doc);
+  if (doc) {
+    ScopedComPtr<IOleWindow> ole_window;
+    ole_window.QueryFrom(doc);
+    EXPECT_TRUE(ole_window);
+    if (ole_window) {
+      ole_window->GetWindow(&renderer_window);
+    }
+  }
+  return renderer_window;
+}
+
 HRESULT WebBrowserEventSink::SetWebBrowser(IWebBrowser2* web_browser2) {
   DCHECK(web_browser2_.get() == NULL);
   DCHECK(!is_main_browser_object_);
@@ -717,14 +777,16 @@ HRESULT WebBrowserEventSink::SetWebBrowser(IWebBrowser2* web_browser2) {
 }
 
 HRESULT WebBrowserEventSink::CloseWebBrowser() {
-  DCHECK(process_id_to_wait_for_ == 0);
+  DCHECK_EQ(process_id_to_wait_for_, 0u);
   if (!web_browser2_)
     return E_FAIL;
+
+  DisconnectFromChromeFrame();
   web_browser2_->Quit();
   return S_OK;
 }
 
-void WebBrowserEventSink::ExpectRendererWindowHasfocus() {
+void WebBrowserEventSink::ExpectRendererWindowHasFocus() {
   HWND renderer_window = GetRendererWindow();
   EXPECT_TRUE(IsWindow(renderer_window));
 
@@ -748,6 +810,31 @@ void WebBrowserEventSink::ExpectRendererWindowHasfocus() {
   EXPECT_TRUE(AttachThreadInput(GetCurrentThreadId(), renderer_thread, FALSE));
 }
 
+void WebBrowserEventSink::ExpectIERendererWindowHasFocus() {
+  HWND renderer_window = GetIERendererWindow();
+  EXPECT_TRUE(IsWindow(renderer_window));
+
+  DWORD renderer_thread = 0;
+  DWORD renderer_process = 0;
+  renderer_thread = GetWindowThreadProcessId(renderer_window,
+                                             &renderer_process);
+
+  ASSERT_TRUE(AttachThreadInput(GetCurrentThreadId(), renderer_thread, TRUE));
+  HWND focus_window = GetFocus();
+  EXPECT_TRUE(focus_window == renderer_window);
+  EXPECT_TRUE(AttachThreadInput(GetCurrentThreadId(), renderer_thread, FALSE));
+}
+
+void WebBrowserEventSink::ExpectAddressBarUrl(
+    const std::wstring& expected_url) {
+  DCHECK(web_browser2_);
+  if (web_browser2_) {
+    ScopedBstr address_bar_url;
+    EXPECT_EQ(S_OK, web_browser2_->get_LocationURL(address_bar_url.Receive()));
+    EXPECT_EQ(expected_url, std::wstring(address_bar_url));
+  }
+}
+
 void WebBrowserEventSink::Exec(const GUID* cmd_group_guid, DWORD command_id,
                                DWORD cmd_exec_opt, VARIANT* in_args,
                                VARIANT* out_args) {
@@ -768,23 +855,130 @@ void WebBrowserEventSink::StopWatching() {
   window_watcher_.RemoveObserver(this);
 }
 
+std::wstring GetExeVersion(const std::wstring& exe_path) {
+  scoped_ptr<FileVersionInfo> ie_version_info(
+      FileVersionInfo::CreateFileVersionInfo(FilePath(exe_path)));
+  return ie_version_info->product_version();
+}
+
+IEVersion GetInstalledIEVersion() {
+  std::wstring path = chrome_frame_test::GetExecutableAppPath(kIEImageName);
+  std::wstring version = GetExeVersion(path);
+
+  switch (version[0]) {
+    case '6':
+      return IE_6;
+    case '7':
+      return IE_7;
+    case '8':
+      return IE_8;
+    default:
+      break;
+  }
+
+  return IE_UNSUPPORTED;
+}
+
 FilePath GetProfilePathForIE() {
   FilePath profile_path;
   // Browsers without IDeleteBrowsingHistory in non-priv mode
   // have their profiles moved into "Temporary Internet Files".
   // The code below basically retrieves the version of IE and computes
   // the profile directory accordingly.
-  std::wstring path = chrome_frame_test::GetExecutableAppPath(kIEImageName);
-  scoped_ptr<FileVersionInfo> ie_version_info(
-      FileVersionInfo::CreateFileVersionInfo(FilePath(path)));
-  std::wstring ie_version = ie_version_info->product_version();
-  if (ie_version[0] == L'8') {
+  if (GetInstalledIEVersion() == IE_8) {
     profile_path = GetProfilePath(kIEProfileName);
   } else {
     profile_path = GetIETemporaryFilesFolder();
     profile_path = profile_path.Append(L"Google Chrome Frame");
   }
   return profile_path;
+}
+
+FilePath GetTestDataFolder() {
+  FilePath test_dir;
+  PathService::Get(base::DIR_SOURCE_ROOT, &test_dir);
+  test_dir = test_dir.Append(FILE_PATH_LITERAL("chrome_frame"))
+      .Append(FILE_PATH_LITERAL("test"))
+      .Append(FILE_PATH_LITERAL("data"));
+  return test_dir;
+}
+
+std::wstring GetPathFromUrl(const std::wstring& url) {
+  string16 url16 = WideToUTF16(url);
+  GURL gurl = GURL(url16);
+  if (gurl.has_query()) {
+    GURL::Replacements replacements;
+    replacements.ClearQuery();
+    gurl = gurl.ReplaceComponents(replacements);
+  }
+  return UTF8ToWide(gurl.PathForRequest());
+}
+
+std::wstring GetPathAndQueryFromUrl(const std::wstring& url) {
+  string16 url16 = WideToUTF16(url);
+  GURL gurl = GURL(url16);
+  return UTF8ToWide(gurl.PathForRequest());
+}
+
+bool AddCFMetaTag(std::string* html_data) {
+  if (!html_data) {
+    NOTREACHED();
+    return false;
+  }
+  size_t head = html_data->find("<head>");
+  if (head == std::string::npos) {
+    // Add missing head section.
+    size_t html = html_data->find("<html>");
+    EXPECT_NE(std::string::npos, html) << "Meta tag will not be injected "
+        << "because the html tag could not be found";
+    if (html != std::string::npos) {
+      html_data->insert(html + strlen("<html>"), "<head></head>");
+      head = html_data->find("<head>");
+    }
+  }
+  if (head != std::string::npos) {
+    html_data->insert(
+        head + strlen("<head>"),
+        "<meta http-equiv=\"x-ua-compatible\" content=\"chrome=1\" />");
+  }
+  return head != std::string::npos;
+}
+
+void DelaySendExtendedKeysEnter(TimedMsgLoop* loop, int delay, char c,
+                                int repeat, simulate_input::Modifier mod) {
+  const unsigned int kInterval = 25;
+  unsigned int next_delay = delay;
+  for (int i = 0; i < repeat; i++) {
+    loop->PostDelayedTask(FROM_HERE, NewRunnableFunction(
+        simulate_input::SendExtendedKey, c, mod), next_delay);
+    next_delay += kInterval;
+  }
+
+  loop->PostDelayedTask(FROM_HERE, NewRunnableFunction(
+    simulate_input::SendCharA, VK_RETURN, simulate_input::NONE), next_delay);
+}
+
+base::ProcessHandle StartCrashService() {
+  FilePath exe_dir;
+  if (!PathService::Get(base::DIR_EXE, &exe_dir)) {
+    DCHECK(false);
+    return NULL;
+  }
+
+  base::ProcessHandle crash_service = NULL;
+
+  FilePath crash_service_path = exe_dir.AppendASCII("crash_service.exe");
+  if (!base::LaunchApp(crash_service_path.value(), false, false,
+                       &crash_service)) {
+    DLOG(ERROR) << "Couldn't start crash_service.exe";
+    return NULL;
+  }
+
+  DLOG(INFO) << "Started crash_service.exe so you know if a test crashes!";
+  // This sleep is to ensure that the crash service is done initializing, i.e
+  // the pipe creation, etc.
+  Sleep(500);
+  return crash_service;
 }
 
 }  // namespace chrome_frame_test

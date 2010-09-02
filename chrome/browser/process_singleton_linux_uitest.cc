@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,20 +23,21 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/chrome_process_util.h"
 #include "chrome/test/ui/ui_test.h"
+#include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
 typedef UITest ProcessSingletonLinuxTest;
 
-// A helper method to call ProcessSingleton::NotifyOtherProcess().
-// |url| will be added to CommandLine for current process, so that it can be
-// sent to browser process by ProcessSingleton::NotifyOtherProcess().
-ProcessSingleton::NotifyResult NotifyOtherProcess(const std::string& url,
-                                                  int timeout_ms) {
+ProcessSingleton* CreateProcessSingleton() {
   FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
 
+  return new ProcessSingleton(user_data_dir);
+}
+
+CommandLine CommandLineForUrl(const std::string& url) {
   // Hack: mutate the current process's command line so we don't show a dialog.
   // Note that this only works if we have no loose values on the command line,
   // but that's fine for unit tests.  In a UI test we disable error dialogs
@@ -47,11 +48,28 @@ ProcessSingleton::NotifyResult NotifyOtherProcess(const std::string& url,
 
   CommandLine new_cmd_line(*cmd_line);
   new_cmd_line.AppendLooseValue(ASCIIToWide(url));
+  return new_cmd_line;
+}
 
-  ProcessSingleton process_singleton(user_data_dir);
+// A helper method to call ProcessSingleton::NotifyOtherProcess().
+// |url| will be added to CommandLine for current process, so that it can be
+// sent to browser process by ProcessSingleton::NotifyOtherProcess().
+ProcessSingleton::NotifyResult NotifyOtherProcess(const std::string& url,
+                                                  int timeout_ms) {
+  scoped_ptr<ProcessSingleton> process_singleton(CreateProcessSingleton());
+  return process_singleton->NotifyOtherProcessWithTimeout(
+      CommandLineForUrl(url), timeout_ms / 1000, true);
+}
 
-  return process_singleton.NotifyOtherProcessWithTimeout(
-      new_cmd_line, timeout_ms / 1000);
+// A helper method to call ProcessSingleton::NotifyOtherProcessOrCreate().
+// |url| will be added to CommandLine for current process, so that it can be
+// sent to browser process by ProcessSingleton::NotifyOtherProcessOrCreate().
+ProcessSingleton::NotifyResult NotifyOtherProcessOrCreate(
+    const std::string& url,
+    int timeout_ms) {
+  scoped_ptr<ProcessSingleton> process_singleton(CreateProcessSingleton());
+  return process_singleton->NotifyOtherProcessWithTimeoutOrCreate(
+      CommandLineForUrl(url), timeout_ms / 1000);
 }
 
 }  // namespace
@@ -84,8 +102,8 @@ TEST_F(ProcessSingletonLinuxTest, CheckSocketFile) {
 // The following tests in linux/view does not pass without a window manager,
 // which is true in build/try bots.
 // See http://crbug.com/30953.
-#define NotifyOtherProcessSuccess FLAKY_NotifyOtherProcessSuccess
-#define NotifyOtherProcessHostChanged FLAKY_NotifyOtherProcessHostChanged
+#define NotifyOtherProcessSuccess FAILS_NotifyOtherProcessSuccess
+#define NotifyOtherProcessHostChanged FAILS_NotifyOtherProcessHostChanged
 #endif
 
 // TODO(james.su@gmail.com): port following tests to Windows.
@@ -120,6 +138,35 @@ TEST_F(ProcessSingletonLinuxTest, NotifyOtherProcessFailure) {
 
   // Wait for a while to make sure the browser process is actually killed.
   EXPECT_FALSE(CrashAwareSleep(sleep_timeout_ms()));
+}
+
+// Test that we don't kill ourselves by accident if a lockfile with the same pid
+// happens to exist.
+// TODO(mattm): This doesn't really need to be a uitest.  (We don't use the
+// uitest created browser process, but we do use some uitest provided stuff like
+// the user_data_dir and the NotifyOtherProcess function in this file, which
+// would have to be duplicated or shared if this test was moved into a
+// unittest.)
+TEST_F(ProcessSingletonLinuxTest, NotifyOtherProcessNoSuicide) {
+  FilePath lock_path = user_data_dir().Append(chrome::kSingletonLockFilename);
+  FilePath socket_path = user_data_dir().Append(chrome::kSingletonSocketFilename);
+
+  // Replace lockfile with one containing our own pid.
+  EXPECT_EQ(0, unlink(lock_path.value().c_str()));
+  std::string symlink_content = StringPrintf(
+      "%s%c%u",
+      net::GetHostName().c_str(),
+      '-',
+      base::GetCurrentProcId());
+  EXPECT_EQ(0, symlink(symlink_content.c_str(), lock_path.value().c_str()));
+
+  // Remove socket so that we will not be able to notify the existing browser.
+  EXPECT_EQ(0, unlink(socket_path.value().c_str()));
+
+  std::string url("about:blank");
+  EXPECT_EQ(ProcessSingleton::PROCESS_NONE,
+            NotifyOtherProcess(url, action_timeout_ms()));
+  // If we've gotten to this point without killing ourself, the test succeeded.
 }
 
 // Test that we can still notify a process on the same host even after the
@@ -157,4 +204,31 @@ TEST_F(ProcessSingletonLinuxTest, NotifyOtherProcessDifferingHost) {
   std::string url("about:blank");
   EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE,
             NotifyOtherProcess(url, action_timeout_ms()));
+}
+
+// Test that we fail when lock says process is on another host and we can't
+// notify it over the socket.
+TEST_F(ProcessSingletonLinuxTest, NotifyOtherProcessOrCreate_DifferingHost) {
+  base::ProcessId pid = browser_process_id();
+
+  ASSERT_GE(pid, 1);
+
+  // Kill the browser process, so that it does not respond on the socket.
+  kill(pid, SIGKILL);
+  // Wait for a while to make sure the browser process is actually killed.
+  EXPECT_FALSE(CrashAwareSleep(sleep_timeout_ms()));
+
+  FilePath lock_path = user_data_dir().Append(chrome::kSingletonLockFilename);
+  EXPECT_EQ(0, unlink(lock_path.value().c_str()));
+  EXPECT_EQ(0, symlink("FAKEFOOHOST-1234", lock_path.value().c_str()));
+
+  std::string url("about:blank");
+  EXPECT_EQ(ProcessSingleton::PROFILE_IN_USE,
+            NotifyOtherProcessOrCreate(url, action_timeout_ms()));
+}
+
+// Test that Create fails when another browser is using the profile directory.
+TEST_F(ProcessSingletonLinuxTest, CreateFailsWithExistingBrowser) {
+  scoped_ptr<ProcessSingleton> process_singleton(CreateProcessSingleton());
+  EXPECT_FALSE(process_singleton->Create());
 }

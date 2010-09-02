@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,16 +24,6 @@
 #include "gfx/rect.h"
 #include "gfx/size.h"
 
-#if defined(OS_MACOSX)
-// http://crbug.com/40002
-#define MAYBE_IncognitoBasic DISABLED_IncognitoBasic
-// http://crbug.com/40133
-#define MAYBE_BrowserActionAddPopup DISABLED_BrowserActionAddPopup
-#else
-#define MAYBE_IncognitoBasic IncognitoBasic
-#define MAYBE_BrowserActionAddPopup BrowserActionAddPopup
-#endif
-
 class BrowserActionApiTest : public ExtensionApiTest {
  public:
   BrowserActionApiTest() {}
@@ -44,17 +34,18 @@ class BrowserActionApiTest : public ExtensionApiTest {
     return BrowserActionTestUtil(browser());
   }
 
-  gfx::Rect OpenPopup(int index) {
+  bool OpenPopup(int index) {
     ResultCatcher catcher;
     GetBrowserActionsBar().Press(index);
+    ui_test_utils::WaitForNotification(
+        NotificationType::EXTENSION_POPUP_VIEW_READY);
     EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
-    EXPECT_TRUE(GetBrowserActionsBar().HasPopup());
-    return GetBrowserActionsBar().GetPopupBounds();
+    return GetBrowserActionsBar().HasPopup();
   }
 };
 
 IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, Basic) {
-  StartHTTPServer();
+  ASSERT_TRUE(StartHTTPServer());
   ASSERT_TRUE(RunExtensionTest("browser_action/basics")) << message_;
   Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
@@ -152,16 +143,17 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, TabSpecificBrowserActionState) {
   EXPECT_EQ("hi!", GetBrowserActionsBar().GetTooltip(0));
 }
 
-// Crashy, http://crbug.com/39158.
-IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DISABLED_BrowserActionPopup) {
+IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionPopup) {
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII(
       "browser_action/popup")));
+  BrowserActionTestUtil actions_bar = GetBrowserActionsBar();
   Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   // The extension's popup's size grows by |growFactor| each click.
   const int growFactor = 500;
   gfx::Size minSize = BrowserActionTestUtil::GetMinPopupSize();
+  gfx::Size middleSize = gfx::Size(growFactor, growFactor);
   gfx::Size maxSize = BrowserActionTestUtil::GetMaxPopupSize();
 
   // Ensure that two clicks will exceed the maximum allowed size.
@@ -170,23 +162,23 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DISABLED_BrowserActionPopup) {
 
   // Simulate a click on the browser action and verify the size of the resulting
   // popup.  The first one tries to be 0x0, so it should be the min values.
-  gfx::Rect bounds = OpenPopup(0);
-  EXPECT_EQ(minSize, bounds.size());
-  EXPECT_TRUE(GetBrowserActionsBar().HidePopup());
+  ASSERT_TRUE(OpenPopup(0));
+  EXPECT_EQ(minSize, actions_bar.GetPopupBounds().size());
+  EXPECT_TRUE(actions_bar.HidePopup());
 
-  bounds = OpenPopup(0);
-  EXPECT_EQ(gfx::Size(growFactor, growFactor), bounds.size());
-  EXPECT_TRUE(GetBrowserActionsBar().HidePopup());
+  ASSERT_TRUE(OpenPopup(0));
+  EXPECT_EQ(middleSize, actions_bar.GetPopupBounds().size());
+  EXPECT_TRUE(actions_bar.HidePopup());
 
   // One more time, but this time it should be constrained by the max values.
-  bounds = OpenPopup(0);
-  EXPECT_EQ(maxSize, bounds.size());
-  EXPECT_TRUE(GetBrowserActionsBar().HidePopup());
+  ASSERT_TRUE(OpenPopup(0));
+  EXPECT_EQ(maxSize, actions_bar.GetPopupBounds().size());
+  EXPECT_TRUE(actions_bar.HidePopup());
 }
 
 // Test that calling chrome.browserAction.setPopup() can enable and change
 // a popup.
-IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, MAYBE_BrowserActionAddPopup) {
+IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionAddPopup) {
   ASSERT_TRUE(RunExtensionTest("browser_action/add_popup")) << message_;
   Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
@@ -273,8 +265,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionRemovePopup) {
       << "a specific tab id.";
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, MAYBE_IncognitoBasic) {
-  StartHTTPServer();
+IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoBasic) {
+  ASSERT_TRUE(StartHTTPServer());
 
   ASSERT_TRUE(RunExtensionTest("browser_action/basics")) << message_;
   Extension* extension = GetSingleLoadedExtension();
@@ -306,12 +298,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, MAYBE_IncognitoBasic) {
   // incognito.
 }
 
-// TODO(mpcomplete): enable this when Mac gets dragging support.
-#if defined(OS_MACOSX)
-IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DISABLED_IncognitoDragging) {
-#else
 IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoDragging) {
-#endif
   ExtensionsService* service = browser()->profile()->GetExtensionsService();
 
   // The tooltips for each respective browser action.

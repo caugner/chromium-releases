@@ -3,11 +3,5 @@
   "version": "0.1",
   "description": "end-to-end browser test for chrome.tabs API",
   "background_page": "test.html",
-  "content_scripts": [
-    {
-      "matches": ["http://*/*"],
-      "js": ["echo.js"]
-    }
-  ],
   "permissions": ["tabs"]
 }

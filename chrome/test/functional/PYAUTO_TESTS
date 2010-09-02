@@ -15,22 +15,46 @@
 #      example: 'test_basic.SimpleTest'
 # 3. or as an individual test
 #      example: 'test_basic.SimpleTest.testCanOpenGoogle'
+#
+# Tests beginning with '-' will be excluded.  This can be used to enforce
+# exclusions for a particular platform.
 
 {
   'all': [
+    'autofill',
     'bookmark_bar',
     'bookmarks',
+    'browser',
+    'browsing_data',
+    'codesign',
+    'content',
+    'cookies',
+    'downloads',
+    'history',
+    'navigation',
+    'omnibox',
+    'passwords',
+    'plugins',
+    'prefs',
+    'special_tabs',
     'test_basic.SimpleTest.testCanOpenGoogle',
-    'downloads'
+    'themes',
   ],
 
   'win': [
+    # testBookmarkBarVisible fails on windows. crbug.com/42823
+    '-bookmark_bar.BookmarkBarTest.testBookmarkBarVisible',
   ],
 
   'mac': [
+    # Keychain popups make password tests difficult. crbug.com/49378
+    '-passwords',
   ],
 
   'linux': [
+    '-omnibox',  # http://crbug.com/44203
+    '-browser.BrowserTest.testWindowResize',  # crbug.com/44963
+    '-content.ContentTest.testThreeWindows',  # crbug.com/47457
   ],
 
   # TODO(nirnimesh): Add a ChromeOS section

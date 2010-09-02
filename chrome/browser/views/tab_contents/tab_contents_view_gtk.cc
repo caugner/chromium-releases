@@ -20,8 +20,8 @@
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/tab_contents/web_drag_dest_gtk.h"
 #include "chrome/browser/views/sad_tab_view.h"
-#include "chrome/browser/views/tab_contents/render_view_context_menu_gtk.h"
-#include "gfx/canvas_paint.h"
+#include "chrome/browser/views/tab_contents/render_view_context_menu_views.h"
+#include "gfx/canvas_skia_paint.h"
 #include "gfx/point.h"
 #include "gfx/rect.h"
 #include "gfx/size.h"
@@ -78,12 +78,14 @@ gboolean OnMouseScroll(GtkWidget* widget, GdkEventScroll* event,
                        TabContents* tab_contents) {
   if ((event->state & gtk_accelerator_get_default_mod_mask()) ==
       GDK_CONTROL_MASK) {
-    if (event->direction == GDK_SCROLL_DOWN) {
-      tab_contents->delegate()->ContentsZoomChange(false);
-      return TRUE;
-    } else if (event->direction == GDK_SCROLL_UP) {
-      tab_contents->delegate()->ContentsZoomChange(true);
-      return TRUE;
+    if (tab_contents->delegate()) {
+      if (event->direction == GDK_SCROLL_DOWN) {
+        tab_contents->delegate()->ContentsZoomChange(false);
+        return TRUE;
+      } else if (event->direction == GDK_SCROLL_UP) {
+        tab_contents->delegate()->ContentsZoomChange(true);
+        return TRUE;
+      }
     }
   }
 
@@ -187,7 +189,8 @@ RenderWidgetHostView* TabContentsViewGtk::CreateViewForWidget(
                         GDK_POINTER_MOTION_MASK);
 
   // Renderer target DnD.
-  drag_dest_.reset(new WebDragDestGtk(tab_contents(), view->native_view()));
+  if (tab_contents()->ShouldAcceptDragAndDrop())
+    drag_dest_.reset(new WebDragDestGtk(tab_contents(), view->native_view()));
 
   gtk_fixed_put(GTK_FIXED(GetNativeView()), view->native_view(), 0, 0);
   return view;
@@ -214,8 +217,10 @@ void TabContentsViewGtk::GetContainerBounds(gfx::Rect* out) const {
 
   // Callers expect the requested bounds not the actual bounds. For example,
   // during init callers expect 0x0, but Gtk layout enforces a min size of 1x1.
-  out->set_width(GetNativeView()->requisition.width);
-  out->set_height(GetNativeView()->requisition.height);
+  GtkRequisition requisition;
+  gtk_widget_get_child_requisition(GetNativeView(), &requisition);
+  out->set_width(requisition.width);
+  out->set_height(requisition.height);
 }
 
 void TabContentsViewGtk::StartDragging(const WebDropData& drop_data,
@@ -302,7 +307,7 @@ void TabContentsViewGtk::RestoreFocus() {
     // If you hit this DCHECK, please report it to Jay (jcampan).
     DCHECK(focus_manager != NULL) << "No focus manager when restoring focus.";
 
-    if (last_focused_view->IsFocusable() && focus_manager &&
+    if (last_focused_view->IsFocusableInRootView() && focus_manager &&
         focus_manager->ContainsView(last_focused_view)) {
       last_focused_view->RequestFocus();
     } else {
@@ -318,15 +323,18 @@ void TabContentsViewGtk::RestoreFocus() {
 }
 
 void TabContentsViewGtk::UpdateDragCursor(WebDragOperation operation) {
-  drag_dest_->UpdateDragStatus(operation);
+  if (drag_dest_.get())
+    drag_dest_->UpdateDragStatus(operation);
 }
 
 void TabContentsViewGtk::GotFocus() {
-  tab_contents()->delegate()->TabContentsFocused(tab_contents());
+  if (tab_contents()->delegate())
+    tab_contents()->delegate()->TabContentsFocused(tab_contents());
 }
 
 void TabContentsViewGtk::TakeFocus(bool reverse) {
-  if (!tab_contents()->delegate()->TakeFocus(reverse)) {
+  if (tab_contents()->delegate() &&
+      !tab_contents()->delegate()->TakeFocus(reverse)) {
 
     views::FocusManager* focus_manager =
         views::FocusManager::GetFocusManagerForNativeView(GetNativeView());
@@ -343,7 +351,7 @@ void TabContentsViewGtk::ShowContextMenu(const ContextMenuParams& params) {
   if (tab_contents()->delegate()->HandleContextMenu(params))
     return;
 
-  context_menu_.reset(new RenderViewContextMenuGtk(tab_contents(), params));
+  context_menu_.reset(new RenderViewContextMenuViews(tab_contents(), params));
   context_menu_->Init();
 
   gfx::Point screen_point(params.x, params.y);
@@ -382,7 +390,7 @@ gboolean TabContentsViewGtk::OnPaint(GtkWidget* widget, GdkEventExpose* event) {
     gfx::Rect bounds;
     GetBounds(&bounds, true);
     sad_tab_->SetBounds(gfx::Rect(0, 0, bounds.width(), bounds.height()));
-    gfx::CanvasPaint canvas(event);
+    gfx::CanvasSkiaPaint canvas(event);
     sad_tab_->ProcessPaint(&canvas);
   }
   return false;  // False indicates other widgets should get the event as well.

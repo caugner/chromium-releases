@@ -11,11 +11,7 @@
 
 // Allows InvokeLater without adding refcounting. This class is a Singleton and
 // won't be deleted until it's last InvokeLater is run.
-template <>
-struct RunnableMethodTraits<chromeos::MountLibraryImpl> {
-  void RetainCallee(chromeos::MountLibraryImpl* obj) {}
-  void ReleaseCallee(chromeos::MountLibraryImpl* obj) {}
-};
+DISABLE_RUNNABLE_METHOD_REFCOUNT(chromeos::MountLibraryImpl);
 
 namespace chromeos {
 
@@ -86,6 +82,11 @@ void MountLibraryImpl::MountStatusChangedHandler(void* object,
 void MountLibraryImpl::Init() {
   // Getting the monitor status so that the daemon starts up.
   MountStatus* mount = RetrieveMountInformation();
+  if (!mount) {
+    LOG(ERROR) << "Failed to retrieve mount information";
+    return;
+  }
+  ParseDisks(*mount);
   FreeMountStatus(mount);
 
   mount_status_connection_ = MonitorMountStatus(

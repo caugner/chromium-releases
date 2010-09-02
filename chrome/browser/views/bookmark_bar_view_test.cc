@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@
 #include "views/controls/menu/menu_controller.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/submenu_view.h"
+#include "views/views_delegate.h"
 #include "views/window/window.h"
 
 #if defined(OS_LINUX)
@@ -33,6 +34,12 @@
 // See http://crbug.com/40039 for details.
 #define MAYBE_KeyEvents DISABLED_KeyEvents
 
+// Two bugs here. http://crbug.com/47089 for general Linux Views, and
+// http://crbug.com/47452 for ChromiumOS.
+#define MAYBE_CloseWithModalDialog DISABLED_CloseWithModalDialog
+// See http://crbug.com/47089 for details.
+#define MAYBE_CloseMenuAfterClosingContextMenu \
+        DISABLED_CloseMenuAfterClosingContextMenu
 #else
 
 #define MAYBE_DND DND
@@ -40,10 +47,43 @@
 #define MAYBE_DNDBackToOriginatingMenu DNDBackToOriginatingMenu
 #define MAYBE_DNDBackToOriginatingMenu DNDBackToOriginatingMenu
 #define MAYBE_KeyEvents KeyEvents
+#define MAYBE_CloseWithModalDialog CloseWithModalDialog
+#define MAYBE_CloseMenuAfterClosingContextMenu CloseMenuAfterClosingContextMenu
 
 #endif
 
 namespace {
+
+class ViewsDelegateImpl : public views::ViewsDelegate {
+ public:
+  ViewsDelegateImpl() {}
+  virtual Clipboard* GetClipboard() const { return NULL; }
+  virtual void SaveWindowPlacement(const std::wstring& window_name,
+                                   const gfx::Rect& bounds,
+                                   bool maximized) {}
+  virtual bool GetSavedWindowBounds(const std::wstring& window_name,
+                                    gfx::Rect* bounds) const {
+    return false;
+  }
+  virtual bool GetSavedMaximizedState(const std::wstring& window_name,
+                                      bool* maximized) const {
+    return false;
+  }
+
+#if defined(OS_WIN)
+  virtual HICON GetDefaultWindowIcon() const { return 0; }
+#endif
+
+  virtual void AddRef() {
+  }
+
+  virtual void ReleaseRef() {
+    MessageLoopForUI::current()->Quit();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ViewsDelegateImpl);
+};
 
 // PageNavigator implementation that records the URL.
 class TestingPageNavigator : public PageNavigator {
@@ -99,7 +139,6 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
   }
 
   virtual void SetUp() {
-    views::MenuItemView::allow_task_nesting_during_run_ = true;
     BookmarkBarView::testing_ = true;
 
     profile_.reset(new TestingProfile());
@@ -145,12 +184,16 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
   }
 
   virtual void TearDown() {
-    views::MenuItemView::allow_task_nesting_during_run_ = false;
     ViewEventTestBase::TearDown();
     BookmarkBarView::testing_ = false;
+    views::ViewsDelegate::views_delegate = NULL;
   }
 
  protected:
+  void InstallViewsDelegate() {
+    views::ViewsDelegate::views_delegate = &views_delegate_;
+  }
+
   virtual views::View* CreateContentsView() {
     return bb_view_;
   }
@@ -200,6 +243,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
   scoped_ptr<TestingProfile> profile_;
   ChromeThread ui_thread_;
   ChromeThread file_thread_;
+  ViewsDelegateImpl views_delegate_;
 };
 
 // Clicks on first menu, makes sure button is depressed. Moves mouse to first
@@ -369,7 +413,7 @@ class BookmarkBarViewTest3 : public BookmarkBarViewEventTestBase {
     EXPECT_EQ(GURL(), navigator_.url_);
 
     // Hide menu.
-    menu->GetMenuController()->Cancel(true);
+    menu->GetMenuController()->CancelAll();
 
     Done();
   }
@@ -784,7 +828,7 @@ class BookmarkBarViewTest9 : public BookmarkBarViewEventTestBase {
     ASSERT_NE(start_y_, menu_loc.y());
 
     // Hide menu.
-    bb_view_->GetMenu()->GetMenuController()->Cancel(true);
+    bb_view_->GetMenu()->GetMenuController()->CancelAll();
 
     // On linux, Cancelling menu will call Quit on the message loop,
     // which can interfere with Done. We need to run Done in the
@@ -822,7 +866,7 @@ class BookmarkBarViewTest10 : public BookmarkBarViewEventTestBase {
 
     // Send a down event, which should select the first item.
     ui_controls::SendKeyPressNotifyWhenDone(
-        NULL, base::VKEY_DOWN, false, false, false,
+        NULL, base::VKEY_DOWN, false, false, false, false,
         CreateEventTask(this, &BookmarkBarViewTest10::Step3));
   }
 
@@ -835,7 +879,7 @@ class BookmarkBarViewTest10 : public BookmarkBarViewEventTestBase {
 
     // Send a key down event, which should select the next item.
     ui_controls::SendKeyPressNotifyWhenDone(
-        NULL, base::VKEY_DOWN, false, false, false,
+        NULL, base::VKEY_DOWN, false, false, false, false,
         CreateEventTask(this, &BookmarkBarViewTest10::Step4));
   }
 
@@ -848,7 +892,7 @@ class BookmarkBarViewTest10 : public BookmarkBarViewEventTestBase {
 
     // Send a right arrow to force the menu to open.
     ui_controls::SendKeyPressNotifyWhenDone(
-        NULL, base::VKEY_RIGHT, false, false, false,
+        NULL, base::VKEY_RIGHT, false, false, false, false,
         CreateEventTask(this, &BookmarkBarViewTest10::Step5));
   }
 
@@ -864,7 +908,7 @@ class BookmarkBarViewTest10 : public BookmarkBarViewEventTestBase {
 
     // Send a left arrow to close the submenu.
     ui_controls::SendKeyPressNotifyWhenDone(
-        NULL, base::VKEY_LEFT, false, false, false,
+        NULL, base::VKEY_LEFT, false, false, false, false,
         CreateEventTask(this, &BookmarkBarViewTest10::Step6));
   }
 
@@ -879,7 +923,7 @@ class BookmarkBarViewTest10 : public BookmarkBarViewEventTestBase {
 
     // Send a down arrow to wrap back to f1a
     ui_controls::SendKeyPressNotifyWhenDone(
-        NULL, base::VKEY_DOWN, false, false, false,
+        NULL, base::VKEY_DOWN, false, false, false, false,
         CreateEventTask(this, &BookmarkBarViewTest10::Step7));
   }
 
@@ -892,7 +936,7 @@ class BookmarkBarViewTest10 : public BookmarkBarViewEventTestBase {
 
     // Send enter, which should select the item.
     ui_controls::SendKeyPressNotifyWhenDone(
-        NULL, base::VKEY_RETURN, false, false, false,
+        NULL, base::VKEY_RETURN, false, false, false, false,
         CreateEventTask(this, &BookmarkBarViewTest10::Step8));
   }
 
@@ -947,7 +991,7 @@ class BookmarkBarViewTest11 : public BookmarkBarViewEventTestBase {
   void Step3() {
     // Send escape so that the context menu hides.
     ui_controls::SendKeyPressNotifyWhenDone(
-        NULL, base::VKEY_ESCAPE, false, false, false,
+        NULL, base::VKEY_ESCAPE, false, false, false, false,
         CreateEventTask(this, &BookmarkBarViewTest11::Step4));
   }
 
@@ -981,7 +1025,7 @@ class BookmarkBarViewTest11 : public BookmarkBarViewEventTestBase {
   ContextMenuNotificationObserver observer_;
 };
 
-VIEW_TEST(BookmarkBarViewTest11, CloseMenuAfterClosingContextMenu)
+VIEW_TEST(BookmarkBarViewTest11, MAYBE_CloseMenuAfterClosingContextMenu)
 
 // Tests showing a modal dialog from a context menu.
 class BookmarkBarViewTest12 : public BookmarkBarViewEventTestBase {
@@ -1036,7 +1080,7 @@ class BookmarkBarViewTest12 : public BookmarkBarViewEventTestBase {
 
   void Step4() {
     // Press tab to give focus to the cancel button.
-    ui_controls::SendKeyPress(NULL, base::VKEY_TAB, false, false, false);
+    ui_controls::SendKeyPress(NULL, base::VKEY_TAB, false, false, false, false);
 
     // For some reason return isn't processed correctly unless we delay.
     MessageLoop::current()->PostDelayedTask(FROM_HERE,
@@ -1046,7 +1090,7 @@ class BookmarkBarViewTest12 : public BookmarkBarViewEventTestBase {
   void Step5() {
     // And press enter so that the cancel button is selected.
     ui_controls::SendKeyPressNotifyWhenDone(
-        NULL, base::VKEY_RETURN, false, false, false,
+        NULL, base::VKEY_RETURN, false, false, false, false,
         CreateEventTask(this, &BookmarkBarViewTest12::Step6));
   }
 
@@ -1061,7 +1105,7 @@ class BookmarkBarViewTest12 : public BookmarkBarViewEventTestBase {
   }
 };
 
-VIEW_TEST(BookmarkBarViewTest12, CloseWithModalDialog)
+VIEW_TEST(BookmarkBarViewTest12, MAYBE_CloseWithModalDialog)
 
 // Tests clicking on the separator of a context menu (this is for coverage of
 // bug 17862).
@@ -1175,7 +1219,7 @@ class BookmarkBarViewTest14 : public BookmarkBarViewEventTestBase {
 
     // Send escape so that the context menu hides.
     ui_controls::SendKeyPressNotifyWhenDone(
-        NULL, base::VKEY_ESCAPE, false, false, false,
+        NULL, base::VKEY_ESCAPE, false, false, false, false,
         CreateEventTask(this, &BookmarkBarViewTest14::Step3));
   }
 
@@ -1255,7 +1299,7 @@ class BookmarkBarViewTest15 : public BookmarkBarViewEventTestBase {
     // And the deleted_menu_id_ should have been removed.
     ASSERT_TRUE(menu->GetMenuItemByID(deleted_menu_id_) == NULL);
 
-    bb_view_->GetMenu()->GetMenuController()->Cancel(true);
+    bb_view_->GetMenu()->GetMenuController()->CancelAll();
 
     Done();
   }
@@ -1265,3 +1309,36 @@ class BookmarkBarViewTest15 : public BookmarkBarViewEventTestBase {
 };
 
 VIEW_TEST(BookmarkBarViewTest15, MenuStaysVisibleAfterDelete)
+
+// Tests that we don't crash or get stuck if the parent of a menu is closed.
+class BookmarkBarViewTest16 : public BookmarkBarViewEventTestBase {
+ protected:
+  virtual void DoTestOnMessageLoop() {
+    InstallViewsDelegate();
+
+    // Move the mouse to the first folder on the bookmark bar and press the
+    // mouse.
+    views::TextButton* button = bb_view_->GetBookmarkButton(0);
+    ui_controls::MoveMouseToCenterAndPress(button, ui_controls::LEFT,
+        ui_controls::DOWN | ui_controls::UP,
+        CreateEventTask(this, &BookmarkBarViewTest16::Step2));
+  }
+
+ private:
+  void Step2() {
+    // Menu should be showing.
+    views::MenuItemView* menu = bb_view_->GetMenu();
+    ASSERT_TRUE(menu != NULL);
+    ASSERT_TRUE(menu->GetSubmenu()->IsShowing());
+
+    // Button should be depressed.
+    views::TextButton* button = bb_view_->GetBookmarkButton(0);
+    ASSERT_TRUE(button->state() == views::CustomButton::BS_PUSHED);
+
+    // Close the window.
+    window_->Close();
+    window_ = NULL;
+  }
+};
+
+VIEW_TEST(BookmarkBarViewTest16, DeleteMenu)

@@ -13,6 +13,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "third_party/cros/chromeos_wm_ipc_enums.h"
 
 namespace chromeos {
 
@@ -43,7 +44,11 @@ IN_PROC_BROWSER_TEST_F(PanelTest, PanelOpenSmall) {
   GURL url("data:text/html," + HTML);
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kDisablePopupBlocking);
-  ui_test_utils::NavigateToURL(browser(), url);
+
+  browser()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
+
+  // Wait for notification that window.open has been processed.
+  ui_test_utils::WaitForNotification(NotificationType::TAB_ADDED);
 
   // Find the new browser.
   Browser* new_browser = NULL;
@@ -58,9 +63,9 @@ IN_PROC_BROWSER_TEST_F(PanelTest, PanelOpenSmall) {
   // This window type tells the cros window manager to treat the window
   // as a panel.
   EXPECT_EQ(
-      WmIpc::WINDOW_TYPE_CHROME_PANEL_CONTENT,
+      WM_IPC_WINDOW_CHROME_PANEL_CONTENT,
       WmIpc::instance()->GetWindowType(
-          GTK_WIDGET(new_browser->window()->GetNativeHandle())));
+          GTK_WIDGET(new_browser->window()->GetNativeHandle()), NULL));
 }
 
 // Large popups should open as new tab.
@@ -78,7 +83,10 @@ IN_PROC_BROWSER_TEST_F(PanelTest, PanelOpenLarge) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kDisablePopupBlocking);
   int old_tab_count = browser()->tab_count();
-  ui_test_utils::NavigateToURL(browser(), url);
+  browser()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
+
+  // Wait for notification that window.open has been processed.
+  ui_test_utils::WaitForNotification(NotificationType::TAB_ADDED);
 
   // Shouldn't find a new browser.
   Browser* new_browser = NULL;

@@ -8,7 +8,7 @@
 #include <map>
 #include <vector>
 
-#include "chrome/browser/sync/util/event_sys.h"
+#include "chrome/browser/sync/util/channel.h"
 
 namespace syncable {
 class BaseTransaction;
@@ -99,6 +99,23 @@ struct SyncerEvent {
     // This event is sent when the thread is resumed in response to a
     // resume request.
     RESUMED,
+
+    // This event is sent when the thread is waiting for a connection
+    // to be established.
+    WAITING_FOR_CONNECTION,
+
+    // This event is sent when a connection has been established and
+    // the thread continues.
+    CONNECTED,
+
+    // This is sent after the Syncer (and SyncerThread) have initiated self
+    // halt due to no longer being permitted to communicate with the server.
+    // The listener should sever the sync / browser connections and delete sync
+    // data (i.e. as if the user clicked 'Stop Syncing' in the browser.
+    STOP_SYNCING_PERMANENTLY,
+
+    // Sent when the main syncer loop finishes.
+    SYNCER_THREAD_EXITING,
   };
 
   explicit SyncerEvent(EventCause cause) : what_happened(cause),
@@ -128,15 +145,16 @@ struct SyncerEvent {
 };
 
 struct SyncerShutdownEvent {
-  typedef Syncer* EventType;
+  SyncerShutdownEvent(Syncer *syncer_ptr) : syncer(syncer_ptr) {}
+  Syncer* syncer;
   static bool IsChannelShutdownEvent(Syncer* syncer) {
     return true;
   }
 };
 
-typedef EventChannel<SyncerEvent, Lock> SyncerEventChannel;
+typedef Channel<SyncerEvent> SyncerEventChannel;
 
-typedef EventChannel<SyncerShutdownEvent, Lock> ShutdownChannel;
+typedef Channel<SyncerShutdownEvent> ShutdownChannel;
 
 // This struct is passed between parts of the syncer during the processing of
 // one sync loop. It lives on the stack. We don't expose the number of

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -8,12 +8,13 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/dynamic_annotations.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/platform_thread.h"
+#include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
+#include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/thread.h"
 #include "base/waitable_event.h"
 #include "ipc/ipc_message.h"
@@ -222,7 +223,7 @@ class Worker : public Channel::Listener, public Message::Sender {
 
   base::WaitableEvent shutdown_event_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(Worker);
+  DISALLOW_COPY_AND_ASSIGN(Worker);
 };
 
 

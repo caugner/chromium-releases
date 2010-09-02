@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/file_util.h"
 #include "base/histogram.h"
 #include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/time.h"
@@ -28,9 +29,10 @@
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/chrome_plugin_lib.h"
-#include "net/dns_global.h"
+#include "net/predictor_api.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/rlz/rlz.h"
@@ -111,7 +113,7 @@ void Shutdown() {
 
   PrefService* prefs = g_browser_process->local_state();
 
-  chrome_browser_net::SaveDnsPrefetchStateForNextStartupAndTrim(prefs);
+  chrome_browser_net::SavePredictorStateForNextStartupAndTrim(prefs);
 
   MetricsService* metrics = g_browser_process->metrics_service();
   if (metrics) {
@@ -126,6 +128,14 @@ void Shutdown() {
     prefs->SetInteger(prefs::kShutdownNumProcesses, shutdown_num_processes_);
     prefs->SetInteger(prefs::kShutdownNumProcessesSlow,
                       shutdown_num_processes_slow_);
+  }
+
+  // Check local state for the restart flag so we can restart the session below.
+  bool restart_last_session = false;
+  if (prefs->HasPrefPath(prefs::kRestartLastSessionOnShutdown)) {
+    restart_last_session =
+        prefs->GetBoolean(prefs::kRestartLastSessionOnShutdown);
+    prefs->ClearPref(prefs::kRestartLastSessionOnShutdown);
   }
 
   prefs->SavePersistentPrefs();
@@ -153,6 +163,27 @@ void Shutdown() {
     Upgrade::SwapNewChromeExeIfPresent();
   }
 #endif
+
+  if (restart_last_session) {
+#if !defined(OS_CHROMEOS)
+    // Make sure to relaunch the browser with the same command line and add
+    // Restore Last Session flag if session restore is not set.
+    CommandLine command_line(*CommandLine::ForCurrentProcess());
+    if (!command_line.HasSwitch(switches::kRestoreLastSession))
+      command_line.AppendSwitch(switches::kRestoreLastSession);
+#if defined(OS_WIN) || defined(OS_LINUX)
+    Upgrade::RelaunchChromeBrowser(command_line);
+#endif  // defined(OS_WIN) || defined(OS_LINUX)
+
+#if defined(OS_MACOSX)
+    command_line.AppendSwitch(switches::kActivateOnLaunch);
+    base::LaunchApp(command_line, false, false, NULL);
+#endif  // defined(OS_MACOSX)
+
+#else
+    NOTIMPLEMENTED();
+#endif  // !defined(OS_CHROMEOS)
+  }
 
   if (shutdown_type_ > NOT_VALID && shutdown_num_processes_ > 0) {
     // Measure total shutdown time as late in the process as possible

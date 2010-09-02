@@ -298,14 +298,9 @@ bool CookiesTreeModelObserverBridge::HasCocoaModel() {
   // node to select.
   if (![[treeController_ selectedObjects] count]) {
     NSUInteger lastIndex = [path indexAtPosition:[path length] - 1];
-    if (lastIndex == 0) {
-      // If this was the only child node, then perform a delete again to
-      // remove the parent. When the path becomes empty, we're done.
-      path = [path indexPathByRemovingLastIndex];
-      if ([path length])
-        [self deleteNodeAtIndexPath:path];
-    } else {
-      // Otherwise, select the node that is in the list before this one.
+    if (lastIndex != 0) {
+      // If there any nodes remaining, select the node that is in the list
+      // before this one.
       path = [path indexPathByRemovingLastIndex];
       path = [path indexPathByAddingIndex:lastIndex - 1];
       [treeController_ setSelectionIndexPath:path];
@@ -329,6 +324,23 @@ bool CookiesTreeModelObserverBridge::HasCocoaModel() {
   if ([removeMask intValue] & BrowsingDataRemover::REMOVE_COOKIES) {
     [self loadTreeModelFromProfile];
   }
+}
+
+// Override keyDown on the controller (which is the first responder) to allow
+// both backspace and delete to be captured by the Remove button.
+- (void)keyDown:(NSEvent*)theEvent {
+  NSString* keys = [theEvent characters];
+  if ([keys length]) {
+    unichar key = [keys characterAtIndex:0];
+    // The button has a key equivalent of backspace, so examine this event for
+    // forward delete.
+    if ((key == NSDeleteCharacter || key == NSDeleteFunctionKey) &&
+        [self removeButtonEnabled]) {
+      [removeButton_ performClick:self];
+      return;
+    }
+  }
+  [super keyDown:theEvent];
 }
 
 #pragma mark Getters and Setters
@@ -430,8 +442,9 @@ bool CookiesTreeModelObserverBridge::HasCocoaModel() {
 // to rebuild after the user clears browsing data. Because the models get
 // clobbered, we rebuild the icon cache for safety (though they do not change).
 - (void)loadTreeModelFromProfile {
-  treeModel_.reset(new CookiesTreeModel(profile_, databaseHelper_,
-                   storageHelper_, appcacheHelper_));
+  treeModel_.reset(new CookiesTreeModel(
+      profile_->GetRequestContext()->GetCookieStore()->GetCookieMonster(),
+      databaseHelper_, storageHelper_, appcacheHelper_));
   modelObserver_.reset(new CookiesTreeModelObserverBridge(self));
   treeModel_->AddObserver(modelObserver_.get());
 

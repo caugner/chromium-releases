@@ -6,33 +6,35 @@
 
 #include <algorithm>
 #include <string>
+#include <vector>
 
 #include "app/menus/simple_menu_model.h"
-#include "app/theme_provider.h"
+#include "base/command_line.h"
 #include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/chromeos/compact_location_bar_host.h"
-#include "chrome/browser/chromeos/compact_navigation_bar.h"
 #include "chrome/browser/chromeos/frame/panel_browser_view.h"
-#include "chrome/browser/chromeos/status/browser_status_area_view.h"
+#include "chrome/browser/chromeos/options/language_config_view.h"
+#include "chrome/browser/chromeos/status/status_area_view.h"
+#include "chrome/browser/chromeos/status/language_menu_button.h"
 #include "chrome/browser/chromeos/status/network_menu_button.h"
 #include "chrome/browser/chromeos/status/status_area_button.h"
 #include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/views/app_launcher.h"
-#include "chrome/browser/views/frame/browser_extender.h"
 #include "chrome/browser/views/frame/browser_frame_gtk.h"
 #include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/browser/views/frame/browser_view_layout.h"
 #include "chrome/browser/views/tabs/tab.h"
 #include "chrome/browser/views/tabs/tab_strip.h"
+#include "chrome/browser/views/theme_background.h"
 #include "chrome/browser/views/toolbar_view.h"
-#include "chrome/browser/views/toolbar_star_toggle.h"
+#include "chrome/common/chrome_switches.h"
 #include "gfx/canvas.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "third_party/cros/chromeos_wm_ipc_enums.h"
 #include "views/controls/button/button.h"
 #include "views/controls/button/image_button.h"
 #include "views/controls/menu/menu_2.h"
+#include "views/screen.h"
 #include "views/widget/root_view.h"
 #include "views/window/hit_test.h"
 #include "views/window/window.h"
@@ -48,77 +50,17 @@ const int kOTRBottomSpacing = 2;
 // it on the left, and between it and the tabstrip on the right).
 const int kOTRSideSpacing = 2;
 
-// The size of the space between the content area and the tabstrip that is
-// inserted in compact nvaigation bar mode.
-const int kCompactNavbarSpaceHeight = 3;
-
-// The padding of the app launcher to the left side of the border.
-const int kAppLauncherLeftPadding = 5;
-
-// A space we insert between the tabstrip and the content in
-// Compact mode.
-class Spacer : public views::View {
-  SkBitmap* background_;
- public:
-  explicit Spacer(SkBitmap* bitmap) : background_(bitmap) {}
-
-  void Paint(gfx::Canvas* canvas) {
-    canvas->TileImageInt(*background_, 0, 0, width(), height());
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(Spacer);
-};
-
-// A chromeos implementation of Tab that shows the compact location bar.
-class ChromeosTab : public Tab {
- public:
-  ChromeosTab(TabStrip* tab_strip, chromeos::BrowserView* browser_view)
-      : Tab(tab_strip),
-        browser_view_(browser_view) {
-  }
-  virtual ~ChromeosTab() {}
-
-  // Overridden from views::View.
-  virtual void OnMouseEntered(const views::MouseEvent& event) {
-    TabRenderer::OnMouseEntered(event);
-    browser_view_->ShowCompactLocationBarUnderSelectedTab(true);
-  }
-
- private:
-  chromeos::BrowserView* browser_view_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeosTab);
-};
-
-// A Tabstrip that uses ChromeosTab as a Tab implementation.
-class ChromeosTabStrip : public TabStrip {
- public:
-  ChromeosTabStrip(TabStripModel* model, chromeos::BrowserView* browser_view)
-      : TabStrip(model), browser_view_(browser_view) {
-  }
-  virtual ~ChromeosTabStrip() {}
-
- protected:
-  // Overridden from TabStrip.
-  virtual Tab* CreateTab() {
-    return new ChromeosTab(this, browser_view_);
-  }
-
- private:
-  chromeos::BrowserView* browser_view_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeosTabStrip);
-};
+// Amount to offset the toolbar by when vertical tabs are enabled.
+const int kVerticalTabStripToolbarOffset = 2;
 
 }  // namespace
 
 namespace chromeos {
 
 // LayoutManager for BrowserView, which layouts extra components such as
-// main menu, stataus views as follows:
-//                     ____  __ __
-//      [AppLauncher] /    \   \  \     [StatusArea]
+// the status views as follows:
+//       ____  __ __
+//      /    \   \  \     [StatusArea]
 //
 class BrowserViewLayout : public ::BrowserViewLayout {
  public:
@@ -129,10 +71,7 @@ class BrowserViewLayout : public ::BrowserViewLayout {
   // BrowserViewLayout overrides:
 
   void Installed(views::View* host) {
-    main_menu_button_ = NULL;
-    compact_navigation_bar_ = NULL;
     status_area_ = NULL;
-    spacer_ = NULL;
     ::BrowserViewLayout::Installed(host);
   }
 
@@ -140,17 +79,8 @@ class BrowserViewLayout : public ::BrowserViewLayout {
                  views::View* view) {
     ::BrowserViewLayout::ViewAdded(host, view);
     switch (view->GetID()) {
-      case VIEW_ID_SPACER:
-        spacer_ = view;
-        break;
-      case VIEW_ID_APP_MENU_BUTTON:
-        main_menu_button_ = view;
-        break;
       case VIEW_ID_STATUS_AREA:
         status_area_ = static_cast<chromeos::StatusAreaView*>(view);
-        break;
-      case VIEW_ID_COMPACT_NAV_BAR:
-        compact_navigation_bar_ = view;
         break;
       case VIEW_ID_OTR_AVATAR:
         otr_avatar_icon_ = view;
@@ -162,10 +92,7 @@ class BrowserViewLayout : public ::BrowserViewLayout {
   // layouts compact navigation buttons and status views in the title
   // area. See Layout
   virtual int LayoutTabStrip() {
-    if (browser_view_->IsFullscreen() ||
-        !browser_view_->IsTabStripVisible()) {
-      main_menu_button_->SetVisible(false);
-      compact_navigation_bar_->SetVisible(false);
+    if (browser_view_->IsFullscreen() || !browser_view_->IsTabStripVisible()) {
       status_area_->SetVisible(false);
       otr_avatar_icon_->SetVisible(false);
       tabstrip_->SetVisible(false);
@@ -178,8 +105,20 @@ class BrowserViewLayout : public ::BrowserViewLayout {
       views::View::ConvertPointToView(browser_view_->GetParent(), browser_view_,
                                       &tabstrip_origin);
       layout_bounds.set_origin(tabstrip_origin);
+      if (browser_view_->UseVerticalTabs())
+        return LayoutTitlebarComponentsWithVerticalTabs(layout_bounds);
       return LayoutTitlebarComponents(layout_bounds);
     }
+  }
+
+  virtual int LayoutToolbar(int top) {
+    if (!browser_view_->IsFullscreen() && browser_view_->IsTabStripVisible() &&
+        browser_view_->UseVerticalTabs()) {
+      // For vertical tabs the toolbar is positioned in
+      // LayoutTitlebarComponentsWithVerticalTabs.
+      return top;
+    }
+    return ::BrowserViewLayout::LayoutToolbar(top);
   }
 
   virtual bool IsPositionInWindowCaption(const gfx::Point& point) {
@@ -205,64 +144,85 @@ class BrowserViewLayout : public ::BrowserViewLayout {
   // considered title bar area of client view.
   bool IsPointInViewsInTitleArea(const gfx::Point& point)
       const {
-    gfx::Point point_in_main_menu_coords(point);
-    views::View::ConvertPointToView(browser_view_, main_menu_button_,
-                                    &point_in_main_menu_coords);
-    if (main_menu_button_->HitTest(point_in_main_menu_coords))
-      return true;
-
     gfx::Point point_in_status_area_coords(point);
     views::View::ConvertPointToView(browser_view_, status_area_,
                                     &point_in_status_area_coords);
     if (status_area_->HitTest(point_in_status_area_coords))
       return true;
 
-    if (compact_navigation_bar_->IsVisible()) {
-      gfx::Point point_in_cnb_coords(point);
-      views::View::ConvertPointToView(browser_view_,
-                                      compact_navigation_bar_,
-                                      &point_in_cnb_coords);
-      return compact_navigation_bar_->HitTest(point_in_cnb_coords);
-    }
     return false;
   }
 
+  // Positions the titlebar, toolbar, tabstrip, tabstrip and otr icon. This is
+  // used when side tabs are enabled.
+  int LayoutTitlebarComponentsWithVerticalTabs(const gfx::Rect& bounds) {
+    if (bounds.IsEmpty())
+      return 0;
+
+    tabstrip_->SetVisible(true);
+    otr_avatar_icon_->SetVisible(browser_view_->ShouldShowOffTheRecordAvatar());
+    status_area_->SetVisible(true);
+
+    gfx::Size status_size = status_area_->GetPreferredSize();
+    int status_height = status_size.height();
+
+    // Layout the otr icon.
+    int status_x = bounds.x();
+    if (!otr_avatar_icon_->IsVisible()) {
+      otr_avatar_icon_->SetBounds(0, 0, 0, 0);
+    } else {
+      gfx::Size otr_size = otr_avatar_icon_->GetPreferredSize();
+
+      status_height = std::max(status_height, otr_size.height());
+      int y = bounds.bottom() - status_height;
+      otr_avatar_icon_->SetBounds(status_x, y, otr_size.width(), status_height);
+      status_x += otr_size.width();
+    }
+
+    // Layout the status area after the otr icon.
+    status_area_->SetBounds(status_x, bounds.bottom() - status_height,
+                            status_size.width(), status_height);
+
+    // The tabstrip's width is the bigger of it's preferred width and the width
+    // the status area.
+    int tabstrip_w = std::max(status_x + status_size.width(),
+                              tabstrip_->GetPreferredSize().width());
+    tabstrip_->SetBounds(bounds.x(), bounds.y(), tabstrip_w,
+                         bounds.height() - status_height);
+
+    // The toolbar is promoted to the title for vertical tabs.
+    bool toolbar_visible = browser_view_->IsToolbarVisible();
+    toolbar_->SetVisible(toolbar_visible);
+    int toolbar_height = 0;
+    if (toolbar_visible)
+      toolbar_height = toolbar_->GetPreferredSize().height();
+    int tabstrip_max_x = tabstrip_->bounds().right();
+    toolbar_->SetBounds(tabstrip_max_x,
+                        bounds.y() - kVerticalTabStripToolbarOffset,
+                        browser_view_->width() - tabstrip_max_x,
+                        toolbar_height);
+
+    // Adjust the available bounds for other components.
+    gfx::Rect available_bounds = vertical_layout_rect();
+    available_bounds.Inset(tabstrip_w, 0, 0, 0);
+    set_vertical_layout_rect(available_bounds);
+
+    return bounds.y() + toolbar_height;
+  }
+
   // Layouts components in the title bar area (given by
-  // |bounds|). These include the main menu, the compact navigation
-  // buttons (in compact navbar mode), the otr avatar icon (in
+  // |bounds|). These include the main menu, the otr avatar icon (in
   // incognito window), the tabstrip and the the status area.
   int LayoutTitlebarComponents(const gfx::Rect& bounds) {
     if (bounds.IsEmpty()) {
       return 0;
     }
-    main_menu_button_->SetVisible(true);
-    compact_navigation_bar_->SetVisible(
-        chromeos_browser_view()->is_compact_style());
     tabstrip_->SetVisible(true);
     otr_avatar_icon_->SetVisible(browser_view_->ShouldShowOffTheRecordAvatar());
     status_area_->SetVisible(true);
 
     int bottom = bounds.bottom();
 
-    /* TODO(oshima):
-     * Disabling the ability to update location bar on re-layout bacause
-     * tabstrip state may not be in sync with the browser's state when
-     * new tab is added. We should decide when we know more about this
-     * feature. May be we should simply hide the location?
-     * Filed a bug: http://crbug.com/30612.
-     if (compact_navigation_bar_->IsVisible()) {
-     // Update the size and location of the compact location bar.
-     int index = browser_view()->browser()->selected_index();
-     compact_location_bar_host_->Update(index, false, true);
-     }
-    */
-
-    // Layout main menu before tab strip.
-    gfx::Size main_menu_size = main_menu_button_->GetPreferredSize();
-    main_menu_button_->SetBounds(0, bounds.y(),
-                                 main_menu_size.width(), bounds.height());
-
-    status_area_->Update();
     // Layout status area after tab strip.
     gfx::Size status_size = status_area_->GetPreferredSize();
     status_area_->SetBounds(bounds.x() + bounds.width() - status_size.width(),
@@ -270,37 +230,16 @@ class BrowserViewLayout : public ::BrowserViewLayout {
                             status_size.height());
     LayoutOTRAvatar(bounds);
 
-    int curx = bounds.x() + main_menu_size.width();
-
-    if (compact_navigation_bar_->IsVisible()) {
-      gfx::Size cnb_size = compact_navigation_bar_->GetPreferredSize();
-      // Adjust the size of the compact nativation bar to avoid creating
-      // a fixed widget with its own gdk window. AutocompleteEditView
-      // expects the parent view to be transparent, but a fixed with
-      // its own window is not.
-      gfx::Rect cnb_bounds(curx, bounds.y(), cnb_size.width(), bounds.height());
-      compact_navigation_bar_->SetBounds(
-          cnb_bounds.Intersect(browser_view_->GetVisibleBounds()));
-      curx += cnb_bounds.width();
-
-      spacer_->SetVisible(true);
-      spacer_->SetBounds(0, bottom, browser_view_->width(),
-                         kCompactNavbarSpaceHeight);
-      bottom += kCompactNavbarSpaceHeight;
-    } else {
-      compact_navigation_bar_->SetBounds(curx, bounds.y(), 0, 0);
-      spacer_->SetVisible(false);
-    }
+    int curx = bounds.x();
     int remaining_width = std::max(
         0,  // In case there is no space left.
-        otr_avatar_icon_->bounds().x() -
-        compact_navigation_bar_->bounds().right());
+        otr_avatar_icon_->bounds().x() - curx);
+
     tabstrip_->SetBounds(curx, bounds.y(), remaining_width, bounds.height());
 
     gfx::Rect toolbar_bounds = browser_view_->GetToolbarBounds();
     tabstrip_->SetBackgroundOffset(
-        gfx::Point(curx - toolbar_bounds.x(),
-                   bounds.y()));
+        gfx::Point(curx - toolbar_bounds.x(), bounds.y()));
     return bottom;
   }
 
@@ -320,10 +259,7 @@ class BrowserViewLayout : public ::BrowserViewLayout {
   }
 
 
-  views::View* main_menu_button_;
   chromeos::StatusAreaView* status_area_;
-  views::View* compact_navigation_bar_;
-  views::View* spacer_;
   views::View* otr_avatar_icon_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserViewLayout);
@@ -331,14 +267,8 @@ class BrowserViewLayout : public ::BrowserViewLayout {
 
 BrowserView::BrowserView(Browser* browser)
     : ::BrowserView(browser),
-      main_menu_button_(NULL),
       status_area_(NULL),
-      compact_navigation_bar_(NULL),
-      // Standard style is default.
-      // TODO(oshima): Get this info from preference.
-      ui_style_(StandardStyle),
       force_maximized_window_(false),
-      spacer_(NULL),
       otr_avatar_icon_(new views::ImageView()) {
 }
 
@@ -350,35 +280,10 @@ BrowserView::~BrowserView() {
 
 void BrowserView::Init() {
   ::BrowserView::Init();
-  main_menu_button_ = new views::ImageButton(this);
-  main_menu_button_->SetID(VIEW_ID_APP_MENU_BUTTON);
-  ThemeProvider* theme_provider =
-      frame()->GetThemeProviderForFrame();
-  SkBitmap* image = theme_provider->GetBitmapNamed(IDR_APP_LAUNCHER_BUTTON);
-  main_menu_button_->SetImage(views::CustomButton::BS_NORMAL, image);
-  main_menu_button_->SetImage(views::CustomButton::BS_HOT, image);
-  main_menu_button_->SetImage(views::CustomButton::BS_PUSHED, image);
-  AddChildView(main_menu_button_);
-
-  compact_location_bar_host_.reset(
-      new chromeos::CompactLocationBarHost(this));
-  compact_navigation_bar_ =
-      new chromeos::CompactNavigationBar(this);
-  compact_navigation_bar_->SetID(VIEW_ID_COMPACT_NAV_BAR);
-  AddChildView(compact_navigation_bar_);
-  compact_navigation_bar_->Init();
-  status_area_ = new BrowserStatusAreaView(this);
+  status_area_ = new StatusAreaView(this);
   status_area_->SetID(VIEW_ID_STATUS_AREA);
   AddChildView(status_area_);
   status_area_->Init();
-  ToolbarView* toolbar_view = GetToolbarView();
-  toolbar_view->SetAppMenuModel(status_area_->CreateAppMenuModel(toolbar_view));
-
-  SkBitmap* theme_toolbar = theme_provider->GetBitmapNamed(IDR_THEME_TOOLBAR);
-  spacer_ = new Spacer(theme_toolbar);
-  spacer_->SetID(VIEW_ID_SPACER);
-  AddChildView(spacer_);
-
   InitSystemMenu();
 
   // The ContextMenuController has to be set to a NonClientView but
@@ -391,46 +296,45 @@ void BrowserView::Init() {
   otr_avatar_icon_->SetImage(GetOTRAvatarIcon());
   otr_avatar_icon_->SetID(VIEW_ID_OTR_AVATAR);
   AddChildView(otr_avatar_icon_);
+
+  // Make sure the window is set to the right type.
+  std::vector<int> params;
+  params.push_back(browser()->tab_count());
+  params.push_back(browser()->selected_index());
+  params.push_back(gtk_get_current_event_time());
+  WmIpc::instance()->SetWindowType(
+      GTK_WIDGET(frame()->GetWindow()->GetNativeWindow()),
+      WM_IPC_WINDOW_CHROME_TOPLEVEL,
+      &params);
 }
 
 void BrowserView::Show() {
   bool was_visible = frame()->GetWindow()->IsVisible();
   ::BrowserView::Show();
   if (!was_visible) {
+    // Have to update the tab count and selected index to reflect reality.
+    std::vector<int> params;
+    params.push_back(browser()->tab_count());
+    params.push_back(browser()->selected_index());
     WmIpc::instance()->SetWindowType(
         GTK_WIDGET(frame()->GetWindow()->GetNativeWindow()),
-        WmIpc::WINDOW_TYPE_CHROME_TOPLEVEL,
-        NULL);
+        WM_IPC_WINDOW_CHROME_TOPLEVEL,
+        &params);
   }
 }
 
-bool BrowserView::IsToolbarVisible() const {
-  if (is_compact_style())
-    return false;
-  return ::BrowserView::IsToolbarVisible();
-}
-
-void BrowserView::SetFocusToLocationBar(bool select_all) {
-  if (is_compact_style())
-    ShowCompactLocationBarUnderSelectedTab(select_all);
-  else
-    ::BrowserView::SetFocusToLocationBar(select_all);
-}
-
-void BrowserView::ToggleCompactNavigationBar() {
-  ui_style_ = static_cast<UIStyle>((ui_style_ + 1) % 2);
-  compact_location_bar_host_->SetEnabled(is_compact_style());
-  compact_location_bar_host_->Hide(false);
-  Layout();
+void BrowserView::FocusChromeOSStatus() {
+  SaveFocusedView();
+  status_area_->SetToolbarFocus(last_focused_view_storage_id(), NULL);
 }
 
 views::LayoutManager* BrowserView::CreateLayoutManager() const {
   return new BrowserViewLayout();
 }
 
-BaseTabStrip* BrowserView::CreateTabStrip(
-    TabStripModel* tab_strip_model) {
-  return new ChromeosTabStrip(tab_strip_model, this);
+void BrowserView::InitTabStrip(TabStripModel* tab_strip_model) {
+  ::BrowserView::InitTabStrip(tab_strip_model);
+  UpdateOTRBackground();
 }
 
 void BrowserView::ChildPreferredSizeChanged(View* child) {
@@ -438,30 +342,18 @@ void BrowserView::ChildPreferredSizeChanged(View* child) {
   SchedulePaint();
 }
 
-void BrowserView::SetStarredState(bool is_starred) {
-  ::BrowserView::SetStarredState(is_starred);
-  compact_location_bar_host_->GetStarButton()->SetToggled(is_starred);
-}
-
-void BrowserView::ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {
-  if (is_compact_style())
-    compact_location_bar_host_->GetStarButton()->ShowStarBubble(
-        url, !already_bookmarked);
-  else
-    ::BrowserView::ShowBookmarkBubble(url, already_bookmarked);
-}
-
-// views::ButtonListener overrides.
-void BrowserView::ButtonPressed(views::Button* sender,
-                                const views::Event& event) {
-  gfx::Rect bounds = main_menu_button_->bounds();
-  gfx::Point origin = bounds.origin();
-  // Move the origin to the right otherwise the app launcher info bubble left
-  // border will show out of screen.
-  origin.Offset(kAppLauncherLeftPadding, 0);
-  views::RootView::ConvertPointToScreen(this, &origin);
-  bounds.set_origin(origin);
-  ::AppLauncher::Show(browser(), bounds);
+bool BrowserView::GetSavedWindowBounds(gfx::Rect* bounds) const {
+  if ((browser()->type() & Browser::TYPE_POPUP) == 0 &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeosFrame)) {
+    // Typically we don't request a full screen size. This means we'll request a
+    // non-full screen size, layout/paint at that size, then the window manager
+    // will snap us to full screen size. This results in an ugly
+    // resize/paint. To avoid this we always request a full screen size.
+    *bounds = views::Screen::GetMonitorWorkAreaNearestWindow(
+        GTK_WIDGET(GetWindow()->GetNativeWindow()));
+    return true;
+  }
+  return ::BrowserView::GetSavedWindowBounds(bounds);
 }
 
 // views::ContextMenuController overrides.
@@ -493,27 +385,36 @@ bool BrowserView::ShouldOpenButtonOptions(
   return true;
 }
 
-void BrowserView::OpenButtonOptions(const views::View* button_view) const {
-  if (button_view == status_area_->network_view())
-    browser()->OpenInternetOptionsDialog();
-  else
-    browser()->OpenSystemOptionsDialog();
+void BrowserView::ExecuteBrowserCommand(int id) const {
+  browser()->ExecuteCommand(id);
 }
 
-bool BrowserView::IsButtonVisible(const views::View* button_view) const {
-  if (button_view == status_area_->menu_view())
-    return !IsToolbarVisible();
+void BrowserView::OpenButtonOptions(const views::View* button_view) const {
+  if (button_view == status_area_->network_view()) {
+    browser()->OpenInternetOptionsDialog();
+  } else if (button_view == status_area_->language_view()) {
+    LanguageConfigView::Show(GetProfile(),
+                             frame()->GetWindow()->GetNativeWindow());
+  } else {
+    browser()->OpenSystemOptionsDialog();
+  }
+}
+
+bool BrowserView::IsBrowserMode() const {
   return true;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// BrowserView public:
+bool BrowserView::IsScreenLockerMode() const {
+  return false;
+}
 
-void BrowserView::ShowCompactLocationBarUnderSelectedTab(bool select_all) {
-  if (!is_compact_style())
-    return;
-  int index = browser()->selected_index();
-  compact_location_bar_host_->Update(index, true, select_all);
+////////////////////////////////////////////////////////////////////////////////
+// BrowserView protected:
+
+void BrowserView::GetAccessibleToolbars(
+    std::vector<AccessibleToolbarView*>* toolbars) {
+  ::BrowserView::GetAccessibleToolbars(toolbars);
+  toolbars->push_back(status_area_);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -528,6 +429,13 @@ void BrowserView::InitSystemMenu() {
   system_menu_contents_->AddItemWithStringId(IDC_TASK_MANAGER,
                                                IDS_TASK_MANAGER);
   system_menu_menu_.reset(new views::Menu2(system_menu_contents_.get()));
+}
+
+void BrowserView::UpdateOTRBackground() {
+  if (UseVerticalTabs())
+    otr_avatar_icon_->set_background(new ThemeBackground(this));
+  else
+    otr_avatar_icon_->set_background(NULL);
 }
 
 }  // namespace chromeos

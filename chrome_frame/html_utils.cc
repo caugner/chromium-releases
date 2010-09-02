@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -10,6 +10,7 @@
 #include "base/string_util.h"
 #include "base/string_tokenizer.h"
 #include "chrome_frame/utils.h"
+#include "net/base/net_util.h"
 
 const wchar_t kQuotes[] = L"\"'";
 const char kXFrameOptionsHeader[] = "X-Frame-Options";
@@ -333,7 +334,7 @@ std::string GetDefaultUserAgentHeaderWithCFTag() {
 
 std::string GetDefaultUserAgent() {
   std::string ret;
-  DWORD size = MAX_PATH;  // NOLINT
+  DWORD size = MAX_PATH;
   HRESULT hr = E_OUTOFMEMORY;
   for (int retries = 1; hr == E_OUTOFMEMORY && retries <= 10; ++retries) {
     hr = ::ObtainUserAgentString(0, WriteInto(&ret, size + 1), &size);
@@ -341,36 +342,30 @@ std::string GetDefaultUserAgent() {
       size = MAX_PATH * retries;
     } else if (SUCCEEDED(hr)) {
       // Truncate the extra allocation.
-      DCHECK(size > 0);  // NOLINT
-      ret.resize(size - sizeof(char));  // NOLINT
+      DCHECK_GT(size, 0U);
+      ret.resize(size - 1);
     }
   }
 
   if (FAILED(hr)) {
     NOTREACHED() << StringPrintf("ObtainUserAgentString==0x%08X", hr);
-    return "";
-  } else {
-    DCHECK(ret.length() == lstrlenA(ret.c_str()));
+    return std::string();
   }
 
   return ret;
 }
 
 bool HasFrameBustingHeader(const std::string& http_headers) {
-  net::HttpUtil::HeadersIterator it(
-      http_headers.begin(), http_headers.end(), "\r\n");
+  // NOTE: We cannot use net::GetSpecificHeader() here since when there are
+  // multiple instances of a header that returns the first value seen, and we
+  // need to look at all instances.
+  net::HttpUtil::HeadersIterator it(http_headers.begin(), http_headers.end(),
+                                    "\r\n");
   while (it.GetNext()) {
-    if (lstrcmpiA(it.name().c_str(), kXFrameOptionsHeader) == 0) {
-      std::string allow_all(kXFrameOptionsValueAllowAll);
-      if (it.values_end() - it.values_begin() != allow_all.length() ||
-          !std::equal(it.values_begin(), it.values_end(),
-              allow_all.begin(),
-              CaseInsensitiveCompareASCII<const char>())) {
-        return true;
-      }
-    }
+    if (!lstrcmpiA(it.name().c_str(), kXFrameOptionsHeader) &&
+        lstrcmpiA(it.values().c_str(), kXFrameOptionsValueAllowAll))
+      return true;
   }
-
   return false;
 }
 

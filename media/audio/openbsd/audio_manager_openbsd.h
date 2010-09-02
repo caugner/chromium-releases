@@ -5,7 +5,7 @@
 #ifndef MEDIA_AUDIO_OPENBSD_AUDIO_MANAGER_OPENBSD_H_
 #define MEDIA_AUDIO_OPENBSD_AUDIO_MANAGER_OPENBSD_H_
 
-#include "media/audio/audio_output.h"
+#include "media/audio/audio_io.h"
 
 class AudioManagerOpenBSD : public AudioManager {
  public:
@@ -15,10 +15,15 @@ class AudioManagerOpenBSD : public AudioManager {
   virtual void Init();
 
   // Implementation of AudioManager.
-  virtual bool HasAudioDevices();
-  virtual AudioOutputStream* MakeAudioStream(Format format, int channels,
-                                             int sample_rate,
-                                             char bits_per_sample);
+  virtual bool HasAudioOutputDevices();
+  virtual bool HasAudioInputDevices();
+  virtual AudioOutputStream* MakeAudioOutputStream(Format format, int channels,
+                                                   int sample_rate,
+                                                   char bits_per_sample);
+  virtual AudioInputStream* MakeAudioInputStream(Format format, int channels,
+                                                 int sample_rate,
+                                                 char bits_per_sample,
+                                                 uint32 samples_per_packet);
   virtual void MuteAll();
   virtual void UnMuteAll();
 

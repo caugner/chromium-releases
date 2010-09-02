@@ -51,11 +51,10 @@ void BookmarkEditor::Show(HWND parent_hwnd,
                           Profile* profile,
                           const BookmarkNode* parent,
                           const EditDetails& details,
-                          Configuration configuration,
-                          Handler* handler) {
+                          Configuration configuration) {
   DCHECK(profile);
   BookmarkEditorView* editor =
-      new BookmarkEditorView(profile, parent, details, configuration, handler);
+      new BookmarkEditorView(profile, parent, details, configuration);
   editor->Show(parent_hwnd);
 }
 
@@ -63,8 +62,7 @@ BookmarkEditorView::BookmarkEditorView(
     Profile* profile,
     const BookmarkNode* parent,
     const EditDetails& details,
-    BookmarkEditor::Configuration configuration,
-    BookmarkEditor::Handler* handler)
+    BookmarkEditor::Configuration configuration)
     : profile_(profile),
       tree_view_(NULL),
       new_group_button_(NULL),
@@ -73,8 +71,7 @@ BookmarkEditorView::BookmarkEditorView(
       parent_(parent),
       details_(details),
       running_menu_for_root_(false),
-      show_tree_(configuration == SHOW_TREE),
-      handler_(handler) {
+      show_tree_(configuration == SHOW_TREE) {
   DCHECK(profile);
   Init();
 }
@@ -280,12 +277,14 @@ void BookmarkEditorView::Init() {
   std::wstring url_text;
   if (details_.type == EditDetails::EXISTING_NODE) {
     std::wstring languages = profile_
-        ? profile_->GetPrefs()->GetString(prefs::kAcceptLanguages)
+        ? UTF8ToWide(profile_->GetPrefs()->GetString(prefs::kAcceptLanguages))
         : std::wstring();
-    // The following URL is user-editable.  We specify omit_username_password=
-    // false and unescape=false to show the original URL except IDN.
+    // Because this gets parsed by FixupURL(), it's safe to omit the scheme or
+    // trailing slash, and unescape most characters, but we need to not drop any
+    // username/password, or unescape anything that changes the meaning.
     url_text = net::FormatUrl(details_.existing_node->GetURL(), languages,
-                              false, UnescapeRule::NONE, NULL, NULL, NULL);
+        net::kFormatUrlOmitAll & ~net::kFormatUrlOmitUsernamePassword,
+        UnescapeRule::SPACES, NULL, NULL, NULL);
   }
   url_tf_.SetText(url_text);
   url_tf_.SetController(this);
@@ -415,14 +414,11 @@ void BookmarkEditorView::Reset() {
 
   context_menu_.reset();
 
-  if (GetParent()) {
+  if (GetParent())
     ExpandAndSelect();
-  } else if (GetParent()) {
-    tree_view_->ExpandAll();
-  }
 }
 GURL BookmarkEditorView::GetInputURL() const {
-  return GURL(URLFixerUpper::FixupURL(UTF16ToUTF8(url_tf_.text()), ""));
+  return URLFixerUpper::FixupURL(UTF16ToUTF8(url_tf_.text()), std::string());
 }
 
 std::wstring BookmarkEditorView::GetInputTitle() const {
@@ -536,7 +532,7 @@ void BookmarkEditorView::ApplyEdits(EditorNode* parent) {
 
   if (!show_tree_) {
     bookmark_utils::ApplyEditsWithNoGroupChange(
-        bb_model_, parent_, details_, new_title, new_url, handler_.get());
+        bb_model_, parent_, details_, new_title, new_url);
     return;
   }
 
@@ -546,7 +542,7 @@ void BookmarkEditorView::ApplyEdits(EditorNode* parent) {
       bb_model_->root_node(), tree_model_->GetRoot(), parent, &new_parent);
 
   bookmark_utils::ApplyEditsWithPossibleGroupChange(
-      bb_model_, new_parent, details_, new_title, new_url, handler_.get());
+      bb_model_, new_parent, details_, new_title, new_url);
 }
 
 void BookmarkEditorView::ApplyNameChangesAndCreateNewGroups(

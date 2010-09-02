@@ -8,7 +8,8 @@
 #include "app/l10n_util.h"
 #include "base/file_version_info.h"
 #include "base/string_util.h"
-#include "chrome/browser/child_process_host.h"
+#include "chrome/app/chrome_version_info.h"
+#include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/renderer_host/backing_store_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
@@ -100,7 +101,7 @@ void MemoryDetails::CollectProcessData(
     }
     for (int index2 = 0; index2 < arraysize(g_process_template); index2++) {
       if (_wcsicmp(process_data_[index2].process_name.c_str(),
-          process_entry.szExeFile) != 0)
+                   process_entry.szExeFile) != 0)
         continue;
       if (index2 == IE_BROWSER && is_64bit_process)
         continue;  // Should use IE_64BIT_BROWSER
@@ -121,7 +122,7 @@ void MemoryDetails::CollectProcessData(
       TCHAR name[MAX_PATH];
       if (index2 == CHROME_BROWSER || index2 == CHROME_NACL_PROCESS) {
         scoped_ptr<FileVersionInfo> version_info(
-            FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+            chrome_app::GetChromeVersionInfo());
         if (version_info != NULL)
           info.version = version_info->file_version();
         // Check if this is one of the child processes whose data we collected

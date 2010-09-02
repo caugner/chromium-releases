@@ -32,7 +32,6 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void UpdateTitleBar() {}
   virtual void ShelfVisibilityChanged() {}
   virtual void UpdateDevTools() {}
-  virtual void FocusDevTools() {}
   virtual void UpdateLoadingAnimations(bool should_animate) {}
   virtual void SetStarredState(bool is_starred) {}
   virtual gfx::Rect GetRestoredBounds() const { return gfx::Rect(); }
@@ -44,12 +43,14 @@ class TestBrowserWindow : public BrowserWindow {
     return const_cast<TestLocationBar*>(&location_bar_);
   }
   virtual void SetFocusToLocationBar(bool select_all) {}
-  virtual void UpdateStopGoState(bool is_loading, bool force) {}
+  virtual void UpdateReloadStopState(bool is_loading, bool force) {}
   virtual void UpdateToolbar(TabContents* contents,
                              bool should_restore_state) {}
   virtual void FocusToolbar() {}
-  virtual void FocusPageAndAppMenus() {}
-  virtual void ShowPageMenu() {}
+  virtual void FocusAppMenu() {}
+  virtual void FocusBookmarksToolbar() {}
+  virtual void FocusChromeOSStatus() {}
+  virtual void RotatePaneFocus(bool forwards) {}
   virtual void ShowAppMenu() {}
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut) {
@@ -69,7 +70,8 @@ class TestBrowserWindow : public BrowserWindow {
                                         Profile* profile) {}
   virtual void ToggleBookmarkBar() {}
   virtual void ToggleExtensionShelf() {}
-  virtual void ShowAboutChromeDialog() {}
+  virtual views::Window* ShowAboutChromeDialog() { return NULL; }
+  virtual void ShowUpdateChromeDialog() {}
   virtual void ShowTaskManager() {}
   virtual void ShowBookmarkManager() {}
   virtual void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {}
@@ -80,11 +82,10 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ShowImportDialog() {}
   virtual void ShowSearchEnginesDialog() {}
   virtual void ShowPasswordManager() {}
-  virtual void ShowSelectProfileDialog() {}
-  virtual void ShowNewProfileDialog() {}
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) {}
   virtual void ShowContentSettingsWindow(ContentSettingsType content_type,
                                          Profile* profile) {}
+  virtual void ShowCollectedCookiesDialog(TabContents* tab_contents) {}
   virtual void ShowProfileErrorDialog(int message_id) {}
   virtual void ShowThemeInstallBubble() {}
   virtual void ConfirmBrowserCloseWithPendingDownloads() {}
@@ -100,6 +101,8 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void Cut() { }
   virtual void Copy() { }
   virtual void Paste() { }
+  virtual void ToggleTabStripMode() {}
+  virtual void SetToolbarCollapsedMode(bool val) {}
 
  protected:
   virtual void DestroyBrowser() {}
