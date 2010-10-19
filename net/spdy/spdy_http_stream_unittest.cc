@@ -3,134 +3,152 @@
 // found in the LICENSE file.
 
 #include "net/spdy/spdy_http_stream.h"
-#include "base/ref_counted.h"
-#include "base/time.h"
-#include "net/base/mock_host_resolver.h"
-#include "net/base/net_errors.h"
-#include "net/base/net_log.h"
-#include "net/base/ssl_config_service.h"
-#include "net/base/ssl_config_service_defaults.h"
-#include "net/base/test_completion_callback.h"
-#include "net/http/http_auth_handler_factory.h"
-#include "net/http/http_network_session.h"
-#include "net/http/http_request_info.h"
-#include "net/http/http_response_info.h"
-#include "net/proxy/proxy_service.h"
-#include "net/socket/socket_test_util.h"
 #include "net/spdy/spdy_session.h"
-#include "net/spdy/spdy_session_pool.h"
+#include "net/spdy/spdy_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
 
-class SpdySessionPoolPeer {
- public:
-  explicit SpdySessionPoolPeer(const scoped_refptr<SpdySessionPool>& pool)
-      : pool_(pool) {}
-
-  void RemoveSpdySession(const scoped_refptr<SpdySession>& session) {
-    pool_->Remove(session);
-  }
-
- private:
-  const scoped_refptr<SpdySessionPool> pool_;
-
-  DISALLOW_COPY_AND_ASSIGN(SpdySessionPoolPeer);
-};
-
-namespace {
-
-// Create a proxy service which fails on all requests (falls back to direct).
-ProxyService* CreateNullProxyService() {
-  return ProxyService::CreateNull();
-}
-
-// Helper to manage the lifetimes of the dependencies for a
-// SpdyNetworkTransaction.
-class SessionDependencies {
- public:
-  // Default set of dependencies -- "null" proxy service.
-  SessionDependencies()
-      : host_resolver(new MockHostResolver),
-        proxy_service(CreateNullProxyService()),
-        ssl_config_service(new SSLConfigServiceDefaults),
-        http_auth_handler_factory(HttpAuthHandlerFactory::CreateDefault()),
-        spdy_session_pool(new SpdySessionPool()) {}
-
-  // Custom proxy service dependency.
-  explicit SessionDependencies(ProxyService* proxy_service)
-      : host_resolver(new MockHostResolver),
-        proxy_service(proxy_service),
-        ssl_config_service(new SSLConfigServiceDefaults),
-        http_auth_handler_factory(HttpAuthHandlerFactory::CreateDefault()),
-        spdy_session_pool(new SpdySessionPool()) {}
-
-  scoped_refptr<MockHostResolverBase> host_resolver;
-  scoped_refptr<ProxyService> proxy_service;
-  scoped_refptr<SSLConfigService> ssl_config_service;
-  MockClientSocketFactory socket_factory;
-  scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory;
-  scoped_refptr<SpdySessionPool> spdy_session_pool;
-};
-
-HttpNetworkSession* CreateSession(SessionDependencies* session_deps) {
-  return new HttpNetworkSession(session_deps->host_resolver,
-                                session_deps->proxy_service,
-                                &session_deps->socket_factory,
-                                session_deps->ssl_config_service,
-                                session_deps->spdy_session_pool,
-                                session_deps->http_auth_handler_factory.get(),
-                                NULL,
-                                NULL);
-}
-
 class SpdyHttpStreamTest : public testing::Test {
+ public:
+  OrderedSocketData* data() { return data_; }
  protected:
-  SpdyHttpStreamTest()
-      : session_(CreateSession(&session_deps_)),
-        pool_peer_(session_->spdy_session_pool()) {}
+  SpdyHttpStreamTest() {}
 
-  scoped_refptr<SpdySession> CreateSpdySession() {
-    HostPortPair host_port_pair("www.google.com", 80);
-    scoped_refptr<SpdySession> session(
-        session_->spdy_session_pool()->Get(
-            host_port_pair, session_, BoundNetLog()));
-    return session;
+  void EnableCompression(bool enabled) {
+    spdy::SpdyFramer::set_enable_compression_default(enabled);
   }
 
   virtual void TearDown() {
     MessageLoop::current()->RunAllPending();
   }
-
-  SessionDependencies session_deps_;
-  scoped_refptr<HttpNetworkSession> session_;
-  SpdySessionPoolPeer pool_peer_;
+  int InitSession(MockRead* reads, size_t reads_count,
+                  MockWrite* writes, size_t writes_count,
+                  HostPortPair& host_port_pair) {
+    HostPortProxyPair pair(host_port_pair, ProxyServer::Direct());
+    data_ = new OrderedSocketData(reads, reads_count, writes, writes_count);
+    session_deps_.socket_factory->AddSocketDataProvider(data_.get());
+    http_session_ = SpdySessionDependencies::SpdyCreateSession(&session_deps_);
+    session_ = http_session_->spdy_session_pool()->
+      Get(pair, http_session_.get(), BoundNetLog());
+    tcp_params_ = new TCPSocketParams(host_port_pair.host(),
+                                      host_port_pair.port(),
+                                      MEDIUM, GURL(), false);
+    return session_->Connect(host_port_pair.host(), tcp_params_, MEDIUM);
+  }
+  SpdySessionDependencies session_deps_;
+  scoped_refptr<OrderedSocketData> data_;
+  scoped_refptr<HttpNetworkSession> http_session_;
+  scoped_refptr<SpdySession> session_;
+  scoped_refptr<TCPSocketParams> tcp_params_;
 };
 
-// Needs fixing, see http://crbug.com/28622
 TEST_F(SpdyHttpStreamTest, SendRequest) {
-  scoped_refptr<SpdySession> session(CreateSpdySession());
+  EnableCompression(false);
+  SpdySession::SetSSLMode(false);
+
+  scoped_ptr<spdy::SpdyFrame> req(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
+  MockWrite writes[] = {
+    CreateMockWrite(*req.get(), 1),
+  };
+  scoped_ptr<spdy::SpdyFrame> resp(ConstructSpdyGetSynReply(NULL, 0, 1));
+  MockRead reads[] = {
+    CreateMockRead(*resp, 2),
+    MockRead(false, 0, 3)  // EOF
+  };
+
+  HostPortPair host_port_pair("www.google.com", 80);
+  HostPortProxyPair pair(host_port_pair, ProxyServer::Direct());
+  EXPECT_EQ(OK, InitSession(reads, arraysize(reads), writes, arraysize(writes),
+      host_port_pair));
+
   HttpRequestInfo request;
   request.method = "GET";
   request.url = GURL("http://www.google.com/");
   TestCompletionCallback callback;
   HttpResponseInfo response;
-  scoped_ptr<SpdyHttpStream> http_stream(new SpdyHttpStream());
+  BoundNetLog net_log;
+  scoped_ptr<SpdyHttpStream> http_stream(
+      new SpdyHttpStream(session_.get(), true));
   ASSERT_EQ(
       OK,
-      http_stream->InitializeStream(session, request, BoundNetLog(), NULL));
-  http_stream->InitializeRequest(base::Time::Now(), NULL);
-  EXPECT_EQ(ERR_IO_PENDING,
-            http_stream->SendRequest(&response, &callback));
+      http_stream->InitializeStream(&request, net_log, NULL));
 
-  // Need to manually remove the spdy session since normally it gets removed on
-  // socket close/error, but we aren't communicating over a socket here.
-  pool_peer_.RemoveSpdySession(session);
+  EXPECT_EQ(ERR_IO_PENDING,
+            http_stream->SendRequest("", NULL, &response, &callback));
+  EXPECT_TRUE(http_session_->spdy_session_pool()->HasSession(pair));
+
+  // This triggers the MockWrite and read 2
+  callback.WaitForResult();
+
+  // This triggers read 3. The empty read causes the session to shut down.
+  data()->CompleteRead();
+
+  // Because we abandoned the stream, we don't expect to find a session in the
+  // pool anymore.
+  EXPECT_TRUE(!http_session_->spdy_session_pool()->HasSession(pair));
+  EXPECT_TRUE(data()->at_read_eof());
+  EXPECT_TRUE(data()->at_write_eof());
+}
+
+// Test case for bug: http://code.google.com/p/chromium/issues/detail?id=50058
+TEST_F(SpdyHttpStreamTest, SpdyURLTest) {
+  EnableCompression(false);
+  SpdySession::SetSSLMode(false);
+
+  const char * const full_url = "http://www.google.com/foo?query=what#anchor";
+  const char * const base_url = "http://www.google.com/foo?query=what";
+  scoped_ptr<spdy::SpdyFrame> req(ConstructSpdyGet(base_url, false, 1, LOWEST));
+  MockWrite writes[] = {
+    CreateMockWrite(*req.get(), 1),
+  };
+  scoped_ptr<spdy::SpdyFrame> resp(ConstructSpdyGetSynReply(NULL, 0, 1));
+  MockRead reads[] = {
+    CreateMockRead(*resp, 2),
+    MockRead(false, 0, 3)  // EOF
+  };
+
+  HostPortPair host_port_pair("www.google.com", 80);
+  HostPortProxyPair pair(host_port_pair, ProxyServer::Direct());
+  EXPECT_EQ(OK, InitSession(reads, arraysize(reads), writes, arraysize(writes),
+      host_port_pair));
+
+  HttpRequestInfo request;
+  request.method = "GET";
+  request.url = GURL(full_url);
+  TestCompletionCallback callback;
+  HttpResponseInfo response;
+  BoundNetLog net_log;
+  scoped_ptr<SpdyHttpStream> http_stream(new SpdyHttpStream(session_, true));
+  ASSERT_EQ(
+      OK,
+      http_stream->InitializeStream(&request, net_log, NULL));
+
+  EXPECT_EQ(ERR_IO_PENDING,
+            http_stream->SendRequest("", NULL, &response, &callback));
+
+  spdy::SpdyHeaderBlock* spdy_header =
+    http_stream->stream()->spdy_headers().get();
+  EXPECT_TRUE(spdy_header != NULL);
+  if (spdy_header->find("url") != spdy_header->end())
+    EXPECT_EQ("/foo?query=what", spdy_header->find("url")->second);
+  else
+    FAIL() << "No url is set in spdy_header!";
+
+  // This triggers the MockWrite and read 2
+  callback.WaitForResult();
+
+  // This triggers read 3. The empty read causes the session to shut down.
+  data()->CompleteRead();
+
+  // Because we abandoned the stream, we don't expect to find a session in the
+  // pool anymore.
+  EXPECT_TRUE(!http_session_->spdy_session_pool()->HasSession(pair));
+  EXPECT_TRUE(data()->at_read_eof());
+  EXPECT_TRUE(data()->at_write_eof());
 }
 
 // TODO(willchan): Write a longer test for SpdyStream that exercises all
 // methods.
-
-}  // namespace
 
 }  // namespace net

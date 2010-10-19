@@ -8,6 +8,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/renderer_preferences.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
@@ -25,10 +26,12 @@
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_LINUX)
-#include "base/event_synthesis_gtk.h"
+#include "app/event_synthesis_gtk.h"
 #endif
 
 using WebKit::WebFrame;
+using WebKit::WebInputEvent;
+using WebKit::WebMouseEvent;
 using WebKit::WebScriptController;
 using WebKit::WebScriptSource;
 using WebKit::WebString;
@@ -80,7 +83,7 @@ void RenderViewTest::SetUp() {
 
   // Setting flags and really doing anything with WebKit is fairly fragile and
   // hacky, but this is the world we live in...
-  webkit_glue::SetJavaScriptFlags(L" --expose-gc");
+  webkit_glue::SetJavaScriptFlags(" --expose-gc");
   WebKit::initialize(&webkitclient_);
   WebScriptController::registerExtension(BaseJsV8Extension::Get());
   WebScriptController::registerExtension(JsonSchemaJsV8Extension::Get());
@@ -187,8 +190,8 @@ int RenderViewTest::SendKeyEvent(MockKeyboard::Layout layout,
   // We ignore |layout|, which means we are only testing the layout of the
   // current locale. TODO(estade): fix this to respect |layout|.
   std::vector<GdkEvent*> events;
-  base::SynthesizeKeyPressEvents(
-      NULL, static_cast<base::KeyboardCode>(key_code),
+  app::SynthesizeKeyPressEvents(
+      NULL, static_cast<app::KeyboardCode>(key_code),
       modifiers & (MockKeyboard::LEFT_CONTROL | MockKeyboard::RIGHT_CONTROL),
       modifiers & (MockKeyboard::LEFT_SHIFT | MockKeyboard::RIGHT_SHIFT),
       modifiers & (MockKeyboard::LEFT_ALT | MockKeyboard::RIGHT_ALT),
@@ -262,4 +265,66 @@ void RenderViewTest::VerifyPagesPrinted() {
           ViewHostMsg_TempFileForPrintingWritten::ID);
   ASSERT_TRUE(did_print_msg);
 #endif
+}
+
+const char* const kGetCoordinatesScript =
+    "(function() {"
+    "  function GetCoordinates(elem) {"
+    "    if (!elem)"
+    "      return [ 0, 0];"
+    "    var coordinates = [ elem.offsetLeft, elem.offsetTop];"
+    "    var parent_coordinates = GetCoordinates(elem.offsetParent);"
+    "    coordinates[0] += parent_coordinates[0];"
+    "    coordinates[1] += parent_coordinates[1];"
+    "    return coordinates;"
+    "  };"
+    "  var elem = document.getElementById('$1');"
+    "  if (!elem)"
+    "    return null;"
+    "  var bounds = GetCoordinates(elem);"
+    "  bounds[2] = elem.offsetWidth;"
+    "  bounds[3] = elem.offsetHeight;"
+    "  return bounds;"
+    "})();";
+gfx::Rect RenderViewTest::GetElementBounds(const std::string& element_id) {
+  std::vector<std::string> params;
+  params.push_back(element_id);
+  std::string script =
+      ReplaceStringPlaceholders(kGetCoordinatesScript, params, NULL);
+
+  v8::HandleScope handle_scope;
+  v8::Handle<v8::Value>  value = GetMainFrame()->executeScriptAndReturnValue(
+      WebScriptSource(WebString::fromUTF8(script)));
+  if (value.IsEmpty() || !value->IsArray())
+    return gfx::Rect();
+
+  v8::Handle<v8::Array> array = value.As<v8::Array>();
+  if (array->Length() != 4)
+    return gfx::Rect();
+  std::vector<int> coords;
+  for (int i = 0; i < 4; ++i) {
+    v8::Handle<v8::Number> index = v8::Number::New(i);
+    v8::Local<v8::Value> value = array->Get(index);
+    if (value.IsEmpty() || !value->IsInt32())
+      return gfx::Rect();
+    coords.push_back(value->Int32Value());
+  }
+  return gfx::Rect(coords[0], coords[1], coords[2], coords[3]);
+}
+
+bool RenderViewTest::SimulateElementClick(const std::string& element_id) {
+  gfx::Rect bounds = GetElementBounds(element_id);
+  if (bounds.IsEmpty())
+    return false;
+  WebMouseEvent mouse_event;
+  mouse_event.type = WebInputEvent::MouseDown;
+  mouse_event.button = WebMouseEvent::ButtonLeft;
+  mouse_event.x = bounds.CenterPoint().x();
+  mouse_event.y = bounds.CenterPoint().y();
+  mouse_event.clickCount = 1;
+  ViewMsg_HandleInputEvent input_event(0);
+  input_event.WriteData(reinterpret_cast<const char*>(&mouse_event),
+                        sizeof(WebMouseEvent));
+  view_->OnHandleInputEvent(input_event);
+  return true;
 }

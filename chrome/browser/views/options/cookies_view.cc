@@ -7,7 +7,6 @@
 #include <algorithm>
 
 #include "app/l10n_util.h"
-#include "base/i18n/time_formatting.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "chrome/browser/profile.h"
@@ -146,9 +145,9 @@ void CookiesView::ContentsChanged(views::Textfield* sender,
 
 bool CookiesView::HandleKeystroke(views::Textfield* sender,
                                   const views::Textfield::Keystroke& key) {
-  if (key.GetKeyboardCode() == base::VKEY_ESCAPE) {
+  if (key.GetKeyboardCode() == app::VKEY_ESCAPE) {
     ResetSearchQuery();
-  } else if (key.GetKeyboardCode() == base::VKEY_RETURN) {
+  } else if (key.GetKeyboardCode() == app::VKEY_RETURN) {
     search_update_factory_.RevokeAll();
     UpdateSearchResults();
   }
@@ -215,8 +214,8 @@ void CookiesView::OnTreeViewSelectionChanged(views::TreeView* tree_view) {
       GetDetailedInfo();
   if (detailed_info.node_type == CookieTreeNode::DetailedInfo::TYPE_COOKIE) {
     UpdateVisibleDetailedInfo(cookie_info_view_);
-    cookie_info_view_->SetCookie(detailed_info.cookie->first,
-                                 detailed_info.cookie->second);
+    cookie_info_view_->SetCookie(detailed_info.cookie->Domain(),
+                                 *detailed_info.cookie);
   } else if (detailed_info.node_type ==
              CookieTreeNode::DetailedInfo::TYPE_DATABASE) {
     UpdateVisibleDetailedInfo(database_info_view_);
@@ -236,8 +235,8 @@ void CookiesView::OnTreeViewSelectionChanged(views::TreeView* tree_view) {
   }
 }
 
-void CookiesView::OnTreeViewKeyDown(base::KeyboardCode keycode) {
-  if (keycode == base::VKEY_DELETE)
+void CookiesView::OnTreeViewKeyDown(app::KeyboardCode keycode) {
+  if (keycode == app::VKEY_DELETE)
     cookies_tree_->RemoveSelectedItems();
 }
 
@@ -285,6 +284,7 @@ void CookiesView::Init() {
       profile_->GetRequestContext()->GetCookieStore()->GetCookieMonster(),
       new BrowsingDataDatabaseHelper(profile_),
       new BrowsingDataLocalStorageHelper(profile_),
+      NULL,
       new BrowsingDataAppCacheHelper(profile_)));
   cookies_tree_model_->AddObserver(this);
 

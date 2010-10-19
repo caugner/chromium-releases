@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "media/audio/linux/alsa_output.h"
@@ -44,6 +43,9 @@ class MockAlsaWrapper : public AlsaWrapper {
   MOCK_METHOD3(PcmWritei, snd_pcm_sframes_t(snd_pcm_t* handle,
                                             const void* buffer,
                                             snd_pcm_uframes_t size));
+  MOCK_METHOD3(PcmReadi, snd_pcm_sframes_t(snd_pcm_t* handle,
+                                           void* buffer,
+                                           snd_pcm_uframes_t size));
   MOCK_METHOD3(PcmRecover, int(snd_pcm_t* handle, int err, int silent));
   MOCK_METHOD7(PcmSetParams, int(snd_pcm_t* handle, snd_pcm_format_t format,
                                  snd_pcm_access_t access, unsigned int channels,
@@ -55,6 +57,7 @@ class MockAlsaWrapper : public AlsaWrapper {
   MOCK_METHOD1(PcmName, const char*(snd_pcm_t* handle));
   MOCK_METHOD1(PcmAvailUpdate, snd_pcm_sframes_t(snd_pcm_t* handle));
   MOCK_METHOD1(PcmState, snd_pcm_state_t(snd_pcm_t* handle));
+  MOCK_METHOD1(PcmStart, int(snd_pcm_t* handle));
 
   MOCK_METHOD1(StrError, const char*(int errnum));
 };
@@ -72,12 +75,10 @@ class MockAudioManagerLinux : public AudioManagerLinux {
   MOCK_METHOD0(Init, void());
   MOCK_METHOD0(HasAudioOutputDevices, bool());
   MOCK_METHOD0(HasAudioInputDevices, bool());
-  MOCK_METHOD4(MakeAudioOutputStream, AudioOutputStream*(Format format,
-                                                         int channels,
-                                                         int sample_rate,
-                                                         char bits_per_sample));
+  MOCK_METHOD1(MakeAudioOutputStream, AudioOutputStream*(
+      AudioParameters params));
   MOCK_METHOD5(MakeAudioInputStream, AudioInputStream*(
-      Format format,
+      AudioParameters::Format format,
       int channels,
       int sample_rate,
       char bits_per_sample,
@@ -99,11 +100,10 @@ class AlsaPcmOutputStreamTest : public testing::Test {
   }
 
   AlsaPcmOutputStream* CreateStreamWithChannels(int channels) {
+    AudioParameters params(kTestFormat, channels, kTestSampleRate,
+                           kTestBitsPerSample);
     return new AlsaPcmOutputStream(kTestDeviceName,
-                                   kTestFormat,
-                                   channels,
-                                   kTestSampleRate,
-                                   kTestBitsPerSample,
+                                   params,
                                    &mock_alsa_wrapper_,
                                    &mock_manager_,
                                    &message_loop_);
@@ -132,7 +132,7 @@ class AlsaPcmOutputStreamTest : public testing::Test {
   static const int kTestSampleRate;
   static const int kTestBitsPerSample;
   static const int kTestBytesPerFrame;
-  static const AudioManager::Format kTestFormat;
+  static const AudioParameters::Format kTestFormat;
   static const char kTestDeviceName[];
   static const char kDummyMessage[];
   static const uint32 kTestFramesPerPacket;
@@ -161,13 +161,13 @@ class AlsaPcmOutputStreamTest : public testing::Test {
 
 const int AlsaPcmOutputStreamTest::kTestChannels = 2;
 const int AlsaPcmOutputStreamTest::kTestSampleRate =
-    AudioManager::kAudioCDSampleRate;
+    AudioParameters::kAudioCDSampleRate;
 const int AlsaPcmOutputStreamTest::kTestBitsPerSample = 8;
 const int AlsaPcmOutputStreamTest::kTestBytesPerFrame =
     AlsaPcmOutputStreamTest::kTestBitsPerSample / 8 *
     AlsaPcmOutputStreamTest::kTestChannels;
-const AudioManager::Format AlsaPcmOutputStreamTest::kTestFormat =
-    AudioManager::AUDIO_PCM_LINEAR;
+const AudioParameters::Format AlsaPcmOutputStreamTest::kTestFormat =
+    AudioParameters::AUDIO_PCM_LINEAR;
 const char AlsaPcmOutputStreamTest::kTestDeviceName[] = "TestDevice";
 const char AlsaPcmOutputStreamTest::kDummyMessage[] = "dummy";
 const uint32 AlsaPcmOutputStreamTest::kTestFramesPerPacket = 1000;
@@ -203,11 +203,10 @@ TEST_F(AlsaPcmOutputStreamTest, ConstructedState) {
             test_stream_->shared_data_.state());
 
   // Bad bits per sample.
+  AudioParameters bad_bps_params(kTestFormat, kTestChannels,
+                                 kTestSampleRate, kTestBitsPerSample - 1);
   test_stream_ = new AlsaPcmOutputStream(kTestDeviceName,
-                                         kTestFormat,
-                                         kTestChannels,
-                                         kTestSampleRate,
-                                         kTestBitsPerSample - 1,
+                                         bad_bps_params,
                                          &mock_alsa_wrapper_,
                                          &mock_manager_,
                                          &message_loop_);
@@ -215,11 +214,11 @@ TEST_F(AlsaPcmOutputStreamTest, ConstructedState) {
             test_stream_->shared_data_.state());
 
   // Bad format.
+  AudioParameters bad_format_params(
+      AudioParameters::AUDIO_LAST_FORMAT, kTestChannels,
+      kTestSampleRate, kTestBitsPerSample);
   test_stream_ = new AlsaPcmOutputStream(kTestDeviceName,
-                                         AudioManager::AUDIO_LAST_FORMAT,
-                                         kTestChannels,
-                                         kTestSampleRate,
-                                         kTestBitsPerSample,
+                                         bad_format_params,
                                          &mock_alsa_wrapper_,
                                          &mock_manager_,
                                          &message_loop_);

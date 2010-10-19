@@ -4,11 +4,13 @@
 
 #ifndef CHROME_RENDERER_PEPPER_PLUGIN_DELEGATE_IMPL_H_
 #define CHROME_RENDERER_PEPPER_PLUGIN_DELEGATE_IMPL_H_
+#pragma once
 
 #include <set>
 
 #include "base/basictypes.h"
 #include "base/weak_ptr.h"
+#include "third_party/ppapi/c/pp_errors.h"
 #include "webkit/glue/plugins/pepper_plugin_delegate.h"
 #include "webkit/glue/plugins/pepper_plugin_instance.h"
 
@@ -18,11 +20,17 @@ namespace pepper {
 class PluginInstance;
 }
 
+namespace WebKit {
+class WebFileChooserCompletion;
+struct WebFileChooserParams;
+}
+
 class PepperPluginDelegateImpl
     : public pepper::PluginDelegate,
       public base::SupportsWeakPtr<PepperPluginDelegateImpl> {
  public:
   explicit PepperPluginDelegateImpl(RenderView* render_view);
+  virtual ~PepperPluginDelegateImpl() {}
 
   // Called by RenderView to tell us about painting events, these two functions
   // just correspond to the DidInitiatePaint and DidFlushPaint in R.V..
@@ -32,11 +40,21 @@ class PepperPluginDelegateImpl
   // pepper::PluginDelegate implementation.
   virtual void InstanceCreated(pepper::PluginInstance* instance);
   virtual void InstanceDeleted(pepper::PluginInstance* instance);
+  virtual PlatformAudio* CreateAudio(
+      uint32_t sample_rate,
+      uint32_t sample_count,
+      pepper::PluginDelegate::PlatformAudio::Client* client);
   virtual PlatformImage2D* CreateImage2D(int width, int height);
+  virtual PlatformContext3D* CreateContext3D();
+  virtual PlatformVideoDecoder* CreateVideoDecoder(
+      const PP_VideoDecoderConfig_Dev& decoder_config);
   virtual void DidChangeNumberOfFindResults(int identifier,
                                             int total,
                                             bool final_result);
   virtual void DidChangeSelectedFindResult(int identifier, int index);
+  virtual bool RunFileChooser(
+      const WebKit::WebFileChooserParams& params,
+      WebKit::WebFileChooserCompletion* chooser_completion);
 
  private:
   // Pointer to the RenderView that owns us.

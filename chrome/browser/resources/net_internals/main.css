@@ -87,6 +87,11 @@ body {
   color: blue;
 }
 
+#requestsListTableBody .source_HOST_RESOLVER_IMPL_JOB,
+#requestsListTableBody .source_HOST_RESOLVER_IMPL_REQUEST {
+  color: #308080;
+}
+
 #requestsListTableBody .source_SOCKET {
   color: purple;
 }
@@ -196,6 +201,7 @@ body {
 #proxyTabContent,
 #dataTabContent,
 #dnsTabContent,
+#socketsTabContent,
 #testTabContent {
   overflow: auto;
   padding: 10px;
@@ -217,6 +223,8 @@ table.styledTable,
 .styledTable th,
 .styledTable td {
   border: 1px solid #777;
+  padding-right: 4px; 
+  padding-left: 4px; 
 }
 
 .styledTable th {

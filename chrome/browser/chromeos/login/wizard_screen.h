@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_WIZARD_SCREEN_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_WIZARD_SCREEN_H_
+#pragma once
 
 #include "gfx/canvas.h"
 
@@ -51,4 +52,3 @@ class WizardScreen {
 };
 
 #endif  // CHROME_BROWSER_CHROMEOS_LOGIN_WIZARD_SCREEN_H_
-

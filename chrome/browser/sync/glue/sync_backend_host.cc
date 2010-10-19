@@ -3,12 +3,14 @@
 // found in the LICENSE file.
 
 #include "build/build_config.h"
+
+#include <algorithm>
+
 #include "base/file_util.h"
-#include "base/file_version_info.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/change_processor.h"
@@ -18,8 +20,10 @@
 #include "chrome/browser/sync/glue/http_bridge.h"
 #include "chrome/browser/sync/glue/password_model_worker.h"
 #include "chrome/browser/sync/sessions/session_state.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
+#include "chrome/common/pref_names.h"
 #include "webkit/glue/webkit_glue.h"
 
 static const int kSaveChangesIntervalSeconds = 10;
@@ -47,7 +51,8 @@ SyncBackendHost::SyncBackendHost(
       frontend_(frontend),
       sync_data_folder_path_(profile_path.Append(kSyncDataFolderName)),
       data_type_controllers_(data_type_controllers),
-      last_auth_error_(AuthError::None()) {
+      last_auth_error_(AuthError::None()),
+      syncapi_initialized_(false) {
 
   core_ = new Core(this);
 }
@@ -55,8 +60,10 @@ SyncBackendHost::SyncBackendHost(
 SyncBackendHost::SyncBackendHost()
     : core_thread_("Chrome_SyncCoreThread"),
       frontend_loop_(MessageLoop::current()),
+      profile_(NULL),
       frontend_(NULL),
-      last_auth_error_(AuthError::None()) {
+      last_auth_error_(AuthError::None()),
+      syncapi_initialized_(false) {
 }
 
 SyncBackendHost::~SyncBackendHost() {
@@ -73,6 +80,7 @@ void SyncBackendHost::Initialize(
     bool invalidate_sync_login,
     bool invalidate_sync_xmpp_login,
     bool use_chrome_async_socket,
+    bool try_ssltcp_first,
     NotificationMethod notification_method) {
   if (!core_thread_.Start())
     return;
@@ -89,9 +97,15 @@ void SyncBackendHost::Initialize(
           profile_->GetHistoryService(Profile::IMPLICIT_ACCESS));
   registrar_.workers[GROUP_UI] = new UIModelWorker(frontend_loop_);
   registrar_.workers[GROUP_PASSIVE] = new ModelSafeWorker();
-  registrar_.workers[GROUP_PASSWORD] =
-      new PasswordModelWorker(
-          profile_->GetPasswordStore(Profile::IMPLICIT_ACCESS));
+
+  PasswordStore* password_store =
+      profile_->GetPasswordStore(Profile::IMPLICIT_ACCESS);
+  if (password_store) {
+    registrar_.workers[GROUP_PASSWORD] =
+        new PasswordModelWorker(password_store);
+  } else {
+    LOG(ERROR) << "Password store not initialized, cannot sync passwords";
+  }
 
   // Any datatypes that we want the syncer to pull down must
   // be in the routing_info map.  We set them to group passive, meaning that
@@ -101,18 +115,43 @@ void SyncBackendHost::Initialize(
     registrar_.routing_info[(*it)] = GROUP_PASSIVE;
   }
 
+  InitCore(Core::DoInitializeOptions(
+      sync_service_url, lsid.empty(),
+      MakeHttpBridgeFactory(baseline_context_getter),
+      MakeHttpBridgeFactory(baseline_context_getter),
+      lsid,
+      delete_sync_data_folder,
+      invalidate_sync_login,
+      invalidate_sync_xmpp_login,
+      use_chrome_async_socket,
+      try_ssltcp_first,
+      notification_method,
+      RestoreEncryptionBootstrapToken()));
+}
+
+void SyncBackendHost::PersistEncryptionBootstrapToken(
+    const std::string& token) {
+  PrefService* prefs = profile_->GetPrefs();
+
+  prefs->SetString(prefs::kEncryptionBootstrapToken, token);
+  prefs->ScheduleSavePersistentPrefs();
+}
+
+std::string SyncBackendHost::RestoreEncryptionBootstrapToken() {
+  PrefService* prefs = profile_->GetPrefs();
+  std::string token = prefs->GetString(prefs::kEncryptionBootstrapToken);
+  return token;
+}
+
+sync_api::HttpPostProviderFactory* SyncBackendHost::MakeHttpBridgeFactory(
+    URLRequestContextGetter* getter) {
+  return new HttpBridgeFactory(getter);
+}
+
+void SyncBackendHost::InitCore(const Core::DoInitializeOptions& options) {
   core_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoInitialize,
-                        Core::DoInitializeOptions(
-                            sync_service_url, lsid.empty(),
-                            new HttpBridgeFactory(baseline_context_getter),
-                            new HttpBridgeFactory(baseline_context_getter),
-                            lsid,
-                            delete_sync_data_folder,
-                            invalidate_sync_login,
-                            invalidate_sync_xmpp_login,
-                            use_chrome_async_socket,
-                            notification_method)));
+                        options));
 }
 
 void SyncBackendHost::Authenticate(const std::string& username,
@@ -184,30 +223,31 @@ void SyncBackendHost::ConfigureDataTypes(const syncable::ModelTypeSet& types,
                                          CancelableTask* ready_task) {
   // Only one configure is allowed at a time.
   DCHECK(!configure_ready_task_.get());
-  AutoLock lock(registrar_lock_);
-  bool has_new = false;
+  DCHECK(syncapi_initialized_);
 
-  for (DataTypeController::TypeMap::const_iterator it =
-           data_type_controllers_.begin();
-       it != data_type_controllers_.end(); ++it) {
-    syncable::ModelType type = (*it).first;
+  {
+    AutoLock lock(registrar_lock_);
+    for (DataTypeController::TypeMap::const_iterator it =
+             data_type_controllers_.begin();
+         it != data_type_controllers_.end(); ++it) {
+      syncable::ModelType type = (*it).first;
 
-    // If a type is not specified, remove it from the routing_info.
-    if (types.count(type) == 0) {
-      registrar_.routing_info.erase(type);
-    } else {
-      // Add a newly specified data type as GROUP_PASSIVE into the
-      // routing_info, if it does not already exist.
-      if (registrar_.routing_info.count(type) == 0) {
-        registrar_.routing_info[type] = GROUP_PASSIVE;
-        has_new = true;
+      // If a type is not specified, remove it from the routing_info.
+      if (types.count(type) == 0) {
+        registrar_.routing_info.erase(type);
+      } else {
+        // Add a newly specified data type as GROUP_PASSIVE into the
+        // routing_info, if it does not already exist.
+        if (registrar_.routing_info.count(type) == 0) {
+          registrar_.routing_info[type] = GROUP_PASSIVE;
+        }
       }
     }
   }
 
   // If no new data types were added to the passive group, no need to
   // wait for the syncer.
-  if (!has_new) {
+  if (core_->syncapi()->InitialSyncEndedForAllEnabledTypes()) {
     ready_task->Run();
     delete ready_task;
     return;
@@ -215,7 +255,7 @@ void SyncBackendHost::ConfigureDataTypes(const syncable::ModelTypeSet& types,
 
   // Save the task here so we can run it when the syncer finishes
   // initializing the new data types.  It will be run only when the
-  // set of initially sycned data types matches the types requested in
+  // set of initially synced data types matches the types requested in
   // this configure.
   configure_ready_task_.reset(ready_task);
   configure_initial_sync_types_ = types;
@@ -225,6 +265,10 @@ void SyncBackendHost::ConfigureDataTypes(const syncable::ModelTypeSet& types,
   // downloading updates for newly added data types.  Once this is
   // complete, the configure_ready_task_ is run via an
   // OnInitializationComplete notification.
+  RequestNudge();
+}
+
+void SyncBackendHost::RequestNudge() {
   core_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoRequestNudge));
 }
@@ -275,6 +319,9 @@ bool SyncBackendHost::RequestResume() {
   return true;
 }
 
+SyncBackendHost::Core::~Core() {
+}
+
 void SyncBackendHost::Core::NotifyPaused() {
   NotificationService::current()->Notify(NotificationType::SYNC_PAUSED,
                                          NotificationService::AllSources(),
@@ -294,7 +341,9 @@ void SyncBackendHost::Core::NotifyPassphraseRequired() {
       NotificationService::NoDetails());
 }
 
-void SyncBackendHost::Core::NotifyPassphraseAccepted() {
+void SyncBackendHost::Core::NotifyPassphraseAccepted(
+    const std::string& bootstrap_token) {
+  host_->PersistEncryptionBootstrapToken(bootstrap_token);
   NotificationService::current()->Notify(
       NotificationType::SYNC_PASSPHRASE_ACCEPTED,
       NotificationService::AllSources(),
@@ -302,18 +351,22 @@ void SyncBackendHost::Core::NotifyPassphraseAccepted() {
 }
 
 SyncBackendHost::UserShareHandle SyncBackendHost::GetUserShareHandle() const {
+  DCHECK(syncapi_initialized_);
   return core_->syncapi()->GetUserShare();
 }
 
 SyncBackendHost::Status SyncBackendHost::GetDetailedStatus() {
+  DCHECK(syncapi_initialized_);
   return core_->syncapi()->GetDetailedStatus();
 }
 
 SyncBackendHost::StatusSummary SyncBackendHost::GetStatusSummary() {
+  DCHECK(syncapi_initialized_);
   return core_->syncapi()->GetStatusSummary();
 }
 
 string16 SyncBackendHost::GetAuthenticatedUsername() const {
+  DCHECK(syncapi_initialized_);
   return UTF8ToUTF16(core_->syncapi()->GetAuthenticatedUsername());
 }
 
@@ -340,6 +393,11 @@ void SyncBackendHost::GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) {
   out->swap(copy);
 }
 
+bool SyncBackendHost::HasUnsyncedItems() const {
+  DCHECK(syncapi_initialized_);
+  return core_->syncapi()->HasUnsyncedItems();
+}
+
 SyncBackendHost::Core::Core(SyncBackendHost* backend)
     : host_(backend),
       syncapi_(new sync_api::SyncManager()) {
@@ -362,16 +420,15 @@ std::string MakeUserAgentForSyncapi() {
 #elif defined(OS_MACOSX)
   user_agent += "MAC ";
 #endif
-  scoped_ptr<FileVersionInfo> version_info(
-      chrome_app::GetChromeVersionInfo());
-  if (version_info == NULL) {
-    DLOG(ERROR) << "Unable to create FileVersionInfo object";
+  chrome::VersionInfo version_info;
+  if (!version_info.is_valid()) {
+    DLOG(ERROR) << "Unable to create chrome::VersionInfo object";
     return user_agent;
   }
 
-  user_agent += WideToASCII(version_info->product_version());
-  user_agent += " (" + WideToASCII(version_info->last_change()) + ")";
-  if (!version_info->is_official_build())
+  user_agent += version_info.Version();
+  user_agent += " (" + version_info.LastChange() + ")";
+  if (!version_info.IsOfficialBuild())
     user_agent += "-devel";
   return user_agent;
 }
@@ -406,7 +463,9 @@ void SyncBackendHost::Core::DoInitialize(const DoInitializeOptions& options) {
       MakeUserAgentForSyncapi().c_str(),
       options.lsid.c_str(),
       options.use_chrome_async_socket,
-      options.notification_method);
+      options.try_ssltcp_first,
+      options.notification_method,
+      options.restored_key_for_bootstrapping);
   DCHECK(success) << "Syncapi initialization failed!";
 }
 
@@ -549,6 +608,7 @@ void SyncBackendHost::Core::HandleInitalizationCompletedOnFrontendLoop() {
 void SyncBackendHost::HandleInitializationCompletedOnFrontendLoop() {
   if (!frontend_)
     return;
+  syncapi_initialized_ = true;
   frontend_->OnBackendInitialized();
 }
 
@@ -582,9 +642,11 @@ void SyncBackendHost::Core::OnPassphraseRequired() {
       NewRunnableMethod(this, &Core::NotifyPassphraseRequired));
 }
 
-void SyncBackendHost::Core::OnPassphraseAccepted() {
+void SyncBackendHost::Core::OnPassphraseAccepted(
+    const std::string& bootstrap_token) {
   host_->frontend_loop_->PostTask(FROM_HERE,
-      NewRunnableMethod(this, &Core::NotifyPassphraseAccepted));
+      NewRunnableMethod(this, &Core::NotifyPassphraseAccepted,
+          bootstrap_token));
 }
 
 void SyncBackendHost::Core::OnPaused() {

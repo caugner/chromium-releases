@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_TAB_CONTENTS_TAB_CONTENTS_DELEGATE_H_
 #define CHROME_BROWSER_TAB_CONTENTS_TAB_CONTENTS_DELEGATE_H_
+#pragma once
 
 #include <string>
 
@@ -11,26 +12,31 @@
 #include "chrome/browser/automation/automation_resource_routing_delegate.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/common/content_settings_types.h"
-#include "chrome/common/native_web_keyboard_event.h"
+#include "chrome/common/navigation_types.h"
 #include "chrome/common/page_transition_types.h"
 #include "gfx/native_widget_types.h"
-#include "gfx/rect.h"
-#include "webkit/glue/context_menu.h"
 #include "webkit/glue/window_open_disposition.h"
 
-class Browser;
+namespace gfx {
+class Point;
+class Rect;
+class Size;
+}
+
+namespace history {
+class HistoryAddPageArgs;
+}
+
 class DownloadItem;
 class ExtensionFunctionDispatcher;
 class GURL;
 class HtmlDialogUIDelegate;
+struct NativeWebKeyboardEvent;
 class Profile;
 class RenderViewHost;
 class TabContents;
 class TemplateURL;
-
-namespace webkit_glue {
-struct WebApplicationInfo;
-}
+struct ContextMenuParams;
 
 // Objects implement this interface to get notified about changes in the
 // TabContents and to provide necessary functionality.
@@ -67,6 +73,10 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // Selects the specified contents, bringing its container to the front.
   virtual void ActivateContents(TabContents* contents) = 0;
 
+  // Deactivates the specified contents by deactivating its container and
+  // potentialy moving it to the back of the Z order.
+  virtual void DeactivateContents(TabContents* contents) = 0;
+
   // Notifies the delegate that this contents is starting or is done loading
   // some resource. The delegate should use this notification to represent
   // loading feedback. See TabContents::is_loading()
@@ -86,7 +96,7 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   virtual void DetachContents(TabContents* source);
 
   // Called to determine if the TabContents is contained in a popup window.
-  virtual bool IsPopup(TabContents* source) = 0;
+  virtual bool IsPopup(const TabContents* source) const;
 
   // If |source| is constrained, returns the tab containing it.  Otherwise
   // returns |source|.
@@ -173,7 +183,7 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
       RenderViewHost* render_view_host,
       const std::string& extension_id);
 
-  // This is called when webkit tells us that it is done tabbing through
+  // This is called when WebKit tells us that it is done tabbing through
   // controls on the page. Provides a way for TabContentsDelegates to handle
   // this. Returns true if the delegate successfully handled it.
   virtual bool TakeFocus(bool reverse);
@@ -194,7 +204,7 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
 
   virtual bool CanDownload(int request_id);
 
-  virtual void OnStartDownload(DownloadItem* download);
+  virtual void OnStartDownload(DownloadItem* download, TabContents* tab);
 
   // Returns true if the context menu operation was handled by the delegate.
   virtual bool HandleContextMenu(const ContextMenuParams& params);
@@ -240,15 +250,15 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // Returns true to allow TabContents to continue with the default processing.
   virtual bool OnGoToEntryOffset(int offset);
 
-  // Returns whether this tab contents should add navigations to history.
-  virtual bool ShouldAddNavigationsToHistory() const;
+  // Returns whether this tab contents should add the specified navigation to
+  // history.
+  virtual bool ShouldAddNavigationToHistory(
+      const history::HistoryAddPageArgs& add_page_args,
+      NavigationType::Type navigation_type);
 
   // Notification when web app info data is available
   virtual void OnDidGetApplicationInfo(TabContents* tab_contents,
                                        int32 page_id);
-
-  // Returns the browser in which the tab contents is being displayed.
-  virtual Browser* GetBrowser();
 
   // Returns the native window framing the view containing the tab contents.
   virtual gfx::NativeWindow GetFrameNativeWindow();
@@ -270,8 +280,18 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // Only called if ShouldEnablePreferredSizeNotifications() returns true.
   virtual void UpdatePreferredSize(const gfx::Size& pref_size);
 
+  // Notifies the delegate that something has changed about what content the
+  // TabContents is displaying. Currently this is only fired when displaying
+  // PDF using the internal PDF plugin.
+  virtual void ContentTypeChanged(TabContents* source);
+
+  // Sent when the user does a gesture that results in committing the match
+  // preview. The delegate should replace |source| with the |source|'s match
+  // preview TabContents.
+  virtual void CommitMatchPreview(TabContents* source);
+
  protected:
-  ~TabContentsDelegate();
+  virtual ~TabContentsDelegate();
 };
 
 #endif  // CHROME_BROWSER_TAB_CONTENTS_TAB_CONTENTS_DELEGATE_H_

@@ -36,6 +36,9 @@ class IfNode(base.Node):
     elif isinstance(self.parent, empty.StructuresNode):
       from grit.node import structure
       return isinstance(child, structure.StructureNode)
+    elif isinstance(self.parent, empty.OutputsNode):
+      from grit.node import io
+      return isinstance(child, io.OutputNode)
     else:
       return False
 
@@ -204,12 +207,31 @@ class GritNode(base.Node):
     '''
     return self.attrs['base_dir']
 
+  def _CollectOutputFiles(self, nodes, output_files):
+    '''Recursively filters the list of nodes that may contain other lists
+    in <if> nodes, and collects all the nodes that are not enclosed by
+    unsatisfied <if> conditionals and not <if> nodes themselves.
+
+    Args:
+      nodes: The list of nodes to filter.
+      output_files: The list of satisfying nodes.
+    '''
+    for node in nodes:
+      if node.name == 'if':
+        if node.IsConditionSatisfied():
+          self._CollectOutputFiles(node.children, output_files)
+      else:
+        output_files.append(node)
+
   def GetOutputFiles(self):
-    '''Returns the list of <file> nodes that are children of this node's
-    <outputs> child.'''
+    '''Returns the list of <output> nodes that are descendants of this node's
+    <outputs> child and are not enclosed by unsatisfied <if> conditionals.
+    '''
     for child in self.children:
       if child.name == 'outputs':
-        return child.children
+        output_files = []
+        self._CollectOutputFiles(child.children, output_files)
+        return output_files
     raise exception.MissingElement()
 
   def ItemFormatter(self, t):
@@ -228,6 +250,9 @@ class GritNode(base.Node):
     elif t == 'js_map_format':
       from grit.format import js_map_format
       return js_map_format.TopLevel()
+    elif t in ['adm', 'plist', 'plist_strings', 'admx', 'adml']:
+      from grit.format.policy_templates import template_formatter
+      return template_formatter.TemplateFormatter(t)
     else:
       return super(type(self), self).ItemFormatter(t)
 

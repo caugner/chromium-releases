@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_PREFS_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_PREFS_H_
+#pragma once
 
 #include <set>
 #include <string>
@@ -11,7 +12,7 @@
 
 #include "base/linked_ptr.h"
 #include "base/time.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/extensions/extension.h"
 #include "googleurl/src/gurl.h"
 
@@ -89,6 +90,10 @@ class ExtensionPrefs {
   // Based on extension id, checks prefs to see if it is blacklisted.
   bool IsExtensionBlacklisted(const std::string& id);
 
+  // Is the extension with |extension_id| allowed by policy (checking both
+  // whitelist and blacklist).
+  bool IsExtensionAllowedByPolicy(const std::string& extension_id);
+
   // Returns the last value set via SetLastPingDay. If there isn't such a
   // pref, the returned Time will return true for is_null().
   base::Time LastPingDay(const std::string& extension_id) const;
@@ -142,11 +147,13 @@ class ExtensionPrefs {
   // Returns the extension id's that have idle install information.
   std::set<std::string> GetIdleInstallInfoIds();
 
-  // Returns whether app toolbars are visible for the specified extension.
-  bool AreAppTabToolbarsVisible(const std::string& extension_id);
-
-  // Set whether app toolbars are visible for the specified extension.
-  void SetAppTabToolbarVisibility(const std::string& extension_id, bool value);
+  // We allow the web store to set a string containing login information when a
+  // purchase is made, so that when a user logs into sync with a different
+  // account we can recognize the situation. The Get function returns true if
+  // there was previously stored data (placing it in |result|), or false
+  // otherwise. The Set will overwrite any previous login.
+  bool GetWebStoreLogin(std::string* result);
+  void SetWebStoreLogin(const std::string& login);
 
   static void RegisterUserPrefs(PrefService* prefs);
 
@@ -154,7 +161,6 @@ class ExtensionPrefs {
   PrefService* pref_service() const { return prefs_; }
 
  private:
-
   // Converts absolute paths in the pref to paths relative to the
   // install_directory_.
   void MakePathsRelative();
@@ -165,7 +171,7 @@ class ExtensionPrefs {
 
   // Sets the pref |key| for extension |id| to |value|.
   void UpdateExtensionPref(const std::string& id,
-                           const std::wstring& key,
+                           const std::string& key,
                            Value* value);
 
   // Deletes the pref dictionary for extension |id|.
@@ -173,11 +179,11 @@ class ExtensionPrefs {
 
   // Reads a boolean pref from |ext| with key |pref_key|.
   // Return false if the value is false or kPrefBlacklist does not exist.
-  bool ReadBooleanFromPref(DictionaryValue* ext, const std::wstring& pref_key);
+  bool ReadBooleanFromPref(DictionaryValue* ext, const std::string& pref_key);
 
   // Reads a boolean pref |pref_key| from extension with id |extension_id|.
   bool ReadExtensionPrefBoolean(const std::string& extension_id,
-                                const std::wstring& pref_key);
+                                const std::string& pref_key);
 
   // Ensures and returns a mutable dictionary for extension |id|'s prefs.
   DictionaryValue* GetOrCreateExtensionPref(const std::string& id);

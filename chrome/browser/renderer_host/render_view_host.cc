@@ -8,20 +8,21 @@
 #include <utility>
 #include <vector>
 
-#include "app/resource_bundle.h"
 #include "base/i18n/rtl.h"
 #include "base/json/json_reader.h"
 #include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "base/time.h"
-#include "base/waitable_event.h"
+#include "chrome/browser/blocked_plugin_manager.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/child_process_security_policy.h"
 #include "chrome/browser/cross_site_request_manager.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/in_process_webkit/session_storage_namespace.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
@@ -30,10 +31,12 @@
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/common/bindings_policy.h"
+#include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/net/url_request_context_getter.h"
@@ -44,13 +47,13 @@
 #include "net/base/net_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFindOptions.h"
+#include "webkit/glue/context_menu.h"
+#include "webkit/glue/dom_operations.h"
 #include "webkit/glue/form_data.h"
 #include "webkit/glue/form_field.h"
-
-#if defined(OS_WIN)
-// TODO(port): accessibility not yet implemented. See http://crbug.com/8288.
-#include "chrome/browser/browser_accessibility_manager_win.h"
-#endif
+#include "webkit/glue/password_form_dom_manager.h"
+#include "webkit/glue/webaccessibility.h"
+#include "webkit/glue/webdropdata.h"
 
 using base::TimeDelta;
 using webkit_glue::FormData;
@@ -112,7 +115,7 @@ RenderViewHost* RenderViewHost::FromID(int render_process_id,
 RenderViewHost::RenderViewHost(SiteInstance* instance,
                                RenderViewHostDelegate* delegate,
                                int routing_id,
-                               int64 session_storage_namespace_id)
+                               SessionStorageNamespace* session_storage)
     : RenderWidgetHost(instance->GetProcess(), routing_id),
       instance_(instance),
       delegate_(delegate),
@@ -127,8 +130,15 @@ RenderViewHost::RenderViewHost(SiteInstance* instance,
       unload_ack_is_for_cross_site_transition_(false),
       are_javascript_messages_suppressed_(false),
       sudden_termination_allowed_(false),
-      session_storage_namespace_id_(session_storage_namespace_id),
-      is_extension_process_(false) {
+      session_storage_namespace_(session_storage),
+      is_extension_process_(false),
+      autofill_query_id_(0),
+      save_accessibility_tree_for_testing_(false) {
+  if (!session_storage_namespace_) {
+    session_storage_namespace_ =
+        new SessionStorageNamespace(process()->profile());
+  }
+
   DCHECK(instance_);
   DCHECK(delegate_);
 }
@@ -139,22 +149,16 @@ RenderViewHost::~RenderViewHost() {
   // Be sure to clean up any leftover state from cross-site requests.
   Singleton<CrossSiteRequestManager>()->SetHasPendingCrossSiteRequest(
       process()->id(), routing_id(), false);
-
-  NotificationService::current()->Notify(
-      NotificationType::EXTENSION_PORT_DELETED_DEBUG,
-      Source<IPC::Message::Sender>(this),
-      NotificationService::NoDetails());
 }
 
-bool RenderViewHost::CreateRenderView(
-    URLRequestContextGetter* request_context, const string16& frame_name) {
+bool RenderViewHost::CreateRenderView(const string16& frame_name) {
   DCHECK(!IsRenderViewLive()) << "Creating view twice";
 
   // The process may (if we're sharing a process with another host that already
   // initialized it) or may not (we have our own process or the old process
   // crashed) have been initialized. Calling Init multiple times will be
   // ignored, so this is safe.
-  if (!process()->Init(is_extension_process_, request_context))
+  if (!process()->Init(is_extension_process_))
     return false;
   DCHECK(process()->HasConnection());
   DCHECK(process()->profile());
@@ -185,13 +189,20 @@ bool RenderViewHost::CreateRenderView(
     webkit_prefs.databases_enabled = true;
   }
 
+  // Force accelerated compositing off for chrome: and chrome-extension: pages
+  if (delegate_->GetURL().SchemeIs(chrome::kChromeUIScheme) ||
+      delegate_->GetURL().SchemeIs(chrome::kExtensionScheme) ||
+      delegate_->GetURL().SchemeIs(chrome::kChromeInternalScheme)) {
+    webkit_prefs.accelerated_compositing_enabled = false;
+  }
+
   ViewMsg_New_Params params;
   params.parent_window = GetNativeViewId();
   params.renderer_preferences =
       delegate_->GetRendererPrefs(process()->profile());
   params.web_preferences = webkit_prefs;
   params.view_id = routing_id();
-  params.session_storage_namespace_id = session_storage_namespace_id_;
+  params.session_storage_namespace_id = session_storage_namespace_->id();
   params.frame_name = frame_name;
   Send(new ViewMsg_New(params));
 
@@ -238,6 +249,10 @@ void RenderViewHost::Navigate(const ViewMsg_Navigate_Params& params) {
     DCHECK(!suspended_nav_message_.get());
     suspended_nav_message_.reset(nav_message);
   } else {
+    // Unset this, otherwise if true and the hang monitor fires we'll
+    // incorrectly close the tab.
+    is_waiting_for_unload_ack_ = false;
+
     Send(nav_message);
 
     // Force the throbber to start. We do this because WebKit's "started
@@ -253,6 +268,11 @@ void RenderViewHost::Navigate(const ViewMsg_Navigate_Params& params) {
     // don't want to either.
     if (!params.url.SchemeIs(chrome::kJavaScriptScheme))
       delegate_->DidStartLoading();
+
+    const GURL& url = params.url;
+    if (!delegate_->IsExternalTabContainer() &&
+        (url.SchemeIs("http") || url.SchemeIs("https")))
+      chrome_browser_net::PreconnectUrlAndSubresources(url);
   }
 }
 
@@ -652,6 +672,10 @@ void RenderViewHost::InstallMissingPlugin() {
   Send(new ViewMsg_InstallMissingPlugin(routing_id()));
 }
 
+void RenderViewHost::LoadBlockedPlugins() {
+  Send(new ViewMsg_LoadBlockedPlugins(routing_id()));
+}
+
 void RenderViewHost::FilesSelectedInChooser(
     const std::vector<FilePath>& files) {
   // Grant the security access requested to the given files.
@@ -703,6 +727,8 @@ void RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP_EX(RenderViewHost, msg, msg_is_ok)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ShowView, OnMsgShowView)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ShowWidget, OnMsgShowWidget)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_ShowFullscreenWidget,
+                        OnMsgShowFullscreenWidget)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_RunModal, OnMsgRunModal)
     IPC_MESSAGE_HANDLER(ViewHostMsg_RenderViewReady, OnMsgRenderViewReady)
     IPC_MESSAGE_HANDLER(ViewHostMsg_RenderViewGone, OnMsgRenderViewGone)
@@ -771,8 +797,6 @@ void RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_UpdateDragCursor, OnUpdateDragCursor)
     IPC_MESSAGE_HANDLER(ViewHostMsg_TakeFocus, OnTakeFocus)
     IPC_MESSAGE_HANDLER(ViewHostMsg_PageHasOSDD, OnMsgPageHasOSDD)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetSearchProviderInstallState,
-                                    OnMsgGetSearchProviderInstallState)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidGetPrintedPagesCount,
                         OnDidGetPrintedPagesCount)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidPrintPage, DidPrintPage)
@@ -789,12 +813,18 @@ void RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
                         OnRequestDockDevToolsWindow);
     IPC_MESSAGE_HANDLER(ViewHostMsg_RequestUndockDevToolsWindow,
                         OnRequestUndockDevToolsWindow);
-    IPC_MESSAGE_HANDLER(ViewHostMsg_DevToolsRuntimeFeatureStateChanged,
-                        OnDevToolsRuntimeFeatureStateChanged);
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DevToolsRuntimePropertyChanged,
+                        OnDevToolsRuntimePropertyChanged);
     IPC_MESSAGE_HANDLER(ViewHostMsg_UserMetricsRecordAction,
                         OnUserMetricsRecordAction)
     IPC_MESSAGE_HANDLER(ViewHostMsg_MissingPluginStatus, OnMissingPluginStatus);
+    IPC_MESSAGE_HANDLER(ViewHostMsg_NonSandboxedPluginBlocked,
+                        OnNonSandboxedPluginBlocked);
+    IPC_MESSAGE_HANDLER(ViewHostMsg_BlockedPluginLoaded,
+                        OnBlockedPluginLoaded);
     IPC_MESSAGE_HANDLER(ViewHostMsg_CrashedPlugin, OnCrashedPlugin);
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DisabledOutdatedPlugin,
+                        OnDisabledOutdatedPlugin);
     IPC_MESSAGE_HANDLER(ViewHostMsg_SendCurrentPageAllSavableResourceLinks,
                         OnReceivedSavableResourceLinksForCurrentPage);
     IPC_MESSAGE_HANDLER(ViewHostMsg_SendSerializedHtmlData,
@@ -826,6 +856,8 @@ void RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
                         OnAccessibilityFocusChange)
     IPC_MESSAGE_HANDLER(ViewHostMsg_AccessibilityObjectStateChange,
                         OnAccessibilityObjectStateChange)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_AccessibilityObjectChildrenChange,
+                        OnAccessibilityObjectChildrenChange)
     IPC_MESSAGE_HANDLER(ViewHostMsg_OnCSSInserted, OnCSSInserted)
     IPC_MESSAGE_HANDLER(ViewHostMsg_PageContents, OnPageContents)
     IPC_MESSAGE_HANDLER(ViewHostMsg_PageTranslated, OnPageTranslated)
@@ -834,6 +866,8 @@ void RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_WebDatabaseAccessed, OnWebDatabaseAccessed)
     IPC_MESSAGE_HANDLER(ViewHostMsg_AccessibilityTree, OnAccessibilityTree)
     IPC_MESSAGE_HANDLER(ViewHostMsg_FocusedNodeChanged, OnMsgFocusedNodeChanged)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_SetDisplayingPDFContent,
+                        OnSetDisplayingPDFContent)
     // Have the super handle all other messages.
     IPC_MESSAGE_UNHANDLED(RenderWidgetHost::OnMessageReceived(msg))
   IPC_END_MESSAGE_MAP_EX()
@@ -877,6 +911,13 @@ void RenderViewHost::CreateNewWidget(int route_id,
     view->CreateNewWidget(route_id, popup_type);
 }
 
+void RenderViewHost::CreateNewFullscreenWidget(
+    int route_id, WebKit::WebPopupType popup_type) {
+  RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
+  if (view)
+    view->CreateNewFullscreenWidget(route_id, popup_type);
+}
+
 void RenderViewHost::OnMsgShowView(int route_id,
                                    WindowOpenDisposition disposition,
                                    const gfx::Rect& initial_pos,
@@ -893,6 +934,14 @@ void RenderViewHost::OnMsgShowWidget(int route_id,
   RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
   if (view) {
     view->ShowCreatedWidget(route_id, initial_pos);
+    Send(new ViewMsg_Move_ACK(route_id));
+  }
+}
+
+void RenderViewHost::OnMsgShowFullscreenWidget(int route_id) {
+  RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
+  if (view) {
+    view->ShowCreatedFullscreenWidget(route_id);
     Send(new ViewMsg_Move_ACK(route_id));
   }
 }
@@ -983,7 +1032,12 @@ void RenderViewHost::OnMsgNavigate(const IPC::Message& msg) {
   FilterURL(policy, renderer_id, &validated_params.password_form.origin);
   FilterURL(policy, renderer_id, &validated_params.password_form.action);
 
-  SetDocumentLoaded(false);
+  if (!validated_params.was_within_same_page) {
+    // Only set that the document is not loaded if the navigation was not within
+    // the current page. If it was within the same page, the document will not
+    // load again.
+    SetDocumentLoaded(false);
+  }
   delegate_->DidNavigate(this, validated_params);
 }
 
@@ -1245,11 +1299,6 @@ void RenderViewHost::OnMsgDOMUISend(
     return;
   }
 
-  // DOMUI doesn't use these values yet.
-  // TODO(aa): When DOMUI is ported to ExtensionFunctionDispatcher, send real
-  // values here.
-  const int kRequestId = -1;
-  const bool kHasCallback = false;
   scoped_ptr<Value> value;
   if (!content.empty()) {
     value.reset(base::JSONReader::Read(content, false));
@@ -1261,11 +1310,18 @@ void RenderViewHost::OnMsgDOMUISend(
     }
   }
 
-  delegate_->ProcessDOMUIMessage(message,
-                                 static_cast<const ListValue*>(value.get()),
-                                 source_url,
-                                 kRequestId,
-                                 kHasCallback);
+  ViewHostMsg_DomMessage_Params params;
+  params.name = message;
+  if (value.get())
+    params.arguments.Swap(static_cast<ListValue*>(value.get()));
+  params.source_url = source_url;
+  // DOMUI doesn't use these values yet.
+  // TODO(aa): When DOMUI is ported to ExtensionFunctionDispatcher, send real
+  // values here.
+  params.request_id = -1;
+  params.has_callback = false;
+  params.user_gesture = false;
+  delegate_->ProcessDOMUIMessage(params);
 }
 
 void RenderViewHost::OnMsgForwardMessageToExternalHost(
@@ -1317,7 +1373,9 @@ void RenderViewHost::OnMsgSetTooltipText(
   if (!tooltip_text.empty()) {
     if (text_direction_hint == WebKit::WebTextDirectionLeftToRight) {
       // Force the tooltip to have LTR directionality.
-      base::i18n::GetDisplayStringInLTRDirectionality(&wrapped_tooltip_text);
+      wrapped_tooltip_text = UTF16ToWide(
+          base::i18n::GetDisplayStringInLTRDirectionality(
+              WideToUTF16(wrapped_tooltip_text)));
     } else if (text_direction_hint == WebKit::WebTextDirectionRightToLeft &&
                !base::i18n::IsRTL()) {
       // Force the tooltip to have RTL directionality.
@@ -1335,7 +1393,10 @@ void RenderViewHost::OnMsgSelectionChanged(const std::string& text) {
 
 void RenderViewHost::OnMsgRunFileChooser(
     const ViewHostMsg_RunFileChooser_Params& params) {
-  delegate_->RunFileChooser(params);
+  RenderViewHostDelegate::FileSelect* file_select_delegate =
+      delegate()->GetFileSelectDelegate();
+  if (file_select_delegate)
+    file_select_delegate->RunFileChooser(params);
 }
 
 void RenderViewHost::OnMsgRunJavaScriptMessage(
@@ -1432,14 +1493,6 @@ void RenderViewHost::OnMsgPageHasOSDD(int32 page_id, const GURL& doc_url,
   delegate_->PageHasOSDD(this, page_id, doc_url, autodetected);
 }
 
-void RenderViewHost::OnMsgGetSearchProviderInstallState(
-    const GURL& url, IPC::Message* reply_msg) {
-  ViewHostMsg_GetSearchProviderInstallState::WriteReplyParams(
-      reply_msg,
-      delegate_->GetSearchProviderInstallState(url));
-  Send(reply_msg);
-}
-
 void RenderViewHost::OnDidGetPrintedPagesCount(int cookie, int number_pages) {
   RenderViewHostDelegate::Printing* printing_delegate =
       delegate_->GetPrintingDelegate();
@@ -1487,11 +1540,11 @@ void RenderViewHost::OnRequestUndockDevToolsWindow() {
   DevToolsManager::GetInstance()->RequestUndockWindow(this);
 }
 
-void RenderViewHost::OnDevToolsRuntimeFeatureStateChanged(
-    const std::string& feature,
-    bool enabled) {
+void RenderViewHost::OnDevToolsRuntimePropertyChanged(
+    const std::string& name,
+    const std::string& value) {
   DevToolsManager::GetInstance()->
-      RuntimeFeatureStateChanged(this, feature, enabled);
+      RuntimePropertyChanged(this, name, value);
 }
 
 void RenderViewHost::OnUserMetricsRecordAction(const std::string& action) {
@@ -1525,11 +1578,36 @@ void RenderViewHost::OnMissingPluginStatus(int status) {
     integration_delegate->OnMissingPluginStatus(status);
 }
 
+void RenderViewHost::OnNonSandboxedPluginBlocked(const std::string& plugin,
+                                                 const string16& name) {
+  RenderViewHostDelegate::BlockedPlugin* blocked_plugin_delegate =
+      delegate_->GetBlockedPluginDelegate();
+  if (blocked_plugin_delegate) {
+    blocked_plugin_delegate->OnNonSandboxedPluginBlocked(plugin, name);
+  }
+}
+
+void RenderViewHost::OnBlockedPluginLoaded() {
+  RenderViewHostDelegate::BlockedPlugin* blocked_plugin_delegate =
+      delegate_->GetBlockedPluginDelegate();
+  if (blocked_plugin_delegate) {
+    blocked_plugin_delegate->OnBlockedPluginLoaded();
+  }
+}
+
 void RenderViewHost::OnCrashedPlugin(const FilePath& plugin_path) {
   RenderViewHostDelegate::BrowserIntegration* integration_delegate =
       delegate_->GetBrowserIntegrationDelegate();
   if (integration_delegate)
     integration_delegate->OnCrashedPlugin(plugin_path);
+}
+
+void RenderViewHost::OnDisabledOutdatedPlugin(const string16& name,
+                                              const GURL& update_url) {
+  RenderViewHostDelegate::BrowserIntegration* integration_delegate =
+      delegate_->GetBrowserIntegrationDelegate();
+  if (integration_delegate)
+    integration_delegate->OnDisabledOutdatedPlugin(name, update_url);
 }
 
 void RenderViewHost::GetAllSavableResourceLinksForCurrentPage(
@@ -1607,6 +1685,7 @@ void RenderViewHost::OnQueryFormFieldAutoFill(
     AutoFillSuggestionsReturned(query_id,
                                 std::vector<string16>(),
                                 std::vector<string16>(),
+                                std::vector<string16>(),
                                 std::vector<int>());
   }
 
@@ -1656,10 +1735,12 @@ void RenderViewHost::AutoFillSuggestionsReturned(
     int query_id,
     const std::vector<string16>& names,
     const std::vector<string16>& labels,
+    const std::vector<string16>& icons,
     const std::vector<int>& unique_ids) {
   autofill_query_id_ = query_id;
   autofill_values_.assign(names.begin(), names.end());
   autofill_labels_.assign(labels.begin(), labels.end());
+  autofill_icons_.assign(icons.begin(), icons.end());
   autofill_unique_ids_.assign(unique_ids.begin(), unique_ids.end());
 }
 
@@ -1673,6 +1754,7 @@ void RenderViewHost::AutocompleteSuggestionsReturned(
     // Autocomplete is canceling.
     autofill_values_.clear();
     autofill_labels_.clear();
+    autofill_icons_.clear();
     autofill_unique_ids_.clear();
   }
 
@@ -1692,6 +1774,7 @@ void RenderViewHost::AutocompleteSuggestionsReturned(
     if (unique) {
       autofill_values_.push_back(suggestions[i]);
       autofill_labels_.push_back(string16());
+      autofill_icons_.push_back(string16());
       autofill_unique_ids_.push_back(0);  // 0 means no profile.
     }
   }
@@ -1700,6 +1783,7 @@ void RenderViewHost::AutocompleteSuggestionsReturned(
                                                query_id,
                                                autofill_values_,
                                                autofill_labels_,
+                                               autofill_icons_,
                                                autofill_unique_ids_));
 }
 
@@ -1725,6 +1809,18 @@ void RenderViewHost::OnMsgFocusedNodeChanged() {
   delegate_->FocusedNodeChanged();
 }
 
+void RenderViewHost::OnMsgFocus() {
+  RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
+  if (view)
+    view->Activate();
+}
+
+void RenderViewHost::OnMsgBlur() {
+  RenderViewHostDelegate::View* view = delegate_->GetViewDelegate();
+  if (view)
+    view->Deactivate();
+}
+
 gfx::Rect RenderViewHost::GetRootWindowResizerRect() const {
   return delegate_->GetRootWindowResizerRect();
 }
@@ -1741,12 +1837,14 @@ void RenderViewHost::ForwardMouseEvent(
   if (view) {
     switch (event_copy.type) {
       case WebInputEvent::MouseMove:
-        view->HandleMouseEvent();
+        view->HandleMouseMove();
         break;
       case WebInputEvent::MouseLeave:
         view->HandleMouseLeave();
         break;
       case WebInputEvent::MouseDown:
+        view->HandleMouseDown();
+        break;
       case WebInputEvent::MouseWheel:
         if (ignore_input_events() && delegate_)
           delegate_->OnIgnoredUIEvent();
@@ -1823,21 +1921,17 @@ void RenderViewHost::OnRequestNotificationPermission(
   }
 }
 
-void RenderViewHost::OnExtensionRequest(const std::string& name,
-                                        const ListValue& args,
-                                        const GURL& source_url,
-                                        int request_id,
-                                        bool has_callback) {
+void RenderViewHost::OnExtensionRequest(
+    const ViewHostMsg_DomMessage_Params& params) {
   if (!ChildProcessSecurityPolicy::GetInstance()->
           HasExtensionBindings(process()->id())) {
     // This can happen if someone uses window.open() to open an extension URL
     // from a non-extension context.
-    BlockExtensionRequest(request_id);
+    BlockExtensionRequest(params.request_id);
     return;
   }
 
-  delegate_->ProcessDOMUIMessage(name, &args, source_url, request_id,
-      has_callback);
+  delegate_->ProcessDOMUIMessage(params);
 }
 
 void RenderViewHost::SendExtensionResponse(int request_id, bool success,
@@ -1850,10 +1944,6 @@ void RenderViewHost::SendExtensionResponse(int request_id, bool success,
 void RenderViewHost::BlockExtensionRequest(int request_id) {
   SendExtensionResponse(request_id, false, "",
                         "Access to extension API denied.");
-}
-
-void RenderViewHost::ViewTypeChanged(ViewType::Type type) {
-  Send(new ViewMsg_NotifyRenderViewType(routing_id(), type));
 }
 
 void RenderViewHost::UpdateBrowserWindowId(int window_id) {
@@ -1894,17 +1984,41 @@ void RenderViewHost::OnExtensionPostMessage(
 }
 
 void RenderViewHost::OnAccessibilityFocusChange(int acc_obj_id) {
-  view()->OnAccessibilityFocusChange(acc_obj_id);
+  if (view())
+    view()->OnAccessibilityFocusChange(acc_obj_id);
 }
 
-void RenderViewHost::OnAccessibilityObjectStateChange(int acc_obj_id) {
-  view()->OnAccessibilityObjectStateChange(acc_obj_id);
+void RenderViewHost::OnAccessibilityObjectStateChange(
+    const webkit_glue::WebAccessibility& acc_obj) {
+  if (view())
+    view()->OnAccessibilityObjectStateChange(acc_obj);
+
+  NotificationService::current()->Notify(
+      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
+      Source<RenderViewHost>(this),
+      NotificationService::NoDetails());
+}
+
+void RenderViewHost::OnAccessibilityObjectChildrenChange(
+    const std::vector<webkit_glue::WebAccessibility>& acc_changes) {
+  if (view())
+    view()->OnAccessibilityObjectChildrenChange(acc_changes);
+
+  if (acc_changes.size() > 0) {
+    NotificationService::current()->Notify(
+        NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
+        Source<RenderViewHost>(this),
+        NotificationService::NoDetails());
+  }
 }
 
 void RenderViewHost::OnAccessibilityTree(
     const webkit_glue::WebAccessibility& tree) {
   if (view())
     view()->UpdateAccessibilityTree(tree);
+
+  if (save_accessibility_tree_for_testing_)
+    accessibility_tree_ = tree;
 
   NotificationService::current()->Notify(
       NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
@@ -1941,11 +2055,12 @@ void RenderViewHost::OnPageTranslated(int32 page_id,
                                          translated_lang, error_type);
 }
 
-void RenderViewHost::OnContentBlocked(ContentSettingsType type) {
+void RenderViewHost::OnContentBlocked(ContentSettingsType type,
+                                      const std::string& resource_identifier) {
   RenderViewHostDelegate::ContentSettings* content_settings_delegate =
       delegate_->GetContentSettingsDelegate();
   if (content_settings_delegate)
-    content_settings_delegate->OnContentBlocked(type);
+    content_settings_delegate->OnContentBlocked(type, resource_identifier);
 }
 
 void RenderViewHost::OnAppCacheAccessed(const GURL& manifest_url,
@@ -1967,4 +2082,8 @@ void RenderViewHost::OnWebDatabaseAccessed(const GURL& url,
   if (content_settings_delegate)
     content_settings_delegate->OnWebDatabaseAccessed(
         url, name, display_name, estimated_size, blocked_by_policy);
+}
+
+void RenderViewHost::OnSetDisplayingPDFContent() {
+  delegate_->SetDisplayingPDFContent();
 }

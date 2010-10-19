@@ -46,6 +46,7 @@ class VideoRendererBase : public VideoRenderer,
   // MediaFilter implementation.
   virtual void Play(FilterCallback* callback);
   virtual void Pause(FilterCallback* callback);
+  virtual void Flush(FilterCallback* callback);
   virtual void Stop(FilterCallback* callback);
   virtual void SetPlaybackRate(float playback_rate);
   virtual void Seek(base::TimeDelta time, FilterCallback* callback);
@@ -106,16 +107,21 @@ class VideoRendererBase : public VideoRenderer,
     return surface_type_ == media::VideoFrame::TYPE_EGL_IMAGE;
   }
 
+  void ReadInput(scoped_refptr<VideoFrame> frame);
+
  private:
   // Callback from video decoder to deliver decoded video frames and decrements
   // |pending_reads_|.
-  void OnFillBufferDone(scoped_refptr<VideoFrame> frame);
+  void ConsumeVideoFrame(scoped_refptr<VideoFrame> frame);
 
   // Helper method that schedules an asynchronous read from the decoder and
   // increments |pending_reads_|.
   //
   // Safe to call from any thread.
   void ScheduleRead_Locked();
+
+  // Helper function to finished "flush" operation
+  void OnFlushDone();
 
   // Helper method that flushes all video frame in "ready queue" including
   // current frame into "done queue".
@@ -149,10 +155,36 @@ class VideoRendererBase : public VideoRenderer,
   // always check |state_| to see if it was set to STOPPED after waking up!
   ConditionVariable frame_available_;
 
+  // State transition Diagram of this class:
+  //       [kUninitialized] -------> [kError]
+  //              |
+  //              | Initialize()
+  //              V        All frames returned
+  //   +------[kFlushed]<----------------------[kFlushing]
+  //   |          | Seek() or upon                  ^
+  //   |          V got first frame                 |
+  //   |      [kSeeking]                            | Flush()
+  //   |          |                                 |
+  //   |          V Got enough frames               |
+  //   |      [kPrerolled]---------------------->[kPaused]
+  //   |          |                Pause()          ^
+  //   |          V Play()                          |
+  //   |       [kPlaying]---------------------------|
+  //   |          |                Pause()          ^
+  //   |          V Receive EOF frame.              | Pause()
+  //   |       [kEnded]-----------------------------+
+  //   |                                            ^
+  //   |                                            |
+  //   +-----> [kStopped]                   [Any state other than]
+  //                                        [kUninitialized/kError]
+
   // Simple state tracking variable.
   enum State {
     kUninitialized,
+    kPrerolled,
     kPaused,
+    kFlushing,
+    kFlushed,
     kSeeking,
     kPlaying,
     kEnded,
@@ -167,19 +199,21 @@ class VideoRendererBase : public VideoRenderer,
   // Previous time returned from the pipeline.
   base::TimeDelta previous_time_;
 
-  // Keeps track of our pending reads.  We *must* have no pending reads before
-  // executing the pause callback, otherwise we breach the contract that all
-  // filters are idling.
-  //
-  // We use size_t since we compare against std::deque::size().
-  size_t pending_reads_;
+  // Keeps track of our pending buffers. We *must* have no pending reads
+  // before executing the flush callback; We decrement it each time we receive
+  // a buffer and increment it each time we send a buffer out. therefore if
+  // decoder provides buffer, |pending_reads_| is always non-positive and if
+  // renderer provides buffer, |pending_reads_| is always non-negative.
+  int pending_reads_;
   bool pending_paint_;
 
   float playback_rate_;
 
   // Filter callbacks.
-  scoped_ptr<FilterCallback> pause_callback_;
+  scoped_ptr<FilterCallback> flush_callback_;
   scoped_ptr<FilterCallback> seek_callback_;
+
+  base::TimeDelta seek_timestamp_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoRendererBase);
 };

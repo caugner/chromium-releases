@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_COCOA_BOOKMARK_BAR_CONTROLLER_H_
 #define CHROME_BROWSER_COCOA_BOOKMARK_BAR_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 #include <map>
@@ -30,7 +31,6 @@ class BookmarkNode;
 class Browser;
 class GURL;
 class PrefService;
-class Profile;
 class TabContents;
 @class ToolbarController;
 @protocol ViewResizer;
@@ -199,7 +199,7 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   NSRect originalImportBookmarksRect_;  // Original, pre-resized field rect.
 
   // "Other bookmarks" button on the right side.
-  scoped_nsobject<NSButton> otherBookmarksButton_;
+  scoped_nsobject<BookmarkButton> otherBookmarksButton_;
 
   // We have a special menu for folder buttons.  This starts as a copy
   // of the bar menu.

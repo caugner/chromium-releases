@@ -1,13 +1,12 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef APP_TEST_SUITE_H_
 #define APP_TEST_SUITE_H_
+#pragma once
 
 #include "build/build_config.h"
-
-#include <string>
 
 #include "app/app_paths.h"
 #include "app/resource_bundle.h"
@@ -18,7 +17,7 @@
 #include "base/scoped_nsautorelease_pool.h"
 #include "base/test/test_suite.h"
 
-class AppTestSuite : public TestSuite {
+class AppTestSuite : public base::TestSuite {
  public:
   AppTestSuite(int argc, char** argv) : TestSuite(argc, argv) {
   }
@@ -46,20 +45,18 @@ class AppTestSuite : public TestSuite {
 #error Unknown branding
 #endif
     mac_util::SetOverrideAppBundlePath(path);
-#endif  // OS_MACOSX
-
-#if defined(OS_LINUX)
+#elif defined(OS_POSIX)
     FilePath pak_dir;
     PathService::Get(base::DIR_MODULE, &pak_dir);
     pak_dir = pak_dir.AppendASCII("app_unittests_strings");
     PathService::Override(app::DIR_LOCALES, pak_dir);
     PathService::Override(app::FILE_RESOURCES_PAK,
                           pak_dir.AppendASCII("app_resources.pak"));
-#endif  // OS_LINUX
+#endif
 
     // Force unittests to run using en-US so if we test against string
     // output, it'll pass regardless of the system language.
-    ResourceBundle::InitSharedInstance(L"en-US");
+    ResourceBundle::InitSharedInstance("en-US");
   }
 
   virtual void Shutdown() {

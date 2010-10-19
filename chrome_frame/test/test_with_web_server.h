@@ -8,6 +8,8 @@
 #include <windows.h>
 #include <string>
 
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome_frame/test/http_server.h"
 #include "chrome_frame/test/test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"

@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/message_loop.h"
@@ -13,6 +14,7 @@
 #include "base/process_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/dom_operation_notification_details.h"
@@ -167,7 +169,7 @@ class DownloadsCompleteObserver : public DownloadManager::Observer,
 
     download_manager_->RemoveObserver(this);
     // waiting_ will have been set if not all downloads were complete on first
-    // pass below in SetDownloads().
+    // pass below in ModelChanged().
     if (waiting_)
       MessageLoopForUI::current()->Quit();
     return true;
@@ -185,11 +187,9 @@ class DownloadsCompleteObserver : public DownloadManager::Observer,
 
   // DownloadManager::Observer
   virtual void ModelChanged() {
-    download_manager_->GetDownloads(this, L"");
-  }
+    downloads_.clear();
+    download_manager_->SearchDownloads(string16(), &downloads_);
 
-  virtual void SetDownloads(std::vector<DownloadItem*>& downloads) {
-    downloads_ = downloads;
     if (CheckAllDownloadsComplete())
       return;
 
@@ -198,7 +198,6 @@ class DownloadsCompleteObserver : public DownloadManager::Observer,
       ui_test_utils::RunMessageLoop();
     }
   }
-
 
  private:
   // The observed download manager.
@@ -551,6 +550,25 @@ void WaitForBookmarkModelToLoad(BookmarkModel* model) {
   ASSERT_TRUE(model->IsLoaded());
 }
 
+bool SendKeyPressSync(gfx::NativeWindow window,
+                      app::KeyboardCode key,
+                      bool control,
+                      bool shift,
+                      bool alt,
+                      bool command) {
+  if (!ui_controls::SendKeyPressNotifyWhenDone(
+          window, key, control, shift, alt, command,
+          new MessageLoop::QuitTask())) {
+    LOG(ERROR) << "ui_controls::SendKeyPressNotifyWhenDone failed";
+    return false;
+  }
+  // Run the message loop. It'll stop running when either the key was received
+  // or the test timed out (in which case testing::Test::HasFatalFailure should
+  // be set).
+  RunMessageLoop();
+  return !testing::Test::HasFatalFailure();
+}
+
 TimedMessageLoopRunner::TimedMessageLoopRunner()
     : loop_(new MessageLoopForUI()),
       owned_(true),
@@ -611,14 +629,13 @@ void AppendToPythonPath(const FilePath& dir) {
 
 TestWebSocketServer::TestWebSocketServer(const FilePath& root_directory) {
   scoped_ptr<CommandLine> cmd_line(CreateWebSocketServerCommandLine());
-  cmd_line->AppendSwitchWithValue("server", "start");
+  cmd_line->AppendSwitchASCII("server", "start");
   cmd_line->AppendSwitch("chromium");
   cmd_line->AppendSwitch("register_cygwin");
-  cmd_line->AppendSwitchWithValue("root", root_directory.ToWStringHack());
+  cmd_line->AppendSwitchPath("root", root_directory);
   temp_dir_.CreateUniqueTempDir();
   websocket_pid_file_ = temp_dir_.path().AppendASCII("websocket.pid");
-  cmd_line->AppendSwitchWithValue("pidfile",
-                                  websocket_pid_file_.ToWStringHack());
+  cmd_line->AppendSwitchPath("pidfile", websocket_pid_file_);
   SetPythonPath();
   base::LaunchApp(*cmd_line.get(), true, false, NULL);
 }
@@ -652,16 +669,15 @@ CommandLine* TestWebSocketServer::CreateWebSocketServerCommandLine() {
   script_path = script_path.AppendASCII("new-run-webkit-websocketserver");
 
   CommandLine* cmd_line = CreatePythonCommandLine();
-  cmd_line->AppendLooseValue(script_path.ToWStringHack());
+  cmd_line->AppendArgPath(script_path);
   return cmd_line;
 }
 
 TestWebSocketServer::~TestWebSocketServer() {
   scoped_ptr<CommandLine> cmd_line(CreateWebSocketServerCommandLine());
-  cmd_line->AppendSwitchWithValue("server", "stop");
+  cmd_line->AppendSwitchASCII("server", "stop");
   cmd_line->AppendSwitch("chromium");
-  cmd_line->AppendSwitchWithValue("pidfile",
-                                  websocket_pid_file_.ToWStringHack());
+  cmd_line->AppendSwitchPath("pidfile", websocket_pid_file_);
   base::LaunchApp(*cmd_line.get(), true, false, NULL);
 }
 

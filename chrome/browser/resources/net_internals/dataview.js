@@ -12,12 +12,14 @@
  *
  *  @constructor
  */
-function DataView(mainBoxId, outputTextBoxId, exportTextButtonId) {
+function DataView(mainBoxId, outputTextBoxId,
+                  exportTextButtonId, stripCookiesCheckboxId) {
   DivView.call(this, mainBoxId);
 
   this.textPre_ = document.getElementById(outputTextBoxId);
-  var exportTextButton = document.getElementById(exportTextButtonId);
+  this.stripCookiesCheckbox_ = document.getElementById(stripCookiesCheckboxId);
 
+  var exportTextButton = document.getElementById(exportTextButtonId);
   exportTextButton.onclick = this.onExportToText_.bind(this);
 }
 
@@ -48,11 +50,21 @@ DataView.prototype.onExportToText_ = function() {
 
   text.push('');
   text.push('----------------------------------------------');
-  text.push(' Proxy settings');
+  text.push(' Proxy settings (effective)');
   text.push('----------------------------------------------');
   text.push('');
 
-  text.push(g_browser.proxySettings_.currentData_);
+  text.push(proxySettingsToString(
+        g_browser.proxySettings_.currentData_.effective));
+
+  text.push('');
+  text.push('----------------------------------------------');
+  text.push(' Proxy settings (original)');
+  text.push('----------------------------------------------');
+  text.push('');
+
+  text.push(proxySettingsToString(
+        g_browser.proxySettings_.currentData_.original));
 
   text.push('');
   text.push('----------------------------------------------');
@@ -105,6 +117,8 @@ DataView.prototype.onExportToText_ = function() {
       }
 
       text.push('Valid until: ' + this.formatExpirationTime_(e.expiration));
+      var expirationDate = g_browser.convertTimeTicksToDate(e.expiration);
+      text.push('  (' + expirationDate.toLocaleString() + ')');
     }
   } else {
     text.push('');
@@ -131,6 +145,8 @@ DataView.prototype.onExportToText_ = function() {
 
   // Open a new window to display this text.
   this.setText_(text.join('\n'));
+
+  this.selectText_();
 };
 
 DataView.prototype.appendRequestsPrintedAsText_ = function(out) {
@@ -142,14 +158,19 @@ DataView.prototype.appendRequestsPrintedAsText_ = function(out) {
   // Group the events into buckets by source ID, and buckets by source type.
   var sourceIds = [];
   var sourceIdToEventList = {};
-  var sourceTypeToSourceIdList = {}
+  var sourceTypeToSourceIdList = {};
+
+  // Lists used for actual output.
+  var eventLists = [];
 
   for (var i = 0; i < allEvents.length; ++i) {
     var e = allEvents[i];
     var eventList = sourceIdToEventList[e.source.id];
     if (!eventList) {
       eventList = [];
-      sourceIdToEventList[e.source.id] = eventList;
+      eventLists.push(eventList);
+      if (e.source.type != LogSourceType.NONE)
+        sourceIdToEventList[e.source.id] = eventList;
 
       // Update sourceIds
       sourceIds.push(e.source.id);
@@ -166,18 +187,23 @@ DataView.prototype.appendRequestsPrintedAsText_ = function(out) {
   }
 
 
-  // For each source (ordered by when that source was first started).
-  for (var i = 0; i < sourceIds.length; ++i) {
-    var sourceId = sourceIds[i];
-    var eventList = sourceIdToEventList[sourceId];
+  // For each source or event without a source (ordered by when the first
+  // output event for that source happened).
+  for (var i = 0; i < eventLists.length; ++i) {
+    var eventList = eventLists[i];
+    var sourceId = eventList[0].source.id;
     var sourceType = eventList[0].source.type;
 
-    out.push('------------------------------');
-    out.push(getKeyWithValue(LogSourceType, sourceType) +
-             ' (id=' + sourceId + ')');
-    out.push('------------------------------');
+    var startDate = g_browser.convertTimeTicksToDate(eventList[0].time);
 
-    out.push(PrintSourceEntriesAsText(eventList));
+    out.push('------------------------------------------');
+    out.push(getKeyWithValue(LogSourceType, sourceType) +
+             ' (id=' + sourceId + ')' +
+             '  [start=' + startDate.toLocaleString() + ']');
+    out.push('------------------------------------------');
+
+    out.push(PrintSourceEntriesAsText(eventList,
+                                      this.stripCookiesCheckbox_.checked));
   }
 };
 
@@ -198,4 +224,14 @@ DataView.prototype.formatExpirationTime_ = function(timeTicks) {
   return 't=' + d.getTime() + (isExpired ? ' [EXPIRED]' : '');
 };
 
+/**
+ * Select all text from log dump.
+ */
+DataView.prototype.selectText_ = function() {
+  var selection = window.getSelection();
+  selection.removeAllRanges();
 
+  var range = document.createRange();
+  range.selectNodeContents(this.textPre_);
+  selection.addRange(range);
+};

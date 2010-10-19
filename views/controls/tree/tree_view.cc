@@ -6,11 +6,12 @@
 
 #include <vector>
 
-#include "app/l10n_util.h"
+#include "app/keyboard_code_conversion_win.h"
+#include "app/keyboard_codes.h"
 #include "app/l10n_util_win.h"
 #include "app/resource_bundle.h"
 #include "base/i18n/rtl.h"
-#include "base/keyboard_codes.h"
+#include "base/logging.h"
 #include "base/stl_util-inl.h"
 #include "base/win_util.h"
 #include "gfx/canvas_skia.h"
@@ -292,44 +293,6 @@ void TreeView::TreeNodesRemoved(TreeModel* model,
   }
 }
 
-namespace {
-
-// Callback function used to compare two items. The first two args are the
-// LPARAMs of the HTREEITEMs being compared. The last arg maps from LPARAM
-// to order. This is invoked from TreeNodeChildrenReordered.
-int CALLBACK CompareTreeItems(LPARAM item1_lparam,
-                              LPARAM item2_lparam,
-                              LPARAM map_as_lparam) {
-  std::map<int, int>& mapping =
-      *reinterpret_cast<std::map<int, int>*>(map_as_lparam);
-  return mapping[static_cast<int>(item1_lparam)] -
-         mapping[static_cast<int>(item2_lparam)];
-}
-
-}  // namespace
-
-void TreeView::TreeNodeChildrenReordered(TreeModel* model,
-                                         TreeModelNode* parent) {
-  DCHECK(parent);
-  if (model_->GetChildCount(parent) <= 1)
-    return;
-
-  TVSORTCB sort_details;
-  sort_details.hParent = GetTreeItemForNodeDuringMutation(parent);
-  if (!sort_details.hParent)
-    return;
-
-  std::map<int, int> lparam_to_order_map;
-  for (int i = 0; i < model_->GetChildCount(parent); ++i) {
-    TreeModelNode* node = model_->GetChild(parent, i);
-    lparam_to_order_map[GetNodeDetails(node)->id] = i;
-  }
-
-  sort_details.lpfnCompare = &CompareTreeItems;
-  sort_details.lParam = reinterpret_cast<LPARAM>(&lparam_to_order_map);
-  TreeView_SortChildrenCB(tree_view_, &sort_details, 0);
-}
-
 void TreeView::TreeNodeChanged(TreeModel* model, TreeModelNode* node) {
   if (node_to_details_map_.find(node) == node_to_details_map_.end()) {
     // User hasn't navigated to this entry yet. Ignore the change.
@@ -486,7 +449,7 @@ LRESULT TreeView::OnNotify(int w_param, LPNMHDR l_param) {
         NMTVKEYDOWN* key_down_message =
             reinterpret_cast<NMTVKEYDOWN*>(l_param);
         controller_->OnTreeViewKeyDown(
-            win_util::WinToKeyboardCode(key_down_message->wVKey));
+            app::KeyboardCodeForWindowsKeyCode(key_down_message->wVKey));
       }
       break;
 
@@ -496,7 +459,7 @@ LRESULT TreeView::OnNotify(int w_param, LPNMHDR l_param) {
   return 0;
 }
 
-bool TreeView::OnKeyDown(base::KeyboardCode virtual_key_code) {
+bool TreeView::OnKeyDown(app::KeyboardCode virtual_key_code) {
   if (virtual_key_code == VK_F2) {
     if (!GetEditingNode()) {
       TreeModelNode* selected_node = GetSelectedNode();
@@ -504,7 +467,7 @@ bool TreeView::OnKeyDown(base::KeyboardCode virtual_key_code) {
         StartEditing(selected_node);
     }
     return true;
-  } else if (virtual_key_code == base::VKEY_RETURN && !process_enter_) {
+  } else if (virtual_key_code == app::VKEY_RETURN && !process_enter_) {
     Widget* widget = GetWidget();
     DCHECK(widget);
     Accelerator accelerator(Accelerator(virtual_key_code,
@@ -640,6 +603,18 @@ void TreeView::RecursivelyDelete(NodeDetails* node) {
   id_to_details_map_.erase(node->id);
   node_to_details_map_.erase(node->node);
   delete node;
+}
+
+TreeView::NodeDetails* TreeView::GetNodeDetails(TreeModelNode* node) {
+  DCHECK(node &&
+         node_to_details_map_.find(node) != node_to_details_map_.end());
+  return node_to_details_map_[node];
+}
+
+// Returns the NodeDetails by identifier (lparam of the HTREEITEM).
+TreeView::NodeDetails* TreeView::GetNodeDetailsByID(int id) {
+  DCHECK(id_to_details_map_.find(id) != id_to_details_map_.end());
+  return id_to_details_map_[id];
 }
 
 TreeView::NodeDetails* TreeView::GetNodeDetailsByTreeItem(HTREEITEM tree_item) {

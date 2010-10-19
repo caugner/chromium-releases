@@ -7,7 +7,6 @@
 
 #include <map>
 #include "base/basictypes.h"
-#include "base/logging.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "gpu/command_buffer/service/gl_utils.h"
@@ -33,10 +32,14 @@ class FramebufferManager {
       return service_id_;
     }
 
+    bool HasUnclearedAttachment(GLenum attachment) const;
+
     // Attaches a renderbuffer to a particlar attachment.
     // Pass null to detach.
     void AttachRenderbuffer(
         GLenum attachment, RenderbufferManager::RenderbufferInfo* renderbuffer);
+
+    void MarkAttachedRenderbuffersAsCleared();
 
     bool IsDeleted() {
       return service_id_ == 0;
@@ -93,5 +96,3 @@ class FramebufferManager {
 }  // namespace gpu
 
 #endif  // GPU_COMMAND_BUFFER_SERVICE_FRAMEBUFFER_MANAGER_H_
-
-

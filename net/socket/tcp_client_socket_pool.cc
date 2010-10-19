@@ -23,7 +23,7 @@ namespace net {
 TCPSocketParams::TCPSocketParams(const HostPortPair& host_port_pair,
                                  RequestPriority priority, const GURL& referrer,
                                  bool disable_resolver_cache)
-    : destination_(host_port_pair.host, host_port_pair.port) {
+    : destination_(host_port_pair.host(), host_port_pair.port()) {
   Initialize(priority, referrer, disable_resolver_cache);
 }
 
@@ -143,7 +143,7 @@ int TCPConnectJob::DoResolveHostComplete(int result) {
 int TCPConnectJob::DoTCPConnect() {
   next_state_ = kStateTCPConnectComplete;
   set_socket(client_socket_factory_->CreateTCPClientSocket(
-        addresses_, net_log().net_log()));
+        addresses_, net_log().net_log(), net_log().source()));
   connect_start_time_ = base::TimeTicks::Now();
   return socket()->Connect(&callback_);
 }
@@ -202,7 +202,7 @@ TCPClientSocketPool::TCPClientSocketPool(
             base::TimeDelta::FromSeconds(kUsedIdleSocketTimeout),
             new TCPConnectJobFactory(client_socket_factory,
                                      host_resolver, net_log)) {
-  base_.EnableBackupJobs();
+  base_.EnableConnectBackupJobs();
 }
 
 TCPClientSocketPool::~TCPClientSocketPool() {}
@@ -217,7 +217,7 @@ int TCPClientSocketPool::RequestSocket(
   const scoped_refptr<TCPSocketParams>* casted_params =
       static_cast<const scoped_refptr<TCPSocketParams>*>(params);
 
-  if (net_log.HasListener()) {
+  if (net_log.IsLoggingAll()) {
     // TODO(eroman): Split out the host and port parameters.
     net_log.AddEvent(
         NetLog::TYPE_TCP_CLIENT_SOCKET_POOL_REQUESTED_SOCKET,

@@ -21,21 +21,34 @@ using WebKit::WebFrame;
 using WebKit::WebURLRequest;
 using WebKit::WebURL;
 using WebKit::WebURLResponse;
+using WebKit::WebVector;
 
 namespace appcache {
+
+namespace {
 
 typedef IDMap<WebApplicationCacheHostImpl> HostsMap;
 
 // Note: the order of the elements in this array must match those
 // of the EventID enum in appcache_interfaces.h.
-static const char* kEventNames[] = {
+const char* kEventNames[] = {
   "Checking", "Error", "NoUpdate", "Downloading", "Progress",
   "UpdateReady", "Cached", "Obsolete"
 };
 
-static HostsMap* all_hosts() {
+GURL ClearUrlRef(const GURL& url) {
+  if (!url.has_ref())
+    return url;
+  GURL::Replacements replacements;
+  replacements.ClearRef();
+  return url.ReplaceComponents(replacements);
+}
+
+HostsMap* all_hosts() {
   return Singleton<HostsMap>::get();
 }
+
+}  // anon namespace
 
 WebApplicationCacheHostImpl* WebApplicationCacheHostImpl::FromId(int id) {
   return all_hosts()->Lookup(id);
@@ -75,10 +88,12 @@ WebApplicationCacheHostImpl::~WebApplicationCacheHostImpl() {
   all_hosts()->Remove(host_id_);
 }
 
-void WebApplicationCacheHostImpl::OnCacheSelected(int64 selected_cache_id,
-                                                  appcache::Status status) {
-  status_ = status;
+void WebApplicationCacheHostImpl::OnCacheSelected(
+    const appcache::AppCacheInfo& info) {
+  status_ = info.status;
   has_status_ = true;
+  cache_info_ = info;
+  client_->didChangeCacheAssociation();
 }
 
 void WebApplicationCacheHostImpl::OnStatusChanged(appcache::Status status) {
@@ -133,6 +148,9 @@ void WebApplicationCacheHostImpl::OnErrorEventRaised(
 void WebApplicationCacheHostImpl::willStartMainResourceRequest(
     WebURLRequest& request) {
   request.setAppCacheHostID(host_id_);
+
+  original_main_resource_url_ = ClearUrlRef(request.url());
+
   std::string method = request.httpMethod().utf8();
   is_get_method_ = (method == kHttpGETMethod);
   DCHECK(method == StringToUpperASCII(method));
@@ -154,6 +172,38 @@ void WebApplicationCacheHostImpl::selectCacheWithoutManifest() {
                         GURL());
 }
 
+void WebApplicationCacheHostImpl::getAssociatedCacheInfo(
+    WebApplicationCacheHost::CacheInfo* info) {
+  if (!cache_info_.is_complete)
+    return;
+  info->manifestURL = cache_info_.manifest_url;
+  info->creationTime = cache_info_.creation_time.ToDoubleT();
+  info->updateTime = cache_info_.last_update_time.ToDoubleT();
+  info->totalSize = cache_info_.size;
+}
+
+void WebApplicationCacheHostImpl::getResourceList(
+    WebVector<ResourceInfo>* resources) {
+  if (!cache_info_.is_complete)
+    return;
+  std::vector<AppCacheResourceInfo> resource_infos;
+  backend_->GetResourceList(host_id_, &resource_infos);
+
+  WebVector<ResourceInfo> web_resources(resource_infos.size());
+  // Convert resource_infos to WebKit API.
+  for (size_t i = 0; i < resource_infos.size(); ++i) {
+    web_resources[i].size = resource_infos[i].size;
+    web_resources[i].isMaster = resource_infos[i].is_master;
+    web_resources[i].isExplicit = resource_infos[i].is_explicit;
+    web_resources[i].isManifest = resource_infos[i].is_manifest;
+    web_resources[i].isForeign = resource_infos[i].is_foreign;
+    web_resources[i].isFallback = resource_infos[i].is_fallback;
+    web_resources[i].url = resource_infos[i].url;
+  }
+
+  resources->swap(web_resources);
+}
+
 bool WebApplicationCacheHostImpl::selectCacheWithManifest(
     const WebURL& manifest_url) {
   // Reset any previous status values we've received from the backend
@@ -161,12 +211,7 @@ bool WebApplicationCacheHostImpl::selectCacheWithManifest(
   has_status_ = false;
   has_cached_status_ = false;
 
-  GURL manifest_gurl(manifest_url);
-  if (manifest_gurl.has_ref()) {
-    GURL::Replacements replacements;
-    replacements.ClearRef();
-    manifest_gurl = manifest_gurl.ReplaceComponents(replacements);
-  }
+  GURL manifest_gurl(ClearUrlRef(manifest_url));
 
   // 6.9.6 The application cache selection algorithm
   // Check for new 'master' entries.
@@ -206,12 +251,11 @@ bool WebApplicationCacheHostImpl::selectCacheWithManifest(
 void WebApplicationCacheHostImpl::didReceiveResponseForMainResource(
     const WebURLResponse& response) {
   document_response_ = response;
-  document_url_ = document_response_.url();
-  if (document_url_.has_ref()) {
-    GURL::Replacements replacements;
-    replacements.ClearRef();
-    document_url_ = document_url_.ReplaceComponents(replacements);
-  }
+  document_url_ = ClearUrlRef(document_response_.url());
+  if (document_url_ != original_main_resource_url_)
+    is_get_method_ = true;  // A redirect was involved.
+  original_main_resource_url_ = GURL();
+
   is_scheme_supported_ =  IsSchemeSupported(document_url_);
   if ((document_response_.appCacheID() != kNoCacheId) ||
       !is_scheme_supported_ || !is_get_method_)

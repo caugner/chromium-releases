@@ -8,6 +8,7 @@
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 
 using appcache::AppCacheBackend;
 using WebKit::WebApplicationCacheHostClient;
@@ -42,10 +43,12 @@ void RendererWebApplicationCacheHostImpl::OnContentBlocked(
 }
 
 void RendererWebApplicationCacheHostImpl::OnCacheSelected(
-    int64 selected_cache_id, appcache::Status status) {
-  // TODO(jochen): Send a ViewHostMsg_AppCacheAccessed to the browser once this
-  // methods gets the manifest url passed.
-  WebApplicationCacheHostImpl::OnCacheSelected(selected_cache_id, status);
+    const appcache::AppCacheInfo& info) {
+  if (!info.manifest_url.is_empty()) {
+    RenderThread::current()->Send(new ViewHostMsg_AppCacheAccessed(
+        routing_id_, info.manifest_url, false));
+  }
+  WebApplicationCacheHostImpl::OnCacheSelected(info);
 }
 
 RenderView* RendererWebApplicationCacheHostImpl::GetRenderView() {

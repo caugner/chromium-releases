@@ -7,6 +7,7 @@
 
 #ifndef BASE_PROCESS_UTIL_H_
 #define BASE_PROCESS_UTIL_H_
+#pragma once
 
 #include "base/basictypes.h"
 
@@ -32,9 +33,7 @@ typedef struct _malloc_zone_t malloc_zone_t;
 #include <utility>
 #include <vector>
 
-#include "base/command_line.h"
 #include "base/file_descriptor_shuffle.h"
-#include "base/file_path.h"
 #include "base/process.h"
 
 #ifndef NAME_MAX  // Solaris and some BSDs have no NAME_MAX
@@ -44,6 +43,9 @@ typedef struct _malloc_zone_t malloc_zone_t;
 #define NAME_MAX 256
 #endif
 #endif
+
+class CommandLine;
+class FilePath;
 
 namespace base {
 
@@ -143,6 +145,18 @@ void CloseSuperfluousFds(const InjectiveMultimap& saved_map);
 #endif
 
 #if defined(OS_WIN)
+
+enum IntegrityLevel {
+  INTEGRITY_UNKNOWN,
+  LOW_INTEGRITY,
+  MEDIUM_INTEGRITY,
+  HIGH_INTEGRITY,
+};
+// Determine the integrity level of the specified process. Returns false
+// if the system does not support integrity levels (pre-Vista) or in the case
+// of an underlying system failure.
+bool GetProcessIntegrityLevel(ProcessHandle process, IntegrityLevel *level);
+
 // Runs the given application name with the given command line. Normally, the
 // first command line argument should be the path to the process, and don't
 // forget to quote it.
@@ -160,6 +174,13 @@ void CloseSuperfluousFds(const InjectiveMultimap& saved_map);
 bool LaunchApp(const std::wstring& cmdline,
                bool wait, bool start_hidden, ProcessHandle* process_handle);
 
+// Same as LaunchApp, except allows the new process to inherit handles of the
+// parent process.
+bool LaunchAppWithHandleInheritance(const std::wstring& cmdline,
+                                    bool wait,
+                                    bool start_hidden,
+                                    ProcessHandle* process_handle);
+
 // Runs the given application name with the given command line as if the user
 // represented by |token| had launched it. The caveats about |cmdline| and
 // |process_handle| explained for LaunchApp above apply as well.
@@ -174,10 +195,11 @@ bool LaunchAppAsUser(UserTokenHandle token, const std::wstring& cmdline,
                      bool start_hidden, ProcessHandle* process_handle);
 
 // Has the same behavior as LaunchAppAsUser, but offers the boolean option to
-// use an empty string for the desktop name.
+// use an empty string for the desktop name and a boolean for allowing the
+// child process to inherit handles from its parent.
 bool LaunchAppAsUser(UserTokenHandle token, const std::wstring& cmdline,
                      bool start_hidden, ProcessHandle* process_handle,
-                     bool empty_desktop_name);
+                     bool empty_desktop_name, bool inherit_handles);
 
 
 #elif defined(OS_POSIX)
@@ -252,6 +274,9 @@ class ProcessFilter {
   // Returns true to indicate set-inclusion and false otherwise.  This method
   // should not have side-effects and should be idempotent.
   virtual bool Includes(const ProcessEntry& entry) const = 0;
+
+ protected:
+  virtual ~ProcessFilter() {}
 };
 
 // Returns the number of processes on the machine that are running from the

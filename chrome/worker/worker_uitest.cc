@@ -12,7 +12,7 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_layout_test.h"
 #include "chrome/test/ui_test_utils.h"
-#include "net/url_request/url_request_unittest.h"
+#include "net/test/test_server.h"
 
 namespace {
 
@@ -189,7 +189,8 @@ TEST_F(WorkerTest, IncognitoSharedWorkers) {
   RunIncognitoTest(FilePath(FILE_PATH_LITERAL("incognito_worker.html")));
 }
 
-const wchar_t kDocRoot[] = L"chrome/test/data/workers";
+const FilePath::CharType kDocRoot[] =
+    FILE_PATH_LITERAL("chrome/test/data/workers");
 
 #if defined(OS_WIN)
 // http://crbug.com/33344 - NavigateAndWaitForAuth times out on the Windows
@@ -198,14 +199,13 @@ const wchar_t kDocRoot[] = L"chrome/test/data/workers";
 #endif
 // Make sure that auth dialog is displayed from worker context.
 TEST_F(WorkerTest, WorkerHttpAuth) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(kDocRoot, NULL);
-  ASSERT_TRUE(NULL != server.get());
+  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
 
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
 
-  GURL url = server->TestServerPage("files/worker_auth.html");
+  GURL url = test_server.GetURL("files/worker_auth.html");
   EXPECT_TRUE(NavigateAndWaitForAuth(tab, url));
 }
 
@@ -216,14 +216,13 @@ TEST_F(WorkerTest, WorkerHttpAuth) {
 #endif
 // Make sure that auth dialog is displayed from shared worker context.
 TEST_F(WorkerTest, SharedWorkerHttpAuth) {
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(kDocRoot, NULL);
-  ASSERT_TRUE(NULL != server.get());
+  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  ASSERT_TRUE(test_server.Start());
 
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
 
-  GURL url = server->TestServerPage("files/shared_worker_auth.html");
+  GURL url = test_server.GetURL("files/shared_worker_auth.html");
   EXPECT_TRUE(NavigateAndWaitForAuth(tab, url));
   // TODO(atwilson): Add support to automation framework to test for auth
   // dialogs displayed by non-navigating tabs.
@@ -423,8 +422,12 @@ TEST_F(WorkerTest, FLAKY_WorkerHttpLayoutTests) {
 // Flaky, see http://crbug.com/49381
 TEST_F(WorkerTest, FLAKY_WorkerWebSocketLayoutTests) {
   static const char* kLayoutTestFiles[] = {
-    "worker-simple.html",
+    "close-in-onmessage-crash.html",
+    "close-in-shared-worker.html",
+    "close-in-worker.html",
     "shared-worker-simple.html",
+    "worker-handshake-challenge-randomness.html",
+    "worker-simple.html"
   };
 
   FilePath websocket_test_dir;
@@ -578,8 +581,7 @@ TEST_F(WorkerTest, WorkerClose) {
   ASSERT_TRUE(WaitForProcessCountToBe(1, 0));
 }
 
-// http://crbug.com/42641
-TEST_F(WorkerTest, FAILS_QueuedSharedWorkerShutdown) {
+TEST_F(WorkerTest, QueuedSharedWorkerShutdown) {
   // Tests to make sure that queued shared workers are started up when
   // shared workers shut down.
   int max_workers_per_tab = WorkerService::kMaxWorkersPerTabWhenSeparate;
@@ -630,15 +632,8 @@ TEST_F(WorkerTest, FLAKY_MultipleTabsQueuedSharedWorker) {
   ASSERT_TRUE(WaitForProcessCountToBe(3, max_workers_per_tab));
 }
 
-// Only flaky on Mac  http://crbug.com/48148
-#if defined(OS_MACOSX)
-#define MAYBE_QueuedSharedWorkerStartedFromOtherTab \
-    FLAKY_QueuedSharedWorkerStartedFromOtherTab
-#else
-#define MAYBE_QueuedSharedWorkerStartedFromOtherTab \
-    QueuedSharedWorkerStartedFromOtherTab
-#endif
-TEST_F(WorkerTest, MAYBE_QueuedSharedWorkerStartedFromOtherTab) {
+// Flaky: http://crbug.com/48148
+TEST_F(WorkerTest, FLAKY_QueuedSharedWorkerStartedFromOtherTab) {
   // Tests to make sure that queued shared workers are started up when
   // an instance is launched from another tab.
   int max_workers_per_tab = WorkerService::kMaxWorkersPerTabWhenSeparate;
@@ -664,9 +659,4 @@ TEST_F(WorkerTest, MAYBE_QueuedSharedWorkerStartedFromOtherTab) {
       kTestCompleteCookie, action_max_timeout_ms());
   ASSERT_STREQ(kTestCompleteSuccess, value.c_str());
   ASSERT_TRUE(WaitForProcessCountToBe(2, max_workers_per_tab+1));
-}
-
-// TODO(ojan): Started failing with r52393. WebKit merge 63272:63323.
-TEST_F(WorkerTest, FAILS_OpenDatabaseSyncInputs) {
-  RunWorkerStorageLayoutTest("open-database-sync-inputs.html");
 }

@@ -16,8 +16,6 @@
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/time.h"
-#include "base/waitable_event.h"
-#include "base/waitable_event_watcher.h"
 #include "ipc/ipc_switches.h"
 #include "ipc/ipc_sync_message.h"
 #include "ipc/ipc_message_utils.h"
@@ -49,7 +47,17 @@ Logging::Logging()
       sender_(NULL),
       main_thread_(MessageLoop::current()),
       consumer_(NULL) {
-  if (getenv("CHROME_IPC_LOGGING")) {
+#if defined(OS_WIN)
+  // getenv triggers an unsafe warning. Simply check how big of a buffer
+  // would be needed to fetch the value to see if the enviornment variable is
+  // set.
+  size_t requiredSize = 0;
+  getenv_s(&requiredSize, NULL, 0, "CHROME_IPC_LOGGING");
+  bool logging_env_var_set = (requiredSize != 0);
+#else  // !defined(OS_WIN)
+  bool logging_env_var_set = (getenv("CHROME_IPC_LOGGING") != NULL);
+#endif  //defined(OS_WIN)
+  if (logging_env_var_set) {
     enabled_ = true;
     enabled_on_stderr_ = true;
   }
@@ -153,9 +161,9 @@ void Logging::OnPostDispatchMessage(const Message& message,
   }
 }
 
-void Logging::GetMessageText(uint32 type, std::wstring* name,
+void Logging::GetMessageText(uint32 type, std::string* name,
                              const Message* message,
-                             std::wstring* params) {
+                             std::string* params) {
   if (!log_function_mapping_)
     return;
 
@@ -188,14 +196,14 @@ void Logging::Log(const LogData& data) {
     if (data.message_name.empty()) {
       message_name = StringPrintf("[unknown type %d]", data.type);
     } else {
-      message_name = WideToASCII(data.message_name);
+      message_name = data.message_name;
     }
     fprintf(stderr, "ipc %s %d %s %s %s\n",
             data.channel.c_str(),
             data.routing_id,
-            WideToASCII(data.flags).c_str(),
+            data.flags.c_str(),
             message_name.c_str(),
-            WideToUTF8(data.params).c_str());
+            data.params.c_str());
   }
 }
 
@@ -203,27 +211,27 @@ void GenerateLogData(const std::string& channel, const Message& message,
                      LogData* data) {
   if (message.is_reply()) {
     // "data" should already be filled in.
-    std::wstring params;
+    std::string params;
     Logging::GetMessageText(data->type, NULL, &message, &params);
 
     if (!data->params.empty() && !params.empty())
-      data->params += L", ";
+      data->params += ", ";
 
-    data->flags += L" DR";
+    data->flags += " DR";
 
     data->params += params;
   } else {
-    std::wstring flags;
+    std::string flags;
     if (message.is_sync())
-      flags = L"S";
+      flags = "S";
 
     if (message.is_reply())
-      flags += L"R";
+      flags += "R";
 
     if (message.is_reply_error())
-      flags += L"E";
+      flags += "E";
 
-    std::wstring params, message_name;
+    std::string params, message_name;
     Logging::GetMessageText(message.type(), &message_name, &message, &params);
 
     data->channel = channel;

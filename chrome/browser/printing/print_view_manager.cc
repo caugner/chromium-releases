@@ -6,6 +6,7 @@
 
 #include "app/l10n_util.h"
 #include "base/scoped_ptr.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_job_manager.h"
@@ -14,7 +15,7 @@
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "grit/generated_resources.h"
 #include "printing/native_metafile.h"
 #include "printing/printed_document.h"

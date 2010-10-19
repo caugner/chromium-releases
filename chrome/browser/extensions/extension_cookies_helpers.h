@@ -9,14 +9,16 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_COOKIES_HELPERS_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_COOKIES_HELPERS_H_
+#pragma once
 
 #include <string>
 
-#include "base/values.h"
 #include "net/base/cookie_monster.h"
 
 class Browser;
+class DictionaryValue;
 class Extension;
+class ListValue;
 class Profile;
 
 namespace extension_cookies_helpers {
@@ -35,7 +37,7 @@ const char* GetStoreIdFromProfile(Profile* profile);
 // allocates a new DictionaryValue object; the caller is responsible for
 // freeing it.
 DictionaryValue* CreateCookieValue(
-    const net::CookieMonster::CookieListPair& cookie_pair,
+    const net::CookieMonster::CanonicalCookie& cookie,
     const std::string& store_id);
 
 // Constructs a CookieStore object as defined by the cookies API. This function
@@ -54,8 +56,8 @@ net::CookieMonster::CookieList GetCookieListFromStore(
 // a cookie against the extension's host permissions. The Secure
 // property of the cookie defines the URL scheme, and the cookie's
 // domain becomes the URL host.
-GURL GetURLFromCookiePair(
-    const net::CookieMonster::CookieListPair& cookie_pair);
+GURL GetURLFromCanonicalCookie(
+    const net::CookieMonster::CanonicalCookie& cookie);
 
 // Looks through all cookies in the given cookie store, and appends to the
 // match list all the cookies that both match the given URL and cookie details
@@ -86,18 +88,18 @@ class MatchFilter {
 
   // Returns true if the given cookie matches the properties in the match
   // filter.
-  bool MatchesCookie(const net::CookieMonster::CookieListPair& cookie_pair);
+  bool MatchesCookie(const net::CookieMonster::CanonicalCookie& cookie);
 
  private:
   // Returns true if the details dictionary contains a string with the given
   // key and value. Also returns true if the dictionary doesn't contain the
   // given key at all (trival match).
-  bool MatchesString(const wchar_t* key, const std::string& value);
+  bool MatchesString(const char* key, const std::string& value);
 
   // Returns true if the details dictionary contains a boolean with the given
   // key and value. Also returns true if the dictionary doesn't contain the
   // given key at all (trival match).
-  bool MatchesBoolean(const wchar_t* key, bool value);
+  bool MatchesBoolean(const char* key, bool value);
 
   // Returns true if the given cookie domain string matches the filter's
   // domain. Any cookie domain which is equal to or is a subdomain of the

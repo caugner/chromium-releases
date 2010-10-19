@@ -173,6 +173,8 @@
             'crash_report_sender',
           ],
           'sources': [
+            'src/client/mac/crash_generation/crash_generation_client.cc',
+            'src/client/mac/crash_generation/crash_generation_client.h',
             'src/client/mac/handler/protected_memory_allocator.cc',
             'src/client/mac/handler/exception_handler.cc',
             'src/client/mac/Framework/Breakpad.mm',
@@ -184,7 +186,7 @@
     [ 'OS=="linux"', {
       'conditions': [
         # Tools needed for archiving build symbols.
-        ['branding=="Chrome" or linux_breakpad==1', {
+        ['linux_breakpad==1', {
           'targets': [
             {
               'target_name': 'symupload',
@@ -230,14 +232,12 @@
 
               'sources': [
                 'src/common/dwarf/bytereader.cc',
-                'src/common/dwarf/cfi_assembler.cc',
                 'src/common/dwarf_cfi_to_module.cc',
                 'src/common/dwarf_cfi_to_module.h',
                 'src/common/dwarf_cu_to_module.cc',
                 'src/common/dwarf_cu_to_module.h',
                 'src/common/dwarf/dwarf2diehandler.cc',
                 'src/common/dwarf/dwarf2reader.cc',
-                'src/common/dwarf/functioninfo.cc',
                 'src/common/dwarf_line_to_module.cc',
                 'src/common/dwarf_line_to_module.h',
                 'src/common/language.cc',
@@ -257,7 +257,7 @@
               ],
 
               # Breakpad rev 583 introduced this flag.
-              # Using this define, stabs_reader.h will include a.out.h to 
+              # Using this define, stabs_reader.h will include a.out.h to
               # build on Linux.
               'defines': [
                 'HAVE_A_OUT_H',
@@ -359,6 +359,19 @@
 
           'dependencies': [
             'breakpad_client',
+          ],
+
+          'include_dirs': [
+            '..',
+            'src',
+          ],
+        },
+        {
+          'target_name': 'minidump-2-core',
+          'type': 'executable',
+
+          'sources': [
+            'src/tools/linux/md2core/minidump-2-core.cc'
           ],
 
           'include_dirs': [

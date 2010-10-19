@@ -45,6 +45,8 @@
   ],
   'target_defaults': {
     'dependencies': [
+      # locales need to be built for the chrome frame binaries to be loadable.
+      '../chrome/app/locales/locales.gyp:*',
       '../chrome/chrome.gyp:chrome_resources',
       '../chrome/chrome.gyp:chrome_strings',
       '../chrome/chrome.gyp:theme_resources',
@@ -113,34 +115,24 @@
     {
       'target_name': 'chrome_frame_unittests',
       'type': 'executable',
-      'msvs_guid': '17D98CCA-0F6A-470F-9DF9-56DC6CC1A0BE',
       'dependencies': [
-        '../build/temp_gyp/googleurl.gyp:googleurl',
-        '../chrome/chrome.gyp:browser',     
-        '../chrome/chrome.gyp:common',
-        '../chrome/chrome.gyp:debugger',
-        '../chrome/chrome.gyp:nacl',
-        '../chrome/chrome.gyp:renderer',
-        '../chrome/chrome.gyp:utility',
+        '../base/base.gyp:test_support_base',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        'base_noicu',
         'chrome_frame_ie',
-        'chrome_frame_npapi',
         'chrome_frame_strings',
-        'xulrunner_sdk',
       ],
       'sources': [
         'chrome_tab.h',
         'chrome_tab.idl',
         'chrome_frame_histograms.h',
         'chrome_frame_histograms.cc',
-        'chrome_frame_npapi_unittest.cc',
         'chrome_frame_unittest_main.cc',
         'chrome_launcher.cc',
         'chrome_launcher.h',
         'chrome_launcher_unittest.cc',
         'function_stub_unittest.cc',
+        'renderer_glue.cc',
         'test/chrome_frame_test_utils.h',
         'test/chrome_frame_test_utils.cc',
         'test/com_message_event_unittest.cc',
@@ -152,8 +144,8 @@
         'test/urlmon_moniker_tests.h',
         'test/urlmon_moniker_unittest.cc',
         'test/util_unittests.cc',
-        'test/window_watchdog.h',
-        'test/window_watchdog.cc',
+        'test/win_event_receiver.h',
+        'test/win_event_receiver.cc',
         'unittest_precompile.h',
         'unittest_precompile.cc',
         'urlmon_upload_data_stream.cc',
@@ -169,15 +161,41 @@
         '<(SHARED_INTERMEDIATE_DIR)',
       ],
       'conditions': [
+        # We needed to extract this test from the chrome_frame_unittests because
+        # we can't instrument code for coverage if it depends on 3rd party
+        # binaries that we don't have PDBs for. See here for more details:
+        # http://connect.microsoft.com/VisualStudio/feedback/details/176188/can-not-disable-warning-lnk4099
+        ['coverage==0', {
+          'dependencies': [
+            'chrome_frame_npapi',
+            'xulrunner_sdk',
+          ],
+          'sources': [
+            'chrome_frame_npapi_unittest.cc',
+          ],
+          'conditions': [
+            ['OS=="win"', {
+              'msvs_settings': {
+                'VCLinkerTool': {
+                  'DelayLoadDLLs': ['xpcom.dll', 'nspr4.dll'],
+                },
+              },
+              'dependencies': [
+                # TODO(slightlyoff): Get automation targets working on OS X
+                '../chrome/chrome.gyp:automation',
+              ],
+            }],
+          ],        
+        }],
         ['OS=="win"', {
           'link_settings': {
             'libraries': [
-              '-lshdocvw.lib',
+              '-lshdocvw.lib', '-loleacc.lib',
             ],
           },
           'msvs_settings': {
             'VCLinkerTool': {
-              'DelayLoadDLLs': ['xpcom.dll', 'nspr4.dll', 'shdocvw.dll'],
+              'DelayLoadDLLs': ['shdocvw.dll'],
             },
           },
           'dependencies': [
@@ -203,6 +221,7 @@
       'msvs_guid': '1D25715A-C8CE-4448-AFA3-8515AF22D235',
       'type': 'executable',
       'dependencies': [
+        '../base/base.gyp:test_support_base',
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../chrome/chrome.gyp:common',
         '../chrome/chrome.gyp:utility',
@@ -213,17 +232,17 @@
         'chrome_frame_ie',
         'chrome_frame_npapi',
         'chrome_frame_strings',
-        'npchrome_frame',
+		'npchrome_frame',
         'xulrunner_sdk',
       ],
       'sources': [
         '../base/test_suite.h',
-        'bind_context_info.cc',
-        'bind_context_info.h',
         'test/automation_client_mock.cc',
         'test/automation_client_mock.h',
         'test/chrome_frame_test_utils.cc',
         'test/chrome_frame_test_utils.h',
+        'test/chrome_frame_ui_test_utils.cc',
+        'test/chrome_frame_ui_test_utils.h',
         'test/chrome_frame_automation_mock.cc',
         'test/chrome_frame_automation_mock.h',
         'test/http_server.cc',
@@ -248,30 +267,13 @@
         'test/urlmon_moniker_tests.h',
         'test/urlmon_moniker_integration_test.cc',
         'test/url_request_test.cc',
-        'test/window_watchdog.cc',
-        'test/window_watchdog.h',
-        'chrome_frame_automation.cc',
-        'chrome_frame_histograms.h',
-        'chrome_frame_histograms.cc',
+        'test/win_event_receiver.cc',
+        'test/win_event_receiver.h',
         'chrome_tab.h',
         'chrome_tab.idl',
-        'com_message_event.cc',
-        'custom_sync_call_context.h',        
-        'html_utils.cc',
-        'http_negotiate.h',
-        'http_negotiate.cc',
-        'sync_msg_reply_dispatcher.cc',
-        'sync_msg_reply_dispatcher.h',
+        'renderer_glue.cc',
         'test_utils.cc',
         'test_utils.h',
-        'urlmon_upload_data_stream.h',
-        'urlmon_upload_data_stream.cc',
-        'urlmon_url_request.h',
-        'urlmon_url_request.cc',
-        'utils.cc',
-        'utils.h',
-        'vtable_patch_manager.h',
-        'vtable_patch_manager.cc'
       ],
       'include_dirs': [
         '<@(xul_include_directories)',
@@ -284,6 +286,11 @@
       ],
       'conditions': [
         ['OS=="win"', {
+          'link_settings': {
+            'libraries': [
+              '-loleacc.lib',
+            ],
+          },
           'msvs_settings': {
             'VCLinkerTool': {
               'DelayLoadDLLs': ['xpcom.dll', 'nspr4.dll'],
@@ -306,6 +313,8 @@
         '../base/base.gyp:test_support_base',
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../chrome/chrome.gyp:common',
+        '../chrome/chrome.gyp:debugger',
+        '../chrome/chrome.gyp:test_support_ui',
         '../chrome/chrome.gyp:utility',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
@@ -327,7 +336,6 @@
         '../chrome/test/ui/ui_test.cc',
         'chrome_tab.h',
         'chrome_tab.idl',
-        'html_utils.cc',
         'test/chrome_frame_test_utils.cc',
         'test/chrome_frame_test_utils.h',
         'test/perf/chrome_frame_perftest.cc',
@@ -338,10 +346,8 @@
         'test/simulate_input.h',
         'test_utils.cc',
         'test_utils.h',
-        'test/window_watchdog.cc',
-        'test/window_watchdog.h',
-        'utils.cc',
-        'utils.h',
+        'test/win_event_receiver.cc',
+        'test/win_event_receiver.h',
       ],
       'include_dirs': [
         '<@(xul_include_directories)',
@@ -351,6 +357,20 @@
       ],
       'conditions': [
         ['OS=="win"', {
+          'configurations': {
+            'Debug_Base': {
+              'msvs_settings': {
+                'VCLinkerTool': {
+                  'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
+                },
+              },
+            },
+          },
+          'link_settings': {
+            'libraries': [
+              '-loleacc.lib',
+            ],
+          },
           'dependencies': [
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../chrome/chrome.gyp:automation',
@@ -393,8 +413,8 @@
         'test/simulate_input.h',
         'test/test_server.cc',
         'test/test_server.h',
-        'test/window_watchdog.cc',
-        'test/window_watchdog.h',
+        'test/win_event_receiver.cc',
+        'test/win_event_receiver.h',
         'test/net/fake_external_tab.cc',
         'test/net/fake_external_tab.h',
         'test/net/process_singleton_subclass.cc',
@@ -412,6 +432,11 @@
       ],
       'conditions': [
         ['OS=="win"', {
+          'link_settings': {
+            'libraries': [
+              '-loleacc.lib',
+            ],
+          },
           'msvs_settings': {
             'VCLinkerTool': {
               'DelayLoadDLLs': ['prntvpt.dll'],
@@ -442,8 +467,12 @@
       'type': 'executable',
       'msvs_guid': 'A1440368-4089-4E14-8864-D84D3C5714A7',
       'dependencies': [
+        '../base/base.gyp:test_support_base',
         '../chrome/chrome.gyp:browser',
+        '../chrome/chrome.gyp:debugger',
         '../chrome/chrome.gyp:renderer',
+        '../chrome/chrome.gyp:test_support_common',
+        '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         'base_noicu',
         'chrome_frame_ie',
@@ -457,12 +486,14 @@
         'test/reliability/reliability_test_suite.h',
         'test/chrome_frame_test_utils.cc',
         'test/chrome_frame_test_utils.h',
+        'test/ie_event_sink.cc',
+        'test/ie_event_sink.h',
         'test_utils.cc',
         'test_utils.h',
         'test/simulate_input.cc',
         'test/simulate_input.h',
-        'test/window_watchdog.cc',
-        'test/window_watchdog.h',
+        'test/win_event_receiver.cc',
+        'test/win_event_receiver.h',
         'chrome_tab.h',
         'chrome_tab.idl',
         '../base/test/test_file_util_win.cc',
@@ -481,12 +512,26 @@
       ],
       'conditions': [
         ['OS=="win"', {
+          'link_settings': {
+            'libraries': [
+              '-loleacc.lib',
+            ],
+          },
           'dependencies': [
             # TODO(slightlyoff): Get automation targets working on OS X
             '../chrome/chrome.gyp:automation',
             '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
-          ]
+          ],
+          'configurations': {
+            'Debug_Base': {
+              'msvs_settings': {
+                'VCLinkerTool': {
+                  'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
+                },
+              },
+            },
+          },
         }],
       ],
     },
@@ -495,24 +540,17 @@
       'target_name': 'chrome_frame_npapi',
       'type': 'static_library',
       'dependencies': [
+        'chrome_frame_common',
         'chrome_frame_strings',
         'chrome_frame_utils',
         '../chrome/chrome.gyp:common',
         'xulrunner_sdk',
       ],
       'sources': [
-        'chrome_frame_automation.cc',
-        'chrome_frame_automation.h',
-        'chrome_frame_delegate.cc',
-        'chrome_frame_delegate.h',
-        'chrome_frame_plugin.h',
         'chrome_frame_npapi.cc',
         'chrome_frame_npapi.h',
-        'custom_sync_call_context.h',
         'ff_30_privilege_check.cc',
         'ff_privilege_check.h',
-        'html_utils.cc',
-        'html_utils.h',
         'np_browser_functions.cc',
         'np_browser_functions.h',
         'np_event_listener.cc',
@@ -525,13 +563,7 @@
         'npapi_url_request.h',
         'ns_associate_iid_win.h',
         'ns_isupports_impl.h',
-        'plugin_url_request.cc',
-        'plugin_url_request.h',
         'scoped_ns_ptr_win.h',
-        'sync_msg_reply_dispatcher.cc',
-        'sync_msg_reply_dispatcher.h',
-        'utils.cc',
-        'utils.h',
       ],
     },
     {
@@ -580,8 +612,16 @@
       'type': 'static_library',
       'dependencies': [
         '../base/base.gyp:base_i18n',
-       ],
+        '../breakpad/breakpad.gyp:breakpad_handler',
+        '../chrome/chrome.gyp:chrome_version_header',
+      ],
+      'include_dirs': [
+        # To allow including "chrome_tab.h"
+        '<(SHARED_INTERMEDIATE_DIR)',
+      ],
       'sources': [
+        'crash_server_init.cc',
+        'crash_server_init.h',
         'simple_resource_loader.cc',
         'simple_resource_loader.h',
       ],
@@ -590,6 +630,7 @@
       'target_name': 'chrome_frame_ie',
       'type': 'static_library',
       'dependencies': [
+        'chrome_frame_common',
         'chrome_frame_strings',
         'chrome_frame_utils',
         '../chrome/chrome.gyp:common',
@@ -597,6 +638,7 @@
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/bzip2/bzip2.gyp:bzip2',
+        '../webkit/support/webkit_support.gyp:webkit_user_agent',
       ],
       'sources': [
         'bho.cc',
@@ -606,6 +648,8 @@
         'bind_context_info.h',
         'bind_status_callback_impl.cc',
         'bind_status_callback_impl.h',
+        'buggy_bho_handling.cc',
+        'buggy_bho_handling.h',
         'chrome_active_document.cc',
         'chrome_active_document.h',
         'chrome_active_document.rgs',
@@ -615,10 +659,6 @@
         'chrome_frame_activex_base.h',
         'chrome_frame_histograms.cc',
         'chrome_frame_histograms.h',
-        'chrome_frame_reporting.cc',
-        'chrome_frame_reporting.h',
-        'chrome_launcher_utils.cc',
-        'chrome_launcher_utils.h',
         'chrome_protocol.cc',
         'chrome_protocol.h',
         'chrome_protocol.rgs',
@@ -635,9 +675,11 @@
         'exception_barrier_lowlevel.asm',
         'find_dialog.cc',
         'find_dialog.h',
-        'function_stub.h',
-        'http_negotiate.cc',
         'function_stub.cc',
+        'function_stub.h',
+        'html_utils.h',
+        'html_utils.cc',
+        'http_negotiate.cc',
         'http_negotiate.h',
         'iids.cc',
         'in_place_menu.h',
@@ -648,10 +690,9 @@
         'ole_document_impl.h',
         'protocol_sink_wrap.cc',
         'protocol_sink_wrap.h',
+        'register_bho.rgs',
         'stream_impl.cc',
         'stream_impl.h',
-        'sync_msg_reply_dispatcher.cc',
-        'sync_msg_reply_dispatcher.h',
         'extra_system_apis.h',
         'urlmon_bind_status_callback.h',
         'urlmon_bind_status_callback.cc',
@@ -662,6 +703,8 @@
         'urlmon_url_request_private.h',
         'urlmon_upload_data_stream.cc',
         'urlmon_upload_data_stream.h',
+        'utils.h',
+        'utils.cc',
         'vtable_patch_manager.cc',
         'vtable_patch_manager.h',
       ],
@@ -669,6 +712,7 @@
         # To allow including "chrome_tab.h"
         '<(INTERMEDIATE_DIR)',
         '<(INTERMEDIATE_DIR)/../chrome_frame',
+        '<(DEPTH)/third_party/wtl/include',
       ],
       'conditions': [
         ['OS=="win"', {
@@ -720,6 +764,24 @@
       },
     },
     {
+      'target_name': 'chrome_frame_common',
+      'type': 'static_library',
+      'sources': [
+        'chrome_frame_automation.h',
+        'chrome_frame_automation.cc',
+        'chrome_frame_delegate.h',
+        'chrome_frame_delegate.cc',
+        'chrome_frame_plugin.h',
+        'chrome_launcher_utils.cc',
+        'chrome_launcher_utils.h',
+        'custom_sync_call_context.h',
+        'plugin_url_request.h',
+        'plugin_url_request.cc',
+        'sync_msg_reply_dispatcher.h',
+        'sync_msg_reply_dispatcher.cc',
+      ]
+    },
+    {
       'target_name': 'npchrome_frame',
       'type': 'shared_library',
       'msvs_guid': 'E3DE7E63-D3B6-4A9F-BCC4-5C8169E9C9F2',
@@ -731,16 +793,19 @@
         'chrome_frame_utils',
         'xulrunner_sdk',
         'chrome_frame_launcher.gyp:chrome_launcher',
-        '../chrome/chrome.gyp:chrome_version_info',
+        '../build/temp_gyp/googleurl.gyp:googleurl',
+        'chrome_frame_launcher.gyp:chrome_frame_helper',
+        'chrome_frame_launcher.gyp:chrome_frame_helper_dll',
         '../chrome/chrome.gyp:chrome_version_header',
         '../chrome/chrome.gyp:common',
         '../chrome/chrome.gyp:utility',
-        '../build/temp_gyp/googleurl.gyp:googleurl',
       ],
       'sources': [
         'chrome_frame_npapi.rgs',
         'chrome_frame_npapi_entrypoints.cc',
         'chrome_frame_npapi_entrypoints.h',
+        'chrome_frame_reporting.cc',
+        'chrome_frame_reporting.h',
         'chrome_tab.cc',
         'chrome_tab.def',
         'chrome_tab.h',
@@ -750,12 +815,13 @@
         'resources/tlb_resource.rc',
         'chrome_tab.rgs',
         'chrome_tab_version.rc',
+        'renderer_glue.cc',
         'resource.h',
       ],
       'include_dirs': [
         # To allow including "chrome_tab.h"
         '<(INTERMEDIATE_DIR)',
-        '<(INTERMEDIATE_DIR)/../chrome_frame',
+        '<(INTERMEDIATE_DIR)/../npchrome_frame',
       ],
       'conditions': [
         ['OS=="win"', {
@@ -799,6 +865,143 @@
       ],
     },
   ],
+  'conditions': [
+    # To enable the coverage targets, do
+    #    GYP_DEFINES='coverage=1' gclient sync
+    ['coverage!=0',
+      { 'targets': [
+        {
+          # Coverage BUILD AND RUN.
+          # Not named coverage_build_and_run for historical reasons.
+          'target_name': 'gcf_coverage',
+          'dependencies': [ 'gcf_coverage_build', 'gcf_coverage_run' ],
+          # do NOT place this in the 'all' list; most won't want it.
+          'suppress_wildcard': 1,
+          'type': 'none',
+          'actions': [
+            {
+              'message': 'Coverage is now complete.',
+              # MSVS must have an input file and an output file.
+              'inputs': [ '<(PRODUCT_DIR)/gcf_coverage.info' ],
+              'outputs': [ '<(PRODUCT_DIR)/gcf_coverage-build-and-run.stamp' ],
+              'action_name': 'gcf_coverage',
+              # Wish gyp had some basic builtin commands (e.g. 'touch').
+              'action': [ 'python', '-c',
+                          'import os; ' \
+                          'open(' \
+                          '\'<(PRODUCT_DIR)\' + os.path.sep + ' \
+                          '\'gcf_coverage-build-and-run.stamp\'' \
+                          ', \'w\').close()' ],
+              # Use outputs of this action as inputs for the main target build.
+              # Seems as a misnomer but makes this happy on Linux (scons).
+              'process_outputs_as_sources': 1,
+            },
+          ],
+        },
+        # Coverage BUILD.  Compile only; does not run the bundles.
+        # Intended as the build phase for our coverage bots.
+        #
+        # Builds unit test bundles needed for coverage.
+        # Outputs this list of bundles into coverage_bundles.py.
+        #
+        # If you want to both build and run coverage from your IDE,
+        # use the 'coverage' target.
+        {
+          'target_name': 'gcf_coverage_build',
+          'suppress_wildcard': 1,
+          'type': 'none',
+          'dependencies': [
+            # Some tests are disabled because they depend on browser.lib which
+            # has some trouble to link with instrumentation. Until this is
+            # fixed on the Chrome side we won't get complete coverage from
+            # our tests but we at least get the process rolling...
+            # TODO(mad): FIX THIS!
+            #'chrome_frame_net_tests',
+            #'chrome_frame_reliability_tests',
+            
+            # Other tests depend on Chrome bins being available when they run.
+            # Those should be re-enabled as soon as we setup the build slave to
+            # also build (or download an archive of) Chrome, even it it isn't
+            # instrumented itself.
+            # TODO(mad): FIX THIS!
+            #'chrome_frame_perftests',
+            #'chrome_frame_tests',
+
+            'chrome_frame_unittests',
+          ],  # 'dependencies'
+          'actions': [
+            {
+              # TODO(jrg):
+              # Technically I want inputs to be the list of
+              # executables created in <@(_dependencies) but use of
+              # that variable lists the dep by dep name, not their
+              # output executable name.
+              # Is there a better way to force this action to run, always?
+              #
+              # If a test bundle is added to this coverage_build target it
+              # necessarily means this file (chrome_frame.gyp) is changed,
+              # so the action is run (coverage_bundles.py is generated).
+              # Exceptions to that rule are theoretically possible
+              # (e.g. re-gyp with a GYP_DEFINES set).
+              # Else it's the same list of bundles as last time.  They are
+              # built (since on the deps list) but the action may not run.
+              # For now, things work, but it's less than ideal.
+              'inputs': [ 'chrome_frame.gyp' ],
+              'outputs': [ '<(PRODUCT_DIR)/coverage_bundles.py' ],
+              'action_name': 'gcf_coverage_build',
+              'action': [ 'python', '-c',
+                          'import os; '
+                          'f = open(' \
+                          '\'<(PRODUCT_DIR)\' + os.path.sep + ' \
+                          '\'coverage_bundles.py\'' \
+                          ', \'w\'); ' \
+                          'deplist = \'' \
+                          '<@(_dependencies)' \
+                          '\'.split(\' \'); ' \
+                          'f.write(str(deplist)); ' \
+                          'f.close()'],
+              # Use outputs of this action as inputs for the main target build.
+              # Seems as a misnomer but makes this happy on Linux (scons).
+              'process_outputs_as_sources': 1,
+            },
+          ],
+        },
+        # Coverage RUN.  Does not actually compile the bundles (though it
+        # depends on the gcf_coverage_build step which will do it).
+        # This target mirrors the run_coverage_bundles buildbot phase.
+        # If you update this command update the mirror in
+        # $BUILDBOT/scripts/master/factory/chromium_commands.py.
+        # If you want both build and run, use the 'gcf_coverage' target which
+        # adds a bit more magic to identify if we need to run or not.
+        {
+          'target_name': 'gcf_coverage_run',
+          'dependencies': [ 'gcf_coverage_build' ],
+          'suppress_wildcard': 1,
+          'type': 'none',
+          'actions': [
+            {
+              # MSVS must have an input file and an output file.
+              'inputs': [ '<(PRODUCT_DIR)/coverage_bundles.py' ],
+              'outputs': [ '<(PRODUCT_DIR)/coverage.info' ],
+              'action_name': 'gcf_coverage_run',
+              'action': [ 'python',
+                          '../tools/code_coverage/coverage_posix.py',
+                          '--directory',
+                          '<(PRODUCT_DIR)',
+                          '--src_root',
+                          '.',
+                          '--bundles',
+                          '<(PRODUCT_DIR)/coverage_bundles.py',
+                        ],
+              # Use outputs of this action as inputs for the main target build.
+              # Seems as a misnomer but makes this happy on Linux (scons).
+              'process_outputs_as_sources': 1,
+            },
+          ],
+        },
+      ],
+    }, ],  # 'coverage!=0'
+  ],  # 'conditions'
 }
 
 # vim: shiftwidth=2:et:ai:tabstop=2

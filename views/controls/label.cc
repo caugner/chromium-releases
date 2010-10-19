@@ -7,11 +7,11 @@
 #include <cmath>
 #include <limits>
 
-#include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "app/text_elider.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "gfx/canvas_skia.h"
 #include "gfx/color_utils.h"
@@ -58,7 +58,7 @@ gfx::Size Label::GetPreferredSize() {
 }
 
 int Label::GetBaseline() {
-  return GetInsets().top() + font_.baseline();
+  return GetInsets().top() + font_.GetBaseline();
 }
 
 int Label::GetHeightForWidth(int w) {
@@ -66,7 +66,7 @@ int Label::GetHeightForWidth(int w) {
     return View::GetHeightForWidth(w);
 
   w = std::max(0, w - GetInsets().width());
-  int h = font_.height();
+  int h = font_.GetHeight();
   gfx::CanvasSkia::SizeStringInt(text_, font_, &w, &h, ComputeMultiLineFlags());
   return h + GetInsets().height();
 }
@@ -292,7 +292,7 @@ gfx::Size Label::GetTextSize() const {
     // on Linux.
     int w = is_multi_line_ ?
         GetAvailableRect().width() : std::numeric_limits<int>::max();
-    int h = font_.height();
+    int h = font_.GetHeight();
     // For single-line strings, ignore the available width and calculate how
     // wide the text wants to be.
     int flags = ComputeMultiLineFlags();
@@ -365,8 +365,10 @@ gfx::Rect Label::GetTextBounds() const {
     case ALIGN_LEFT:
       break;
     case ALIGN_CENTER:
-      // We put any extra margin pixel on the left rather than the right since
-      // GetTextExtentPoint32() can report a value one too large on the right.
+      // We put any extra margin pixel on the left rather than the right.  We
+      // used to do this because measurement on Windows used
+      // GetTextExtentPoint32(), which could report a value one too large on the
+      // right; we now use DrawText(), and who knows if it can also do this.
       text_origin.Offset((available_rect.width() + 1 - text_size.width()) / 2,
                          0);
       break;
@@ -437,7 +439,8 @@ void Label::CalculateDrawStringParams(std::wstring* paint_text,
     // characters. We use the locale settings because an URL is always treated
     // as an LTR string, even if its containing view does not use an RTL UI
     // layout.
-    base::i18n::GetDisplayStringInLTRDirectionality(paint_text);
+    *paint_text = UTF16ToWide(base::i18n::GetDisplayStringInLTRDirectionality(
+        WideToUTF16(*paint_text)));
   } else if (elide_in_middle_) {
     *paint_text = gfx::ElideText(text_, font_, width(), true);
   } else {

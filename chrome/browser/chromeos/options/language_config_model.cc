@@ -16,6 +16,7 @@
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
+#include "grit/generated_resources.h"
 
 namespace chromeos {
 
@@ -30,14 +31,13 @@ int AddLanguageComboboxModel::GetItemCount() {
   return get_languages_count() + 1 - ignore_set_.size();
 }
 
-std::wstring AddLanguageComboboxModel::GetItemAt(int index) {
+string16 AddLanguageComboboxModel::GetItemAt(int index) {
   // Show "Add language" as the first item.
   if (index == 0) {
-    return l10n_util::GetString(
+    return l10n_util::GetStringUTF16(
         IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_LANGUAGE_COMBOBOX);
   }
-  return input_method::MaybeRewriteLanguageName(
-      GetLanguageNameAt(GetLanguageIndex(index)));
+  return WideToUTF16Hack(GetLanguageNameAt(GetLanguageIndex(index)));
 }
 
 int AddLanguageComboboxModel::GetLanguageIndex(int index) const {
@@ -76,12 +76,14 @@ LanguageConfigModel::LanguageConfigModel(PrefService* pref_service)
   // Initialize the maps and vectors.
   InitInputMethodIdVectors();
 
-  preload_engines_.Init(
+  preferred_languages_pref_.Init(
+      prefs::kLanguagePreferredLanguages, pref_service_, this);
+  preload_engines_pref_.Init(
       prefs::kLanguagePreloadEngines, pref_service_, this);
   // TODO(yusukes): It might be safer to call GetActiveLanguages() cros API
-  // here and compare the result and preload_engines_.GetValue(). If there's
-  // a discrepancy between IBus setting and Chrome prefs, we can resolve it
-  // by calling preload_engines_SetValue() here.
+  // here and compare the result and preload_engines_pref_.GetValue().
+  // If there's a discrepancy between IBus setting and Chrome prefs, we
+  // can resolve it by calling preload_engines_pref_SetValue() here.
 
   // Initialize the language codes currently activated.
   NotifyPrefChanged();
@@ -122,11 +124,15 @@ size_t LanguageConfigModel::AddLanguageCode(
                     std::find(preferred_language_codes_.begin(),
                               preferred_language_codes_.end(),
                               language_code));
+  preferred_languages_pref_.SetValue(
+      JoinString(preferred_language_codes_, ','));
   return added_at;
 }
 
 void LanguageConfigModel::RemoveLanguageAt(size_t row) {
   preferred_language_codes_.erase(preferred_language_codes_.begin() + row);
+  preferred_languages_pref_.SetValue(
+      JoinString(preferred_language_codes_, ','));
 }
 
 void LanguageConfigModel::UpdateInputMethodPreferences(
@@ -136,7 +142,7 @@ void LanguageConfigModel::UpdateInputMethodPreferences(
   // function below uses stable sort, the relateve order of input methods that
   // belong to the same language (e.g. "mozc" and "xkb:jp::jpn") is maintained.
   input_method::SortInputMethodIdsByNames(&new_input_method_ids);
-  preload_engines_.SetValue(JoinString(new_input_method_ids, ','));
+  preload_engines_pref_.SetValue(JoinString(new_input_method_ids, ','));
 }
 
 void LanguageConfigModel::DeactivateInputMethodsFor(
@@ -186,10 +192,18 @@ bool LanguageConfigModel::InputMethodIsActivated(
 
 void LanguageConfigModel::GetActiveInputMethodIds(
     std::vector<std::string>* out_input_method_ids) {
-  const std::string value = preload_engines_.GetValue();
+  const std::string value = preload_engines_pref_.GetValue();
   out_input_method_ids->clear();
   if (!value.empty())
     SplitString(value, ',', out_input_method_ids);
+}
+
+void LanguageConfigModel::GetPreferredLanguageCodes(
+    std::vector<std::string>* out_language_codes) {
+  const std::string value = preferred_languages_pref_.GetValue();
+  out_language_codes->clear();
+  if (!value.empty())
+    SplitString(value, ',', out_language_codes);
 }
 
 void LanguageConfigModel::GetInputMethodIdsFromLanguageCode(
@@ -199,27 +213,10 @@ void LanguageConfigModel::GetInputMethodIdsFromLanguageCode(
   input_method_ids->clear();
   input_method::GetInputMethodIdsFromLanguageCode(
       language_code, input_method::kAllInputMethods, input_method_ids);
-
-  // Reorder the input methods.
-  input_method::ReorderInputMethodIdsForLanguageCode(
-      language_code, input_method_ids);
 }
 
 void LanguageConfigModel::NotifyPrefChanged() {
-  std::vector<std::string> input_method_ids;
-  GetActiveInputMethodIds(&input_method_ids);
-
-  std::set<std::string> language_code_set;
-  for (size_t i = 0; i < input_method_ids.size(); ++i) {
-    const std::string language_code =
-        input_method::GetLanguageCodeFromInputMethodId(input_method_ids[i]);
-    language_code_set.insert(language_code);
-  }
-
-  preferred_language_codes_.clear();
-  preferred_language_codes_.assign(
-      language_code_set.begin(), language_code_set.end());
-  input_method::SortLanguageCodesByNames(&preferred_language_codes_);
+  GetPreferredLanguageCodes(&preferred_language_codes_);
 }
 
 void LanguageConfigModel::Observe(NotificationType type,

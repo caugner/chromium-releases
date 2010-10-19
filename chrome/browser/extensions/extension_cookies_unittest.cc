@@ -7,9 +7,11 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
+#include "base/values.h"
 #include "chrome/browser/extensions/extension_cookies_api_constants.h"
 #include "chrome/browser/extensions/extension_cookies_helpers.h"
 #include "chrome/test/testing_profile.h"
+#include "googleurl/src/gurl.h"
 
 namespace keys = extension_cookies_api_constants;
 
@@ -81,16 +83,16 @@ TEST_F(ExtensionCookiesTest, StoreIdProfileConversion) {
 
   EXPECT_EQ(std::string("1"),
             extension_cookies_helpers::GetStoreIdFromProfile(&otrProfile));
-  EXPECT_EQ(&profile,
+  EXPECT_EQ(NULL,
             extension_cookies_helpers::ChooseProfileFromStoreId(
                 "0", &otrProfile, true));
-  EXPECT_EQ(&profile,
+  EXPECT_EQ(NULL,
             extension_cookies_helpers::ChooseProfileFromStoreId(
                 "0", &otrProfile, false));
   EXPECT_EQ(&otrProfile,
             extension_cookies_helpers::ChooseProfileFromStoreId(
                 "1", &otrProfile, true));
-  EXPECT_EQ(NULL,
+  EXPECT_EQ(&otrProfile,
             extension_cookies_helpers::ChooseProfileFromStoreId(
                 "1", &otrProfile, false));
 }
@@ -104,10 +106,9 @@ TEST_F(ExtensionCookiesTest, ExtensionTypeCreation) {
   net::CookieMonster::CanonicalCookie cookie1(
       "ABC", "DEF", "www.foobar.com", "/", false, false,
       base::Time(), base::Time(), false, base::Time());
-  net::CookieMonster::CookieListPair cookie_pair1("www.foobar.com", cookie1);
   scoped_ptr<DictionaryValue> cookie_value1(
       extension_cookies_helpers::CreateCookieValue(
-          cookie_pair1, "some cookie store"));
+          cookie1, "some cookie store"));
   EXPECT_TRUE(cookie_value1->GetString(keys::kNameKey, &string_value));
   EXPECT_EQ("ABC", string_value);
   EXPECT_TRUE(cookie_value1->GetString(keys::kValueKey, &string_value));
@@ -132,10 +133,9 @@ TEST_F(ExtensionCookiesTest, ExtensionTypeCreation) {
   net::CookieMonster::CanonicalCookie cookie2(
       "ABC", "DEF", ".foobar.com", "/", false, false,
       base::Time(), base::Time(), true, base::Time::FromDoubleT(10000));
-  net::CookieMonster::CookieListPair cookie_pair2(".foobar.com", cookie2);
   scoped_ptr<DictionaryValue> cookie_value2(
       extension_cookies_helpers::CreateCookieValue(
-          cookie_pair2, "some cookie store"));
+          cookie2, "some cookie store"));
   EXPECT_TRUE(cookie_value2->GetBoolean(keys::kHostOnlyKey, &boolean_value));
   EXPECT_EQ(false, boolean_value);
   EXPECT_TRUE(cookie_value2->GetBoolean(keys::kSessionKey, &boolean_value));
@@ -153,22 +153,20 @@ TEST_F(ExtensionCookiesTest, ExtensionTypeCreation) {
   EXPECT_EQ(tab_ids, value);
 }
 
-TEST_F(ExtensionCookiesTest, GetURLFromCookiePair) {
+TEST_F(ExtensionCookiesTest, GetURLFromCanonicalCookie) {
   net::CookieMonster::CanonicalCookie cookie1(
       "ABC", "DEF", "www.foobar.com", "/", false, false,
       base::Time(), base::Time(), false, base::Time());
-  net::CookieMonster::CookieListPair cookie_pair1("www.foobar.com", cookie1);
   EXPECT_EQ("http://www.foobar.com/",
-            extension_cookies_helpers::GetURLFromCookiePair(
-                cookie_pair1).spec());
+            extension_cookies_helpers::GetURLFromCanonicalCookie(
+                cookie1).spec());
 
   net::CookieMonster::CanonicalCookie cookie2(
       "ABC", "DEF", ".helloworld.com", "/", true, false,
       base::Time(), base::Time(), false, base::Time());
-  net::CookieMonster::CookieListPair cookie_pair2(".helloworld.com", cookie2);
   EXPECT_EQ("https://helloworld.com/",
-            extension_cookies_helpers::GetURLFromCookiePair(
-                cookie_pair2).spec());
+            extension_cookies_helpers::GetURLFromCanonicalCookie(
+                cookie2).spec());
 }
 
 TEST_F(ExtensionCookiesTest, EmptyDictionary) {
@@ -176,9 +174,8 @@ TEST_F(ExtensionCookiesTest, EmptyDictionary) {
   extension_cookies_helpers::MatchFilter filter(details.get());
   std::string domain;
   net::CookieMonster::CanonicalCookie cookie;
-  net::CookieMonster::CookieListPair cookie_pair(domain, cookie);
 
-  EXPECT_TRUE(filter.MatchesCookie(cookie_pair));
+  EXPECT_TRUE(filter.MatchesCookie(cookie));
 }
 
 TEST_F(ExtensionCookiesTest, DomainMatching) {
@@ -193,11 +190,14 @@ TEST_F(ExtensionCookiesTest, DomainMatching) {
   };
 
   scoped_ptr<DictionaryValue> details(new DictionaryValue());
-  net::CookieMonster::CanonicalCookie cookie;
   for (size_t i = 0; i < arraysize(tests); ++i) {
     details->SetString(keys::kDomainKey, std::string(tests[i].filter));
     extension_cookies_helpers::MatchFilter filter(details.get());
-    net::CookieMonster::CookieListPair cookie_pair(tests[i].domain, cookie);
-    EXPECT_EQ(tests[i].matches, filter.MatchesCookie(cookie_pair));
+    net::CookieMonster::CanonicalCookie cookie("", "", tests[i].domain,
+                                               "", false, false,
+                                               base::Time(),
+                                               base::Time(),
+                                               false, base::Time());
+    EXPECT_EQ(tests[i].matches, filter.MatchesCookie(cookie));
   }
 }

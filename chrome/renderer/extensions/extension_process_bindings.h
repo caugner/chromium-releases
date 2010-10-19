@@ -6,6 +6,7 @@
 
 #ifndef CHROME_RENDERER_EXTENSIONS_EXTENSION_PROCESS_BINDINGS_H_
 #define CHROME_RENDERER_EXTENSIONS_EXTENSION_PROCESS_BINDINGS_H_
+#pragma once
 
 #include <set>
 #include <string>
@@ -48,10 +49,12 @@ class ExtensionProcessBindings {
 
   // Sets whether incognito is enabled for a particular extension.
   static void SetIncognitoEnabled(const std::string& extension_id,
-                                  bool enabled);
+                                  bool enabled,
+                                  bool incognito_split_mode);
 
-  // Checks whether incognito is enabled for a particular extension.
-  static bool HasIncognitoEnabled(const std::string& extension_id);
+  // Checks whether the given extension can see events/data from another
+  // profile (normal to incognito or vice versa).
+  static bool AllowCrossProfile(const std::string& extension_id);
 
   // Check if the extension in the currently running context has permission to
   // access the given extension function. Must be called with a valid V8
@@ -70,11 +73,6 @@ class ExtensionProcessBindings {
   // denied. Must be called with a valid V8 context in scope.
   static v8::Handle<v8::Value> ThrowPermissionDeniedException(
       const std::string& function_name);
-
-  // For EXTENSION_* |type| values, adds/replaces a special class name on to
-  // the document element (e.g. "extension_toolstrip", "extension_mole") so
-  // that the page can use CSS rules to control its display appropriately.
-  static void SetViewType(WebKit::WebView* view, ViewType::Type type);
 };
 
 #endif  // CHROME_RENDERER_EXTENSIONS_EXTENSION_PROCESS_BINDINGS_H_

@@ -8,8 +8,8 @@
 
 #include "app/gtk_util.h"
 #include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/command_line.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
@@ -21,7 +21,7 @@
 #include "chrome/browser/gtk/options/options_layout_gtk.h"
 #include "chrome/browser/gtk/options/passwords_exceptions_window_gtk.h"
 #include "chrome/browser/importer/importer_data_types.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
@@ -75,8 +75,8 @@ ContentPageGtk::ContentPageGtk(Profile* profile)
 #if !defined(OS_CHROMEOS)
       sync_action_link_background_(NULL),
       sync_action_link_(NULL),
-      sync_start_stop_button_(NULL),
 #endif
+      sync_start_stop_button_(NULL),
       sync_customize_button_(NULL),
       privacy_dashboard_link_(NULL),
       initializing_(true),
@@ -101,6 +101,8 @@ ContentPageGtk::ContentPageGtk(Profile* profile)
   // Add preferences observers.
   ask_to_save_passwords_.Init(prefs::kPasswordManagerEnabled,
                               profile->GetPrefs(), this);
+  form_autofill_enabled_.Init(prefs::kAutoFillEnabled,
+                              profile->GetPrefs(), this);
   if (browser_defaults::kCanToggleSystemTitleBar) {
     use_custom_chrome_frame_.Init(prefs::kUseCustomChromeFrame,
                                   profile->GetPrefs(), this);
@@ -112,11 +114,9 @@ ContentPageGtk::ContentPageGtk(Profile* profile)
   options_builder->AddOptionGroup(
       l10n_util::GetStringUTF8(IDS_AUTOFILL_SETTING_WINDOWS_GROUP_NAME),
       InitFormAutoFillGroup(), false);
-#if !defined(OS_CHROMEOS)
   options_builder->AddOptionGroup(
       l10n_util::GetStringUTF8(IDS_OPTIONS_BROWSING_DATA_GROUP_NAME),
       InitBrowsingDataGroup(), false);
-#endif
   options_builder->AddOptionGroup(
       l10n_util::GetStringUTF8(IDS_APPEARANCE_GROUP_NAME),
       InitThemesGroup(), false);
@@ -152,7 +152,7 @@ void ContentPageGtk::OnStateChanged() {
 // If |pref_name| is NULL, set the state of all the widgets. (This is used
 // in ContentPageGtk() above to initialize the dialog.) Otherwise, reset the
 // state of the widget for the given preference name, as it has changed.
-void ContentPageGtk::NotifyPrefChanged(const std::wstring* pref_name) {
+void ContentPageGtk::NotifyPrefChanged(const std::string* pref_name) {
   initializing_ = true;
   if (!pref_name || *pref_name == prefs::kPasswordManagerEnabled) {
     if (ask_to_save_passwords_.GetValue()) {
@@ -162,6 +162,19 @@ void ContentPageGtk::NotifyPrefChanged(const std::wstring* pref_name) {
       gtk_toggle_button_set_active(
           GTK_TOGGLE_BUTTON(passwords_neversave_radio_), TRUE);
     }
+    bool isPasswordManagerEnabled = !ask_to_save_passwords_.IsManaged();
+    gtk_widget_set_sensitive(passwords_asktosave_radio_,
+                             isPasswordManagerEnabled);
+    gtk_widget_set_sensitive(passwords_neversave_radio_,
+                             isPasswordManagerEnabled);
+    gtk_widget_set_sensitive(show_passwords_button_,
+                             isPasswordManagerEnabled ||
+                             ask_to_save_passwords_.GetValue());
+  }
+  if (!pref_name || *pref_name == prefs::kAutoFillEnabled) {
+    bool disabled_by_policy = form_autofill_enabled_.IsManaged() &&
+        !form_autofill_enabled_.GetValue();
+    gtk_widget_set_sensitive(autofill_button_, !disabled_by_policy);
   }
   if (browser_defaults::kCanToggleSystemTitleBar &&
       (!pref_name || *pref_name == prefs::kUseCustomChromeFrame)) {
@@ -224,20 +237,12 @@ GtkWidget* ContentPageGtk::InitPasswordSavingGroup() {
   // depend on the spacing above.
   GtkWidget* button_hbox = gtk_hbox_new(FALSE, gtk_util::kLabelSpacing);
   gtk_container_add(GTK_CONTAINER(vbox), button_hbox);
-  GtkWidget* show_passwords_button = gtk_button_new_with_label(
+  show_passwords_button_ = gtk_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_OPTIONS_PASSWORDS_SHOWPASSWORDS).c_str());
-  g_signal_connect(show_passwords_button, "clicked",
+  g_signal_connect(show_passwords_button_, "clicked",
                    G_CALLBACK(OnShowPasswordsButtonClickedThunk), this);
-  gtk_box_pack_start(GTK_BOX(button_hbox), show_passwords_button, FALSE,
+  gtk_box_pack_start(GTK_BOX(button_hbox), show_passwords_button_, FALSE,
                      FALSE, 0);
-
-  bool isPasswordManagerEnabled = !ask_to_save_passwords_.IsManaged();
-  gtk_widget_set_sensitive(passwords_asktosave_radio_,
-                           isPasswordManagerEnabled);
-  gtk_widget_set_sensitive(passwords_neversave_radio_,
-                           isPasswordManagerEnabled);
-  gtk_widget_set_sensitive(show_passwords_button,
-                           isPasswordManagerEnabled);
 
   return vbox;
 }
@@ -249,12 +254,12 @@ GtkWidget* ContentPageGtk::InitFormAutoFillGroup() {
   gtk_container_add(GTK_CONTAINER(vbox), button_hbox);
 
   // AutoFill button.
-  GtkWidget* autofill_button = gtk_button_new_with_label(
+  autofill_button_ = gtk_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_AUTOFILL_OPTIONS).c_str());
 
-  g_signal_connect(G_OBJECT(autofill_button), "clicked",
+  g_signal_connect(G_OBJECT(autofill_button_), "clicked",
                    G_CALLBACK(OnAutoFillButtonClickedThunk), this);
-  gtk_box_pack_start(GTK_BOX(button_hbox), autofill_button, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(button_hbox), autofill_button_, FALSE, FALSE, 0);
 
   return vbox;
 }
@@ -358,13 +363,11 @@ GtkWidget* ContentPageGtk::InitSyncGroup() {
   // depend on the spacing above.
   GtkWidget* button_hbox = gtk_hbox_new(FALSE, gtk_util::kLabelSpacing);
   gtk_container_add(GTK_CONTAINER(vbox), button_hbox);
-#if !defined(OS_CHROMEOS)
   sync_start_stop_button_ = gtk_button_new_with_label("");
   g_signal_connect(sync_start_stop_button_, "clicked",
                    G_CALLBACK(OnSyncStartStopButtonClickedThunk), this);
   gtk_box_pack_start(GTK_BOX(button_hbox), sync_start_stop_button_, FALSE,
                      FALSE, 0);
-#endif
   sync_customize_button_ = gtk_button_new_with_label("");
   g_signal_connect(sync_customize_button_, "clicked",
                    G_CALLBACK(OnSyncCustomizeButtonClickedThunk), this);
@@ -399,29 +402,49 @@ void ContentPageGtk::UpdateSyncControls() {
   string16 status_label;
   string16 link_label;
   std::string customize_button_label;
-  std::string button_label;
   bool managed = sync_service_->IsManaged();
   bool sync_setup_completed = sync_service_->HasSyncSetupCompleted();
   bool status_has_error = sync_ui_util::GetStatusLabels(sync_service_,
       &status_label, &link_label) == sync_ui_util::SYNC_ERROR;
   customize_button_label =
     l10n_util::GetStringUTF8(IDS_SYNC_CUSTOMIZE_BUTTON_LABEL);
+
+  std::string start_stop_button_label;
+  bool is_start_stop_button_visible = false;
+  bool is_start_stop_button_sensitive = false;
   if (sync_setup_completed) {
-    button_label = l10n_util::GetStringUTF8(IDS_SYNC_STOP_SYNCING_BUTTON_LABEL);
+    start_stop_button_label =
+        l10n_util::GetStringUTF8(IDS_SYNC_STOP_SYNCING_BUTTON_LABEL);
+#if defined(OS_CHROMEOS)
+    is_start_stop_button_visible = false;
+#else
+    is_start_stop_button_visible = true;
+#endif
+    is_start_stop_button_sensitive = !managed;
   } else if (sync_service_->SetupInProgress()) {
-    button_label = l10n_util::GetStringUTF8(IDS_SYNC_NTP_SETUP_IN_PROGRESS);
+    start_stop_button_label =
+        l10n_util::GetStringUTF8(IDS_SYNC_NTP_SETUP_IN_PROGRESS);
+    is_start_stop_button_visible = true;
+    is_start_stop_button_sensitive = false;
   } else {
-    button_label = l10n_util::GetStringUTF8(IDS_SYNC_START_SYNC_BUTTON_LABEL);
+    start_stop_button_label =
+        l10n_util::GetStringUTF8(IDS_SYNC_START_SYNC_BUTTON_LABEL);
+    is_start_stop_button_visible = true;
+    is_start_stop_button_sensitive = !managed;
   }
+  gtk_widget_set_no_show_all(sync_start_stop_button_,
+                             !is_start_stop_button_visible);
+  if (is_start_stop_button_visible)
+    gtk_widget_show(sync_start_stop_button_);
+  else
+    gtk_widget_hide(sync_start_stop_button_);
+  gtk_widget_set_sensitive(sync_start_stop_button_,
+                           is_start_stop_button_sensitive);
+  gtk_button_set_label(GTK_BUTTON(sync_start_stop_button_),
+                       start_stop_button_label.c_str());
 
   gtk_label_set_label(GTK_LABEL(sync_status_label_),
                       UTF16ToUTF8(status_label).c_str());
-#if !defined(OS_CHROMEOS)
-  gtk_widget_set_sensitive(sync_start_stop_button_,
-                           !sync_service_->WizardIsVisible() && !managed);
-  gtk_button_set_label(GTK_BUTTON(sync_start_stop_button_),
-                       button_label.c_str());
-#endif
 
   gtk_widget_set_child_visible(sync_customize_button_,
       sync_setup_completed && !status_has_error);

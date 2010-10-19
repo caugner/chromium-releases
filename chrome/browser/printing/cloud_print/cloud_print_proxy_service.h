@@ -4,15 +4,12 @@
 
 #ifndef CHROME_BROWSER_PRINTING_CLOUD_PRINT_CLOUD_PRINT_PROXY_SERVICE_H_
 #define CHROME_BROWSER_PRINTING_CLOUD_PRINT_CLOUD_PRINT_PROXY_SERVICE_H_
+#pragma once
 
 #include <string>
-#include <map>
-#include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
 #include "base/observer_list.h"
-#include "base/scoped_ptr.h"
 #include "chrome/browser/profile.h"
 
 
@@ -40,4 +37,3 @@ class CloudPrintProxyService {
 };
 
 #endif  // CHROME_BROWSER_PRINTING_CLOUD_PRINT_CLOUD_PRINT_PROXY_SERVICE_H_
-

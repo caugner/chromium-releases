@@ -7,7 +7,9 @@
 
 #include <string>
 
+#include "app/keyboard_codes.h"
 #include "base/basictypes.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDevToolsAgentClient.h"
 
 class Task;
 class WebURLLoaderMockFactory;
@@ -23,8 +25,10 @@ class WebPlugin;
 class WebString;
 class WebThemeEngine;
 class WebURL;
+class WebURLRequest;
 class WebURLResponse;
 struct WebPluginParams;
+struct WebURLError;
 }
 
 // This package provides functions used by DumpRenderTree/chromium.
@@ -97,8 +101,11 @@ void RunMessageLoop();
 void QuitMessageLoop();
 void RunAllPendingMessages();
 void DispatchMessageLoop();
+WebKit::WebDevToolsAgentClient::WebKitClientMessageLoop*
+    CreateDevToolsMessageLoop();
 void PostTaskFromHere(Task* task);  // TODO(tkent): Eliminate Task.
 void PostDelayedTaskFromHere(Task* task, int64 delay_ms);  // ditto.
+void PostDelayedTask(void (*func)(void*), void* context, int64 delay_ms);
 
 // -------- File path and PathService
 // Converts the specified path string to an absolute path in WebString.
@@ -118,6 +125,17 @@ WebKit::WebURL RewriteLayoutTestsURL(const std::string& utf8_url);
 // Set the directory of specified file: URL as the current working directory.
 bool SetCurrentDirectoryForFileURL(const WebKit::WebURL& fileUrl);
 
+// -------- Time
+int64 GetCurrentTimeInMillisecond();
+
+// -------- Net
+// A wrapper of net::EscapePath().
+std::string EscapePath(const std::string& path);
+// Make an error description for layout tests.
+std::string MakeURLErrorDescription(const WebKit::WebURLError& error);
+// Creates WebURLError for an aborted request.
+WebKit::WebURLError CreateCancelledError(const WebKit::WebURLRequest& request);
+
 // - Database
 void SetDatabaseQuota(int quota);
 void ClearAllDatabases();
@@ -132,10 +150,25 @@ WebKit::WebThemeEngine* GetThemeEngine();
 #endif
 
 // - DevTools
-WebKit::WebCString GetDevToolsInjectedScriptSource();
-WebKit::WebCString GetDevToolsInjectedScriptDispatcherSource();
 WebKit::WebCString GetDevToolsDebuggerScriptSource();
 WebKit::WebURL GetDevToolsPathAsURL();
+
+// -------- Keyboard code
+enum {
+    VKEY_LEFT = app::VKEY_LEFT,
+    VKEY_RIGHT = app::VKEY_RIGHT,
+    VKEY_UP = app::VKEY_UP,
+    VKEY_DOWN = app::VKEY_DOWN,
+    VKEY_RETURN = app::VKEY_RETURN,
+    VKEY_INSERT = app::VKEY_INSERT,
+    VKEY_DELETE = app::VKEY_DELETE,
+    VKEY_PRIOR = app::VKEY_PRIOR,
+    VKEY_NEXT = app::VKEY_NEXT,
+    VKEY_HOME = app::VKEY_HOME,
+    VKEY_END = app::VKEY_END,
+    VKEY_SNAPSHOT = app::VKEY_SNAPSHOT,
+    VKEY_F1 = app::VKEY_F1,
+};
 
 }  // namespace webkit_support
 

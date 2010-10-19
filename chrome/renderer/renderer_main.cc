@@ -8,8 +8,6 @@
 #endif  // OS_MACOSX
 
 #include "app/hi_res_timer_manager.h"
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "app/system_monitor.h"
 #include "base/command_line.h"
 #include "base/field_trial.h"
@@ -21,6 +19,7 @@
 #include "base/scoped_nsautorelease_pool.h"
 #include "base/stats_counters.h"
 #include "base/string_util.h"
+#include "base/trace_event.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_counters.h"
 #include "chrome/common/chrome_switches.h"
@@ -178,6 +177,8 @@ static void HandleRendererErrorTestParameters(const CommandLine& command_line) {
 
 // mainline routine for running as the Renderer process
 int RendererMain(const MainFunctionParams& parameters) {
+  TRACE_EVENT_BEGIN("RendererMain", 0, "");
+
   const CommandLine& parsed_command_line = parameters.command_line_;
   base::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool_;
 
@@ -257,8 +258,8 @@ int RendererMain(const MainFunctionParams& parameters) {
   FieldTrialList field_trial;
   // Ensure any field trials in browser are reflected into renderer.
   if (parsed_command_line.HasSwitch(switches::kForceFieldTestNameAndValue)) {
-    std::string persistent(WideToASCII(parsed_command_line.GetSwitchValue(
-        switches::kForceFieldTestNameAndValue)));
+    std::string persistent = parsed_command_line.GetSwitchValueASCII(
+        switches::kForceFieldTestNameAndValue);
     bool ret = field_trial.StringAugmentsState(persistent);
     DCHECK(ret);
   }
@@ -289,9 +290,12 @@ int RendererMain(const MainFunctionParams& parameters) {
     if (run_loop) {
       if (pool)
         pool->Recycle();
+      TRACE_EVENT_BEGIN("RendererMain.START_MSG_LOOP", 0, 0);
       MessageLoop::current()->Run();
+      TRACE_EVENT_END("RendererMain.START_MSG_LOOP", 0, 0);
     }
   }
   platform.PlatformUninitialize();
+  TRACE_EVENT_END("RendererMain", 0, "");
   return 0;
 }

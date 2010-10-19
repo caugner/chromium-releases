@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_WIDGET_WIDGET_GTK_H_
 #define VIEWS_WIDGET_WIDGET_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -148,6 +149,11 @@ class WidgetGtk
   // Returns the RootView for |widget|.
   static RootView* GetRootViewForWidget(GtkWidget* widget);
 
+  // Gets the requested size of the widget.  This can be the size
+  // stored in properties for a GtkViewsFixed, or in the requisitioned
+  // size of other kinds of widgets.
+  void GetRequestedSize(gfx::Size* out) const;
+
   // Overriden from ActiveWindowWatcherX::Observer.
   virtual void ActiveWindowChanged(GdkWindow* active_window);
 
@@ -196,6 +202,10 @@ class WidgetGtk
 
   // Clears the focus on the native widget having the focus.
   virtual void ClearNativeFocus();
+
+  // Handles a keyboard event by sending it to our focus manager.
+  // Returns true if it's handled by the focus manager.
+  bool HandleKeyboardEvent(GdkEventKey* event);
 
  protected:
   // If widget containes another widget, translates event coordinates to the
@@ -246,8 +256,7 @@ class WidgetGtk
   CHROMEGTK_CALLBACK_1(WidgetGtk, gboolean, OnButtonRelease, GdkEventButton*);
   CHROMEGTK_CALLBACK_1(WidgetGtk, gboolean, OnFocusIn, GdkEventFocus*);
   CHROMEGTK_CALLBACK_1(WidgetGtk, gboolean, OnFocusOut, GdkEventFocus*);
-  CHROMEGTK_CALLBACK_1(WidgetGtk, gboolean, OnKeyPress, GdkEventKey*);
-  CHROMEGTK_CALLBACK_1(WidgetGtk, gboolean, OnKeyRelease, GdkEventKey*);
+  CHROMEGTK_CALLBACK_1(WidgetGtk, gboolean, OnKeyEvent, GdkEventKey*);
   CHROMEGTK_CALLBACK_4(WidgetGtk, gboolean, OnQueryTooltip,
                        gint, gint, gboolean, GtkTooltip*);
   CHROMEGTK_CALLBACK_1(WidgetGtk, gboolean, OnScroll, GdkEventScroll*);
@@ -434,6 +443,9 @@ class WidgetGtk
   // If true, we enable the content widget's double buffering.
   // This is false by default.
   bool is_double_buffered_;
+
+  // Indicates if we should handle the upcoming Alt key release event.
+  bool should_handle_menu_key_release_;
 
   DISALLOW_COPY_AND_ASSIGN(WidgetGtk);
 };

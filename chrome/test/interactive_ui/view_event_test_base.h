@@ -4,6 +4,7 @@
 
 #ifndef CHROME_TEST_INTERACTIVE_UI_VIEW_EVENT_TEST_BASE_H_
 #define CHROME_TEST_INTERACTIVE_UI_VIEW_EVENT_TEST_BASE_H_
+#pragma once
 
 #include "base/message_loop.h"
 #include "base/task.h"
@@ -69,9 +70,7 @@ class ViewEventTestBase : public views::WindowDelegate,
   // Destroys the window.
   virtual void TearDown();
 
-  virtual bool CanResize() const {
-    return true;
-  }
+  virtual bool CanResize() const;
 
   // WindowDelegate method. Calls into CreateContentsView to get the actual
   // view.
@@ -83,6 +82,8 @@ class ViewEventTestBase : public views::WindowDelegate,
   static bool ImplementsThreadSafeReferenceCounting() { return false; }
 
  protected:
+  virtual ~ViewEventTestBase();
+
   // Returns the view that is added to the window.
   virtual views::View* CreateContentsView() = 0;
 

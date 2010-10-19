@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <windows.h>
+#include <shlwapi.h> // For SHDeleteKey.
 
 #include "base/registry.h"
 #include "base/scoped_ptr.h"
@@ -13,9 +14,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
-const wchar_t* kHKCUReplacement =
+
+const wchar_t kHKCUReplacement[] =
     L"Software\\Google\\InstallUtilUnittest\\HKCU";
-const wchar_t* kHKLMReplacement =
+const wchar_t kHKLMReplacement[] =
     L"Software\\Google\\InstallUtilUnittest\\HKLM";
 
 const wchar_t kTestProductGuid[] = L"{89F1B351-B15D-48D4-8F10-1298721CF13D}";
@@ -35,8 +37,8 @@ class GoogleUpdateSettingsTest: public testing::Test {
     EXPECT_TRUE(err == ERROR_SUCCESS || err == ERROR_FILE_NOT_FOUND);
 
     // Create the keys we're redirecting HKCU and HKLM to.
-    ASSERT_TRUE(hkcu_.Create(HKEY_CURRENT_USER, kHKCUReplacement));
-    ASSERT_TRUE(hklm_.Create(HKEY_CURRENT_USER, kHKLMReplacement));
+    ASSERT_TRUE(hkcu_.Create(HKEY_CURRENT_USER, kHKCUReplacement, KEY_READ));
+    ASSERT_TRUE(hklm_.Create(HKEY_CURRENT_USER, kHKLMReplacement, KEY_READ));
 
     // And do the switcharoo.
     ASSERT_EQ(ERROR_SUCCESS,

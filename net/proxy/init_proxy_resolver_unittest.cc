@@ -130,35 +130,37 @@ class RuleBasedProxyResolver : public ProxyResolver {
     NOTREACHED();
   }
 
-  virtual int SetPacScript(const GURL& pac_url,
-                           const string16& pac_script,
-                           CompletionCallback* callback) {
+  virtual int SetPacScript(
+      const scoped_refptr<ProxyResolverScriptData>& script_data,
+      CompletionCallback* callback) {
+
+   const GURL url =
+      script_data->type() == ProxyResolverScriptData::TYPE_SCRIPT_URL ?
+          script_data->url() : GURL();
+
     const Rules::Rule& rule = expects_pac_bytes() ?
-        rules_->GetRuleByText(pac_script) :
-        rules_->GetRuleByUrl(pac_url);
+        rules_->GetRuleByText(script_data->utf16()) :
+        rules_->GetRuleByUrl(url);
 
     int rv = rule.set_pac_error;
     EXPECT_NE(ERR_UNEXPECTED, rv);
 
-    if (expects_pac_bytes())
-      EXPECT_EQ(rule.text(), pac_script);
-    else
-      EXPECT_EQ(rule.url, pac_url);
-
-    if (rv == OK) {
-      pac_script_ = pac_script;
-      pac_url_ = pac_url;
+    if (expects_pac_bytes()) {
+      EXPECT_EQ(rule.text(), script_data->utf16());
+    } else {
+      EXPECT_EQ(rule.url, url);
     }
+
+    if (rv == OK)
+      script_data_ = script_data;
     return rv;
   }
 
-  const string16& pac_script() const { return pac_script_; }
-  const GURL& pac_url() const { return pac_url_; }
+  const ProxyResolverScriptData* script_data() const { return script_data_; }
 
  private:
   const Rules* rules_;
-  string16 pac_script_;
-  GURL pac_url_;
+  scoped_refptr<ProxyResolverScriptData> script_data_;
 };
 
 // Succeed using custom PAC script.
@@ -175,8 +177,8 @@ TEST(InitProxyResolverTest, CustomPacSucceeds) {
   TestCompletionCallback callback;
   CapturingNetLog log(CapturingNetLog::kUnbounded);
   InitProxyResolver init(&resolver, &fetcher, &log);
-  EXPECT_EQ(OK, init.Init(config, &callback));
-  EXPECT_EQ(rule.text(), resolver.pac_script());
+  EXPECT_EQ(OK, init.Init(config, base::TimeDelta(), NULL, &callback));
+  EXPECT_EQ(rule.text(), resolver.script_data()->utf16());
 
   // Check the NetLog was filled correctly.
   EXPECT_EQ(6u, log.entries().size());
@@ -208,8 +210,9 @@ TEST(InitProxyResolverTest, CustomPacFails1) {
   TestCompletionCallback callback;
   CapturingNetLog log(CapturingNetLog::kUnbounded);
   InitProxyResolver init(&resolver, &fetcher, &log);
-  EXPECT_EQ(kFailedDownloading, init.Init(config, &callback));
-  EXPECT_EQ(string16(), resolver.pac_script());
+  EXPECT_EQ(kFailedDownloading,
+            init.Init(config, base::TimeDelta(), NULL, &callback));
+  EXPECT_EQ(NULL, resolver.script_data());
 
   // Check the NetLog was filled correctly.
   EXPECT_EQ(4u, log.entries().size());
@@ -236,8 +239,9 @@ TEST(InitProxyResolverTest, CustomPacFails2) {
 
   TestCompletionCallback callback;
   InitProxyResolver init(&resolver, &fetcher, NULL);
-  EXPECT_EQ(kFailedParsing, init.Init(config, &callback));
-  EXPECT_EQ(string16(), resolver.pac_script());
+  EXPECT_EQ(kFailedParsing,
+            init.Init(config, base::TimeDelta(), NULL, &callback));
+  EXPECT_EQ(NULL, resolver.script_data());
 }
 
 // Fail downloading the custom PAC script, because the fetcher was NULL.
@@ -250,8 +254,9 @@ TEST(InitProxyResolverTest, HasNullProxyScriptFetcher) {
 
   TestCompletionCallback callback;
   InitProxyResolver init(&resolver, NULL, NULL);
-  EXPECT_EQ(ERR_UNEXPECTED, init.Init(config, &callback));
-  EXPECT_EQ(string16(), resolver.pac_script());
+  EXPECT_EQ(ERR_UNEXPECTED,
+            init.Init(config, base::TimeDelta(), NULL, &callback));
+  EXPECT_EQ(NULL, resolver.script_data());
 }
 
 // Succeeds in choosing autodetect (wpad).
@@ -267,8 +272,8 @@ TEST(InitProxyResolverTest, AutodetectSuccess) {
 
   TestCompletionCallback callback;
   InitProxyResolver init(&resolver, &fetcher, NULL);
-  EXPECT_EQ(OK, init.Init(config, &callback));
-  EXPECT_EQ(rule.text(), resolver.pac_script());
+  EXPECT_EQ(OK, init.Init(config, base::TimeDelta(), NULL, &callback));
+  EXPECT_EQ(rule.text(), resolver.script_data()->utf16());
 }
 
 // Fails at WPAD (downloading), but succeeds in choosing the custom PAC.
@@ -286,8 +291,8 @@ TEST(InitProxyResolverTest, AutodetectFailCustomSuccess1) {
 
   TestCompletionCallback callback;
   InitProxyResolver init(&resolver, &fetcher, NULL);
-  EXPECT_EQ(OK, init.Init(config, &callback));
-  EXPECT_EQ(rule.text(), resolver.pac_script());
+  EXPECT_EQ(OK, init.Init(config, base::TimeDelta(), NULL, &callback));
+  EXPECT_EQ(rule.text(), resolver.script_data()->utf16());
 }
 
 // Fails at WPAD (parsing), but succeeds in choosing the custom PAC.
@@ -299,15 +304,24 @@ TEST(InitProxyResolverTest, AutodetectFailCustomSuccess2) {
   ProxyConfig config;
   config.set_auto_detect(true);
   config.set_pac_url(GURL("http://custom/proxy.pac"));
+  config.proxy_rules().ParseFromString("unused-manual-proxy:99");
 
   rules.AddFailParsingRule("http://wpad/wpad.dat");
   Rules::Rule rule = rules.AddSuccessRule("http://custom/proxy.pac");
 
   TestCompletionCallback callback;
   CapturingNetLog log(CapturingNetLog::kUnbounded);
+
+  ProxyConfig effective_config;
   InitProxyResolver init(&resolver, &fetcher, &log);
-  EXPECT_EQ(OK, init.Init(config, &callback));
-  EXPECT_EQ(rule.text(), resolver.pac_script());
+  EXPECT_EQ(OK, init.Init(config, base::TimeDelta(),
+                          &effective_config, &callback));
+  EXPECT_EQ(rule.text(), resolver.script_data()->utf16());
+
+  // Verify that the effective configuration no longer contains auto detect or
+  // any of the manual settings.
+  EXPECT_TRUE(effective_config.Equals(
+      ProxyConfig::CreateFromCustomPacURL(GURL("http://custom/proxy.pac"))));
 
   // Check the NetLog was filled correctly.
   // (Note that the Fetch and Set states are repeated since both WPAD and custom
@@ -354,8 +368,9 @@ TEST(InitProxyResolverTest, AutodetectFailCustomFails1) {
 
   TestCompletionCallback callback;
   InitProxyResolver init(&resolver, &fetcher, NULL);
-  EXPECT_EQ(kFailedDownloading, init.Init(config, &callback));
-  EXPECT_EQ(string16(), resolver.pac_script());
+  EXPECT_EQ(kFailedDownloading,
+            init.Init(config, base::TimeDelta(), NULL, &callback));
+  EXPECT_EQ(NULL, resolver.script_data());
 }
 
 // Fails at WPAD (downloading), and fails at custom PAC (parsing).
@@ -373,8 +388,9 @@ TEST(InitProxyResolverTest, AutodetectFailCustomFails2) {
 
   TestCompletionCallback callback;
   InitProxyResolver init(&resolver, &fetcher, NULL);
-  EXPECT_EQ(kFailedParsing, init.Init(config, &callback));
-  EXPECT_EQ(string16(), resolver.pac_script());
+  EXPECT_EQ(kFailedParsing,
+            init.Init(config, base::TimeDelta(), NULL, &callback));
+  EXPECT_EQ(NULL, resolver.script_data());
 }
 
 // Fails at WPAD (parsing), but succeeds in choosing the custom PAC.
@@ -394,8 +410,80 @@ TEST(InitProxyResolverTest, AutodetectFailCustomSuccess2_NoFetch) {
 
   TestCompletionCallback callback;
   InitProxyResolver init(&resolver, &fetcher, NULL);
-  EXPECT_EQ(OK, init.Init(config, &callback));
-  EXPECT_EQ(rule.url, resolver.pac_url());
+  EXPECT_EQ(OK, init.Init(config, base::TimeDelta(), NULL, &callback));
+  EXPECT_EQ(rule.url, resolver.script_data()->url());
+}
+
+// This is a copy-paste of CustomPacFails1, with the exception that we give it
+// a 1 millisecond delay. This means it will now complete asynchronously.
+// Moreover, we test the NetLog to make sure it logged the pause.
+TEST(InitProxyResolverTest, CustomPacFails1_WithPositiveDelay) {
+  Rules rules;
+  RuleBasedProxyResolver resolver(&rules, true /*expects_pac_bytes*/);
+  RuleBasedProxyScriptFetcher fetcher(&rules);
+
+  ProxyConfig config;
+  config.set_pac_url(GURL("http://custom/proxy.pac"));
+
+  rules.AddFailDownloadRule("http://custom/proxy.pac");
+
+  TestCompletionCallback callback;
+  CapturingNetLog log(CapturingNetLog::kUnbounded);
+  InitProxyResolver init(&resolver, &fetcher, &log);
+  EXPECT_EQ(ERR_IO_PENDING,
+            init.Init(config, base::TimeDelta::FromMilliseconds(1),
+                      NULL, &callback));
+
+  EXPECT_EQ(kFailedDownloading, callback.WaitForResult());
+  EXPECT_EQ(NULL, resolver.script_data());
+
+  // Check the NetLog was filled correctly.
+  EXPECT_EQ(6u, log.entries().size());
+  EXPECT_TRUE(LogContainsBeginEvent(
+      log.entries(), 0, NetLog::TYPE_INIT_PROXY_RESOLVER));
+  EXPECT_TRUE(LogContainsBeginEvent(
+      log.entries(), 1, NetLog::TYPE_INIT_PROXY_RESOLVER_WAIT));
+  EXPECT_TRUE(LogContainsEndEvent(
+      log.entries(), 2, NetLog::TYPE_INIT_PROXY_RESOLVER_WAIT));
+  EXPECT_TRUE(LogContainsBeginEvent(
+      log.entries(), 3, NetLog::TYPE_INIT_PROXY_RESOLVER_FETCH_PAC_SCRIPT));
+  EXPECT_TRUE(LogContainsEndEvent(
+      log.entries(), 4, NetLog::TYPE_INIT_PROXY_RESOLVER_FETCH_PAC_SCRIPT));
+  EXPECT_TRUE(LogContainsEndEvent(
+      log.entries(), 5, NetLog::TYPE_INIT_PROXY_RESOLVER));
+}
+
+// This is a copy-paste of CustomPacFails1, with the exception that we give it
+// a -5 second delay instead of a 0 ms delay. This change should have no effect
+// so the rest of the test is unchanged.
+TEST(InitProxyResolverTest, CustomPacFails1_WithNegativeDelay) {
+  Rules rules;
+  RuleBasedProxyResolver resolver(&rules, true /*expects_pac_bytes*/);
+  RuleBasedProxyScriptFetcher fetcher(&rules);
+
+  ProxyConfig config;
+  config.set_pac_url(GURL("http://custom/proxy.pac"));
+
+  rules.AddFailDownloadRule("http://custom/proxy.pac");
+
+  TestCompletionCallback callback;
+  CapturingNetLog log(CapturingNetLog::kUnbounded);
+  InitProxyResolver init(&resolver, &fetcher, &log);
+  EXPECT_EQ(kFailedDownloading,
+            init.Init(config, base::TimeDelta::FromSeconds(-5),
+                      NULL, &callback));
+  EXPECT_EQ(NULL, resolver.script_data());
+
+  // Check the NetLog was filled correctly.
+  EXPECT_EQ(4u, log.entries().size());
+  EXPECT_TRUE(LogContainsBeginEvent(
+      log.entries(), 0, NetLog::TYPE_INIT_PROXY_RESOLVER));
+  EXPECT_TRUE(LogContainsBeginEvent(
+      log.entries(), 1, NetLog::TYPE_INIT_PROXY_RESOLVER_FETCH_PAC_SCRIPT));
+  EXPECT_TRUE(LogContainsEndEvent(
+      log.entries(), 2, NetLog::TYPE_INIT_PROXY_RESOLVER_FETCH_PAC_SCRIPT));
+  EXPECT_TRUE(LogContainsEndEvent(
+      log.entries(), 3, NetLog::TYPE_INIT_PROXY_RESOLVER));
 }
 
 }  // namespace

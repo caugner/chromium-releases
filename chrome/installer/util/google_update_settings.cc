@@ -1,12 +1,17 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/installer/util/google_update_settings.h"
 
+#include <algorithm>
+
+#include "base/command_line.h"
 #include "base/registry.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/time.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/install_util.h"
@@ -99,17 +104,17 @@ int GoogleUpdateSettings::GetLastRunTime() {
   if (!ReadGoogleUpdateStrKey(google_update::kRegLastRunTimeField, &time_s))
     return -1;
   int64 time_i;
-  if (!StringToInt64(time_s, &time_i))
+  if (!base::StringToInt64(time_s, &time_i))
     return -1;
   base::TimeDelta td =
-    base::Time::NowFromSystemTime() - base::Time::FromInternalValue(time_i);
+      base::Time::NowFromSystemTime() - base::Time::FromInternalValue(time_i);
   return td.InDays();
 }
 
 bool GoogleUpdateSettings::SetLastRunTime() {
   int64 time = base::Time::NowFromSystemTime().ToInternalValue();
   return WriteGoogleUpdateStrKey(google_update::kRegLastRunTimeField,
-                                 Int64ToWString(time));
+                                 base::Int64ToString16(time));
 }
 
 bool GoogleUpdateSettings::RemoveLastRunTime() {
@@ -239,7 +244,38 @@ std::wstring GoogleUpdateSettings::GetNewGoogleUpdateApKey(
   return new_value;
 }
 
+int GoogleUpdateSettings::DuplicateGoogleUpdateSystemClientKey() {
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  std::wstring reg_path = dist->GetStateKey();
+
+  // Minimum access needed is to be able to write to this key.
+  RegKey reg_key(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_SET_VALUE);
+  if (!reg_key.Valid())
+    return 0;
+
+  HANDLE target_handle = 0;
+  if (!DuplicateHandle(GetCurrentProcess(), reg_key.Handle(),
+                       GetCurrentProcess(), &target_handle, KEY_SET_VALUE,
+                       TRUE, DUPLICATE_SAME_ACCESS)) {
+    return 0;
+  }
+  return reinterpret_cast<int>(target_handle);
+}
+
+bool GoogleUpdateSettings::WriteGoogleUpdateSystemClientKey(
+    int handle, const std::wstring& key, const std::wstring& value) {
+  HKEY reg_key = reinterpret_cast<HKEY>(reinterpret_cast<void*>(handle));
+  DWORD size = static_cast<DWORD>(value.size()) * sizeof(wchar_t);
+  LSTATUS status = RegSetValueEx(reg_key, key.c_str(), 0, REG_SZ,
+      reinterpret_cast<const BYTE*>(value.c_str()), size);
+  return status == ERROR_SUCCESS;
+}
+
 bool GoogleUpdateSettings::IsOrganic(const std::wstring& brand) {
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kOrganicInstall))
+    return true;
+
   static const wchar_t* kBrands[] = {
       L"CHFO", L"CHFT", L"CHHS", L"CHHM", L"CHMA", L"CHMB", L"CHME", L"CHMF",
       L"CHMG", L"CHMH", L"CHMI", L"CHMQ", L"CHMV", L"CHNB", L"CHNC", L"CHNG",

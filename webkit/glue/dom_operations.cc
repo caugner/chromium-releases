@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "webkit/glue/dom_operations.h"
+
 #include <set>
 
 #include "base/compiler_specific.h"
-#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebAnimationController.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
@@ -17,7 +19,6 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebNodeList.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
-#include "webkit/glue/dom_operations.h"
 #include "webkit/glue/form_data.h"
 #include "webkit/glue/password_form_dom_manager.h"
 #include "webkit/glue/webpasswordautocompletelistener_impl.h"
@@ -405,7 +406,7 @@ static int ParseSingleIconSize(const string16& text) {
       return 0;
   }
   int output;
-  if (!StringToInt(text, &output))
+  if (!base::StringToInt(text, &output))
     return 0;
   return output;
 }
@@ -591,9 +592,10 @@ int NumberOfActiveAnimations(WebView* view) {
   return controller->numberOfActiveAnimations();
 }
 
-void GetMetaElementsWithName(WebDocument* document,
-                             const string16& name,
-                             std::vector<WebElement>* meta_elements) {
+void GetMetaElementsWithAttribute(WebDocument* document,
+                                  const string16& attribute_name,
+                                  const string16& attribute_value,
+                                  std::vector<WebElement>* meta_elements) {
   DCHECK(document);
   DCHECK(meta_elements);
   meta_elements->clear();
@@ -609,8 +611,8 @@ void GetMetaElementsWithName(WebDocument* document,
     WebElement element = node.to<WebElement>();
     if (!element.hasTagName("meta"))
       continue;
-    WebString meta_name = element.getAttribute("name");
-    if (meta_name.isNull() || meta_name != name)
+    WebString value = element.getAttribute(attribute_name);
+    if (value.isNull() || value != attribute_value)
       continue;
     meta_elements->push_back(element);
   }

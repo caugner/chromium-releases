@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/env_var.h"
+#include "base/environment.h"
 #include "base/basictypes.h"
+#include "base/logging.h"
 #include "base/waitable_event.h"
 #include "media/audio/audio_output_controller.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -14,8 +15,9 @@ using ::testing::AtLeast;
 using ::testing::Exactly;
 using ::testing::InvokeWithoutArgs;
 using ::testing::NotNull;
+using ::testing::Return;
 
-static const int kSampleRate = AudioManager::kAudioCDSampleRate;
+static const int kSampleRate = AudioParameters::kAudioCDSampleRate;
 static const int kBitsPerSample = 16;
 static const int kChannels = 2;
 static const int kHardwareBufferSize = kSampleRate * kBitsPerSample *
@@ -62,10 +64,14 @@ static bool HasAudioOutputDevices() {
 }
 
 static bool IsRunningHeadless() {
-  scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
-  if (env->HasEnv("CHROME_HEADLESS"))
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  if (env->HasVar("CHROME_HEADLESS"))
     return true;
   return false;
+}
+
+ACTION_P(SignalEvent, event) {
+  event->Signal();
 }
 
 ACTION_P3(SignalEvent, event, count, limit) {
@@ -79,14 +85,17 @@ TEST(AudioOutputControllerTest, CreateAndClose) {
     return;
 
   MockAudioOutputControllerEventHandler event_handler;
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannels,
+                         kSampleRate, kBitsPerSample);
   scoped_refptr<AudioOutputController> controller =
-      AudioOutputController::Create(&event_handler,
-                                    AudioManager::AUDIO_PCM_LINEAR, kChannels,
-                                    kSampleRate, kBitsPerSample,
+      AudioOutputController::Create(&event_handler, params,
                                     kHardwareBufferSize, kBufferCapacity);
   ASSERT_TRUE(controller.get());
 
-  // Close the controller immediately.
+  // Close the controller immediately. At this point, chances are that
+  // DoCreate() hasn't been called yet. In any case, it should be safe to call
+  // Close() and it should not try to call |event_handler| later (the test
+  // would crash otherwise).
   controller->Close();
 }
 
@@ -100,7 +109,7 @@ TEST(AudioOutputControllerTest, PlayAndClose) {
 
   // If OnCreated is called then signal the event.
   EXPECT_CALL(event_handler, OnCreated(NotNull()))
-      .WillOnce(InvokeWithoutArgs(&event, &base::WaitableEvent::Signal));
+      .WillOnce(SignalEvent(&event));
 
   // OnPlaying() will be called only once.
   EXPECT_CALL(event_handler, OnPlaying(NotNull()))
@@ -111,23 +120,22 @@ TEST(AudioOutputControllerTest, PlayAndClose) {
       .Times(AtLeast(10))
       .WillRepeatedly(SignalEvent(&event, &count, 10));
 
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannels,
+                         kSampleRate, kBitsPerSample);
   scoped_refptr<AudioOutputController> controller =
-      AudioOutputController::Create(&event_handler,
-                                    AudioManager::AUDIO_PCM_LINEAR, kChannels,
-                                    kSampleRate, kBitsPerSample,
+      AudioOutputController::Create(&event_handler, params,
                                     kHardwareBufferSize, kBufferCapacity);
   ASSERT_TRUE(controller.get());
 
   // Wait for OnCreated() to be called.
   event.Wait();
-  event.Reset();
 
   // Play and then wait for the event to be signaled.
   controller->Play();
   event.Wait();
 
-  // Now stop the controller. This should shutdown the internal
-  // thread and we hold the only reference to it.
+  // Now stop the controller. The object is freed later after DoClose() is
+  // executed.
   controller->Close();
 }
 
@@ -158,10 +166,10 @@ TEST(AudioOutputControllerTest, PlayPauseClose) {
       .Times(Exactly(1))
       .WillOnce(InvokeWithoutArgs(&event, &base::WaitableEvent::Signal));
 
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannels,
+                         kSampleRate, kBitsPerSample);
   scoped_refptr<AudioOutputController> controller =
-      AudioOutputController::Create(&event_handler,
-                                    AudioManager::AUDIO_PCM_LINEAR, kChannels,
-                                    kSampleRate, kBitsPerSample,
+      AudioOutputController::Create(&event_handler, params,
                                     kHardwareBufferSize, kBufferCapacity);
   ASSERT_TRUE(controller.get());
 
@@ -178,8 +186,8 @@ TEST(AudioOutputControllerTest, PlayPauseClose) {
   controller->Pause();
   event.Wait();
 
-  // Now stop the controller. This should shutdown the internal
-  // thread and we hold the only reference to it.
+  // Now stop the controller. The object is freed later after DoClose() is
+  // executed.
   controller->Close();
 }
 
@@ -216,10 +224,10 @@ TEST(AudioOutputControllerTest, PlayPausePlay) {
     .Times(Exactly(1))
     .RetiresOnSaturation();
 
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannels,
+                         kSampleRate, kBitsPerSample);
   scoped_refptr<AudioOutputController> controller =
-      AudioOutputController::Create(&event_handler,
-                                    AudioManager::AUDIO_PCM_LINEAR, kChannels,
-                                    kSampleRate, kBitsPerSample,
+      AudioOutputController::Create(&event_handler, params,
                                     kHardwareBufferSize, kBufferCapacity);
   ASSERT_TRUE(controller.get());
 
@@ -242,8 +250,8 @@ TEST(AudioOutputControllerTest, PlayPausePlay) {
   controller->Play();
   event.Wait();
 
-  // Now stop the controller. This should shutdown the internal
-  // thread and we hold the only reference to it.
+  // Now stop the controller. The object is freed later after DoClose() is
+  // executed.
   controller->Close();
 }
 
@@ -253,10 +261,10 @@ TEST(AudioOutputControllerTest, HardwareBufferTooLarge) {
 
   // Create an audio device with a very large hardware buffer size.
   MockAudioOutputControllerEventHandler event_handler;
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannels,
+                         kSampleRate, kBitsPerSample);
   scoped_refptr<AudioOutputController> controller =
-      AudioOutputController::Create(&event_handler,
-                                    AudioManager::AUDIO_PCM_LINEAR, kChannels,
-                                    kSampleRate, kBitsPerSample,
+      AudioOutputController::Create(&event_handler, params,
                                     kHardwareBufferSize * 1000,
                                     kBufferCapacity);
 
@@ -270,14 +278,30 @@ TEST(AudioOutputControllerTest, CloseTwice) {
     return;
 
   MockAudioOutputControllerEventHandler event_handler;
+  base::WaitableEvent event(false, false);
+
+  // If OnCreated is called then signal the event.
+  EXPECT_CALL(event_handler, OnCreated(NotNull()))
+      .WillOnce(SignalEvent(&event));
+
+  // One OnMoreData() is expected.
+  EXPECT_CALL(event_handler, OnMoreData(NotNull(), _, 0))
+      .Times(AtLeast(1))
+      .WillRepeatedly(SignalEvent(&event));
+
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kChannels,
+                         kSampleRate, kBitsPerSample);
   scoped_refptr<AudioOutputController> controller =
-      AudioOutputController::Create(&event_handler,
-                                    AudioManager::AUDIO_PCM_LINEAR, kChannels,
-                                    kSampleRate, kBitsPerSample,
+      AudioOutputController::Create(&event_handler, params,
                                     kHardwareBufferSize, kBufferCapacity);
   ASSERT_TRUE(controller.get());
 
-  // Close the controller immediately.
+  // Wait for OnCreated() to be called.
+  event.Wait();
+
+  // Wait for OnMoreData() to be called.
+  event.Wait();
+
   controller->Close();
   controller->Close();
 }

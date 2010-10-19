@@ -5,7 +5,6 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/logging.h"
 #include "base/message_loop.h"
 #include "jingle/notifier/listener/mediator_thread_mock.h"
 #include "jingle/notifier/listener/mediator_thread_impl.h"
@@ -40,11 +39,12 @@ class TalkMediatorImplTest : public testing::Test {
 
   TalkMediatorImpl* NewTalkMediator() {
     const bool kUseChromeAsyncSocket = false;
+    const bool kTrySslTcpFirst = false;
     const bool kInitializeSsl = true;
     const bool kConnectImmediately = false;
     const bool kInvalidateXmppAuthToken = false;
     return new TalkMediatorImpl(
-        new MediatorThreadImpl(kUseChromeAsyncSocket),
+        new MediatorThreadImpl(kUseChromeAsyncSocket, kTrySslTcpFirst),
         kInitializeSsl, kConnectImmediately, kInvalidateXmppAuthToken);
   }
 

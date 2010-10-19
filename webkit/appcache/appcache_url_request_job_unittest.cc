@@ -2,11 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stack>
+#include <utility>
+
 #include "base/compiler_specific.h"
 #include "base/pickle.h"
 #include "base/thread.h"
 #include "base/waitable_event.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_error_job.h"
 #include "net/base/io_buffer.h"
@@ -431,7 +435,7 @@ class AppCacheURLRequestJobTest : public testing::Test {
     const GURL kManifestUrl("http://blah/");
     const int64 kCacheId(1);
     const AppCacheEntry kEntry(AppCacheEntry::EXPLICIT, 1);
-    job->DeliverAppCachedResponse(kManifestUrl, kCacheId, kEntry);
+    job->DeliverAppCachedResponse(kManifestUrl, kCacheId, kEntry, false);
     EXPECT_FALSE(job->is_waiting());
     EXPECT_TRUE(job->is_delivering_appcache_response());
     EXPECT_FALSE(job->has_been_started());
@@ -540,7 +544,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
     if (start_after_delivery_orders) {
       job->DeliverAppCachedResponse(
           GURL(), 111,
-          AppCacheEntry(AppCacheEntry::EXPLICIT, written_response_id_));
+          AppCacheEntry(AppCacheEntry::EXPLICIT, written_response_id_),
+          false);
       EXPECT_TRUE(job->is_delivering_appcache_response());
     }
 
@@ -554,7 +559,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
     if (!start_after_delivery_orders) {
       job->DeliverAppCachedResponse(
           GURL(), 111,
-          AppCacheEntry(AppCacheEntry::EXPLICIT, written_response_id_));
+          AppCacheEntry(AppCacheEntry::EXPLICIT, written_response_id_),
+          false);
       EXPECT_TRUE(job->is_delivering_appcache_response());
     }
 
@@ -649,7 +655,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
         new AppCacheURLRequestJob(request_.get(), storage));
     job->DeliverAppCachedResponse(
         GURL(), 111,
-        AppCacheEntry(AppCacheEntry::EXPLICIT, written_response_id_));
+        AppCacheEntry(AppCacheEntry::EXPLICIT, written_response_id_),
+        false);
     EXPECT_TRUE(job->is_delivering_appcache_response());
 
     // Start the request.

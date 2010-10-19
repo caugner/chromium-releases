@@ -4,11 +4,11 @@
 
 #ifndef CHROME_TEST_AUTOMATION_EXTENSION_PROXY_H_
 #define CHROME_TEST_AUTOMATION_EXTENSION_PROXY_H_
+#pragma once
 
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/weak_ptr.h"
 #include "chrome/test/automation/automation_constants.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
 

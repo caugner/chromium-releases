@@ -6,7 +6,6 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "app/theme_provider.h"
 #if defined(OS_WIN)
 #include "app/win_util.h"
 #include "base/win_util.h"
@@ -281,7 +280,7 @@ int CustomFrameView::IconSize() const {
   // size are increased.
   return GetSystemMetrics(SM_CYSMICON);
 #else
-  return std::max(title_font_->height(), kIconMinimumSize);
+  return std::max(title_font_->GetHeight(), kIconMinimumSize);
 #endif
 }
 
@@ -542,7 +541,7 @@ void CustomFrameView::LayoutTitleBar() {
   // Size the title.
   int title_x = d->ShouldShowWindowIcon() ?
       icon_bounds.right() + kIconTitleSpacing : icon_bounds.x();
-  int title_height = title_font_->height();
+  int title_height = title_font_->GetHeight();
   // We bias the title position so that when the difference between the icon and
   // title heights is odd, the extra pixel of the title is above the vertical
   // midline rather than below.  This compensates for how the icon is already

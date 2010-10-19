@@ -6,6 +6,7 @@
 
 #ifndef NET_BASE_COOKIE_MONSTER_H_
 #define NET_BASE_COOKIE_MONSTER_H_
+#pragma once
 
 #include <map>
 #include <string>
@@ -13,6 +14,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/histogram.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
@@ -50,9 +52,7 @@ class CookieMonster : public CookieStore {
   // a multimap.  Also, multimap is standard, another reason to use it.
   typedef std::multimap<std::string, CanonicalCookie*> CookieMap;
   typedef std::pair<CookieMap::iterator, CookieMap::iterator> CookieMapItPair;
-  typedef std::pair<std::string, CanonicalCookie*> KeyedCanonicalCookie;
-  typedef std::pair<std::string, CanonicalCookie> CookieListPair;
-  typedef std::vector<CookieListPair> CookieList;
+  typedef std::vector<CanonicalCookie> CookieList;
 
   // The store passed in should not have had Init() called on it yet. This
   // class will take care of initializing it. The backing store is NOT owned by
@@ -72,6 +72,7 @@ class CookieMonster : public CookieStore {
             last_access_threshold_milliseconds)),
         delegate_(delegate),
         last_statistic_record_time_(base::Time::Now()) {
+    InitializeHistograms();
     SetDefaultCookieableSchemes();
   }
 #endif
@@ -87,6 +88,8 @@ class CookieMonster : public CookieStore {
   virtual bool SetCookieWithOptions(const GURL& url,
                                     const std::string& cookie_line,
                                     const CookieOptions& options);
+  // The returned cookies are ordered by longest path, then earliest
+  // creation date.
   virtual std::string GetCookiesWithOptions(const GURL& url,
                                             const CookieOptions& options);
   virtual void DeleteCookie(const GURL& url, const std::string& cookie_name);
@@ -106,25 +109,17 @@ class CookieMonster : public CookieStore {
                             const base::Time& expiration_time,
                             bool secure, bool http_only);
 
-  // Exposed for unit testing.
-  bool SetCookieWithCreationTimeAndOptions(const GURL& url,
-                                           const std::string& cookie_line,
-                                           const base::Time& creation_time,
-                                           const CookieOptions& options);
-  bool SetCookieWithCreationTime(const GURL& url,
-                                 const std::string& cookie_line,
-                                 const base::Time& creation_time) {
-    return SetCookieWithCreationTimeAndOptions(url, cookie_line, creation_time,
-                                               CookieOptions());
-  }
-
   // Returns all the cookies, for use in management UI, etc. This does not mark
   // the cookies as having been accessed.
+  // The returned cookies are ordered by longest path, then earliest
+  // creation date.
   CookieList GetAllCookies();
 
   // Returns all the cookies, for use in management UI, etc. Filters results
   // using given url scheme, host / domain and path. This does not mark the
   // cookies as having been accessed.
+  // The returned cookies are ordered by longest path, then earliest
+  // creation date.
   CookieList GetAllCookiesForURL(const GURL& url);
 
   // Delete all of the cookies.
@@ -145,9 +140,7 @@ class CookieMonster : public CookieStore {
   int DeleteAllForHost(const GURL& url);
 
   // Delete one specific cookie.
-  bool DeleteCookie(const std::string& domain,
-                    const CanonicalCookie& cookie,
-                    bool sync_to_store);
+  bool DeleteCanonicalCookie(const CanonicalCookie& cookie);
 
   // Override the default list of schemes that are allowed to be set in
   // this cookie store.  Calling his overrides the value of
@@ -165,6 +158,16 @@ class CookieMonster : public CookieStore {
 
  private:
   ~CookieMonster();
+
+  // Testing support.
+  friend class CookieMonsterTest;
+  FRIEND_TEST_ALL_PREFIXES(CookieMonsterTest,
+                           TestCookieDeleteAllCreatedAfterTimestamp);
+  FRIEND_TEST_ALL_PREFIXES(CookieMonsterTest,
+                           TestCookieDeleteAllCreatedBetweenTimestamps);
+  bool SetCookieWithCreationTime(const GURL& url,
+                                 const std::string& cookie_line,
+                                 const base::Time& creation_time);
 
   // Called by all non-static functions to ensure that the cookies store has
   // been initialized. This is not done during creating so it doesn't block
@@ -197,22 +200,15 @@ class CookieMonster : public CookieStore {
 
   void FindCookiesForHostAndDomain(const GURL& url,
                                    const CookieOptions& options,
+                                   bool update_access_time,
                                    std::vector<CanonicalCookie*>* cookies);
 
   void FindCookiesForKey(const std::string& key,
                          const GURL& url,
                          const CookieOptions& options,
                          const base::Time& current,
+                         bool update_access_time,
                          std::vector<CanonicalCookie*>* cookies);
-
-  void FindRawCookies(const std::string& key,
-                      bool include_secure,
-                      const std::string& path,
-                      CookieList* list);
-
-  // Internal helper returning all cookies for a given URL. The caller is
-  // assumed to hold lock_ and having called InitIfNecessary().
-  CookieList InternalGetAllCookiesForURL(const GURL& url);
 
   // Delete any cookies that are equivalent to |ecc| (same path, key, etc).
   // If |skip_httponly| is true, httponly cookies will not be deleted.  The
@@ -226,10 +222,18 @@ class CookieMonster : public CookieStore {
                             CanonicalCookie* cc,
                             bool sync_to_store);
 
+  // Helper function that sets cookies with more control.
+  // Not exposed as we don't want callers to have the ability
+  // to specify (potentially duplicate) creation times.
+  bool SetCookieWithCreationTimeAndOptions(const GURL& url,
+                                           const std::string& cookie_line,
+                                           const base::Time& creation_time,
+                                           const CookieOptions& options);
+
+
   // Helper function that sets a canonical cookie, deleting equivalents and
   // performing garbage collection.
   bool SetCanonicalCookie(scoped_ptr<CanonicalCookie>* cc,
-                          const std::string& cookie_domain,
                           const base::Time& creation_time,
                           const CookieOptions& options);
 
@@ -286,6 +290,19 @@ class CookieMonster : public CookieStore {
   // This function should be called repeatedly, and will record
   // statistics if a sufficient time period has passed.
   void RecordPeriodicStats(const base::Time& current_time);
+
+  // Histogram variables; see CookieMonster::InitializeHistograms() in
+  // cookie_monster.cc for details.
+  scoped_refptr<Histogram> histogram_expiration_duration_minutes_;
+  scoped_refptr<Histogram> histogram_between_access_interval_minutes_;
+  scoped_refptr<Histogram> histogram_evicted_last_access_minutes_;
+  scoped_refptr<Histogram> histogram_count_;
+  scoped_refptr<Histogram> histogram_number_duplicate_db_cookies_;
+  scoped_refptr<Histogram> histogram_cookie_deletion_cause_;
+
+  // Initialize the above variables; should only be called from
+  // the constructor.
+  void InitializeHistograms();
 
   CookieMap cookies_;
 
@@ -416,10 +433,9 @@ class CookieMonster::Delegate
     : public base::RefCountedThreadSafe<CookieMonster::Delegate> {
  public:
   // Will be called when a cookie is added or removed. The function is passed
-  // the respective |cookie| which was added to or removed from the cookies for
-  // |domain_key|. If |removed| is true, the cookie was deleted.
-  virtual void OnCookieChanged(const std::string& domain_key,
-                               const CookieMonster::CanonicalCookie& cookie,
+  // the respective |cookie| which was added to or removed from the cookies.
+  // If |removed| is true, the cookie was deleted.
+  virtual void OnCookieChanged(const CookieMonster::CanonicalCookie& cookie,
                                bool removed) = 0;
  protected:
   friend class base::RefCountedThreadSafe<CookieMonster::Delegate>;
@@ -529,7 +545,7 @@ class CookieMonster::PersistentCookieStore
 
   // Initializes the store and retrieves the existing cookies. This will be
   // called only once at startup.
-  virtual bool Load(std::vector<CookieMonster::KeyedCanonicalCookie>*) = 0;
+  virtual bool Load(std::vector<CookieMonster::CanonicalCookie*>*) = 0;
 
   virtual void AddCookie(const std::string&, const CanonicalCookie&) = 0;
   virtual void UpdateCookieAccessTime(const CanonicalCookie&) = 0;

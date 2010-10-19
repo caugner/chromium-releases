@@ -6,6 +6,7 @@
 
 #ifndef NET_DISK_CACHE_BACKEND_IMPL_H_
 #define NET_DISK_CACHE_BACKEND_IMPL_H_
+#pragma once
 
 #include "base/file_path.h"
 #include "base/hash_tables.h"
@@ -36,22 +37,10 @@ enum BackendFlags {
 class BackendImpl : public Backend {
   friend class Eviction;
  public:
-  BackendImpl(const FilePath& path, base::MessageLoopProxy* cache_thread)
-      : ALLOW_THIS_IN_INITIALIZER_LIST(background_queue_(this, cache_thread)),
-        path_(path), block_files_(path), mask_(0), max_size_(0),
-        cache_type_(net::DISK_CACHE), uma_report_(0), user_flags_(0),
-        init_(false), restarted_(false), unit_test_(false), read_only_(false),
-        new_eviction_(false), first_timer_(true), done_(true, false),
-        ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {}
+  BackendImpl(const FilePath& path, base::MessageLoopProxy* cache_thread);
   // mask can be used to limit the usable size of the hash table, for testing.
   BackendImpl(const FilePath& path, uint32 mask,
-              base::MessageLoopProxy* cache_thread)
-      : ALLOW_THIS_IN_INITIALIZER_LIST(background_queue_(this, cache_thread)),
-        path_(path), block_files_(path), mask_(mask), max_size_(0),
-        cache_type_(net::DISK_CACHE), uma_report_(0), user_flags_(kMask),
-        init_(false), restarted_(false), unit_test_(false), read_only_(false),
-        new_eviction_(false), first_timer_(true), done_(true, false),
-        ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {}
+              base::MessageLoopProxy* cache_thread);
   ~BackendImpl();
 
   // Returns a new backend with the desired flags. See the declaration of
@@ -83,10 +72,7 @@ class BackendImpl : public Backend {
   virtual void GetStats(StatsItems* stats);
 
   // Performs the actual initialization and final cleanup on destruction.
-  // Cleanup is a two step process (with a trip to the message loop in between).
-  // Note that these methods are not intended for external consumption.
   int SyncInit();
-  void StartCleanup();
   void CleanupCache();
 
   // Same bahavior as OpenNextEntry but walks the list from back to front.
@@ -175,6 +161,17 @@ class BackendImpl : public Backend {
   // Logs requests that are denied due to being too big.
   void TooMuchStorageRequested(int32 size);
 
+  // Returns true if a temporary buffer is allowed to be extended.
+  bool IsAllocAllowed(int current_size, int new_size);
+
+  // Tracks the release of |size| bytes by an entry buffer.
+  void BufferDeleted(int size);
+
+  // Only intended for testing the two previous methods.
+  int GetTotalBuffersSize() const {
+    return buffer_bytes_;
+  }
+
   // Returns true if this instance seems to be under heavy load.
   bool IsLoaded() const;
 
@@ -185,6 +182,11 @@ class BackendImpl : public Backend {
 
   net::CacheType cache_type() const {
     return cache_type_;
+  }
+
+  // Returns a weak pointer to this object.
+  base::WeakPtr<BackendImpl> GetWeakPtr() {
+    return ptr_factory_.GetWeakPtr();
   }
 
   // Returns the group for this client, based on the current cache size.
@@ -309,6 +311,9 @@ class BackendImpl : public Backend {
   // Part of the self test. Returns false if the entry is corrupt.
   bool CheckEntry(EntryImpl* cache_entry);
 
+  // Returns the maximum total memory for the memory buffers.
+  int MaxBuffersSize();
+
   InFlightBackendIO background_queue_;  // The controller of pending operations.
   scoped_refptr<MappedFile> index_;  // The main cache index.
   FilePath path_;  // Path to the folder used as backing storage.
@@ -324,6 +329,7 @@ class BackendImpl : public Backend {
   int num_pending_io_;  // Number of pending IO operations.
   int entry_count_;  // Number of entries accessed lately.
   int byte_count_;  // Number of bytes read/written lately.
+  int buffer_bytes_;  // Total size of the temporary entries' buffers.
   net::CacheType cache_type_;
   int uma_report_;  // Controls transmision of UMA data.
   uint32 user_flags_;  // Flags set by the user.
@@ -340,6 +346,7 @@ class BackendImpl : public Backend {
   base::WaitableEvent done_;  // Signals the end of background work.
   scoped_refptr<TraceObject> trace_object_;  // Inits internal tracing.
   ScopedRunnableMethodFactory<BackendImpl> factory_;
+  base::WeakPtrFactory<BackendImpl> ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BackendImpl);
 };

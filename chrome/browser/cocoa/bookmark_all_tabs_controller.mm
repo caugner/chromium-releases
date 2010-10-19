@@ -4,6 +4,7 @@
 
 #import "chrome/browser/cocoa/bookmark_all_tabs_controller.h"
 #include "app/l10n_util_mac.h"
+#include "base/string16.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser.h"
@@ -42,7 +43,7 @@
   const int tabCount = tabstrip_model->count();
   for (int i = 0; i < tabCount; ++i) {
     TabContents* tc = tabstrip_model->GetTabContentsAt(i);
-    const std::wstring tabTitle = UTF16ToWideHack(tc->GetTitle());
+    const string16 tabTitle = tc->GetTitle();
     const GURL& tabURL(tc->GetURL());
     ActiveTabNameURLPair tabPair(tabTitle, tabURL);
     activeTabPairsVector_.push_back(tabPair);
@@ -60,7 +61,7 @@
   int newIndex = newParentNode->GetChildCount();
   // Create the new folder which will contain all of the tab URLs.
   NSString* newFolderName = [self displayName];
-  std::wstring newFolderString = base::SysNSStringToWide(newFolderName);
+  string16 newFolderString = base::SysNSStringToUTF16(newFolderName);
   BookmarkModel* model = [self bookmarkModel];
   const BookmarkNode* newFolder = model->AddGroup(newParentNode, newIndex,
                                                   newFolderString);

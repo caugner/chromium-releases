@@ -21,6 +21,7 @@ AppCache::AppCache(AppCacheService *service, int64 cache_id)
       owning_group_(NULL),
       online_whitelist_all_(false),
       is_complete_(false),
+      cache_size_(0),
       service_(service) {
   service_->storage()->working_set()->AddCache(this);
 }
@@ -42,6 +43,7 @@ void AppCache::UnassociateHost(AppCacheHost* host) {
 void AppCache::AddEntry(const GURL& url, const AppCacheEntry& entry) {
   DCHECK(entries_.find(url) == entries_.end());
   entries_.insert(EntryMap::value_type(url, entry));
+  cache_size_ += entry.response_size();
 }
 
 bool AppCache::AddOrModifyEntry(const GURL& url, const AppCacheEntry& entry) {
@@ -51,8 +53,16 @@ bool AppCache::AddOrModifyEntry(const GURL& url, const AppCacheEntry& entry) {
   // Entry already exists.  Merge the types of the new and existing entries.
   if (!ret.second)
     ret.first->second.add_types(entry.types());
-
+  else
+    cache_size_ += entry.response_size();  // New entry. Add to cache size.
   return ret.second;
+}
+
+void AppCache::RemoveEntry(const GURL& url) {
+  EntryMap::iterator found = entries_.find(url);
+  DCHECK(found != entries_.end());
+  cache_size_ -= found->second.response_size();
+  entries_.erase(found);
 }
 
 AppCacheEntry* AppCache::GetEntry(const GURL& url) {
@@ -61,12 +71,10 @@ AppCacheEntry* AppCache::GetEntry(const GURL& url) {
 }
 
 namespace {
-
 bool SortByLength(
     const FallbackNamespace& lhs, const FallbackNamespace& rhs) {
   return lhs.first.spec().length() > rhs.first.spec().length();
 }
-
 }
 
 void AppCache::InitializeWithManifest(Manifest* manifest) {
@@ -95,6 +103,7 @@ void AppCache::InitializeWithDatabaseRecords(
     AddEntry(entry.url, AppCacheEntry(entry.flags, entry.response_id,
                                       entry.response_size));
   }
+  DCHECK(cache_size_ == cache_record.cache_size);
 
   for (size_t i = 0; i < fallbacks.size(); ++i) {
     const AppCacheDatabase::FallbackNameSpaceRecord& fallback = fallbacks.at(i);
@@ -161,7 +170,6 @@ void AppCache::ToDatabaseRecords(
     }
   }
 }
-
 
 bool AppCache::FindResponseForRequest(const GURL& url,
     AppCacheEntry* found_entry, AppCacheEntry* found_fallback_entry,

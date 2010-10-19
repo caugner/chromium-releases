@@ -4,6 +4,7 @@
 
 #ifndef GFX_ICON_UTIL_H_
 #define GFX_ICON_UTIL_H_
+#pragma once
 
 #include <windows.h>
 #include <string>
@@ -11,8 +12,9 @@
 #include "base/basictypes.h"
 
 namespace gfx {
-  class Size;
+class Size;
 }
+class FilePath;
 class SkBitmap;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -76,8 +78,11 @@ class IconUtil {
   // the desired .ico file.
   //
   // The function returns true on success and false otherwise.
+  // TODO(tfarina): Deprecated version of the FilePath version below.
   static bool CreateIconFileFromSkBitmap(const SkBitmap& bitmap,
                                          const std::wstring& icon_file_name);
+  static bool CreateIconFileFromSkBitmap(const SkBitmap& bitmap,
+                                         const FilePath& icon_path);
 
  private:
   // The icon format is published in the MSDN but there is no definition of

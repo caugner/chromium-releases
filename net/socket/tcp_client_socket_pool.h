@@ -4,6 +4,7 @@
 
 #ifndef NET_SOCKET_TCP_CLIENT_SOCKET_POOL_H_
 #define NET_SOCKET_TCP_CLIENT_SOCKET_POOL_H_
+#pragma once
 
 #include <string>
 
@@ -147,6 +148,11 @@ class TCPClientSocketPool : public ClientSocketPool {
 
   virtual LoadState GetLoadState(const std::string& group_name,
                                  const ClientSocketHandle* handle) const;
+
+  virtual Value* GetInfoAsValue(const std::string& name,
+                                const std::string& type) const {
+    return base_.GetInfoAsValue(name, type);
+  }
 
   virtual base::TimeDelta ConnectionTimeout() const {
     return base_.ConnectionTimeout();

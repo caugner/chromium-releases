@@ -5,6 +5,7 @@
 
 #ifndef CHROME_COMMON_SECURITY_FILTER_PEER_H__
 #define CHROME_COMMON_SECURITY_FILTER_PEER_H__
+#pragma once
 
 #include "webkit/glue/resource_loader_bridge.h"
 
@@ -38,6 +39,7 @@ class SecurityFilterPeer : public webkit_glue::ResourceLoaderBridge::Peer {
   virtual void OnReceivedResponse(
       const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
       bool content_filtered);
+  virtual void OnDownloadedData(int len) {}
   virtual void OnReceivedData(const char* data, int len);
   virtual void OnCompletedRequest(const URLRequestStatus& status,
                                   const std::string& security_info);

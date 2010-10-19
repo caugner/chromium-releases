@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,11 +21,13 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/eintr_wrapper.h"
+#include "base/file_path.h"
 #include "base/global_descriptors_posix.h"
 #include "base/hash_tables.h"
 #include "base/linux_util.h"
 #include "base/path_service.h"
 #include "base/pickle.h"
+#include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/scoped_ptr.h"
 #include "base/sys_info.h"
@@ -36,6 +38,7 @@
 #include "chrome/common/chrome_descriptors.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/main_function_params.h"
+#include "chrome/common/pepper_plugin_registry.h"
 #include "chrome/common/process_watcher.h"
 #include "chrome/common/sandbox_methods_linux.h"
 
@@ -43,7 +46,7 @@
 
 #include "skia/ext/SkFontHost_fontconfig_control.h"
 
-#include "sandbox/linux/seccomp/sandbox.h"
+#include "seccompsandbox/sandbox.h"
 
 #include "unicode/timezone.h"
 
@@ -546,6 +549,9 @@ static void PreSandboxInit() {
   FilePath module_path;
   if (PathService::Get(base::DIR_MODULE, &module_path))
     media::InitializeMediaLibrary(module_path);
+
+  // Ensure access to the Pepper plugins before the sandbox is turned on.
+  PepperPluginRegistry::PreloadModules();
 }
 
 #if !defined(CHROMIUM_SELINUX)

@@ -4,15 +4,19 @@
 
 #ifndef CHROME_SERVICE_SERVICE_PROCESS_H_
 #define CHROME_SERVICE_SERVICE_PROCESS_H_
+#pragma once
 
-#include <vector>
-
+#include "base/gtest_prod_util.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/thread.h"
+#include "base/waitable_event.h"
+#include "chrome/service/cloud_print/cloud_print_proxy.h"
+#include "chrome/service/remoting/remoting_directory_service.h"
 
-class CloudPrintProxy;
 class JsonPrefStore;
+class ServiceIPCServer;
+
 namespace net {
 class NetworkChangeNotifier;
 }
@@ -20,17 +24,20 @@ class NetworkChangeNotifier;
 namespace remoting {
 class ChromotingHost;
 class ChromotingHostContext;
-class MutableHostConfig;
+class HostKeyPair;
+class JsonHostConfig;
 }
 
 // The ServiceProcess does not inherit from ChildProcess because this
 // process can live independently of the browser process.
-class ServiceProcess {
+class ServiceProcess : public RemotingDirectoryService::Client,
+                       public CloudPrintProxy::Client {
  public:
   ServiceProcess();
   ~ServiceProcess();
 
-  bool Initialize();
+  // Initialize the ServiceProcess with the message loop that it should run on.
+  bool Initialize(MessageLoop* message_loop);
   bool Teardown();
   // TODO(sanjeevr): Change various parts of the code such as
   // net::ProxyService::CreateSystemProxyConfigService to take in
@@ -54,18 +61,105 @@ class ServiceProcess {
   base::Thread* file_thread() const {
     return file_thread_.get();
   }
-  CloudPrintProxy* CreateCloudPrintProxy(JsonPrefStore* service_prefs);
+
+  // A global event object that is signalled when the main thread's message
+  // loop exits. This gives background threads a way to observe the main
+  // thread shutting down.
+  base::WaitableEvent* shutdown_event() {
+    return &shutdown_event_;
+  }
+
+  // Shutdown the service process. This is likely triggered by a IPC message.
+  void Shutdown();
+
+  CloudPrintProxy* GetCloudPrintProxy();
+
+  // CloudPrintProxy::Client implementation.
+  virtual void OnCloudPrintProxyEnabled();
+  virtual void OnCloudPrintProxyDisabled();
+
 #if defined(ENABLE_REMOTING)
-  remoting::ChromotingHost* CreateChromotingHost(
-      remoting::ChromotingHostContext* context,
-      remoting::MutableHostConfig* config);
+  // Return the reference to the chromoting host only if it has started.
+  remoting::ChromotingHost* GetChromotingHost() { return chromoting_host_; }
+
+  // Enable chromoting host with the tokens.
+  // Return true if successful.
+  bool EnableChromotingHostWithTokens(const std::string& login,
+                                      const std::string& remoting_token,
+                                      const std::string& talk_token);
+
+  // Start running the chromoting host asynchronously.
+  // Return true if chromoting host has started.
+  bool StartChromotingHost();
+
+  // Shutdown chromoting host. Return true if chromoting host was shutdown.
+  // The shutdown process will happen asynchronously.
+  bool ShutdownChromotingHost();
+
+  // RemotingDirectoryService::Client implementation.
+  virtual void OnRemotingHostAdded();
+  virtual void OnRemotingDirectoryError();
 #endif
 
  private:
+  // Called exactly ONCE per process instance for each service that gets
+  // enabled in this process.
+  void OnServiceEnabled();
+  // Called exactly ONCE per process instance for each service that gets
+  // disabled in this process (note that shutdown != disabled).
+  void OnServiceDisabled();
+
+  bool AddServiceProcessToAutoStart();
+  bool RemoveServiceProcessFromAutoStart();
+
+#if defined(ENABLE_REMOTING)
+  FRIEND_TEST_ALL_PREFIXES(ServiceProcessTest, RunChromoting);
+  FRIEND_TEST_ALL_PREFIXES(ServiceProcessTest, RunChromotingUntilShutdown);
+
+  // Save authenication token to the json config file.
+  void SaveChromotingConfig(
+      const std::string& login,
+      const std::string& token,
+      const std::string& host_id,
+      const std::string& host_name,
+      remoting::HostKeyPair* host_key_pair);
+
+  // Load settings for chromoting from json file.
+  void LoadChromotingConfig();
+
+  // This method is called when chromoting is shutting down. This is virtual
+  // for used in the test.
+  virtual void OnChromotingHostShutdown();
+#endif
+
   scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
   scoped_ptr<base::Thread> io_thread_;
   scoped_ptr<base::Thread> file_thread_;
-  std::vector<CloudPrintProxy*> cloud_print_proxy_list_;
+  scoped_ptr<CloudPrintProxy> cloud_print_proxy_;
+  scoped_ptr<JsonPrefStore> service_prefs_;
+  scoped_ptr<ServiceIPCServer> ipc_server_;
+
+#if defined(ENABLE_REMOTING)
+  scoped_refptr<remoting::JsonHostConfig> chromoting_config_;
+  scoped_ptr<remoting::ChromotingHostContext> chromoting_context_;
+  scoped_refptr<remoting::ChromotingHost> chromoting_host_;
+  scoped_ptr<RemotingDirectoryService> remoting_directory_;
+
+  // Temporary storage for remoting credentials. The content is cleared
+  // after it is saved.
+  std::string remoting_login_;
+  std::string remoting_token_;
+  std::string talk_token_;
+#endif
+
+  // An event that will be signalled when we shutdown.
+  base::WaitableEvent shutdown_event_;
+
+  // Pointer to the main message loop that host this object.
+  MessageLoop* main_message_loop_;
+
+  // Count of currently enabled services in this process.
+  int enabled_services_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceProcess);
 };
@@ -73,4 +167,3 @@ class ServiceProcess {
 extern ServiceProcess* g_service_process;
 
 #endif  // CHROME_SERVICE_SERVICE_PROCESS_H_
-

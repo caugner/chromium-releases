@@ -4,16 +4,16 @@
 
 #ifndef VIEWS_CONTROLS_TREE_TREE_VIEW_H_
 #define VIEWS_CONTROLS_TREE_TREE_VIEW_H_
+#pragma once
 
 #include <windows.h>
 #include <commctrl.h>
 
 #include <map>
 
+#include "app/keyboard_codes.h"
 #include "app/tree_model.h"
 #include "base/basictypes.h"
-#include "base/keyboard_codes.h"
-#include "base/logging.h"
 #include "views/controls/native_control.h"
 
 namespace views {
@@ -36,7 +36,7 @@ class TreeViewController {
   }
 
   // Invoked when a key is pressed on the tree view.
-  virtual void OnTreeViewKeyDown(base::KeyboardCode keycode) {}
+  virtual void OnTreeViewKeyDown(app::KeyboardCode keycode) {}
 };
 
 // TreeView -------------------------------------------------------------------
@@ -120,7 +120,8 @@ class TreeView : public NativeControl, TreeModelObserver {
   // true.
   void SetRootShown(bool root_visible);
 
-  // TreeModelObserver methods. Don't call these directly, instead your model
+  // Begin TreeModelObserver implementation.
+  // Don't call these directly, instead your model
   // should notify the observer TreeView adds to it.
   virtual void TreeNodesAdded(TreeModel* model,
                               TreeModelNode* parent,
@@ -130,9 +131,8 @@ class TreeView : public NativeControl, TreeModelObserver {
                                 TreeModelNode* parent,
                                 int start,
                                 int count);
-  virtual void TreeNodeChildrenReordered(TreeModel* model,
-                                         TreeModelNode* parent);
   virtual void TreeNodeChanged(TreeModel* model, TreeModelNode* node);
+  // End TreeModelObserver implementation.
 
   // Sets the controller, which may be null. TreeView does not take ownership
   // of the controller.
@@ -181,7 +181,7 @@ class TreeView : public NativeControl, TreeModelObserver {
   // We pay attention to key down for two reasons: to circumvent VK_ENTER from
   // toggling the expaned state when processes_enter_ is false, and to have F2
   // start editting.
-  virtual bool OnKeyDown(base::KeyboardCode virtual_key_code);
+  virtual bool OnKeyDown(app::KeyboardCode virtual_key_code);
 
   virtual void OnContextMenu(const POINT& location);
 
@@ -242,17 +242,10 @@ class TreeView : public NativeControl, TreeModelObserver {
   void RecursivelyDelete(NodeDetails* node);
 
   // Returns the NodeDetails by node from the model.
-  NodeDetails* GetNodeDetails(TreeModelNode* node) {
-    DCHECK(node &&
-           node_to_details_map_.find(node) != node_to_details_map_.end());
-    return node_to_details_map_[node];
-  }
+  NodeDetails* GetNodeDetails(TreeModelNode* node);
 
   // Returns the NodeDetails by identifier (lparam of the HTREEITEM).
-  NodeDetails* GetNodeDetailsByID(int id) {
-    DCHECK(id_to_details_map_.find(id) != id_to_details_map_.end());
-    return id_to_details_map_[id];
-  }
+  NodeDetails* GetNodeDetailsByID(int id);
 
   // Returns the NodeDetails by HTREEITEM.
   NodeDetails* GetNodeDetailsByTreeItem(HTREEITEM tree_item);

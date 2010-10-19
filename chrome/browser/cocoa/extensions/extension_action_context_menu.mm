@@ -18,7 +18,7 @@
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
@@ -241,13 +241,18 @@ int CurrentTabId() {
           [window->cocoa_controller() toolbarController];
       LocationBarViewMac* locationBarView =
           [toolbarController locationBarBridge];
-      NSPoint popupPoint = locationBarView->GetPageActionBubblePoint(action_);
 
-      // If there was no matching page action, it was a browser action.
-      if (NSEqualPoints(popupPoint, NSZeroPoint)) {
+      NSPoint popupPoint = NSZeroPoint;
+      if (extension_->page_action() == action_) {
+        popupPoint = locationBarView->GetPageActionBubblePoint(action_);
+
+      } else if (extension_->browser_action() == action_) {
         BrowserActionsController* controller =
             [toolbarController browserActionsController];
         popupPoint = [controller popupPointForBrowserAction:extension_];
+
+      } else {
+        NOTREACHED() << "action_ is not a page action or browser action?";
       }
 
       int tabId = CurrentTabId();

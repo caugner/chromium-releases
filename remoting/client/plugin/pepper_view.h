@@ -18,13 +18,11 @@
 #include "base/task.h"
 #include "media/base/video_frame.h"
 #include "remoting/client/chromoting_view.h"
-#include "remoting/client/decoder.h"
-#include "third_party/ppapi/cpp/device_context_2d.h"
+#include "third_party/ppapi/cpp/graphics_2d.h"
 
 namespace remoting {
 
-class ChromotingPlugin;
-class Decoder;
+class ChromotingInstance;
 
 class PepperView : public ChromotingView {
  public:
@@ -33,7 +31,7 @@ class PepperView : public ChromotingView {
   //
   // TODO(ajwong): This probably needs to synchronize with the pepper thread
   // to be safe.
-  explicit PepperView(ChromotingPlugin* plugin);
+  explicit PepperView(ChromotingInstance* instance);
   virtual ~PepperView();
 
   // ChromotingView implementation.
@@ -44,9 +42,9 @@ class PepperView : public ChromotingView {
   virtual void UnsetSolidFill();
   virtual void SetViewport(int x, int y, int width, int height);
   virtual void SetHostScreenSize(int width, int height);
-  virtual void HandleBeginUpdateStream(HostMessage* msg);
-  virtual void HandleUpdateStreamPacket(HostMessage* msg);
-  virtual void HandleEndUpdateStream(HostMessage* msg);
+  virtual void HandleBeginUpdateStream(ChromotingHostMessage* msg);
+  virtual void HandleUpdateStreamPacket(ChromotingHostMessage* msg);
+  virtual void HandleEndUpdateStream(ChromotingHostMessage* msg);
 
  private:
   void OnPaintDone();
@@ -56,12 +54,9 @@ class PepperView : public ChromotingView {
   // Reference to the creating plugin instance. Needed for interacting with
   // pepper.  Marking explciitly as const since it must be initialized at
   // object creation, and never change.
-  ChromotingPlugin* const plugin_;
+  ChromotingInstance* const instance_;
 
-  pp::DeviceContext2D device_context_;
-
-  int backing_store_width_;
-  int backing_store_height_;
+  pp::Graphics2D device_context_;
 
   int viewport_x_;
   int viewport_y_;
@@ -70,12 +65,6 @@ class PepperView : public ChromotingView {
 
   bool is_static_fill_;
   uint32 static_fill_color_;
-
-  scoped_refptr<media::VideoFrame> frame_;
-  UpdatedRects update_rects_;
-  UpdatedRects all_update_rects_;
-
-  scoped_ptr<Decoder> decoder_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperView);
 };

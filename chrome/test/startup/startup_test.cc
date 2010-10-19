@@ -2,19 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/env_var.h"
+#include "base/environment.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/test/test_file_util.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
-#include "chrome/test/ui/ui_test.h"
+#include "chrome/test/ui/ui_perf_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/net_util.h"
 
@@ -23,7 +25,7 @@ using base::TimeTicks;
 
 namespace {
 
-class StartupTest : public UITest {
+class StartupTest : public UIPerfTest {
  public:
   StartupTest() {
     show_window_ = true;
@@ -48,7 +50,7 @@ class StartupTest : public UITest {
         FilePath(FilePath::kCurrentDirectory),
         FilePath(FILE_PATH_LITERAL("simple.html")));
     ASSERT_TRUE(file_util::PathExists(file_url));
-    launch_arguments_.AppendLooseValue(file_url.ToWStringHack());
+    launch_arguments_.AppendArgPath(file_url);
   }
 
   // Load a complex html file on startup represented by |which_tab|.
@@ -66,7 +68,7 @@ class StartupTest : public UITest {
         .AppendASCII("page_cycler").AppendASCII("moz")
         .AppendASCII(this_domain).AppendASCII("index.html");
     GURL file_url = net::FilePathToFileURL(page_cycler_path).Resolve("?skip");
-    launch_arguments_.AppendLooseValue(ASCIIToWide(file_url.spec()));
+    launch_arguments_.AppendArg(file_url.spec());
   }
 
   // Use the given profile in the test data extensions/profiles dir.  This tests
@@ -77,9 +79,6 @@ class StartupTest : public UITest {
     data_dir = data_dir.AppendASCII("extensions").AppendASCII("profiles").
         AppendASCII(profile);
     set_template_user_data(data_dir);
-
-    // For now, these tests still depend on toolstrips.
-    launch_arguments_.AppendSwitch(switches::kEnableExtensionToolstrips);
   }
 
   // Runs a test which loads |tab_count| tabs on startup, either as command line
@@ -105,10 +104,10 @@ class StartupTest : public UITest {
 
     const int kNumCyclesMax = 20;
     int numCycles = kNumCyclesMax;
-    scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
+    scoped_ptr<base::Environment> env(base::Environment::Create());
     std::string numCyclesEnv;
-    if (env->GetEnv(env_vars::kStartupTestsNumCycles, &numCyclesEnv) &&
-        StringToInt(numCyclesEnv, &numCycles)) {
+    if (env->GetVar(env_vars::kStartupTestsNumCycles, &numCyclesEnv) &&
+        base::StringToInt(numCyclesEnv, &numCycles)) {
       if (numCycles <= kNumCyclesMax) {
         LOG(INFO) << env_vars::kStartupTestsNumCycles
                   << " set in environment, so setting numCycles to "
@@ -162,7 +161,7 @@ class StartupTest : public UITest {
         std::vector<std::string> version_numbers;
         SplitString(server_version, '.', &version_numbers);
         int chrome_buildnum = 0;
-        ASSERT_TRUE(StringToInt(version_numbers[2], &chrome_buildnum));
+        ASSERT_TRUE(base::StringToInt(version_numbers[2], &chrome_buildnum));
         if (chrome_buildnum < 368) {
           num_tabs = 0;
         }
@@ -226,7 +225,7 @@ class StartupTest : public UITest {
       if (nth_timed_tab > 0) {
         // Display only the time necessary to load the first n tabs.
         times.clear();
-        name = name_base + "-" + IntToString(nth_timed_tab);
+        name = name_base + "-" + base::IntToString(nth_timed_tab);
         for (int i = 0; i < numCycles; ++i)
           StringAppendF(&times, "%.2f,", timings[i].nth_tab_stop_ms);
         PrintResultList(graph, "", name.c_str(), times, "ms", important);
@@ -282,8 +281,8 @@ void StartupTest::RunPerfTestWithManyTabs(const char* graph, const char* trace,
     // The session will be restored once per cycle for numCycles test cycles,
     // and each time, UITest::SetUp will wait for |tab_count| tabs to
     // finish loading.
-    launch_arguments_.AppendSwitchWithValue(switches::kRestoreLastSession,
-                                            IntToWString(tab_count));
+    launch_arguments_.AppendSwitchASCII(switches::kRestoreLastSession,
+                                        base::IntToString(tab_count));
   }
   RunStartupTest(graph, trace, WARM, NOT_IMPORTANT, UITest::DEFAULT_THEME,
                  tab_count, nth_timed_tab);
@@ -298,7 +297,13 @@ TEST_F(StartupTest, PerfFewTabsReference) {
   RunPerfTestWithManyTabs("few_tabs", "cmdline-ref", 5, 2, false);
 }
 
-TEST_F(StartupTest, PerfRestoreFewTabs) {
+// http://crbug.com/52858
+#if defined(OS_MACOSX)
+#define MAYBE_PerfRestoreFewTabs FLAKY_PerfRestoreFewTabs
+#else
+#define MAYBE_PerfRestoreFewTabs PerfRestoreFewTabs
+#endif
+TEST_F(StartupTest, MAYBE_PerfRestoreFewTabs) {
   RunPerfTestWithManyTabs("few_tabs", "restore", 5, 2, true);
 }
 
@@ -307,13 +312,18 @@ TEST_F(StartupTest, PerfRestoreFewTabsReference) {
   RunPerfTestWithManyTabs("few_tabs", "restore-ref", 5, 2, true);
 }
 
-// http://crbug.com/46609
 #if defined(OS_MACOSX)
+// http://crbug.com/46609
 #define MAYBE_PerfSeveralTabsReference FLAKY_PerfSeveralTabsReference
 #define MAYBE_PerfSeveralTabs FLAKY_PerfSeveralTabs
+// http://crbug.com/52858
+#define MAYBE_PerfRestoreSeveralTabs FLAKY_PerfRestoreSeveralTabs
+#define MAYBE_PerfExtensionContentScript50 FLAKY_PerfExtensionContentScript50
 #else
 #define MAYBE_PerfSeveralTabsReference PerfSeveralTabsReference
 #define MAYBE_PerfSeveralTabs PerfSeveralTabs
+#define MAYBE_PerfRestoreSeveralTabs PerfRestoreSeveralTabs
+#define MAYBE_PerfExtensionContentScript50 PerfExtensionContentScript50
 #endif
 
 TEST_F(StartupTest, MAYBE_PerfSeveralTabs) {
@@ -325,7 +335,7 @@ TEST_F(StartupTest, MAYBE_PerfSeveralTabsReference) {
   RunPerfTestWithManyTabs("several_tabs", "cmdline-ref", 10, 4, false);
 }
 
-TEST_F(StartupTest, PerfRestoreSeveralTabs) {
+TEST_F(StartupTest, MAYBE_PerfRestoreSeveralTabs) {
   RunPerfTestWithManyTabs("several_tabs", "restore", 10, 4, true);
 }
 
@@ -341,20 +351,6 @@ TEST_F(StartupTest, PerfExtensionEmpty) {
                  UITest::DEFAULT_THEME, 1, 0);
 }
 
-TEST_F(StartupTest, PerfExtensionToolstrips1) {
-  SetUpWithFileURL();
-  SetUpWithExtensionsProfile("toolstrips1");
-  RunStartupTest("warm", "extension_toolstrip1", WARM, NOT_IMPORTANT,
-                 UITest::DEFAULT_THEME, 1, 0);
-}
-
-TEST_F(StartupTest, PerfExtensionToolstrips50) {
-  SetUpWithFileURL();
-  SetUpWithExtensionsProfile("toolstrips50");
-  RunStartupTest("warm", "extension_toolstrip50", WARM, NOT_IMPORTANT,
-                 UITest::DEFAULT_THEME, 1, 0);
-}
-
 TEST_F(StartupTest, PerfExtensionContentScript1) {
   SetUpWithFileURL();
   SetUpWithExtensionsProfile("content_scripts1");
@@ -362,7 +358,7 @@ TEST_F(StartupTest, PerfExtensionContentScript1) {
                  UITest::DEFAULT_THEME, 1, 0);
 }
 
-TEST_F(StartupTest, PerfExtensionContentScript50) {
+TEST_F(StartupTest, MAYBE_PerfExtensionContentScript50) {
   SetUpWithFileURL();
   SetUpWithExtensionsProfile("content_scripts50");
   RunStartupTest("warm", "extension_content_scripts50", WARM, NOT_IMPORTANT,

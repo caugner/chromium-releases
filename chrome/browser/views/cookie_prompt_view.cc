@@ -7,12 +7,11 @@
 #include <algorithm>
 
 #include "app/l10n_util.h"
-#include "base/i18n/time_formatting.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/cookie_modal_dialog.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/views/browser_dialogs.h"
 #include "chrome/browser/views/cookie_info_view.h"

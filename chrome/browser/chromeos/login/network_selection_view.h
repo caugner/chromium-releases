@@ -4,9 +4,9 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_NETWORK_SELECTION_VIEW_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_NETWORK_SELECTION_VIEW_H_
+#pragma once
 
-#include <string>
-
+#include "base/string16.h"
 #include "views/controls/button/menu_button.h"
 #include "views/view.h"
 #include "views/widget/widget_gtk.h"
@@ -58,7 +58,7 @@ class NetworkSelectionView : public views::View {
  protected:
   // Overridden from views::View.
   virtual void ChildPreferredSizeChanged(View* child);
-  virtual void LocaleChanged();
+  virtual void OnLocaleChanged();
 
  private:
   // Delete and recreate native controls that
@@ -77,6 +77,9 @@ class NetworkSelectionView : public views::View {
   views::Label* connecting_network_label_;
   views::NativeButton* continue_button_;
   views::SmoothedThrobber* throbber_;
+
+  // Tab index of continue button.
+  int continue_button_order_index_;
 
   // NetworkScreen delegate.
   NetworkScreenDelegate* delegate_;

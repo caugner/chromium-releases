@@ -25,6 +25,8 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/md5.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "media/base/djb2.h"
@@ -89,10 +91,7 @@ int main(int argc, const char** argv) {
   CommandLine::Init(argc, argv);
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
 
-  // TODO(evanm): GetLooseValues() should return a
-  // CommandLine::StringType, which can be converted to FilePaths
-  // directly.
-  std::vector<std::wstring> filenames(cmd_line->GetLooseValues());
+  const std::vector<CommandLine::StringType>& filenames = cmd_line->args();
   if (filenames.empty()) {
     std::cerr << "Usage: " << argv[0] << " [OPTIONS] FILE [DUMPFILE]\n"
               << "  --stream=[audio|video]          "
@@ -129,12 +128,10 @@ int main(int argc, const char** argv) {
   }
 
   // Retrieve command line options.
-  std::string in_path(WideToASCII(filenames[0]));
+  FilePath in_path(filenames[0]);
   FilePath out_path;
-  if (filenames.size() > 1) {
-    // See TODO above the declaration of filenames.
-    out_path = FilePath::FromWStringHack(filenames[1]);
-  }
+  if (filenames.size() > 1)
+    out_path = FilePath(filenames[1]);
   CodecType target_codec = CODEC_TYPE_UNKNOWN;
 
   // Determine whether to benchmark audio or video decoding.
@@ -154,7 +151,7 @@ int main(int argc, const char** argv) {
   int video_threads = 0;
   std::string threads(cmd_line->GetSwitchValueASCII(switches::kVideoThreads));
   if (!threads.empty() &&
-      !StringToInt(threads, &video_threads)) {
+      !base::StringToInt(threads, &video_threads)) {
     video_threads = 0;
   }
 
@@ -162,7 +159,7 @@ int main(int argc, const char** argv) {
   int verbose_level = AV_LOG_FATAL;
   std::string verbose(cmd_line->GetSwitchValueASCII(switches::kVerbose));
   if (!verbose.empty() &&
-      !StringToInt(verbose, &verbose_level)) {
+      !base::StringToInt(verbose, &verbose_level)) {
     verbose_level = AV_LOG_FATAL;
   }
 
@@ -170,7 +167,7 @@ int main(int argc, const char** argv) {
   int max_frames = 0;
   std::string frames_opt(cmd_line->GetSwitchValueASCII(switches::kFrames));
   if (!frames_opt.empty() &&
-      !StringToInt(frames_opt, &max_frames)) {
+      !base::StringToInt(frames_opt, &max_frames)) {
     max_frames = 0;
   }
 
@@ -178,7 +175,7 @@ int main(int argc, const char** argv) {
   int max_loops = 0;
   std::string loop_opt(cmd_line->GetSwitchValueASCII(switches::kLoop));
   if (!loop_opt.empty() &&
-      !StringToInt(loop_opt, &max_loops)) {
+      !base::StringToInt(loop_opt, &max_loops)) {
     max_loops = 0;
   }
 
@@ -213,7 +210,7 @@ int main(int argc, const char** argv) {
   int skip = 0;
   if (cmd_line->HasSwitch(switches::kSkip)) {
     std::string skip_opt(cmd_line->GetSwitchValueASCII(switches::kSkip));
-    if (!StringToInt(skip_opt, &skip)) {
+    if (!base::StringToInt(skip_opt, &skip)) {
       skip = 0;
     }
   }
@@ -228,19 +225,27 @@ int main(int argc, const char** argv) {
   avcodec_init();
   av_log_set_level(verbose_level);
   av_register_all();
-  av_register_protocol(&kFFmpegFileProtocol);
+  av_register_protocol2(&kFFmpegFileProtocol, sizeof(kFFmpegFileProtocol));
   AVFormatContext* format_context = NULL;
-  int result = av_open_input_file(&format_context, in_path.c_str(),
+  // av_open_input_file wants a char*, which can't work with wide paths.
+  // So we assume ASCII on Windows.  On other platforms we can pass the
+  // path bytes through verbatim.
+#if defined(OS_WIN)
+  std::string string_path = WideToASCII(in_path.value());
+#else
+  const std::string& string_path = in_path.value();
+#endif
+  int result = av_open_input_file(&format_context, string_path.c_str(),
                                   NULL, 0, NULL);
   if (result < 0) {
     switch (result) {
       case AVERROR_NOFMT:
         std::cerr << "Error: File format not supported "
-                  << in_path << std::endl;
+                  << in_path.value() << std::endl;
         break;
       default:
         std::cerr << "Error: Could not open input for "
-                  << in_path << std::endl;
+                  << in_path.value() << std::endl;
         break;
     }
     return 1;
@@ -270,7 +275,7 @@ int main(int argc, const char** argv) {
   // Parse a little bit of the stream to fill out the format context.
   if (av_find_stream_info(format_context) < 0) {
     std::cerr << "Error: Could not find stream info for "
-              << in_path << std::endl;
+              << in_path.value() << std::endl;
     return 1;
   }
 
@@ -300,7 +305,7 @@ int main(int argc, const char** argv) {
   // Only continue if we found our target stream.
   if (target_stream < 0) {
     std::cerr << "Error: Could not find target stream "
-              << target_stream << " for " << in_path << std::endl;
+              << target_stream << " for " << in_path.value() << std::endl;
     return 1;
   }
 
@@ -312,7 +317,7 @@ int main(int argc, const char** argv) {
   // Only continue if we found our codec.
   if (!codec) {
     std::cerr << "Error: Could not find codec for "
-              << in_path << std::endl;
+              << in_path.value() << std::endl;
     return 1;
   }
 
@@ -325,6 +330,7 @@ int main(int argc, const char** argv) {
     codec_context->skip_frame = AVDISCARD_NONREF;
   }
   if (fast2) {
+    // Note this flag is no longer necessary for H264 multithreading.
     codec_context->flags2 |= CODEC_FLAG2_FAST;
   }
   if (error_correction) {
@@ -344,7 +350,7 @@ int main(int argc, const char** argv) {
   if (avcodec_open(codec_context, codec) < 0) {
     std::cerr << "Error: Could not open codec "
               << codec_context->codec->name << " for "
-              << in_path << std::endl;
+              << in_path.value() << std::endl;
     return 1;
   }
 
@@ -357,7 +363,7 @@ int main(int argc, const char** argv) {
       avcodec_alloc_frame());
   if (!frame.get()) {
     std::cerr << "Error: avcodec_alloc_frame for "
-              << in_path << std::endl;
+              << in_path.value() << std::endl;
     return 1;
   }
 
@@ -409,7 +415,8 @@ int main(int argc, const char** argv) {
             if (fwrite(samples.get(), 1, size_out, output) !=
                 static_cast<size_t>(size_out)) {
               std::cerr << "Error: Could not write "
-                        << size_out << " bytes for " << in_path << std::endl;
+                        << size_out << " bytes for " << in_path.value()
+                        << std::endl;
               return 1;
             }
           }
@@ -467,7 +474,7 @@ int main(int argc, const char** argv) {
                            bytes_per_line) {
                   std::cerr << "Error: Could not write data after "
                             << copy_lines << " lines for "
-                            << in_path << std::endl;
+                            << in_path.value() << std::endl;
                   return 1;
                 }
                 source += source_stride;
@@ -495,7 +502,7 @@ int main(int argc, const char** argv) {
       // Make sure our decoding went OK.
       if (result < 0) {
         std::cerr << "Error: avcodec_decode returned "
-                  << result << " for " << in_path << std::endl;
+                  << result << " for " << in_path.value() << std::endl;
         return 1;
       }
     }
@@ -522,20 +529,12 @@ int main(int argc, const char** argv) {
     sum += decode_times[i];
   }
 
-  // Print our results.
-  log_out->setf(std::ios::fixed);
-  log_out->precision(2);
-  *log_out << std::endl;
-  *log_out << "     Frames:" << std::setw(11) << frames
-           << std::endl;
-  *log_out << "      Total:" << std::setw(11) << total.InMillisecondsF()
-           << " ms" << std::endl;
-  *log_out << "  Summation:" << std::setw(11) << sum
-           << " ms" << std::endl;
-
+  double average = 0;
+  double stddev = 0;
+  double fps = 0;
   if (frames > 0) {
     // Calculate the average time per frame.
-    double average = sum / frames;
+    average = sum / frames;
 
     // Calculate the sum of the squared differences.
     // Standard deviation will only be accurate if no threads are used.
@@ -547,27 +546,42 @@ int main(int argc, const char** argv) {
     }
 
     // Calculate the standard deviation (jitter).
-    double stddev = sqrt(squared_sum / frames);
+    stddev = sqrt(squared_sum / frames);
 
-    *log_out << "    Average:" << std::setw(11) << average
-             << " ms" << std::endl;
-    *log_out << "     StdDev:" << std::setw(11) << stddev
-             << " ms" << std::endl;
+    // Calculate frames per second.
+    fps = frames * 1000.0 / sum;
   }
+
+  // Print our results.
+  log_out->setf(std::ios::fixed);
+  log_out->precision(2);
+  *log_out << std::endl;
+  *log_out << "     Frames:" << std::setw(11) << frames
+           << std::endl;
+  *log_out << "      Total:" << std::setw(11) << total.InMillisecondsF()
+           << " ms" << std::endl;
+  *log_out << "  Summation:" << std::setw(11) << sum
+           << " ms" << std::endl;
+  *log_out << "    Average:" << std::setw(11) << average
+           << " ms" << std::endl;
+  *log_out << "     StdDev:" << std::setw(11) << stddev
+           << " ms" << std::endl;
+  *log_out << "        FPS:" << std::setw(11) << fps
+           << std::endl;
   if (hash_djb2) {
     *log_out << "  DJB2 Hash:" << std::setw(11) << hash_value
-             << "  " << in_path << std::endl;
+             << "  " << in_path.value() << std::endl;
   }
   if (hash_md5) {
     MD5Digest digest;  // The result of the computation.
     MD5Final(&digest, &ctx);
     *log_out << "   MD5 Hash: " << MD5DigestToBase16(digest)
-             << " " << in_path << std::endl;
+             << " " << in_path.value() << std::endl;
   }
 #if defined(ENABLE_WINDOWS_EXCEPTIONS)
   } __except(EXCEPTION_EXECUTE_HANDLER) {
     *log_out << "  Exception:" << std::setw(11) << GetExceptionCode()
-             << " " << in_path << std::endl;
+             << " " << in_path.value() << std::endl;
     return 1;
   }
 #endif

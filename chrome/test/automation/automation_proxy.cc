@@ -1,26 +1,26 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/automation/automation_proxy.h"
 
+#include <gtest/gtest.h>
+
 #include <sstream>
 
 #include "base/basictypes.h"
-#include "base/file_version_info.h"
 #include "base/logging.h"
 #include "base/platform_thread.h"
 #include "base/process_util.h"
 #include "base/ref_counted.h"
 #include "base/waitable_event.h"
-#include "chrome/app/chrome_version_info.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/test/automation/automation_constants.h"
 #include "chrome/test/automation/automation_messages.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/extension_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
-#include <gtest/gtest.h>
 #include "ipc/ipc_descriptors.h"
 #if defined(OS_WIN)
 // TODO(port): Enable when dialog_delegate is ported.
@@ -90,13 +90,15 @@ class AutomationMessageFilter : public IPC::ChannelProxy::MessageFilter {
 }  // anonymous namespace
 
 
-AutomationProxy::AutomationProxy(int command_execution_timeout_ms)
+AutomationProxy::AutomationProxy(int command_execution_timeout_ms,
+                                 bool disconnect_on_failure)
     : app_launched_(true, false),
       initial_loads_complete_(true, false),
       new_tab_ui_load_complete_(true, false),
       shutdown_event_(new base::WaitableEvent(true, false)),
       app_launch_signaled_(0),
       perform_version_check_(false),
+      disconnect_on_failure_(disconnect_on_failure),
       command_execution_timeout_(
           TimeDelta::FromMilliseconds(command_execution_timeout_ms)),
       listener_thread_id_(0) {
@@ -112,12 +114,10 @@ AutomationProxy::AutomationProxy(int command_execution_timeout_ms)
 }
 
 AutomationProxy::~AutomationProxy() {
-  DCHECK(shutdown_event_.get() != NULL);
-  shutdown_event_->Signal();
   // Destruction order is important. Thread has to outlive the channel and
   // tracker has to outlive the thread since we access the tracker inside
   // AutomationMessageFilter::OnMessageReceived.
-  channel_.reset();
+  Disconnect();
   thread_.reset();
   tracker_.reset();
 }
@@ -173,16 +173,13 @@ AutomationLaunchResult AutomationProxy::WaitForAppLaunch() {
     if (perform_version_check_) {
       // Obtain our own version number and compare it to what the automation
       // provider sent.
-      scoped_ptr<FileVersionInfo> file_version_info(
-          chrome_app::GetChromeVersionInfo());
-      DCHECK(file_version_info != NULL);
-      std::string version_string(
-          WideToASCII(file_version_info->file_version()));
+      chrome::VersionInfo version_info;
+      DCHECK(version_info.is_valid());
 
       // Note that we use a simple string comparison since we expect the version
       // to be a punctuated numeric string. Consider using base/Version if we
       // ever need something more complicated here.
-      if (server_version_ != version_string) {
+      if (server_version_ != version_info.Version()) {
         result = AUTOMATION_VERSION_MISMATCH;
       }
     }
@@ -378,6 +375,8 @@ bool AutomationProxy::SendProxyConfig(const std::string& new_proxy_config) {
 }
 
 void AutomationProxy::Disconnect() {
+  DCHECK(shutdown_event_.get() != NULL);
+  shutdown_event_->Signal();
   channel_.reset();
 }
 
@@ -388,7 +387,9 @@ void AutomationProxy::OnMessageReceived(const IPC::Message& msg) {
 }
 
 void AutomationProxy::OnChannelError() {
-  DLOG(ERROR) << "Channel error in AutomationProxy.";
+  LOG(ERROR) << "Channel error in AutomationProxy.";
+  if (disconnect_on_failure_)
+    Disconnect();
 }
 
 scoped_refptr<WindowProxy> AutomationProxy::GetActiveWindow() {
@@ -449,7 +450,19 @@ bool AutomationProxy::Send(IPC::Message* message) {
     return false;
   }
 
-  return channel_->SendWithTimeout(message, command_execution_timeout_ms());
+  bool success = channel_->SendWithTimeout(message,
+                                           command_execution_timeout_ms());
+
+  if (!success && disconnect_on_failure_) {
+    // Send failed (possibly due to a timeout). Browser is likely in a weird
+    // state, and further IPC requests are extremely likely to fail (possibly
+    // timeout, which would make tests slower). Disconnect the channel now
+    // to avoid the slowness.
+    LOG(ERROR) << "Disconnecting channel after error!";
+    Disconnect();
+  }
+
+  return success;
 }
 
 void AutomationProxy::InvalidateHandle(const IPC::Message& message) {

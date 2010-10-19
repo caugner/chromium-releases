@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_VIEWS_TABS_BROWSER_TAB_STRIP_CONTROLLER_H_
 #define CHROME_BROWSER_VIEWS_TABS_BROWSER_TAB_STRIP_CONTROLLER_H_
+#pragma once
 
 #include "base/scoped_ptr.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
@@ -12,6 +13,7 @@
 
 class BaseTab;
 class BaseTabStrip;
+class Browser;
 
 struct TabRendererData;
 
@@ -21,7 +23,7 @@ class BrowserTabStripController : public TabStripController,
                                   public TabStripModelObserver,
                                   public NotificationObserver {
  public:
-  explicit BrowserTabStripController(TabStripModel* model);
+  BrowserTabStripController(Browser* browser, TabStripModel* model);
   virtual ~BrowserTabStripController();
 
   void InitFromModel(BaseTabStrip* tabstrip);
@@ -35,8 +37,6 @@ class BrowserTabStripController : public TabStripController,
   void ExecuteCommandForTab(TabStripModel::ContextMenuCommand command_id,
                             BaseTab* tab);
   bool IsTabPinned(BaseTab* tab);
-  bool IsAppTab(BaseTab* tab);
-  bool IsToolbarVisible(BaseTab* tab);
 
   // TabStripController implementation:
   virtual int GetCount() const;
@@ -104,6 +104,9 @@ class BrowserTabStripController : public TabStripController,
   TabStripModel* model_;
 
   BaseTabStrip* tabstrip_;
+
+  // Non-owning pointer to the browser which is using this controller.
+  Browser* browser_;
 
   // If non-NULL it means we're showing a menu for the tab.
   scoped_ptr<TabContextMenuContents> context_menu_contents_;

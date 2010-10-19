@@ -10,9 +10,9 @@
 #include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "media/base/data_buffer.h"
+#include "remoting/base/capture_data.h"
 #include "remoting/base/protocol_decoder.h"
 #include "remoting/host/client_connection.h"
-#include "remoting/host/encoder.h"
 
 namespace remoting {
 
@@ -111,7 +111,7 @@ void SessionManager::DoStart() {
   DCHECK_EQ(capture_loop_, MessageLoop::current());
 
   if (started_) {
-    NOTREACHED() << "Record session already started";
+    NOTREACHED() << "Record session already started.";
     return;
   }
 
@@ -128,7 +128,7 @@ void SessionManager::DoPause() {
   DCHECK_EQ(capture_loop_, MessageLoop::current());
 
   if (!started_) {
-    NOTREACHED() << "Record session not started";
+    NOTREACHED() << "Record session not started.";
     return;
   }
 
@@ -210,17 +210,14 @@ void SessionManager::DoCapture() {
   // And finally perform one capture.
   DCHECK(capturer_.get());
 
-  // TODO(dmaclach): make this not required on the Mac eventually.
-  // Will require getting the X11client to work properly. Right now X11 expects
-  // full screens each pass.
-  capturer_->InvalidateFullScreen();
   capturer_->CaptureInvalidRects(
       NewCallback(this, &SessionManager::CaptureDoneCallback));
 }
 
 void SessionManager::CaptureDoneCallback(
-    scoped_refptr<Capturer::CaptureData> capture_data) {
-  // TODO(hclam): There is a bug if the capturer doesn't produce any dirty rects.
+    scoped_refptr<CaptureData> capture_data) {
+  // TODO(hclam): There is a bug if the capturer doesn't produce any dirty
+  // rects.
   DCHECK_EQ(capture_loop_, MessageLoop::current());
   encode_loop_->PostTask(
       FROM_HERE,
@@ -322,11 +319,12 @@ void SessionManager::DoRateControl() {
   ScheduleNextRateControl();
 }
 
-void SessionManager::DoSendUpdate(HostMessage* message,
+void SessionManager::DoSendUpdate(ChromotingHostMessage* message,
                                   Encoder::EncodingState state) {
   DCHECK_EQ(network_loop_, MessageLoop::current());
 
   // Create a data buffer in wire format from |message|.
+  // Note that this takes ownership of |message|.
   scoped_refptr<media::DataBuffer> data =
       ClientConnection::CreateWireFormatDataBuffer(message);
 
@@ -381,8 +379,13 @@ void SessionManager::DoRemoveAllClients() {
 // Encoder thread --------------------------------------------------------------
 
 void SessionManager::DoEncode(
-    scoped_refptr<Capturer::CaptureData> capture_data) {
+    scoped_refptr<CaptureData> capture_data) {
   DCHECK_EQ(encode_loop_, MessageLoop::current());
+
+  if (!capture_data->dirty_rects().size()) {
+    capture_loop_->PostTask(
+        FROM_HERE, NewRunnableMethod(this, &SessionManager::DoFinishEncode));
+  }
 
   // TODO(hclam): Enable |force_refresh| if a new client was
   // added.
@@ -391,7 +394,7 @@ void SessionManager::DoEncode(
 }
 
 void SessionManager::EncodeDataAvailableTask(
-    HostMessage* message, Encoder::EncodingState state) {
+    ChromotingHostMessage* message, Encoder::EncodingState state) {
   DCHECK_EQ(encode_loop_, MessageLoop::current());
 
   // Before a new encode task starts, notify clients a new update

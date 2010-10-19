@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_CONTROLS_LISTBOX_NATIVE_LISTBOX_WRAPPER_H_
 #define VIEWS_CONTROLS_LISTBOX_NATIVE_LISTBOX_WRAPPER_H_
+#pragma once
 
 #include "gfx/native_widget_types.h"
 #include "gfx/rect.h"
@@ -32,6 +33,9 @@ class NativeListboxWrapper {
       Listbox* listbox,
       const std::vector<string16>& strings,
       Listbox::Listener* listener);
+
+ protected:
+  virtual ~NativeListboxWrapper() {}
 };
 
 }  // namespace views

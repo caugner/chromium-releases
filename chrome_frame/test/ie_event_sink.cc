@@ -6,8 +6,9 @@
 
 #include "base/scoped_bstr_win.h"
 #include "base/scoped_handle.h"
+#include "base/scoped_variant_win.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -99,10 +100,19 @@ void IEEventSink::Attach(IDispatch* browser_disp) {
   EXPECT_TRUE(NULL != browser_disp);
   if (browser_disp) {
     EXPECT_HRESULT_SUCCEEDED(web_browser2_.QueryFrom(browser_disp));
-    EXPECT_TRUE(S_OK == DispEventAdvise(web_browser2_,
-                                        &DIID_DWebBrowserEvents2));
-    FindIEProcessId();
+    EXPECT_HRESULT_SUCCEEDED(Attach(web_browser2_.get()));
   }
+}
+
+HRESULT IEEventSink::Attach(IWebBrowser2* browser) {
+  DCHECK(browser);
+  HRESULT result;
+  if (browser) {
+    web_browser2_ = browser;
+    FindIEProcessId();
+    result = DispEventAdvise(web_browser2_, &DIID_DWebBrowserEvents2);
+  }
+  return result;
 }
 
 void IEEventSink::Uninitialize() {
@@ -174,24 +184,27 @@ void IEEventSink::Uninitialize() {
 bool IEEventSink::IsCFRendering() {
   DCHECK(web_browser2_);
 
-  HWND renderer_window;
   if (web_browser2_) {
     ScopedComPtr<IDispatch> doc;
     web_browser2_->get_Document(doc.Receive());
     if (doc) {
-      ScopedComPtr<IOleWindow> ole_window;
-      ole_window.QueryFrom(doc);
-      if (ole_window) {
-        ole_window->GetWindow(&renderer_window);
-        if (IsWindow(renderer_window)) {
-          wchar_t class_name[MAX_PATH] = {0};
-          GetClassName(renderer_window, class_name, arraysize(class_name));
-          return _wcsicmp(class_name, L"Internet Explorer_Server") != 0;
-        }
-      }
+      // Detect if CF is rendering based on whether the document is a
+      // ChromeActiveDocument. Detecting based on hwnd is problematic as
+      // the CF Active Document window may not have been created yet.
+      ScopedComPtr<IChromeFrame> chrome_frame;
+      chrome_frame.QueryFrom(doc);
+      return chrome_frame.get();
     }
   }
   return false;
+}
+
+void IEEventSink::PostMessageToCF(const std::wstring& message,
+                                  const std::wstring& target) {
+  ScopedBstr message_bstr(message.c_str());
+  ScopedVariant target_variant(target.c_str());
+  EXPECT_HRESULT_SUCCEEDED(
+      chrome_frame_->postMessage(message_bstr, target_variant));
 }
 
 void IEEventSink::SetFocusToRenderer() {
@@ -211,17 +224,6 @@ void IEEventSink::SendMouseClick(int x, int y,
 void IEEventSink::ExpectRendererWindowHasFocus() {
   HWND renderer_window = GetRendererWindow();
   EXPECT_TRUE(IsWindow(renderer_window));
-
-  if (IsCFRendering()) {
-    for (HWND first_child = renderer_window;
-        IsWindow(first_child); first_child = GetWindow(first_child, GW_CHILD)) {
-      renderer_window = first_child;
-    }
-
-    wchar_t class_name[MAX_PATH] = {0};
-    GetClassName(renderer_window, class_name, arraysize(class_name));
-    EXPECT_EQ(0, _wcsicmp(class_name, L"Chrome_RenderWidgetHostHWND"));
-  }
 
   DWORD renderer_thread = 0;
   DWORD renderer_process = 0;
@@ -255,6 +257,13 @@ void IEEventSink::Exec(const GUID* cmd_group_guid, DWORD command_id,
       command_id, cmd_exec_opt, in_args, out_args));
 }
 
+HWND IEEventSink::GetBrowserWindow() {
+  HWND browser_window = NULL;
+  web_browser2_->get_HWND(reinterpret_cast<SHANDLE_PTR*>(&browser_window));
+  EXPECT_TRUE(::IsWindow(browser_window));
+  return browser_window;
+}
+
 HWND IEEventSink::GetRendererWindow() {
   HWND renderer_window = NULL;
   if (IsCFRendering()) {
@@ -269,9 +278,13 @@ HWND IEEventSink::GetRendererWindow() {
       EXPECT_TRUE(IsWindow(activex_window));
 
       // chrome tab window is the first (and the only) child of activex
-      HWND chrome_tab_window = GetWindow(activex_window, GW_CHILD);
-      EXPECT_TRUE(IsWindow(chrome_tab_window));
-      renderer_window = GetWindow(chrome_tab_window, GW_CHILD);
+      for (HWND first_child = activex_window; ::IsWindow(first_child);
+           first_child = ::GetWindow(first_child, GW_CHILD)) {
+        renderer_window = first_child;
+      }
+      wchar_t class_name[MAX_PATH] = {0};
+      GetClassName(renderer_window, class_name, arraysize(class_name));
+      EXPECT_EQ(0, _wcsicmp(class_name, L"Chrome_RenderWidgetHostHWND"));
     }
   } else {
     DCHECK(web_browser2_);
@@ -289,7 +302,45 @@ HWND IEEventSink::GetRendererWindow() {
     }
   }
 
-  EXPECT_TRUE(IsWindow(renderer_window));
+  EXPECT_TRUE(::IsWindow(renderer_window));
+  return renderer_window;
+}
+
+HWND IEEventSink::GetRendererWindowSafe() {
+  HWND renderer_window = NULL;
+  if (IsCFRendering()) {
+    DCHECK(chrome_frame_);
+    ScopedComPtr<IOleWindow> ole_window;
+    ole_window.QueryFrom(chrome_frame_);
+
+    if (ole_window) {
+      HWND activex_window = NULL;
+      ole_window->GetWindow(&activex_window);
+
+      // chrome tab window is the first (and the only) child of activex
+      for (HWND first_child = activex_window; ::IsWindow(first_child);
+           first_child = ::GetWindow(first_child, GW_CHILD)) {
+        renderer_window = first_child;
+      }
+      wchar_t class_name[MAX_PATH] = {0};
+      GetClassName(renderer_window, class_name, arraysize(class_name));
+      if (_wcsicmp(class_name, L"Chrome_RenderWidgetHostHWND") != 0)
+        renderer_window = NULL;
+    }
+  } else {
+    DCHECK(web_browser2_);
+    ScopedComPtr<IDispatch> doc;
+    web_browser2_->get_Document(doc.Receive());
+    if (doc) {
+      ScopedComPtr<IOleWindow> ole_window;
+      ole_window.QueryFrom(doc);
+      if (ole_window) {
+        ole_window->GetWindow(&renderer_window);
+      }
+    }
+  }
+  if (!::IsWindow(renderer_window))
+    renderer_window = NULL;
   return renderer_window;
 }
 
@@ -297,16 +348,11 @@ HRESULT IEEventSink::LaunchIEAndNavigate(
     const std::wstring& navigate_url, IEEventListener* listener) {
   listener_ = listener;
   HRESULT hr = LaunchIEAsComServer(web_browser2_.Receive());
-  EXPECT_EQ(S_OK, hr);
-  if (hr == S_OK) {
-    FindIEProcessId();
+  if (SUCCEEDED(hr)) {
     web_browser2_->put_Visible(VARIANT_TRUE);
-    hr = DispEventAdvise(web_browser2_, &DIID_DWebBrowserEvents2);
-    EXPECT_TRUE(hr == S_OK);
+    Attach(web_browser2_);
     hr = Navigate(navigate_url);
   }
-
-  DLOG_IF(WARNING, FAILED(hr)) << "Failed to launch IE. Error:" << hr;
   return hr;
 }
 
@@ -335,6 +381,7 @@ void IEEventSink::Refresh() {
   web_browser2_->Refresh2(refresh_level.AsInput());
 }
 
+// private methods
 void IEEventSink::ConnectToChromeFrame() {
   DCHECK(web_browser2_);
   if (chrome_frame_.get())
@@ -382,6 +429,7 @@ void IEEventSink::FindIEProcessId() {
   EXPECT_TRUE(::IsWindow(hwnd));
   if (::IsWindow(hwnd))
     ::GetWindowThreadProcessId(hwnd, &ie_process_id_);
+  EXPECT_NE(static_cast<DWORD>(0), ie_process_id_);
 }
 
 // Event callbacks

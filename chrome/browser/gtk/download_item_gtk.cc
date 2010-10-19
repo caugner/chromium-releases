@@ -4,9 +4,7 @@
 
 #include "chrome/browser/gtk/download_item_gtk.h"
 
-#include "app/gtk_util.h"
 #include "app/l10n_util.h"
-#include "app/menus/simple_menu_model.h"
 #include "app/resource_bundle.h"
 #include "app/slide_animation.h"
 #include "app/text_elider.h"
@@ -15,6 +13,7 @@
 #include "base/histogram.h"
 #include "base/string_util.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_item.h"
@@ -781,15 +780,7 @@ gboolean DownloadItemGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e) {
 void DownloadItemGtk::OnClick(GtkWidget* widget) {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.open_download",
                            base::Time::Now() - creation_time_);
-
-  DownloadItem* download = get_download();
-
-  if (download->state() == DownloadItem::IN_PROGRESS) {
-    download->set_open_when_complete(
-        !download->open_when_complete());
-  } else if (download->state() == DownloadItem::COMPLETE) {
-    download_util::OpenDownload(download);
-  }
+  get_download()->OpenDownload();
 }
 
 gboolean DownloadItemGtk::OnProgressAreaExpose(GtkWidget* widget,
@@ -858,7 +849,7 @@ gboolean DownloadItemGtk::OnDangerousPromptExpose(GtkWidget* widget,
 void DownloadItemGtk::OnDangerousAccept(GtkWidget* button) {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.save_download",
                            base::Time::Now() - creation_time_);
-  get_download()->manager()->DangerousDownloadValidated(get_download());
+  get_download()->DangerousDownloadValidated();
 }
 
 void DownloadItemGtk::OnDangerousDecline(GtkWidget* button) {

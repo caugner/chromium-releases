@@ -4,16 +4,21 @@
 
 #include <CoreAudio/AudioHardware.h>
 
-#include "base/at_exit.h"
 #include "media/audio/fake_audio_input_stream.h"
 #include "media/audio/fake_audio_output_stream.h"
+#include "media/audio/mac/audio_input_mac.h"
 #include "media/audio/mac/audio_manager_mac.h"
 #include "media/audio/mac/audio_output_mac.h"
+#include "media/base/limits.h"
 
-bool AudioManagerMac::HasAudioOutputDevices() {
+namespace {
+const int kMaxInputChannels = 2;
+const int kMaxSamplesPerPacket = media::Limits::kMaxSampleRate;
+
+bool HasAudioHardware(AudioObjectPropertySelector selector) {
   AudioDeviceID output_device_id = kAudioObjectUnknown;
-  AudioObjectPropertyAddress property_address = {
-    kAudioHardwarePropertyDefaultOutputDevice,  // mSelector
+  const AudioObjectPropertyAddress property_address = {
+    selector,
     kAudioObjectPropertyScopeGlobal,            // mScope
     kAudioObjectPropertyElementMaster           // mElement
   };
@@ -25,40 +30,39 @@ bool AudioManagerMac::HasAudioOutputDevices() {
                                             &output_device_id_size,
                                             &output_device_id);
   return err == kAudioHardwareNoError &&
-         output_device_id != kAudioObjectUnknown;
+      output_device_id != kAudioObjectUnknown;
+}
+}  // namespace
+
+bool AudioManagerMac::HasAudioOutputDevices() {
+  return HasAudioHardware(kAudioHardwarePropertyDefaultOutputDevice);
 }
 
 bool AudioManagerMac::HasAudioInputDevices() {
-  // TODO(satish): implement.
-  return false;
-}
-
-AudioInputStream* AudioManagerMac::MakeAudioInputStream(
-    Format format,
-    int channels,
-    int sample_rate,
-    char bits_per_sample,
-    uint32 samples_per_packet) {
-  if (format == AUDIO_MOCK) {
-    return FakeAudioInputStream::MakeFakeStream(channels, bits_per_sample,
-                                                sample_rate,
-                                                samples_per_packet);
-  }
-  // TODO(satish): implement.
-  return NULL;
+  return HasAudioHardware(kAudioHardwarePropertyDefaultInputDevice);
 }
 
 AudioOutputStream* AudioManagerMac::MakeAudioOutputStream(
-    Format format,
-    int channels,
-    int sample_rate,
-    char bits_per_sample) {
-  if (format == AUDIO_MOCK)
+    AudioParameters params) {
+  if (params.format == AudioParameters::AUDIO_MOCK)
     return FakeAudioOutputStream::MakeFakeStream();
-  else if (format != AUDIO_PCM_LINEAR)
+  else if (params.format != AudioParameters::AUDIO_PCM_LINEAR)
     return NULL;
-  return new PCMQueueOutAudioOutputStream(this, channels, sample_rate,
-                                          bits_per_sample);
+  return new PCMQueueOutAudioOutputStream(this, params);
+}
+
+AudioInputStream* AudioManagerMac::MakeAudioInputStream(
+    AudioParameters params, int samples_per_packet) {
+  if (!params.IsValid() || (params.channels > kMaxInputChannels) ||
+      (samples_per_packet > kMaxSamplesPerPacket) || (samples_per_packet < 0))
+    return NULL;
+
+  if (params.format == AudioParameters::AUDIO_MOCK) {
+    return FakeAudioInputStream::MakeFakeStream(params, samples_per_packet);
+  } else if (params.format == AudioParameters::AUDIO_PCM_LINEAR) {
+    return new PCMQueueInAudioInputStream(this, params, samples_per_packet);
+  }
+  return NULL;
 }
 
 void AudioManagerMac::MuteAll() {
@@ -75,22 +79,12 @@ void AudioManagerMac::ReleaseOutputStream(
   delete stream;
 }
 
-namespace {
-
-AudioManagerMac* g_audio_manager = NULL;
-
-}  // namespace.
-
-void DestroyAudioManagerMac(void* param) {
-  delete g_audio_manager;
-  g_audio_manager = NULL;
+// Called by the stream when it has been released by calling Close().
+void AudioManagerMac::ReleaseInputStream(PCMQueueInAudioInputStream* stream) {
+  delete stream;
 }
 
-// By convention, the AudioManager is not thread safe.
-AudioManager* AudioManager::GetAudioManager() {
-  if (!g_audio_manager) {
-    g_audio_manager = new AudioManagerMac();
-    base::AtExitManager::RegisterCallback(&DestroyAudioManagerMac, NULL);
-  }
-  return g_audio_manager;
+// static
+AudioManager* AudioManager::CreateAudioManager() {
+  return new AudioManagerMac();
 }

@@ -29,6 +29,7 @@
 
 #ifndef CHROME_TEST_SYNC_ENGINE_TEST_DIRECTORY_SETTER_UPPER_H_
 #define CHROME_TEST_SYNC_ENGINE_TEST_DIRECTORY_SETTER_UPPER_H_
+#pragma once
 
 #include <string>
 
@@ -36,7 +37,6 @@
 #include "base/scoped_temp_dir.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/util/sync_types.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace syncable {

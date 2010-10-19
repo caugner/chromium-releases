@@ -4,7 +4,9 @@
 
 #include "net/http/http_auth_handler_ntlm.h"
 
+#if !defined(NTLM_SSPI)
 #include "base/base64.h"
+#endif
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -14,8 +16,8 @@
 namespace net {
 
 int HttpAuthHandlerNTLM::GenerateAuthTokenImpl(
-    const std::wstring* username,
-    const std::wstring* password,
+    const string16* username,
+    const string16* password,
     const HttpRequestInfo* request,
     CompletionCallback* callback,
     std::string* auth_token) {
@@ -26,6 +28,11 @@ int HttpAuthHandlerNTLM::GenerateAuthTokenImpl(
       CreateSPN(origin_),
       auth_token);
 #else  // !defined(NTLM_SSPI)
+  // TODO(cbentzel): Shouldn't be hitting this case.
+  if (!username || !password) {
+    LOG(ERROR) << "Username and password are expected to be non-NULL.";
+    return ERR_MISSING_AUTH_CREDENTIALS;
+  }
   // TODO(wtc): See if we can use char* instead of void* for in_buf and
   // out_buf.  This change will need to propagate to GetNextToken,
   // GenerateType1Msg, and GenerateType3Msg, and perhaps further.
@@ -36,18 +43,19 @@ int HttpAuthHandlerNTLM::GenerateAuthTokenImpl(
 
   // |username| may be in the form "DOMAIN\user".  Parse it into the two
   // components.
-  std::wstring domain;
-  std::wstring user;
-  size_t backslash_idx = username->find(L'\\');
-  if (backslash_idx == std::wstring::npos) {
+  string16 domain;
+  string16 user;
+  const char16 backslash_character = '\\';
+  size_t backslash_idx = username->find(backslash_character);
+  if (backslash_idx == string16::npos) {
     user = *username;
   } else {
     domain = username->substr(0, backslash_idx);
     user = username->substr(backslash_idx + 1);
   }
-  domain_ = WideToUTF16(domain);
-  username_ = WideToUTF16(user);
-  password_ = WideToUTF16(*password);
+  domain_ = domain;
+  username_ = user;
+  password_ = *password;
 
   // Initial challenge.
   if (auth_data_.empty()) {

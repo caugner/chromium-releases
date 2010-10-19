@@ -7,6 +7,7 @@
 
 #ifndef APP_GFX_GL_GL_MOCK_H_
 #define APP_GFX_GL_GL_MOCK_H_
+#pragma once
 
 #include "app/gfx/gl/gl_interface.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -44,6 +45,11 @@ class MockGLInterface : public GLInterface {
 
   MOCK_METHOD4(BlendFuncSeparate, void(
       GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha));
+
+  MOCK_METHOD10(BlitFramebufferEXT, void(
+      GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
+      GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
+      GLbitfield mask, GLenum filter));
 
   MOCK_METHOD4(BufferData, void(
       GLenum target, GLsizeiptr size, const void* data, GLenum usage));
@@ -229,11 +235,11 @@ class MockGLInterface : public GLInterface {
 
   MOCK_METHOD1(IsEnabled, GLboolean(GLenum cap));
 
-  MOCK_METHOD1(IsFramebuffer, GLboolean(GLuint framebuffer));
+  MOCK_METHOD1(IsFramebufferEXT, GLboolean(GLuint framebuffer));
 
   MOCK_METHOD1(IsProgram, GLboolean(GLuint program));
 
-  MOCK_METHOD1(IsRenderbuffer, GLboolean(GLuint renderbuffer));
+  MOCK_METHOD1(IsRenderbufferEXT, GLboolean(GLuint renderbuffer));
 
   MOCK_METHOD1(IsShader, GLboolean(GLuint shader));
 
@@ -255,6 +261,10 @@ class MockGLInterface : public GLInterface {
 
   MOCK_METHOD4(RenderbufferStorageEXT, void(
       GLenum target, GLenum internalformat, GLsizei width, GLsizei height));
+
+  MOCK_METHOD5(RenderbufferStorageMultisampleEXT, void(
+      GLenum target, GLsizei samples, GLenum internalformat,
+      GLsizei width, GLsizei height));
 
   MOCK_METHOD2(SampleCoverage, void(GLclampf value, GLboolean invert));
 

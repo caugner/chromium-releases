@@ -6,33 +6,32 @@
 #define MEDIA_AUDIO_MAC_AUDIO_MANAGER_MAC_H_
 
 #include "base/basictypes.h"
-#include "media/audio/audio_io.h"
+#include "media/audio/audio_manager_base.h"
 
+class PCMQueueInAudioInputStream;
 class PCMQueueOutAudioOutputStream;
 
 // Mac OS X implementation of the AudioManager singleton. This class is internal
 // to the audio output and only internal users can call methods not exposed by
 // the AudioManager class.
-class AudioManagerMac : public AudioManager {
+class AudioManagerMac : public AudioManagerBase {
  public:
   AudioManagerMac() {};
 
   // Implementation of AudioManager.
   virtual bool HasAudioOutputDevices();
   virtual bool HasAudioInputDevices();
-  virtual AudioOutputStream* MakeAudioOutputStream(Format format, int channels,
-                                                   int sample_rate,
-                                                   char bits_per_sample);
-  virtual AudioInputStream* MakeAudioInputStream(Format format, int channels,
-                                                 int sample_rate,
-                                                 char bits_per_sample,
-                                                 uint32 samples_per_packet);
+  virtual AudioOutputStream* MakeAudioOutputStream(AudioParameters params);
+  virtual AudioInputStream* MakeAudioInputStream(AudioParameters params,
+                                                 int samples_per_packet);
   virtual void MuteAll();
   virtual void UnMuteAll();
 
-  // Mac-only method to free a stream created in MakeAudioStream.
-  // It is called internally by the audio stream when it has been closed.
+  // Mac-only method to free the streams created by above facoty methods.
+  // They are called internally by the respective audio stream when it has
+  // been closed.
   void ReleaseOutputStream(PCMQueueOutAudioOutputStream* stream);
+  void ReleaseInputStream(PCMQueueInAudioInputStream* stream);
 
  private:
   friend void DestroyAudioManagerMac(void*);

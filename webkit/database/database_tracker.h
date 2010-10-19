@@ -9,6 +9,7 @@
 #include <set>
 
 #include "base/file_path.h"
+#include "base/gtest_prod_util.h"
 #include "base/observer_list.h"
 #include "base/platform_file.h"
 #include "base/ref_counted.h"
@@ -17,7 +18,6 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "net/base/completion_callback.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "webkit/database/database_connections.h"
 
 namespace sql {
@@ -145,10 +145,12 @@ class DatabaseTracker
                      net::CompletionCallback* callback);
 
   // Delete any databases that have been touched since the cutoff date that's
-  // supplied. Returns net::OK on success, net::FAILED if not all databases
-  // could be deleted, and net::ERR_IO_PENDING and |callback| is invoked upon
-  // completion, if non-NULL.
+  // supplied, omitting any that match IDs within |protected_origins|.
+  // Returns net::OK on success, net::FAILED if not all databases could be
+  // deleted, and net::ERR_IO_PENDING and |callback| is invoked upon completion,
+  // if non-NULL.
   int DeleteDataModifiedSince(const base::Time& cutoff,
+                              const std::vector<string16>& protected_origins,
                               net::CompletionCallback* callback);
 
   // Delete all databases that belong to the given origin. Returns net::OK on
@@ -272,7 +274,7 @@ class DatabaseTracker
   OriginDirectoriesMap incognito_origin_directories_;
   int incognito_origin_directories_generator_;
 
-  FRIEND_TEST(DatabaseTracker, TestHelper);
+  FRIEND_TEST_ALL_PREFIXES(DatabaseTracker, TestHelper);
 };
 
 }  // namespace webkit_database

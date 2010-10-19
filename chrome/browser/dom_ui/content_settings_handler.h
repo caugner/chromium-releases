@@ -4,8 +4,12 @@
 
 #ifndef CHROME_BROWSER_DOM_UI_CONTENT_SETTINGS_HANDLER_H_
 #define CHROME_BROWSER_DOM_UI_CONTENT_SETTINGS_HANDLER_H_
+#pragma once
 
 #include "chrome/browser/dom_ui/options_ui.h"
+#include "chrome/common/content_settings_types.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 
 class ContentSettingsHandler : public OptionsPageUIHandler {
  public:
@@ -15,12 +19,25 @@ class ContentSettingsHandler : public OptionsPageUIHandler {
   // OptionsUIHandler implementation.
   virtual void GetLocalizedValues(DictionaryValue* localized_strings);
 
+  virtual void Initialize();
+
   virtual void RegisterMessages();
 
+  // NotificationObserver implementation.
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
  private:
-  void GetContentFilterSettings(const Value* value);
-  void SetContentFilter(const Value* value);
-  void SetAllowThirdPartyCookies(const Value* value);
+  void UpdateAllExceptionsViewsFromModel();
+  void UpdateExceptionsViewFromModel(ContentSettingsType type);
+  void SetContentFilter(const ListValue* args);
+  void SetAllowThirdPartyCookies(const ListValue* args);
+  void RemoveExceptions(const ListValue* args);
+  void SetException(const ListValue* args);
+  void CheckExceptionPatternValidity(const ListValue* args);
+
+  NotificationRegistrar notification_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingsHandler);
 };

@@ -6,7 +6,10 @@
 
 #include <string>
 
-#include "app/combobox_model.h"
+#include "app/l10n_util.h"
+#include "app/resource_bundle.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/options/options_window_view.h"
@@ -474,12 +477,12 @@ void RememberedSection::ButtonClicked(int button, int connection_type, int id) {
   if (connection_type == TYPE_CELLULAR) {
     if (static_cast<int>(celluar_networks_.size()) > id) {
       CrosLibrary::Get()->GetNetworkLibrary()->ForgetWirelessNetwork(
-          celluar_networks_[id]);
+          celluar_networks_[id].service_path());
     }
   } else if (connection_type == TYPE_WIFI) {
     if (static_cast<int>(wifi_networks_.size()) > id) {
       CrosLibrary::Get()->GetNetworkLibrary()->ForgetWirelessNetwork(
-          wifi_networks_[id]);
+          wifi_networks_[id].service_path());
     }
   } else {
     NOTREACHED();
@@ -522,7 +525,7 @@ class InternetPageContentView : public SettingsPageView {
 InternetPageContentView::InternetPageContentView(Profile* profile)
     : SettingsPageView(profile) {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  line_height_ = rb.GetFont(ResourceBundle::BaseFont).height();
+  line_height_ = rb.GetFont(ResourceBundle::BaseFont).GetHeight();
 }
 
 void InternetPageContentView::RefreshContents() {
@@ -585,7 +588,9 @@ InternetPageView::InternetPageView(Profile* profile)
     : SettingsPageView(profile),
       contents_view_(new InternetPageContentView(profile)),
       scroll_view_(new views::ScrollView) {
-  CrosLibrary::Get()->GetNetworkLibrary()->AddObserver(this);
+  NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
+  cros->UpdateSystemInfo();
+  cros->AddObserver(this);
 }
 
 InternetPageView::~InternetPageView() {

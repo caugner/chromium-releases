@@ -9,7 +9,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_store.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
@@ -73,7 +73,8 @@ std::wstring PasswordsTableModel::GetText(int row,
     case IDS_PASSWORDS_PAGE_VIEW_SITE_COLUMN: {  // Site.
       // Force URL to have LTR directionality.
       std::wstring url(saved_signons_[row]->display_url.display_url());
-      base::i18n::GetDisplayStringInLTRDirectionality(&url);
+      url = UTF16ToWide(base::i18n::GetDisplayStringInLTRDirectionality(
+          WideToUTF16(url)));
       return url;
     }
     case IDS_PASSWORDS_PAGE_VIEW_USERNAME_COLUMN: {  // Username.

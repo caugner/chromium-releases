@@ -6,6 +6,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/history/history.h"
@@ -87,6 +88,11 @@ static TestURLInfo test_db[] = {
   {"http://www.\xEA\xB5\x90\xEC\x9C\xA1.kr/", "Korean", 2, 2},
   {"http://spaces.com/path%20with%20spaces/foo.html", "Spaces", 2, 2},
   {"http://ms/c++%20style%20guide", "Style guide", 2, 2},
+
+  // URLs for testing ctrl-enter behavior.
+  {"http://binky/", "Intranet binky", 2, 2},
+  {"http://winky/", "Intranet winky", 2, 2},
+  {"http://www.winky.com/", "Internet winky", 5, 0},
 };
 
 class HistoryURLProviderTest : public testing::Test,
@@ -174,7 +180,8 @@ void HistoryURLProviderTest::FillData() {
     const GURL current_url(cur.url);
     history_service_->AddPageWithDetails(current_url, UTF8ToUTF16(cur.title),
                                          cur.visit_count, cur.typed_count,
-                                         visit_time, false);
+                                         visit_time, false,
+                                         history::SOURCE_BROWSED);
   }
 }
 
@@ -190,7 +197,8 @@ void HistoryURLProviderTest::RunTest(const std::wstring text,
     MessageLoop::current()->Run();
 
   matches_ = autocomplete_->matches();
-  ASSERT_EQ(num_results, matches_.size()) << "Input text: " << text;
+  ASSERT_EQ(num_results, matches_.size()) << "Input text: " << text
+                                          << "\nTLD: \"" << desired_tld << "\"";
   for (size_t i = 0; i < num_results; ++i)
     EXPECT_EQ(expected_urls[i], matches_[i].destination_url.spec());
 }
@@ -314,7 +322,8 @@ TEST_F(HistoryURLProviderTest, CullRedirects) {
     history_service_->AddPageWithDetails(GURL(redirect[i].url),
                                          UTF8ToUTF16("Title"),
                                          redirect[i].count, redirect[i].count,
-                                         Time::Now(), false);
+                                         Time::Now(), false,
+                                         history::SOURCE_BROWSED);
   }
 
   // Create a B->C->A redirect chain, but set the visit counts such that they
@@ -326,7 +335,8 @@ TEST_F(HistoryURLProviderTest, CullRedirects) {
   redirects_to_a.push_back(GURL(redirect[2].url));
   redirects_to_a.push_back(GURL(redirect[0].url));
   history_service_->AddPage(GURL(redirect[0].url), NULL, 0, GURL(),
-                            PageTransition::TYPED, redirects_to_a, true);
+                            PageTransition::TYPED, redirects_to_a,
+                            history::SOURCE_BROWSED, true);
 
   // Because all the results are part of a redirect chain with other results,
   // all but the first one (A) should be culled. We should get the default
@@ -356,6 +366,35 @@ TEST_F(HistoryURLProviderTest, WhatYouTyped) {
   const std::string results_3[] = {"https://wytmatch%20foo%20bar/"};
   RunTest(L"https://wytmatch foo bar", std::wstring(), false, results_3,
           arraysize(results_3));
+
+  // Test the corner case where a user has fully typed a previously visited
+  // intranet address and is now hitting ctrl-enter, which completes to a
+  // previously unvisted internet domain.
+  const std::string binky_results[] = {"http://binky/"};
+  const std::string binky_com_results[] = {
+    "http://www.binky.com/",
+    "http://binky/",
+  };
+  RunTest(L"binky", std::wstring(), false, binky_results,
+          arraysize(binky_results));
+  RunTest(L"binky", L"com", false, binky_com_results,
+          arraysize(binky_com_results));
+
+  // Test the related case where a user has fully typed a previously visited
+  // intranet address and is now hitting ctrl-enter, which completes to a
+  // previously visted internet domain.
+  const std::string winky_results[] = {
+    "http://winky/",
+    "http://www.winky.com/",
+  };
+  const std::string winky_com_results[] = {
+    "http://www.winky.com/",
+    "http://winky/",
+  };
+  RunTest(L"winky", std::wstring(), false, winky_results,
+          arraysize(winky_results));
+  RunTest(L"winky", L"com", false, winky_com_results,
+          arraysize(winky_com_results));
 }
 
 TEST_F(HistoryURLProviderTest, Fixup) {

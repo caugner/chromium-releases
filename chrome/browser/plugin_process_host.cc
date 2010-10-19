@@ -35,6 +35,7 @@
 #include "chrome/common/render_messages.h"
 #include "gfx/native_widget_types.h"
 #include "ipc/ipc_switches.h"
+#include "net/base/cookie_store.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request.h"
@@ -47,6 +48,7 @@
 #if defined(OS_MACOSX)
 #include "base/mac_util.h"
 #include "chrome/common/plugin_carbon_interpose_constants_mac.h"
+#include "gfx/rect.h"
 #endif
 
 static const char kDefaultPluginFinderURL[] =
@@ -146,11 +148,9 @@ void PluginDownloadUrlHelper::OnSSLCertificateError(
 
 void PluginDownloadUrlHelper::OnResponseStarted(URLRequest* request) {
   if (!download_file_->IsOpen()) {
-    file_util::GetTempDir(&download_file_path_);
-
-    GURL request_url = request->url();
-    download_file_path_ = download_file_path_.Append(
-        UTF8ToWide(request_url.ExtractFileName()));
+    // This is safe because once the temp file has been safely created, an
+    // attacker can't drop a symlink etc into place.
+    file_util::CreateTemporaryFile(&download_file_path_);
     download_file_->Open(download_file_path_,
                          base::PLATFORM_FILE_CREATE_ALWAYS |
                          base::PLATFORM_FILE_READ | base::PLATFORM_FILE_WRITE);
@@ -340,7 +340,7 @@ PluginProcessHost::~PluginProcessHost() {
 }
 
 bool PluginProcessHost::Init(const WebPluginInfo& info,
-                             const std::wstring& locale) {
+                             const std::string& locale) {
   info_ = info;
   set_name(UTF16ToWideHack(info_.name));
   set_version(UTF16ToWideHack(info_.version));
@@ -351,8 +351,8 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
   // Build command line for plugin. When we have a plugin launcher, we can't
   // allow "self" on linux and we need the real file path.
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
-  std::wstring plugin_launcher =
-      browser_command_line.GetSwitchValue(switches::kPluginLauncher);
+  CommandLine::StringType plugin_launcher =
+      browser_command_line.GetSwitchValueNative(switches::kPluginLauncher);
   FilePath exe_path = GetChildPath(plugin_launcher.empty());
   if (exe_path.empty())
     return false;
@@ -360,17 +360,15 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
   CommandLine* cmd_line = new CommandLine(exe_path);
   // Put the process type and plugin path first so they're easier to see
   // in process listings using native process management tools.
-  cmd_line->AppendSwitchWithValue(switches::kProcessType,
-                                  switches::kPluginProcess);
-  cmd_line->AppendSwitchWithValue(switches::kPluginPath,
-                                  info.path.ToWStringHack());
+  cmd_line->AppendSwitchASCII(switches::kProcessType, switches::kPluginProcess);
+  cmd_line->AppendSwitchPath(switches::kPluginPath, info.path);
 
   if (logging::DialogsAreSuppressed())
     cmd_line->AppendSwitch(switches::kNoErrorDialogs);
 
   // Propagate the following switches to the plugin command line (along with
   // any associated values) if present in the browser command line
-  static const char* const switch_names[] = {
+  static const char* const kSwitchNames[] = {
     switches::kPluginStartupDialog,
     switches::kNoSandbox,
     switches::kSafePlugins,
@@ -391,17 +389,12 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
     switches::kEnableGPUPlugin,
     switches::kUseGL,
 #if defined(OS_CHROMEOS)
-    switches::kProfile,
+    switches::kLoginProfile,
 #endif
   };
 
-  for (size_t i = 0; i < arraysize(switch_names); ++i) {
-    if (browser_command_line.HasSwitch(switch_names[i])) {
-      cmd_line->AppendSwitchWithValue(
-          switch_names[i],
-          browser_command_line.GetSwitchValueASCII(switch_names[i]));
-    }
-  }
+  cmd_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
+                             arraysize(kSwitchNames));
 
   // If specified, prepend a launcher program to the command line.
   if (!plugin_launcher.empty())
@@ -410,17 +403,16 @@ bool PluginProcessHost::Init(const WebPluginInfo& info,
   if (!locale.empty()) {
     // Pass on the locale so the null plugin will use the right language in the
     // prompt to install the desired plugin.
-    cmd_line->AppendSwitchWithValue(switches::kLang, locale);
+    cmd_line->AppendSwitchASCII(switches::kLang, locale);
   }
 
   // Gears requires the data dir to be available on startup.
-  std::wstring data_dir =
-    PluginService::GetInstance()->GetChromePluginDataDir().ToWStringHack();
+  FilePath data_dir =
+    PluginService::GetInstance()->GetChromePluginDataDir();
   DCHECK(!data_dir.empty());
-  cmd_line->AppendSwitchWithValue(switches::kPluginDataDir, data_dir);
+  cmd_line->AppendSwitchPath(switches::kPluginDataDir, data_dir);
 
-  cmd_line->AppendSwitchWithValue(switches::kProcessChannelID,
-                                  ASCIIToWide(channel_id()));
+  cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id());
 
   SetCrashReporterCommandLine(cmd_line);
 

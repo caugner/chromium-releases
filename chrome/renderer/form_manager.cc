@@ -8,6 +8,7 @@
 #include "base/scoped_vector.h"
 #include "base/string_util.h"
 #include "base/stl_util-inl.h"
+#include "base/utf_string_conversions.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFormControlElement.h"
@@ -16,6 +17,7 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebLabelElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebNodeList.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebOptionElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSelectElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
@@ -33,6 +35,7 @@ using WebKit::WebInputElement;
 using WebKit::WebLabelElement;
 using WebKit::WebNode;
 using WebKit::WebNodeList;
+using WebKit::WebOptionElement;
 using WebKit::WebSelectElement;
 using WebKit::WebString;
 using WebKit::WebVector;
@@ -44,6 +47,9 @@ namespace {
 // label for each field is a costly operation and we can't spare the cycles if
 // it's not necessary.
 const size_t kRequiredAutoFillFields = 3;
+
+// The maximum length allowed for form data.
+const size_t kMaxDataLength = 1024;
 
 // This is a helper function for the FindChildText() function.
 // Returns the aggregated values of the descendants or siblings of |node| that
@@ -210,6 +216,24 @@ string16 InferLabelFromDefinitionList(
   return inferred_label;
 }
 
+void GetOptionStringsFromElement(WebKit::WebFormControlElement element,
+                                 std::vector<string16>* option_strings) {
+  DCHECK(!element.isNull());
+  DCHECK(option_strings);
+  option_strings->clear();
+  if (element.formControlType() == ASCIIToUTF16("select-one")) {
+    WebSelectElement select_element = element.to<WebSelectElement>();
+
+    // For select-one elements copy option strings.
+    WebVector<WebElement> list_items = select_element.listItems();
+    option_strings->reserve(list_items.size());
+    for (size_t i = 0; i < list_items.size(); ++i) {
+      if (list_items[i].hasTagName("option"))
+        option_strings->push_back(list_items[i].to<WebOptionElement>().value());
+    }
+  }
+}
+
 }  // namespace
 
 FormManager::FormManager() {
@@ -229,6 +253,11 @@ void FormManager::WebFormControlElementToFormField(
   // WebFormElementToFormData.
   field->set_name(element.nameForAutofill());
   field->set_form_control_type(element.formControlType());
+
+  // Set option strings on the field if available.
+  std::vector<string16> option_strings;
+  GetOptionStringsFromElement(element, &option_strings);
+  field->set_option_strings(option_strings);
 
   if (element.formControlType() == WebString::fromUTF8("text")) {
     const WebInputElement& input_element = element.toConst<WebInputElement>();
@@ -253,6 +282,14 @@ void FormManager::WebFormControlElementToFormField(
     WebSelectElement select_element = e.to<WebSelectElement>();
     value = select_element.value();
   }
+
+  // TODO(jhawkins): This is a temporary stop-gap measure designed to prevent
+  // a malicious site from DOS'ing the browser with extremely large profile
+  // data.  The correct solution is to parse this data asynchronously.
+  // See http://crbug.com/49332.
+  if (value.size() > kMaxDataLength)
+    value = value.substr(0, kMaxDataLength);
+
   field->set_value(value);
 }
 
@@ -294,6 +331,7 @@ bool FormManager::WebFormElementToFormData(const WebFormElement& element,
   form->method = element.method();
   form->origin = frame->url();
   form->action = frame->document().completeURL(element.action());
+  form->user_submitted = element.wasUserSubmitted();
 
   // If the completed URL is not valid, just use the action we get from
   // WebKit.
@@ -580,9 +618,9 @@ bool FormManager::ClearFormWithNode(const WebKit::WebNode& node) {
   return true;
 }
 
-bool FormManager::ClearPreviewedForm(const FormData& form) {
+bool FormManager::ClearPreviewedFormWithNode(const WebKit::WebNode& node) {
   FormElement* form_element = NULL;
-  if (!FindCachedFormElement(form, &form_element))
+  if (!FindCachedFormElementWithNode(node, &form_element))
     return false;
 
   for (size_t i = 0; i < form_element->control_elements.size(); ++i) {

@@ -18,7 +18,7 @@
 
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, IncognitoNoScript) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
 
   // Loads a simple extension which attempts to change the title of every page
   // that loads to "modified".
@@ -44,7 +44,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, IncognitoNoScript) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, IncognitoYesScript) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
 
   // Load a dummy extension. This just tests that we don't regress a
   // crash fix when multiple incognito- and non-incognito-enabled extensions
@@ -79,10 +79,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, IncognitoYesScript) {
 }
 
 // Tests that the APIs in an incognito-enabled extension work properly.
-// Flaky, http://crbug.com/42844.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FLAKY_Incognito) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Incognito) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
 
   ResultCatcher catcher;
 
@@ -96,11 +95,38 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FLAKY_Incognito) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
+// Tests that the APIs in an incognito-enabled split-mode extension work
+// properly.
+// Hangy, http://crbug.com/53991.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_IncognitoSplitMode) {
+  host_resolver()->AddRule("*", "127.0.0.1");
+  ASSERT_TRUE(test_server()->Start());
+
+  // We need 2 ResultCatchers because we'll be running the same test in both
+  // regular and incognito mode.
+  ResultCatcher catcher;
+  catcher.RestrictToProfile(browser()->profile());
+  ResultCatcher catcher_incognito;
+  catcher_incognito.RestrictToProfile(
+      browser()->profile()->GetOffTheRecordProfile());
+
+  // Open incognito window and navigate to test page.
+  ui_test_utils::OpenURLOffTheRecord(browser()->profile(),
+      GURL("http://www.example.com:1337/files/extensions/test_file.html"));
+
+  ASSERT_TRUE(LoadExtensionIncognito(test_data_dir_
+      .AppendASCII("incognito").AppendASCII("split")));
+
+  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
+  EXPECT_TRUE(catcher_incognito.GetNextResult()) << catcher.message();
+}
+
 // Tests that the APIs in an incognito-disabled extension don't see incognito
 // events or callbacks.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoDisabled) {
+// Hangy, http://crbug.com/53869.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_IncognitoDisabled) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
 
   ResultCatcher catcher;
 
@@ -117,7 +143,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoDisabled) {
 // Test that opening a popup from an incognito browser window works properly.
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoPopup) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
 
   ResultCatcher catcher;
 

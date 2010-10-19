@@ -37,7 +37,7 @@ const SkColor ResourceBundle::toolbar_separator_color =
 
 /* static */
 std::string ResourceBundle::InitSharedInstance(
-    const std::wstring& pref_locale) {
+    const std::string& pref_locale) {
   DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
   g_shared_instance_ = new ResourceBundle();
 
@@ -47,7 +47,7 @@ std::string ResourceBundle::InitSharedInstance(
 
 /* static */
 std::string ResourceBundle::ReloadSharedInstance(
-    const std::wstring& pref_locale) {
+    const std::string& pref_locale) {
   DCHECK(g_shared_instance_ != NULL) << "ResourceBundle not initialized";
 
   g_shared_instance_->UnloadLocaleResources();
@@ -172,7 +172,7 @@ void ResourceBundle::LoadFontsIfNecessary() {
 
     bold_font_.reset(new gfx::Font());
     *bold_font_ =
-        base_font_->DeriveFont(0, base_font_->style() | gfx::Font::BOLD);
+        base_font_->DeriveFont(0, base_font_->GetStyle() | gfx::Font::BOLD);
 
     small_font_.reset(new gfx::Font());
     *small_font_ = base_font_->DeriveFont(-2);
@@ -182,7 +182,7 @@ void ResourceBundle::LoadFontsIfNecessary() {
 
     medium_bold_font_.reset(new gfx::Font());
     *medium_bold_font_ =
-        base_font_->DeriveFont(3, base_font_->style() | gfx::Font::BOLD);
+        base_font_->DeriveFont(3, base_font_->GetStyle() | gfx::Font::BOLD);
 
     large_font_.reset(new gfx::Font());
     *large_font_ = base_font_->DeriveFont(8);

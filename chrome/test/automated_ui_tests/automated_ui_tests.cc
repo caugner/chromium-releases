@@ -6,13 +6,14 @@
 #include <string>
 #include <vector>
 
+#include "app/keyboard_codes.h"
 #include "base/command_line.h"
-#include "base/env_var.h"
+#include "base/environment.h"
 #include "base/file_util.h"
-#include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/rand_util.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "chrome/app/chrome_dll_resource.h"
@@ -127,11 +128,11 @@ AutomatedUITest::AutomatedUITest()
     if (str.empty()) {
       post_action_delay_ = 1;
     } else {
-      post_action_delay_ = StringToInt(str);
+      base::StringToInt(str, &post_action_delay_);
     }
   }
-  scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
-  if (env->HasEnv(env_vars::kHeadless))
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  if (env->HasVar(env_vars::kHeadless))
     logging::SetLogReportHandler(SilentRuntimeReportHandler);
 }
 
@@ -146,8 +147,9 @@ void AutomatedUITest::RunReproduction() {
 
   int64 num_reproductions = 1;
   if (parsed_command_line.HasSwitch(kReproRepeatSwitch)) {
-    num_reproductions = StringToInt64(
-        parsed_command_line.GetSwitchValueASCII(kReproRepeatSwitch));
+    base::StringToInt64(
+        parsed_command_line.GetSwitchValueASCII(kReproRepeatSwitch),
+        &num_reproductions);
   }
   std::vector<std::string> actions;
   SplitString(action_string, ',', &actions);
@@ -484,35 +486,35 @@ bool AutomatedUITest::Options() {
 }
 
 bool AutomatedUITest::PressDownArrow() {
-  return SimulateKeyPressInActiveWindow(base::VKEY_DOWN, 0);
+  return SimulateKeyPressInActiveWindow(app::VKEY_DOWN, 0);
 }
 
 bool AutomatedUITest::PressEnterKey() {
-  return SimulateKeyPressInActiveWindow(base::VKEY_RETURN, 0);
+  return SimulateKeyPressInActiveWindow(app::VKEY_RETURN, 0);
 }
 
 bool AutomatedUITest::PressEscapeKey() {
-  return SimulateKeyPressInActiveWindow(base::VKEY_ESCAPE, 0);
+  return SimulateKeyPressInActiveWindow(app::VKEY_ESCAPE, 0);
 }
 
 bool AutomatedUITest::PressPageDown() {
-  return SimulateKeyPressInActiveWindow(base::VKEY_PRIOR, 0);
+  return SimulateKeyPressInActiveWindow(app::VKEY_PRIOR, 0);
 }
 
 bool AutomatedUITest::PressPageUp() {
-  return SimulateKeyPressInActiveWindow(base::VKEY_NEXT, 0);
+  return SimulateKeyPressInActiveWindow(app::VKEY_NEXT, 0);
 }
 
 bool AutomatedUITest::PressSpaceBar() {
-  return SimulateKeyPressInActiveWindow(base::VKEY_SPACE, 0);
+  return SimulateKeyPressInActiveWindow(app::VKEY_SPACE, 0);
 }
 
 bool AutomatedUITest::PressTabKey() {
-  return SimulateKeyPressInActiveWindow(base::VKEY_TAB, 0);
+  return SimulateKeyPressInActiveWindow(app::VKEY_TAB, 0);
 }
 
 bool AutomatedUITest::PressUpArrow() {
-  return SimulateKeyPressInActiveWindow(base::VKEY_UP, 0);
+  return SimulateKeyPressInActiveWindow(app::VKEY_UP, 0);
 }
 
 bool AutomatedUITest::StarPage() {
@@ -602,7 +604,7 @@ bool AutomatedUITest::ForceCrash() {
   return true;
 }
 
-bool AutomatedUITest::SimulateKeyPressInActiveWindow(base::KeyboardCode key,
+bool AutomatedUITest::SimulateKeyPressInActiveWindow(app::KeyboardCode key,
                                                      int flags) {
   scoped_refptr<WindowProxy> window(automation()->GetActiveWindow());
   if (window.get() == NULL) {
@@ -709,8 +711,8 @@ FilePath AutomatedUITest::GetMostRecentCrashDump() {
                                        file_util::FileEnumerator::FILES);
   for (FilePath path = enumerator.Next(); !path.value().empty();
        path = enumerator.Next()) {
-    file_util::FileInfo file_info;
-    GetFileInfo(path, &file_info);
+    base::PlatformFileInfo file_info;
+    file_util::GetFileInfo(path, &file_info);
     if (first_file) {
       most_recent_file_time = file_info.last_modified;
       most_recent_file_name = path.BaseName();

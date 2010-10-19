@@ -12,7 +12,13 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 
 
-WebGLES2ContextImpl::WebGLES2ContextImpl() : context_(NULL) {
+WebGLES2ContextImpl::WebGLES2ContextImpl()
+    : context_(NULL)
+#if defined(OS_MACOSX)
+    , plugin_handle_(gfx::kNullPluginWindow)
+    , web_view_(NULL)
+#endif
+    {
 }
 
 WebGLES2ContextImpl::~WebGLES2ContextImpl() {
@@ -45,8 +51,17 @@ bool WebGLES2ContextImpl::initialize(
     RenderView* renderview = RenderView::FromWebView(web_view);
     if (!renderview)
       return false;
-    gfx::NativeViewId view_id = renderview->host_window();
-    context_ = ggl::CreateViewContext(host, view_id);
+    gfx::NativeViewId view_id;
+#if !defined(OS_MACOSX)
+    view_id = renderview->host_window();
+#else
+    plugin_handle_ = renderview->AllocateFakePluginWindowHandle(true, true);
+    web_view_ = web_view;
+    view_id = static_cast<gfx::NativeViewId>(plugin_handle_);
+#endif
+    context_ = ggl::CreateViewContext(
+        host, view_id,
+        renderview->routing_id());
   } else {
     ggl::Context* parent_context = NULL;
 
@@ -68,6 +83,13 @@ bool WebGLES2ContextImpl::makeCurrent() {
 }
 
 bool WebGLES2ContextImpl::destroy() {
+#if defined(OS_MACOSX)
+  RenderView* renderview = RenderView::FromWebView(web_view_);
+  DCHECK(plugin_handle_ == gfx::kNullPluginWindow || renderview);
+  if (plugin_handle_ != gfx::kNullPluginWindow && renderview)
+    renderview->DestroyFakePluginWindowHandle(plugin_handle_);
+  plugin_handle_ = gfx::kNullPluginWindow;
+#endif
   return ggl::DestroyContext(context_);
 }
 
@@ -82,6 +104,12 @@ void WebGLES2ContextImpl::resizeOffscreenContent(const WebKit::WebSize& size) {
 unsigned WebGLES2ContextImpl::getOffscreenContentParentTextureId() {
   return ggl::GetParentTextureId(context_);
 }
+
+#if defined(OS_MACOSX)
+void WebGLES2ContextImpl::resizeOnscreenContent(const WebKit::WebSize& size) {
+  ggl::ResizeOnscreenContext(context_, size);
+}
+#endif
 
 #endif  // defined(ENABLE_GPU)
 

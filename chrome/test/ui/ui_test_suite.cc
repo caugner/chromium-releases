@@ -6,9 +6,11 @@
 
 #include <string>
 
-#include "base/env_var.h"
+#include "base/environment.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
+#include "base/string_number_conversions.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
 
 // Timeout for the test in milliseconds.  UI tests only.
@@ -48,24 +50,26 @@ void UITestSuite::Initialize() {
       parsed_command_line.HasSwitch(switches::kSilentDumpOnDCHECK));
   UITest::set_disable_breakpad(
       parsed_command_line.HasSwitch(switches::kDisableBreakpad));
-  std::wstring test_timeout =
-      parsed_command_line.GetSwitchValue(UITestSuite::kTestTimeout);
+  std::string test_timeout =
+      parsed_command_line.GetSwitchValueASCII(UITestSuite::kTestTimeout);
   if (!test_timeout.empty()) {
-    UITest::set_test_timeout_ms(StringToInt(WideToUTF16Hack(test_timeout)));
+    int timeout;
+    base::StringToInt(test_timeout, &timeout);
+    UITest::set_test_timeout_ms(timeout);
   }
 
 #if defined(OS_WIN)
   int batch_count = 0;
   int batch_index = 0;
-  std::wstring batch_count_str =
-      parsed_command_line.GetSwitchValue(UITestSuite::kBatchCount);
+  std::string batch_count_str =
+      parsed_command_line.GetSwitchValueASCII(UITestSuite::kBatchCount);
   if (!batch_count_str.empty()) {
-    batch_count = StringToInt(WideToUTF16Hack(batch_count_str));
+    base::StringToInt(batch_count_str, &batch_count);
   }
-  std::wstring batch_index_str =
-      parsed_command_line.GetSwitchValue(UITestSuite::kBatchIndex);
+  std::string batch_index_str =
+      parsed_command_line.GetSwitchValueASCII(UITestSuite::kBatchIndex);
   if (!batch_index_str.empty()) {
-    batch_index = StringToInt(WideToUTF16Hack(batch_index_str));
+    base::StringToInt(batch_index_str, &batch_index);
   }
   if (batch_count > 0 && batch_index >= 0 && batch_index < batch_count) {
     // Running UI test in parallel. Gtest supports running tests in shards,
@@ -73,24 +77,22 @@ void UITestSuite::Initialize() {
     // Thus all we need to do is to set up environment variables for gtest.
     // See http://code.google.com/p/googletest/wiki/GoogleTestAdvancedGuide.
     std::string batch_count_env(UITestSuite::kGTestTotalShards);
-    batch_count_env.append(WideToASCII(batch_count_str));
+    batch_count_env.append(batch_count_str);
     std::string batch_index_env(UITestSuite::kGTestShardIndex);
-    batch_index_env.append(WideToASCII(batch_index_str));
+    batch_index_env.append(batch_index_str);
     _putenv(batch_count_env.c_str());
     _putenv(batch_index_env.c_str());
   }
 #endif
 
-  std::wstring js_flags =
-    parsed_command_line.GetSwitchValue(switches::kJavaScriptFlags);
-  if (!js_flags.empty()) {
+  std::string js_flags =
+    parsed_command_line.GetSwitchValueASCII(switches::kJavaScriptFlags);
+  if (!js_flags.empty())
     UITest::set_js_flags(js_flags);
-  }
-  std::wstring log_level =
-    parsed_command_line.GetSwitchValue(switches::kLoggingLevel);
-  if (!log_level.empty()) {
+  std::string log_level =
+    parsed_command_line.GetSwitchValueASCII(switches::kLoggingLevel);
+  if (!log_level.empty())
     UITest::set_log_level(log_level);
-  }
 
 #if defined(OS_WIN)
   LoadCrashService();
@@ -113,8 +115,8 @@ void UITestSuite::SuppressErrorDialogs() {
 
 #if defined(OS_WIN)
 void UITestSuite::LoadCrashService() {
-  scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
-  if (env->HasEnv(env_vars::kHeadless))
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  if (env->HasVar(env_vars::kHeadless))
     return;
 
   if (base::GetProcessCount(L"crash_service.exe", NULL))

@@ -4,9 +4,9 @@
 
 #ifndef NET_SOCKET_CLIENT_SOCKET_POOL_H_
 #define NET_SOCKET_CLIENT_SOCKET_POOL_H_
+#pragma once
 
 #include <deque>
-#include <map>
 #include <string>
 
 #include "base/basictypes.h"
@@ -17,6 +17,8 @@
 #include "net/base/host_resolver.h"
 #include "net/base/load_states.h"
 #include "net/base/request_priority.h"
+
+class Value;
 
 namespace net {
 
@@ -102,6 +104,11 @@ class ClientSocketPool : public base::RefCounted<ClientSocketPool> {
   // Determine the LoadState of a connecting ClientSocketHandle.
   virtual LoadState GetLoadState(const std::string& group_name,
                                  const ClientSocketHandle* handle) const = 0;
+
+  // Retrieves information on the current state of the pool as a Value.  Caller
+  // takes possession of the returned value.
+  virtual Value* GetInfoAsValue(const std::string& name,
+                                const std::string& type) const = 0;
 
   // Returns the maximum amount of time to wait before retrying a connect.
   static const int kMaxConnectRetryIntervalMs = 250;

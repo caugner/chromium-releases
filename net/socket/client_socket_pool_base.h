@@ -21,6 +21,7 @@
 //
 #ifndef NET_SOCKET_CLIENT_SOCKET_POOL_BASE_H_
 #define NET_SOCKET_CLIENT_SOCKET_POOL_BASE_H_
+#pragma once
 
 #include <deque>
 #include <map>
@@ -227,28 +228,33 @@ class ClientSocketPoolBaseHelper
   virtual void OnIPAddressChanged();
 
   int NumConnectJobsInGroup(const std::string& group_name) const {
-    return group_map_.find(group_name)->second.jobs.size();
+    return group_map_.find(group_name)->second->jobs().size();
   }
+
+  bool HasGroup(const std::string& group_name) const;
 
   // Closes all idle sockets if |force| is true.  Else, only closes idle
   // sockets that timed out or can't be reused.  Made public for testing.
   void CleanupIdleSockets(bool force);
 
+  // See ClientSocketPool::GetInfoAsValue for documentation on this function.
+  Value* GetInfoAsValue(const std::string& name, const std::string& type) const;
+
   base::TimeDelta ConnectionTimeout() const {
     return connect_job_factory_->ConnectionTimeout();
   }
 
-  void EnableBackupJobs() { backup_jobs_enabled_ = true; }
+  static void set_connect_backup_jobs_enabled(bool enabled);
+  void EnableConnectBackupJobs();
 
  private:
   friend class base::RefCounted<ClientSocketPoolBaseHelper>;
 
   // Entry for a persistent socket which became idle at time |start_time|.
   struct IdleSocket {
-    IdleSocket() : socket(NULL), used(false) {}
+    IdleSocket() : socket(NULL) {}
     ClientSocket* socket;
     base::TimeTicks start_time;
-    bool used;  // Indicates whether or not the socket has been used yet.
 
     // An idle socket should be removed if it can't be reused, or has been idle
     // for too long. |now| is the current time value (TimeTicks::Now()).
@@ -267,57 +273,69 @@ class ClientSocketPoolBaseHelper
   // A Group is allocated per group_name when there are idle sockets or pending
   // requests.  Otherwise, the Group object is removed from the map.
   // |active_socket_count| tracks the number of sockets held by clients.
-  struct Group {
-    Group()
-        : active_socket_count(0),
-          backup_job(NULL),
-          backup_task(NULL) {
-    }
-
-    ~Group() {
-      CleanupBackupJob();
-    }
+  class Group {
+   public:
+    Group();
+    ~Group();
 
     bool IsEmpty() const {
-      return active_socket_count == 0 && idle_sockets.empty() && jobs.empty() &&
-          pending_requests.empty();
+      return active_socket_count_ == 0 && idle_sockets_.empty() &&
+          jobs_.empty() && pending_requests_.empty();
     }
 
     bool HasAvailableSocketSlot(int max_sockets_per_group) const {
-      return active_socket_count + static_cast<int>(jobs.size()) <
+      return active_socket_count_ + static_cast<int>(jobs_.size()) <
           max_sockets_per_group;
     }
 
     bool IsStalled(int max_sockets_per_group) const {
       return HasAvailableSocketSlot(max_sockets_per_group) &&
-          pending_requests.size() > jobs.size();
+          pending_requests_.size() > jobs_.size();
     }
 
     RequestPriority TopPendingPriority() const {
-      return pending_requests.front()->priority();
+      return pending_requests_.front()->priority();
     }
+
+    bool HasBackupJob() const { return !method_factory_.empty(); }
 
     void CleanupBackupJob() {
-      if (backup_job) {
-        delete backup_job;
-        backup_job = NULL;
-      }
-      if (backup_task) {
-        backup_task->Cancel();
-        backup_task = NULL;
-      }
+      method_factory_.RevokeAll();
     }
 
-    std::deque<IdleSocket> idle_sockets;
-    std::set<const ConnectJob*> jobs;
-    RequestQueue pending_requests;
-    int active_socket_count;  // number of active sockets used by clients
-    // A backup job in case the connect for this group takes too long.
-    ConnectJob* backup_job;
-    CancelableTask* backup_task;
+    // Set a timer to create a backup socket if it takes too long to create one.
+    void StartBackupSocketTimer(const std::string& group_name,
+                                ClientSocketPoolBaseHelper* pool);
+
+    // Called when the backup socket timer fires.
+    void OnBackupSocketTimerFired(
+        std::string group_name,
+        ClientSocketPoolBaseHelper* pool);
+
+    void AddJob(const ConnectJob* job) { jobs_.insert(job); }
+    void RemoveJob(const ConnectJob* job) { jobs_.erase(job); }
+    void RemoveAllJobs();
+
+    void IncrementActiveSocketCount() { active_socket_count_++; }
+    void DecrementActiveSocketCount() { active_socket_count_--; }
+
+    const std::set<const ConnectJob*>& jobs() const { return jobs_; }
+    const std::deque<IdleSocket>& idle_sockets() const { return idle_sockets_; }
+    const RequestQueue& pending_requests() const { return pending_requests_; }
+    int active_socket_count() const { return active_socket_count_; }
+    RequestQueue* mutable_pending_requests() { return &pending_requests_; }
+    std::deque<IdleSocket>* mutable_idle_sockets() { return &idle_sockets_; }
+
+   private:
+    std::deque<IdleSocket> idle_sockets_;
+    std::set<const ConnectJob*> jobs_;
+    RequestQueue pending_requests_;
+    int active_socket_count_;  // number of active sockets used by clients
+    // A factory to pin the backup_job tasks.
+    ScopedRunnableMethodFactory<Group> method_factory_;
   };
 
-  typedef std::map<std::string, Group> GroupMap;
+  typedef std::map<std::string, Group*> GroupMap;
 
   typedef std::set<const ConnectJob*> ConnectJobSet;
 
@@ -339,6 +357,10 @@ class ClientSocketPoolBaseHelper
                                      RequestQueue* pending_requests);
   static const Request* RemoveRequestFromQueue(RequestQueue::iterator it,
                                                RequestQueue* pending_requests);
+
+  Group* GetOrCreateGroup(const std::string& group_name);
+  void RemoveGroup(const std::string& group_name);
+  void RemoveGroup(GroupMap::iterator it);
 
   // Called when the number of idle sockets changes.
   void IncrementIdleCount();
@@ -373,14 +395,16 @@ class ClientSocketPoolBaseHelper
                      Group* group,
                      const BoundNetLog& net_log);
 
-  // Adds |socket| to the list of idle sockets for |group|.  |used| indicates
-  // whether or not the socket has previously been used.
-  void AddIdleSocket(ClientSocket* socket, bool used, Group* group);
+  // Adds |socket| to the list of idle sockets for |group|.
+  void AddIdleSocket(ClientSocket* socket, Group* group);
 
-  // Iterates through |connect_job_map_|, canceling all ConnectJobs.
-  // Afterwards, it iterates through all groups and deletes them if they are no
-  // longer needed.
+  // Iterates through |group_map_|, canceling all ConnectJobs and deleting
+  // groups if they are no longer needed.
   void CancelAllConnectJobs();
+
+  // Iterates through |group_map_|, posting ERR_ABORTED callbacks for all
+  // requests, and then deleting groups if they are no longer needed.
+  void AbortAllRequests();
 
   // Returns true if we can't create any more sockets due to the total limit.
   bool ReachedMaxSocketsLimit() const;
@@ -393,16 +417,10 @@ class ClientSocketPoolBaseHelper
 
   // Assigns an idle socket for the group to the request.
   // Returns |true| if an idle socket is available, false otherwise.
-  bool AssignIdleSocketToGroup(Group* group, const Request* request);
+  bool AssignIdleSocketToGroup(const Request* request, Group* group);
 
   static void LogBoundConnectJobToRequest(
       const NetLog::Source& connect_job_source, const Request* request);
-
-  // Set a timer to create a backup socket if it takes too long to create one.
-  void StartBackupSocketTimer(const std::string& group_name);
-
-  // Called when the backup socket timer fires.
-  void OnBackupSocketTimerFired(const std::string& group_name);
 
   // Closes one idle socket.  Picks the first one encountered.
   // TODO(willchan): Consider a better algorithm for doing this.  Perhaps we
@@ -460,15 +478,15 @@ class ClientSocketPoolBaseHelper
   const scoped_ptr<ConnectJobFactory> connect_job_factory_;
 
   // TODO(vandebo) Remove when backup jobs move to TCPClientSocketPool
-  bool backup_jobs_enabled_;
-
-  // A factory to pin the backup_job tasks.
-  ScopedRunnableMethodFactory<ClientSocketPoolBaseHelper> method_factory_;
+  bool connect_backup_jobs_enabled_;
 
   // A unique id for the pool.  It gets incremented every time we Flush() the
   // pool.  This is so that when sockets get released back to the pool, we can
   // make sure that they are discarded rather than reused.
   int pool_generation_number_;
+
+  // Some parts of this class need to know if the destructor is running.
+  bool in_destructor_;
 };
 
 }  // namespace internal
@@ -487,7 +505,7 @@ class ClientSocketPoolBase {
             const scoped_refptr<SocketParams>& params,
             const BoundNetLog& net_log)
         : internal::ClientSocketPoolBaseHelper::Request(
-            handle, callback, priority, net_log),
+              handle, callback, priority, net_log),
           params_(params) {}
 
     const scoped_refptr<SocketParams>& params() const { return params_; }
@@ -527,9 +545,9 @@ class ClientSocketPoolBase {
       ConnectJobFactory* connect_job_factory)
       : histograms_(histograms),
         helper_(new internal::ClientSocketPoolBaseHelper(
-          max_sockets, max_sockets_per_group,
-          unused_idle_socket_timeout, used_idle_socket_timeout,
-          new ConnectJobFactoryAdaptor(connect_job_factory))) {}
+            max_sockets, max_sockets_per_group,
+            unused_idle_socket_timeout, used_idle_socket_timeout,
+            new ConnectJobFactoryAdaptor(connect_job_factory))) {}
 
   virtual ~ClientSocketPoolBase() {}
 
@@ -579,8 +597,17 @@ class ClientSocketPoolBase {
     return helper_->NumConnectJobsInGroup(group_name);
   }
 
+  bool HasGroup(const std::string& group_name) const {
+    return helper_->HasGroup(group_name);
+  }
+
   void CleanupIdleSockets(bool force) {
     return helper_->CleanupIdleSockets(force);
+  }
+
+  Value* GetInfoAsValue(const std::string& name,
+                        const std::string& type) const {
+    return helper_->GetInfoAsValue(name, type);
   }
 
   base::TimeDelta ConnectionTimeout() const {
@@ -591,7 +618,7 @@ class ClientSocketPoolBase {
     return histograms_;
   }
 
-  void EnableBackupJobs() { helper_->EnableBackupJobs(); }
+  void EnableConnectBackupJobs() { helper_->EnableConnectBackupJobs(); }
 
   void Flush() { helper_->Flush(); }
 
@@ -607,8 +634,7 @@ class ClientSocketPoolBase {
     typedef typename ClientSocketPoolBase<SocketParams>::ConnectJobFactory
         ConnectJobFactory;
 
-    explicit ConnectJobFactoryAdaptor(
-        ConnectJobFactory* connect_job_factory)
+    explicit ConnectJobFactoryAdaptor(ConnectJobFactory* connect_job_factory)
         : connect_job_factory_(connect_job_factory) {}
     virtual ~ConnectJobFactoryAdaptor() {}
 

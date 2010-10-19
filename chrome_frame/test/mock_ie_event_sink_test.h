@@ -9,12 +9,18 @@
 #include <atlcom.h>
 #include <string>
 
+#include "base/file_path.h"
+#include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
+#include "chrome_frame/test/chrome_frame_ui_test_utils.h"
 #include "chrome_frame/test/ie_event_sink.h"
 #include "chrome_frame/test/test_server.h"
 #include "chrome_frame/test/test_with_web_server.h"
+#include "chrome_frame/test/win_event_receiver.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/xulrunner-sdk/win/include/accessibility/AccessibleEventId.h"
 
 namespace chrome_frame_test {
 
@@ -93,9 +99,11 @@ class MockIEEventSink : public IEEventListener {
   // Expect a normal navigation to |url| to occur in CF or IE.
   void ExpectNavigation(bool is_cf, const std::wstring& url);
 
-  // Same as above, but used when the new navigation is to a diffrent fragment
-  // in the same page.
-  void ExpectInPageNavigation(bool is_cf, const std::wstring& url);
+  // Similar as above, but should be used in cases where IE6 with CF may not
+  // generate an OnBeforeNavigate event during the navigation. This occurs
+  // during in-page navigation (via anchors), form submission, window.open
+  // to target "self", and possibly others.
+  void ExpectNavigationOptionalBefore(bool is_cf, const std::wstring& url);
 
   // Expect a navigation in a new window created by a window.open call to |url|.
   // |parent_cf| signifies whether the parent frame was loaded in CF, while
@@ -111,15 +119,14 @@ class MockIEEventSink : public IEEventListener {
   // Expects any and all navigations.
   void ExpectAnyNavigations();
 
+  void ExpectDocumentReadystate(int ready_state);
+
   IEEventSink* event_sink() { return event_sink_; }
 
  private:
   // Override IE's OnDocumentComplete to call our OnLoad, iff it is IE actually
   // rendering the page.
-  virtual void OnDocumentComplete(IDispatch* dispatch, VARIANT* url) {
-    if (!event_sink_->IsCFRendering())
-      OnLoad(IN_IE, V_BSTR(url));
-  }
+  virtual void OnDocumentComplete(IDispatch* dispatch, VARIANT* url);
 
   // Override CF's OnLoad to call our OnLoad.
   virtual void OnLoad(const wchar_t* url) {
@@ -144,6 +151,59 @@ class MockIEEventSink : public IEEventListener {
   CComObject<IEEventSink>* event_sink_;
 };
 
+// This mocks a PropertyNotifySinkListener, providing methods for
+// expecting certain sequences of events.
+class MockPropertyNotifySinkListener : public PropertyNotifySinkListener {
+ public:
+  MockPropertyNotifySinkListener() : cookie_(0), sink_(NULL) {
+    CComObject<PropertyNotifySinkImpl>::CreateInstance(&sink_);
+    sink_->AddRef();
+    sink_->set_listener(this);
+  }
+
+  ~MockPropertyNotifySinkListener() {
+    Detach();
+    sink_->set_listener(NULL);
+    DLOG_IF(ERROR, sink_->m_dwRef != 1)
+        << "Event sink is still referenced externally: ref count = "
+        << sink_->m_dwRef;
+    sink_->Release();
+  }
+
+  // Override PropertyNotifySinkListener methods.
+  MOCK_METHOD1(OnChanged, void (DISPID dispid));  // NOLINT
+
+  bool Attach(IUnknown* obj) {
+    DCHECK_EQ(cookie_, 0UL);
+    DCHECK(obj);
+    HRESULT hr = AtlAdvise(obj, sink_->GetUnknown(), IID_IPropertyNotifySink,
+                           &cookie_);
+    if (SUCCEEDED(hr)) {
+      event_source_ = obj;
+    } else {
+      LOG(ERROR) << StringPrintf("AtlAdvise: 0x%08X", hr);
+      cookie_ = 0;
+    }
+
+    return SUCCEEDED(hr);
+  }
+
+  void Detach() {
+    if (event_source_) {
+      DCHECK_NE(cookie_, 0UL);
+      AtlUnadvise(event_source_, IID_IPropertyNotifySink, cookie_);
+      event_source_.Release();
+      cookie_ = 0;
+    }
+  }
+
+ private:
+  CComObject<PropertyNotifySinkImpl>* sink_;
+  DWORD cookie_;
+  ScopedComPtr<IUnknown> event_source_;
+};
+
+
 // Mocks a window observer so that tests can detect new windows.
 class MockWindowObserver : public WindowObserver {
  public:
@@ -159,6 +219,14 @@ class MockWindowObserver : public WindowObserver {
 
  private:
   WindowWatchdog window_watcher_;
+};
+
+class MockAccEventObserver : public AccEventObserver {
+ public:
+  MOCK_METHOD1(OnAccDocLoad, void (HWND));  // NOLINT
+  MOCK_METHOD3(OnAccValueChange, void (HWND, AccObject*,  // NOLINT
+                                       const std::wstring&));
+  MOCK_METHOD1(OnMenuPopup, void (HWND));  // NOLINT
 };
 
 // This test fixture provides common methods needed for testing CF
@@ -211,7 +279,7 @@ class MockIEEventSinkTest {
     DCHECK_LT(index, 5);
     std::wstring base_name = L"anchor.html";
     if (index > 0)
-      base_name += std::wstring(L"#a") + IntToWString(index);
+      base_name += std::wstring(L"#a") + base::IntToString16(index);
     return GetTestUrl(base_name);
   }
 

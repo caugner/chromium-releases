@@ -11,6 +11,7 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #import "chrome/browser/cocoa/bubble_view.h"
 #include "gfx/point.h"
 #include "googleurl/src/gurl.h"
@@ -112,13 +113,13 @@ StatusBubbleMac::~StatusBubbleMac() {
   }
 }
 
-void StatusBubbleMac::SetStatus(const std::wstring& status) {
+void StatusBubbleMac::SetStatus(const string16& status) {
   Create();
 
   SetText(status, false);
 }
 
-void StatusBubbleMac::SetURL(const GURL& url, const std::wstring& languages) {
+void StatusBubbleMac::SetURL(const GURL& url, const string16& languages) {
   Create();
 
   NSRect frame = [window_ frame];
@@ -126,21 +127,21 @@ void StatusBubbleMac::SetURL(const GURL& url, const std::wstring& languages) {
                                     kBubbleViewTextPositionX -
                                     kTextPadding);
   NSFont* font = [[window_ contentView] font];
-  gfx::Font font_chr =
-      gfx::Font::CreateFont(base::SysNSStringToWide([font fontName]),
-                            [font pointSize]);
+  gfx::Font font_chr(base::SysNSStringToWide([font fontName]),
+                     [font pointSize]);
 
-  std::wstring status = gfx::ElideUrl(url, font_chr, text_width, languages);
+  string16 status = WideToUTF16(gfx::ElideUrl(url, font_chr, text_width,
+      UTF16ToWideHack(languages)));
 
   SetText(status, true);
 }
 
-void StatusBubbleMac::SetText(const std::wstring& text, bool is_url) {
+void StatusBubbleMac::SetText(const string16& text, bool is_url) {
   // The status bubble allows the status and URL strings to be set
   // independently.  Whichever was set non-empty most recently will be the
   // value displayed.  When both are empty, the status bubble hides.
 
-  NSString* text_ns = base::SysWideToNSString(text);
+  NSString* text_ns = base::SysUTF16ToNSString(text);
 
   NSString** main;
   NSString** backup;
@@ -347,8 +348,10 @@ void StatusBubbleMac::Create() {
 void StatusBubbleMac::Attach() {
   // This method may be called several times during the process of creating or
   // showing a status bubble to attach the bubble to its parent window.
-  if (!is_attached())
+  if (!is_attached()) {
     [parent_ addChildWindow:window_ ordered:NSWindowAbove];
+    UpdateSizeAndPosition();
+  }
 }
 
 void StatusBubbleMac::Detach() {

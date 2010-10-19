@@ -4,12 +4,12 @@
 
 #include "app/l10n_util_mac.h"
 #include "base/mac_util.h"
-#import "chrome/browser/browser_theme_provider.h"
 #import "chrome/browser/cocoa/menu_controller.h"
 #import "chrome/browser/cocoa/tab_controller.h"
 #import "chrome/browser/cocoa/tab_controller_target.h"
 #import "chrome/browser/cocoa/tab_view.h"
 #import "chrome/browser/cocoa/themed_window.h"
+#import "chrome/browser/themes/browser_theme_provider.h"
 #import "chrome/common/extensions/extension.h"
 #include "grit/generated_resources.h"
 
@@ -130,10 +130,7 @@ class MenuDelegate : public menus::SimpleMenuModel::Delegate {
   contextMenuDelegate_.reset(
       new TabControllerInternal::MenuDelegate(target_, self));
   contextMenuModel_.reset(new TabMenuModel(contextMenuDelegate_.get(),
-                                           [self pinned],
-                                           false,   // allow_toolbar_toggle
-                                           true));  // is_toolbar_visible
-
+                                           [self pinned]));
   contextMenuController_.reset(
       [[MenuController alloc] initWithModel:contextMenuModel_.get()
                      useWithPopUpButtonCell:NO]);

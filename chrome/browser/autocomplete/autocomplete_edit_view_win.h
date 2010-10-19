@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_EDIT_VIEW_WIN_H_
 #define CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_EDIT_VIEW_WIN_H_
+#pragma once
 
 #include <atlbase.h>
 #include <atlapp.h>
@@ -24,7 +25,6 @@
 #include "webkit/glue/window_open_disposition.h"
 #include "views/controls/menu/menu_2.h"
 
-class AutocompletePopupModel;
 class Profile;
 class TabContents;
 namespace views {
@@ -124,6 +124,7 @@ class AutocompleteEditViewWin
   virtual bool OnAfterPossibleChange();
   virtual gfx::NativeView GetNativeView() const;
   virtual CommandUpdater* GetCommandUpdater();
+  int GetPopupMaxYCoordinate();
 
   // Exposes custom IAccessible implementation to the overall MSAA hierarchy.
   IAccessible* GetIAccessible();

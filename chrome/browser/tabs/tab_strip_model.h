@@ -4,15 +4,16 @@
 
 #ifndef CHROME_BROWSER_TABS_TAB_STRIP_MODEL_H_
 #define CHROME_BROWSER_TABS_TAB_STRIP_MODEL_H_
+#pragma once
 
 #include <vector>
 
 #include "base/observer_list.h"
+#include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/page_transition_types.h"
 
 namespace gfx {
-class Point;
 class Rect;
 }
 class Browser;
@@ -52,6 +53,18 @@ class TabStripModelObserver {
 
     // Change not characterized by LOADING_ONLY or TITLE_NOT_LOADING.
     ALL
+  };
+
+  // Enum used by ReplaceTabContentsAt.
+  // TODO(sky): TabReplaceType should be declared outside the scope of
+  // the observer. I need to put all the enums in a namespace and cleanup this
+  // file.
+  enum TabReplaceType {
+    // The replace is the result of the tab being made phantom.
+    REPLACE_MADE_PHANTOM,
+
+    // The replace is the result of the match preview being committed.
+    REPLACE_MATCH_PREVIEW
   };
 
   // A new TabContents was inserted into the TabStripModel at the specified
@@ -100,8 +113,18 @@ class TabStripModelObserver {
   // The tab contents was replaced at the specified index. This is invoked when
   // a tab becomes phantom. See description of phantom tabs in class description
   // of TabStripModel for details.
+  // TODO(sky): nuke this in favor of the 4 arg variant.
   virtual void TabReplacedAt(TabContents* old_contents,
-                             TabContents* new_contents, int index);
+                             TabContents* new_contents,
+                             int index);
+
+  // The tab contents was replaced at the specified index. |type| describes
+  // the type of replace.
+  // This invokes TabReplacedAt with three args.
+  virtual void TabReplacedAt(TabContents* old_contents,
+                             TabContents* new_contents,
+                             int index,
+                             TabReplaceType type);
 
   // Invoked when the pinned state of a tab changes. This is not invoked if the
   // tab ends up moving as a result of the mini state changing.
@@ -129,6 +152,9 @@ class TabStripModelObserver {
   // Sent when the tabstrip model is about to be deleted and any reference held
   // must be dropped.
   virtual void TabStripModelDeleted();
+
+ protected:
+  virtual ~TabStripModelObserver() {}
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -157,7 +183,8 @@ class TabStripModelDelegate {
   // show the window, it's up to the caller to do so.
   virtual Browser* CreateNewStripWithContents(TabContents* contents,
                                               const gfx::Rect& window_bounds,
-                                              const DockInfo& dock_info) = 0;
+                                              const DockInfo& dock_info,
+                                              bool maximize) = 0;
 
   // Creates a new Browser object and window containing the specified
   // |contents|, and continues a drag operation that began within the source
@@ -237,8 +264,11 @@ class TabStripModelDelegate {
   // Toggles the use of the vertical tabstrip.
   virtual void ToggleUseVerticalTabs() = 0;
 
-  // Set the visiblity of the toolbar.
-  virtual void SetToolbarVisibility(bool value) = 0;
+  // Returns true if the tab strip can use large icons.
+  virtual bool LargeIconsPermitted() const = 0;
+
+ protected:
+  virtual ~TabStripModelDelegate() {}
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -260,7 +290,8 @@ class TabStripModelDelegate {
 //   You'll notice there is no explcit api for making a tab a mini-tab, rather
 //   there are two tab types that are implicitly mini-tabs:
 //   . App. Corresponds to an extension that wants an app tab. App tabs are
-//     identified by TabContents::is_app().
+//     identified by TabContents::is_app(). App tabs are always pinneded (you
+//     can't unpin them).
 //   . Pinned. Any tab can be pinned. A pinned tab is made phantom when closed.
 //     Non-app tabs whose pinned state is changed are moved to be with other
 //     mini-tabs or non-mini tabs.
@@ -428,6 +459,12 @@ class TabStripModel : public NotificationObserver {
   void ReplaceNavigationControllerAt(int index,
                                      NavigationController* controller);
 
+  // Replaces the tab contents at |index| with |new_contents|. |type| is passed
+  // to the observer. This deletes the TabContents currently at |index|.
+  void ReplaceTabContentsAt(int index,
+                            TabContents* new_contents,
+                            TabStripModelObserver::TabReplaceType type);
+
   // Detaches the TabContents at the specified index from this strip. The
   // TabContents is not destroyed, just removed from display. The caller is
   // responsible for doing something with it (e.g. stuffing it into another
@@ -551,9 +588,6 @@ class TabStripModel : public NotificationObserver {
   // See description above class for details on app tabs.
   bool IsAppTab(int index) const;
 
-  // Returns true if the toolbar is visible for the tab at |index|.
-  bool IsToolbarVisible(int index) const;
-
   // Returns true if the tab is a phantom tab. A phantom tab is one where the
   // renderer has not been loaded.
   // See description above class for details on phantom tabs.
@@ -609,12 +643,6 @@ class TabStripModel : public NotificationObserver {
 
   // View API //////////////////////////////////////////////////////////////////
 
-  // The specified contents should be opened in a new tabstrip. Returns the
-  // Browser that holds it.
-  Browser* TearOffTabContents(TabContents* detached_contents,
-                              const gfx::Rect& window_bounds,
-                              const DockInfo& dock_info);
-
   // Context menu functions.
   enum ContextMenuCommand {
     CommandFirst = 0,
@@ -626,7 +654,6 @@ class TabStripModel : public NotificationObserver {
     CommandCloseTabsToRight,
     CommandRestoreTab,
     CommandTogglePinned,
-    CommandToggleToolbar,
     CommandBookmarkAllTabs,
     CommandUseVerticalTabs,
     CommandLast
@@ -729,6 +756,13 @@ class TabStripModel : public NotificationObserver {
   static bool OpenerMatches(const TabContentsData* data,
                             const NavigationController* opener,
                             bool use_group);
+
+  // Does the work for ReplaceTabContentsAt returning the old TabContents.
+  // The caller owns the returned TabContents.
+  TabContents* ReplaceTabContentsAtImpl(
+      int index,
+      TabContents* new_contents,
+      TabStripModelObserver::TabReplaceType type);
 
   // Our delegate.
   TabStripModelDelegate* delegate_;

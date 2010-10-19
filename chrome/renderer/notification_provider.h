@@ -1,11 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_RENDERER_NOTIFICATION_PROVIDER_H_
 #define CHROME_RENDERER_NOTIFICATION_PROVIDER_H_
-
-#include <map>
+#pragma once
 
 #include "chrome/common/desktop_notifications/active_notification_tracker.h"
 #include "ipc/ipc_channel.h"
@@ -22,7 +21,7 @@ class WebNotificationPermissionCallback;
 class NotificationProvider : public WebKit::WebNotificationPresenter {
  public:
   explicit NotificationProvider(RenderView* view);
-  ~NotificationProvider() {}
+  virtual ~NotificationProvider();
 
   // WebKit::WebNotificationPresenter interface.
   virtual bool show(const WebKit::WebNotification& proxy);
@@ -48,6 +47,7 @@ class NotificationProvider : public WebKit::WebNotificationPresenter {
   void OnDisplay(int id);
   void OnError(int id, const WebKit::WebString& message);
   void OnClose(int id, bool by_user);
+  void OnClick(int id);
   void OnPermissionRequestComplete(int id);
 
   bool Send(IPC::Message* message);

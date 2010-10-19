@@ -113,4 +113,13 @@
     "includes": [17500],
     "structures": [18000],
   },
+
+  "gfx/gfx_resources.grd": {
+    "includes": [18500],
+  },
+
+  "chrome/app/policy/policy_templates.grd": {
+    "structures": [19000],
+    "messages": [19010],
+  },
 }

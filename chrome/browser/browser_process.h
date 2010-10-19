@@ -9,6 +9,7 @@
 
 #ifndef CHROME_BROWSER_BROWSER_PROCESS_H_
 #define CHROME_BROWSER_BROWSER_PROCESS_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -28,11 +29,9 @@ class NotificationUIManager;
 class PrefService;
 class ProfileManager;
 class ResourceDispatcherHost;
-class StatusTrayManager;
-class SuspendController;
+class SidebarManager;
 class TabCloseableStateWatcher;
 class ThumbnailGenerator;
-class WebAppInstallerService;
 
 namespace base {
 class Thread;
@@ -65,14 +64,11 @@ class BrowserProcess {
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
   virtual DevToolsManager* devtools_manager() = 0;
+  virtual SidebarManager* sidebar_manager() = 0;
   virtual Clipboard* clipboard() = 0;
 
   // Returns the manager for desktop notifications.
   virtual NotificationUIManager* notification_ui_manager() = 0;
-
-  // Returns the status tray manager (provides APIs for manipulating status
-  // icons).
-  virtual StatusTrayManager* status_tray_manager() = 0;
 
   // Returns the thread that we perform I/O coordination on (network requests,
   // communication with renderers, etc.

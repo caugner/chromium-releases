@@ -4,11 +4,12 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_USER_VIEW_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_USER_VIEW_H_
+#pragma once
 
 #include <string>
 
 #include "app/menus/simple_menu_model.h"
-#include "views/controls/button/button.h"
+#include "views/controls/link.h"
 #include "views/controls/menu/view_menu_delegate.h"
 #include "views/view.h"
 
@@ -26,7 +27,7 @@ namespace chromeos {
 class SignoutView;
 
 class UserView : public views::View,
-                 public views::ButtonListener,
+                 public views::LinkController,
                  public views::ViewMenuDelegate,
                  public menus::SimpleMenuModel::Delegate {
  public:
@@ -52,6 +53,7 @@ class UserView : public views::View,
 
   // view::View overrides.
   virtual gfx::Size GetPreferredSize();
+  virtual void OnLocaleChanged();
 
   // Sets the user's image.
   void SetImage(const SkBitmap& image);
@@ -69,8 +71,9 @@ class UserView : public views::View,
   // Enable/Disable sign-out button.
   void SetSignoutEnabled(bool enabled);
 
-  // ButtonListener:
-  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
+  // Implements LinkController.
+  // Called when a signout link is clicked.
+  virtual void LinkActivated(views::Link* source, int event_flags);
 
   // ViewMenuDelegate:
   virtual void RunMenu(View* source, const gfx::Point& pt);
@@ -106,4 +109,3 @@ class UserView : public views::View,
 }  // chromeos
 
 #endif  // CHROME_BROWSER_CHROMEOS_LOGIN_USER_VIEW_H_
-

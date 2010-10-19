@@ -4,14 +4,15 @@
 
 #ifndef CHROME_BROWSER_BROWSER_ACCESSIBILITY_WIN_H_
 #define CHROME_BROWSER_BROWSER_ACCESSIBILITY_WIN_H_
+#pragma once
 
 #include <atlbase.h>
 #include <atlcom.h>
 #include <oleacc.h>
 
+#include <map>
 #include <vector>
 
-#include "base/scoped_comptr_win.h"
 #include "chrome/browser/browser_accessibility_manager_win.h"
 #include "ia2_api_all.h"  // Generated
 #include "webkit/glue/webaccessibility.h"
@@ -66,6 +67,13 @@ class ATL_NO_VTABLE BrowserAccessibility
   // Return true if this object is equal to or a descendant of |ancestor|.
   bool IsDescendantOf(BrowserAccessibility* ancestor);
 
+  // Returns the parent of this object, or NULL if it's the BrowserAccessibility
+  // root.
+  BrowserAccessibility* GetParent();
+
+  // Returns the number of children of this BrowserAccessibility object.
+  uint32 GetChildCount();
+
   // Return the previous sibling of this object, or NULL if it's the first
   // child of its parent.
   BrowserAccessibility* GetPreviousSibling();
@@ -74,9 +82,15 @@ class ATL_NO_VTABLE BrowserAccessibility
   // of its parent.
   BrowserAccessibility* GetNextSibling();
 
+  // Replace a child BrowserAccessibility object. Used when updating the
+  // accessibility tree.
+  void ReplaceChild(
+      const BrowserAccessibility* old_acc, BrowserAccessibility* new_acc);
+
   // Accessors
   LONG child_id() const { return child_id_; }
   int32 renderer_id() const { return renderer_id_; }
+  LONG index_in_parent() const { return index_in_parent_; }
 
   // Add one to the reference count and return the same object. Always
   // use this method when returning a BrowserAccessibility object as

@@ -8,13 +8,14 @@
 #include <set>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
 #include "base/native_library.h"
 #include "base/ref_counted.h"
 #include "third_party/ppapi/c/pp_module.h"
 #include "third_party/ppapi/c/ppb.h"
 
-typedef struct _ppb_Core PPB_Core;
+class FilePath;
+
+struct PPB_Core;
 
 namespace pepper {
 

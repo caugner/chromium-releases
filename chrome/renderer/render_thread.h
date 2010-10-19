@@ -4,26 +4,20 @@
 
 #ifndef CHROME_RENDERER_RENDER_THREAD_H_
 #define CHROME_RENDERER_RENDER_THREAD_H_
+#pragma once
 
-#include <set>
 #include <string>
 #include <vector>
 
 #include "base/shared_memory.h"
-#include "base/string16.h"
-#include "base/task.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "build/build_config.h"
 #include "chrome/common/child_thread.h"
 #include "chrome/common/css_colors.h"
-#include "chrome/common/dom_storage_common.h"
-#include "chrome/common/extensions/extension_extent.h"
-#include "chrome/renderer/gpu_channel_host.h"
-#include "chrome/renderer/renderer_histogram_snapshots.h"
 #include "chrome/renderer/visitedlink_slave.h"
 #include "gfx/native_widget_types.h"
-#include "ipc/ipc_channel_handle.h"
+#include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_platform_file.h"
 
 class AppCacheDispatcher;
@@ -31,10 +25,12 @@ class CookieMessageFilter;
 class DBMessageFilter;
 class DevToolsAgentFilter;
 class FilePath;
+class GpuChannelHost;
 class IndexedDBDispatcher;
 class ListValue;
 class NullableString16;
 class RendererHistogram;
+class RendererHistogramSnapshots;
 class RendererNetPredictor;
 class RendererWebKitClientImpl;
 class SpellCheck;
@@ -46,9 +42,18 @@ class WebDatabaseObserverImpl;
 struct ContentSettings;
 struct RendererPreferences;
 struct ViewMsg_DOMStorageEvent_Params;
-struct ViewMsg_ExtensionExtentsUpdated_Params;
+struct ViewMsg_ExtensionsUpdated_Params;
 struct ViewMsg_New_Params;
 struct WebPreferences;
+
+namespace base {
+class MessageLoopProxy;
+class Thread;
+}
+
+namespace IPC {
+struct ChannelHandle;
+}
 
 namespace WebKit {
 class WebStorageEventDispatcher;
@@ -104,6 +109,9 @@ class RenderThreadBase {
 
   // True if this process should be treated as an extension process.
   virtual bool IsExtensionProcess() const = 0;
+
+  // True if this process is running in an incognito profile.
+  virtual bool IsIncognitoProcess() const = 0;
 };
 
 // The RenderThread class represents a background thread where RenderView
@@ -144,6 +152,8 @@ class RenderThread : public RenderThreadBase,
   virtual void RemoveFilter(IPC::ChannelProxy::MessageFilter* filter);
   virtual void WidgetHidden();
   virtual void WidgetRestored();
+  virtual bool IsExtensionProcess() const { return is_extension_process_; }
+  virtual bool IsIncognitoProcess() const { return is_incognito_process_; }
 
   // These methods modify how the next message is sent.  Normally, when sending
   // a synchronous message that runs a nested message loop, we need to suspend
@@ -175,10 +185,6 @@ class RenderThread : public RenderThreadBase,
 
   bool plugin_refresh_allowed() const { return plugin_refresh_allowed_; }
 
-  virtual bool IsExtensionProcess() const { return is_extension_process_; }
-
-  bool is_incognito_process() const { return is_incognito_process_; }
-
   // Do DNS prefetch resolution of a hostname.
   void Resolve(const char* name, size_t length);
 
@@ -198,6 +204,9 @@ class RenderThread : public RenderThreadBase,
   // Sends a message to the browser to clear the disk cache.
   void ClearCache();
 
+  // Sends a message to the browser to enable/disable spdy.
+  void EnableSpdy(bool enable);
+
   // Update the list of active extensions that will be reported when we crash.
   void UpdateActiveExtensions();
 
@@ -216,24 +225,12 @@ class RenderThread : public RenderThreadBase,
   // has been lost.
   GpuChannelHost* GetGpuChannel();
 
-  // Returns the extension ID that the given URL is a part of, or empty if
-  // none. This includes web URLs that are part of an extension's web extent.
-  // TODO(mpcomplete): this doesn't feel like it belongs here. Find a better
-  // place.
-  std::string GetExtensionIdByURL(const GURL& url);
-
-  std::string GetExtensionIdByBrowseExtent(const GURL& url);
+  // Returns a MessageLoopProxy instance corresponding to the message loop
+  // of the thread on which file operations should be run. Must be called
+  // on the renderer's main thread.
+  scoped_refptr<base::MessageLoopProxy> GetFileThreadMessageLoopProxy();
 
  private:
-  // Contains extension-related data that the renderer needs to know about.
-  // TODO(mpcomplete): this doesn't feel like it belongs here. Find a better
-  // place.
-  struct ExtensionInfo {
-    std::string extension_id;
-    ExtensionExtent web_extent;
-    ExtensionExtent browse_extent;
-  };
-
   virtual void OnControlMessageReceived(const IPC::Message& msg);
 
   void Init();
@@ -246,8 +243,8 @@ class RenderThread : public RenderThreadBase,
       const GURL& url, const ContentSettings& content_settings);
   void OnUpdateUserScripts(base::SharedMemoryHandle table);
   void OnSetExtensionFunctionNames(const std::vector<std::string>& names);
-  void OnExtensionExtentsUpdated(
-      const ViewMsg_ExtensionExtentsUpdated_Params& params);
+  void OnExtensionsUpdated(
+      const ViewMsg_ExtensionsUpdated_Params& params);
   void OnPageActionsUpdated(const std::string& extension_id,
       const std::vector<std::string>& page_actions);
   void OnDOMStorageEvent(const ViewMsg_DOMStorageEvent_Params& params);
@@ -259,7 +256,8 @@ class RenderThread : public RenderThreadBase,
       const std::vector<URLPattern>& permissions);
   void OnExtensionSetIncognitoEnabled(
       const std::string& extension_id,
-      bool enabled);
+      bool enabled,
+      bool incognito_split_mode);
   void OnSetNextPageID(int32 next_page_id);
   void OnSetIsIncognitoProcess(bool is_incognito_process);
   void OnSetCSSColors(const std::vector<CSSColors::CSSColorMapping>& colors);
@@ -366,9 +364,8 @@ class RenderThread : public RenderThreadBase,
   // The channel from the renderer process to the GPU process.
   scoped_refptr<GpuChannelHost> gpu_channel_;
 
-  // A list of extension web extents, which tells us which URLs belong to an
-  // installed app.
-  std::vector<ExtensionInfo> extension_extents_;
+  // A lazily initiated thread on which file operations are run.
+  scoped_ptr<base::Thread> file_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderThread);
 };

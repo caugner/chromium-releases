@@ -1,10 +1,12 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/sandbox_init_wrapper.h"
 
 #include "base/command_line.h"
+#include "base/file_path.h"
+#include "base/logging.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/sandbox_mac.h"
 
@@ -26,14 +28,6 @@ bool SandboxInitWrapper::InitializeSandbox(const CommandLine& command_line,
       // platform because the sandbox is initialized later. Remove
       // this once this flag is removed.
       return true;
-    } else if (command_line.HasSwitch(switches::kInternalNaCl)) {
-      // Renderer process sandbox. If --internal_nacl is present then use the
-      // version of the renderer sandbox which allows Native Client to use Unix
-      // sockets.
-      // TODO(msneck): Remove the use of Unix sockets from Native Client and
-      // then get rid of the SANDBOX_TYPE_NACL_PLUGIN enum.
-      // See http://code.google.com/p/nativeclient/issues/detail?id=344
-      sandbox_process_type = sandbox::SANDBOX_TYPE_NACL_PLUGIN;
     } else {
       sandbox_process_type = sandbox::SANDBOX_TYPE_RENDERER;
     }
@@ -49,8 +43,8 @@ bool SandboxInitWrapper::InitializeSandbox(const CommandLine& command_line,
   } else if (process_type == switches::kUtilityProcess) {
     // Utility process sandbox.
     sandbox_process_type = sandbox::SANDBOX_TYPE_UTILITY;
-    allowed_dir = FilePath::FromWStringHack(
-          command_line.GetSwitchValue(switches::kUtilityProcessAllowedDir));
+    allowed_dir =
+        command_line.GetSwitchValuePath(switches::kUtilityProcessAllowedDir);
   } else if (process_type == switches::kWorkerProcess) {
     // Worker process sandbox.
     sandbox_process_type = sandbox::SANDBOX_TYPE_WORKER;

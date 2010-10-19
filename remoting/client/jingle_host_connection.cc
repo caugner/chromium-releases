@@ -4,6 +4,7 @@
 
 #include "base/message_loop.h"
 #include "remoting/base/constants.h"
+#include "remoting/base/protocol_util.h"
 #include "remoting/client/client_config.h"
 #include "remoting/client/jingle_host_connection.h"
 #include "remoting/jingle_glue/jingle_thread.h"
@@ -18,7 +19,7 @@ JingleHostConnection::JingleHostConnection(ClientContext* context)
 JingleHostConnection::~JingleHostConnection() {
 }
 
-void JingleHostConnection::Connect(ClientConfig* config,
+void JingleHostConnection::Connect(const ClientConfig& config,
                                    HostEventCallback* event_callback) {
   message_loop()->PostTask(
       FROM_HERE,
@@ -30,6 +31,22 @@ void JingleHostConnection::Disconnect() {
   message_loop()->PostTask(
       FROM_HERE,
       NewRunnableMethod(this, &JingleHostConnection::DoDisconnect));
+}
+
+void JingleHostConnection::SendEvent(const ChromotingClientMessage& msg) {
+  if (message_loop() != MessageLoop::current()) {
+    message_loop()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(this, &JingleHostConnection::SendEvent, msg));
+    return;
+  }
+
+  // Don't send messages if we're disconnected.
+  if (jingle_channel_ == NULL) {
+    return;
+  }
+
+  jingle_channel_->Write(SerializeAndFrameMessage(msg));
 }
 
 void JingleHostConnection::OnStateChange(JingleChannel* channel,
@@ -106,16 +123,16 @@ MessageLoop* JingleHostConnection::message_loop() {
   return context_->jingle_thread()->message_loop();
 }
 
-void JingleHostConnection::DoConnect(ClientConfig* config,
+void JingleHostConnection::DoConnect(const ClientConfig& config,
                                      HostEventCallback* event_callback) {
   DCHECK_EQ(message_loop(), MessageLoop::current());
 
   event_callback_ = event_callback;
 
   jingle_client_ = new JingleClient(context_->jingle_thread());
-  jingle_client_->Init(config->username(), config->auth_token(),
+  jingle_client_->Init(config.username, config.auth_token,
                        kChromotingTokenServiceName, this);
-  jingle_channel_ = jingle_client_->Connect(config->host_jid(), this);
+  jingle_channel_ = jingle_client_->Connect(config.host_jid, this);
 }
 
 void JingleHostConnection::DoDisconnect() {

@@ -5,7 +5,9 @@
 #include "chrome/renderer/audio_message_filter.h"
 
 #include "base/message_loop.h"
+#include "base/time.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "ipc/ipc_logging.h"
 
 AudioMessageFilter::AudioMessageFilter(int32 route_id)

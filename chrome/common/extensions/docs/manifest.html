@@ -79,8 +79,23 @@
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd>
+            <div></div>
+          </dd>
+
         </div> <!-- /VALUE -->
 
+        <div id="functionParametersTemplate">
+          <h5>Parameters</h5>
+          <dl>
+            <div>
+              <div>
+              </div>
+            </div>
+          </dl>         
+        </div>
       </div> <!-- /SUBTEMPLATES -->
 
   <a id="top"></a>
@@ -142,6 +157,7 @@
         <ul>
           <li><a href="getstarted.html">Getting Started</a></li>
           <li><a href="overview.html">Overview</a></li>
+          <li><a href="whats_new.html">What's New?</a></li>
           <li><h2><a href="devguide.html">Developer's Guide</a></h2>
             <ul>
               <li>Browser UI
@@ -243,6 +259,8 @@
                   <a href="#permissions">permissions</a>
                 </li><li>
                   <a href="#version">version</a>
+                </li><li>
+                  <a href="#incognito">incognito</a>
                 </li>
               </ol>
             </li>
@@ -286,6 +304,11 @@
           </ol>
         </div>
         <!-- /TABLE OF CONTENTS -->
+
+        <!-- Standard content lead-in for experimental API pages -->
+        <p id="classSummary" style="display: none; ">
+          For information on how to use experimental APIs, see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
+        </p>
 
         <!-- STATIC CONTENT PLACEHOLDER -->
         <div id="static"><div id="pageData-name" class="pageData">Formats: Manifest Files</div>
@@ -332,6 +355,7 @@ are <b>name</b> and <b>version</b>.
   "<a href="#permissions">permissions</a>": [...],
   "<a href="npapi.html">plugins</a>": [...],
   "<a href="autoupdate.html">update_url</a>": "http://<em>path/to/updateInfo</em>.xml"
+  "<a href="#incognito">incognito</a>": "<em>split</em> or <em>spanning</em>",
 }
 </pre>
 
@@ -509,7 +533,7 @@ Here's an example of the permissions part of a manifest file:
   "bookmarks",
   "http://www.blogger.com/",
   "http://*.google.com/",
-  "unlimited_storage"
+  "unlimitedStorage"
 ],
 </pre>
 
@@ -553,7 +577,7 @@ The following table lists the permissions an extension can use.
 <tr>
   <td> "contextMenus" </td>
   <td> Required if the extension uses the
-       <a href="contextMenus.html">context menus</a> module. </td>
+       <a href="contextMenus.html">chrome.contextMenus</a> module. </td>
 </tr>
 <tr>
   <td> "cookies" </td>
@@ -566,7 +590,7 @@ The following table lists the permissions an extension can use.
        <a href="http://code.google.com/chrome/extensions/dev/experimental.html">chrome.experimental.* APIs</a>.</td>
 </tr>
 <tr>
-  <td> "geolocation" </td>
+  <td id="geolocation"> "geolocation" </td>
   <td> Allows the extension to use the proposed HTML5
        <a href="http://dev.w3.org/geo/api/spec-source.html">geolocation API</a>
        without prompting the user for permission. </td>
@@ -597,7 +621,7 @@ The following table lists the permissions an extension can use.
        <a href="windows.html">chrome.windows</a> module. </td>
 </tr>
 <tr>
-  <td> "unlimited_storage"</td>
+  <td> "unlimitedStorage"</td>
   <td> Provides an unlimited quota for storing HTML5 client-side data,
        such as databases and local storage files. 
        Without this permission, the extension is limited to
@@ -653,6 +677,36 @@ For example, 1.1.9.9999 is newer than 1.1.
 <p>
 For more information, see
 <a href="autoupdate.html">Autoupdating</a>.
+</p>
+
+<h3 id="incognito">incognito</h3>
+
+<p>
+Either <em>split</em> or <em>spanning</em>, to specify how this extension will
+behave if allowed to run in incognito.
+</p>
+
+<p>
+<em>spanning</em> is the default for extensions, and means that the extension
+will run in a single shared process.  Any events or messages from an incognito
+tab will be sent to the shared process, with an <em>incognito</em> flag
+indicating where it came from.
+</p>
+
+<p>
+<em>split</em> is the default for apps, and it means that all app pages in
+an incognito window will run in their own incognito process. If the app or extension contains a background page, that will also run in the incognito process.
+This incognito process runs along side the regular process, but has a separate
+memory-only cookie store. Each process sees events and messages only from its
+own context (e.g. the incognito process will only see incognito tab updates).
+The processes are unable to communicate with each other.
+</p>
+
+<p>
+As a rule of thumb, if your extension or app needs to load a tab in an incognito browser, use
+<em>split</em> incognito behavior. If your extension or app needs to be logged
+into a remote server or persist settings locally, use <em>spanning</em>
+incognito behavior.
 </p>
 
 <!-- [PENDING: Possibly: point to the gallery and make a big deal of the fact that autoupdating is free if you use the gallery.] -->
@@ -734,7 +788,7 @@ For more information, see
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>

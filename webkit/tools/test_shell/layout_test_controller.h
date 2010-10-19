@@ -26,6 +26,7 @@ class LayoutTestController : public CppBoundClass {
   // Builds the property and method lists needed to bind this class to a JS
   // object.
   LayoutTestController(TestShell* shell);
+  ~LayoutTestController();
 
   // This function sets a flag that tells the test_shell to dump pages as
   // plain text, rather than as a text representation of the renderer's state.
@@ -180,6 +181,8 @@ class LayoutTestController : public CppBoundClass {
                                            CppVariant* result);
   void pauseTransitionAtTimeOnElementWithId(const CppArgumentList& args,
                                             CppVariant* result);
+  void suspendAnimations(const CppArgumentList& args, CppVariant* result);
+  void resumeAnimations(const CppArgumentList& args, CppVariant* result);
   void elementDoesAutoCompleteForElementWithId(const CppArgumentList& args,
                                                CppVariant* result);
   void numberOfActiveAnimations(const CppArgumentList& args,
@@ -283,11 +286,15 @@ class LayoutTestController : public CppBoundClass {
   void setMockGeolocationError(const CppArgumentList& args,
                                CppVariant* result);
 
+  void markerTextForListItem(const CppArgumentList& args,
+                             CppVariant* result);
+
  public:
   // The following methods are not exposed to JavaScript.
   void SetWorkQueueFrozen(bool frozen) { work_queue_.set_frozen(frozen); }
 
   bool ShouldDumpAsText() { return dump_as_text_; }
+  bool ShouldGeneratePixelResults() { return generate_pixel_results_; }
   bool ShouldDumpEditingCallbacks() { return dump_editing_callbacks_; }
   bool ShouldDumpFrameLoadCallbacks() { return dump_frame_load_callbacks_; }
   void SetShouldDumpFrameLoadCallbacks(bool value) {
@@ -349,6 +356,7 @@ class LayoutTestController : public CppBoundClass {
   // queueScript.
   class WorkQueue {
    public:
+    WorkQueue();
     virtual ~WorkQueue();
     void ProcessWorkSoon();
 
@@ -387,6 +395,10 @@ class LayoutTestController : public CppBoundClass {
   // If true, the test_shell will produce a plain text dump rather than a
   // text representation of the renderer.
   static bool dump_as_text_;
+
+  // If true, dump pixel results. This can be true even if
+  // dump_as_text_ is true.
+  static bool generate_pixel_results_;
 
   // If true, the test_shell will write a descriptive line for each editing
   // command.

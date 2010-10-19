@@ -7,7 +7,7 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/sha1.h"
-#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_xml_parser.h"
 #include "chrome/browser/autofill/field_types.h"
@@ -52,7 +52,7 @@ static std::string Hash64Bit(const std::string& str) {
                   (((static_cast<uint64>(hash_bin[6])) & 0xFF) << 8) |
                    ((static_cast<uint64>(hash_bin[7])) & 0xFF);
 
-  return Uint64ToString(hash64);
+  return base::Uint64ToString(hash64);
 }
 
 }  // namespace
@@ -61,6 +61,9 @@ FormStructure::FormStructure(const FormData& form)
     : form_name_(form.name),
       source_url_(form.origin),
       target_url_(form.action),
+      has_credit_card_field_(false),
+      has_autofillable_field_(false),
+      has_password_fields_(false),
       autofill_count_(0) {
   // Copy the form fields.
   std::vector<webkit_glue::FormField>::const_iterator field;
@@ -79,7 +82,8 @@ FormStructure::FormStructure(const FormData& form)
     }
 
     // Generate a unique name for this field by appending a counter to the name.
-    string16 unique_name = field->name() + IntToString16(fields_.size() + 1);
+    string16 unique_name = field->name() +
+        base::IntToString16(fields_.size() + 1);
     fields_.push_back(new AutoFillField(*field, unique_name));
   }
 
@@ -329,6 +333,9 @@ FormData FormStructure::ConvertToFormData() const {
   form.origin = source_url_;
   form.action = target_url_;
 
+  // FormStructures can't be created by forms not submitted by the user.
+  form.user_submitted = true;
+
   if (method_ == GET)
     form.method = ASCIIToUTF16("GET");
   else if (method_ == POST)
@@ -371,9 +378,7 @@ void FormStructure::GetHeuristicAutoFillTypes() {
 
   for (size_t index = 0; index < field_count(); index++) {
     AutoFillField* field = fields_[index];
-    // TODO(dhollowa): Defensive check for crash happening in the field.
-    // See http://crbug.com/42211
-    CHECK(field);
+    DCHECK(field);
     FieldTypeMap::iterator iter = field_type_map.find(field->unique_name());
 
     AutoFillFieldType heuristic_auto_fill_type;
@@ -422,7 +427,7 @@ bool FormStructure::EncodeFormRequest(
         field_element->SetAttr(buzz::QName(kAttributeSignature),
                                field->FieldSignature());
         field_element->SetAttr(buzz::QName(kAttributeAutoFillType),
-                               IntToString(*type));
+                               base::IntToString(*type));
         encompassing_xml_element->AddElement(field_element);
       }
     } else {

@@ -5,10 +5,9 @@
 #include "chrome/browser/views/options/content_settings_window_view.h"
 
 #include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/stl_util-inl.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/views/options/advanced_page_view.h"
 #include "chrome/browser/views/options/content_filter_page_view.h"
@@ -118,23 +117,23 @@ void ContentSettingsWindowView::ListboxSelectionChanged(
 // ContentSettingsWindowView, views::View overrides:
 
 void ContentSettingsWindowView::Layout() {
-  int list_box_width = views::Window::GetLocalizedContentsWidth(
+  int listbox_width = views::Window::GetLocalizedContentsWidth(
       IDS_CONTENT_SETTINGS_DIALOG_LISTBOX_WIDTH_CHARS);
   label_->SetBounds(kDialogPadding,
                     kDialogPadding,
-                    list_box_width,
+                    listbox_width,
                     label_->GetPreferredSize().height());
 
   listbox_->SetBounds(kDialogPadding,
                       2 * kDialogPadding + label_->height(),
-                      list_box_width,
+                      listbox_width,
                       height() - (3 * kDialogPadding) - label_->height());
 
   if (pages_[current_page_]->GetParent()) {
     pages_[current_page_]->SetBounds(
-        2 * kDialogPadding + list_box_width,
+        2 * kDialogPadding + listbox_width,
         2 * kDialogPadding + label_->height(),
-        width() - (3 * kDialogPadding) - list_box_width,
+        width() - (3 * kDialogPadding) - listbox_width,
         height() - (2 * kDialogPadding));
   }
 }

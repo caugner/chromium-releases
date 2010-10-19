@@ -4,8 +4,9 @@
 
 #ifndef VIEWS_CONTROLS_TABLE_TABLE_VIEW_OBSERVER_H_
 #define VIEWS_CONTROLS_TABLE_TABLE_VIEW_OBSERVER_H_
+#pragma once
 
-#include "base/keyboard_codes.h"
+#include "app/keyboard_codes.h"
 
 namespace views {
 
@@ -27,7 +28,7 @@ class TableViewObserver {
   virtual void OnMiddleClick() {}
 
   // Optional method invoked when the user hits a key with the table in focus.
-  virtual void OnKeyDown(base::KeyboardCode virtual_keycode) {}
+  virtual void OnKeyDown(app::KeyboardCode virtual_keycode) {}
 
   // Invoked when the user presses the delete key.
   virtual void OnTableViewDelete(TableView* table_view) {}

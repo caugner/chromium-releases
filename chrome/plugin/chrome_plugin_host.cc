@@ -15,6 +15,7 @@
 #include "chrome/common/chrome_plugin_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/plugin_messages.h"
+#include "chrome/common/resource_dispatcher.h"
 #include "chrome/plugin/plugin_thread.h"
 #include "chrome/plugin/webplugin_proxy.h"
 #include "net/base/data_url.h"
@@ -84,6 +85,9 @@ class PluginRequestHandlerProxy
     response_headers_ = info.headers;
     plugin_->functions().response_funcs->start_completed(
         cprequest_.get(), CPERR_SUCCESS);
+  }
+
+  virtual void OnDownloadedData(int len) {
   }
 
   virtual void OnReceivedData(const char* data, int len) {
@@ -437,8 +441,8 @@ int STDCALL CPB_GetBrowsingContextInfo(
     if (buf_size < sizeof(char*))
       return sizeof(char*);
 
-    std::wstring wretval = webkit_glue::GetWebKitLocale();
-    *static_cast<char**>(buf) = CPB_StringDup(CPB_Alloc, WideToUTF8(wretval));
+    std::string retval = webkit_glue::GetWebKitLocale();
+    *static_cast<char**>(buf) = CPB_StringDup(CPB_Alloc, retval);
     return CPERR_SUCCESS;
     }
   }

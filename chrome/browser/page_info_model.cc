@@ -7,13 +7,15 @@
 #include <string>
 
 #include "app/l10n_util.h"
-#include "base/callback.h"
+#include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
+#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/cert_store.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/ssl/ssl_manager.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
 #include "net/base/cert_status_flags.h"
@@ -21,29 +23,14 @@
 #include "net/base/ssl_cipher_suite_names.h"
 #include "net/base/x509_certificate.h"
 
-namespace {
-  // Returns a name that can be used to represent the issuer.  It tries in this
-  // order CN, O and OU and returns the first non-empty one found.
-  std::string GetIssuerName(const net::CertPrincipal& issuer) {
-    if (!issuer.common_name.empty())
-      return issuer.common_name;
-    if (!issuer.organization_names.empty())
-      return issuer.organization_names[0];
-    if (!issuer.organization_unit_names.empty())
-      return issuer.organization_unit_names[0];
-
-    return std::string();
-  }
-}
-
 PageInfoModel::PageInfoModel(Profile* profile,
                              const GURL& url,
                              const NavigationEntry::SSLStatus& ssl,
                              bool show_history,
                              PageInfoModelObserver* observer)
     : observer_(observer) {
-  bool state = true;
-  string16 head_line;
+  SectionInfoState state = SECTION_STATE_OK;
+  string16 headline;
   string16 description;
   scoped_refptr<net::X509Certificate> cert;
 
@@ -61,7 +48,7 @@ PageInfoModel::PageInfoModel(Profile* profile,
     // OK HTTPS page.
     if ((ssl.cert_status() & net::CERT_STATUS_IS_EV) != 0) {
       DCHECK(!cert->subject().organization_names.empty());
-      head_line =
+      headline =
           l10n_util::GetStringFUTF16(IDS_PAGE_INFO_EV_IDENTITY_TITLE,
               UTF8ToUTF16(cert->subject().organization_names[0]),
               UTF8ToUTF16(url.host()));
@@ -87,14 +74,14 @@ PageInfoModel::PageInfoModel(Profile* profile,
           IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_EV,
           UTF8ToUTF16(cert->subject().organization_names[0]),
           locality,
-          UTF8ToUTF16(GetIssuerName(cert->issuer()))));
+          UTF8ToUTF16(cert->issuer().GetDisplayName())));
     } else {
       // Non EV OK HTTPS.
       if (empty_subject_name)
-        head_line.clear();  // Don't display any title.
+        headline.clear();  // Don't display any title.
       else
-        head_line.assign(subject_name);
-      string16 issuer_name(UTF8ToUTF16(GetIssuerName(cert->issuer())));
+        headline.assign(subject_name);
+      string16 issuer_name(UTF8ToUTF16(cert->issuer().GetDisplayName()));
       if (issuer_name.empty()) {
         issuer_name.assign(l10n_util::GetStringUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_UNKNOWN_PARTY));
@@ -107,28 +94,32 @@ PageInfoModel::PageInfoModel(Profile* profile,
     // HTTP or bad HTTPS.
     description.assign(l10n_util::GetStringUTF16(
         IDS_PAGE_INFO_SECURITY_TAB_INSECURE_IDENTITY));
-    state = false;
+    state = SECTION_STATE_ERROR;
   }
   sections_.push_back(SectionInfo(
       state,
       l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURITY_TAB_IDENTITY_TITLE),
-      head_line,
-      description));
+      headline,
+      description,
+      SECTION_INFO_IDENTITY));
 
   // Connection section.
   // We consider anything less than 80 bits encryption to be weak encryption.
   // TODO(wtc): Bug 1198735: report mixed/unsafe content for unencrypted and
   // weakly encrypted connections.
-  state = true;
-  head_line.clear();
+  state = SECTION_STATE_OK;
+  headline.clear();
   description.clear();
-  if (ssl.security_bits() <= 0) {
-    state = false;
+  if (ssl.security_bits() < 0) {
+    // Security strength is unknown.  Say nothing.
+    state = SECTION_STATE_ERROR;
+  } else if (ssl.security_bits() == 0) {
+    state = SECTION_STATE_ERROR;
     description.assign(l10n_util::GetStringFUTF16(
         IDS_PAGE_INFO_SECURITY_TAB_NOT_ENCRYPTED_CONNECTION_TEXT,
         subject_name));
   } else if (ssl.security_bits() < 80) {
-    state = false;
+    state = SECTION_STATE_ERROR;
     description.assign(l10n_util::GetStringFUTF16(
         IDS_PAGE_INFO_SECURITY_TAB_WEAK_ENCRYPTION_CONNECTION_TEXT,
         subject_name));
@@ -136,9 +127,13 @@ PageInfoModel::PageInfoModel(Profile* profile,
     description.assign(l10n_util::GetStringFUTF16(
         IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_CONNECTION_TEXT,
         subject_name,
-        IntToString16(ssl.security_bits())));
+        base::IntToString16(ssl.security_bits())));
     if (ssl.displayed_insecure_content() || ssl.ran_insecure_content()) {
-      state = false;
+      const CommandLine* command_line(CommandLine::ForCurrentProcess());
+      if (command_line->HasSwitch(switches::kEnableNewPageInfoBubble))
+        state = SECTION_STATE_WARNING;
+      else
+        state = SECTION_STATE_ERROR;
       description.assign(l10n_util::GetStringFUTF16(
           IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_SENTENCE_LINK,
           description,
@@ -153,8 +148,9 @@ PageInfoModel::PageInfoModel(Profile* profile,
   if (ssl.security_bits() > 0 && cipher_suite) {
     bool did_fallback = (ssl.connection_status() &
                          net::SSL_CONNECTION_SSL3_FALLBACK) != 0;
-    bool no_renegotiation = (ssl.connection_status() &
-                             net::SSL_CONNECTION_NO_RENEGOTIATION_EXTENSION) != 0;
+    bool no_renegotiation =
+        (ssl.connection_status() &
+        net::SSL_CONNECTION_NO_RENEGOTIATION_EXTENSION) != 0;
     const char *key_exchange, *cipher, *mac;
     net::SSLCipherSuiteToStrings(&key_exchange, &cipher, &mac, cipher_suite);
 
@@ -179,7 +175,7 @@ PageInfoModel::PageInfoModel(Profile* profile,
 
     if (did_fallback) {
       // For now, only SSLv3 fallback will trigger a warning icon.
-      state = false;
+      state = SECTION_STATE_ERROR;
       description += ASCIIToUTF16("\n\n");
       description += l10n_util::GetStringUTF16(
           IDS_PAGE_INFO_SECURITY_TAB_FALLBACK_MESSAGE);
@@ -191,11 +187,14 @@ PageInfoModel::PageInfoModel(Profile* profile,
     }
   }
 
-  sections_.push_back(SectionInfo(
-      state,
-      l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURITY_TAB_CONNECTION_TITLE),
-      head_line,
-      description));
+  if (!description.empty()) {
+    sections_.push_back(SectionInfo(
+        state,
+        l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURITY_TAB_CONNECTION_TITLE),
+        headline,
+        description,
+        SECTION_INFO_CONNECTION));
+  }
 
   // Request the number of visits.
   HistoryService* history = profile->GetHistoryService(
@@ -206,6 +205,9 @@ PageInfoModel::PageInfoModel(Profile* profile,
         &request_consumer_,
         NewCallback(this, &PageInfoModel::OnGotVisitCountToHost));
   }
+}
+
+PageInfoModel::~PageInfoModel() {
 }
 
 int PageInfoModel::GetSectionCount() {
@@ -235,21 +237,23 @@ void PageInfoModel::OnGotVisitCountToHost(HistoryService::Handle handle,
 
   if (!visited_before_today) {
     sections_.push_back(SectionInfo(
-        false,
+        SECTION_STATE_ERROR,
         l10n_util::GetStringUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_PERSONAL_HISTORY_TITLE),
         string16(),
         l10n_util::GetStringUTF16(
-            IDS_PAGE_INFO_SECURITY_TAB_FIRST_VISITED_TODAY)));
+            IDS_PAGE_INFO_SECURITY_TAB_FIRST_VISITED_TODAY),
+        SECTION_INFO_FIRST_VISIT));
   } else {
     sections_.push_back(SectionInfo(
-        true,
+        SECTION_STATE_OK,
         l10n_util::GetStringUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_PERSONAL_HISTORY_TITLE),
         string16(),
         l10n_util::GetStringFUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_VISITED_BEFORE_TODAY,
-            WideToUTF16(base::TimeFormatShortDate(first_visit)))));
+            WideToUTF16(base::TimeFormatShortDate(first_visit))),
+        SECTION_INFO_FIRST_VISIT));
   }
   observer_->ModelChanged();
 }
@@ -257,4 +261,7 @@ void PageInfoModel::OnGotVisitCountToHost(HistoryService::Handle handle,
 // static
 void PageInfoModel::RegisterPrefs(PrefService* prefs) {
   prefs->RegisterDictionaryPref(prefs::kPageInfoWindowPlacement);
+}
+
+PageInfoModel::PageInfoModel() {
 }

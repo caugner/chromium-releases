@@ -4,9 +4,11 @@
 
 #ifndef CHROME_WORKER_WORKER_WEBKITCLIENT_IMPL_H_
 #define CHROME_WORKER_WORKER_WEBKITCLIENT_IMPL_H_
+#pragma once
 
+#include "base/scoped_ptr.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebMimeRegistry.h"
-#include "webkit/glue/webfilesystem_impl.h"
+#include "webkit/glue/webfileutilities_impl.h"
 #include "webkit/glue/webkitclient_impl.h"
 
 class WorkerWebKitClientImpl : public webkit_glue::WebKitClientImpl,
@@ -15,7 +17,7 @@ class WorkerWebKitClientImpl : public webkit_glue::WebKitClientImpl,
   // WebKitClient methods:
   virtual WebKit::WebClipboard* clipboard();
   virtual WebKit::WebMimeRegistry* mimeRegistry();
-  virtual WebKit::WebFileSystem* fileSystem();
+  virtual WebKit::WebFileUtilities* fileUtilities();
   virtual WebKit::WebSandboxSupport* sandboxSupport();
   virtual bool sandboxEnabled();
   virtual unsigned long long visitedLinkHash(const char* canonicalURL,
@@ -48,6 +50,8 @@ class WorkerWebKitClientImpl : public webkit_glue::WebKitClientImpl,
   virtual long long databaseGetFileSize(
       const WebKit::WebString& vfs_file_name);
 
+  virtual WebKit::WebBlobRegistry* blobRegistry();
+
   // WebMimeRegistry methods:
   virtual WebKit::WebMimeRegistry::SupportsType supportsMIMEType(
       const WebKit::WebString&);
@@ -65,7 +69,9 @@ class WorkerWebKitClientImpl : public webkit_glue::WebKitClientImpl,
       const WebKit::WebString&);
 
  private:
-  webkit_glue::WebFileSystemImpl file_system_;
+  webkit_glue::WebFileUtilitiesImpl file_utilities_;
+
+  scoped_ptr<WebKit::WebBlobRegistry> blob_registry_;
 };
 
 #endif  // CHROME_WORKER_WORKER_WEBKITCLIENT_IMPL_H_

@@ -1131,6 +1131,22 @@
     c.Init(x, y, width, height);
   }
 
+  void BlitFramebufferEXT(
+      GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0,
+      GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) {
+    gles2::BlitFramebufferEXT& c = GetCmdSpace<gles2::BlitFramebufferEXT>();
+    c.Init(
+        srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter);
+  }
+
+  void RenderbufferStorageMultisampleEXT(
+      GLenum target, GLsizei samples, GLenum internalformat, GLsizei width,
+      GLsizei height) {
+    gles2::RenderbufferStorageMultisampleEXT& c =
+        GetCmdSpace<gles2::RenderbufferStorageMultisampleEXT>();
+    c.Init(target, samples, internalformat, width, height);
+  }
+
   void SwapBuffers() {
     gles2::SwapBuffers& c = GetCmdSpace<gles2::SwapBuffers>();
     c.Init();
@@ -1168,6 +1184,13 @@
       GLuint bucket_id, uint32 result_shm_id, uint32 result_shm_offset) {
     gles2::CommandBufferEnable& c = GetCmdSpace<gles2::CommandBufferEnable>();
     c.Init(bucket_id, result_shm_id, result_shm_offset);
+  }
+
+  void CopyTextureToParentTexture(
+      GLuint client_child_id, GLuint client_parent_id) {
+    gles2::CopyTextureToParentTexture& c =
+        GetCmdSpace<gles2::CopyTextureToParentTexture>();
+    c.Init(client_child_id, client_parent_id);
   }
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_CMD_HELPER_AUTOGEN_H_

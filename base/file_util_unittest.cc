@@ -13,13 +13,11 @@
 #endif
 
 #include <fstream>
-#include <iostream>
 #include <set>
 
 #include "base/base_paths.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/logging.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/scoped_handle.h"
@@ -240,69 +238,6 @@ TEST_F(FileUtilTest, AppendToPath) {
 }
 #endif  // defined(OS_WIN)
 
-
-static const struct InsertBeforeExtensionCase {
-  const FilePath::CharType* path;
-  const FilePath::CharType* suffix;
-  const FilePath::CharType* result;
-} kInsertBeforeExtension[] = {
-  {FPL(""), FPL(""), FPL("")},
-  {FPL(""), FPL("txt"), FPL("txt")},
-  {FPL("."), FPL("txt"), FPL("txt.")},
-  {FPL("."), FPL(""), FPL(".")},
-  {FPL("foo.dll"), FPL("txt"), FPL("footxt.dll")},
-  {FPL("foo.dll"), FPL(".txt"), FPL("foo.txt.dll")},
-  {FPL("foo"), FPL("txt"), FPL("footxt")},
-  {FPL("foo"), FPL(".txt"), FPL("foo.txt")},
-  {FPL("foo.baz.dll"), FPL("txt"), FPL("foo.baztxt.dll")},
-  {FPL("foo.baz.dll"), FPL(".txt"), FPL("foo.baz.txt.dll")},
-  {FPL("foo.dll"), FPL(""), FPL("foo.dll")},
-  {FPL("foo.dll"), FPL("."), FPL("foo..dll")},
-  {FPL("foo"), FPL(""), FPL("foo")},
-  {FPL("foo"), FPL("."), FPL("foo.")},
-  {FPL("foo.baz.dll"), FPL(""), FPL("foo.baz.dll")},
-  {FPL("foo.baz.dll"), FPL("."), FPL("foo.baz..dll")},
-#if defined(OS_WIN)
-  {FPL("\\"), FPL(""), FPL("\\")},
-  {FPL("\\"), FPL("txt"), FPL("\\txt")},
-  {FPL("\\."), FPL("txt"), FPL("\\txt.")},
-  {FPL("\\."), FPL(""), FPL("\\.")},
-  {FPL("C:\\bar\\foo.dll"), FPL("txt"), FPL("C:\\bar\\footxt.dll")},
-  {FPL("C:\\bar.baz\\foodll"), FPL("txt"), FPL("C:\\bar.baz\\foodlltxt")},
-  {FPL("C:\\bar.baz\\foo.dll"), FPL("txt"), FPL("C:\\bar.baz\\footxt.dll")},
-  {FPL("C:\\bar.baz\\foo.dll.exe"), FPL("txt"),
-   FPL("C:\\bar.baz\\foo.dlltxt.exe")},
-  {FPL("C:\\bar.baz\\foo"), FPL(""), FPL("C:\\bar.baz\\foo")},
-  {FPL("C:\\bar.baz\\foo.exe"), FPL(""), FPL("C:\\bar.baz\\foo.exe")},
-  {FPL("C:\\bar.baz\\foo.dll.exe"), FPL(""), FPL("C:\\bar.baz\\foo.dll.exe")},
-  {FPL("C:\\bar\\baz\\foo.exe"), FPL(" (1)"), FPL("C:\\bar\\baz\\foo (1).exe")},
-#elif defined(OS_POSIX)
-  {FPL("/"), FPL(""), FPL("/")},
-  {FPL("/"), FPL("txt"), FPL("/txt")},
-  {FPL("/."), FPL("txt"), FPL("/txt.")},
-  {FPL("/."), FPL(""), FPL("/.")},
-  {FPL("/bar/foo.dll"), FPL("txt"), FPL("/bar/footxt.dll")},
-  {FPL("/bar.baz/foodll"), FPL("txt"), FPL("/bar.baz/foodlltxt")},
-  {FPL("/bar.baz/foo.dll"), FPL("txt"), FPL("/bar.baz/footxt.dll")},
-  {FPL("/bar.baz/foo.dll.exe"), FPL("txt"), FPL("/bar.baz/foo.dlltxt.exe")},
-  {FPL("/bar.baz/foo"), FPL(""), FPL("/bar.baz/foo")},
-  {FPL("/bar.baz/foo.exe"), FPL(""), FPL("/bar.baz/foo.exe")},
-  {FPL("/bar.baz/foo.dll.exe"), FPL(""), FPL("/bar.baz/foo.dll.exe")},
-  {FPL("/bar/baz/foo.exe"), FPL(" (1)"), FPL("/bar/baz/foo (1).exe")},
-#endif
-};
-
-#if defined(OS_WIN)
-// This function has been deprecated on non-Windows.
-TEST_F(FileUtilTest, InsertBeforeExtensionTest) {
-  for (unsigned int i = 0; i < arraysize(kInsertBeforeExtension); ++i) {
-    FilePath path(kInsertBeforeExtension[i].path);
-    file_util::InsertBeforeExtension(&path, kInsertBeforeExtension[i].suffix);
-    EXPECT_EQ(kInsertBeforeExtension[i].result, path.value());
-  }
-}
-#endif
-
 static const struct filename_case {
   const wchar_t* path;
   const wchar_t* filename;
@@ -492,7 +427,7 @@ TEST_F(FileUtilTest, NormalizeFilePathBasic) {
   ASSERT_FALSE(file_util::PathExists(file_a_path));
   ASSERT_FALSE(file_util::NormalizeFilePath(file_a_path,
                                             &normalized_file_a_path))
-    << "NormalizeFilePath() should fail on nonexistant paths.";
+    << "NormalizeFilePath() should fail on nonexistent paths.";
 
   CreateTextFile(file_a_path, bogus_content);
   ASSERT_TRUE(file_util::PathExists(file_a_path));
@@ -576,7 +511,7 @@ TEST_F(FileUtilTest, NormalizeFilePathReparsePoints) {
                    OPEN_EXISTING,
                    FILE_FLAG_BACKUP_SEMANTICS,  // Needed to open a directory.
                    NULL));
-  ASSERT_NE(INVALID_HANDLE_VALUE, reparse_to_sub_a.Get());
+  ASSERT_TRUE(reparse_to_sub_a.IsValid());
   ASSERT_TRUE(SetReparsePoint(reparse_to_sub_a, sub_a));
 
   FilePath to_base_b = base_b.Append(FPL("to_base_b"));
@@ -589,7 +524,7 @@ TEST_F(FileUtilTest, NormalizeFilePathReparsePoints) {
                    OPEN_EXISTING,
                    FILE_FLAG_BACKUP_SEMANTICS,  // Needed to open a directory.
                    NULL));
-  ASSERT_NE(INVALID_HANDLE_VALUE, reparse_to_base_b.Get());
+  ASSERT_TRUE(reparse_to_base_b.IsValid());
   ASSERT_TRUE(SetReparsePoint(reparse_to_base_b, base_b));
 
   FilePath to_sub_long = base_b.Append(FPL("to_sub_long"));
@@ -602,7 +537,7 @@ TEST_F(FileUtilTest, NormalizeFilePathReparsePoints) {
                    OPEN_EXISTING,
                    FILE_FLAG_BACKUP_SEMANTICS,  // Needed to open a directory.
                    NULL));
-  ASSERT_NE(INVALID_HANDLE_VALUE, reparse_to_sub_long.Get());
+  ASSERT_TRUE(reparse_to_sub_long.IsValid());
   ASSERT_TRUE(SetReparsePoint(reparse_to_sub_long, sub_long));
 
   // Normalize a junction free path: base_a\sub_a\file.txt .
@@ -1578,7 +1513,6 @@ TEST_F(FileUtilTest, CreateNewTemporaryDirInDirTest) {
   ASSERT_TRUE(file_util::CreateTemporaryDirInDir(
                   test_dir_,
                   FILE_PATH_LITERAL("CreateNewTemporaryDirInDirTest"),
-                  false,
                   &new_dir));
   EXPECT_TRUE(file_util::PathExists(new_dir));
   EXPECT_TRUE(test_dir_.IsParent(new_dir));
@@ -1843,7 +1777,7 @@ TEST_F(FileUtilTest, LastModified) {
   ASSERT_TRUE(base::Time::FromString(L"Tue, 15 Nov 1994, 12:45:26 GMT",
               &modification_time));
   ASSERT_TRUE(file_util::SetLastModifiedTime(foobar, modification_time));
-  file_util::FileInfo file_info;
+  base::PlatformFileInfo file_info;
   ASSERT_TRUE(file_util::GetFileInfo(foobar, &file_info));
   ASSERT_TRUE(file_info.last_modified == modification_time);
 }

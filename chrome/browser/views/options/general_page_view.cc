@@ -8,16 +8,18 @@
 #include "app/l10n_util.h"
 #include "base/callback.h"
 #include "base/message_loop.h"
+#include "base/string16.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/custom_home_pages_table_model.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/session_startup_pref.h"
+#include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_model_observer.h"
 #include "chrome/browser/views/keyword_editor_view.h"
 #include "chrome/browser/views/options/managed_prefs_banner_view.h"
 #include "chrome/browser/views/options/options_group_view.h"
@@ -64,7 +66,7 @@ class SearchEngineListModel : public ComboboxModel,
 
   // ComboboxModel overrides:
   virtual int GetItemCount();
-  virtual std::wstring GetItemAt(int index);
+  virtual string16 GetItemAt(int index);
 
   // Returns the TemplateURL at the specified index.
   const TemplateURL* GetTemplateURLAt(int index);
@@ -121,9 +123,9 @@ int SearchEngineListModel::GetItemCount() {
   return static_cast<int>(template_urls_.size());
 }
 
-std::wstring SearchEngineListModel::GetItemAt(int index) {
+string16 SearchEngineListModel::GetItemAt(int index) {
   DCHECK(index < GetItemCount());
-  return template_urls_[index]->short_name();
+  return WideToUTF16Hack(template_urls_[index]->short_name());
 }
 
 const TemplateURL* SearchEngineListModel::GetTemplateURLAt(int index) {
@@ -348,39 +350,34 @@ void GeneralPageView::InitControlLayout() {
   show_home_button_.Init(prefs::kShowHomeButton, profile()->GetPrefs(), this);
 }
 
-void GeneralPageView::NotifyPrefChanged(const std::wstring* pref_name) {
-  if (!pref_name || *pref_name == prefs::kRestoreOnStartup) {
+void GeneralPageView::NotifyPrefChanged(const std::string* pref_name) {
+  if (!pref_name ||
+      *pref_name == prefs::kRestoreOnStartup ||
+      *pref_name == prefs::kURLsToRestoreOnStartup) {
     PrefService* prefs = profile()->GetPrefs();
     const SessionStartupPref startup_pref =
         SessionStartupPref::GetStartupPref(prefs);
+    bool radio_buttons_enabled = !SessionStartupPref::TypeIsManaged(prefs);
+    bool restore_urls_enabled = !SessionStartupPref::URLsAreManaged(prefs);
     switch (startup_pref.type) {
     case SessionStartupPref::DEFAULT:
       startup_homepage_radio_->SetChecked(true);
-      EnableCustomHomepagesControls(false);
+      restore_urls_enabled = false;
       break;
 
     case SessionStartupPref::LAST:
       startup_last_session_radio_->SetChecked(true);
-      EnableCustomHomepagesControls(false);
+      restore_urls_enabled = false;
       break;
 
     case SessionStartupPref::URLS:
       startup_custom_radio_->SetChecked(true);
-      EnableCustomHomepagesControls(true);
       break;
     }
-  }
-
-  // TODO(beng): Note that the kURLsToRestoreOnStartup pref is a mutable list,
-  //             and changes to mutable lists aren't broadcast through the
-  //             observer system, so the second half of this condition will
-  //             never match. Once support for broadcasting such updates is
-  //             added, this will automagically start to work, and this comment
-  //             can be removed.
-  if (!pref_name || *pref_name == prefs::kURLsToRestoreOnStartup) {
-    PrefService* prefs = profile()->GetPrefs();
-    const SessionStartupPref startup_pref =
-        SessionStartupPref::GetStartupPref(prefs);
+    startup_homepage_radio_->SetEnabled(radio_buttons_enabled);
+    startup_last_session_radio_->SetEnabled(radio_buttons_enabled);
+    startup_custom_radio_->SetEnabled(radio_buttons_enabled);
+    EnableCustomHomepagesControls(restore_urls_enabled);
     startup_custom_pages_table_model_->SetURLs(startup_pref.urls);
   }
 
@@ -409,6 +406,8 @@ void GeneralPageView::NotifyPrefChanged(const std::wstring* pref_name) {
   if (!pref_name || *pref_name == prefs::kShowHomeButton) {
     homepage_show_home_button_checkbox_->SetChecked(
         show_home_button_.GetValue());
+    homepage_show_home_button_checkbox_->SetEnabled(
+        !show_home_button_.IsManaged());
   }
 }
 
@@ -732,6 +731,11 @@ void GeneralPageView::EnableCustomHomepagesControls(bool enable) {
 void GeneralPageView::AddBookmark(UrlPicker* dialog,
                                   const std::wstring& title,
                                   const GURL& url) {
+  // The restore URLs policy might have become managed while the dialog is
+  // displayed.  While the model makes sure that no changes are made in this
+  // condition, we should still avoid changing the graphic elements.
+  if (SessionStartupPref::URLsAreManaged(profile()->GetPrefs()))
+    return;
   int index = startup_custom_pages_table_->FirstSelectedRow();
   if (index == -1)
     index = startup_custom_pages_table_model_->RowCount();

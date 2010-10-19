@@ -4,10 +4,9 @@
 
 #ifndef CHROME_BROWSER_GTK_OPTIONS_SIMPLE_CONTENT_EXCEPTIONS_WINDOW_H_
 #define CHROME_BROWSER_GTK_OPTIONS_SIMPLE_CONTENT_EXCEPTIONS_WINDOW_H_
+#pragma once
 
 #include <gtk/gtk.h>
-
-#include <set>
 
 #include "app/gtk_signal.h"
 #include "base/scoped_ptr.h"

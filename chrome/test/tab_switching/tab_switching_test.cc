@@ -3,11 +3,14 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/environment.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
+#include "base/scoped_ptr.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -15,7 +18,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
-#include "chrome/test/ui/ui_test.h"
+#include "chrome/test/ui/ui_perf_test.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 
@@ -28,7 +31,7 @@ namespace {
 // time taken for each switch. It then prints out the times on the console,
 // with the aim that the page cycler parser can interpret these numbers to
 // draw graphs for page cycler Tab Switching Performance.
-class TabSwitchingUITest : public UITest {
+class TabSwitchingUITest : public UIPerfTest {
  public:
   TabSwitchingUITest() {
     PathService::Get(base::DIR_SOURCE_ROOT, &path_prefix_);
@@ -43,12 +46,11 @@ class TabSwitchingUITest : public UITest {
     log_file_name_ = browser_directory_.AppendASCII("chrome_debug.log");
 
     // Set the log file path for the browser test.
+    scoped_ptr<base::Environment> env(base::Environment::Create());
 #if defined(OS_WIN)
-    SetEnvironmentVariable(UTF8ToWide(env_vars::kLogFileName).c_str(),
-                           log_file_name_.value().c_str());
+    env->SetVar(env_vars::kLogFileName, WideToUTF8(log_file_name_.value()));
 #else
-    setenv(env_vars::kLogFileName,
-           log_file_name_.value().c_str(), 1);
+    env->SetVar(env_vars::kLogFileName, log_file_name_.value());
 #endif
 
     // Add the necessary arguments to Chrome's launch command for these tests.
@@ -174,20 +176,13 @@ class TabSwitchingUITest : public UITest {
   void AddLaunchArguments() {
     launch_arguments_.AppendSwitch(switches::kEnableLogging);
     launch_arguments_.AppendSwitch(switches::kDumpHistogramsOnExit);
-    launch_arguments_.AppendSwitchWithValue(switches::kLoggingLevel, "0");
+    launch_arguments_.AppendSwitchASCII(switches::kLoggingLevel, "0");
   }
 
   DISALLOW_COPY_AND_ASSIGN(TabSwitchingUITest);
 };
 
-#if defined(OS_WIN)
-// Started failing with a webkit roll in r49936. See http://crbug.com/46751
-#define MAYBE_TabSwitch FAILS_TabSwitch
-#else
-#define MAYBE_TabSwitch TabSwitch
-#endif
-
-TEST_F(TabSwitchingUITest, MAYBE_TabSwitch) {
+TEST_F(TabSwitchingUITest, TabSwitch) {
   RunTabSwitchingUITest("t", true);
 }
 

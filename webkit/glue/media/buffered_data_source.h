@@ -5,9 +5,7 @@
 #ifndef WEBKIT_GLUE_MEDIA_BUFFERED_DATA_SOURCE_H_
 #define WEBKIT_GLUE_MEDIA_BUFFERED_DATA_SOURCE_H_
 
-#include <algorithm>
 #include <string>
-#include <vector>
 
 #include "base/callback.h"
 #include "base/lock.h"
@@ -118,6 +116,7 @@ class BufferedResourceLoader :
   virtual void OnReceivedResponse(
       const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
       bool content_filtered);
+  virtual void OnDownloadedData(int len) {}
   virtual void OnReceivedData(const char* data, int len);
   virtual void OnCompletedRequest(const URLRequestStatus& status,
       const std::string& security_info);

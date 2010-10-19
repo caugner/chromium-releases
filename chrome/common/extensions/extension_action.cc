@@ -7,10 +7,12 @@
 #include <algorithm>
 
 #include "app/resource_bundle.h"
+#include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "gfx/canvas_skia.h"
 #include "gfx/font.h"
 #include "gfx/rect.h"
+#include "googleurl/src/gurl.h"
 #include "grit/app_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkTypeface.h"
@@ -35,11 +37,11 @@ const int kBottomMargin = 5;
 const int kPadding = 2;
 const int kTopTextPadding = 0;
 #else
-const float kTextSize = 7.5;
+const float kTextSize = 10;
 const int kBottomMargin = 5;
 const int kPadding = 2;
 // The padding between the top of the badge and the top of the text.
-const int kTopTextPadding = 1;
+const int kTopTextPadding = -1;
 #endif
 
 const int kBadgeHeight = 11;
@@ -76,7 +78,7 @@ SkPaint* GetTextPaint() {
       ResourceBundle& rb = ResourceBundle::GetSharedInstance();
       const gfx::Font& base_font = rb.GetFont(ResourceBundle::BaseFont);
       typeface = SkTypeface::CreateFromName(
-          WideToUTF8(base_font.FontName()).c_str(), SkTypeface::kNormal);
+          WideToUTF8(base_font.GetFontName()).c_str(), SkTypeface::kNormal);
     }
 
     text_paint->setTypeface(typeface);
@@ -89,6 +91,45 @@ SkPaint* GetTextPaint() {
 }  // namespace
 
 const int ExtensionAction::kDefaultTabId = -1;
+
+ExtensionAction::ExtensionAction() {
+}
+
+ExtensionAction::~ExtensionAction() {
+}
+
+void ExtensionAction::SetPopupUrl(int tab_id, const GURL& url) {
+  // We store |url| even if it is empty, rather than removing a URL from the
+  // map.  If an extension has a default popup, and removes it for a tab via
+  // the API, we must remember that there is no popup for that specific tab.
+  // If we removed the tab's URL, GetPopupURL would incorrectly return the
+  // default URL.
+  SetValue(&popup_url_, tab_id, url);
+}
+
+bool ExtensionAction::HasPopup(int tab_id) {
+  return !GetPopupUrl(tab_id).is_empty();
+}
+
+GURL ExtensionAction::GetPopupUrl(int tab_id) {
+  return GetValue(&popup_url_, tab_id);
+}
+
+void ExtensionAction::SetIcon(int tab_id, const SkBitmap& bitmap) {
+  SetValue(&icon_, tab_id, bitmap);
+}
+
+SkBitmap ExtensionAction::GetIcon(int tab_id) {
+  return GetValue(&icon_, tab_id);
+}
+
+void ExtensionAction::SetIconIndex(int tab_id, int index) {
+  if (static_cast<size_t>(index) >= icon_paths_.size()) {
+    NOTREACHED();
+    return;
+  }
+  SetValue(&icon_index_, tab_id, index);
+}
 
 void ExtensionAction::ClearAllValuesForTab(int tab_id) {
   title_.erase(tab_id);

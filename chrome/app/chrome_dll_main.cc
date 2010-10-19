@@ -38,7 +38,6 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/debug_util.h"
-#include "base/file_version_info.h"
 #include "base/i18n/icu_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -46,9 +45,10 @@
 #include "base/scoped_nsautorelease_pool.h"
 #include "base/stats_counters.h"
 #include "base/stats_table.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/app/chrome_version_info.h"
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/diagnostics/diagnostics_main.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/platform_util.h"
@@ -57,6 +57,7 @@
 #include "chrome/common/chrome_descriptors.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/main_function_params.h"
 #include "chrome/common/sandbox_init_wrapper.h"
@@ -90,7 +91,6 @@
 #endif
 
 #if defined(OS_WIN)
-#include "base/win_util.h"
 #include "sandbox/src/sandbox.h"
 #include "tools/memory_watcher/memory_watcher.h"
 #endif
@@ -331,11 +331,9 @@ void SetupCRT(const CommandLine& parsed_command_line) {
   // Enable the low fragmentation heap for the CRT heap. The heap is not changed
   // if the process is run under the debugger is enabled or if certain gflags
   // are set.
-  bool use_lfh = false;
-  if (parsed_command_line.HasSwitch(switches::kUseLowFragHeapCrt))
-    use_lfh = parsed_command_line.GetSwitchValue(switches::kUseLowFragHeapCrt)
-        != L"false";
-  if (use_lfh) {
+  if (parsed_command_line.HasSwitch(switches::kUseLowFragHeapCrt) &&
+      (parsed_command_line.GetSwitchValueASCII(switches::kUseLowFragHeapCrt)
+       != "false")) {
     void* crt_heap = reinterpret_cast<void*>(_get_heap_handle());
     ULONG enable_lfh = 2;
     HeapSetInformation(crt_heap, HeapCompatibilityInformation,
@@ -442,9 +440,6 @@ DLLEXPORT int __cdecl ChromeMain(HINSTANCE instance,
 #elif defined(OS_POSIX)
 int ChromeMain(int argc, char** argv) {
 #endif
-#if defined(OS_CHROMEOS)
-  chromeos::BootTimesLoader::SaveChromeMainStats();
-#endif
 #if defined(OS_MACOSX)
   // TODO(mark): Some of these things ought to be handled in chrome_exe_main.mm.
   // Under the current architecture, nothing in chrome_exe_main can rely
@@ -465,6 +460,10 @@ int ChromeMain(int argc, char** argv) {
   // app quits. Each "main" needs to flush this pool right before it goes into
   // its main event loop to get rid of the cruft.
   base::ScopedNSAutoreleasePool autorelease_pool;
+
+#if defined(OS_CHROMEOS)
+  chromeos::BootTimesLoader::Get()->SaveChromeMainStats();
+#endif
 
 #if defined(OS_POSIX)
   base::GlobalDescriptors* g_fds = Singleton<base::GlobalDescriptors>::get();
@@ -506,25 +505,25 @@ int ChromeMain(int argc, char** argv) {
 #endif
 
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
-
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-  if (parsed_command_line.HasSwitch(switches::kProductVersion)) {
-    scoped_ptr<FileVersionInfo> version(chrome_app::GetChromeVersionInfo());
-    printf("%s\n", WideToASCII(version->product_version()).c_str());
-    return 0;
-  }
-#endif
+  const chrome::VersionInfo version_info;
 
 #if defined(OS_POSIX)
-  if (parsed_command_line.HasSwitch(switches::kVersion)) {
-    scoped_ptr<FileVersionInfo> version(chrome_app::GetChromeVersionInfo());
-    printf("%s %s %s\n",
-           WideToUTF8(version->product_name()).c_str(),
-           WideToASCII(version->product_version()).c_str(),
-           UTF16ToUTF8(platform_util::GetVersionStringModifier()).c_str());
+
+#if !defined(OS_MACOSX)
+  if (parsed_command_line.HasSwitch(switches::kProductVersion)) {
+    printf("%s\n", version_info.Version().c_str());
     return 0;
   }
 #endif
+
+  if (parsed_command_line.HasSwitch(switches::kVersion)) {
+    printf("%s %s %s\n",
+           version_info.Name().c_str(),
+           version_info.Version().c_str(),
+           platform_util::GetVersionStringModifier().c_str());
+    return 0;
+  }
+#endif  // OS_POSIX
 
   std::string process_type =
       parsed_command_line.GetSwitchValueASCII(switches::kProcessType);
@@ -567,14 +566,25 @@ int ChromeMain(int argc, char** argv) {
     singleton_command_line->AppendSwitch(switches::kEnableGPUPlugin);
   }
 
+#if defined(OS_CHROMEOS)
+  if (parsed_command_line.HasSwitch(switches::kBWSI)) {
+    // Disable sync and extensions if we're in "browse without sign-in" mode.
+    CommandLine* singleton_command_line = CommandLine::ForCurrentProcess();
+    singleton_command_line->AppendSwitch(switches::kDisableSync);
+    singleton_command_line->AppendSwitch(switches::kDisableExtensions);
+    browser_defaults::bookmarks_enabled = false;
+  }
+#endif
+
   base::ProcessId browser_pid = base::GetCurrentProcId();
   if (SubprocessIsBrowserChild(process_type)) {
 #if defined(OS_WIN)
-    std::wstring channel_name =
-      parsed_command_line.GetSwitchValue(switches::kProcessChannelID);
+    std::string channel_name =
+        parsed_command_line.GetSwitchValueASCII(switches::kProcessChannelID);
 
-    browser_pid =
-        static_cast<base::ProcessId>(StringToInt(WideToASCII(channel_name)));
+    int browser_pid_int;
+    base::StringToInt(channel_name, &browser_pid_int);
+    browser_pid = static_cast<base::ProcessId>(browser_pid_int);
     DCHECK_NE(browser_pid, 0u);
 #elif defined(OS_MACOSX)
     browser_pid = base::GetCurrentProcId();
@@ -602,6 +612,12 @@ int ChromeMain(int argc, char** argv) {
   // Initialize the Chrome path provider.
   app::RegisterPathProvider();
   chrome::RegisterPathProvider();
+
+  // Notice a user data directory override if any
+  const FilePath user_data_dir =
+      parsed_command_line.GetSwitchValuePath(switches::kUserDataDir);
+  if (!user_data_dir.empty())
+    CHECK(PathService::Override(chrome::DIR_USER_DATA, user_data_dir));
 
 #if defined(OS_MACOSX)
   // TODO(mark): Right now, InitCrashReporter() needs to be called after
@@ -637,6 +653,26 @@ int ChromeMain(int argc, char** argv) {
     }
   }
 
+#if defined(OS_MACOSX)
+  // Mac Chrome is packaged with a main app bundle and a helper app bundle.
+  // The main app bundle should only be used for the browser process, so it
+  // should never see a --type switch (switches::kProcessType).  Likewise,
+  // the helper should always have a --type switch.
+  //
+  // This check is done this late so there is already a call to
+  // mac_util::IsBackgroundOnlyProcess(), so there is no change in
+  // startup/initialization order.
+
+  // The helper's Info.plist marks it as a background only app.
+  if (mac_util::IsBackgroundOnlyProcess()) {
+    CHECK(parsed_command_line.HasSwitch(switches::kProcessType))
+        << "Helper application requires --type.";
+  } else {
+    CHECK(!parsed_command_line.HasSwitch(switches::kProcessType))
+        << "Main application forbids --type, saw \"" << process_type << "\".";
+  }
+#endif  // defined(OS_MACOSX)
+
   if (IsCrashReporterEnabled())
     InitCrashProcessInfo();
 #endif  // OS_MACOSX
@@ -669,12 +705,6 @@ int ChromeMain(int argc, char** argv) {
 #if defined(OS_WIN)
   _Module.Init(NULL, instance);
 #endif
-
-  // Notice a user data directory override if any
-  const FilePath user_data_dir =
-      parsed_command_line.GetSwitchValuePath(switches::kUserDataDir);
-  if (!user_data_dir.empty())
-    CHECK(PathService::Override(chrome::DIR_USER_DATA, user_data_dir));
 
   bool single_process =
 #if defined (GOOGLE_CHROME_BUILD)
@@ -733,7 +763,7 @@ int ChromeMain(int argc, char** argv) {
     // the --lang flag to passe the value of the PrefService in here. Maybe this
     // value could be passed in a different way.
     ResourceBundle::InitSharedInstance(
-        parsed_command_line.GetSwitchValue(switches::kLang));
+        parsed_command_line.GetSwitchValueASCII(switches::kLang));
 
 #if defined(OS_MACOSX)
     // Update the process name (need resources to get the strings, so

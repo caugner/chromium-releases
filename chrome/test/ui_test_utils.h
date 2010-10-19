@@ -4,11 +4,13 @@
 
 #ifndef CHROME_TEST_UI_TEST_UTILS_H_
 #define CHROME_TEST_UI_TEST_UTILS_H_
+#pragma once
 
 #include <map>
 #include <string>
 #include <set>
 
+#include "app/keyboard_codes.h"
 #include "base/basictypes.h"
 #include "base/message_loop.h"
 #include "base/scoped_temp_dir.h"
@@ -19,6 +21,7 @@
 #include "chrome/common/notification_type.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/test/automation/dom_element_proxy.h"
+#include "gfx/native_widget_types.h"
 
 class AppModalDialog;
 class BookmarkModel;
@@ -185,6 +188,16 @@ void RegisterAndWait(NotificationObserver* observer,
 
 // Blocks until |model| finishes loading.
 void WaitForBookmarkModelToLoad(BookmarkModel* model);
+
+// Sends a key press blocking until the key press is received or the test times
+// out. This uses ui_controls::SendKeyPress, see it for details. Returns true
+// if the event was successfully sent and received.
+bool SendKeyPressSync(gfx::NativeWindow window,
+                      app::KeyboardCode key,
+                      bool control,
+                      bool shift,
+                      bool alt,
+                      bool command) WARN_UNUSED_RESULT;
 
 // Run a message loop only for the specified amount of time.
 class TimedMessageLoopRunner {
@@ -415,6 +428,12 @@ class WindowedNotificationObserverWithDetails
 
   DISALLOW_COPY_AND_ASSIGN(WindowedNotificationObserverWithDetails);
 };
+
+// Hide a native window.
+void HideNativeWindow(gfx::NativeWindow window);
+
+// Show and focus a native window.
+void ShowAndFocusNativeWindow(gfx::NativeWindow window);
 
 }  // namespace ui_test_utils
 

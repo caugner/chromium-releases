@@ -1,18 +1,19 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_INSTALLER_UTIL_WORK_ITEM_LIST_H_
 #define CHROME_INSTALLER_UTIL_WORK_ITEM_LIST_H_
+#pragma once
 
 #include <windows.h>
 
 #include <list>
 #include <string>
 
-#include "base/file_path.h"
-
 #include "chrome/installer/util/work_item.h"
+
+class FilePath;
 
 // A WorkItem subclass that recursively contains a list of WorkItems. Thus it
 // provides functionalities to carry out or roll back the sequence of actions
@@ -84,8 +85,11 @@ class WorkItemList : public WorkItem {
                               bool overwrite);
 
   // Add a SelfRegWorkItem that registers or unregisters a DLL at the
-  // specified path.
-  bool AddSelfRegWorkItem(const std::wstring& dll_path, bool do_register);
+  // specified path. If user_level_registration is true, then alternate
+  // registration and unregistration entry point names will be used.
+  bool AddSelfRegWorkItem(const std::wstring& dll_path,
+                          bool do_register,
+                          bool user_level_registration);
 
  private:
   friend class WorkItem;

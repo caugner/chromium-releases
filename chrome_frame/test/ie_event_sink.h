@@ -57,10 +57,16 @@ class IEEventListener {
   virtual void OnNewBrowserWindow(IDispatch* new_window, const wchar_t* url) {}
 };
 
+// Listener for IPropertyNotifySink.
+class PropertyNotifySinkListener {
+ public:
+  virtual ~PropertyNotifySinkListener() {}
+  virtual void OnChanged(DISPID dispid) {}
+  virtual void OnRequestEdit(DISPID dispid) {}
+};
+
 // This class sets up event sinks to the IWebBrowser interface. It forwards
 // all events to its listener.
-// TODO(kkania): Delete WebBrowserEventSink and use this class instead for
-// the reliability tests.
 class IEEventSink
     : public CComObjectRootEx<CComSingleThreadModel>,
       public IDispEventSimpleImpl<0, IEEventSink,
@@ -77,9 +83,20 @@ class IEEventSink
   IEEventSink();
   ~IEEventSink();
 
+  // Launches IE, sets up the sink to forward events to the listener, and
+  // navigates to the given page.
+  HRESULT LaunchIEAndNavigate(const std::wstring& navigate_url,
+                              IEEventListener* listener);
+
+  // Navigate to the given url.
+  HRESULT Navigate(const std::wstring& navigate_url);
+
   // Listen to events from this |browser_disp|, which should be queryable for
   // IWebBrowser2.
   void Attach(IDispatch* browser_disp);
+
+  // Listen to events from the given browser.
+  HRESULT Attach(IWebBrowser2* browser);
 
   // Stop listening to the associated web browser and possibly wait for it to
   // close, if this browser has its own process.
@@ -88,6 +105,9 @@ class IEEventSink
   // Closes the web browser in such a way that the OnQuit notification will
   // be fired when the window closes (async).
   HRESULT CloseWebBrowser();
+
+  // Posts a message to the given target in ChromeFrame. |target| may be "*".
+  void PostMessageToCF(const std::wstring& message, const std::wstring& target);
 
     // Set input focus to chrome frame window.
   void SetFocusToRenderer();
@@ -100,15 +120,17 @@ class IEEventSink
   // SendInput API.
   void SendMouseClick(int x, int y, simulate_input::MouseButton button);
 
-  // Get the HWND for the browser's renderer window.
+  // Get the HWND for the browser's main window. Will fail test if window
+  // not found.
+  HWND GetBrowserWindow();
+
+  // Get the HWND for the browser's renderer window. Will fail test if
+  // renderer window not found.
   HWND GetRendererWindow();
 
-  // Launch IE, use the given listener, and navigate to the given url.
-  HRESULT LaunchIEAndNavigate(const std::wstring& navigate_url,
-                              IEEventListener* listener);
-
-  // Navigate to the given url.
-  HRESULT Navigate(const std::wstring& navigate_url);
+  // Same as above, but does not fail the test if the window cannot be found.
+  // In that case, the returned handle will be NULL.
+  HWND GetRendererWindowSafe();
 
   // Returns whether CF is rendering the current page.
   bool IsCFRendering();
@@ -225,6 +247,39 @@ END_SINK_MAP()
   static _ATL_FUNC_INFO kFileDownloadInfo;
 };
 
+class PropertyNotifySinkImpl
+    : public CComObjectRootEx<CComSingleThreadModel>,
+      public IPropertyNotifySink {
+ public:
+  PropertyNotifySinkImpl() : listener_(NULL) {
+  }
+
+BEGIN_COM_MAP(PropertyNotifySinkImpl)
+  COM_INTERFACE_ENTRY(IPropertyNotifySink)
+END_COM_MAP()
+
+  STDMETHOD(OnChanged)(DISPID dispid) {
+    if (listener_)
+      listener_->OnChanged(dispid);
+    return S_OK;
+  }
+
+  STDMETHOD(OnRequestEdit)(DISPID dispid) {
+    if (listener_)
+      listener_->OnRequestEdit(dispid);
+    return S_OK;
+  }
+
+  void set_listener(PropertyNotifySinkListener* listener) {
+    DCHECK(listener_ == NULL || listener == NULL);
+    listener_ = listener;
+  }
+
+ protected:
+  PropertyNotifySinkListener* listener_;
+};
+
 }  // namespace chrome_frame_test
 
 #endif  // CHROME_FRAME_TEST_IE_EVENT_SINK_H_
+

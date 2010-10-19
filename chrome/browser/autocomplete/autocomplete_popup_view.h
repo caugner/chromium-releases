@@ -10,6 +10,7 @@
 
 #ifndef CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_POPUP_VIEW_H_
 #define CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_POPUP_VIEW_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -40,6 +41,9 @@ class AutocompletePopupView {
 
   // Returns the popup's model.
   virtual AutocompletePopupModel* GetModel() = 0;
+
+  // Returns the max y coordinate of the popup in screen coordinates.
+  virtual int GetMaxYCoordinate() = 0;
 };
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_POPUP_VIEW_H_

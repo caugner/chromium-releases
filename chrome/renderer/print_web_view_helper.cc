@@ -6,7 +6,9 @@
 
 #include "app/l10n_util.h"
 #include "base/logging.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/renderer/render_view.h"
 #include "gfx/codec/jpeg_codec.h"
 #include "grit/generated_resources.h"
@@ -17,6 +19,7 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebScreenInfo.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 
 using printing::ConvertPixelsToPoint;
@@ -178,7 +181,6 @@ void PrintWebViewHelper::Print(WebFrame* frame, bool script_initiated) {
           // If the settings are invalid, early quit.
           if (print_settings.params.dpi &&
               print_settings.params.document_cookie) {
-            UpdatePrintableSizeInPrintParameters(frame, &print_settings.params);
             if (print_settings.params.selection_only) {
               CopyAndPrint(print_settings, frame);
             } else {
@@ -310,13 +312,16 @@ void PrintWebViewHelper::PrintPageAsJPEG(
 #if defined(OS_MACOSX) || defined(OS_WIN)
 void PrintWebViewHelper::PrintPages(const ViewMsg_PrintPages_Params& params,
                                     WebFrame* frame) {
-  PrepareFrameAndViewForPrint prep_frame_view(params.params,
+  ViewMsg_Print_Params printParams = params.params;
+  UpdatePrintableSizeInPrintParameters(frame, &printParams);
+
+  PrepareFrameAndViewForPrint prep_frame_view(printParams,
                                               frame,
                                               frame->view());
   int page_count = prep_frame_view.GetExpectedPageCount();
 
   Send(new ViewHostMsg_DidGetPrintedPagesCount(routing_id(),
-                                               params.params.document_cookie,
+                                               printParams.document_cookie,
                                                page_count));
   if (!page_count)
     return;
@@ -438,6 +443,7 @@ void PrintWebViewHelper::UpdatePrintableSizeInPrintParameters(
     WebFrame* frame, ViewMsg_Print_Params* params) {
   double content_width_in_points;
   double content_height_in_points;
+  PrepareFrameAndViewForPrint prepare(*params, frame, frame->view());
   PrintWebViewHelper::GetPageSizeAndMarginsInPoints(frame, 0, *params,
                                                     &content_width_in_points,
                                                     &content_height_in_points,

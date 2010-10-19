@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,11 +22,14 @@ DOMUIThumbnailSource::DOMUIThumbnailSource(Profile* profile)
       profile_(profile) {
 }
 
+DOMUIThumbnailSource::~DOMUIThumbnailSource() {
+}
+
 void DOMUIThumbnailSource::StartDataRequest(const std::string& path,
                                             bool is_off_the_record,
                                             int request_id) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kTopSites)) {
-    scoped_refptr<history::TopSites> top_sites = profile_->GetTopSites();
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoTopSites)) {
+    history::TopSites* top_sites = profile_->GetTopSites();
     RefCountedBytes* data = NULL;
     if (top_sites->GetPageThumbnail(GURL(path), &data)) {
       // We have the thumbnail.
@@ -49,6 +52,12 @@ void DOMUIThumbnailSource::StartDataRequest(const std::string& path,
     // Tell the caller that no thumbnail is available.
     SendResponse(request_id, NULL);
   }
+}
+
+std::string DOMUIThumbnailSource::GetMimeType(const std::string&) const {
+  // We need to explicitly return a mime type, otherwise if the user tries to
+  // drag the image they get no extension.
+  return "image/png";
 }
 
 void DOMUIThumbnailSource::SendDefaultThumbnail(int request_id) {

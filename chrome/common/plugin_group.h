@@ -4,17 +4,22 @@
 
 #ifndef CHROME_COMMON_PLUGIN_GROUP_H_
 #define CHROME_COMMON_PLUGIN_GROUP_H_
+#pragma once
 
 #include <set>
 #include <vector>
 
-#include "base/linked_ptr.h"
+#include "base/gtest_prod_util.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
-#include "base/version.h"
-#include "webkit/glue/plugins/webplugininfo.h"
 
 class DictionaryValue;
+class FilePath;
+class Version;
+struct WebPluginInfo;
+
+template <typename T>
+class linked_ptr;
 
 // Hard-coded definitions of plugin groups.
 struct PluginGroupDefinition {
@@ -26,20 +31,28 @@ struct PluginGroupDefinition {
   const char* update_url;  // Location of latest secure version.
 };
 
+// A PluginGroup can match a range of versions of a specific plugin (as defined
+// by matching a substring of its name).
+// It contains all WebPluginInfo structs (at least one) matching its definition.
+// In addition, it knows about a security "baseline", i.e. the minimum version
+// of a plugin that is needed in order not to exhibit known security
+// vulnerabilities.
 
-// A PluginGroup contains at least one WebPluginInfo.
-// In addition, it knows if the plugin is critically vulnerable.
 class PluginGroup {
  public:
   // Creates a PluginGroup from a PluginGroupDefinition.
   static PluginGroup* FromPluginGroupDefinition(
       const PluginGroupDefinition& definition);
 
+  ~PluginGroup();
+
   // Creates a PluginGroup from a WebPluginInfo -- when no hard-coded
   // definition is found.
   static PluginGroup* FromWebPluginInfo(const WebPluginInfo& wpi);
 
-  // Find a plugin group matching |info| in the list of hardcoded plugins.
+  // Find a plugin group matching |info| in the list of hardcoded plugins and
+  // returns a copy of it if found, or a new group matching exactly this plugin
+  // otherwise.
   static PluginGroup* FindHardcodedPluginGroup(const WebPluginInfo& info);
 
   // Configures the set of plugin names that are disabled by policy.
@@ -78,7 +91,10 @@ class PluginGroup {
   void Enable(bool enable);
 
   // Returns this group's name
-  const string16 GetGroupName() const { return group_name_; }
+  const string16& GetGroupName() const { return group_name_; }
+
+  // Returns the description of the highest-priority plug-in in the group.
+  const string16& description() const { return description_; }
 
   // Returns a DictionaryValue with data to display in the UI.
   DictionaryValue* GetDataForUI() const;
@@ -89,9 +105,13 @@ class PluginGroup {
   // Returns the update URL.
   std::string GetUpdateURL() const { return update_url_; }
 
-  // Returns true if the latest plugin in this group has known
+  // Returns true if the highest-priority plugin in this group has known
   // security problems.
   bool IsVulnerable() const;
+
+  // Disables all plugins in this group that are older than the
+  // minimum version.
+  void DisableOutdatedPlugins();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(PluginGroupTest, PluginGroupDefinition);
@@ -106,7 +126,17 @@ class PluginGroup {
               const std::string& min_version,
               const std::string& update_url);
 
-  static std::set<string16>* policy_disabled_puglins_;
+  Version* CreateVersionFromString(const string16& version_string);
+
+  // Set the description and version for this plugin group from the
+  // given plug-in.
+  void UpdateDescriptionAndVersion(const WebPluginInfo& plugin);
+
+  // Updates the active plugin in the group. The active plugin is the first
+  // enabled one, or if all plugins are disabled, simply the first one.
+  void UpdateActivePlugin(const WebPluginInfo& plugin);
+
+  static std::set<string16>* policy_disabled_plugins_;
 
   string16 group_name_;
   string16 name_matcher_;
@@ -119,7 +149,7 @@ class PluginGroup {
   bool enabled_;
   std::string min_version_str_;
   scoped_ptr<Version> min_version_;
-  scoped_ptr<Version> max_version_;
+  scoped_ptr<Version> version_;
   std::vector<WebPluginInfo> web_plugin_infos_;
   std::vector<int> web_plugin_positions_;
 

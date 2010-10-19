@@ -10,7 +10,7 @@ PyAuto uses swig to expose Automation Proxy interfaces to Python.
 For complete documentation on the functionality available,
 run pydoc on this file.
 
-Ref: http://dev.chromium.org/developers/pyauto
+Ref: http://dev.chromium.org/developers/testing/pyauto
 
 
 Include the following in your PyAuto test script to make it run standalone.
@@ -29,6 +29,8 @@ import logging
 import optparse
 import os
 import shutil
+import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -58,7 +60,7 @@ def _LocateBinDirs():
                              os.pardir, os.pardir, 'third_party'),
                 script_dir,
   ]
-  sys.path += bin_dirs.get(sys.platform, []) + deps_dirs
+  sys.path += map(os.path.normpath, bin_dirs.get(sys.platform, []) + deps_dirs)
 
 _LocateBinDirs()
 
@@ -69,6 +71,9 @@ try:
   from pyautolib import *
 except ImportError:
   print >>sys.stderr, "Could not locate built libraries. Did you build?"
+  # Mac requires python2.5 even when not the default 'python' (e.g. 10.6)
+  if 'darwin' == sys.platform and sys.version_info[:2] != (2,5):
+    print  >>sys.stderr, "*\n* Perhaps use 'python2.5', not 'python' ?\n*"
   raise
 
 # Should go after sys.path is set appropriately
@@ -187,7 +192,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
 
   @staticmethod
   def IsLinux():
-    """Are we on Linux?"""
+    """Are we on Linux? ChromeOS is linux too."""
     return 'linux2' == sys.platform
 
   @staticmethod
@@ -196,9 +201,29 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     return 'win32' == sys.platform
 
   @staticmethod
+  def IsChromeOS():
+    """Are we on ChromeOS (or Chromium OS)?
+
+    Checks for "CHROMEOS_RELEASE_NAME=" in /etc/lsb-release.
+    """
+    lsb_release = '/etc/lsb-release'
+    if not PyUITest.IsLinux() or not os.path.isfile(lsb_release):
+      return False
+    for line in open(lsb_release).readlines():
+      if line.startswith('CHROMEOS_RELEASE_NAME='):
+        return True
+    return False
+
+  @staticmethod
   def IsPosix():
     """Are we on Mac/Linux?"""
     return PyUITest.IsMac() or PyUITest.IsLinux()
+
+  @staticmethod
+  def IsEnUS():
+    """Are we en-US?"""
+    # TODO: figure out the machine's langugage.
+    return True
 
   @staticmethod
   def EvalDataFrom(filename):
@@ -214,6 +239,14 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       print >>sys.stderr, '%s is an invalid data file.' % data_file
       raise
     return ret
+
+  @staticmethod
+  def Kill(pid):
+    """Terminate the given pid."""
+    if PyUITest.IsWin():
+      subprocess.call(['taskkill.exe', '/T', '/F', '/PID', str(pid)])
+    else:
+      os.kill(pid, signal.SIGTERM)
 
   def WaitUntil(self, function, timeout=-1, retry_sleep=0.25, args=[]):
     """Poll on a condition until timeout.
@@ -258,6 +291,31 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         return True
       time.sleep(retry_sleep)
     return False
+
+  class CmdExecutionTimeoutChanger(object):
+    """Facilitate temporary changes to command_execution_timeout_ms.
+
+    Automatically resets to original timeout when object is destroyed.
+    """
+    _saved_timeout = -1  # Saved value for command_execution_timeout_ms
+
+    def __init__(self, ui_test, new_timeout):
+      """Initialize.
+
+      Args:
+        ui_test: a PyUITest object
+        new_timeout: new timeout to use (in milli secs)
+      """
+      self._saved_timeout = ui_test.command_execution_timeout_ms()
+      if new_timeout != self._saved_timeout:
+        ui_test.set_command_execution_timeout_ms(new_timeout)
+      self._ui_test = ui_test
+
+    def __del__(self):
+      """Reset command_execution_timeout_ms to original value."""
+      if self._ui_test.command_execution_timeout_ms() != self._saved_timeout:
+        self._ui_test.set_command_execution_timeout_ms(self._saved_timeout)
+
 
   def _GetResultFromJSONRequest(self, cmd_dict, windex=0):
     """Issue call over the JSON automation channel and fetch output.
@@ -432,10 +490,75 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     self._GetResultFromJSONRequest(cmd_dict)
 
   def WaitForAllDownloadsToComplete(self):
-    """Wait for all downloads to complete."""
-    # Implementation detail: uses the generic "JSON command" model
-    # (experimental)
+    """Wait for all downloads to complete.
+
+    Note: This method does not work for dangerous downloads. Use
+    WaitForGivenDownloadsToComplete (below) instead.
+    """
     self._GetResultFromJSONRequest({'command': 'WaitForAllDownloadsToComplete'})
+
+  def WaitForDownloadToComplete(self, download_path, timeout=-1):
+    """Wait for the given downloads to complete.
+
+    This method works for dangerous downloads as well as regular downloads.
+
+    Args:
+      download_path: The path to the final download. This is only necessary for
+                     the workaround described in the comments below and should
+                     be removed when downloads are re-implemented.
+      timeout: The timeout to use - default is WaitUntil's default timeout.
+    """
+    # TODO(alyssad): Remove this wait when downloads are re-implemented in a
+    # testable way.
+    self.WaitUntil(lambda path: os.path.exists(path), timeout=timeout,
+                   args=[download_path])
+
+  def PerformActionOnDownload(self, id, action, window_index=0):
+    """Perform the given action on the download with the given id.
+
+    Args:
+      id: The id of the download.
+      action: The action to perform on the download.
+              Possible actions:
+                'open': Opens the download (waits until it has completed first).
+                'toggle_open_files_like_this': Toggles the 'Always Open Files
+                    Of This Type' option.
+                'remove': Removes the file from downloads (not from disk).
+                'decline_dangerous_download': Equivalent to 'Discard' option
+                    after downloading a dangerous download (ex. an executable).
+                'save_dangerous_download': Equivalent to 'Save' option after
+                    downloading a dangerous file.
+                'toggle_pause': Toggles the paused state of the download. If the
+                    download completed before this call, it's a no-op.
+                'cancel': Cancel the download.
+      window_index: The window index, default is 0.
+
+    Returns:
+      A dictionary representing the updated download item (except in the case
+      of 'decline_dangerous_download', 'toggle_open_files_like_this', and
+      'remove', which return an empty dict).
+      Example dictionary:
+      { u'PercentComplete': 100,
+        u'file_name': u'file.txt',
+        u'full_path': u'/path/to/file.txt',
+        u'id': 0,
+        u'is_extension_install': False,
+        u'is_otr': False,
+        u'is_paused': False,
+        u'is_temporary': False,
+        u'open_when_complete': False,
+        u'referrer_url': u'',
+        u'safety_state': u'SAFE',
+        u'state': u'COMPLETE',
+        u'url':  u'file://url/to/file.txt'
+      }
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'PerformActionOnDownload',
+      'id': id,
+      'action': action
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=window_index)
 
   def DownloadAndWaitForStart(self, file_url):
     """Trigger download for the given url and wait for downloads to start.
@@ -480,6 +603,59 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       cmd_dict['height'] = height
     self._GetResultFromJSONRequest(cmd_dict, windex=windex)
 
+  def WaitForInfobarCount(self, count, windex=0, tab_index=0):
+    """Wait until infobar count becomes |count|.
+
+    Note: Wait duration is capped by the automation timeout.
+
+    Args:
+      count: requested number of infobars
+      windex: window index.  Defaults to 0 (first window)
+      tab_index: tab index  Defaults to 0 (first tab)
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'WaitForInfobarCount',
+      'count': count,
+      'tab_index': tab_index,
+    }
+    # TODO(phajdan.jr): We need a solid automation infrastructure to handle
+    # these cases. See crbug.com/53647.
+    return self.WaitUntil(
+        lambda(count): len(self.GetBrowserInfo()\
+            ['windows'][windex]['tabs'][tab_index]['infobars']) == count,
+        args=[count])
+
+  def PerformActionOnInfobar(
+      self, action, infobar_index, windex=0, tab_index=0):
+    """Perform actions on an infobar.
+
+    Args:
+      action: the action to be performed.
+              Actions depend on the type of the infobar.  The user needs to
+              call the right action for the right infobar.
+              Valid inputs are:
+              - "dismiss": closes the infobar (for all infobars)
+              - "accept", "cancel": click accept / cancel (for confirm infobars)
+      infobar_index: 0-based index of the infobar on which to perform the action
+      windex: 0-based window index  Defaults to 0 (first window)
+      tab_index: 0-based tab index.  Defaults to 0 (first tab)
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'PerformActionOnInfobar',
+      'action': action,
+      'infobar_index': infobar_index,
+      'tab_index': tab_index,
+    }
+    if action not in ('dismiss', 'accept', 'cancel'):
+      raise JSONInterfaceError('Invalid action %s' % action)
+    self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+
   def GetBrowserInfo(self):
     """Return info about the browser.
 
@@ -520,14 +696,26 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                         u'incognito': False,
                         u'is_fullscreen': False,
                         u'selected_tab': 0,
-                        u'tabs': [ { u'index': 0,
-                                     u'num_infobars': 0,
-                                     u'renderer_pid': 93747,
-                                     u'url': u'http://www.google.com/'},
-                                   { u'index': 1,
-                                     u'num_infobars': 0,
-                                     u'renderer_pid': 93919,
-                                     u'url': u'https://chrome.google.com/'}],
+                        u'tabs': [ {
+                          u'index': 0,
+                          u'infobars': [],
+                          u'renderer_pid': 93747,
+                          u'url': u'http://www.google.com/' }, {
+
+                          u'index': 1,
+                          u'infobars': [],
+                          u'renderer_pid': 93919,
+                          u'url': u'https://chrome.google.com/'}, {
+                          u'index': 2,
+                          u'infobars': [ {
+                            u'buttons': [u'Allow', u'Deny'],
+                            u'link_text': u'Learn more',
+                            u'text': u'slides.html5rocks.com wants to track '
+                                      'your physical location',
+                            u'type': u'confirm_infobar'}],
+                          u'renderer_pid': 93929,
+                          u'url': u'http://slides.html5rocks.com/#slide14'},
+                            ],
                         u'width': 925,
                         u'x': 26,
                         u'y': 44}]}
@@ -539,6 +727,40 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'command': 'GetBrowserInfo',
     }
     return self._GetResultFromJSONRequest(cmd_dict)
+
+  def GetNavigationInfo(self, tab_index=0, windex=0):
+    """Get info about the navigation state of a given tab.
+
+    Args:
+      tab_index: The tab index, default is 0.
+      window_index: The window index, default is 0.
+
+    Returns:
+      a dictionary.
+      Sample:
+
+      { u'favicon_url': u'https://www.google.com/favicon.ico',
+        u'page_type': u'NORMAL_PAGE',
+        u'ssl': { u'displayed_insecure_content': False,
+                  u'ran_insecure_content': False,
+                  u'security_style': u'SECURITY_STYLE_AUTHENTICATED'}}
+
+      Values for security_style can be:
+        SECURITY_STYLE_UNKNOWN
+        SECURITY_STYLE_UNAUTHENTICATED
+        SECURITY_STYLE_AUTHENTICATION_BROKEN
+        SECURITY_STYLE_AUTHENTICATED
+
+      Values for page_type can be:
+        NORMAL_PAGE
+        ERROR_PAGE
+        INTERSTITIAL_PAGE
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'GetNavigationInfo',
+      'tab_index': tab_index,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
 
   def GetHistoryInfo(self, search_text=''):
     """Return info about browsing history.
@@ -561,6 +783,210 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     return history_info.HistoryInfo(
         self._SendJSONRequest(0, json.dumps(cmd_dict)))
+
+  def GetTranslateInfo(self, tab_index=0, window_index=0):
+    """Returns info about translate for the given page.
+
+    If the translate bar is showing, also returns information about the bar.
+
+    Args:
+      tab_index: The tab index, default is 0.
+      window_index: The window index, default is 0.
+
+    Returns:
+      A dictionary of information about translate for the page. Example:
+      { u'always_translate_lang_button_showing': False,
+        u'never_translate_lang_button_showing': False,
+        u'can_translate_page': True,
+        u'original_language': u'es',
+        u'page_translated': False,
+        # The below will only appear if the translate bar is showing.
+        u'translate_bar': { u'bar_state': u'BEFORE_TRANSLATE',
+                            u'original_lang_code': u'es',
+                            u'target_lang_code': u'en'}}
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'GetTranslateInfo',
+      'tab_index': tab_index
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=window_index)
+
+  def ClickTranslateBarTranslate(self, tab_index=0, window_index=0):
+    """If the translate bar is showing, clicks the 'Translate' button on the
+       bar. This will show the 'this page has been translated...' infobar.
+
+    Args:
+      tab_index: The index of the tab, default is 0.
+      window_index: The index of the window, default is 0.
+
+    Returns:
+      True if the translation was successful or false if there was an error.
+      Note that an error shouldn't neccessarily mean a failed test - retry the
+      call on error.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation returns an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'SelectTranslateOption',
+      'tab_index': tab_index,
+      'option': 'translate_page'
+    }
+    return self._GetResultFromJSONRequest(
+        cmd_dict, windex=window_index)['translation_success']
+
+  def RevertPageTranslation(self, tab_index=0, window_index=0):
+    """Select the 'Show original' button on  the 'this page has been
+       translated...' infobar. This will remove the infobar and revert the
+       page translation.
+
+    Args:
+      tab_index: The index of the tab, default is 0.
+      window_index: The index of the window, default is 0.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'SelectTranslateOption',
+      'tab_index': tab_index,
+      'option': 'revert_translation'
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=window_index)
+
+  def ChangeTranslateToLanguage(self, new_language, tab_index=0,
+                                window_index=0):
+    """Set the target language to be a new language.
+
+    This is equivalent to selecting a different language from the 'to'
+    drop-down menu on the translate bar. If the page was already translated
+    before calling this function, this will trigger a re-translate to the
+    new language.
+
+    Args:
+      new_language: The new target language. The string should be equivalent
+                    to the text seen in the translate bar options.
+                    Example: 'English'.
+      tab_index: The tab index - default is 0.
+      window_index: The window index - default is 0.
+
+    Returns:
+      False, if a new translation was triggered and the translation failed.
+      True on success.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'SelectTranslateOption',
+      'tab_index': tab_index,
+      'option': 'set_target_language',
+      'target_language': new_language
+    }
+    return self._GetResultFromJSONRequest(
+        cmd_dict, windex=window_index)['translation_success']
+
+  def GetExtensionsInfo(self):
+    """Returns information about all installed extensions.
+
+    Returns:
+      A list of dictionaries representing each of the installed extensions.
+      Example:
+      [ { u'background_url': u'',
+          u'description': u'Bookmark Manager',
+          u'id': u'eemcgdkfndhakfknompkggombfjjjeno',
+          u'name': u'Bookmark Manager',
+          u'options_url': u'',
+          u'version': u'0.1' },
+        { u'background_url': u'chrome-extension://\
+                               lkdedmbpkaiahjjibfdmpoefffnbdkli/\
+                               background.html',
+          u'description': u'Extension which lets you read your Facebook news \
+                            feed and wall. You can also post status updates.',
+          u'id': u'lkdedmbpkaiahjjibfdmpoefffnbdkli',
+          u'name': u'Facebook for Google Chrome',
+          u'options_url': u'',
+          u'version': u'2.0.9' } ]
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'GetExtensionsInfo'
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['extensions']
+
+  def UninstallExtensionById(self, id):
+    """Uninstall the extension with the given id.
+
+    Args:
+      id: The string id of the extension. It can be retrieved through the
+          GetExtensionsInfo call above.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'UninstallExtensionById',
+      'id': id
+    }
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def SelectTranslateOption(self, option, tab_index=0, window_index=0):
+    """Selects one of the options in the drop-down menu for the translate bar.
+
+    Args:
+      option: One of 'never_translate_language', 'never_translate_site', or
+              'toggle_always_translate'. See notes on each below.
+      tab_index: The index of the tab, default is 0.
+      window_index: The index of the window, default is 0.
+
+    *Notes*
+    never_translate_language: Selecting this means that no sites in this
+      language will be translated. This dismisses the infobar.
+    never_translate_site: Selecting this means that this site will never be
+      translated, regardless of the language. This dismisses the infobar.
+    toggle_always_translate: This does not dismiss the infobar or translate the
+      page. See ClickTranslateBarTranslate and PerformActioOnInfobar to do
+      those. If a language is selected to be always translated, then whenver
+      the user visits a page with that language, the infobar will show the
+      'This page has been translated...' message.
+    decline_translation: Equivalent to selecting 'Nope' on the translate bar.
+    click_never_translate_lang_button: This button appears when the user has
+      declined translation of this language several times. Selecting it causes
+      the language to never be translated. Look at GetTranslateInfo to
+      determine if the button is showing.
+    click_always_translate_lang_button: This button appears when the user has
+      accepted translation of this language several times. Selecting it causes
+      the language to always be translated. Look at GetTranslateInfo to
+      determine if the button is showing.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation returns an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'SelectTranslateOption',
+      'option': option,
+      'tab_index': tab_index
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=window_index)
+
+  def WaitUntilTranslateComplete(self, tab_index=0, window_index=0):
+    """Waits until an attempted translation has finished.
+
+    This should be called after navigating to a page that should be translated
+    automatically (because the language always-translate is on). It does not
+    need to be called after 'ClickTranslateBarTranslate'.
+
+    Do not call this function if you are not expecting a page translation - it
+    will hang. If you call it when there is no translate bar, it will return
+    False.
+
+    Args:
+      tab_index: The tab index, default is 0.
+      window_index: The window index, default is 0.
+
+    Returns:
+      True if the translation was successful, False if there was an error.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'WaitUntilTranslateComplete',
+      'tab_index': tab_index
+    }
+    # TODO(phajdan.jr): We need a solid automation infrastructure to handle
+    # these cases. See crbug.com/53647.
+    return self.WaitUntil(
+        lambda tab_index, window_index: self.GetTranslateInfo(
+            tab_index=tab_index, window_index=window_index)['page_translated'],
+        args=[tab_index, window_index])
 
   def FillAutoFillProfile(self, profiles=None, credit_cards=None,
                           tab_index=0, window_index=0):
@@ -611,8 +1037,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       }
 
       Each dictionary must have a key 'label'. Other possible keys are:
-      'CREDIT_CARD_NAME', 'CREDIT_CARD_NUMBER', 'CREDIT_CARD_TYPE',
-      'CREDIT_CARD_EXP_MONTH', 'CREDIT_CARD_EXP_4_DIGIT_YEAR'
+      'CREDIT_CARD_NAME', 'CREDIT_CARD_NUMBER', 'CREDIT_CARD_EXP_MONTH',
+      'CREDIT_CARD_EXP_4_DIGIT_YEAR'
 
       All values must be strings.
 
@@ -806,42 +1232,69 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     return self._GetResultFromJSONRequest(cmd_dict)
 
-  def AddSavedPassword(self, username, password, time=None, window_index=0):
+  def AddSavedPassword(self, password_dict, window_index=0):
     """Adds the given username-password combination to the saved passwords.
 
     Args:
-      username: a string representing the username
-      password: a string representing the password
+      password_dict: a dictionary that represents a password. Example:
+      { 'username_value': 'user@example.com',        # Required
+        'password_value': 'test.password',           # Required
+        'signon_realm': 'https://www.example.com/',  # Required
+        'time': 1279317810.0,                        # Can get from time.time()
+        'origin_url': 'https://www.example.com/login',
+        'username_element': 'username',              # The HTML element
+        'password_element': 'password',              # The HTML element
+        'submit_element': 'submit',                  # The HTML element
+        'action_target': 'https://www.example.com/login/',
+        'blacklist': False }
       window_index: window index, defaults to 0
 
+    *Blacklist notes* To blacklist a site, add a blacklist password with the
+    following dictionary items: origin_url, signon_realm, username_element,
+    password_element, action_target, and 'blacklist': True. Then all sites that
+    have password forms matching those are blacklisted.
+
     Returns:
-      The success or failure of adding the password. In incognito mode, adding
-      the password should fail. Example return:
-      { "password_added": True }
+      True if adding the password succeeded, false otherwise. In incognito
+      mode, adding the password should fail.
 
     Raises:
       JSONInterfaceError on error.
     """
     cmd_dict = {  # Prepare command for the json interface
       'command': 'AddSavedPassword',
-      'username': username,
-      'password': password,
-      'time': time
+      'password': password_dict
     }
-    return self._GetResultFromJSONRequest(cmd_dict)
+    return self._GetResultFromJSONRequest(
+        cmd_dict, windex=window_index)['password_added']
+
+  def RemoveSavedPassword(self, password_dict, window_index=0):
+    """Removes the password matching the provided password dictionary.
+
+    Args:
+      password_dict: A dictionary that represents a password.
+                     For an example, see the dictionary in AddSavedPassword.
+      window_index: The window index, default is 0.
+    """
+    cmd_dict = {  # Prepare command for the json interface
+      'command': 'RemoveSavedPassword',
+      'password': password_dict
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=window_index)
 
   def GetSavedPasswords(self):
     """Return the passwords currently saved.
 
     Returns:
-      A list of 2-item lists of username, password for all saved passwords.
-      Example:
-      { 'passwords': [['username1', 'password1'], ['username2', 'password2']] }
+      A list of dictionaries representing each password. For an example
+      dictionary see AddSavedPassword documentation. The overall structure will
+      be:
+      [ {password1 dictionary}, {password2 dictionary} ]
     """
     cmd_dict = {  # Prepare command for the json interface
       'command': 'GetSavedPasswords'
     }
-    return self._GetResultFromJSONRequest(cmd_dict)
+    return self._GetResultFromJSONRequest(cmd_dict)['passwords']
 
   def SetTheme(self, crx_file_path):
     """Installs the given theme synchronously.
@@ -856,6 +1309,22 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       True, on success.
     """
     return self.InstallExtension(crx_file_path, True)
+
+  def WaitUntilDownloadedThemeSet(self, theme_name):
+    """Waits until the theme has been set.
+
+    This should not be called after SetTheme(). It only needs to be called after
+    downloading a theme file (which will automatically set the theme).
+
+    Uses WaitUntil so timeout is capped by automation timeout.
+
+    Args:
+      theme_name: The name that the theme will have once it is installed.
+    """
+    def _ReturnThemeSet(name):
+      theme_info = self.GetThemeInfo()
+      return theme_info and theme_info['name'] == name
+    return self.WaitUntil(_ReturnThemeSet, args=[theme_name])
 
   def ClearTheme(self):
     """Clear the theme.  Resets to default.
@@ -923,6 +1392,60 @@ class PyUITestSuite(pyautolib.PyUITestSuiteBase, unittest.TestSuite):
     pyautolib.PyUITestSuiteBase.__del__(self)
 
 
+class _GTestTextTestResult(unittest._TextTestResult):
+  """A test result class that can print formatted text results to a stream.
+
+  Results printed in conformance with gtest output format, like:
+  [ RUN        ] autofill.AutoFillTest.testAutofillInvalid: "test desc."
+  [         OK ] autofill.AutoFillTest.testAutofillInvalid
+  [ RUN        ] autofill.AutoFillTest.testFillProfile: "test desc."
+  [         OK ] autofill.AutoFillTest.testFillProfile
+  [ RUN        ] autofill.AutoFillTest.testFillProfileCrazyCharacters: "Test."
+  [         OK ] autofill.AutoFillTest.testFillProfileCrazyCharacters
+  """
+  def __init__(self, stream, descriptions, verbosity):
+    unittest._TextTestResult.__init__(self, stream, descriptions, verbosity)
+
+  def _GetTestURI(self, test):
+    if sys.version_info[:2] <= (2, 4):
+      return '%s.%s' % (unittest._strclass(test.__class__),
+                        test._TestCase__testMethodName)
+    return '%s.%s' % (unittest._strclass(test.__class__), test._testMethodName)
+
+  def getDescription(self, test):
+    return '%s: "%s"' % (self._GetTestURI(test), test.shortDescription())
+
+  def startTest(self, test):
+    unittest.TestResult.startTest(self, test)
+    self.stream.writeln('[ RUN        ] %s' % self.getDescription(test))
+
+  def addSuccess(self, test):
+    unittest.TestResult.addSuccess(self, test)
+    self.stream.writeln('[         OK ] %s' % self._GetTestURI(test))
+
+  def addError(self, test, err):
+    unittest.TestResult.addError(self, test, err)
+    self.stream.writeln('[      ERROR ] %s' % self._GetTestURI(test))
+
+  def addFailure(self, test, err):
+    unittest.TestResult.addFailure(self, test, err)
+    self.stream.writeln('[     FAILED ] %s' % self._GetTestURI(test))
+
+
+class PyAutoTextTestRuner(unittest.TextTestRunner):
+  """Test Runner for PyAuto tests that displays results in textual format.
+
+  Results are displayed in conformance with gtest output.
+  """
+  def __init__(self, verbosity=1):
+    unittest.TextTestRunner.__init__(self,
+                                     stream=sys.stderr,
+                                     verbosity=verbosity)
+
+  def _makeResult(self):
+    return _GTestTextTestResult(self.stream, self.descriptions, self.verbosity)
+
+
 # Implementation inspired from unittest.main()
 class Main(object):
   """Main program for running PyAuto tests."""
@@ -933,6 +1456,7 @@ class Main(object):
     'win32':  'win',
     'darwin': 'mac',
     'linux2': 'linux',
+    'chromeos': 'chromeos',
   }
 
   def __init__(self):
@@ -968,7 +1492,7 @@ class Main(object):
     self._options, self._args = parser.parse_args()
 
     # Setup logging - start with defaults
-    level = logging.WARNING
+    level = logging.INFO
     format = None
 
     if self._options.verbose:
@@ -1098,14 +1622,18 @@ class Main(object):
         else:
           args = self._LoadTestNamesFrom(pyauto_tests_file)
     args = args * self._options.repeat
-    logging.debug("Loading tests from %s", args)
+    logging.debug("Loading %d tests from %s", len(args), args)
     loaded_tests = unittest.defaultTestLoader.loadTestsFromNames(args)
     return loaded_tests
 
   def _LoadTestNamesFrom(self, filename):
     modules= PyUITest.EvalDataFrom(filename)
+    platform = sys.platform
+    if PyUITest.IsChromeOS():  # check if it's chromeos
+      platform = 'chromeos'
+    assert platform in self._platform_map, '%s unsupported' % platform
     all_names = modules.get('all', []) + \
-                modules.get(self._platform_map[sys.platform], [])
+                modules.get(self._platform_map[platform], [])
     args = []
     excluded = []
     # Find all excluded tests.  Excluded tests begin with '-'.
@@ -1126,15 +1654,26 @@ class Main(object):
       raw_input('Attach debugger to process %s and hit <enter> ' % os.getpid())
 
     suite_args = [sys.argv[0]]
-    if self._options.chrome_flags:
-      suite_args.append('--extra-chrome-flags=' + self._options.chrome_flags)
+    chrome_flags = self._options.chrome_flags
+    # Enable crash reporter by default on posix.
+    # On windows, the choice to enable/disable crash reporting is made when
+    # downloading the installer.
+    # TODO(nirnimesh): Figure out a way to control this from here on Win too.
+    if PyUITest.IsPosix():
+      chrome_flags += ' --enable-crash-reporter'
+
+    # We add this so that pyauto can execute javascript in the renderer and
+    # read values back out.
+    chrome_flags += ' --dom-automation'
+
+    suite_args.append('--extra-chrome-flags=%s' % chrome_flags)
     pyauto_suite = PyUITestSuite(suite_args)
     loaded_tests = self._LoadTests(self._args)
     pyauto_suite.addTests(loaded_tests)
     verbosity = 1
     if self._options.verbose:
       verbosity = 2
-    result = unittest.TextTestRunner(verbosity=verbosity).run(pyauto_suite)
+    result = PyAutoTextTestRuner(verbosity=verbosity).run(pyauto_suite)
     del loaded_tests  # Need to destroy test cases before the suite
     del pyauto_suite
     sys.exit(not result.wasSuccessful())

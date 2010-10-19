@@ -31,6 +31,9 @@ function onLoaded() {
                                       'filterCount',
                                       'deleteSelected',
                                       'selectAll',
+                                      'sortById',
+                                      'sortBySource',
+                                      'sortByDescription',
 
                                       // IDs for the details view.
                                       "detailsTabHandles",
@@ -47,7 +50,8 @@ function onLoaded() {
 
   // Create a view which will display info on the proxy setup.
   var proxyView = new ProxyView("proxyTabContent",
-                                "proxyCurrentConfig",
+                                "proxyOriginalSettings",
+                                "proxyEffectiveSettings",
                                 "proxyReloadSettings",
                                 "badProxiesTableBody",
                                 "clearBadProxies");
@@ -63,7 +67,7 @@ function onLoaded() {
   // Create a view which will display import/export options to control the
   // captured data.
   var dataView = new DataView("dataTabContent", "exportedDataText",
-                              "exportToText");
+                              "exportToText", "stripCookiesCheckbox");
 
   // Create a view which will display the results and controls for connection
   // tests.
@@ -73,6 +77,10 @@ function onLoaded() {
   var httpCacheView = new HttpCacheView("httpCacheTabContent",
                                         "httpCacheStats");
 
+  var socketsView = new SocketsView("socketsTabContent",
+                                    "socketTabTbody",
+                                    "socketPoolGroupsDiv");
+
   // Create a view which lets you tab between the different sub-views.
   var categoryTabSwitcher =
       new TabSwitcherView(new DivView('categoryTabHandles'));
@@ -81,8 +89,7 @@ function onLoaded() {
   categoryTabSwitcher.addTab('requestsTab', requestsView, false);
   categoryTabSwitcher.addTab('proxyTab', proxyView, false);
   categoryTabSwitcher.addTab('dnsTab', dnsView, false);
-  categoryTabSwitcher.addTab('socketsTab', new DivView('socketsTabContent'),
-                             false);
+  categoryTabSwitcher.addTab('socketsTab', socketsView, false);
   categoryTabSwitcher.addTab('httpCacheTab', httpCacheView, false);
   categoryTabSwitcher.addTab('dataTab', dataView, false);
   categoryTabSwitcher.addTab('testTab', testView, false);
@@ -132,6 +139,7 @@ function BrowserBridge() {
   this.httpCacheInfo_ = new PollableDataHelper('onHttpCacheInfoChanged');
   this.hostResolverCache_ =
       new PollableDataHelper('onHostResolverCacheChanged');
+  this.socketPoolInfo_ = new PollableDataHelper('onSocketPoolInfoChanged');
 
   // Cache of the data received.
   // TODO(eroman): the controls to clear data in the "Requests" tab should be
@@ -194,11 +202,18 @@ BrowserBridge.prototype.sendGetHttpCacheInfo = function() {
   chrome.send('getHttpCacheInfo');
 };
 
+BrowserBridge.prototype.sendGetSocketPoolInfo = function() {
+  chrome.send('getSocketPoolInfo');
+};
+
 //------------------------------------------------------------------------------
 // Messages received from the browser
 //------------------------------------------------------------------------------
 
 BrowserBridge.prototype.receivedLogEntry = function(logEntry) {
+  // Silently drop entries received before ready to receive them.
+  if (!this.areLogTypesReady_())
+    return;
   if (!logEntry.wasPassivelyCaptured)
     this.activelyCapturedEvents_.push(logEntry);
   for (var i = 0; i < this.logObservers_.length; ++i)
@@ -249,6 +264,10 @@ function(hostResolverCache) {
   this.hostResolverCache_.update(hostResolverCache);
 };
 
+BrowserBridge.prototype.receivedSocketPoolInfo = function(socketPoolInfo) {
+  this.socketPoolInfo_.update(socketPoolInfo);
+};
+
 BrowserBridge.prototype.receivedPassiveLogEntries = function(entries) {
   this.passivelyCapturedEvents_ =
       this.passivelyCapturedEvents_.concat(entries);
@@ -290,6 +309,12 @@ BrowserBridge.prototype.receivedHttpCacheInfo = function(info) {
   this.httpCacheInfo_.update(info);
 };
 
+BrowserBridge.prototype.areLogTypesReady_ = function() {
+  return (LogEventType  != null &&
+          LogEventPhase != null &&
+          LogSourceType != null);
+}
+
 //------------------------------------------------------------------------------
 
 /**
@@ -308,7 +333,17 @@ BrowserBridge.prototype.addLogObserver = function(observer) {
  *
  *   observer.onProxySettingsChanged(proxySettings)
  *
- * |proxySettings| is a formatted string describing the settings.
+ * |proxySettings| is a dictionary with (up to) two properties:
+ *
+ *   "original"  -- The settings that chrome was configured to use
+ *                  (i.e. system settings.)
+ *   "effective" -- The "effective" proxy settings that chrome is using.
+ *                  (decides between the manual/automatic modes of the
+ *                  fetched settings).
+ *
+ * Each of these two configurations is formatted as a string, and may be
+ * omitted if not yet initialized.
+ *
  * TODO(eroman): send a dictionary instead.
  */
 BrowserBridge.prototype.addProxySettingsObserver = function(observer) {
@@ -338,6 +373,16 @@ BrowserBridge.prototype.addBadProxiesObsever = function(observer) {
  */
 BrowserBridge.prototype.addHostResolverCacheObserver = function(observer) {
   this.hostResolverCache_.addObserver(observer);
+};
+
+/**
+ * Adds a listener of the socket pool. |observer| will be called back
+ * when data is received, through:
+ *
+ *   observer.onSocketPoolInfoChanged(socketPoolInfo)
+ */
+BrowserBridge.prototype.addSocketPoolInfoObserver = function(observer) {
+  this.socketPoolInfo_.addObserver(observer);
 };
 
 /**
@@ -403,6 +448,7 @@ BrowserBridge.prototype.doPolling_ = function() {
   this.sendGetBadProxies();
   this.sendGetHostResolverCache();
   this.sendGetHttpCacheInfo();
+  this.sendGetSocketPoolInfo();
 };
 
 /**

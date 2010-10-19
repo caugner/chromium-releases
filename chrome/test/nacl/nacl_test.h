@@ -4,6 +4,7 @@
 
 #ifndef CHROME_TEST_NACL_NACL_TEST_H_
 #define CHROME_TEST_NACL_NACL_TEST_H_
+#pragma once
 
 #include "chrome/test/ui/ui_test.h"
 
@@ -32,6 +33,11 @@ class NaClTest : public UITest {
   // complete.
   void RunTest(const FilePath& filename, int timeout);
 
+  // Similar to RunTest, but relies on the html file to use the "nexes"
+  // property to specify the URLs for all the nexes required to run the test
+  // on different architectures.
+  void RunMultiarchTest(const FilePath& filename, int timeout);
+
   // gtest test setup overrides.
   virtual void SetUp();
   virtual void TearDown();
@@ -43,6 +49,12 @@ class NaClTest : public UITest {
   // Compute the path to the test binaries (prebuilt NaCL executables).
   FilePath GetTestBinariesDir();
   bool use_x64_nexes_;
+
+  // This test uses an HTML file that lists nexes for different architectures
+  // in the "nexes" property
+  bool multiarch_test_;
+
+  DISALLOW_COPY_AND_ASSIGN(NaClTest);
 };
 
 #endif  // CHROME_TEST_NACL_NACL_TEST_H_

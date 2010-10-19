@@ -79,8 +79,23 @@
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd>
+            <div></div>
+          </dd>
+
         </div> <!-- /VALUE -->
 
+        <div id="functionParametersTemplate">
+          <h5>Parameters</h5>
+          <dl>
+            <div>
+              <div>
+              </div>
+            </div>
+          </dl>         
+        </div>
       </div> <!-- /SUBTEMPLATES -->
 
   <a id="top"></a>
@@ -142,6 +157,7 @@
         <ul>
           <li><a href="getstarted.html">Getting Started</a></li>
           <li><a href="overview.html">Overview</a></li>
+          <li><a href="whats_new.html">What's New?</a></li>
           <li><h2><a href="devguide.html">Developer's Guide</a></h2>
             <ul>
               <li>Browser UI
@@ -287,6 +303,11 @@
         </div>
         <!-- /TABLE OF CONTENTS -->
 
+        <!-- Standard content lead-in for experimental API pages -->
+        <p id="classSummary" style="display: none; ">
+          For information on how to use experimental APIs, see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
+        </p>
+
         <!-- STATIC CONTENT PLACEHOLDER -->
         <div id="static"><div id="pageData-name" class="pageData">Packaging</div>
 <div id="pageData-showTOC" class="pageData">true</div>
@@ -370,7 +391,7 @@ You'll need it later if you want to do any of the following:
 <ul>
 <li><a href="#update">Update</a> the extension</li>
 <li>Upload the extension to the
-<a href="https://chrome.google.com/extensions">extensions gallery</a> </li>
+<a href="https://chrome.google.com/extensions">Extensions Gallery</a> </li>
 </ul>
 
 <p>
@@ -531,7 +552,7 @@ See the following page for details:
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>

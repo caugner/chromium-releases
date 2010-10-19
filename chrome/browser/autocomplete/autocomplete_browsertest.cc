@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
@@ -25,6 +27,15 @@
 #else
 #define MAYBE_Basic Basic
 #endif
+
+// Autocomplete test is flaky on ChromeOS.
+// http://crbug.com/52928
+#if defined(OS_CHROMEOS)
+#define MAYBE_Autocomplete FLAKY_Autocomplete
+#else
+#define MAYBE_Autocomplete Autocomplete
+#endif
+
 
 namespace {
 
@@ -99,7 +110,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Basic) {
   EXPECT_FALSE(location_bar->location_entry()->IsSelectAll());
 }
 
-IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, Autocomplete) {
+IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Autocomplete) {
   // The results depend on the history backend being loaded. Make sure it is
   // loaded so that the autocomplete results are consistent.
   WaitForHistoryBackendToLoad();
@@ -142,9 +153,11 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, TabAwayRevertSelect) {
   EXPECT_EQ(UTF8ToWide(chrome::kAboutBlankURL),
             location_bar->location_entry()->GetText());
   location_bar->location_entry()->SetUserText(L"");
+  Browser* browser_used = NULL;
   browser()->AddTabWithURL(
       GURL(chrome::kAboutBlankURL), GURL(), PageTransition::START_PAGE,
-      -1, TabStripModel::ADD_SELECTED, NULL, std::string());
+      -1, TabStripModel::ADD_SELECTED, NULL, std::string(), &browser_used);
+  EXPECT_EQ(browser(), browser_used);
   ui_test_utils::WaitForNavigation(
       &browser()->GetSelectedTabContents()->controller());
   EXPECT_EQ(UTF8ToWide(chrome::kAboutBlankURL),

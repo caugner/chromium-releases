@@ -8,6 +8,7 @@
 #include "base/scoped_bstr_win.h"
 #include "base/scoped_comptr_win.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome_frame/http_negotiate.h"
 #include "chrome_frame/html_utils.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
@@ -77,29 +78,29 @@ TEST_F(HttpNegotiateTest, BeginningTransaction) {
     const std::wstring expected_additional_;
     HRESULT delegate_return_value_;
   } test_cases[] = {
-    { L"Accept: */*\r\n\r\n",
+    { L"Accept: */*\r\n",
       L"",
-      cf_ua + L"\r\n\r\n",
+      cf_ua + L"\r\n",
       S_OK },
-    { L"Accept: */*\r\n\r\n",
+    { L"Accept: */*\r\n",
       L"",
       L"",
       E_OUTOFMEMORY },
     { L"",
-      L"Accept: */*\r\n\r\n",
-      L"Accept: */*\r\n" + cf_ua + L"\r\n\r\n",
+      L"Accept: */*\r\n",
+      L"Accept: */*\r\n" + cf_ua + L"\r\n",
       S_OK },
-    { L"User-Agent: Bingo/1.0\r\n\r\n",
+    { L"User-Agent: Bingo/1.0\r\n",
       L"",
-      L"User-Agent: Bingo/1.0 " + cf_tag + L"\r\n\r\n",
+      L"User-Agent: Bingo/1.0 " + cf_tag + L"\r\n",
       S_OK },
-    { L"User-Agent: NotMe/1.0\r\n\r\n",
-      L"User-Agent: MeMeMe/1.0\r\n\r\n",
-      L"User-Agent: MeMeMe/1.0 " + cf_tag + L"\r\n\r\n",
+    { L"User-Agent: NotMe/1.0\r\n",
+      L"User-Agent: MeMeMe/1.0\r\n",
+      L"User-Agent: MeMeMe/1.0 " + cf_tag + L"\r\n",
       S_OK },
     { L"",
-      L"User-Agent: MeMeMe/1.0\r\n\r\n",
-      L"User-Agent: MeMeMe/1.0 " + cf_tag + L"\r\n\r\n",
+      L"User-Agent: MeMeMe/1.0\r\n",
+      L"User-Agent: MeMeMe/1.0 " + cf_tag + L"\r\n",
       S_OK },
   };
 

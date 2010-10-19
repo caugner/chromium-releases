@@ -1,11 +1,17 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <windows.h>
 #include <shlwapi.h>
 
+#include "base/command_line.h"
+#include "base/environment.h"
 #include "base/file_util.h"
+#include "base/trace_event.h"
+#include "base/logging.h"
+#include "base/scoped_ptr.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/breakpad_win.h"
 #include "chrome/app/client_util.h"
 #include "chrome/common/chrome_switches.h"
@@ -135,7 +141,9 @@ HMODULE LoadChromeWithDirectory(std::wstring* dir) {
       key = NULL;
     }
     if (pre_read) {
+      TRACE_EVENT_BEGIN("PreReadImage", 0, "");
       file_util::PreReadImage(dir->c_str(), pre_read_size, pre_read_step_size);
+      TRACE_EVENT_END("PreReadImage", 0, "");
     }
   }
 #endif  // NDEBUG
@@ -223,9 +231,10 @@ int MainDllLoader::Launch(HINSTANCE instance,
   if (!dll_)
     return ResultCodes::MISSING_DATA;
 
-  ::SetEnvironmentVariableW(
-      BrowserDistribution::GetDistribution()->GetEnvVersionKey().c_str(),
-      version.c_str());
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  env->SetVar(WideToUTF8(
+      BrowserDistribution::GetDistribution()->GetEnvVersionKey()).c_str(),
+      WideToUTF8(version));
 
   InitCrashReporterWithDllPath(file);
   OnBeforeLaunch(version);

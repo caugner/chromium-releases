@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/scoped_temp_dir.h"
 #include "base/string_util.h"
 #include "base/thread.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "net/base/file_stream.h"
 #include "chrome/common/chrome_switches.h"
@@ -43,9 +44,7 @@ const char* kPathNamesMustBeAbsoluteOrLocalError =
 // A limit to stop us passing dangerously large canvases to the browser.
 const int kMaxImageCanvas = 4096 * 4096;
 
-}  // namespace
-
-static SkBitmap DecodeImage(const FilePath& path) {
+SkBitmap DecodeImage(const FilePath& path) {
   // Read the file from disk.
   std::string file_contents;
   if (!file_util::PathExists(path) ||
@@ -64,7 +63,7 @@ static SkBitmap DecodeImage(const FilePath& path) {
   return bitmap;
 }
 
-static bool PathContainsParentDirectory(const FilePath& path) {
+bool PathContainsParentDirectory(const FilePath& path) {
   const FilePath::StringType kSeparators(FilePath::kSeparators);
   const FilePath::StringType kParentDirectory(FilePath::kParentDirectory);
   const size_t npos = FilePath::StringType::npos;
@@ -82,6 +81,15 @@ static bool PathContainsParentDirectory(const FilePath& path) {
   }
 
   return false;
+}
+
+}  // namespace
+
+ExtensionUnpacker::ExtensionUnpacker(const FilePath& extension_path)
+    : extension_path_(extension_path) {
+}
+
+ExtensionUnpacker::~ExtensionUnpacker() {
 }
 
 DictionaryValue* ExtensionUnpacker::ReadManifest() {
@@ -313,7 +321,7 @@ bool ExtensionUnpacker::ReadMessageCatalog(const FilePath& message_path) {
   if (!temp_install_dir_.AppendRelativePath(message_path, &relative_path))
     NOTREACHED();
 
-  parsed_catalogs_->Set(relative_path.DirName().ToWStringHack(),
+  parsed_catalogs_->Set(WideToUTF8(relative_path.DirName().ToWStringHack()),
                         root.release());
 
   return true;

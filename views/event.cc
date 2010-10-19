@@ -25,7 +25,7 @@ LocatedEvent::LocatedEvent(const LocatedEvent& model, View* from, View* to)
     View::ConvertPointToView(from, to, &location_);
 }
 
-KeyEvent::KeyEvent(EventType type, base::KeyboardCode key_code,
+KeyEvent::KeyEvent(EventType type, app::KeyboardCode key_code,
                    int event_flags, int repeat_count, int message_flags)
     : Event(type, event_flags),
       key_code_(key_code),
@@ -46,5 +46,30 @@ MouseEvent::MouseEvent(EventType type,
 MouseEvent::MouseEvent(const MouseEvent& model, View* from, View* to)
     : LocatedEvent(model, from, to) {
 }
+
+#if defined(TOUCH_UI)
+TouchEvent::TouchEvent(EventType type, int x, int y, int flags, int touch_id)
+      : LocatedEvent(type, gfx::Point(x, y), flags),
+        touch_id_(touch_id) {
+}
+
+
+TouchEvent::TouchEvent(EventType type,
+                       View* from,
+                       View* to,
+                       const gfx::Point& l,
+                       int flags,
+                       int touch_id)
+    : LocatedEvent(LocatedEvent(type, gfx::Point(l.x(), l.y()), flags),
+                                from,
+                                to),
+      touch_id_(touch_id) {
+}
+
+TouchEvent::TouchEvent(const TouchEvent& model, View* from, View* to)
+    : LocatedEvent(model, from, to),
+      touch_id_(model.touch_id_) {
+}
+#endif
 
 }  // namespace views

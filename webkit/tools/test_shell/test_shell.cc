@@ -18,6 +18,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/stats_table.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "gfx/codec/png_codec.h"
@@ -42,6 +43,8 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "webkit/blob/blob_storage_controller.h"
+#include "webkit/blob/blob_url_request_job.h"
 #include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
@@ -51,6 +54,7 @@
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_shell_devtools_agent.h"
 #include "webkit/tools/test_shell/test_shell_devtools_client.h"
+#include "webkit/tools/test_shell/test_shell_request_context.h"
 #include "webkit/tools/test_shell/test_shell_switches.h"
 #include "webkit/tools/test_shell/test_webview_delegate.h"
 
@@ -99,14 +103,23 @@ class URLRequestTestShellFileJob : public URLRequestFileJob {
   DISALLOW_COPY_AND_ASSIGN(URLRequestTestShellFileJob);
 };
 
+URLRequestJob* BlobURLRequestJobFactory(URLRequest* request,
+                                        const std::string& scheme) {
+  webkit_blob::BlobStorageController* blob_storage_controller =
+      static_cast<TestShellRequestContext*>(request->context())->
+          blob_storage_controller();
+  return new webkit_blob::BlobURLRequestJob(
+      request,
+      blob_storage_controller->GetBlobDataFromUrl(request->url()),
+      NULL);
+}
+
 }  // namespace
 
 // Initialize static member variable
 WindowList* TestShell::window_list_;
 WebPreferences* TestShell::web_prefs_ = NULL;
 bool TestShell::developer_extras_enabled_ = false;
-bool TestShell::enable_html5_parser_ = true;
-bool TestShell::inspector_test_mode_ = false;
 bool TestShell::layout_test_mode_ = false;
 bool TestShell::allow_external_pages_ = false;
 int TestShell::file_test_timeout_ms_ = kDefaultFileTestTimeoutMillisecs;
@@ -143,6 +156,8 @@ TestShell::TestShell()
     filter->AddHostnameHandler("test-shell-resource", "inspector",
                                &URLRequestTestShellFileJob::InspectorFactory);
     url_util::AddStandardScheme("test-shell-resource");
+
+    URLRequest::RegisterProtocolFactory("blob", &BlobURLRequestJobFactory);
 }
 
 TestShell::~TestShell() {
@@ -231,6 +246,8 @@ void TestShell::Dump(TestShell* shell) {
   if (frame) {
     bool should_dump_as_text =
         shell->layout_test_controller_->ShouldDumpAsText();
+    bool should_generate_pixel_results =
+        shell->layout_test_controller()->ShouldGeneratePixelResults();
     bool dumped_anything = false;
     if (params->dump_tree) {
       dumped_anything = true;
@@ -240,7 +257,10 @@ void TestShell::Dump(TestShell* shell) {
         // Plain text pages should be dumped as text
         const string16& mime_type =
             frame->dataSource()->response().mimeType();
-        should_dump_as_text = EqualsASCII(mime_type, "text/plain");
+        if (EqualsASCII(mime_type, "text/plain")) {
+          should_dump_as_text = true;
+          should_generate_pixel_results = false;
+        }
       }
       if (should_dump_as_text) {
         bool recursive = shell->layout_test_controller_->
@@ -268,7 +288,7 @@ void TestShell::Dump(TestShell* shell) {
       }
     }
 
-    if (params->dump_pixels && !should_dump_as_text) {
+    if (params->dump_pixels && should_generate_pixel_results) {
       // Image output: we write the image data to the file given on the
       // command line (for the dump pixels argument), and the MD5 sum to
       // stdout.
@@ -498,8 +518,6 @@ void TestShell::ResetWebPreferences() {
         // LayoutTests were written with Safari Mac in mind which does not allow
         // tabbing to links by default.
         web_prefs_->tabs_to_links = false;
-
-        web_prefs_->enable_html5_parser = enable_html5_parser_;
 
         // Allow those layout tests running as local files, i.e. under
         // LayoutTests/http/tests/local, to access http server.
@@ -789,8 +807,8 @@ bool IsProtocolSupportedForMedia(const GURL& url) {
   return false;
 }
 
-std::wstring GetWebKitLocale() {
-  return L"en-US";
+std::string GetWebKitLocale() {
+  return "en-US";
 }
 
 void CloseCurrentConnections() {
@@ -802,6 +820,10 @@ void SetCacheMode(bool enabled) {
 }
 
 void ClearCache() {
+  // Used in benchmarking,  Ignored for test_shell.
+}
+
+void EnableSpdy(bool enable) {
   // Used in benchmarking,  Ignored for test_shell.
 }
 

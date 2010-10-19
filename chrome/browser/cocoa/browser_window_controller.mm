@@ -6,6 +6,7 @@
 
 #include <Carbon/Carbon.h>
 
+#include "app/l10n_util.h"
 #include "app/l10n_util_mac.h"
 #include "base/mac_util.h"
 #include "base/nsimage_cache_mac.h"
@@ -13,15 +14,9 @@
 #import "base/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_dll_resource.h"  // IDC_*
+#include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_theme_provider.h"
-#include "chrome/browser/dock_info.h"
-#include "chrome/browser/encoding_menu_controller.h"
-#include "chrome/browser/location_bar.h"
-#include "chrome/browser/profile.h"
-#include "chrome/browser/window_sizer.h"
-#include "chrome/browser/bookmarks/bookmark_editor.h"
 #import "chrome/browser/cocoa/background_gradient_view.h"
 #import "chrome/browser/cocoa/bookmark_bar_controller.h"
 #import "chrome/browser/cocoa/bookmark_editor_controller.h"
@@ -30,8 +25,8 @@
 #import "chrome/browser/cocoa/download_shelf_controller.h"
 #import "chrome/browser/cocoa/event_utils.h"
 #import "chrome/browser/cocoa/fast_resize_view.h"
-#import "chrome/browser/cocoa/find_bar_cocoa_controller.h"
 #import "chrome/browser/cocoa/find_bar_bridge.h"
+#import "chrome/browser/cocoa/find_bar_cocoa_controller.h"
 #import "chrome/browser/cocoa/focus_tracker.h"
 #import "chrome/browser/cocoa/fullscreen_controller.h"
 #import "chrome/browser/cocoa/fullscreen_window.h"
@@ -40,17 +35,24 @@
 #import "chrome/browser/cocoa/sad_tab_controller.h"
 #import "chrome/browser/cocoa/status_bubble_mac.h"
 #import "chrome/browser/cocoa/tab_contents_controller.h"
-#import "chrome/browser/cocoa/tab_strip_model_observer_bridge.h"
 #import "chrome/browser/cocoa/tab_strip_controller.h"
+#import "chrome/browser/cocoa/tab_strip_model_observer_bridge.h"
 #import "chrome/browser/cocoa/tab_strip_view.h"
 #import "chrome/browser/cocoa/tab_view.h"
+#import "chrome/browser/cocoa/tabpose_window.h"
 #import "chrome/browser/cocoa/toolbar_controller.h"
+#include "chrome/browser/dock_info.h"
+#include "chrome/browser/encoding_menu_controller.h"
+#include "chrome/browser/location_bar.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util_mac.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view_mac.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/themes/browser_theme_provider.h"
+#include "chrome/browser/window_sizer.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 
@@ -395,6 +397,10 @@
 
 - (void)updateDevToolsForContents:(TabContents*)contents {
   [tabStripController_ updateDevToolsForContents:contents];
+}
+
+- (void)updateSidebarForContents:(TabContents*)contents {
+  [tabStripController_ updateSidebarForContents:contents];
 }
 
 // Called when the user wants to close a window or from the shutdown process.
@@ -933,11 +939,11 @@
   DCHECK([targetController isKindOfClass:[BrowserWindowController class]]);
   NSInteger command = [sender tag];
   NSUInteger modifierFlags = [[NSApp currentEvent] modifierFlags];
-  if ((command == IDC_RELOAD) && (modifierFlags & NSShiftKeyMask)) {
+  if ((command == IDC_RELOAD) &&
+      (modifierFlags & (NSShiftKeyMask | NSControlKeyMask))) {
     command = IDC_RELOAD_IGNORING_CACHE;
-    // Mask off shift so it isn't interpreted as affecting the disposition
-    // below.
-    modifierFlags &= ~NSShiftKeyMask;
+    // Mask off Shift and Control so they don't affect the disposition below.
+    modifierFlags &= ~(NSShiftKeyMask | NSControlKeyMask);
   }
   if (![[sender window] isMainWindow]) {
     // Remove the command key from the flags, it means "keep the window in
@@ -1155,10 +1161,8 @@
   // Create the new window with a single tab in its model, the one being
   // dragged.
   DockInfo dockInfo;
-  Browser* newBrowser =
-      browser_->tabstrip_model()->TearOffTabContents(contents,
-                                                     browserRect,
-                                                     dockInfo);
+  Browser* newBrowser = browser_->tabstrip_model()->delegate()->
+      CreateNewStripWithContents(contents, browserRect, dockInfo, false);
 
   // Propagate the tab pinned state of the new tab (which is the only tab in
   // this new window).
@@ -1473,6 +1477,7 @@
     // TODO(pinkerton): figure out page-up, http://crbug.com/16305
   } else if ([event deltaY] < -0.5) {
     // TODO(pinkerton): figure out page-down, http://crbug.com/16305
+    browser_->ExecuteCommand(IDC_TABPOSE);
   }
 
   // Ensure the command is valid first (ExecuteCommand() won't do that) and
@@ -1839,6 +1844,26 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 - (BOOL)floatingBarHasFocus {
   NSResponder* focused = [[self window] firstResponder];
   return [focused isKindOfClass:[AutocompleteTextFieldEditor class]];
+}
+
+- (void)openTabpose {
+  NSUInteger modifierFlags = [[NSApp currentEvent] modifierFlags];
+  BOOL slomo = (modifierFlags & NSShiftKeyMask) != 0;
+
+  // Cover info bars, inspector window, and detached bookmark bar on NTP.
+  // Do not cover download shelf.
+  NSRect activeArea = [[self tabContentArea] frame];
+  activeArea.size.height +=
+      NSHeight([[infoBarContainerController_ view] frame]);
+  if ([self isBookmarkBarVisible] && [self placeBookmarkBarBelowInfoBar]) {
+    NSView* bookmarkBarView = [bookmarkBarController_ view];
+    activeArea.size.height += NSHeight([bookmarkBarView frame]);
+  }
+
+  [TabposeWindow openTabposeFor:[self window]
+                           rect:activeArea
+                          slomo:slomo
+                  tabStripModel:browser_->tabstrip_model()];
 }
 
 @end  // @implementation BrowserWindowController(Fullscreen)

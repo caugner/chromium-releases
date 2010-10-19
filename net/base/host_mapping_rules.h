@@ -4,6 +4,7 @@
 
 #ifndef NET_BASE_HOST_MAPPING_RULES_H_
 #define NET_BASE_HOST_MAPPING_RULES_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -11,12 +12,12 @@
 
 namespace net {
 
-struct HostPortPair;
+class HostPortPair;
 
 class HostMappingRules {
  public:
   HostMappingRules();
-  
+
   // Modifies |*host_port| based on the current rules. Returns true if the
   // RequestInfo was modified, false otherwise.
   bool RewriteHost(HostPortPair* host_port) const;

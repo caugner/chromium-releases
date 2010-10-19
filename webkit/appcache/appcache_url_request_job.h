@@ -28,7 +28,7 @@ class AppCacheURLRequestJob : public URLRequestJob,
   // methods should be called, and only once per job. A job will sit idle and
   // wait indefinitely until one of the deliver methods is called.
   void DeliverAppCachedResponse(const GURL& manifest_url, int64 cache_id,
-                                const AppCacheEntry& entry);
+                                const AppCacheEntry& entry, bool is_fallback);
   void DeliverNetworkResponse();
   void DeliverErrorResponse();
 
@@ -67,6 +67,11 @@ class AppCacheURLRequestJob : public URLRequestJob,
   // Returns true if the job has been killed.
   bool has_been_killed() const {
     return has_been_killed_;
+  }
+
+  // Returns true if the cache entry was not found in the disk cache.
+  bool cache_entry_not_found() const {
+    return cache_entry_not_found_;
   }
 
  private:
@@ -131,6 +136,8 @@ class AppCacheURLRequestJob : public URLRequestJob,
   GURL manifest_url_;
   int64 cache_id_;
   AppCacheEntry entry_;
+  bool is_fallback_;
+  bool cache_entry_not_found_;
   scoped_refptr<AppCacheResponseInfo> info_;
   net::HttpByteRange range_requested_;
   scoped_ptr<net::HttpResponseInfo> range_response_info_;

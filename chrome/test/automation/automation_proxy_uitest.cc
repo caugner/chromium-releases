@@ -5,15 +5,14 @@
 #include <string>
 
 #include "app/app_switches.h"
-#include "app/l10n_util.h"
 #include "app/message_box_flags.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/i18n/rtl.h"
-#include "base/keyboard_codes.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
+#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/net/url_request_slow_http_job.h"
@@ -31,7 +30,7 @@
 #include "chrome/test/ui/ui_test.h"
 #include "gfx/rect.h"
 #include "net/base/net_util.h"
-#include "net/url_request/url_request_unittest.h"
+#include "net/test/test_server.h"
 #define GMOCK_MUTANT_INCLUDE_LATE_OBJECT_BINDING
 #include "testing/gmock_mutant.h"
 #include "views/event.h"
@@ -45,8 +44,7 @@ class AutomationProxyTest : public UITest {
  protected:
   AutomationProxyTest() {
     dom_automation_enabled_ = true;
-    launch_arguments_.AppendSwitchWithValue(switches::kLang,
-                                            L"en-US");
+    launch_arguments_.AppendSwitchASCII(switches::kLang, "en-US");
   }
 };
 
@@ -346,8 +344,8 @@ class AutomationProxyTest2 : public AutomationProxyVisibleTest {
 
     document2_ = test_data_directory_.AppendASCII("title2.html");
     launch_arguments_ = CommandLine(CommandLine::ARGUMENTS_ONLY);
-    launch_arguments_.AppendLooseValue(document1_.ToWStringHack());
-    launch_arguments_.AppendLooseValue(document2_.ToWStringHack());
+    launch_arguments_.AppendArgPath(document1_);
+    launch_arguments_.AppendArgPath(document2_);
   }
 
   FilePath document1_;
@@ -563,7 +561,7 @@ class AutomationProxyTest3 : public UITest {
 
     dom_automation_enabled_ = true;
     launch_arguments_ = CommandLine(CommandLine::ARGUMENTS_ONLY);
-    launch_arguments_.AppendLooseValue(document1_.ToWStringHack());
+    launch_arguments_.AppendArgPath(document1_);
   }
 
   FilePath document1_;
@@ -626,7 +624,7 @@ const char simple_data_url[] =
     "</body></html>";
 
 ExternalTabUITestMockClient::ExternalTabUITestMockClient(int execution_timeout)
-    : AutomationProxy(execution_timeout),
+    : AutomationProxy(execution_timeout, false),
       host_window_style_(WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_VISIBLE),
       host_window_(NULL) {
 }
@@ -971,10 +969,10 @@ TEST_F(ExternalTabUITest, FLAKY_TabPostMessage) {
 }
 
 TEST_F(ExternalTabUITest, FLAKY_PostMessageTarget)  {
-  const wchar_t kDocRoot[] = L"chrome/test/data/external_tab";
-  scoped_refptr<HTTPTestServer> server(
-      HTTPTestServer::CreateServer(kDocRoot, NULL));
-  ASSERT_THAT(server.get(), testing::NotNull());
+  net::TestServer test_server(
+      net::TestServer::TYPE_HTTP,
+      FilePath(FILE_PATH_LITERAL("chrome/test/data/external_tab")));
+  ASSERT_TRUE(test_server.Start());
 
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());

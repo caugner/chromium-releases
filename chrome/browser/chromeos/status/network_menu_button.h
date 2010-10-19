@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_STATUS_NETWORK_MENU_BUTTON_H_
 #define CHROME_BROWSER_CHROMEOS_STATUS_NETWORK_MENU_BUTTON_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -85,7 +86,6 @@ class NetworkMenuButton : public StatusAreaButton,
 
   // NetworkLibrary::Observer implementation.
   virtual void NetworkChanged(NetworkLibrary* obj);
-  virtual void NetworkTraffic(NetworkLibrary* cros, int traffic_type);
 
   // Returns the Icon for a network strength between 0 and 100.
   // |black| is used to specify whether to return a black icon for display

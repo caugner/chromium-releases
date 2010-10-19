@@ -7,15 +7,18 @@
 #include "app/surface/transport_dib.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/histogram.h"
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/renderer/render_process.h"
 #include "chrome/renderer/render_thread.h"
 #include "gfx/point.h"
 #include "gfx/size.h"
+#include "ipc/ipc_sync_message.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
@@ -24,6 +27,7 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebScreenInfo.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
+#include "webkit/glue/plugins/webplugin.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_POSIX)
@@ -37,15 +41,18 @@
 using WebKit::WebCompositionUnderline;
 using WebKit::WebCursorInfo;
 using WebKit::WebInputEvent;
+using WebKit::WebMouseEvent;
 using WebKit::WebNavigationPolicy;
 using WebKit::WebPopupMenu;
 using WebKit::WebPopupMenuInfo;
+using WebKit::WebPopupType;
 using WebKit::WebRect;
 using WebKit::WebScreenInfo;
 using WebKit::WebSize;
 using WebKit::WebTextDirection;
 using WebKit::WebTextInputType;
 using WebKit::WebVector;
+using WebKit::WebWidget;
 
 RenderWidget::RenderWidget(RenderThreadBase* render_thread,
                            WebKit::WebPopupType popup_type)
@@ -82,7 +89,7 @@ RenderWidget::~RenderWidget() {
   RenderProcess::current()->ReleaseProcess();
 }
 
-/*static*/
+// static
 RenderWidget* RenderWidget::Create(int32 opener_id,
                                    RenderThreadBase* render_thread,
                                    WebKit::WebPopupType popup_type) {
@@ -91,6 +98,20 @@ RenderWidget* RenderWidget::Create(int32 opener_id,
                                                         popup_type);
   widget->Init(opener_id);  // adds reference
   return widget;
+}
+
+// static
+WebWidget* RenderWidget::CreateWebWidget(RenderWidget* render_widget) {
+  switch (render_widget->popup_type_) {
+    case WebKit::WebPopupTypeNone: // Nothing to create.
+      break;
+    case WebKit::WebPopupTypeSelect:
+    case WebKit::WebPopupTypeSuggestion:
+      return WebPopupMenu::create(render_widget);
+    default:
+      NOTREACHED();
+  }
+  return NULL;
 }
 
 void RenderWidget::ConfigureAsExternalPopupMenu(const WebPopupMenuInfo& info) {
@@ -104,15 +125,23 @@ void RenderWidget::ConfigureAsExternalPopupMenu(const WebPopupMenuInfo& info) {
 }
 
 void RenderWidget::Init(int32 opener_id) {
+  DoInit(opener_id,
+         RenderWidget::CreateWebWidget(this),
+         new ViewHostMsg_CreateWidget(opener_id, popup_type_, &routing_id_));
+}
+
+
+void RenderWidget::DoInit(int32 opener_id,
+                          WebWidget* web_widget,
+                          IPC::SyncMessage* create_widget_message) {
   DCHECK(!webwidget_);
 
   if (opener_id != MSG_ROUTING_NONE)
     opener_id_ = opener_id;
 
-  webwidget_ = WebPopupMenu::create(this);
+  webwidget_ = web_widget;
 
-  bool result = render_thread_->Send(
-      new ViewHostMsg_CreateWidget(opener_id, popup_type_, &routing_id_));
+  bool result = render_thread_->Send(create_widget_message);
   if (result) {
     render_thread_->AddRoute(routing_id_, this);
     // Take a reference on behalf of the RenderThread.  This will be balanced
@@ -346,6 +375,8 @@ void RenderWidget::OnHandleInputEvent(const IPC::Message& message) {
 
   if (WebInputEvent::isKeyboardEventType(input_event->type))
     DidHandleKeyEvent();
+  if (WebInputEvent::isMouseEventType(input_event->type))
+    DidHandleMouseEvent(*(static_cast<const WebMouseEvent*>(input_event)));
 }
 
 void RenderWidget::OnMouseCaptureLost() {
@@ -628,17 +659,9 @@ void RenderWidget::show(WebNavigationPolicy) {
 }
 
 void RenderWidget::didFocus() {
-  // Prevent the widget from stealing the focus if it does not have focus
-  // already.  We do this by explicitely setting the focus to false again.
-  // We only let the browser focus the renderer.
-  if (!has_focus_ && webwidget_) {
-    MessageLoop::current()->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &RenderWidget::ClearFocus));
-  }
 }
 
 void RenderWidget::didBlur() {
-  Send(new ViewHostMsg_Blur(routing_id_));
 }
 
 void RenderWidget::DoDeferredClose() {

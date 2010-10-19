@@ -4,8 +4,6 @@
 
 #include "chrome/browser/in_process_webkit/dom_storage_area.h"
 
-#include "base/file_path.h"
-#include "base/file_util.h"
 #include "base/task.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/in_process_webkit/dom_storage_context.h"
@@ -99,7 +97,7 @@ bool DOMStorageArea::CheckContentSetting(
     DOMStorageDispatcherHost* sender) {
   ContentSetting content_setting =
       host_content_settings_map_->GetContentSetting(
-          origin_url_, CONTENT_SETTINGS_TYPE_COOKIES);
+          origin_url_, CONTENT_SETTINGS_TYPE_COOKIES, "");
 
   if (content_setting == CONTENT_SETTING_ASK) {
     DOMStoragePermissionRequest request(origin_url_, key, value,

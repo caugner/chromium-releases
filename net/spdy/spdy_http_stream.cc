@@ -10,10 +10,15 @@
 
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "net/base/load_flags.h"
+#include "net/base/net_util.h"
+#include "net/base/ssl_cert_request_info.h"
 #include "net/http/http_request_info.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
+#include "net/http/http_util.h"
 #include "net/spdy/spdy_session.h"
 
 namespace {
@@ -86,7 +91,8 @@ bool SpdyHeadersToHttpResponse(const spdy::SpdyHeaderBlock& headers,
 // Create a SpdyHeaderBlock for a Spdy SYN_STREAM Frame from
 // a HttpRequestInfo block.
 void CreateSpdyHeadersFromHttpRequest(
-    const net::HttpRequestInfo& info, spdy::SpdyHeaderBlock* headers) {
+    const net::HttpRequestInfo& info, spdy::SpdyHeaderBlock* headers,
+    bool direct) {
   // TODO(willchan): It's not really necessary to convert from
   // HttpRequestHeaders to spdy::SpdyHeaderBlock.
 
@@ -110,7 +116,28 @@ void CreateSpdyHeadersFromHttpRequest(
   // TODO(mbelshe): Add authentication headers here.
 
   (*headers)["method"] = info.method;
-  (*headers)["url"] = info.url.spec();
+
+  // Handle content-length. This is the same as BuildRequestHeader in
+  // http_network_transaction.cc.
+  // TODO(lzheng): reduce the code duplication between spdy and http here.
+  if (info.upload_data) {
+    (*headers)["content-length"] =
+        base::Int64ToString(info.upload_data->GetContentLength());
+  } else if (info.method == "POST" || info.method == "PUT" ||
+             info.method == "HEAD") {
+    // An empty POST/PUT request still needs a content length.  As for HEAD,
+    // IE and Safari also add a content length header.  Presumably it is to
+    // support sending a HEAD request to an URL that only expects to be sent a
+    // POST or some other method that normally would have a message body.
+    (*headers)["content-length"] = "0";
+  }
+
+  if (direct)
+    (*headers)["url"] = net::HttpUtil::PathForRequest(info.url);
+  else
+    (*headers)["url"] = net::HttpUtil::SpecForRequest(info.url);
+  (*headers)["host"] = net::GetHostAndOptionalPort(info.url);
+  (*headers)["scheme"] = info.url.scheme();
   (*headers)["version"] = kHttpProtocolVersion;
   if (!info.referrer.is_empty())
     (*headers)["referer"] = info.referrer.spec();
@@ -128,31 +155,32 @@ void CreateSpdyHeadersFromHttpRequest(
 
 namespace net {
 
-SpdyHttpStream::SpdyHttpStream()
+SpdyHttpStream::SpdyHttpStream(SpdySession* spdy_session, bool direct)
     : ALLOW_THIS_IN_INITIALIZER_LIST(read_callback_factory_(this)),
       stream_(NULL),
-      spdy_session_(NULL),
+      spdy_session_(spdy_session),
       response_info_(NULL),
       download_finished_(false),
       user_callback_(NULL),
       user_buffer_len_(0),
       buffered_read_callback_pending_(false),
-      more_read_data_pending_(false) { }
+      more_read_data_pending_(false),
+      direct_(direct) { }
 
 SpdyHttpStream::~SpdyHttpStream() {
   if (stream_)
     stream_->DetachDelegate();
 }
 
-int SpdyHttpStream::InitializeStream(
-    SpdySession* spdy_session,
-    const HttpRequestInfo& request_info,
-    const BoundNetLog& stream_net_log,
-    CompletionCallback* callback) {
-  spdy_session_ = spdy_session;
+int SpdyHttpStream::InitializeStream(const HttpRequestInfo* request_info,
+                                     const BoundNetLog& stream_net_log,
+                                     CompletionCallback* callback) {
+  if (spdy_session_->IsClosed())
+   return ERR_CONNECTION_CLOSED;
+
   request_info_ = request_info;
-  if (request_info_.method == "GET") {
-    int error = spdy_session_->GetPushStream(request_info.url, &stream_,
+  if (request_info_->method == "GET") {
+    int error = spdy_session_->GetPushStream(request_info_->url, &stream_,
                                              stream_net_log);
     if (error != OK)
       return error;
@@ -160,35 +188,10 @@ int SpdyHttpStream::InitializeStream(
 
   if (stream_.get())
     return OK;
-  else
-    return spdy_session_->CreateStream(request_info_.url,
-                                       request_info_.priority, &stream_,
-                                       stream_net_log, callback, this);
-}
 
-void SpdyHttpStream::InitializeRequest(
-    base::Time request_time,
-    UploadDataStream* upload_data) {
-  CHECK(stream_.get());
-  stream_->SetDelegate(this);
-  linked_ptr<spdy::SpdyHeaderBlock> headers(new spdy::SpdyHeaderBlock);
-  CreateSpdyHeadersFromHttpRequest(request_info_, headers.get());
-  stream_->set_spdy_headers(headers);
-
-  stream_->SetRequestTime(request_time);
-  // This should only get called in the case of a request occuring
-  // during server push that has already begun but hasn't finished,
-  // so we set the response's request time to be the actual one
-  if (response_info_)
-    response_info_->request_time = request_time;
-
-  CHECK(!request_body_stream_.get());
-  if (upload_data) {
-    if (upload_data->size())
-      request_body_stream_.reset(upload_data);
-    else
-      delete upload_data;
-  }
+  return spdy_session_->CreateStream(request_info_->url,
+                                     request_info_->priority, &stream_,
+                                     stream_net_log, callback);
 }
 
 const HttpResponseInfo* SpdyHttpStream::GetResponseInfo() const {
@@ -203,28 +206,30 @@ uint64 SpdyHttpStream::GetUploadProgress() const {
 }
 
 int SpdyHttpStream::ReadResponseHeaders(CompletionCallback* callback) {
-  DCHECK(stream_->is_idle());
-  // Note: The SpdyStream may have already received the response headers, so
-  //       this call may complete synchronously.
   CHECK(callback);
+  CHECK(!stream_->cancelled());
 
-  if (stream_->response_complete())
+  if (stream_->closed())
     return stream_->response_status();
 
-  int result = stream_->DoReadResponseHeaders();
-  if (result == ERR_IO_PENDING) {
-    CHECK(!user_callback_);
-    user_callback_ = callback;
+  // Check if we already have the response headers. If so, return synchronously.
+  if(stream_->response_received()) {
+    CHECK(stream_->is_idle());
+    return OK;
   }
-  return result;
+
+  // Still waiting for the response, return IO_PENDING.
+  CHECK(!user_callback_);
+  user_callback_ = callback;
+  return ERR_IO_PENDING;
 }
 
 int SpdyHttpStream::ReadResponseBody(
     IOBuffer* buf, int buf_len, CompletionCallback* callback) {
+  CHECK(stream_->is_idle());
   CHECK(buf);
   CHECK(buf_len);
   CHECK(callback);
-  DCHECK(stream_->is_idle());
 
   // If we have data buffered, complete the IO immediately.
   if (!response_body_.empty()) {
@@ -246,8 +251,10 @@ int SpdyHttpStream::ReadResponseBody(
       }
       bytes_read += bytes_to_copy;
     }
+    if (spdy_session_->flow_control())
+      stream_->IncreaseRecvWindowSize(bytes_read);
     return bytes_read;
-  } else if (stream_->response_complete()) {
+  } else if (stream_->closed()) {
     return stream_->response_status();
   }
 
@@ -261,13 +268,45 @@ int SpdyHttpStream::ReadResponseBody(
   return ERR_IO_PENDING;
 }
 
-int SpdyHttpStream::SendRequest(HttpResponseInfo* response,
+void SpdyHttpStream::Close(bool not_reusable) {
+  // Note: the not_reusable flag has no meaning for SPDY streams.
+
+  Cancel();
+}
+
+int SpdyHttpStream::SendRequest(const std::string& /*headers_string*/,
+                                UploadDataStream* request_body,
+                                HttpResponseInfo* response,
                                 CompletionCallback* callback) {
+  base::Time request_time = base::Time::Now();
+  CHECK(stream_.get());
+
+  stream_->SetDelegate(this);
+
+  linked_ptr<spdy::SpdyHeaderBlock> headers(new spdy::SpdyHeaderBlock);
+  CreateSpdyHeadersFromHttpRequest(*request_info_, headers.get(), direct_);
+  stream_->set_spdy_headers(headers);
+
+  stream_->SetRequestTime(request_time);
+  // This should only get called in the case of a request occurring
+  // during server push that has already begun but hasn't finished,
+  // so we set the response's request time to be the actual one
+  if (response_info_)
+    response_info_->request_time = request_time;
+
+  CHECK(!request_body_stream_.get());
+  if (request_body) {
+    if (request_body->size())
+      request_body_stream_.reset(request_body);
+    else
+      delete request_body;
+  }
+
   CHECK(callback);
   CHECK(!stream_->cancelled());
   CHECK(response);
 
-  if (stream_->response_complete()) {
+  if (!stream_->pushed() && stream_->closed()) {
     if (stream_->response_status() == OK)
       return ERR_FAILED;
     else
@@ -279,20 +318,18 @@ int SpdyHttpStream::SendRequest(HttpResponseInfo* response,
   // a) A client initiated request. In this case, |response_info_| should be
   //    NULL to start with.
   // b) A client request which matches a response that the server has already
-  //    pushed.  In this case, the value of |*push_response_info_| is copied
-  //    over to the new response object |*response|.  |push_response_info_| is
-  //    deleted, and |response_info_| is reset |response|.
+  //    pushed.
   if (push_response_info_.get()) {
-    *response = *push_response_info_;
+    *response = *(push_response_info_.get());
     push_response_info_.reset();
-    response_info_ = NULL;
   }
+  else
+    DCHECK_EQ(static_cast<HttpResponseInfo*>(NULL), response_info_);
 
-  DCHECK_EQ(static_cast<HttpResponseInfo*>(NULL), response_info_);
   response_info_ = response;
 
   bool has_upload_data = request_body_stream_.get() != NULL;
-  int result = stream_->DoSendRequest(has_upload_data);
+  int result = stream_->SendRequest(has_upload_data);
   if (result == ERR_IO_PENDING) {
     CHECK(!user_callback_);
     user_callback_ = callback;
@@ -302,13 +339,15 @@ int SpdyHttpStream::SendRequest(HttpResponseInfo* response,
 
 void SpdyHttpStream::Cancel() {
   if (spdy_session_)
-    spdy_session_->CancelPendingCreateStreams(this);
+    spdy_session_->CancelPendingCreateStreams(&stream_);
   user_callback_ = NULL;
   if (stream_)
     stream_->Cancel();
 }
 
 bool SpdyHttpStream::OnSendHeadersComplete(int status) {
+  if (user_callback_)
+    DoCallback(status);
   return request_body_stream_.get() == NULL;
 }
 
@@ -336,13 +375,18 @@ int SpdyHttpStream::OnResponseReceived(const spdy::SpdyHeaderBlock& response,
     response_info_ = push_response_info_.get();
   }
 
+  // TODO(mbelshe): This is the time of all headers received, not just time
+  // to first byte.
+  DCHECK(response_info_->response_time.is_null());
+  response_info_->response_time = base::Time::Now();
+
   if (!SpdyHeadersToHttpResponse(response, response_info_)) {
     status = ERR_INVALID_RESPONSE;
   } else {
     stream_->GetSSLInfo(&response_info_->ssl_info,
                         &response_info_->was_npn_negotiated);
     response_info_->request_time = stream_->GetRequestTime();
-    response_info_->vary_data.Init(request_info_, *response_info_->headers);
+    response_info_->vary_data.Init(*request_info_, *response_info_->headers);
     // TODO(ahendrickson): This is recorded after the entire SYN_STREAM control
     // frame has been received and processed.  Move to framer?
     response_info_->response_time = response_time;
@@ -357,7 +401,8 @@ void SpdyHttpStream::OnDataReceived(const char* data, int length) {
   // Note that data may be received for a SpdyStream prior to the user calling
   // ReadResponseBody(), therefore user_buffer_ may be NULL.  This may often
   // happen for server initiated streams.
-  if (length > 0 && !stream_->response_complete()) {
+  DCHECK(!stream_->closed() || stream_->pushed());
+  if (length > 0) {
     // Save the received data.
     IOBufferWithSize* io_buffer = new IOBufferWithSize(length);
     memcpy(io_buffer->data(), data, length);
@@ -407,7 +452,7 @@ void SpdyHttpStream::ScheduleBufferedReadCallback() {
 // the caller.  Returns true if we should wait, false otherwise.
 bool SpdyHttpStream::ShouldWaitForMoreBufferedData() const {
   // If the response is complete, there is no point in waiting.
-  if (stream_->response_complete())
+  if (stream_->closed())
     return false;
 
   int bytes_buffered = 0;
@@ -457,6 +502,18 @@ void SpdyHttpStream::DoCallback(int rv) {
   CompletionCallback* c = user_callback_;
   user_callback_ = NULL;
   c->Run(rv);
+}
+
+void SpdyHttpStream::GetSSLInfo(SSLInfo* ssl_info) {
+  DCHECK(stream_);
+  bool using_npn;
+  stream_->GetSSLInfo(ssl_info, &using_npn);
+}
+
+void SpdyHttpStream::GetSSLCertRequestInfo(
+    SSLCertRequestInfo* cert_request_info) {
+  DCHECK(stream_);
+  stream_->GetSSLCertRequestInfo(cert_request_info);
 }
 
 }  // namespace net

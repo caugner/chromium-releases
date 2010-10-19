@@ -149,7 +149,8 @@ GtkWidget* PageInfoWindowGtk::CreateSection(
 
   GtkWidget* section_box = gtk_hbox_new(FALSE, 0);
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  GtkWidget* image = gtk_image_new_from_pixbuf(section.state ?
+  GtkWidget* image = gtk_image_new_from_pixbuf(
+      section.state == PageInfoModel::SECTION_STATE_OK ?
       rb.GetPixbufNamed(IDR_PAGEINFO_GOOD) :
       rb.GetPixbufNamed(IDR_PAGEINFO_BAD));
   gtk_box_pack_start(GTK_BOX(section_box), image, FALSE, FALSE,
@@ -157,8 +158,8 @@ GtkWidget* PageInfoWindowGtk::CreateSection(
   gtk_misc_set_alignment(GTK_MISC(image), 0, 0);
 
   GtkWidget* text_box = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
-  if (!section.head_line.empty()) {
-    label = gtk_label_new(UTF16ToUTF8(section.head_line).c_str());
+  if (!section.headline.empty()) {
+    label = gtk_label_new(UTF16ToUTF8(section.headline).c_str());
     gtk_misc_set_alignment(GTK_MISC(label), 0, 0);
     gtk_box_pack_start(GTK_BOX(text_box), label, FALSE, FALSE, 0);
   }

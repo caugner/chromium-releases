@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_WINDOW_WINDOW_GTK_H_
 #define VIEWS_WINDOW_WINDOW_GTK_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "views/widget/widget_gtk.h"
@@ -32,6 +33,7 @@ class WindowGtk : public WidgetGtk, public Window {
   virtual void Show();
   virtual void HideWindow();
   virtual void Activate();
+  virtual void Deactivate();
   virtual void Close();
   virtual void Maximize();
   virtual void Minimize();

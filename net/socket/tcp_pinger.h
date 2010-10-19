@@ -4,6 +4,7 @@
 
 #ifndef NET_SOCKET_TCP_PINGER_H_
 #define NET_SOCKET_TCP_PINGER_H_
+#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/ref_counted.h"
@@ -86,7 +87,7 @@ class TCPPinger {
     }
 
     void DoConnect() {
-      sock_.reset(new TCPClientSocket(addr_, NULL));
+      sock_.reset(new TCPClientSocket(addr_, NULL, net::NetLog::Source()));
       int rv = sock_->Connect(&connect_callback_);
       // Regardless of success or failure, if we're done now,
       // signal the customer.

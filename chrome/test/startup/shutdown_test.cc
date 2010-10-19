@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/env_var.h"
+#include "base/environment.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/time.h"
@@ -13,7 +14,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
-#include "chrome/test/ui/ui_test.h"
+#include "chrome/test/ui/ui_perf_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/net_util.h"
 
@@ -21,7 +22,7 @@ using base::TimeDelta;
 
 namespace {
 
-class ShutdownTest : public UITest {
+class ShutdownTest : public UIPerfTest {
  public:
   ShutdownTest() {
     show_window_ = true;
@@ -69,10 +70,10 @@ class ShutdownTest : public UITest {
                        UITest::ShutdownType shutdown_type) {
     const int kNumCyclesMax = 20;
     int numCycles = kNumCyclesMax;
-    scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
+    scoped_ptr<base::Environment> env(base::Environment::Create());
     std::string numCyclesEnv;
-    if (env->GetEnv(env_vars::kStartupTestsNumCycles, &numCyclesEnv) &&
-        StringToInt(numCyclesEnv, &numCycles)) {
+    if (env->GetVar(env_vars::kStartupTestsNumCycles, &numCyclesEnv) &&
+        base::StringToInt(numCyclesEnv, &numCycles)) {
       if (numCycles <= kNumCyclesMax) {
         LOG(INFO) << env_vars::kStartupTestsNumCycles
                   << " set in environment, so setting numCycles to "
@@ -122,17 +123,28 @@ TEST_F(ShutdownTest, SimpleUserQuit) {
                   true, /* important */ SIMPLE, UITest::USER_QUIT);
 }
 
-TEST_F(ShutdownTest, SimpleSessionEnding) {
+// http://crbug.com/52858
+#if defined(OS_MACOSX)
+#define MAYBE_SimpleSessionEnding FLAKY_SimpleSessionEnding
+#define MAYBE_TwentyTabsWindowClose FLAKY_TwentyTabsWindowClose
+#define MAYBE_TwentyTabsUserQuit FLAKY_TwentyTabsUserQuit
+#else
+#define MAYBE_SimpleSessionEnding SimpleSessionEnding
+#define MAYBE_TwentyTabsWindowClose TwentyTabsWindowClose
+#define MAYBE_TwentyTabsUserQuit TwentyTabsUserQuit
+#endif
+
+TEST_F(ShutdownTest, MAYBE_SimpleSessionEnding) {
   RunShutdownTest("shutdown", "simple-session-ending",
                   true, /* important */ SIMPLE, UITest::SESSION_ENDING);
 }
 
-TEST_F(ShutdownTest, TwentyTabsWindowClose) {
+TEST_F(ShutdownTest, MAYBE_TwentyTabsWindowClose) {
   RunShutdownTest("shutdown", "twentytabs-window-close",
                   true, /* important */ TWENTY_TABS, UITest::WINDOW_CLOSE);
 }
 
-TEST_F(ShutdownTest, TwentyTabsUserQuit) {
+TEST_F(ShutdownTest, MAYBE_TwentyTabsUserQuit) {
   RunShutdownTest("shutdown", "twentytabs-user-quit",
                   true, /* important */ TWENTY_TABS, UITest::USER_QUIT);
 }

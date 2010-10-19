@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -8,17 +8,17 @@
 
 #ifndef CHROME_INSTALLER_UTIL_WORK_ITEM_H_
 #define CHROME_INSTALLER_UTIL_WORK_ITEM_H_
+#pragma once
 
 #include <windows.h>
 #include <string>
-
-#include "base/file_path.h"
 
 class CopyTreeWorkItem;
 class CreateDirWorkItem;
 class CreateRegKeyWorkItem;
 class DeleteTreeWorkItem;
 class DeleteRegValueWorkItem;
+class FilePath;
 class MoveTreeWorkItem;
 class SelfRegWorkItem;
 class SetRegValueWorkItem;
@@ -100,7 +100,8 @@ class WorkItem {
   // Add a SelfRegWorkItem that registers or unregisters a DLL at the
   // specified path.
   static SelfRegWorkItem* CreateSelfRegWorkItem(const std::wstring& dll_path,
-                                                bool do_register);
+                                                bool do_register,
+                                                bool user_level_registration);
 
   // Create an empty WorkItemList. A WorkItemList can recursively contains
   // a list of WorkItems.

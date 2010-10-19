@@ -4,10 +4,11 @@
 
 #ifndef CHROME_BROWSER_DOM_UI_DOM_UI_UTIL_H_
 #define CHROME_BROWSER_DOM_UI_DOM_UI_UTIL_H_
+#pragma once
 
 #include <string>
 
-class Value;
+class ListValue;
 
 namespace dom_ui_util {
 
@@ -17,7 +18,7 @@ namespace dom_ui_util {
 // one entry in it, and that first entry must be a string, which is
 // returned.  The parameter is a Value for convenience.  Returns an
 // empty string on error or if the parameter is not a ListValue.
-std::string GetJsonResponseFromFirstArgumentInList(const Value* content);
+std::string GetJsonResponseFromFirstArgumentInList(const ListValue* args);
 
 // Convenience routine to get one of the response strings from an
 // argument list.  content must be a ListValue, with at least
@@ -26,7 +27,7 @@ std::string GetJsonResponseFromFirstArgumentInList(const Value* content);
 // which is returned.  The parameter is a Value for convenience.
 // Returns an empty string on error or if the parameter is not a
 // ListValue.
-std::string GetJsonResponseFromArgumentList(const Value* content,
+std::string GetJsonResponseFromArgumentList(const ListValue* args,
                                             size_t list_index);
 
 }  // end of namespace

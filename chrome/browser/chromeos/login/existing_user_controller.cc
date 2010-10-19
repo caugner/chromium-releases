@@ -10,11 +10,13 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/stl_util-inl.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
@@ -28,6 +30,7 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
 #include "gfx/native_widget_types.h"
+#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "views/screen.h"
 #include "views/widget/widget_gtk.h"
@@ -44,15 +47,9 @@ const size_t kMaxUsers = 6;
 // Used to indicate no user has been selected.
 const size_t kNotSelected = -1;
 
-// ClientLogin response parameters.
-const char kError[] = "Error=";
-const char kCaptchaError[] = "CaptchaRequired";
-const char kCaptchaUrlParam[] = "CaptchaUrl=";
-const char kCaptchaTokenParam[] = "CaptchaToken=";
-const char kParamSuffix[] = "\n";
-
-// URL prefix for CAPTCHA image.
-const char kCaptchaUrlPrefix[] = "http://www.google.com/accounts/";
+// Offset of cursor in first position from edit left side. It's used to position
+// info bubble arrow to cursor.
+const int kCursorOffset = 5;
 
 // Checks if display names are unique. If there are duplicates, enables
 // tooltips with full emails to let users distinguish their accounts.
@@ -84,6 +81,7 @@ ExistingUserController::ExistingUserController(
       background_window_(NULL),
       background_view_(NULL),
       selected_view_index_(kNotSelected),
+      num_login_attempts_(0),
       bubble_(NULL) {
   if (delete_scheduled_instance_)
     delete_scheduled_instance_->Delete();
@@ -111,11 +109,20 @@ void ExistingUserController::Init() {
     background_window_ = BackgroundView::CreateWindowContainingView(
         background_bounds_,
         &background_view_);
+
+    if (!WizardController::IsDeviceRegistered()) {
+      background_view_->SetOobeProgressBarVisible(true);
+      background_view_->SetOobeProgress(chromeos::BackgroundView::SIGNIN);
+    } else {
+      background_view_->SetGoIncognitoButtonVisible(true, this);
+    }
+
     background_window_->Show();
   }
   for (size_t i = 0; i < controllers_.size(); ++i) {
     (controllers_[i])->Init(static_cast<int>(i),
-                            static_cast<int>(controllers_.size()));
+                            static_cast<int>(controllers_.size()),
+                            background_view_->IsOobeProgressBarVisible());
   }
 
   EnableTooltipsIfNeeded(controllers_);
@@ -132,6 +139,27 @@ void ExistingUserController::OwnBackground(
   DCHECK(!background_window_);
   background_window_ = background_widget;
   background_view_ = background_view;
+}
+
+void ExistingUserController::LoginNewUser(const std::string& username,
+                                          const std::string& password) {
+  SelectNewUser();
+  UserController* new_user = controllers_.back();
+  if (!new_user->is_guest())
+    return;
+  NewUserView* new_user_view = new_user->new_user_view();
+  new_user_view->SetUsername(username);
+
+  if (password.empty())
+    return;
+
+  new_user_view->SetPassword(password);
+  LOG(INFO) << "Password: " << password;
+  new_user_view->Login();
+}
+
+void ExistingUserController::SelectNewUser() {
+  SelectUser(controllers_.size() - 1);
 }
 
 ExistingUserController::~ExistingUserController() {
@@ -166,10 +194,17 @@ void ExistingUserController::SendSetLoginState(bool is_enabled) {
 
 void ExistingUserController::Login(UserController* source,
                                    const string16& password) {
+  BootTimesLoader::Get()->RecordLoginAttempted();
   std::vector<UserController*>::const_iterator i =
       std::find(controllers_.begin(), controllers_.end(), source);
   DCHECK(i != controllers_.end());
-  selected_view_index_ = i - controllers_.begin();
+
+  if (selected_view_index_ == static_cast<size_t>(i - controllers_.begin())) {
+    num_login_attempts_++;
+  } else {
+    selected_view_index_ = i - controllers_.begin();
+    num_login_attempts_ = 0;
+  }
 
   authenticator_ = LoginUtils::Get()->CreateAuthenticator(this);
   Profile* profile = g_browser_process->profile_manager()->GetDefaultProfile();
@@ -211,8 +246,9 @@ void ExistingUserController::OnUserSelected(UserController* source) {
   size_t new_selected_index = i - controllers_.begin();
   if (new_selected_index != selected_view_index_ &&
       selected_view_index_ != kNotSelected) {
-    controllers_[selected_view_index_]->ClearAndEnablePassword();
+    controllers_[selected_view_index_]->ClearAndEnableFields();
     ClearCaptchaState();
+    num_login_attempts_ = 0;
   }
   selected_view_index_ = new_selected_index;
 }
@@ -220,12 +256,14 @@ void ExistingUserController::OnUserSelected(UserController* source) {
 void ExistingUserController::ActivateWizard(const std::string& screen_name) {
   // WizardController takes care of deleting itself when done.
   WizardController* controller = new WizardController();
-  controller->Init(screen_name, background_bounds_);
-  controller->Show();
 
   // Give the background window to the controller.
   controller->OwnBackground(background_window_, background_view_);
   background_window_ = NULL;
+
+  controller->Init(screen_name, background_bounds_);
+  controller->set_start_url(start_url_);
+  controller->Show();
 
   // And schedule us for deletion. We delay for a second as the window manager
   // is doing an animation with our windows.
@@ -259,9 +297,15 @@ void ExistingUserController::SelectUser(int index) {
   }
 }
 
-void ExistingUserController::OnLoginFailure(const std::string& error) {
+void ExistingUserController::OnGoIncognitoButton() {
+  LoginOffTheRecord();
+}
+
+void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
   LOG(INFO) << "OnLoginFailure";
   ClearCaptchaState();
+
+  std::string error = failure.GetErrorString();
 
   // Check networking after trying to login in case user is
   // cached locally or the local admin account.
@@ -271,28 +315,27 @@ void ExistingUserController::OnLoginFailure(const std::string& error) {
   } else if (!network->Connected()) {
     ShowError(IDS_LOGIN_ERROR_OFFLINE_FAILED_NETWORK_NOT_CONNECTED, error);
   } else {
-    std::string error_code = LoginUtils::ExtractClientLoginParam(error,
-                                                                 kError,
-                                                                 kParamSuffix);
-    std::string captcha_url;
-    if (error_code == kCaptchaError)
-      captcha_url = LoginUtils::ExtractClientLoginParam(error,
-                                                        kCaptchaUrlParam,
-                                                        kParamSuffix);
-    if (captcha_url.empty()) {
-      ShowError(IDS_LOGIN_ERROR_AUTHENTICATING, error);
+    if (failure.reason() == LoginFailure::NETWORK_AUTH_FAILED &&
+        failure.error().state() == GoogleServiceAuthError::CAPTCHA_REQUIRED) {
+      if (!failure.error().captcha().image_url.is_empty()) {
+        // Save token for next login retry.
+        login_token_ = failure.error().captcha().token;
+        CaptchaView* view =
+            new CaptchaView(failure.error().captcha().image_url);
+        view->set_delegate(this);
+        views::Window* window = views::Window::CreateChromeWindow(
+            GetNativeWindow(), gfx::Rect(), view);
+        window->SetIsAlwaysOnTop(true);
+        window->Show();
+      } else {
+        LOG(WARNING) << "No captcha image url was found?";
+        ShowError(IDS_LOGIN_ERROR_AUTHENTICATING, error);
+      }
     } else {
-      // Save token for next login retry.
-      login_token_ = LoginUtils::ExtractClientLoginParam(error,
-                                                         kCaptchaTokenParam,
-                                                         kParamSuffix);
-      CaptchaView* view =
-          new CaptchaView(GURL(kCaptchaUrlPrefix + captcha_url));
-      view->set_delegate(this);
-      views::Window* window = views::Window::CreateChromeWindow(
-          GetNativeWindow(), gfx::Rect(), view);
-      window->SetIsAlwaysOnTop(true);
-      window->Show();
+      if (controllers_[selected_view_index_]->is_guest())
+        ShowError(IDS_LOGIN_ERROR_AUTHENTICATING_NEW, error);
+      else
+        ShowError(IDS_LOGIN_ERROR_AUTHENTICATING, error);
     }
   }
 
@@ -303,10 +346,8 @@ void ExistingUserController::OnLoginFailure(const std::string& error) {
 }
 
 void ExistingUserController::AppendStartUrlToCmdline() {
-  if (start_url_.is_valid()) {
-    CommandLine::ForCurrentProcess()->AppendLooseValue(
-        UTF8ToWide(start_url_.spec()));
-  }
+  if (start_url_.is_valid())
+    CommandLine::ForCurrentProcess()->AppendArg(start_url_.spec());
 }
 
 void ExistingUserController::ClearCaptchaState() {
@@ -323,14 +364,31 @@ void ExistingUserController::ShowError(int error_id,
                                        const std::string& details) {
   ClearErrors();
   std::wstring error_text = l10n_util::GetString(error_id);
-  if (!details.empty())
-    error_text += L"\n" + ASCIIToWide(details);
+  // TODO(dpolukhin): show detailed error info. |details| string contains
+  // low level error info that is not localized and even is not user friendly.
+  // For now just ignore it because error_text contains all required information
+  // for end users, developers can see details string in Chrome logs.
+
+  gfx::Rect bounds = controllers_[selected_view_index_]->GetScreenBounds();
+  BubbleBorder::ArrowLocation arrow;
+  if (controllers_[selected_view_index_]->is_guest()) {
+    arrow = BubbleBorder::LEFT_TOP;
+  } else {
+    // Point info bubble arrow to cursor position (approximately).
+    bounds.set_width(kCursorOffset * 2);
+    arrow = BubbleBorder::BOTTOM_LEFT;
+  }
+  std::wstring help_link;
+  if (num_login_attempts_ > static_cast<size_t>(1))
+    help_link = l10n_util::GetString(IDS_CANT_ACCESS_ACCOUNT_BUTTON);
+
   bubble_ = MessageBubble::Show(
       controllers_[selected_view_index_]->controls_window(),
-      controllers_[selected_view_index_]->GetScreenBounds(),
-      BubbleBorder::BOTTOM_LEFT,
+      bounds,
+      arrow,
       ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_WARNING),
       error_text,
+      help_link,
       this);
 }
 
@@ -340,9 +398,11 @@ void ExistingUserController::OnLoginSuccess(const std::string& username,
   AppendStartUrlToCmdline();
   if (selected_view_index_ + 1 == controllers_.size()) {
     // For new user login don't launch browser until we pass image screen.
-    chromeos::LoginUtils::Get()->EnableBrowserLaunch(false);
+    LoginUtils::Get()->EnableBrowserLaunch(false);
     LoginUtils::Get()->CompleteLogin(username, credentials);
-    ActivateWizard(WizardController::kUserImageScreenName);
+    ActivateWizard(WizardController::IsDeviceRegistered() ?
+        WizardController::kUserImageScreenName :
+        WizardController::kRegistrationScreenName);
   } else {
     // Hide the login windows now.
     WmIpc::Message message(WM_IPC_MESSAGE_WM_HIDE_LOGIN);
@@ -356,8 +416,12 @@ void ExistingUserController::OnLoginSuccess(const std::string& username,
 }
 
 void ExistingUserController::OnOffTheRecordLoginSuccess() {
-  AppendStartUrlToCmdline();
-  LoginUtils::Get()->CompleteOffTheRecordLogin();
+  if (WizardController::IsDeviceRegistered()) {
+    LoginUtils::Get()->CompleteOffTheRecordLogin(start_url_);
+  } else {
+    // Postpone CompleteOffTheRecordLogin until registration completion.
+    ActivateWizard(WizardController::kRegistrationScreenName);
+  }
 }
 
 void ExistingUserController::OnPasswordChangeDetected(
@@ -379,6 +443,11 @@ void ExistingUserController::OnPasswordChangeDetected(
                                                             view);
   window->SetIsAlwaysOnTop(true);
   window->Show();
+}
+
+void ExistingUserController::OnHelpLinkActivated() {
+  AddStartUrl(GetAccountRecoveryHelpUrl());
+  LoginOffTheRecord();
 }
 
 void ExistingUserController::OnCaptchaEntered(const std::string& captcha) {

@@ -4,10 +4,18 @@
 
 #include "ipc/ipc_message_utils.h"
 
+#include "base/file_path.h"
 #include "base/json/json_writer.h"
+#include "base/nullable_string16.h"
 #include "base/scoped_ptr.h"
+#include "base/string_number_conversions.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
+#if defined(OS_POSIX)
+#include "ipc/file_descriptor_set_posix.h"
+#endif
+#include "ipc/ipc_channel_handle.h"
 
 namespace IPC {
 
@@ -55,7 +63,7 @@ static void WriteValue(Message* m, const Value* value, int recursion) {
     }
     case Value::TYPE_BINARY: {
       const BinaryValue* binary = static_cast<const BinaryValue*>(value);
-      m->WriteData(binary->GetBuffer(), binary->GetSize());
+      m->WriteData(binary->GetBuffer(), static_cast<int>(binary->GetSize()));
       break;
     }
     case Value::TYPE_DICTIONARY: {
@@ -100,7 +108,7 @@ static bool ReadDictionaryValue(const Message* m, void** iter,
     return false;
 
   for (int i = 0; i < size; ++i) {
-    std::wstring key;
+    std::string key;
     Value* subval;
     if (!ReadParam(m, iter, &key) ||
         !ReadValue(m, iter, &subval, recursion + 1))
@@ -201,6 +209,47 @@ static bool ReadValue(const Message* m, void** iter, Value** value,
   return true;
 }
 
+void ParamTraits<int>::Log(const param_type& p, std::string* l) {
+  l->append(base::IntToString(p));
+}
+
+void ParamTraits<unsigned int>::Log(const param_type& p, std::string* l) {
+  l->append(base::UintToString(p));
+}
+
+void ParamTraits<long>::Log(const param_type& p, std::string* l) {
+  l->append(base::Int64ToString(static_cast<int64>(p)));
+}
+
+void ParamTraits<unsigned long>::Log(const param_type& p, std::string* l) {
+  l->append(base::Uint64ToString(static_cast<uint64>(p)));
+}
+
+void ParamTraits<long long>::Log(const param_type& p, std::string* l) {
+  l->append(base::Int64ToString(static_cast<int64>(p)));
+}
+
+void ParamTraits<unsigned long long>::Log(const param_type& p, std::string* l) {
+  l->append(base::Uint64ToString(p));
+}
+
+void ParamTraits<base::Time>::Write(Message* m, const param_type& p) {
+  ParamTraits<int64>::Write(m, p.ToInternalValue());
+}
+
+bool ParamTraits<base::Time>::Read(const Message* m, void** iter,
+                                   param_type* r) {
+  int64 value;
+  if (!ParamTraits<int64>::Read(m, iter, &value))
+    return false;
+  *r = base::Time::FromInternalValue(value);
+  return true;
+}
+
+void ParamTraits<base::Time>::Log(const param_type& p, std::string* l) {
+  ParamTraits<int64>::Log(p.ToInternalValue(), l);
+}
+
 void ParamTraits<DictionaryValue>::Write(Message* m, const param_type& p) {
   WriteValue(m, &p, 0);
 }
@@ -214,10 +263,10 @@ bool ParamTraits<DictionaryValue>::Read(
   return ReadDictionaryValue(m, iter, r, 0);
 }
 
-void ParamTraits<DictionaryValue>::Log(const param_type& p, std::wstring* l) {
+void ParamTraits<DictionaryValue>::Log(const param_type& p, std::string* l) {
   std::string json;
   base::JSONWriter::Write(&p, false, &json);
-  l->append(UTF8ToWide(json));
+  l->append(json);
 }
 
 void ParamTraits<ListValue>::Write(Message* m, const param_type& p) {
@@ -233,9 +282,123 @@ bool ParamTraits<ListValue>::Read(
   return ReadListValue(m, iter, r, 0);
 }
 
-void ParamTraits<ListValue>::Log(const param_type& p, std::wstring* l) {
+void ParamTraits<ListValue>::Log(const param_type& p, std::string* l) {
   std::string json;
   base::JSONWriter::Write(&p, false, &json);
-  l->append(UTF8ToWide(json));
+  l->append(json);
 }
+
+void ParamTraits<std::wstring>::Log(const param_type& p, std::string* l) {
+  l->append(WideToUTF8(p));
+}
+
+void ParamTraits<NullableString16>::Write(Message* m, const param_type& p) {
+  WriteParam(m, p.string());
+  WriteParam(m, p.is_null());
+}
+
+bool ParamTraits<NullableString16>::Read(const Message* m, void** iter,
+                                         param_type* r) {
+  string16 string;
+  if (!ReadParam(m, iter, &string))
+    return false;
+  bool is_null;
+  if (!ReadParam(m, iter, &is_null))
+    return false;
+  *r = NullableString16(string, is_null);
+  return true;
+}
+
+void ParamTraits<NullableString16>::Log(const param_type& p, std::string* l) {
+  l->append("(");
+  LogParam(p.string(), l);
+  l->append(", ");
+  LogParam(p.is_null(), l);
+  l->append(")");
+}
+
+#if !defined(WCHAR_T_IS_UTF16)
+void ParamTraits<string16>::Log(const param_type& p, std::string* l) {
+  l->append(UTF16ToUTF8(p));
+}
+#endif
+
+
+void ParamTraits<FilePath>::Write(Message* m, const param_type& p) {
+  ParamTraits<FilePath::StringType>::Write(m, p.value());
+}
+
+bool ParamTraits<FilePath>::Read(const Message* m, void** iter, param_type* r) {
+  FilePath::StringType value;
+  if (!ParamTraits<FilePath::StringType>::Read(m, iter, &value))
+    return false;
+  *r = FilePath(value);
+  return true;
+}
+
+void ParamTraits<FilePath>::Log(const param_type& p, std::string* l) {
+  ParamTraits<FilePath::StringType>::Log(p.value(), l);
+}
+
+#if defined(OS_POSIX)
+void ParamTraits<base::FileDescriptor>::Write(Message* m, const param_type& p) {
+  const bool valid = p.fd >= 0;
+  WriteParam(m, valid);
+
+  if (valid) {
+    if (!m->WriteFileDescriptor(p))
+      NOTREACHED();
+  }
+}
+
+bool ParamTraits<base::FileDescriptor>::Read(const Message* m, void** iter,
+                                             param_type* r) {
+  bool valid;
+  if (!ReadParam(m, iter, &valid))
+    return false;
+
+  if (!valid) {
+    r->fd = -1;
+    r->auto_close = false;
+    return true;
+  }
+
+  return m->ReadFileDescriptor(iter, r);
+}
+
+void ParamTraits<base::FileDescriptor>::Log(const param_type& p,
+                                            std::string* l) {
+  if (p.auto_close) {
+    l->append(StringPrintf("FD(%d auto-close)", p.fd));
+  } else {
+    l->append(StringPrintf("FD(%d)", p.fd));
+  }
+}
+#endif  // defined(OS_POSIX)
+
+void ParamTraits<IPC::ChannelHandle>::Write(Message* m, const param_type& p) {
+  WriteParam(m, p.name);
+#if defined(OS_POSIX)
+  WriteParam(m, p.socket);
+#endif
+}
+
+bool ParamTraits<IPC::ChannelHandle>::Read(const Message* m, void** iter,
+                                           param_type* r) {
+  return ReadParam(m, iter, &r->name)
+#if defined(OS_POSIX)
+      && ReadParam(m, iter, &r->socket)
+#endif
+      ;
+}
+
+void ParamTraits<IPC::ChannelHandle>::Log(const param_type& p,
+                                          std::string* l) {
+  l->append(StringPrintf("ChannelHandle(%s", p.name.c_str()));
+#if defined(OS_POSIX)
+  ParamTraits<base::FileDescriptor>::Log(p.socket, l);
+#endif
+  l->append(")");
+}
+
 }  // namespace IPC

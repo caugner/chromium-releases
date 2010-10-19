@@ -17,6 +17,7 @@ JsonHostConfig::JsonHostConfig(
     const FilePath& filename,
     base::MessageLoopProxy* file_message_loop_proxy)
     : filename_(filename),
+      values_(new DictionaryValue()),
       message_loop_proxy_(file_message_loop_proxy) {
 }
 
@@ -38,13 +39,7 @@ bool JsonHostConfig::Read() {
   return true;
 }
 
-bool JsonHostConfig::GetString(const std::wstring& path,
-                               std::wstring* out_value) {
-  AutoLock auto_lock(lock_);
-  return values_->GetString(path, out_value);
-}
-
-bool JsonHostConfig::GetString(const std::wstring& path,
+bool JsonHostConfig::GetString(const std::string& path,
                                std::string* out_value) {
   AutoLock auto_lock(lock_);
   return values_->GetString(path, out_value);
@@ -60,13 +55,7 @@ void JsonHostConfig::Update(Task* task) {
       FROM_HERE, NewRunnableMethod(this, &JsonHostConfig::DoWrite));
 }
 
-void JsonHostConfig::SetString(const std::wstring& path,
-                               const std::wstring& in_value) {
-  lock_.AssertAcquired();
-  values_->SetString(path, in_value);
-}
-
-void JsonHostConfig::SetString(const std::wstring& path,
+void JsonHostConfig::SetString(const std::string& path,
                                const std::string& in_value) {
   lock_.AssertAcquired();
   values_->SetString(path, in_value);

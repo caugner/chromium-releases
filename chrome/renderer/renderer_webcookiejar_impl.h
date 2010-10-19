@@ -4,6 +4,7 @@
 
 #ifndef CHROME_RENDERER_RENDERER_WEBCOOKIEJAR_IMPL_H_
 #define CHROME_RENDERER_RENDERER_WEBCOOKIEJAR_IMPL_H_
+#pragma once
 
 #include "ipc/ipc_message.h"
 // TODO(darin): WebCookieJar.h is missing a WebString.h include!
@@ -19,6 +20,7 @@ class RendererWebCookieJarImpl : public WebKit::WebCookieJar {
   explicit RendererWebCookieJarImpl(IPC::Message::Sender* sender)
       : sender_(sender) {
   }
+  virtual ~RendererWebCookieJarImpl() {}
 
  private:
   // WebKit::WebCookieJar methods:
@@ -34,8 +36,6 @@ class RendererWebCookieJarImpl : public WebKit::WebCookieJar {
       WebKit::WebVector<WebKit::WebCookie>& cookies);
   virtual void deleteCookie(
       const WebKit::WebURL& url, const WebKit::WebString& cookie_name);
-  virtual bool cookiesEnabled(
-      const WebKit::WebURL& url, const WebKit::WebURL& first_party_for_cookies);
 
   IPC::Message::Sender* sender_;
 };

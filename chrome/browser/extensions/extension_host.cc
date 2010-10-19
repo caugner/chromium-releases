@@ -6,45 +6,45 @@
 
 #include <list>
 
+#include "app/keyboard_codes.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "base/keyboard_codes.h"
 #include "base/message_loop.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/browsing_instance.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
-#include "chrome/browser/extensions/extension_tabs_module_constants.h"
 #include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/in_process_webkit/dom_storage_context.h"
-#include "chrome/browser/in_process_webkit/webkit_context.h"
 #include "chrome/browser/message_box_handler.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/common/bindings_policy.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/view_types.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/view_types.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "webkit/glue/context_menu.h"
@@ -58,8 +58,6 @@ using WebKit::WebDragOperationsMask;
 
 // static
 bool ExtensionHost::enable_dom_automation_ = false;
-
-static const char* kToolstripTextColorSubstitution = "$TEXT_COLOR$";
 
 // Helper class that rate-limits the creation of renderer processes for
 // ExtensionHosts, to avoid blocking the UI.
@@ -130,10 +128,8 @@ ExtensionHost::ExtensionHost(Extension* extension, SiteInstance* site_instance,
       url_(url),
       extension_host_type_(host_type),
       associated_tab_contents_(NULL) {
-  int64 session_storage_namespace_id = profile_->GetWebKitContext()->
-      dom_storage_context()->AllocateSessionStorageNamespaceId();
   render_view_host_ = new RenderViewHost(site_instance, this, MSG_ROUTING_NONE,
-                                         session_storage_namespace_id);
+                                         NULL);
   render_view_host_->set_is_extension_process(true);
   render_view_host_->AllowBindings(BindingsPolicy::EXTENSION);
   if (enable_dom_automation_)
@@ -156,6 +152,14 @@ ExtensionHost::~ExtensionHost() {
       Details<ExtensionHost>(this));
   ProcessCreationQueue::get()->Remove(this);
   render_view_host_->Shutdown();  // deletes render_view_host
+
+  if (recently_deleted()->size() >= 20)
+    recently_deleted()->pop_front();
+  recently_deleted()->push_back(this);
+}
+
+ExtensionHost::HostPointerList* ExtensionHost::recently_deleted() {
+  return Singleton<HostPointerList>::get();
 }
 
 void ExtensionHost::CreateView(Browser* browser) {
@@ -202,8 +206,7 @@ void ExtensionHost::CreateRenderViewSoon(RenderWidgetHostView* host_view) {
 }
 
 void ExtensionHost::CreateRenderViewNow() {
-  render_view_host_->CreateRenderView(profile_->GetRequestContext(),
-                                      string16());
+  render_view_host_->CreateRenderView(string16());
   NavigateToURL(url_);
   DCHECK(IsRenderViewLive());
 }
@@ -241,12 +244,6 @@ void ExtensionHost::Observe(NotificationType type,
     case NotificationType::EXTENSION_BACKGROUND_PAGE_READY:
       DCHECK(extension_->GetBackgroundPageReady());
       NavigateToURL(url_);
-      break;
-    case NotificationType::BROWSER_THEME_CHANGED:
-      if (extension_host_type_ == ViewType::EXTENSION_TOOLSTRIP ||
-          extension_host_type_ == ViewType::EXTENSION_MOLE) {
-        InsertThemedToolstripCSS();
-      }
       break;
     case NotificationType::RENDERER_PROCESS_CREATED:
       LOG(INFO) << "Sending EXTENSION_PROCESS_CREATED";
@@ -318,8 +315,7 @@ void ExtensionHost::DidNavigate(RenderViewHost* render_view_host,
   // In both cases, we preserve the old URL and reset the EFD to NULL.  This
   // will leave the host in kind of a bad state with poor UI and errors, but
   // it's better than the alternative.
-  // TODO(erikkay) Perhaps we should display log errors or display a big 404
-  // in the toolstrip or something like that.
+  // TODO(erikkay) Perhaps we should display errors in developer mode.
   if (params.url.host() != extension_->id()) {
     extension_function_dispatcher_.reset(NULL);
     return;
@@ -343,36 +339,6 @@ void ExtensionHost::InsertInfobarCSS() {
       L"", css.as_string(), "InfobarThemeCSS");
 }
 
-void ExtensionHost::InsertThemedToolstripCSS() {
-  DCHECK(!is_background_page());
-
-  static const base::StringPiece toolstrip_theme_css(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-      IDR_EXTENSIONS_TOOLSTRIP_THEME_CSS));
-
-  std::string css = toolstrip_theme_css.as_string();
-  ThemeProvider* theme_provider =
-      render_view_host()->process()->profile()->GetThemeProvider();
-
-  SkColor text_color = theme_provider ?
-      theme_provider->GetColor(BrowserThemeProvider::COLOR_BOOKMARK_TEXT) :
-      SK_ColorBLACK;
-
-  std::string hex_color_string = StringPrintf(
-      "#%02x%02x%02x", SkColorGetR(text_color),
-                       SkColorGetG(text_color),
-                       SkColorGetB(text_color));
-  size_t pos = css.find(kToolstripTextColorSubstitution);
-  while (pos != std::string::npos) {
-    css.replace(pos, 12, hex_color_string);
-    pos = css.find(kToolstripTextColorSubstitution);
-  }
-
-  // As a toolstrip, inject our toolstrip CSS to make it easier for toolstrips
-  // to blend in with the chrome UI.
-  render_view_host()->InsertCSSInWebFrame(L"", css, "ToolstripThemeCSS");
-}
-
 void ExtensionHost::DisableScrollbarsForSmallWindows(
     const gfx::Size& size_limit) {
   render_view_host()->Send(new ViewMsg_DisableScrollbarsForSmallWindows(
@@ -382,9 +348,7 @@ void ExtensionHost::DisableScrollbarsForSmallWindows(
 void ExtensionHost::DidStopLoading() {
   bool notify = !did_stop_loading_;
   did_stop_loading_ = true;
-  if (extension_host_type_ == ViewType::EXTENSION_TOOLSTRIP ||
-      extension_host_type_ == ViewType::EXTENSION_MOLE ||
-      extension_host_type_ == ViewType::EXTENSION_POPUP ||
+  if (extension_host_type_ == ViewType::EXTENSION_POPUP ||
       extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
 #if defined(TOOLKIT_VIEWS)
     if (view_.get())
@@ -402,9 +366,6 @@ void ExtensionHost::DidStopLoading() {
                           since_created_.Elapsed());
     } else if (extension_host_type_ == ViewType::EXTENSION_POPUP) {
       UMA_HISTOGRAM_TIMES("Extensions.PopupLoadTime",
-                          since_created_.Elapsed());
-    } else if (extension_host_type_ == ViewType::EXTENSION_TOOLSTRIP) {
-      UMA_HISTOGRAM_TIMES("Extensions.ToolstripLoadTime",
                           since_created_.Elapsed());
     } else if (extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
       UMA_HISTOGRAM_TIMES("Extensions.InfobarLoadTime",
@@ -426,15 +387,6 @@ void ExtensionHost::DocumentAvailableInMainFrame(RenderViewHost* rvh) {
     switch (extension_host_type_) {
       case ViewType::EXTENSION_INFOBAR:
         InsertInfobarCSS();
-        break;
-      case ViewType::EXTENSION_TOOLSTRIP:
-      case ViewType::EXTENSION_MOLE:
-        // See also BROWSER_THEME_CHANGED in the Observe function.
-        InsertThemedToolstripCSS();
-
-        // Listen for browser changes so we can resend the CSS.
-        registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
-                       NotificationService::AllSources());
         break;
       default:
         break;  // No style sheet for other types, at the moment.
@@ -461,20 +413,8 @@ void ExtensionHost::RunJavaScriptMessage(const std::wstring& message,
   // Unlike for page alerts, navigations aren't a good signal for when to
   // resume showing alerts, so we can't reasonably stop showing them even if
   // the extension is spammy.
-  RunJavascriptMessageBox(this, frame_url, flags, message, default_prompt,
-                          false, reply_msg);
-}
-
-std::wstring ExtensionHost::GetMessageBoxTitle(const GURL& frame_url,
-                                               bool is_alert) {
-  if (extension_->name().empty())
-    return l10n_util::GetString(
-        is_alert ? IDS_EXTENSION_ALERT_DEFAULT_TITLE
-                 : IDS_EXTENSION_MESSAGEBOX_DEFAULT_TITLE);
-
-  return l10n_util::GetStringF(
-      is_alert ? IDS_EXTENSION_ALERT_TITLE : IDS_EXTENSION_MESSAGEBOX_TITLE,
-      UTF8ToWide(extension_->name()));
+  RunJavascriptMessageBox(profile_, this, frame_url, flags, message,
+                          default_prompt, false, reply_msg);
 }
 
 gfx::NativeWindow ExtensionHost::GetMessageBoxRootWindow() {
@@ -539,14 +479,10 @@ WebPreferences ExtensionHost::GetWebkitPrefs() {
   return webkit_prefs;
 }
 
-void ExtensionHost::ProcessDOMUIMessage(const std::string& message,
-                                        const ListValue* content,
-                                        const GURL& source_url,
-                                        int request_id,
-                                        bool has_callback) {
+void ExtensionHost::ProcessDOMUIMessage(
+    const ViewHostMsg_DomMessage_Params& params) {
   if (extension_function_dispatcher_.get()) {
-    extension_function_dispatcher_->HandleRequest(
-        message, content, source_url, request_id, has_callback);
+    extension_function_dispatcher_->HandleRequest(params);
   }
 }
 
@@ -558,11 +494,14 @@ void ExtensionHost::CreateNewWindow(
     int route_id,
     WindowContainerType window_container_type,
     const string16& frame_name) {
+  // TODO(aa): Use the browser's profile if the extension is split mode
+  // incognito.
   delegate_view_helper_.CreateNewWindow(
       route_id,
       render_view_host()->process()->profile(),
       site_instance(),
-      DOMUIFactory::GetDOMUIType(url_),
+      DOMUIFactory::GetDOMUIType(render_view_host()->process()->profile(),
+          url_),
       this,
       window_container_type,
       frame_name);
@@ -571,6 +510,12 @@ void ExtensionHost::CreateNewWindow(
 void ExtensionHost::CreateNewWidget(int route_id,
                                     WebKit::WebPopupType popup_type) {
   CreateNewWidgetInternal(route_id, popup_type);
+}
+
+void ExtensionHost::CreateNewFullscreenWidget(int route_id,
+                                              WebKit::WebPopupType popup_type) {
+  NOTREACHED()
+      << "ExtensionHost does not support showing full screen popups yet.";
 }
 
 RenderWidgetHostView* ExtensionHost::CreateNewWidgetInternal(
@@ -587,10 +532,14 @@ void ExtensionHost::ShowCreatedWindow(int route_id,
   if (!contents)
     return;
 
-  Browser* browser = extension_function_dispatcher_->GetCurrentBrowser(
-      profile_->GetExtensionsService()->IsIncognitoEnabled(extension_));
-  if (!browser)
-    return;
+  Browser* browser = BrowserList::FindBrowserWithType(
+      contents->profile(),
+      Browser::TYPE_NORMAL,
+      false);  // Match incognito exactly.
+  if (!browser) {
+    browser = Browser::Create(contents->profile());
+    browser->window()->Show();
+  }
 
   browser->AddTabContents(contents, disposition, initial_pos, user_gesture);
 }
@@ -599,6 +548,11 @@ void ExtensionHost::ShowCreatedWidget(int route_id,
                                       const gfx::Rect& initial_pos) {
   ShowCreatedWidgetInternal(delegate_view_helper_.GetCreatedWidget(route_id),
                             initial_pos);
+}
+
+void ExtensionHost::ShowCreatedFullscreenWidget(int route_id) {
+  NOTREACHED()
+      << "ExtensionHost does not support showing full screen popups yet.";
 }
 
 void ExtensionHost::ShowCreatedWidgetInternal(
@@ -647,11 +601,17 @@ void ExtensionHost::GotFocus() {
 void ExtensionHost::TakeFocus(bool reverse) {
 }
 
+void ExtensionHost::Activate() {
+}
+
+void ExtensionHost::Deactivate() {
+}
+
 bool ExtensionHost::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                            bool* is_keyboard_shortcut) {
   if (extension_host_type_ == ViewType::EXTENSION_POPUP &&
       event.type == NativeWebKeyboardEvent::RawKeyDown &&
-      event.windowsKeyCode == base::VKEY_ESCAPE) {
+      event.windowsKeyCode == app::VKEY_ESCAPE) {
     DCHECK(is_keyboard_shortcut != NULL);
     *is_keyboard_shortcut = true;
   }
@@ -661,7 +621,7 @@ bool ExtensionHost::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
 void ExtensionHost::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
   if (extension_host_type_ == ViewType::EXTENSION_POPUP) {
     if (event.type == NativeWebKeyboardEvent::RawKeyDown &&
-        event.windowsKeyCode == base::VKEY_ESCAPE) {
+        event.windowsKeyCode == app::VKEY_ESCAPE) {
       NotificationService::current()->Notify(
           NotificationType::EXTENSION_HOST_VIEW_SHOULD_CLOSE,
           Source<Profile>(profile_),
@@ -672,11 +632,14 @@ void ExtensionHost::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
   UnhandledKeyboardEvent(event);
 }
 
-void ExtensionHost::HandleMouseEvent() {
+void ExtensionHost::HandleMouseMove() {
 #if defined(OS_WIN)
   if (view_.get())
-    view_->HandleMouseEvent();
+    view_->HandleMouseMove();
 #endif
+}
+
+void ExtensionHost::HandleMouseDown() {
 }
 
 void ExtensionHost::HandleMouseLeave() {
@@ -684,14 +647,6 @@ void ExtensionHost::HandleMouseLeave() {
   if (view_.get())
     view_->HandleMouseLeave();
 #endif
-}
-
-void ExtensionHost::SetRenderViewType(ViewType::Type type) {
-  DCHECK(type == ViewType::EXTENSION_MOLE ||
-         type == ViewType::EXTENSION_TOOLSTRIP ||
-         type == ViewType::EXTENSION_POPUP);
-  extension_host_type_ = type;
-  render_view_host()->ViewTypeChanged(extension_host_type_);
 }
 
 ViewType::Type ExtensionHost::GetRenderViewType() const {
@@ -711,9 +666,7 @@ void ExtensionHost::RenderViewCreated(RenderViewHost* render_view_host) {
   extension_function_dispatcher_.reset(
       ExtensionFunctionDispatcher::Create(render_view_host, this, url_));
 
-  if (extension_host_type_ == ViewType::EXTENSION_TOOLSTRIP ||
-      extension_host_type_ == ViewType::EXTENSION_MOLE ||
-      extension_host_type_ == ViewType::EXTENSION_POPUP ||
+  if (extension_host_type_ == ViewType::EXTENSION_POPUP ||
       extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
     render_view_host->EnablePreferredSizeChangedMode(
         kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow);
@@ -724,9 +677,7 @@ int ExtensionHost::GetBrowserWindowID() const {
   // Hosts not attached to any browser window have an id of -1.  This includes
   // those mentioned below, and background pages.
   int window_id = extension_misc::kUnknownWindowId;
-  if (extension_host_type_ == ViewType::EXTENSION_TOOLSTRIP ||
-      extension_host_type_ == ViewType::EXTENSION_MOLE ||
-      extension_host_type_ == ViewType::EXTENSION_POPUP ||
+  if (extension_host_type_ == ViewType::EXTENSION_POPUP ||
       extension_host_type_ == ViewType::EXTENSION_INFOBAR) {
     // If the host is bound to a browser, then extract its window id.
     // Extensions hosted in ExternalTabContainer objects may not have

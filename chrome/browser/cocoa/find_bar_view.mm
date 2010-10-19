@@ -1,16 +1,23 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/cocoa/find_bar_view.h"
 
 #import "chrome/browser/cocoa/themed_window.h"
+#import "chrome/browser/cocoa/view_id_util.h"
+#import "chrome/browser/cocoa/url_drop_target.h"
 
 namespace {
 CGFloat kCurveSize = 8;
 }  // end namespace
 
 @implementation FindBarView
+
+- (void)awakeFromNib {
+  // Register for all the drag types handled by the RWHVCocoa.
+  [self registerForDraggedTypes:[URLDropTargetHandler handledDragTypes]];
+}
 
 - (void)drawRect:(NSRect)rect {
   // TODO(rohitrao): Make this prettier.
@@ -111,4 +118,14 @@ CGFloat kCurveSize = 8;
 
 - (void)otherMouseDragged:(NSEvent *)theEvent {
 }
+
+// Eat drag operations, to prevent drags from going through to the views below.
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info {
+  return NSDragOperationNone;
+}
+
+- (ViewID)viewID {
+  return VIEW_ID_FIND_IN_PAGE;
+}
+
 @end

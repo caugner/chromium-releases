@@ -4,12 +4,12 @@
 
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 
-#include "app/l10n_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"

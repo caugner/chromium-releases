@@ -9,7 +9,7 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 #include "net/base/net_util.h"
-#include "net/url_request/url_request_unittest.h"
+#include "net/test/test_server.h"
 #include "webkit/glue/plugins/plugin_switches.h"
 
 namespace {
@@ -36,15 +36,10 @@ class PPAPITest : public UITest {
 
     FilePath plugin_lib = plugin_dir.Append(library_name);
     EXPECT_TRUE(file_util::PathExists(plugin_lib));
-
-#if defined(OS_WIN)
-    std::wstring pepper_plugin = plugin_lib.value();
-#else
-    std::wstring pepper_plugin = UTF8ToWide(plugin_lib.value());
-#endif
-    pepper_plugin.append(L";application/x-ppapi-tests");
-    launch_arguments_.AppendSwitchWithValue(switches::kRegisterPepperPlugins,
-                                            pepper_plugin);
+    FilePath::StringType pepper_plugin = plugin_lib.value();
+    pepper_plugin.append(FILE_PATH_LITERAL(";application/x-ppapi-tests"));
+    launch_arguments_.AppendSwitchNative(switches::kRegisterPepperPlugins,
+                                         pepper_plugin);
 
     // The test sends us the result via a cookie.
     launch_arguments_.AppendSwitch(switches::kEnableFileCookies);
@@ -73,11 +68,11 @@ class PPAPITest : public UITest {
   }
 
   void RunTestViaHTTP(const std::string& test_case) {
-    const wchar_t kDocRoot[] = L"third_party/ppapi/tests";
-    scoped_refptr<HTTPTestServer> server =
-        HTTPTestServer::CreateForkingServer(kDocRoot);
-    ASSERT_TRUE(server);
-    RunTestURL(server->TestServerPage("files/test_case.html?" + test_case));
+    net::TestServer test_server(
+        net::TestServer::TYPE_HTTP,
+        FilePath(FILE_PATH_LITERAL("third_party/ppapi/tests")));
+    ASSERT_TRUE(test_server.Start());
+    RunTestURL(test_server.GetURL("files/test_case.html?" + test_case));
   }
 
  private:
@@ -92,21 +87,18 @@ class PPAPITest : public UITest {
   }
 };
 
-#if defined(OS_MACOSX)
-// TODO(brettw) this fails on Mac for unknown reasons.
-TEST_F(PPAPITest, DISABLED_DeviceContext2D) {
-#else
-TEST_F(PPAPITest, DeviceContext2D) {
-#endif
-  RunTest("DeviceContext2D");
+TEST_F(PPAPITest, FAILS_Instance) {
+  RunTest("Instance");
 }
 
-#if defined(OS_MACOSX)
-// TODO(brettw) this fails on Mac for unknown reasons.
-TEST_F(PPAPITest, DISABLED_ImageData) {
-#else
-TEST_F(PPAPITest, ImageData) {
-#endif
+// http://crbug.com/54150
+TEST_F(PPAPITest, FLAKY_Graphics2D) {
+  RunTest("Graphics2D");
+}
+
+// TODO(brettw) bug 51344: this is flaky on bots. Seems to timeout navigating.
+// Possibly all the image allocations slow things down on a loaded bot too much.
+TEST_F(PPAPITest, FLAKY_ImageData) {
   RunTest("ImageData");
 }
 
@@ -114,20 +106,29 @@ TEST_F(PPAPITest, Buffer) {
   RunTest("Buffer");
 }
 
-TEST_F(PPAPITest, URLLoader) {
+// TODO(brettw) bug 51345: this failed consistently on one of the bots.
+TEST_F(PPAPITest, FAILS_URLLoader) {
   RunTestViaHTTP("URLLoader");
 }
 
-TEST_F(PPAPITest, PaintAgggregator) {
+// Flaky, http://crbug.com/51012
+TEST_F(PPAPITest, FLAKY_PaintAggregator) {
   RunTestViaHTTP("PaintAggregator");
 }
 
-// http://crbug.com/48544
-#if defined(OS_LINUX)
-// TODO(jabdelmalek) this fails on Linux for unknown reasons.
-TEST_F(PPAPITest, FAILS_Scrollbar) {
-#else
+#if defined(OS_WIN)
 TEST_F(PPAPITest, Scrollbar) {
+#else
+// Flaky, http://crbug.com/48544.
+TEST_F(PPAPITest, FLAKY_Scrollbar) {
 #endif
   RunTest("Scrollbar");
+}
+
+TEST_F(PPAPITest, UrlUtil) {
+  RunTest("UrlUtil");
+}
+
+TEST_F(PPAPITest, CharSet) {
+  RunTest("CharSet");
 }

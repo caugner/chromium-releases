@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,19 +12,14 @@
 #endif
 
 #include <stdio.h>
-#include <iostream>
 #include <string>
+#include <utility>
 
 #include "ipc/ipc_tests.h"
 
-#include "base/at_exit.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/debug_on_start.h"
-#if defined(OS_POSIX)
-#include "base/at_exit.h"
-#include "base/global_descriptors_posix.h"
-#endif
 #include "base/perftimer.h"
 #include "base/test/perf_test_suite.h"
 #include "base/test/test_suite.h"
@@ -71,20 +66,15 @@ base::ProcessHandle IPCChannelTest::SpawnChild(ChildType child_type,
 
   switch (child_type) {
   case TEST_CLIENT:
-    return MultiProcessTest::SpawnChild(L"RunTestClient", debug_on_start);
-    break;
+    return MultiProcessTest::SpawnChild("RunTestClient", debug_on_start);
   case TEST_REFLECTOR:
-    return MultiProcessTest::SpawnChild(L"RunReflector", debug_on_start);
-    break;
+    return MultiProcessTest::SpawnChild("RunReflector", debug_on_start);
   case FUZZER_SERVER:
-    return MultiProcessTest::SpawnChild(L"RunFuzzServer", debug_on_start);
-    break;
+    return MultiProcessTest::SpawnChild("RunFuzzServer", debug_on_start);
   case SYNC_SOCKET_SERVER:
-    return MultiProcessTest::SpawnChild(L"RunSyncSocketServer", debug_on_start);
-    break;
+    return MultiProcessTest::SpawnChild("RunSyncSocketServer", debug_on_start);
   default:
     return NULL;
-    break;
   }
 }
 #elif defined(OS_POSIX)
@@ -97,38 +87,38 @@ base::ProcessHandle IPCChannelTest::SpawnChild(ChildType child_type,
   base::file_handle_mapping_vector fds_to_map;
   const int ipcfd = channel->GetClientFileDescriptor();
   if (ipcfd > -1) {
-    fds_to_map.push_back(std::pair<int,int>(ipcfd, kPrimaryIPCChannel + 3));
+    fds_to_map.push_back(std::pair<int, int>(ipcfd, kPrimaryIPCChannel + 3));
   }
 
   base::ProcessHandle ret = NULL;
   switch (child_type) {
   case TEST_CLIENT:
-    ret = MultiProcessTest::SpawnChild(L"RunTestClient",
+    ret = MultiProcessTest::SpawnChild("RunTestClient",
                                        fds_to_map,
                                        debug_on_start);
     break;
   case TEST_DESCRIPTOR_CLIENT:
-    ret = MultiProcessTest::SpawnChild(L"RunTestDescriptorClient",
+    ret = MultiProcessTest::SpawnChild("RunTestDescriptorClient",
                                        fds_to_map,
                                        debug_on_start);
     break;
   case TEST_DESCRIPTOR_CLIENT_SANDBOXED:
-    ret = MultiProcessTest::SpawnChild(L"RunTestDescriptorClientSandboxed",
+    ret = MultiProcessTest::SpawnChild("RunTestDescriptorClientSandboxed",
                                        fds_to_map,
                                        debug_on_start);
     break;
   case TEST_REFLECTOR:
-    ret = MultiProcessTest::SpawnChild(L"RunReflector",
+    ret = MultiProcessTest::SpawnChild("RunReflector",
                                        fds_to_map,
                                        debug_on_start);
     break;
   case FUZZER_SERVER:
-    ret = MultiProcessTest::SpawnChild(L"RunFuzzServer",
+    ret = MultiProcessTest::SpawnChild("RunFuzzServer",
                                        fds_to_map,
                                        debug_on_start);
     break;
   case SYNC_SOCKET_SERVER:
-    ret = MultiProcessTest::SpawnChild(L"RunSyncSocketServer",
+    ret = MultiProcessTest::SpawnChild("RunSyncSocketServer",
                                        fds_to_map,
                                        debug_on_start);
     break;
@@ -272,11 +262,11 @@ TEST_F(IPCChannelTest, ChannelProxyTest) {
     base::file_handle_mapping_vector fds_to_map;
     const int ipcfd = chan.GetClientFileDescriptor();
     if (ipcfd > -1) {
-      fds_to_map.push_back(std::pair<int,int>(ipcfd, kPrimaryIPCChannel + 3));
+      fds_to_map.push_back(std::pair<int, int>(ipcfd, kPrimaryIPCChannel + 3));
     }
 
     base::ProcessHandle process_handle = MultiProcessTest::SpawnChild(
-        L"RunTestClient",
+        "RunTestClient",
         fds_to_map,
         debug_on_start);
 #endif  // defined(OS_POSIX)
@@ -546,7 +536,7 @@ int main(int argc, char** argv) {
 #ifdef PERFORMANCE_TEST
   int retval = PerfTestSuite(argc, argv).Run();
 #else
-  int retval = TestSuite(argc, argv).Run();
+  int retval = base::TestSuite(argc, argv).Run();
 #endif
   return retval;
 }

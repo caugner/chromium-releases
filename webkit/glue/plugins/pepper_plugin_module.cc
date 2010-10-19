@@ -12,35 +12,46 @@
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
-#include "third_party/ppapi/c/ppb_buffer.h"
-#include "third_party/ppapi/c/ppb_core.h"
-#include "third_party/ppapi/c/ppb_device_context_2d.h"
-#include "third_party/ppapi/c/ppb_file_io.h"
-#include "third_party/ppapi/c/ppb_file_io_trusted.h"
-#include "third_party/ppapi/c/ppb_file_system.h"
-#include "third_party/ppapi/c/ppb_image_data.h"
-#include "third_party/ppapi/c/ppb_instance.h"
-#include "third_party/ppapi/c/ppb_find.h"
-#include "third_party/ppapi/c/ppb_font.h"
-#include "third_party/ppapi/c/ppb_scrollbar.h"
-#include "third_party/ppapi/c/ppb_testing.h"
-#include "third_party/ppapi/c/ppb_url_loader.h"
-#include "third_party/ppapi/c/ppb_url_request_info.h"
-#include "third_party/ppapi/c/ppb_url_response_info.h"
-#include "third_party/ppapi/c/ppb_var.h"
-#include "third_party/ppapi/c/ppb_widget.h"
-#include "third_party/ppapi/c/ppp.h"
-#include "third_party/ppapi/c/ppp_instance.h"
+#include "third_party/ppapi/c/dev/ppb_buffer_dev.h"
+#include "third_party/ppapi/c/dev/ppb_char_set_dev.h"
+#include "third_party/ppapi/c/dev/ppb_cursor_control_dev.h"
+#include "third_party/ppapi/c/dev/ppb_directory_reader_dev.h"
+#include "third_party/ppapi/c/dev/ppb_file_io_dev.h"
+#include "third_party/ppapi/c/dev/ppb_file_io_trusted_dev.h"
+#include "third_party/ppapi/c/dev/ppb_file_system_dev.h"
+#include "third_party/ppapi/c/dev/ppb_find_dev.h"
+#include "third_party/ppapi/c/dev/ppb_font_dev.h"
+#include "third_party/ppapi/c/dev/ppb_graphics_3d_dev.h"
+#include "third_party/ppapi/c/dev/ppb_opengles_dev.h"
+#include "third_party/ppapi/c/dev/ppb_scrollbar_dev.h"
+#include "third_party/ppapi/c/dev/ppb_testing_dev.h"
+#include "third_party/ppapi/c/dev/ppb_url_loader_dev.h"
+#include "third_party/ppapi/c/dev/ppb_url_request_info_dev.h"
+#include "third_party/ppapi/c/dev/ppb_url_response_info_dev.h"
+#include "third_party/ppapi/c/dev/ppb_url_util_dev.h"
+#include "third_party/ppapi/c/dev/ppb_video_decoder_dev.h"
+#include "third_party/ppapi/c/dev/ppb_widget_dev.h"
 #include "third_party/ppapi/c/pp_module.h"
 #include "third_party/ppapi/c/pp_resource.h"
 #include "third_party/ppapi/c/pp_var.h"
+#include "third_party/ppapi/c/ppb_core.h"
+#include "third_party/ppapi/c/ppb_graphics_2d.h"
+#include "third_party/ppapi/c/ppb_image_data.h"
+#include "third_party/ppapi/c/ppb_instance.h"
+#include "third_party/ppapi/c/ppb_var.h"
+#include "third_party/ppapi/c/ppp.h"
+#include "third_party/ppapi/c/ppp_instance.h"
+#include "webkit/glue/plugins/pepper_audio.h"
 #include "webkit/glue/plugins/pepper_buffer.h"
-#include "webkit/glue/plugins/pepper_device_context_2d.h"
+#include "webkit/glue/plugins/pepper_char_set.h"
+#include "webkit/glue/plugins/pepper_cursor_control.h"
 #include "webkit/glue/plugins/pepper_directory_reader.h"
+#include "webkit/glue/plugins/pepper_file_chooser.h"
 #include "webkit/glue/plugins/pepper_file_io.h"
 #include "webkit/glue/plugins/pepper_file_ref.h"
 #include "webkit/glue/plugins/pepper_file_system.h"
 #include "webkit/glue/plugins/pepper_font.h"
+#include "webkit/glue/plugins/pepper_graphics_2d.h"
 #include "webkit/glue/plugins/pepper_image_data.h"
 #include "webkit/glue/plugins/pepper_plugin_instance.h"
 #include "webkit/glue/plugins/pepper_private.h"
@@ -49,9 +60,15 @@
 #include "webkit/glue/plugins/pepper_url_loader.h"
 #include "webkit/glue/plugins/pepper_url_request_info.h"
 #include "webkit/glue/plugins/pepper_url_response_info.h"
+#include "webkit/glue/plugins/pepper_url_util.h"
 #include "webkit/glue/plugins/pepper_var.h"
+#include "webkit/glue/plugins/pepper_video_decoder.h"
 #include "webkit/glue/plugins/pepper_widget.h"
 #include "webkit/glue/plugins/ppb_private.h"
+
+#ifdef ENABLE_GPU
+#include "webkit/glue/plugins/pepper_graphics_3d.h"
+#endif  // ENABLE_GPU
 
 namespace pepper {
 
@@ -75,21 +92,15 @@ base::MessageLoopProxy* GetMainThreadMessageLoop() {
 // PPB_Core --------------------------------------------------------------------
 
 void AddRefResource(PP_Resource resource) {
-  Resource* res = ResourceTracker::Get()->GetResource(resource);
-  if (!res) {
-    DLOG(WARNING) << "AddRef()ing a nonexistent resource";
-    return;
+  if (!ResourceTracker::Get()->AddRefResource(resource)) {
+    DLOG(WARNING) << "AddRefResource()ing a nonexistent resource";
   }
-  res->AddRef();
 }
 
 void ReleaseResource(PP_Resource resource) {
-  Resource* res = ResourceTracker::Get()->GetResource(resource);
-  if (!res) {
-    DLOG(WARNING) << "Release()ing a nonexistent resource";
-    return;
+  if (!ResourceTracker::Get()->UnrefResource(resource)) {
+    DLOG(WARNING) << "ReleaseResource()ing a nonexistent resource";
   }
-  res->Release();
 }
 
 void* MemAlloc(size_t num_bytes) {
@@ -113,13 +124,18 @@ void CallOnMainThread(int delay_in_msec,
       delay_in_msec);
 }
 
+bool IsMainThread() {
+  return GetMainThreadMessageLoop()->BelongsToCurrentThread();
+}
+
 const PPB_Core core_interface = {
   &AddRefResource,
   &ReleaseResource,
   &MemAlloc,
   &MemFree,
   &GetTime,
-  &CallOnMainThread
+  &CallOnMainThread,
+  &IsMainThread
 };
 
 // PPB_Testing -----------------------------------------------------------------
@@ -127,8 +143,8 @@ const PPB_Core core_interface = {
 bool ReadImageData(PP_Resource device_context_2d,
                    PP_Resource image,
                    const PP_Point* top_left) {
-  scoped_refptr<DeviceContext2D> context(
-      Resource::GetAs<DeviceContext2D>(device_context_2d));
+  scoped_refptr<Graphics2D> context(
+      Resource::GetAs<Graphics2D>(device_context_2d));
   if (!context.get())
     return false;
   return context->ReadImageData(image, top_left);
@@ -145,7 +161,7 @@ void QuitMessageLoop() {
   MessageLoop::current()->Quit();
 }
 
-const PPB_Testing testing_interface = {
+const PPB_Testing_Dev testing_interface = {
   &ReadImageData,
   &RunMessageLoop,
   &QuitMessageLoop,
@@ -162,41 +178,63 @@ const void* GetInterface(const char* name) {
     return PluginInstance::GetInterface();
   if (strcmp(name, PPB_IMAGEDATA_INTERFACE) == 0)
     return ImageData::GetInterface();
-  if (strcmp(name, PPB_DEVICECONTEXT2D_INTERFACE) == 0)
-    return DeviceContext2D::GetInterface();
-  if (strcmp(name, PPB_URLLOADER_INTERFACE) == 0)
+  if (strcmp(name, PPB_AUDIO_CONFIG_DEV_INTERFACE) == 0)
+    return AudioConfig::GetInterface();
+  if (strcmp(name, PPB_AUDIO_DEV_INTERFACE) == 0)
+    return Audio::GetInterface();
+  if (strcmp(name, PPB_AUDIO_TRUSTED_DEV_INTERFACE) == 0)
+    return Audio::GetTrustedInterface();
+  if (strcmp(name, PPB_GRAPHICS_2D_INTERFACE) == 0)
+    return Graphics2D::GetInterface();
+#ifdef ENABLE_GPU
+  if (strcmp(name, PPB_GRAPHICS_3D_DEV_INTERFACE) == 0)
+    return Graphics3D::GetInterface();
+  if (strcmp(name, PPB_OPENGLES_DEV_INTERFACE) == 0)
+    return Graphics3D::GetOpenGLESInterface();
+#endif  // ENABLE_GPU
+  if (strcmp(name, PPB_URLLOADER_DEV_INTERFACE) == 0)
     return URLLoader::GetInterface();
-  if (strcmp(name, PPB_URLREQUESTINFO_INTERFACE) == 0)
+  if (strcmp(name, PPB_URLREQUESTINFO_DEV_INTERFACE) == 0)
     return URLRequestInfo::GetInterface();
-  if (strcmp(name, PPB_URLRESPONSEINFO_INTERFACE) == 0)
+  if (strcmp(name, PPB_URLRESPONSEINFO_DEV_INTERFACE) == 0)
     return URLResponseInfo::GetInterface();
-  if (strcmp(name, PPB_BUFFER_INTERFACE) == 0)
+  if (strcmp(name, PPB_BUFFER_DEV_INTERFACE) == 0)
     return Buffer::GetInterface();
-  if (strcmp(name, PPB_FILEREF_INTERFACE) == 0)
+  if (strcmp(name, PPB_FILEREF_DEV_INTERFACE) == 0)
     return FileRef::GetInterface();
-  if (strcmp(name, PPB_FILEIO_INTERFACE) == 0)
+  if (strcmp(name, PPB_FILEIO_DEV_INTERFACE) == 0)
     return FileIO::GetInterface();
-  if (strcmp(name, PPB_FILEIOTRUSTED_INTERFACE) == 0)
+  if (strcmp(name, PPB_FILEIOTRUSTED_DEV_INTERFACE) == 0)
     return FileIO::GetTrustedInterface();
-  if (strcmp(name, PPB_FILESYSTEM_INTERFACE) == 0)
+  if (strcmp(name, PPB_FILESYSTEM_DEV_INTERFACE) == 0)
     return FileSystem::GetInterface();
-  if (strcmp(name, PPB_DIRECTORYREADER_INTERFACE) == 0)
+  if (strcmp(name, PPB_DIRECTORYREADER_DEV_INTERFACE) == 0)
     return DirectoryReader::GetInterface();
-  if (strcmp(name, PPB_WIDGET_INTERFACE) == 0)
+  if (strcmp(name, PPB_WIDGET_DEV_INTERFACE) == 0)
     return Widget::GetInterface();
-  if (strcmp(name, PPB_SCROLLBAR_INTERFACE) == 0)
+  if (strcmp(name, PPB_SCROLLBAR_DEV_INTERFACE) == 0)
     return Scrollbar::GetInterface();
-  if (strcmp(name, PPB_FONT_INTERFACE) == 0)
+  if (strcmp(name, PPB_FONT_DEV_INTERFACE) == 0)
     return Font::GetInterface();
-  if (strcmp(name, PPB_FIND_INTERFACE) == 0)
+  if (strcmp(name, PPB_FIND_DEV_INTERFACE) == 0)
     return PluginInstance::GetFindInterface();
+  if (strcmp(name, PPB_URLUTIL_DEV_INTERFACE) == 0)
+    return UrlUtil::GetInterface();
   if (strcmp(name, PPB_PRIVATE_INTERFACE) == 0)
     return Private::GetInterface();
+  if (strcmp(name, PPB_FILECHOOSER_DEV_INTERFACE) == 0)
+    return FileChooser::GetInterface();
+  if (strcmp(name, PPB_VIDEODECODER_DEV_INTERFACE) == 0)
+    return VideoDecoder::GetInterface();
+  if (strcmp(name, PPB_CHAR_SET_DEV_INTERFACE) == 0)
+    return CharSet::GetInterface();
+  if (strcmp(name, PPB_CURSOR_CONTROL_DEV_INTERFACE) == 0)
+    return GetCursorControlInterface();
 
   // Only support the testing interface when the command line switch is
   // specified. This allows us to prevent people from (ab)using this interface
   // in production code.
-  if (strcmp(name, PPB_TESTING_INTERFACE) == 0) {
+  if (strcmp(name, PPB_TESTING_DEV_INTERFACE) == 0) {
     if (CommandLine::ForCurrentProcess()->HasSwitch("enable-pepper-testing"))
       return &testing_interface;
   }

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_TEST_AUTOMATED_UI_TESTS_AUTOMATED_UI_TESTS_H_
 #define CHROME_TEST_AUTOMATED_UI_TESTS_AUTOMATED_UI_TESTS_H_
+#pragma once
 
 // This takes an input file of commands, which consist of a series of
 // actions, and runs every command, reporting the status of each one
@@ -102,7 +103,7 @@
 
 #include <string>
 
-#include "base/keyboard_codes.h"
+#include "app/keyboard_codes.h"
 #include "chrome/test/automated_ui_tests/automated_ui_test_base.h"
 #include "chrome/test/ui/ui_test.h"
 
@@ -294,7 +295,7 @@ class AutomatedUITest : public AutomatedUITestBase {
   // Calls SimulateOSKeyPress on the active window. Simulates a key press at
   // the OS level. |key| is the key pressed  and |flags| specifies which
   // modifiers keys are also pressed (as defined in chrome/views/event.h).
-  bool SimulateKeyPressInActiveWindow(base::KeyboardCode key, int flags);
+  bool SimulateKeyPressInActiveWindow(app::KeyboardCode key, int flags);
 
   // Opens init file, reads it into the reader, and closes the file.
   // Returns false if there are any errors.

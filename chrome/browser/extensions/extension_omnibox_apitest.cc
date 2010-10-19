@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
@@ -11,11 +13,20 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/location_bar.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/ui_test_utils.h"
+
+// Basic test is flaky on ChromeOS.
+// http://crbug.com/52929
+#if defined(OS_CHROMEOS)
+#define MAYBE_Basic FLAKY_Basic
+#else
+#define MAYBE_Basic Basic
+#endif
 
 namespace {
 
@@ -57,16 +68,16 @@ class OmniboxApiTest : public ExtensionApiTest {
   void WaitForAutocompleteDone(AutocompleteController* controller) {
     while (!controller->done()) {
       ui_test_utils::WaitForNotification(
-          NotificationType::AUTOCOMPLETE_CONTROLLER_DEFAULT_MATCH_UPDATED);
+          NotificationType::AUTOCOMPLETE_CONTROLLER_RESULT_UPDATED);
     }
   }
 };
 
-IN_PROC_BROWSER_TEST_F(OmniboxApiTest, Basic) {
+IN_PROC_BROWSER_TEST_F(OmniboxApiTest, MAYBE_Basic) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
 
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(RunExtensionTest("omnibox")) << message_;
 
   // The results depend on the TemplateURLModel being loaded. Make sure it is

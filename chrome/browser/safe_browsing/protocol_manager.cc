@@ -4,9 +4,10 @@
 
 #include "chrome/browser/safe_browsing/protocol_manager.h"
 
+#ifndef NDEBUG
 #include "base/base64.h"
-#include "base/env_var.h"
-#include "base/file_version_info.h"
+#endif
+#include "base/environment.h"
 #include "base/histogram.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
@@ -14,11 +15,11 @@
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/timer.h"
-#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/safe_browsing/protocol_parser.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "net/base/escape.h"
@@ -74,11 +75,11 @@ SafeBrowsingProtocolManager::SafeBrowsingProtocolManager(
   // The first update must happen between 1-5 minutes of start up.
   next_update_sec_ = base::RandInt(60, kSbTimerStartIntervalSec);
 
-  scoped_ptr<FileVersionInfo> version_info(chrome_app::GetChromeVersionInfo());
-  if (!version_info.get())
+  chrome::VersionInfo version_info;
+  if (!version_info.is_valid())
     version_ = "0.1";
   else
-    version_ = WideToASCII(version_info->product_version());
+    version_ = version_info.Version();
 }
 
 SafeBrowsingProtocolManager::~SafeBrowsingProtocolManager() {
@@ -418,8 +419,8 @@ bool SafeBrowsingProtocolManager::HandleServiceResponse(const GURL& url,
 
 void SafeBrowsingProtocolManager::Initialize() {
   // Don't want to hit the safe browsing servers on build/chrome bots.
-  scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
-  if (env->HasEnv(env_vars::kHeadless))
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  if (env->HasVar(env_vars::kHeadless))
     return;
 
   ScheduleNextUpdate(false /* no back off */);
@@ -587,8 +588,10 @@ void SafeBrowsingProtocolManager::OnChunkInserted() {
 
 void SafeBrowsingProtocolManager::ReportMalware(const GURL& malware_url,
                                                 const GURL& page_url,
-                                                const GURL& referrer_url) {
-  GURL report_url = MalwareReportUrl(malware_url, page_url, referrer_url);
+                                                const GURL& referrer_url,
+                                                bool is_subresource) {
+  GURL report_url = MalwareReportUrl(malware_url, page_url, referrer_url,
+                                     is_subresource);
   URLFetcher* report = new URLFetcher(report_url, URLFetcher::GET, this);
   report->set_load_flags(net::LOAD_DISABLE_CACHE);
   report->set_request_context(request_context_getter_);
@@ -678,13 +681,14 @@ GURL SafeBrowsingProtocolManager::MacKeyUrl() const {
 
 GURL SafeBrowsingProtocolManager::MalwareReportUrl(
     const GURL& malware_url, const GURL& page_url,
-    const GURL& referrer_url) const {
+    const GURL& referrer_url, bool is_subresource) const {
   std::string url = ComposeUrl(info_url_prefix_, "report", client_name_,
                                version_, additional_query_);
-  return GURL(StringPrintf("%s&evts=malblhit&evtd=%s&evtr=%s&evhr=%s",
+  return GURL(StringPrintf("%s&evts=malblhit&evtd=%s&evtr=%s&evhr=%s&evtb=%d",
       url.c_str(), EscapeQueryParamValue(malware_url.spec(), true).c_str(),
       EscapeQueryParamValue(page_url.spec(), true).c_str(),
-      EscapeQueryParamValue(referrer_url.spec(), true).c_str()));
+      EscapeQueryParamValue(referrer_url.spec(), true).c_str(),
+      is_subresource));
 }
 
 GURL SafeBrowsingProtocolManager::NextChunkUrl(const std::string& url) const {

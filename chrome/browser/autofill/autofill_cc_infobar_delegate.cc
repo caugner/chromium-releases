@@ -6,10 +6,10 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/histogram.h"
 #include "chrome/browser/autofill/autofill_cc_infobar.h"
 #include "chrome/browser/autofill/autofill_manager.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
@@ -22,15 +22,9 @@
 AutoFillCCInfoBarDelegate::AutoFillCCInfoBarDelegate(TabContents* tab_contents,
                                                      AutoFillManager* host)
     : ConfirmInfoBarDelegate(tab_contents),
-      browser_(NULL),
       host_(host) {
-  if (tab_contents) {
-    // This is NULL for TestTabContents.
-    if (tab_contents->delegate())
-      browser_ = tab_contents->delegate()->GetBrowser();
-
+  if (tab_contents)
     tab_contents->AddInfoBar(this);
-  }
 }
 
 AutoFillCCInfoBarDelegate::~AutoFillCCInfoBarDelegate() {
@@ -54,8 +48,8 @@ void AutoFillCCInfoBarDelegate::InfoBarClosed() {
   ConfirmInfoBarDelegate::InfoBarClosed();
 }
 
-std::wstring AutoFillCCInfoBarDelegate::GetMessageText() const {
-  return l10n_util::GetString(IDS_AUTOFILL_CC_INFOBAR_TEXT);
+string16 AutoFillCCInfoBarDelegate::GetMessageText() const {
+  return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_INFOBAR_TEXT);
 }
 
 SkBitmap* AutoFillCCInfoBarDelegate::GetIcon() const {
@@ -67,19 +61,20 @@ int AutoFillCCInfoBarDelegate::GetButtons() const {
   return BUTTON_OK | BUTTON_CANCEL;
 }
 
-std::wstring AutoFillCCInfoBarDelegate::GetButtonLabel(
+string16 AutoFillCCInfoBarDelegate::GetButtonLabel(
     ConfirmInfoBarDelegate::InfoBarButton button) const {
   if (button == BUTTON_OK)
-    return l10n_util::GetString(IDS_AUTOFILL_CC_INFOBAR_ACCEPT);
+    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_INFOBAR_ACCEPT);
   else if (button == BUTTON_CANCEL)
-    return l10n_util::GetString(IDS_AUTOFILL_CC_INFOBAR_DENY);
+    return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_INFOBAR_DENY);
   else
     NOTREACHED();
 
-  return std::wstring();
+  return string16();
 }
 
 bool AutoFillCCInfoBarDelegate::Accept() {
+  UMA_HISTOGRAM_COUNTS("AutoFill.CCInfoBarAccepted", 1);
   if (host_) {
     host_->OnInfoBarClosed(true);
     host_ = NULL;
@@ -88,6 +83,7 @@ bool AutoFillCCInfoBarDelegate::Accept() {
 }
 
 bool AutoFillCCInfoBarDelegate::Cancel() {
+  UMA_HISTOGRAM_COUNTS("AutoFill.CCInfoBarDenied", 1);
   if (host_) {
     host_->OnInfoBarClosed(false);
     host_ = NULL;
@@ -95,13 +91,13 @@ bool AutoFillCCInfoBarDelegate::Cancel() {
   return true;
 }
 
-std::wstring AutoFillCCInfoBarDelegate::GetLinkText() {
-  return l10n_util::GetString(IDS_AUTOFILL_CC_LEARN_MORE);
+string16 AutoFillCCInfoBarDelegate::GetLinkText() {
+  return l10n_util::GetStringUTF16(IDS_AUTOFILL_CC_LEARN_MORE);
 }
 
 bool AutoFillCCInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
-  browser_->OpenURL(GURL(kAutoFillLearnMoreUrl), GURL(), NEW_FOREGROUND_TAB,
-                    PageTransition::TYPED);
+  host_->tab_contents()->OpenURL(GURL(kAutoFillLearnMoreUrl), GURL(),
+                                 NEW_FOREGROUND_TAB, PageTransition::TYPED);
   return false;
 }
 

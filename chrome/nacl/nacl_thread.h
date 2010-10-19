@@ -1,11 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_NACL_NACL_THREAD_H_
 #define CHROME_NACL_NACL_THREAD_H_
+#pragma once
 
-#include "base/file_path.h"
 #include "base/native_library.h"
 #include "chrome/common/child_thread.h"
 #include "chrome/common/nacl_types.h"
@@ -21,7 +21,7 @@ class NaClThread : public ChildThread {
 
  private:
   virtual void OnControlMessageReceived(const IPC::Message& msg);
-  void OnStartSelLdr(int channel_descriptor, nacl::FileDescriptor handle);
+  void OnStartSelLdr(std::vector<nacl::FileDescriptor> handles);
 
   // TODO(gregoryd): do we need to override Cleanup as in PluginThread?
   DISALLOW_COPY_AND_ASSIGN(NaClThread);

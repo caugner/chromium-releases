@@ -7,7 +7,6 @@
 
 #include <map>
 #include "base/basictypes.h"
-#include "base/logging.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "gpu/command_buffer/service/gl_utils.h"
@@ -48,6 +47,7 @@ class RenderbufferManager {
 
     void set_internal_format(GLenum internalformat) {
       internal_format_ = internalformat;
+      cleared_ = false;
     }
 
     bool IsDeleted() {
@@ -105,5 +105,3 @@ class RenderbufferManager {
 }  // namespace gpu
 
 #endif  // GPU_COMMAND_BUFFER_SERVICE_RENDERBUFFER_MANAGER_H_
-
-

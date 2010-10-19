@@ -43,7 +43,7 @@ void HtmlDialogTabContentsDelegate::OpenURLFromTab(
     TabContents* new_contents =
         browser->AddTabWithURL(url, referrer, transition, -1,
                                TabStripModel::ADD_SELECTED, NULL,
-                               std::string());
+                               std::string(), &browser);
     DCHECK(new_contents);
     browser->window()->Show();
     new_contents->Focus();
@@ -76,6 +76,11 @@ void HtmlDialogTabContentsDelegate::ActivateContents(TabContents* contents) {
   // this frame and we don't have a TabStripModel.
 }
 
+void HtmlDialogTabContentsDelegate::DeactivateContents(TabContents* contents) {
+  // We don't care about this notification (called when a user gesture triggers
+  // a call to window.blur()).
+}
+
 void HtmlDialogTabContentsDelegate::LoadingStateChanged(TabContents* source) {
   // We don't care about this notification.
 }
@@ -85,7 +90,7 @@ void HtmlDialogTabContentsDelegate::CloseContents(TabContents* source) {
   // cleanup somewhere else (namely, HtmlDialogUIDelegate::OnDialogClosed()).
 }
 
-bool HtmlDialogTabContentsDelegate::IsPopup(TabContents* source) {
+bool HtmlDialogTabContentsDelegate::IsPopup(const TabContents* source) const {
   // This needs to return true so that we are allowed to be resized by our
   // contents.
   return true;
@@ -102,7 +107,9 @@ void HtmlDialogTabContentsDelegate::UpdateTargetURL(TabContents* source,
   // Ignored.
 }
 
-bool HtmlDialogTabContentsDelegate::ShouldAddNavigationToHistory() const {
+bool HtmlDialogTabContentsDelegate::ShouldAddNavigationToHistory(
+    const history::HistoryAddPageArgs& add_page_args,
+    NavigationType::Type navigation_type) {
   return false;
 }
 

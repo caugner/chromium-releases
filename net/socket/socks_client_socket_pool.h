@@ -4,6 +4,7 @@
 
 #ifndef NET_SOCKET_SOCKS_CLIENT_SOCKET_POOL_H_
 #define NET_SOCKET_SOCKS_CLIENT_SOCKET_POOL_H_
+#pragma once
 
 #include <string>
 
@@ -14,16 +15,15 @@
 #include "base/time.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/host_resolver.h"
-#include "net/proxy/proxy_server.h"
 #include "net/socket/client_socket_pool_base.h"
 #include "net/socket/client_socket_pool_histograms.h"
 #include "net/socket/client_socket_pool.h"
-#include "net/socket/tcp_client_socket_pool.h"
 
 namespace net {
 
-class ClientSocketFactory;
 class ConnectJobFactory;
+class TCPClientSocketPool;
+class TCPSocketParams;
 
 class SOCKSSocketParams : public base::RefCounted<SOCKSSocketParams> {
  public:
@@ -139,6 +139,11 @@ class SOCKSClientSocketPool : public ClientSocketPool {
 
   virtual LoadState GetLoadState(const std::string& group_name,
                                  const ClientSocketHandle* handle) const;
+
+  virtual Value* GetInfoAsValue(const std::string& name,
+                                const std::string& type) const {
+    return base_.GetInfoAsValue(name, type);
+  }
 
   virtual base::TimeDelta ConnectionTimeout() const {
     return base_.ConnectionTimeout();

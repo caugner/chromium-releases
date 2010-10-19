@@ -11,15 +11,32 @@
 #include "chrome/renderer/plugin_channel_host.h"
 #include "chrome/renderer/render_view.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDevToolsAgent.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDevToolsMessageData.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDevToolsMessageTransport.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "webkit/glue/devtools_message_data.h"
 
 using WebKit::WebDevToolsAgent;
-using WebKit::WebDevToolsMessageData;
-using WebKit::WebDevToolsMessageTransport;
 using WebKit::WebString;
+
+namespace {
+
+class MessageImpl : public WebDevToolsAgent::MessageDescriptor {
+ public:
+  MessageImpl(const std::string& message, int host_id)
+      : msg(message),
+        host_id(host_id) {}
+  virtual ~MessageImpl() {}
+  virtual WebDevToolsAgent* agent() {
+    DevToolsAgent* agent = DevToolsAgent::FromHostId(host_id);
+    if (!agent)
+      return 0;
+    return agent->GetWebAgent();
+  }
+  virtual WebString message() { return WebString::fromUTF8(msg); }
+ private:
+  std::string msg;
+  int host_id;
+};
+
+}
 
 // static
 void DevToolsAgentFilter::DispatchMessageLoop() {
@@ -36,7 +53,8 @@ IPC::Channel* DevToolsAgentFilter::channel_ = NULL;
 int DevToolsAgentFilter::current_routing_id_ = 0;
 
 DevToolsAgentFilter::DevToolsAgentFilter()
-    : message_handled_(false) {
+    : message_handled_(false),
+      render_thread_loop_(MessageLoop::current()) {
   WebDevToolsAgent::setMessageLoopDispatchHandler(
       &DevToolsAgentFilter::DispatchMessageLoop);
 }
@@ -50,9 +68,8 @@ bool DevToolsAgentFilter::OnMessageReceived(const IPC::Message& message) {
   current_routing_id_ = message.routing_id();
   IPC_BEGIN_MESSAGE_MAP(DevToolsAgentFilter, message)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_DebuggerCommand, OnDebuggerCommand)
-    IPC_MESSAGE_HANDLER(DevToolsAgentMsg_DebuggerPauseScript,
-                        OnDebuggerPauseScript)
-    IPC_MESSAGE_HANDLER(DevToolsAgentMsg_RpcMessage, OnRpcMessage)
+    IPC_MESSAGE_HANDLER(DevToolsAgentMsg_DispatchOnInspectorBackend,
+                        OnDispatchOnInspectorBackend)
     IPC_MESSAGE_UNHANDLED(message_handled_ = false)
   IPC_END_MESSAGE_MAP()
   return message_handled_;
@@ -63,32 +80,17 @@ void DevToolsAgentFilter::OnDebuggerCommand(const std::string& command) {
       WebString::fromUTF8(command), current_routing_id_);
 }
 
-void DevToolsAgentFilter::OnDebuggerPauseScript() {
-  WebDevToolsAgent::debuggerPauseScript();
-}
-
-namespace {
-
-class WebDevToolsMessageTransportImpl : public WebDevToolsMessageTransport {
- public:
-  void sendMessageToFrontendOnIOThread(const WebDevToolsMessageData& data) {
-    DevToolsAgentFilter::SendRpcMessage(DevToolsMessageData(data));
+void DevToolsAgentFilter::OnDispatchOnInspectorBackend(
+    const std::string& message) {
+  if (!WebDevToolsAgent::shouldInterruptForMessage(
+          WebString::fromUTF8(message))) {
+      message_handled_ = false;
+      return;
   }
-};
+  WebDevToolsAgent::interruptAndDispatch(
+      new MessageImpl(message, current_routing_id_));
 
-}  // namespace
-
-void DevToolsAgentFilter::OnRpcMessage(const DevToolsMessageData& data) {
-  WebDevToolsMessageTransportImpl transport;
-  message_handled_ = WebDevToolsAgent::dispatchMessageFromFrontendOnIOThread(
-      &transport,
-      data.ToWebDevToolsMessageData());
-}
-
-// static
-void DevToolsAgentFilter::SendRpcMessage(const DevToolsMessageData& data) {
-  IPC::Message* m = new ViewHostMsg_ForwardToDevToolsClient(
-      current_routing_id_,
-      DevToolsClientMsg_RpcMessage(data));
-  channel_->Send(m);
+  render_thread_loop_->PostTask(
+      FROM_HERE,
+      NewRunnableFunction(&WebDevToolsAgent::processPendingMessages));
 }

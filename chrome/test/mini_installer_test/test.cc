@@ -53,7 +53,8 @@ class MiniInstallTest : public testing::Test {
     virtual void SetUp() {
       // Parse test command-line arguments.
       const CommandLine* cmd = CommandLine::ForCurrentProcess();
-      std::wstring build = cmd->GetSwitchValue(switches::kInstallerTestBuild);
+      std::wstring build =
+          cmd->GetSwitchValueNative(switches::kInstallerTestBuild);
       if (build.empty())
         build = L"latest";
       force_tests_ = cmd->HasSwitch(switches::kInstallerTestForce);
@@ -112,8 +113,7 @@ TEST_F(MiniInstallTest, FullOverPreviousFullUser) {
     user_inst_->OverInstallOnFullInstaller(kFullInstall);
 }
 TEST_F(MiniInstallTest, FullOverPreviousFullSys) {
-  if (!chrome_frame_)
-    sys_inst_->OverInstallOnFullInstaller(kFullInstall);
+  sys_inst_->OverInstallOnFullInstaller(kFullInstall);
 }
 
 // Overinstall diff installer.
@@ -123,8 +123,7 @@ TEST_F(MiniInstallTest, DiffOverPreviousFullUser) {
 }
 
 TEST_F(MiniInstallTest, DiffOverPreviousFullSys) {
-  if (!chrome_frame_)
-    sys_inst_->OverInstallOnFullInstaller(kDiffInstall);
+  sys_inst_->OverInstallOnFullInstaller(kDiffInstall);
 }
 
 // Repair version folder.
@@ -134,8 +133,7 @@ TEST_F(MiniInstallTest, RepairFolderOnFullUser) {
 }
 
 TEST_F(MiniInstallTest, RepairFolderOnFullSys) {
-  if (!chrome_frame_)
-    sys_inst_->Repair(ChromeMiniInstaller::VERSION_FOLDER);
+  sys_inst_->Repair(ChromeMiniInstaller::VERSION_FOLDER);
 }
 
 // Repair registry.
@@ -144,8 +142,7 @@ TEST_F(MiniInstallTest, RepairRegistryOnFullUser) {
     user_inst_->Repair(ChromeMiniInstaller::REGISTRY);
 }
 TEST_F(MiniInstallTest, RepairRegistryOnFullSys) {
-  if (!chrome_frame_)
-    sys_inst_->Repair(ChromeMiniInstaller::REGISTRY);
+  sys_inst_->Repair(ChromeMiniInstaller::REGISTRY);
 }
 
 // Install standalone.

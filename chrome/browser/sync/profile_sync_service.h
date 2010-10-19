@@ -4,25 +4,27 @@
 
 #ifndef CHROME_BROWSER_SYNC_PROFILE_SYNC_SERVICE_H_
 #define CHROME_BROWSER_SYNC_PROFILE_SYNC_SERVICE_H_
+#pragma once
 
 #include <string>
-#include <map>
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/observer_list.h"
 #include "base/scoped_ptr.h"
+#include "base/string16.h"
 #include "base/time.h"
-#include "chrome/browser/google_service_auth_error.h"
-#include "chrome/browser/pref_member.h"
+#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
+#include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/notification_method.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/sync_setup_wizard.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/unrecoverable_error_handler.h"
+#include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
@@ -126,6 +128,11 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   void RegisterDataTypeController(
       browser_sync::DataTypeController* data_type_controller);
 
+  // Returns the session model associator associated with this type, but only if
+  // the associator is running.  If it is doing anything else, it will return
+  // null.
+  browser_sync::SessionModelAssociator* GetSessionModelAssociator();
+
   // Fills state_map with a map of current data types that are possible to
   // sync, as well as their states.
   void GetDataTypeControllerStates(
@@ -175,10 +182,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // progress, the sync system is already authenticated, or some error
   // occurred preventing the action. We make it the duty of ProfileSyncService
   // to open the dialog to easily ensure only one is ever showing.
-  bool SetupInProgress() const {
-    return !HasSyncSetupCompleted() &&
-        (WizardIsVisible() || bootstrap_sync_authentication_);
-  }
+  bool SetupInProgress() const;
   bool WizardIsVisible() const {
     return wizard_.IsVisible();
   }
@@ -187,7 +191,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   void ShowChooseDataTypes(gfx::NativeWindow parent_window);
 
   // Pretty-printed strings for a given StatusSummary.
-  static std::wstring BuildSyncStatusSummaryText(
+  static std::string BuildSyncStatusSummaryText(
       const browser_sync::SyncBackendHost::StatusSummary& summary);
 
   // Returns true if the SyncBackendHost has told us it's ready to accept
@@ -218,7 +222,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   const base::Time& last_synced_time() const { return last_synced_time_; }
 
   // Returns a user-friendly string form of last synced time (in minutes).
-  std::wstring GetLastSyncedTimeString() const;
+  string16 GetLastSyncedTimeString() const;
 
   // Returns the authenticated username of the sync user, or empty if none
   // exists. It will only exist if the authentication service provider (e.g
@@ -297,6 +301,10 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // NotificationService when the outcome is known.
   virtual void SetPassphrase(const std::string& passphrase);
 
+  // Returns whether processing changes is allowed.  Check this before doing
+  // any model-modifying operations.
+  bool ShouldPushChanges();
+
  protected:
   // Used by ProfileSyncServiceMock only.
   //
@@ -308,10 +316,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Helper to install and configure a data type manager.
   void ConfigureDataTypeManager();
 
-  // Returns whether processing changes is allowed.  Check this before doing
-  // any model-modifying operations.
-  bool ShouldPushChanges();
-
   // Starts up the backend sync components.
   void StartUp();
   // Shuts down the backend sync components.
@@ -322,10 +326,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   void RegisterPreferences();
   void ClearPreferences();
 
-  // Tests need to override this.  If |delete_sync_data_folder| is true, then
-  // this method will delete all previous "Sync Data" folders. (useful if the
-  // folder is partial/corrupt)
-  virtual void InitializeBackend(bool delete_sync_data_folder);
+  // Test need to override this to create backends that allow setting up
+  // initial conditions, such as populating sync nodes.
+  virtual void CreateBackend();
 
   const browser_sync::DataTypeController::TypeMap& data_type_controllers() {
     return data_type_controllers_;
@@ -347,10 +350,15 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
  private:
   friend class ProfileSyncServiceTest;
   friend class ProfileSyncServicePreferenceTest;
+  friend class ProfileSyncServiceSessionTest;
   friend class ProfileSyncServiceTestHarness;
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTest, InitialState);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTest,
                            UnrecoverableErrorSuspendsService);
+
+  // If |delete_sync_data_folder| is true, then this method will delete all
+  // previous "Sync Data" folders. (useful if the folder is partial/corrupt).
+  void InitializeBackend(bool delete_sync_data_folder);
 
   // Initializes the various settings from the command line.
   void InitSettings();
@@ -358,7 +366,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Sets the last synced time to the current time.
   void UpdateLastSyncedTime();
 
-  static const wchar_t* GetPrefNameForDataType(syncable::ModelType data_type);
+  static const char* GetPrefNameForDataType(syncable::ModelType data_type);
 
   // Time at which we begin an attempt a GAIA authorization.
   base::TimeTicks auth_start_time_;

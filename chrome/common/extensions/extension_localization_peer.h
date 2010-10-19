@@ -5,6 +5,7 @@
 
 #ifndef CHROME_COMMON_EXTENSIONS_EXTENSION_LOCALIZATION_PEER_H_
 #define CHROME_COMMON_EXTENSIONS_EXTENSION_LOCALIZATION_PEER_H_
+#pragma once
 
 #include <string>
 
@@ -39,6 +40,7 @@ class ExtensionLocalizationPeer
   virtual void OnReceivedResponse(
       const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
       bool content_filtered);
+  virtual void OnDownloadedData(int len) {}
   virtual void OnReceivedData(const char* data, int len);
   virtual void OnCompletedRequest(const URLRequestStatus& status,
                                   const std::string& security_info);

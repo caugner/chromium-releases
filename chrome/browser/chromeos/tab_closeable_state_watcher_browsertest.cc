@@ -10,6 +10,7 @@
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
@@ -36,7 +37,8 @@ class TabCloseableStateWatcherTest : public InProcessBrowserTest {
   // Wrapper for Browser::AddTabWithURL
   void AddTabWithURL(Browser* browser, const GURL& url) {
     browser->AddTabWithURL(url, GURL(), PageTransition::TYPED, 0,
-                           TabStripModel::ADD_SELECTED, NULL, std::string());
+                           TabStripModel::ADD_SELECTED, NULL, std::string(),
+                           &browser);
     // Wait for page to finish loading.
     ui_test_utils::WaitForNavigation(
         &browser->GetSelectedTabContents()->controller());

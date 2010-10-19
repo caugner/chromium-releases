@@ -1,17 +1,18 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_COMMON_EXTENSIONS_EXTENSION_MESSAGE_BUNDLE_H_
 #define CHROME_COMMON_EXTENSIONS_EXTENSION_MESSAGE_BUNDLE_H_
+#pragma once
 
 #include <map>
 #include <string>
 #include <vector>
 
 #include "base/linked_ptr.h"
-#include "base/string_util.h"
-#include "base/values.h"
+
+class DictionaryValue;
 
 // Contains localized extension messages for one locale. Any messages that the
 // locale does not provide are pulled from the default locale.
@@ -21,9 +22,9 @@ class ExtensionMessageBundle {
   typedef std::vector<linked_ptr<DictionaryValue> > CatalogVector;
 
   // JSON keys of interest for messages file.
-  static const wchar_t* kContentKey;
-  static const wchar_t* kMessageKey;
-  static const wchar_t* kPlaceholdersKey;
+  static const char* kContentKey;
+  static const char* kMessageKey;
+  static const char* kPlaceholdersKey;
 
   // Begin/end markers for placeholders and messages
   static const char* kPlaceholderBegin;
@@ -93,23 +94,12 @@ class ExtensionMessageBundle {
 
   // Allow only ascii 0-9, a-z, A-Z, and _ in the variable name.
   // Returns false if the input is empty or if it has illegal characters.
-  template<typename str>
-  static bool IsValidName(const str& name) {
-    if (name.empty())
-      return false;
-
-    typename str::const_iterator it = name.begin();
-    for (; it != name.end(); ++it) {
-      // Allow only ascii 0-9, a-z, A-Z, and _ in the name.
-      if (!IsAsciiAlpha(*it) && !IsAsciiDigit(*it) && *it != '_' && *it != '@')
-        return false;
-      }
-
-    return true;
-  }
+  static bool IsValidName(const std::string& name);
 
   // Getter for dictionary_.
   const SubstitutionMap* dictionary() const { return &dictionary_; }
+
+  ~ExtensionMessageBundle();
 
  private:
   // Testing friend.
@@ -132,7 +122,7 @@ class ExtensionMessageBundle {
   // Helper methods that navigate JSON tree and return simplified message.
   // They replace all $PLACEHOLDERS$ with their value, and return just key/value
   // of the message.
-  bool GetMessageValue(const std::wstring& wkey,
+  bool GetMessageValue(const std::string& key,
                        const DictionaryValue& catalog,
                        std::string* value,
                        std::string* error) const;

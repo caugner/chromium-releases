@@ -4,6 +4,7 @@
 
 #ifndef APP_SYSTEM_MONITOR_H_
 #define APP_SYSTEM_MONITOR_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -67,6 +68,9 @@ class SystemMonitor {
 
     // Notification that the system is resuming.
     virtual void OnResume() {}
+
+   protected:
+    virtual ~PowerObserver() {}
   };
 
   // Add a new observer.

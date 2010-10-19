@@ -2,8 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <windows.h>
+#include <objbase.h>
+#include <urlmon.h>
+
 #include "base/logging.h"
-#include "base/registry.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 
@@ -44,8 +48,10 @@ void Request::ParseHeaders(const std::string& headers) {
                                     "\r\n");
   while (it.GetNext()) {
     if (LowerCaseEqualsASCII(it.name(), "content-length")) {
-       content_length_ = StringToInt(it.values().c_str());
-       break;
+      int int_content_length;
+      base::StringToInt(it.values().c_str(), &int_content_length);
+      content_length_ = int_content_length;
+      break;
     }
   }
 }

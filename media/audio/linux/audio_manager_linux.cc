@@ -4,19 +4,21 @@
 
 #include "media/audio/linux/audio_manager_linux.h"
 
-#include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "media/audio/fake_audio_input_stream.h"
 #include "media/audio/fake_audio_output_stream.h"
+#include "media/audio/linux/alsa_input.h"
 #include "media/audio/linux/alsa_output.h"
 #include "media/audio/linux/alsa_wrapper.h"
+#include "media/base/limits.h"
 #include "media/base/media_switches.h"
-
 
 namespace {
 
-AudioManagerLinux* g_audio_manager = NULL;
+const int kMaxInputChannels = 2;
+const int kMaxSamplesPerPacket = media::Limits::kMaxSampleRate;
+
 }  // namespace
 
 // Implementation of AudioManager.
@@ -26,58 +28,65 @@ bool AudioManagerLinux::HasAudioOutputDevices() {
 }
 
 bool AudioManagerLinux::HasAudioInputDevices() {
-  // TODO(satish): implement.
-  return false;
-}
-
-AudioInputStream* AudioManagerLinux::MakeAudioInputStream(
-    Format format,
-    int channels,
-    int sample_rate,
-    char bits_per_sample,
-    uint32 samples_per_packet) {
-  if (format == AUDIO_MOCK) {
-    return FakeAudioInputStream::MakeFakeStream(channels, bits_per_sample,
-                                                sample_rate,
-                                                samples_per_packet);
-  }
-  // TODO(satish): implement.
-  return NULL;
+  // TODO(satish): Make this actually query audio devices.
+  return true;
 }
 
 AudioOutputStream* AudioManagerLinux::MakeAudioOutputStream(
-    Format format,
-    int channels,
-    int sample_rate,
-    char bits_per_sample) {
+    AudioParameters params) {
   // Early return for testing hook.  Do this before checking for
   // |initialized_|.
-  if (format == AudioManager::AUDIO_MOCK) {
+  if (params.format == AudioParameters::AUDIO_MOCK) {
     return FakeAudioOutputStream::MakeFakeStream();
   }
 
-  if (!initialized_) {
+  if (!initialized()) {
     return NULL;
   }
 
   std::string device_name = AlsaPcmOutputStream::kAutoSelectDevice;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAlsaDevice)) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kAlsaOutputDevice)) {
     device_name = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-        switches::kAlsaDevice);
+        switches::kAlsaOutputDevice);
   }
   AlsaPcmOutputStream* stream =
-      new AlsaPcmOutputStream(device_name, format, channels, sample_rate,
-                              bits_per_sample, wrapper_.get(), this,
-                              audio_thread_.message_loop());
+      new AlsaPcmOutputStream(device_name, params, wrapper_.get(), this,
+                              GetMessageLoop());
 
   AutoLock l(lock_);
   active_streams_[stream] = scoped_refptr<AlsaPcmOutputStream>(stream);
   return stream;
 }
 
-AudioManagerLinux::AudioManagerLinux()
-    : audio_thread_("AudioThread"),
-      initialized_(false) {
+AudioInputStream* AudioManagerLinux::MakeAudioInputStream(
+    AudioParameters params, int samples_per_packet) {
+  if (!params.IsValid() || params.channels > kMaxInputChannels ||
+      samples_per_packet < 0 || samples_per_packet > kMaxSamplesPerPacket)
+    return NULL;
+
+  if (params.format == AudioParameters::AUDIO_MOCK) {
+    return FakeAudioInputStream::MakeFakeStream(params, samples_per_packet);
+  } else if (params.format != AudioParameters::AUDIO_PCM_LINEAR) {
+    return NULL;
+  }
+
+  if (!initialized())
+    return NULL;
+
+  std::string device_name = AlsaPcmOutputStream::kAutoSelectDevice;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAlsaInputDevice)) {
+    device_name = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        switches::kAlsaInputDevice);
+  }
+
+  AlsaPcmInputStream* stream = new AlsaPcmInputStream(
+      device_name, params, samples_per_packet, wrapper_.get());
+
+  return stream;
+}
+
+AudioManagerLinux::AudioManagerLinux() {
 }
 
 AudioManagerLinux::~AudioManagerLinux() {
@@ -91,7 +100,7 @@ AudioManagerLinux::~AudioManagerLinux() {
 }
 
 void AudioManagerLinux::Init() {
-  initialized_ = audio_thread_.Start();
+  AudioManagerBase::Init();
   wrapper_.reset(new AlsaWrapper());
 }
 
@@ -110,17 +119,7 @@ void AudioManagerLinux::ReleaseOutputStream(AlsaPcmOutputStream* stream) {
   }
 }
 
-// TODO(ajwong): Collapse this with the windows version.
-void DestroyAudioManagerLinux(void* not_used) {
-  delete g_audio_manager;
-  g_audio_manager = NULL;
-}
-
-AudioManager* AudioManager::GetAudioManager() {
-  if (!g_audio_manager) {
-    g_audio_manager = new AudioManagerLinux();
-    g_audio_manager->Init();
-    base::AtExitManager::RegisterCallback(&DestroyAudioManagerLinux, NULL);
-  }
-  return g_audio_manager;
+// static
+AudioManager* AudioManager::CreateAudioManager() {
+  return new AudioManagerLinux();
 }

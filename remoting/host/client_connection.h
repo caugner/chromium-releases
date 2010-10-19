@@ -57,16 +57,16 @@ class ClientConnection : public base::RefCountedThreadSafe<ClientConnection>,
   // a libjingle channel, these events are delegated to |handler|.
   // It is guranteed that |handler| is called only on the |message_loop|.
   ClientConnection(MessageLoop* message_loop,
-         ProtocolDecoder* decoder,
-         EventHandler* handler);
+                   ProtocolDecoder* decoder,
+                   EventHandler* handler);
 
   virtual ~ClientConnection();
 
-  // Creates a DataBuffer object that wraps around HostMessage. The DataBuffer
-  // object will be responsible for serializing and framing the message.
-  // DataBuffer will also own |msg| after this call.
+  // Creates a DataBuffer object that wraps around ChromotingHostMessage. The
+  // DataBuffer object will be responsible for serializing and framing the
+  // message. DataBuffer will also own |msg| after this call.
   static scoped_refptr<media::DataBuffer> CreateWireFormatDataBuffer(
-      const HostMessage* msg);
+      const ChromotingHostMessage* msg);
 
   virtual void set_jingle_channel(JingleChannel* channel) {
     channel_ = channel;
@@ -84,11 +84,11 @@ class ClientConnection : public base::RefCountedThreadSafe<ClientConnection>,
   // Send encoded update stream data to the viewer.
   //
   // |data| is the actual bytes in wire format. That means it is fully framed
-  // and serialized from a HostMessage. This is a special case only for
-  // UpdateStreamPacket to reduce the amount of memory copies.
+  // and serialized from a ChromotingHostMessage. This is a special case only
+  // for UpdateStreamPacket to reduce the amount of memory copies.
   //
   // |data| should be created by calling to
-  // CreateWireFormatDataBuffer(HostMessage).
+  // CreateWireFormatDataBuffer(ChromotingHostMessage).
   virtual void SendUpdateStreamPacketMessage(
       scoped_refptr<media::DataBuffer> data);
 
@@ -125,7 +125,7 @@ class ClientConnection : public base::RefCountedThreadSafe<ClientConnection>,
   // Process a data buffer received from libjingle.
   void PacketReceivedTask(scoped_refptr<media::DataBuffer> data);
 
-  // The libjingle channel used to send and receive data from the remote viewer.
+  // The libjingle channel used to send and receive data from the remote client.
   scoped_refptr<JingleChannel> channel_;
 
   // The message loop that this object runs on.

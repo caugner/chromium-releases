@@ -4,6 +4,7 @@
 
 #ifndef GFX_CANVAS_H_
 #define GFX_CANVAS_H_
+#pragma once
 
 #include <string>
 
@@ -13,8 +14,10 @@
 
 namespace gfx {
 
+class Brush;
 class CanvasSkia;
 class Font;
+class Point;
 class Rect;
 
 // TODO(beng): documentation.
@@ -81,17 +84,10 @@ class Canvas {
   // call Restore() more times than Save*().
   virtual void Restore() = 0;
 
-  // Retrieves the clip rectangle and sets it in the specified rectangle if any.
-  // Returns true if the clip rect is non-empty.
-  virtual bool GetClipRect(gfx::Rect* clip_rect) = 0;
-
   // Wrapper function that takes integer arguments.
   // Returns true if the clip is non-empty.
   // See clipRect for specifics.
   virtual bool ClipRectInt(int x, int y, int w, int h) = 0;
-
-  // Test whether the provided rectangle intersects the current clip rect.
-  virtual bool IntersectsClipRectInt(int x, int y, int w, int h) = 0;
 
   // Wrapper function that takes integer arguments.
   // See translate() for specifics.
@@ -101,32 +97,38 @@ class Canvas {
   // See scale() for specifics.
   virtual void ScaleInt(int x, int y) = 0;
 
-  // Fills the given rectangle with the given paint's parameters.
-  virtual void FillRectInt(int x, int y, int w, int h,
-                           const SkPaint& paint) = 0;
-
   // Fills the specified region with the specified color using a transfer
   // mode of SkXfermode::kSrcOver_Mode.
-  virtual void FillRectInt(const SkColor& color, int x, int y, int w,
-                           int h) = 0;
+  virtual void FillRectInt(const SkColor& color,
+                           int x, int y, int w, int h) = 0;
+
+  // Fills the specified region with the specified brush.
+  virtual void FillRectInt(const gfx::Brush* brush,
+                           int x, int y, int w, int h) = 0;
 
   // Draws a single pixel rect in the specified region with the specified
   // color, using a transfer mode of SkXfermode::kSrcOver_Mode.
   //
-  // NOTE: if you need a single pixel line, use DraLineInt.
-  virtual void DrawRectInt(const SkColor& color, int x, int y, int w,
-                           int h) = 0;
+  // NOTE: if you need a single pixel line, use DrawLineInt.
+  virtual void DrawRectInt(const SkColor& color,
+                           int x, int y, int w, int h) = 0;
 
   // Draws a single pixel rect in the specified region with the specified
   // color and transfer mode.
   //
-  // NOTE: if you need a single pixel line, use DraLineInt.
-  virtual void DrawRectInt(const SkColor& color, int x, int y, int w, int h,
+  // NOTE: if you need a single pixel line, use DrawLineInt.
+  virtual void DrawRectInt(const SkColor& color,
+                           int x, int y, int w, int h,
                            SkXfermode::Mode mode) = 0;
 
+  // Draws the given rectangle with the given paint's parameters.
+  virtual void DrawRectInt(int x, int y, int w, int h,
+                           const SkPaint& paint) = 0;
+
   // Draws a single pixel line with the specified color.
-  virtual void DrawLineInt(const SkColor& color, int x1, int y1, int x2,
-                           int y2) = 0;
+  virtual void DrawLineInt(const SkColor& color,
+                           int x1, int y1,
+                           int x2, int y2) = 0;
 
   // Draws a bitmap with the origin at the specified location. The upper left
   // corner of the bitmap is rendered at the specified location.
@@ -135,7 +137,8 @@ class Canvas {
   // Draws a bitmap with the origin at the specified location, using the
   // specified paint. The upper left corner of the bitmap is rendered at the
   // specified location.
-  virtual void DrawBitmapInt(const SkBitmap& bitmap, int x, int y,
+  virtual void DrawBitmapInt(const SkBitmap& bitmap,
+                             int x, int y,
                              const SkPaint& paint) = 0;
 
   // Draws a portion of a bitmap in the specified location. The src parameters
@@ -150,38 +153,45 @@ class Canvas {
   // is used for resampling.
   //
   // An optional custom SkPaint can be provided.
-  virtual void DrawBitmapInt(const SkBitmap& bitmap, int src_x, int src_y,
-                             int src_w, int src_h, int dest_x, int dest_y,
-                             int dest_w, int dest_h, bool filter) = 0;
-  virtual void DrawBitmapInt(const SkBitmap& bitmap, int src_x, int src_y,
-                             int src_w, int src_h, int dest_x, int dest_y,
-                             int dest_w, int dest_h, bool filter,
+  virtual void DrawBitmapInt(const SkBitmap& bitmap,
+                             int src_x, int src_y, int src_w, int src_h,
+                             int dest_x, int dest_y, int dest_w, int dest_h,
+                             bool filter) = 0;
+  virtual void DrawBitmapInt(const SkBitmap& bitmap,
+                             int src_x, int src_y, int src_w, int src_h,
+                             int dest_x, int dest_y, int dest_w, int dest_h,
+                             bool filter,
                              const SkPaint& paint) = 0;
 
   // Draws text with the specified color, font and location. The text is
   // aligned to the left, vertically centered, clipped to the region. If the
   // text is too big, it is truncated and '...' is added to the end.
-  virtual void DrawStringInt(const std::wstring& text, const gfx::Font& font,
-                             const SkColor& color, int x, int y, int w,
-                             int h) = 0;
-  virtual void DrawStringInt(const std::wstring& text, const gfx::Font& font,
+  virtual void DrawStringInt(const std::wstring& text, const
+                             gfx::Font& font,
+                             const SkColor& color,
+                             int x, int y, int w, int h) = 0;
+  virtual void DrawStringInt(const std::wstring& text,
+                             const gfx::Font& font,
                              const SkColor& color,
                              const gfx::Rect& display_rect) = 0;
 
   // Draws text with the specified color, font and location. The last argument
   // specifies flags for how the text should be rendered. It can be one of
   // TEXT_ALIGN_CENTER, TEXT_ALIGN_RIGHT or TEXT_ALIGN_LEFT.
-  virtual void DrawStringInt(const std::wstring& text, const gfx::Font& font,
-                             const SkColor& color, int x, int y, int w, int h,
+  virtual void DrawStringInt(const std::wstring& text,
+                             const gfx::Font& font,
+                             const SkColor& color,
+                             int x, int y, int w, int h,
                              int flags) = 0;
 
   // Draws a dotted gray rectangle used for focus purposes.
   virtual void DrawFocusRect(int x, int y, int width, int height) = 0;
 
   // Tiles the image in the specified region.
-  virtual void TileImageInt(const SkBitmap& bitmap, int x, int y, int w,
-                            int h) = 0;
-  virtual void TileImageInt(const SkBitmap& bitmap, int src_x, int src_y,
+  virtual void TileImageInt(const SkBitmap& bitmap,
+                            int x, int y, int w, int h) = 0;
+  virtual void TileImageInt(const SkBitmap& bitmap,
+                            int src_x, int src_y,
                             int dest_x, int dest_y, int w, int h) = 0;
 
   // Returns a native drawing context for platform specific drawing routines to

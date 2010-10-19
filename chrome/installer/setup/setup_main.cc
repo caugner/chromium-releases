@@ -1,12 +1,13 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <string>
 #include <windows.h>
 #include <msi.h>
 #include <shellapi.h>
 #include <shlobj.h>
+
+#include <string>
 
 #include "base/at_exit.h"
 #include "base/basictypes.h"
@@ -14,9 +15,11 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/registry.h"
 #include "base/scoped_handle_win.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "base/win_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/setup/install.h"
@@ -230,7 +233,7 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
 
   // If --install-archive is given, get the user specified value
   if (cmd_line.HasSwitch(installer_util::switches::kInstallArchive)) {
-    archive = cmd_line.GetSwitchValue(
+    archive = cmd_line.GetSwitchValueNative(
         installer_util::switches::kInstallArchive);
   }
   LOG(INFO) << "Archive found to install Chrome " << archive;
@@ -286,7 +289,7 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
         // uncompressing and binary patching. Get the location for this file.
         std::wstring archive_to_copy(temp_path.ToWStringHack());
         file_util::AppendToPath(&archive_to_copy, installer::kChromeArchive);
-        std::wstring prefs_source_path = cmd_line.GetSwitchValue(
+        std::wstring prefs_source_path = cmd_line.GetSwitchValueNative(
             installer_util::switches::kInstallerData);
         install_status = installer::InstallOrUpdateChrome(
             cmd_line.program(), archive_to_copy, temp_path.ToWStringHack(),
@@ -347,15 +350,15 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
   }
 
   // Delete temporary files. These include install temporary directory
-  // and master profile file if present.
-  scoped_ptr<WorkItemList> cleanup_list(WorkItem::CreateWorkItemList());
+  // and master profile file if present. Note that we do not care about rollback
+  // here and we schedule for deletion on reboot below if the deletes fail. As
+  // such, we do not use DeleteTreeWorkItem.
   LOG(INFO) << "Deleting temporary directory " << temp_path.value();
-  cleanup_list->AddDeleteTreeWorkItem(temp_path.ToWStringHack(),
-                                      std::wstring());
+  bool cleanup_success = file_util::Delete(temp_path, true);
   if (cmd_line.HasSwitch(installer_util::switches::kInstallerData)) {
-    std::wstring prefs_path = cmd_line.GetSwitchValue(
+    std::wstring prefs_path = cmd_line.GetSwitchValueNative(
         installer_util::switches::kInstallerData);
-    cleanup_list->AddDeleteTreeWorkItem(prefs_path, std::wstring());
+    cleanup_success = file_util::Delete(prefs_path, true) && cleanup_success;
   }
 
   // The above cleanup has been observed to fail on several users machines.
@@ -364,10 +367,10 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
   // as we end up filling users' disks with large-ish temp files. To mitigate
   // this, if we fail to delete the temp folders, then schedule them for
   // deletion at next reboot.
-  if (!cleanup_list->Do()) {
+  if (!cleanup_success) {
     ScheduleDirectoryForDeletion(temp_path.ToWStringHack().c_str());
     if (cmd_line.HasSwitch(installer_util::switches::kInstallerData)) {
-      std::wstring prefs_path = cmd_line.GetSwitchValue(
+      std::wstring prefs_path = cmd_line.GetSwitchValueNative(
           installer_util::switches::kInstallerData);
       ScheduleDirectoryForDeletion(prefs_path.c_str());
     }
@@ -445,14 +448,14 @@ bool HandleNonInstallCmdLineOptions(const CommandLine& cmd_line,
     if (!file_util::CreateNewTempDirectory(L"chrome_", &temp_path)) {
       LOG(ERROR) << "Could not create temporary path.";
     } else {
-      std::wstring setup_patch = cmd_line.GetSwitchValue(
+      std::wstring setup_patch = cmd_line.GetSwitchValueNative(
           installer_util::switches::kUpdateSetupExe);
       LOG(INFO) << "Opening archive " << setup_patch;
       std::wstring uncompressed_patch;
       if (LzmaUtil::UnPackArchive(setup_patch, temp_path.ToWStringHack(),
                                   &uncompressed_patch) == NO_ERROR) {
         std::wstring old_setup_exe = cmd_line.program();
-        std::wstring new_setup_exe = cmd_line.GetSwitchValue(
+        std::wstring new_setup_exe = cmd_line.GetSwitchValueNative(
             installer_util::switches::kNewSetupExe);
         if (!setup_util::ApplyDiffPatch(old_setup_exe, uncompressed_patch,
                                         new_setup_exe))
@@ -472,7 +475,7 @@ bool HandleNonInstallCmdLineOptions(const CommandLine& cmd_line,
     // Check if we need to show the EULA. If it is passed as a command line
     // then the dialog is shown and regardless of the outcome setup exits here.
     std::wstring inner_frame =
-        cmd_line.GetSwitchValue(installer_util::switches::kShowEula);
+        cmd_line.GetSwitchValueNative(installer_util::switches::kShowEula);
     exit_code = ShowEULADialog(inner_frame);
     if (installer_util::EULA_REJECTED != exit_code)
       GoogleUpdateSettings::SetEULAConsent(true);
@@ -484,12 +487,12 @@ bool HandleNonInstallCmdLineOptions(const CommandLine& cmd_line,
     // browser for Start Menu->Internet shortcut. This option should only
     // be used when setup.exe is launched with admin rights. We do not
     // make any user specific changes in this option.
-    std::wstring chrome_exe(cmd_line.GetSwitchValue(
+    std::wstring chrome_exe(cmd_line.GetSwitchValueNative(
         installer_util::switches::kRegisterChromeBrowser));
     std::wstring suffix;
     if (cmd_line.HasSwitch(
         installer_util::switches::kRegisterChromeBrowserSuffix)) {
-      suffix = cmd_line.GetSwitchValue(
+      suffix = cmd_line.GetSwitchValueNative(
           installer_util::switches::kRegisterChromeBrowserSuffix);
     }
     exit_code = ShellUtil::RegisterChromeBrowser(chrome_exe, suffix, false);
@@ -508,7 +511,7 @@ bool HandleNonInstallCmdLineOptions(const CommandLine& cmd_line,
     std::wstring suffix;
     if (cmd_line.HasSwitch(
         installer_util::switches::kRegisterChromeBrowserSuffix)) {
-      suffix = cmd_line.GetSwitchValue(
+      suffix = cmd_line.GetSwitchValueNative(
           installer_util::switches::kRegisterChromeBrowserSuffix);
     }
     installer_util::InstallStatus tmp = installer_util::UNKNOWN_STATUS;
@@ -518,9 +521,11 @@ bool HandleNonInstallCmdLineOptions(const CommandLine& cmd_line,
     return true;
   } else if (cmd_line.HasSwitch(installer_util::switches::kInactiveUserToast)) {
     // Launch the inactive user toast experiment.
-    std::wstring flavor =
-        cmd_line.GetSwitchValue(installer_util::switches::kInactiveUserToast);
-    dist->InactiveUserToastExperiment(StringToInt(flavor),
+    std::string flavor = cmd_line.GetSwitchValueASCII(
+        installer_util::switches::kInactiveUserToast);
+    int flavor_int;
+    base::StringToInt(flavor, &flavor_int);
+    dist->InactiveUserToastExperiment(flavor_int,
         cmd_line.HasSwitch(installer_util::switches::kSystemLevelToast));
     return true;
   } else if (cmd_line.HasSwitch(installer_util::switches::kSystemLevelToast)) {

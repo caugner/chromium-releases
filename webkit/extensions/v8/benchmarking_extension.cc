@@ -4,6 +4,8 @@
 
 #include "base/command_line.h"
 #include "base/stats_table.h"
+#include "base/time.h"
+#include "net/http/http_network_layer.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
 #include "webkit/extensions/v8/benchmarking_extension.h"
 #include "webkit/glue/webkit_glue.h"
@@ -36,10 +38,34 @@ class BenchmarkingWrapper : public v8::Extension {
         "  native function GetCounter();"
         "  return GetCounter(name);"
         "};"
+        "chrome.benchmarking.enableSpdy = function(name) {"
+        "  native function EnableSpdy();"
+        "  EnableSpdy(name);"
+        "};"
         "chrome.benchmarking.isSingleProcess = function() {"
         "  native function IsSingleProcess();"
         "  return IsSingleProcess();"
         "};"
+        "chrome.Interval = function() {"
+        "  var start_ = 0;"
+        "  var stop_ = 0;"
+        "  native function HiResTime();"
+        "  this.start = function() {"
+        "    stop_ = 0;"
+        "    start_ = HiResTime();"
+        "  };"
+        "  this.stop = function() {"
+        "    stop_ = HiResTime();"
+        "    if (start_ == 0)"
+        "      stop_ = 0;"
+        "  };"
+        "  this.microseconds = function() {"
+        "    var stop = stop_;"
+        "    if (stop == 0 && start_ != 0)"
+        "      stop = HiResTime();"
+        "    return Math.ceil(stop - start_);"
+        "  };"
+        "}"
         ) {}
 
   virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
@@ -48,11 +74,16 @@ class BenchmarkingWrapper : public v8::Extension {
       return v8::FunctionTemplate::New(CloseConnections);
     } else if (name->Equals(v8::String::New("ClearCache"))) {
       return v8::FunctionTemplate::New(ClearCache);
+    } else if (name->Equals(v8::String::New("EnableSpdy"))) {
+      return v8::FunctionTemplate::New(EnableSpdy);
     } else if (name->Equals(v8::String::New("GetCounter"))) {
       return v8::FunctionTemplate::New(GetCounter);
     } else if (name->Equals(v8::String::New("IsSingleProcess"))) {
       return v8::FunctionTemplate::New(IsSingleProcess);
+    } else if (name->Equals(v8::String::New("HiResTime"))) {
+      return v8::FunctionTemplate::New(HiResTime);
     }
+
     return v8::Handle<v8::FunctionTemplate>();
   }
 
@@ -64,6 +95,14 @@ class BenchmarkingWrapper : public v8::Extension {
   static v8::Handle<v8::Value> ClearCache(const v8::Arguments& args) {
     webkit_glue::ClearCache();
     WebCache::clear();
+    return v8::Undefined();
+  }
+
+  static v8::Handle<v8::Value> EnableSpdy(const v8::Arguments& args) {
+    if (!args.Length() || !args[0]->IsBoolean())
+      return v8::Undefined();
+
+    webkit_glue::EnableSpdy(args[0]->BooleanValue());
     return v8::Undefined();
   }
 
@@ -83,6 +122,11 @@ class BenchmarkingWrapper : public v8::Extension {
 
   static v8::Handle<v8::Value> IsSingleProcess(const v8::Arguments& args) {
     return v8::Boolean::New(webkit_glue::IsSingleProcess());
+  }
+
+  static v8::Handle<v8::Value> HiResTime(const v8::Arguments& args) {
+    return v8::Number::New(
+        static_cast<double>(base::TimeTicks::HighResNow().ToInternalValue()));
   }
 };
 

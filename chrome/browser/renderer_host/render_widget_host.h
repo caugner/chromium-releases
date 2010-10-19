@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_H_
 #define CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_H_
+#pragma once
 
 #include <deque>
 #include <string>
@@ -11,7 +12,6 @@
 
 #include "app/surface/transport_dib.h"
 #include "base/gtest_prod_util.h"
-#include "base/process.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/timer.h"
@@ -21,8 +21,7 @@
 #include "gfx/native_widget_types.h"
 #include "gfx/size.h"
 #include "ipc/ipc_channel.h"
-#include "ipc/ipc_channel_handle.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCompositionUnderline.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebTextDirection.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebTextInputType.h"
 
@@ -33,7 +32,7 @@ class Rect;
 namespace WebKit {
 class WebInputEvent;
 class WebMouseEvent;
-class WebMouseWheelEvent;
+struct WebCompositionUnderline;
 struct WebScreenInfo;
 }
 
@@ -125,11 +124,11 @@ struct ViewHostMsg_UpdateRect_Params;
 class RenderWidgetHost : public IPC::Channel::Listener,
                          public IPC::Channel::Sender {
  public:
-  // An interface that gets called whenever a paint occurs.
-  // Used in performance tests.
+  // An interface that gets called before and after a paint.
   class PaintObserver {
    public:
     virtual ~PaintObserver() {}
+    virtual void RenderWidgetHostWillPaint(RenderWidgetHost* rhw) = 0;
     virtual void RenderWidgetHostDidPaint(RenderWidgetHost* rwh) = 0;
   };
 
@@ -291,9 +290,9 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   //     NotifyTextDirection();
   //   }
   // 2. Change the text direction when pressing a set of keys.
-  // Becauses of auto-repeat, we may receive the same key-press event many
+  // Because of auto-repeat, we may receive the same key-press event many
   // times while we presses the keys and it is nonsense to send the same IPC
-  // messsage every time when we receive a key-press event.
+  // message every time when we receive a key-press event.
   // To suppress the number of IPC messages, we just update the text direction
   // when receiving a key-press event and send an IPC message when we release
   // the keys as listed in the following snippet.
@@ -386,6 +385,9 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // on a node with this accessibility object id.
   void AccessibilityDoDefaultAction(int acc_obj_id);
 
+  // Acknowledges a ViewHostMsg_AccessibilityObjectChildrenChange message.
+  void AccessibilityObjectChildrenChangeAck();
+
   // Sets the active state (i.e., control tints).
   virtual void SetActive(bool active);
 
@@ -398,7 +400,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
 
  protected:
   // Aid for determining when an accessibility tree request can be made. Set by
-  // TabContents to true on document load and to false on page nativigation.
+  // TabContents to true on document load and to false on page navigation.
   void SetDocumentLoaded(bool document_loaded);
 
   // Requests a snapshot of an accessible DOM tree from the renderer.
@@ -480,8 +482,8 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   void OnMsgUpdateVideo(TransportDIB::Id bitmap, const gfx::Rect& bitmap_rect);
   void OnMsgDestroyVideo();
   void OnMsgInputEventAck(const IPC::Message& message);
-  void OnMsgFocus();
-  void OnMsgBlur();
+  virtual void OnMsgFocus();
+  virtual void OnMsgBlur();
 
   void OnMsgSetCursor(const WebCursor& cursor);
   void OnMsgImeUpdateTextInputState(WebKit::WebTextInputType type,
@@ -490,16 +492,14 @@ class RenderWidgetHost : public IPC::Channel::Listener,
 
   void OnMsgGpuRenderingActivated(bool activated);
 
-#if defined(OS_LINUX)
-  void OnMsgCreatePluginContainer(gfx::PluginWindowHandle id);
-  void OnMsgDestroyPluginContainer(gfx::PluginWindowHandle id);
-#elif defined(OS_MACOSX)
+#if defined(OS_MACOSX)
   void OnMsgShowPopup(const ViewHostMsg_ShowPopup_Params& params);
   void OnMsgGetScreenInfo(gfx::NativeViewId view,
                           WebKit::WebScreenInfo* results);
   void OnMsgGetWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
   void OnMsgGetRootWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
   void OnAllocateFakePluginWindowHandle(bool opaque,
+                                        bool root,
                                         gfx::PluginWindowHandle* id);
   void OnDestroyFakePluginWindowHandle(gfx::PluginWindowHandle id);
   void OnAcceleratedSurfaceSetIOSurface(gfx::PluginWindowHandle window,
@@ -511,6 +511,9 @@ class RenderWidgetHost : public IPC::Channel::Listener,
                                            int32 height,
                                            TransportDIB::Handle transport_dib);
   void OnAcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window);
+#elif defined(OS_POSIX)
+  void OnMsgCreatePluginContainer(gfx::PluginWindowHandle id);
+  void OnMsgDestroyPluginContainer(gfx::PluginWindowHandle id);
 #endif
 
   // Paints the given bitmap to the current backing store at the given location.
@@ -640,7 +643,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Optional observer that listens for notifications of painting.
   scoped_ptr<PaintObserver> paint_observer_;
 
-  // Flag to detect recurive calls to GetBackingStore().
+  // Flag to detect recursive calls to GetBackingStore().
   bool in_get_backing_store_;
 
   // Set when we call DidPaintRect/DidScrollRect on the view.
@@ -674,7 +677,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // System may translate a RawKeyDown event into zero or more Char events,
   // usually we send them to the renderer directly in sequence. However, If a
   // RawKeyDown event was not handled by the renderer but was handled by
-  // our UnhandledKeyboardEvent() method, eg. as an accelerator key, then we
+  // our UnhandledKeyboardEvent() method, e.g. as an accelerator key, then we
   // shall not send the following sequence of Char events, which was generated
   // by this RawKeyDown event, to the renderer. Otherwise the renderer may
   // handle the Char events and cause unexpected behavior.

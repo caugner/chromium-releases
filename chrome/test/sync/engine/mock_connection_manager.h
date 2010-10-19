@@ -6,6 +6,7 @@
 
 #ifndef CHROME_TEST_SYNC_ENGINE_MOCK_CONNECTION_MANAGER_H_
 #define CHROME_TEST_SYNC_ENGINE_MOCK_CONNECTION_MANAGER_H_
+#pragma once
 
 #include <bitset>
 #include <string>
@@ -31,6 +32,9 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   class MidCommitObserver {
    public:
     virtual void Observe() = 0;
+
+   protected:
+    virtual ~MidCommitObserver() {}
   };
 
   MockConnectionManager(syncable::DirectoryManager* dirmgr,
@@ -132,6 +136,9 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
    public:
     // Called with response_code_override_lock_ acquired.
     virtual void OnOverrideComplete() = 0;
+
+   protected:
+    virtual ~ResponseCodeOverrideRequestor() {}
   };
   void ThrottleNextRequest(ResponseCodeOverrideRequestor* visitor);
   void FailWithAuthInvalid(ResponseCodeOverrideRequestor* visitor);

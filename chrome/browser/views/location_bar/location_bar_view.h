@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_VIEWS_LOCATION_BAR_LOCATION_BAR_VIEW_H_
 #define CHROME_BROWSER_VIEWS_LOCATION_BAR_LOCATION_BAR_VIEW_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -11,9 +12,9 @@
 #include "base/task.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
-#include "chrome/browser/first_run.h"
+#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/location_bar.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_model_observer.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/toolbar_model.h"
 #include "chrome/browser/views/extensions/extension_popup.h"
@@ -30,7 +31,6 @@
 #include "chrome/browser/gtk/accessible_widget_helper_gtk.h"
 #endif
 
-class Browser;
 class CommandUpdater;
 class ContentSettingImageView;
 class EVBubbleView;
@@ -42,6 +42,7 @@ class PageActionWithBadgeView;
 class Profile;
 class SelectedKeywordView;
 class StarView;
+class TemplateURLModel;
 
 namespace views {
 class HorizontalPainter;
@@ -169,6 +170,9 @@ class LocationBarView : public LocationBar,
 #endif
 
   // AutocompleteEditController
+  virtual void OnAutocompleteWillClosePopup();
+  virtual void OnAutocompleteLosingFocus(gfx::NativeView view_gaining_focus);
+  virtual void OnAutocompleteWillAccept();
   virtual void OnAutocompleteAccept(const GURL& url,
                                     WindowOpenDisposition disposition,
                                     PageTransition::Type transition,
@@ -213,8 +217,6 @@ class LocationBarView : public LocationBar,
   virtual AutocompleteEditView* location_entry() {
     return location_entry_.get();
   }
-  virtual void PushForceHidden();
-  virtual void PopForceHidden();
   virtual LocationBarTesting* GetLocationBarForTesting() { return this; }
 
   // Overridden from LocationBarTesting:
@@ -227,9 +229,19 @@ class LocationBarView : public LocationBar,
   // Overridden from TemplateURLModelObserver
   virtual void OnTemplateURLModelChanged();
 
-  static const int kVertMargin;     // Space above and below the edit.
-  static const int kEdgeThickness;  // Unavailable space at horizontal edges.
-  static const int kItemPadding;    // Space between items within the bar.
+  // Thickness of the left and right edges of the omnibox, in normal mode.
+  static const int kNormalHorizontalEdgeThickness;
+  // Thickness of the top and bottom edges of the omnibox.
+  static const int kVerticalEdgeThickness;
+  // Space between items in the location bar.
+  static const int kItemPadding;
+  // Space between items in the location bar when an extension keyword is
+  // showing.
+  static const int kExtensionItemPadding;
+  // Space between the edges and the items next to them.
+  static const int kEdgeItemPadding;
+  // Space between the edge and a bubble.
+  static const int kBubblePadding;
 
  protected:
   void Focus();
@@ -241,24 +253,20 @@ class LocationBarView : public LocationBar,
   friend class PageActionWithBadgeView;
   typedef std::vector<PageActionWithBadgeView*> PageActionViews;
 
-  // Returns the height in pixels of the margin at the top of the bar.
-  int TopMargin() const;
-
   // Returns the amount of horizontal space (in pixels) out of
   // |location_bar_width| that is not taken up by the actual text in
   // location_entry_.
   int AvailableWidth(int location_bar_width);
 
-  // Returns whether the |available_width| is large enough to contain a view
-  // with preferred width |pref_width| at its preferred size. If this returns
-  // true, the preferred size should be used. If this returns false, the
-  // minimum size of the view should be used.
-  bool UsePref(int pref_width, int available_width);
-
-  // If View fits in the specified region, it is made visible and the
-  // bounds are adjusted appropriately. If the View does not fit, it is
-  // made invisible.
-  void LayoutView(bool leading, views::View* view, int available_width,
+  // If |view| fits in |available_width|, it is made visible and positioned at
+  // the leading or trailing end of |bounds|, which are then shrunk
+  // appropriately.  Otherwise |view| is made invisible.
+  // Note: |view| is expected to have already been positioned and sized
+  // vertically.
+  void LayoutView(views::View* view,
+                  int padding,
+                  int available_width,
+                  bool leading,
                   gfx::Rect* bounds);
 
   // Update the visibility state of the Content Blocked icons to reflect what is
@@ -282,9 +290,6 @@ class LocationBarView : public LocationBar,
 
   // Helper to show the first run info bubble.
   void ShowFirstRunBubbleInternal(FirstRun::BubbleType bubble_type);
-
-  // Current browser. Not owned by us.
-  Browser* browser_;
 
   // Current profile. Not owned by us.
   Profile* profile_;
@@ -353,10 +358,6 @@ class LocationBarView : public LocationBar,
 
   // The mode that dictates how the bar shows.
   Mode mode_;
-
-  // Counts the number of times consumers have asked us to be hidden.
-  // We should actually be hidden iff this is greater than zero.
-  int force_hidden_count_;
 
   // True if we should show a focus rect while the location entry field is
   // focused. Used when the toolbar is in full keyboard accessibility mode.

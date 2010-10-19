@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_SYNC_PROFILE_SYNC_TEST_UTIL_H_
 #define CHROME_BROWSER_SYNC_PROFILE_SYNC_TEST_UTIL_H_
+#pragma once
 
 #include <string>
 
@@ -14,6 +15,7 @@
 #include "base/task.h"
 #include "base/thread.h"
 #include "base/waitable_event.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/webdata/web_database.h"

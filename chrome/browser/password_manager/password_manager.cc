@@ -6,15 +6,13 @@
 
 #include <vector>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/platform_thread.h"
 #include "base/stl_util-inl.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/password_manager/password_form_manager.h"
 #include "chrome/browser/password_manager/password_manager_delegate.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"

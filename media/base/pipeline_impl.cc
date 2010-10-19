@@ -57,19 +57,6 @@ const char* GetThreadName() {
   }
 }
 
-// Helper function used with NewRunnableMethod to implement a (very) crude
-// blocking counter.
-//
-// TODO(scherkus): remove this as soon as Stop() is made asynchronous.
-void DecrementCounter(Lock* lock, ConditionVariable* cond_var, int* count) {
-  AutoLock auto_lock(*lock);
-  --(*count);
-  CHECK(*count >= 0);
-  if (*count == 0) {
-    cond_var->Signal();
-  }
-}
-
 }  // namespace
 
 PipelineImpl::PipelineImpl(MessageLoop* message_loop)
@@ -85,6 +72,8 @@ PipelineImpl::PipelineImpl(MessageLoop* message_loop)
 PipelineImpl::~PipelineImpl() {
   AutoLock auto_lock(lock_);
   DCHECK(!running_) << "Stop() must complete before destroying object";
+  DCHECK(!stop_pending_);
+  DCHECK(!seek_pending_);
 }
 
 // Creates the PipelineInternal and calls it's start method.
@@ -149,6 +138,7 @@ bool PipelineImpl::IsInitialized() const {
   AutoLock auto_lock(lock_);
   switch (state_) {
     case kPausing:
+    case kFlushing:
     case kSeeking:
     case kStarting:
     case kStarted:
@@ -225,21 +215,30 @@ base::TimeDelta PipelineImpl::GetBufferedTime() {
   AutoLock auto_lock(lock_);
 
   // If media is fully loaded, then return duration.
-  if (loaded_)
+  if (loaded_ || total_bytes_ == buffered_bytes_) {
+    max_buffered_time_ = duration_;
     return duration_;
+  }
 
   // If buffered time was set, we report that value directly.
   if (buffered_time_.ToInternalValue() > 0)
     return buffered_time_;
 
-  if (total_bytes_ == 0 || current_bytes_ == 0)
+  if (total_bytes_ == 0)
     return base::TimeDelta();
 
   // If buffered time was not set, we use current time, current bytes, and
   // buffered bytes to estimate the buffered time.
   double current_time = static_cast<double>(current_bytes_) / total_bytes_ *
                         duration_.InMilliseconds();
-  double rate = current_time / current_bytes_;
+  double rate = 0.0;
+  if (current_bytes_ == 0) {
+    // If we haven't read any bytes, use the length/size of entire video to
+    // estimate rate.
+    rate = static_cast<double>(duration_.InMilliseconds()) / total_bytes_;
+  } else {
+    rate = current_time / current_bytes_;
+  }
   DCHECK_GE(buffered_bytes_, current_bytes_);
   base::TimeDelta buffered_time = base::TimeDelta::FromMilliseconds(
       static_cast<int64>(rate * (buffered_bytes_ - current_bytes_) +
@@ -294,6 +293,15 @@ PipelineError PipelineImpl::GetError() const {
 
 void PipelineImpl::SetCurrentReadPosition(int64 offset) {
   AutoLock auto_lock(lock_);
+
+  // The current read position should never be ahead of the buffered byte
+  // position but threading issues between BufferedDataSource::DoneRead_Locked()
+  // and BufferedDataSource::NetworkEventCallback() can cause them to be
+  // temporarily out of sync. The easiest fix for this is to cap both
+  // buffered_bytes_ and current_bytes_ to always be legal values in
+  // SetCurrentReadPosition() and in SetBufferedBytes().
+  if (offset > buffered_bytes_)
+    buffered_bytes_ = offset;
   current_bytes_ = offset;
 }
 
@@ -324,6 +332,9 @@ void PipelineImpl::ResetState() {
   AutoLock auto_lock(lock_);
   const base::TimeDelta kZero;
   running_          = false;
+  stop_pending_     = false;
+  seek_pending_     = false;
+  tearing_down_     = false;
   duration_         = kZero;
   buffered_time_    = kZero;
   buffered_bytes_   = 0;
@@ -359,6 +370,25 @@ bool PipelineImpl::IsPipelineStopped() {
   return state_ == kStopped || state_ == kError;
 }
 
+bool PipelineImpl::IsPipelineTearingDown() {
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  return tearing_down_;
+}
+
+bool PipelineImpl::IsPipelineStopPending() {
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  return stop_pending_;
+}
+
+bool PipelineImpl::IsPipelineSeeking() {
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  if (!seek_pending_)
+    return false;
+  DCHECK(kSeeking == state_ || kPausing == state_ ||
+         kFlushing == state_ || kStarting == state_);
+  return true;
+}
+
 void PipelineImpl::FinishInitialization() {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   // Execute the seek callback, if present.  Note that this might be the
@@ -373,6 +403,7 @@ void PipelineImpl::FinishInitialization() {
 // static
 bool PipelineImpl::TransientState(State state) {
   return state == kPausing ||
+         state == kFlushing ||
          state == kSeeking ||
          state == kStarting ||
          state == kStopping;
@@ -381,15 +412,22 @@ bool PipelineImpl::TransientState(State state) {
 // static
 PipelineImpl::State PipelineImpl::FindNextState(State current) {
   // TODO(scherkus): refactor InitializeTask() to make use of this function.
-  if (current == kPausing)
-    return kSeeking;
-  if (current == kSeeking)
+  if (current == kPausing) {
+    return kFlushing;
+  } else if (current == kFlushing) {
+    // We will always honor Seek() before Stop(). This is based on the
+    // assumption that we never accept Seek() after Stop().
+    DCHECK(IsPipelineSeeking() || IsPipelineStopPending());
+    return IsPipelineSeeking() ? kSeeking : kStopping;
+  } else if (current == kSeeking) {
     return kStarting;
-  if (current == kStarting)
+  } else if (current == kStarting) {
     return kStarted;
-  if (current == kStopping)
+  } else if (current == kStopping) {
     return kStopped;
-  return current;
+  } else {
+    return current;
+  }
 }
 
 void PipelineImpl::SetError(PipelineError error) {
@@ -449,6 +487,10 @@ void PipelineImpl::SetTotalBytes(int64 total_bytes) {
 void PipelineImpl::SetBufferedBytes(int64 buffered_bytes) {
   DCHECK(IsRunning());
   AutoLock auto_lock(lock_);
+
+  // See comments in SetCurrentReadPosition() about capping.
+  if (buffered_bytes < current_bytes_)
+    current_bytes_ = buffered_bytes;
   buffered_bytes_ = buffered_bytes;
 }
 
@@ -555,8 +597,11 @@ void PipelineImpl::InitializeTask() {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
 
   // If we have received the stop or error signal, return immediately.
-  if (state_ == kStopping || IsPipelineStopped())
+  if (IsPipelineStopPending() ||
+      IsPipelineStopped() ||
+      PIPELINE_OK != GetError()) {
     return;
+  }
 
   DCHECK(state_ == kCreated || IsPipelineInitializing());
 
@@ -621,6 +666,7 @@ void PipelineImpl::InitializeTask() {
     VolumeChangedTask(GetVolume());
 
     // Fire the initial seek request to get the filters to preroll.
+    seek_pending_ = true;
     state_ = kSeeking;
     remaining_transitions_ = filters_.size();
     seek_timestamp_ = base::TimeDelta();
@@ -640,12 +686,12 @@ void PipelineImpl::StopTask(PipelineCallback* stop_callback) {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   PipelineError error = GetError();
 
-  if (state_ == kStopped || (state_ == kStopping && error == PIPELINE_OK)) {
+  if (state_ == kStopped || (IsPipelineStopPending() && error == PIPELINE_OK)) {
     // If we are already stopped or stopping normally, return immediately.
     delete stop_callback;
     return;
   } else if (state_ == kError ||
-             (state_ == kStopping && error != PIPELINE_OK)) {
+             (IsPipelineStopPending() && error != PIPELINE_OK)) {
     // If we are stopping due to SetError(), stop normally instead of
     // going to error state.
     AutoLock auto_lock(lock_);
@@ -654,11 +700,14 @@ void PipelineImpl::StopTask(PipelineCallback* stop_callback) {
 
   stop_callback_.reset(stop_callback);
 
-  if (IsPipelineInitializing()) {
-    FinishInitialization();
+  stop_pending_ = true;
+  if (!IsPipelineSeeking()) {
+    // We will tear down pipeline immediately when there is no seek operation
+    // pending. This should include the case where we are partially initialized.
+    // Ideally this case should use SetError() rather than Stop() to tear down.
+    DCHECK(!IsPipelineTearingDown());
+    TearDownPipeline();
   }
-
-  StartDestroyingFilters();
 }
 
 void PipelineImpl::ErrorChangedTask(PipelineError error) {
@@ -668,19 +717,14 @@ void PipelineImpl::ErrorChangedTask(PipelineError error) {
   // Suppress executing additional error logic. Note that if we are currently
   // performing a normal stop, then we return immediately and continue the
   // normal stop.
-  if (IsPipelineStopped() || state_ == kStopping) {
+  if (IsPipelineStopped() || IsPipelineTearingDown()) {
     return;
   }
 
   AutoLock auto_lock(lock_);
   error_ = error;
 
-  // Notify the client that starting did not complete, if necessary.
-  if (IsPipelineInitializing()) {
-    FinishInitialization();
-  }
-
-  StartDestroyingFilters();
+  TearDownPipeline();
 }
 
 void PipelineImpl::PlaybackRateChangedTask(float playback_rate) {
@@ -709,6 +753,7 @@ void PipelineImpl::VolumeChangedTask(float volume) {
 void PipelineImpl::SeekTask(base::TimeDelta time,
                             PipelineCallback* seek_callback) {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(!IsPipelineStopPending());
 
   // Suppress seeking if we're not fully started.
   if (state_ != kStarted && state_ != kEnded) {
@@ -719,6 +764,9 @@ void PipelineImpl::SeekTask(base::TimeDelta time,
     delete seek_callback;
     return;
   }
+
+  DCHECK(!seek_pending_);
+  seek_pending_ = true;
 
   // We'll need to pause every filter before seeking.  The state transition
   // is as follows:
@@ -810,8 +858,8 @@ void PipelineImpl::FilterStateTransitionTask() {
 
   // Decrement the number of remaining transitions, making sure to transition
   // to the next state if needed.
-  CHECK(remaining_transitions_ <= filters_.size());
-  CHECK(remaining_transitions_ > 0u);
+  DCHECK(remaining_transitions_ <= filters_.size());
+  DCHECK(remaining_transitions_ > 0u);
   if (--remaining_transitions_ == 0) {
     state_ = FindNextState(state_);
     if (state_ == kSeeking) {
@@ -829,6 +877,14 @@ void PipelineImpl::FilterStateTransitionTask() {
     MediaFilter* filter = filters_[filters_.size() - remaining_transitions_];
     if (state_ == kPausing) {
       filter->Pause(NewCallback(this, &PipelineImpl::OnFilterStateTransition));
+    } else if (state_ == kFlushing) {
+      // We had to use parallel flushing all filters.
+      if (remaining_transitions_ == filters_.size()) {
+        for (size_t i = 0; i < filters_.size(); i++) {
+          filters_[i]->Flush(
+              NewCallback(this, &PipelineImpl::OnFilterStateTransition));
+        }
+      }
     } else if (state_ == kSeeking) {
       filter->Seek(seek_timestamp_,
           NewCallback(this, &PipelineImpl::OnFilterStateTransition));
@@ -844,6 +900,7 @@ void PipelineImpl::FilterStateTransitionTask() {
 
     // Finally, reset our seeking timestamp back to zero.
     seek_timestamp_ = base::TimeDelta();
+    seek_pending_ = false;
 
     AutoLock auto_lock(lock_);
     // We use audio stream to update the clock. So if there is such a stream,
@@ -853,6 +910,11 @@ void PipelineImpl::FilterStateTransitionTask() {
         rendered_mime_types_.end();
     if (!waiting_for_clock_update_)
       clock_.Play();
+
+    if (IsPipelineStopPending()) {
+      // We had a pending stop request need to be honored right now.
+      TearDownPipeline();
+    }
   } else if (IsPipelineStopped()) {
     FinishDestroyingFiltersTask();
   } else {
@@ -879,6 +941,9 @@ void PipelineImpl::FinishDestroyingFiltersTask() {
   filters_.clear();
   filter_types_.clear();
   STLDeleteElements(&filter_threads_);
+
+  stop_pending_ = false;
+  tearing_down_ = false;
 
   if (PIPELINE_OK == GetError()) {
     // Destroying filters due to Stop().
@@ -1011,19 +1076,29 @@ void PipelineImpl::GetFilter(scoped_refptr<Filter>* filter_out) const {
   }
 }
 
-void PipelineImpl::StartDestroyingFilters() {
+void PipelineImpl::TearDownPipeline() {
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK_NE(kStopped, state_);
 
-  if (state_ == kStopping) {
-    return; // Do not call Stop() on filters twice.
+  // Mark that we already start tearing down operation.
+  tearing_down_ = true;
+
+  if (IsPipelineInitializing()) {
+    // Notify the client that starting did not complete, if necessary.
+    FinishInitialization();
   }
 
   remaining_transitions_ = filters_.size();
   if (remaining_transitions_ > 0) {
-    state_ = kStopping;
-    filters_.front()->Stop(NewCallback(
-        this, &PipelineImpl::OnFilterStateTransition));
+    if (IsPipelineInitializing()) {
+      state_ = kStopping;
+      filters_.front()->Stop(NewCallback(
+          this, &PipelineImpl::OnFilterStateTransition));
+    } else {
+      state_ = kPausing;
+      filters_.front()->Pause(NewCallback(
+          this, &PipelineImpl::OnFilterStateTransition));
+    }
   } else {
     state_ = kStopped;
     message_loop_->PostTask(FROM_HERE,

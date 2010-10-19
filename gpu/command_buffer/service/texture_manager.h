@@ -83,9 +83,25 @@ class TextureManager {
     bool GetLevelSize(
         GLint face, GLint level, GLsizei* width, GLsizei* height) const;
 
+    // Get the type of a level. Returns false if level does not exist.
+    bool GetLevelType(
+        GLint face, GLint level, GLenum* type, GLenum* internal_format) const;
+
     bool IsDeleted() const {
       return deleted_;
     }
+
+    // Returns true of the given dimensions are inside the dimensions of the
+    // level and if the format and type match the level.
+    bool ValidForTexture(
+        GLint face,
+        GLint level,
+        GLint xoffset,
+        GLint yoffset,
+        GLsizei width,
+        GLsizei height,
+        GLenum format,
+        GLenum type) const;
 
    private:
     friend class TextureManager;
@@ -106,7 +122,7 @@ class TextureManager {
       }
 
       bool valid;
-      GLint internal_format;
+      GLenum internal_format;
       GLsizei width;
       GLsizei height;
       GLsizei depth;
@@ -117,9 +133,10 @@ class TextureManager {
 
     // Set the info for a particular level.
     void SetLevelInfo(
+        const TextureManager* manager,
         GLenum target,
         GLint level,
-        GLint internal_format,
+        GLenum internal_format,
         GLsizei width,
         GLsizei height,
         GLsizei depth,
@@ -129,7 +146,7 @@ class TextureManager {
 
     // Sets a texture parameter.
     // TODO(gman): Expand to SetParameteri,f,iv,fv
-    void SetParameter(GLenum pname, GLint param);
+    void SetParameter(const TextureManager* manager, GLenum pname, GLint param);
 
     // Makes each of the mip levels as though they were generated.
     bool MarkMipmapsGenerated(const TextureManager* manager);
@@ -158,7 +175,7 @@ class TextureManager {
     }
 
     // Update info about this texture.
-    void Update();
+    void Update(const TextureManager* manager);
 
     // Info about each face and level of texture.
     std::vector<std::vector<LevelInfo> > level_infos_;
@@ -194,9 +211,14 @@ class TextureManager {
   };
 
   TextureManager(bool npot_ok,
+                 bool enable_float_linear,
+                 bool enable_half_float_linear,
                  GLsizei max_texture_size,
                  GLsizei max_cube_map_texture_size);
   ~TextureManager();
+
+  // Init the texture manager.
+  bool Initialize();
 
   // Must call before destruction.
   void Destroy(bool have_context);
@@ -204,6 +226,16 @@ class TextureManager {
   // Whether or not npot textures can render.
   bool npot_ok() const {
     return npot_ok_;
+  }
+
+  // Whether float textures can have linear filtering.
+  bool enable_float_linear() const {
+    return enable_float_linear_;
+  }
+
+  // Whether half float textures can have linear filtering.
+  bool enable_half_float_linear() const {
+    return enable_half_float_linear_;
   }
 
   // Returns the maximum number of levels.
@@ -236,7 +268,7 @@ class TextureManager {
       TextureInfo* info,
       GLenum target,
       GLint level,
-      GLint internal_format,
+      GLenum internal_format,
       GLsizei width,
       GLsizei height,
       GLsizei depth,
@@ -273,6 +305,11 @@ class TextureManager {
     return num_unrenderable_textures_ > 0;
   }
 
+  GLuint black_texture_id(GLenum target) const {
+    return target == GL_SAMPLER_2D ?  black_2d_texture_id_ :
+                                      black_cube_texture_id_;
+  }
+
  private:
   // Info for each texture in the system.
   // TODO(gman): Choose a faster container.
@@ -280,12 +317,20 @@ class TextureManager {
   TextureInfoMap texture_infos_;
 
   bool npot_ok_;
+  bool enable_float_linear_;
+  bool enable_half_float_linear_;
   GLsizei max_texture_size_;
   GLsizei max_cube_map_texture_size_;
   GLint max_levels_;
   GLint max_cube_map_levels_;
 
   int num_unrenderable_textures_;
+
+  // Black (0,0,0,1) textures for when non-renderable textures are used.
+  // NOTE: There is no corresponding TextureInfo for these textures.
+  // TextureInfos are only for textures the client side can access.
+  GLuint black_2d_texture_id_;
+  GLuint black_cube_texture_id_;
 
   // The default textures for each target (texture name = 0)
   TextureInfo::Ref default_texture_2d_;

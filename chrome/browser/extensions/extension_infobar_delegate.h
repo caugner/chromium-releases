@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_INFOBAR_DELEGATE_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_INFOBAR_DELEGATE_H_
+#pragma once
 
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 
@@ -21,6 +22,9 @@ class ExtensionInfoBarDelegate : public InfoBarDelegate,
   class DelegateObserver {
    public:
     virtual void OnDelegateDeleted() = 0;
+
+   protected:
+    virtual ~DelegateObserver() {}
   };
 
   ExtensionInfoBarDelegate(Browser* browser, TabContents* contents,

@@ -1,12 +1,12 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_DEFAULT_PLUGIN_PLUGIN_IMPL_WIN_H_
 #define CHROME_DEFAULT_PLUGIN_PLUGIN_IMPL_WIN_H_
+#pragma once
 
 #include <string>
-#include <vector>
 
 #include "chrome/default_plugin/install_dialog.h"
 #include "chrome/default_plugin/plugin_database_handler.h"
@@ -173,7 +173,7 @@ class PluginInstallerImpl : public gfx::WindowImpl {
   }
 
   // Getter for the NPP instance member.
-  const NPP instance() const {
+  NPP instance() const {
     return instance_;
   }
 

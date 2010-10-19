@@ -4,6 +4,9 @@
 
 #ifndef VIEWS_CONTROLS_BUTTON_TEXT_BUTTON_H_
 #define VIEWS_CONTROLS_BUTTON_TEXT_BUTTON_H_
+#pragma once
+
+#include <string>
 
 #include "gfx/font.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -71,6 +74,9 @@ class TextButtonBorder : public Border {
 ////////////////////////////////////////////////////////////////////////////////
 class TextButton : public CustomButton {
  public:
+  // The menu button's class name.
+  static const char kViewClassName[];
+
   // Enumeration of how the prefix ('&') character is processed. The default
   // is |PREFIX_NONE|.
   enum PrefixType {
@@ -105,9 +111,10 @@ class TextButton : public CustomButton {
 
   // Sets the icon.
   void SetIcon(const SkBitmap& icon);
-  SkBitmap icon() const { return icon_; }
   void SetHoverIcon(const SkBitmap& icon);
-  SkBitmap icon_hover() const { return icon_hover_; }
+  void SetPushedIcon(const SkBitmap& icon);
+
+  bool HasIcon() const { return !icon_.empty(); }
 
   // Meanings are reversed for right-to-left layouts.
   enum IconPlacement {
@@ -132,8 +139,9 @@ class TextButton : public CustomButton {
   void SetHighlightColor(SkColor color);
   void SetHoverColor(SkColor color);
   void SetNormalHasBorder(bool normal_has_border);
-  // Sets whether or not to show the highlighed (i.e. hot) state. Default true.
-  void SetShowHighlighted(bool show_highlighted);
+  // Sets whether or not to show the hot and pushed states for the button icon
+  // (if present) in addition to the normal state.  Defaults to true.
+  void SetShowMultipleIconStates(bool show_multiple_icon_states);
 
   // Paint the button into the specified canvas. If |for_drag| is true, the
   // function paints a drag image representation into the canvas.
@@ -150,7 +158,12 @@ class TextButton : public CustomButton {
   static const SkColor kDisabledColor;
   static const SkColor kHoverColor;
 
+  // Returns views/TextButton.
+  virtual std::string GetClassName() const;
+
  protected:
+  SkBitmap icon() const { return icon_; }
+
   virtual void Paint(gfx::Canvas* canvas);
 
   // Called when enabled or disabled state changes, or the colors for those
@@ -197,6 +210,10 @@ class TextButton : public CustomButton {
   SkBitmap icon_hover_;
   bool has_hover_icon_;
 
+  // An optional different version of the icon for pushed state.
+  SkBitmap icon_pushed_;
+  bool has_pushed_icon_;
+
   // The width of the button will never be larger than this value. A value <= 0
   // indicates the width is not constrained.
   int max_width_;
@@ -204,8 +221,8 @@ class TextButton : public CustomButton {
   // This is true if normal state has a border frame; default is false.
   bool normal_has_border_;
 
-  // Whether or not to show the highlighted (i.e. hot) state.
-  bool show_highlighted_;
+  // Whether or not to show the hot and pushed icon states.
+  bool show_multiple_icon_states_;
 
   PrefixType prefix_type_;
 

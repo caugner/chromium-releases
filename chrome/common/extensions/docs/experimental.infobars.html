@@ -79,8 +79,23 @@
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd>
+            <div></div>
+          </dd>
+
         </div> <!-- /VALUE -->
 
+        <div id="functionParametersTemplate">
+          <h5>Parameters</h5>
+          <dl>
+            <div>
+              <div>
+              </div>
+            </div>
+          </dl>         
+        </div>
       </div> <!-- /SUBTEMPLATES -->
 
   <a id="top"></a>
@@ -142,6 +157,7 @@
         <ul>
           <li><a href="getstarted.html">Getting Started</a></li>
           <li><a href="overview.html">Overview</a></li>
+          <li><a href="whats_new.html">What's New?</a></li>
           <li><h2><a href="devguide.html">Developer's Guide</a></h2>
             <ul>
               <li>Browser UI
@@ -217,10 +233,10 @@
         <div id="toc">
           <h2>Contents</h2>
           <ol>
-            <li style="display: none; ">
-              <a>h2Name</a>
+            <li>
+              <a href="#manifest">Manifest</a>
               <ol>
-                <li>
+                <li style="display: none; ">
                   <a>h3Name</a>
                 </li>
               </ol>
@@ -266,12 +282,57 @@
         </div>
         <!-- /TABLE OF CONTENTS -->
 
+        <!-- Standard content lead-in for experimental API pages -->
+        <p id="classSummary">
+          For information on how to use experimental APIs, see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
+        </p>
+
         <!-- STATIC CONTENT PLACEHOLDER -->
         <div id="static"><!-- BEGIN AUTHORED CONTENT -->
-<p id="classSummary">
-For information on how to use experimental APIs,
-see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
+<p>
+The infobars API allows you to add a
+horizontal panel just above a tab's contents,
+as the following screenshot shows.
 </p>
+
+<p>
+<img src="images/infobar.png" width="566" height="150" alt="An infobar asking whether the user wants to translate the current page">
+</p>
+
+<p>
+Use an infobar to tell the reader
+something about a particular page.
+When the user leaves the page for which the infobar is displayed,
+Google Chrome automatically closes the infobar.
+</p>
+
+<p>
+You implement the content of your
+infobar using HTML. Because infobars are ordinary pages inside an extension,
+they can
+<a href="overview.html#pageComm">communicate with other extension pages</a>.
+</p>
+
+
+<h2 id="manifest">Manifest</h2>
+
+<p>
+The infobars API is currently
+experimental, so you must declare the "experimental"
+permission to use it. Also, you should specify
+a 16x16-pixel icon for display next to your infobar.
+For example:
+</p>
+
+<pre>{
+  "name": "Andy's infobar extension",
+  "version": "1.0",
+  <b>"permissions": ["experimental"],</b>
+  <b>"icons": {</b>
+    <b>"16": "16.png"</b>
+  <b>},</b>
+  "background_page": "background.html"
+}</pre>
 
 <!-- END AUTHORED CONTENT -->
 </div>
@@ -420,6 +481,12 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -472,10 +539,22 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div><div>
                     <div>
@@ -530,6 +609,12 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -557,7 +642,7 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Window window</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>Window window</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
@@ -610,6 +695,12 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                     </div>
                   </dl>

@@ -6,7 +6,7 @@
 #include "chrome/test/automation/extension_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
-#include "net/url_request/url_request_unittest.h"
+#include "net/test/test_server.h"
 
 class InfoBarsUITest : public UITest {
  public:
@@ -16,17 +16,17 @@ class InfoBarsUITest : public UITest {
 };
 
 TEST_F(InfoBarsUITest, TestInfoBarsCloseOnNewTheme) {
-  const wchar_t kDocRoot[] = L"chrome/test/data";
-  scoped_refptr<HTTPTestServer> server =
-      HTTPTestServer::CreateServer(kDocRoot, NULL);
-  ASSERT_TRUE(server.get() != NULL);
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  ASSERT_TRUE(test_server.Start());
+
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
 
   scoped_refptr<TabProxy> tab_1(browser->GetActiveTab());
   ASSERT_TRUE(tab_1.get());
   EXPECT_TRUE(tab_1->NavigateToURL(
-      server->TestServerPage("files/simple.html")));
+      test_server.GetURL("files/simple.html")));
   scoped_refptr<ExtensionProxy> theme = automation()->InstallExtension(
       test_data_directory_.AppendASCII("extensions").AppendASCII("theme.crx"),
       true);
@@ -34,7 +34,7 @@ TEST_F(InfoBarsUITest, TestInfoBarsCloseOnNewTheme) {
   EXPECT_TRUE(tab_1->WaitForInfoBarCount(1, action_max_timeout_ms()));
 
   EXPECT_TRUE(browser->AppendTab(
-      server->TestServerPage("files/simple.html")));
+      test_server.GetURL("files/simple.html")));
   WaitUntilTabCount(2);
   scoped_refptr<TabProxy> tab_2(browser->GetActiveTab());
   ASSERT_TRUE(tab_2.get());

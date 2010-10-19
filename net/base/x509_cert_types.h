@@ -1,15 +1,15 @@
-// Copyright (c) 2007-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_BASE_X509_CERT_TYPES_H_
 #define NET_BASE_X509_CERT_TYPES_H_
+#pragma once
 
 #include <string.h>
 
 #include <functional>
-#include <iostream>
-#include <map>
+#include <iosfwd>
 #include <set>
 #include <string>
 #include <vector>
@@ -67,6 +67,10 @@ struct CertPrincipal {
   // Returns true if all attributes of the two objects match,
   // where "match" is defined in RFC 5280 sec. 7.1.
   bool Matches(const CertPrincipal& against) const;
+
+  // Returns a name that can be used to represent the issuer.  It tries in this
+  // order: CN, O and OU and returns the first non-empty one found.
+  std::string GetDisplayName() const;
 
   // The different attributes for a principal.  They may be "".
   // Note that some of them can have several values.

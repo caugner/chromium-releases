@@ -11,6 +11,7 @@
 
 #ifndef CHROME_BROWSER_SYNC_NOTIFIER_SERVER_NOTIFIER_THREAD_H_
 #define CHROME_BROWSER_SYNC_NOTIFIER_SERVER_NOTIFIER_THREAD_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -26,7 +27,7 @@ class ServerNotifierThread
     : public notifier::MediatorThreadImpl,
       public ChromeInvalidationClient::Listener {
  public:
-  explicit ServerNotifierThread(bool use_chrome_async_socket);
+  ServerNotifierThread(bool use_chrome_async_socket, bool try_ssltcp_first);
 
   virtual ~ServerNotifierThread();
 

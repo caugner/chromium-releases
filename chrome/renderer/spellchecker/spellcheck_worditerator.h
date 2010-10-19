@@ -8,14 +8,15 @@
 
 #ifndef CHROME_RENDERER_SPELLCHECKER_SPELLCHECK_WORDITERATOR_H_
 #define CHROME_RENDERER_SPELLCHECKER_SPELLCHECK_WORDITERATOR_H_
+#pragma once
 
-#include <map>
 #include <string>
+
+#include "unicode/ubrk.h"
+#include "unicode/uscript.h"
 
 #include "base/basictypes.h"
 #include "base/string16.h"
-#include "third_party/icu/public/common/unicode/ubrk.h"
-#include "third_party/icu/public/common/unicode/uscript.h"
 
 // A class which encapsulates language-specific operations used by
 // SpellcheckWordIterator. When we set the spellchecker language, this class

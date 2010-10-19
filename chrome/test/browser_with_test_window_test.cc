@@ -9,12 +9,15 @@
 #endif  // defined(OS_WIN)
 
 #include "chrome/browser/browser.h"
+#include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/test/testing_profile.h"
 
 BrowserWithTestWindowTest::BrowserWithTestWindowTest()
-    : rph_factory_(),
+    : ui_thread_(ChromeThread::UI, message_loop()),
+      rph_factory_(),
       rvh_factory_(&rph_factory_) {
 #if defined(OS_WIN)
   OleInitialize(NULL);
@@ -58,7 +61,7 @@ TestRenderViewHost* BrowserWithTestWindowTest::TestRenderViewHostForTab(
 void BrowserWithTestWindowTest::AddTab(Browser* browser, const GURL& url) {
   TabContents* new_tab = browser->AddTabWithURL(
       url, GURL(), PageTransition::TYPED, 0, TabStripModel::ADD_SELECTED, NULL,
-      std::string());
+      std::string(), NULL);
   CommitPendingLoad(&new_tab->controller());
 }
 

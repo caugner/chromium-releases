@@ -8,6 +8,7 @@
 
 #ifndef CHROME_BROWSER_SYNC_ENGINE_CHANGE_REORDER_BUFFER_H_
 #define CHROME_BROWSER_SYNC_ENGINE_CHANGE_REORDER_BUFFER_H_
+#pragma once
 
 #include <map>
 #include <vector>
@@ -38,7 +39,8 @@ class ChangeReorderBuffer {
  public:
   typedef SyncManager::ChangeRecord ChangeRecord;
 
-  ChangeReorderBuffer() { }
+  ChangeReorderBuffer();
+  ~ChangeReorderBuffer();
 
   // Insert an item, identified by the metahandle |id|, into the reorder
   // buffer. This item will appear in the output list as an ACTION_ADD

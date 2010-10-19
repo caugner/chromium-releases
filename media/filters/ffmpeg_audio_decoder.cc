@@ -61,13 +61,11 @@ void FFmpegAudioDecoder::DoInitialize(DemuxerStream* demuxer_stream,
   DCHECK_GT(codec_context_->channels, 0);
   DCHECK_GT(bps, 0);
   DCHECK_GT(codec_context_->sample_rate, 0);
-  if (codec_context_->channels == 0 ||
-      static_cast<size_t>(codec_context_->channels) > Limits::kMaxChannels ||
-      bps == 0 ||
-      static_cast<size_t>(bps) > Limits::kMaxBPS ||
-      codec_context_->sample_rate == 0 ||
-      (static_cast<size_t>(codec_context_->sample_rate) >
-       Limits::kMaxSampleRate)) {
+  if (codec_context_->channels <= 0 ||
+      codec_context_->channels > Limits::kMaxChannels ||
+      bps <= 0 || bps > Limits::kMaxBitsPerSample ||
+      codec_context_->sample_rate <= 0 ||
+      codec_context_->sample_rate > Limits::kMaxSampleRate) {
     return;
   }
 
@@ -155,6 +153,17 @@ static void ConvertAudioF32ToS32(void* buffer, int buffer_size) {
 }
 
 void FFmpegAudioDecoder::DoDecode(Buffer* input) {
+  // FFmpeg tends to seek Ogg audio streams in the middle of nowhere, giving us
+  // a whole bunch of AV_NOPTS_VALUE packets.  Discard them until we find
+  // something valid.  Refer to http://crbug.com/49709
+  // TODO(hclam): remove this once fixing the issue in FFmpeg.
+  if (input->GetTimestamp() == StreamSample::kInvalidTimestamp &&
+      estimated_next_timestamp_ == StreamSample::kInvalidTimestamp &&
+      !input->IsEndOfStream()) {
+    DecoderBase<AudioDecoder, Buffer>::OnDecodeComplete();
+    return;
+  }
+
   // Due to FFmpeg API changes we no longer have const read-only pointers.
   AVPacket packet;
   av_init_packet(&packet);

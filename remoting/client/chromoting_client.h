@@ -9,20 +9,20 @@
 
 #include "base/task.h"
 #include "remoting/client/host_connection.h"
+#include "remoting/client/client_config.h"
 
 class MessageLoop;
 
 namespace remoting {
 
 class ChromotingView;
-class ClientConfig;
 class ClientContext;
 class InputHandler;
 
 class ChromotingClient : public HostConnection::HostEventCallback {
  public:
   // Objects passed in are not owned by this class.
-  ChromotingClient(ClientConfig* config,
+  ChromotingClient(const ClientConfig& config,
                    ClientContext* context,
                    HostConnection* connection,
                    ChromotingView* view,
@@ -65,13 +65,13 @@ class ChromotingClient : public HostConnection::HostEventCallback {
   void SetState(State s);
 
   // Handles for chromotocol messages.
-  void InitClient(HostMessage* msg);
-  void BeginUpdate(HostMessage* msg);
-  void HandleUpdate(HostMessage* msg);
-  void EndUpdate(HostMessage* msg);
+  void InitClient(ChromotingHostMessage* msg);
+  void BeginUpdate(ChromotingHostMessage* msg);
+  void HandleUpdate(ChromotingHostMessage* msg);
+  void EndUpdate(ChromotingHostMessage* msg);
 
   // The following are not owned by this class.
-  ClientConfig* config_;
+  ClientConfig config_;
   ClientContext* context_;
   HostConnection* connection_;
   ChromotingView* view_;

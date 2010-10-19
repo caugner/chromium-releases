@@ -5,11 +5,15 @@
 #ifndef WEBKIT_TOOLS_TEST_SHELL_TEST_SHELL_WEBKIT_INIT_H_
 #define WEBKIT_TOOLS_TEST_SHELL_TEST_SHELL_WEBKIT_INIT_H_
 
+#include "base/utf_string_conversions.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebGraphicsContext3D.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIndexedDatabase.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebIDBFactory.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebIDBKey.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebIDBKeyPath.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSerializedScriptValue.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebStorageNamespace.h"
 #include "webkit/glue/webclipboard_impl.h"
-#include "webkit/glue/webfilesystem_impl.h"
+#include "webkit/glue/webfileutilities_impl.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webkitclient_impl.h"
 #include "webkit/tools/test_shell/mock_webclipboard_impl.h"
@@ -17,6 +21,7 @@
 #include "webkit/tools/test_shell/simple_database_system.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/simple_webcookiejar_impl.h"
+#include "webkit/tools/test_shell/test_shell_webblobregistry_impl.h"
 #include "webkit/tools/test_shell/test_shell_webmimeregistry_impl.h"
 
 #if defined(OS_WIN)
@@ -34,8 +39,8 @@ class TestShellWebKitInit : public webkit_glue::WebKitClientImpl {
 
   WebKit::WebClipboard* clipboard();
 
-  virtual WebKit::WebFileSystem* fileSystem() {
-    return &file_system_;
+  virtual WebKit::WebFileUtilities* fileUtilities() {
+    return &file_utilities_;
   }
 
   virtual WebKit::WebSandboxSupport* sandboxSupport() {
@@ -44,6 +49,10 @@ class TestShellWebKitInit : public webkit_glue::WebKitClientImpl {
 
   virtual WebKit::WebCookieJar* cookieJar() {
     return &cookie_jar_;
+  }
+
+  virtual WebKit::WebBlobRegistry* blobRegistry() {
+    return blob_registry_.get();
   }
 
   virtual bool sandboxEnabled() {
@@ -109,8 +118,20 @@ class TestShellWebKitInit : public webkit_glue::WebKitClientImpl {
     // The event is dispatched by the proxy.
   }
 
-  virtual WebKit::WebIndexedDatabase* indexedDatabase() {
-    return WebKit::WebIndexedDatabase::create();
+  virtual WebKit::WebIDBFactory* idbFactory() {
+    return WebKit::WebIDBFactory::create();
+  }
+
+  virtual void createIDBKeysFromSerializedValuesAndKeyPath(
+      const WebKit::WebVector<WebKit::WebSerializedScriptValue>& values,
+      const WebKit::WebString& keyPath,
+      WebKit::WebVector<WebKit::WebIDBKey>& keys_out) {
+    WebKit::WebVector<WebKit::WebIDBKey> keys(values.size());
+    for (size_t i = 0; i < values.size(); ++i) {
+      keys[i] = WebKit::WebIDBKey::createFromValueAndKeyPath(
+          values[i], WebKit::WebIDBKeyPath::create(keyPath));
+    }
+    keys_out.swap(keys);
   }
 
 #if defined(OS_WIN)
@@ -135,11 +156,12 @@ class TestShellWebKitInit : public webkit_glue::WebKitClientImpl {
   TestShellWebMimeRegistryImpl mime_registry_;
   MockWebClipboardImpl mock_clipboard_;
   webkit_glue::WebClipboardImpl real_clipboard_;
-  webkit_glue::WebFileSystemImpl file_system_;
+  webkit_glue::WebFileUtilitiesImpl file_utilities_;
   ScopedTempDir appcache_dir_;
   SimpleAppCacheSystem appcache_system_;
   SimpleDatabaseSystem database_system_;
   SimpleWebCookieJarImpl cookie_jar_;
+  scoped_refptr<TestShellWebBlobRegistryImpl> blob_registry_;
 
 #if defined(OS_WIN)
   WebKit::WebThemeEngine* active_theme_engine_;

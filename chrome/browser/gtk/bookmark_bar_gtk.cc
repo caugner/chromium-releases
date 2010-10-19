@@ -7,10 +7,9 @@
 #include <vector>
 
 #include "app/gtk_dnd_util.h"
-#include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "app/text_elider.h"
 #include "base/pickle.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
@@ -34,7 +33,7 @@
 #include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/ntp_background_util.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -66,7 +65,7 @@ const int kNTPRoundedness = 3;
 // The height of the bar when it is "hidden". It is usually not completely
 // hidden because even when it is closed it forms the bottom few pixels of
 // the toolbar.
-const int kBookmarkBarMinimumHeight = 4;
+const int kBookmarkBarMinimumHeight = 3;
 
 // Left-padding for the instructional text.
 const int kInstructionsPadding = 6;
@@ -1233,7 +1232,7 @@ void BookmarkBarGtk::OnDragReceived(GtkWidget* widget,
       if (!url.is_valid())
         break;
       std::string title = bookmark_utils::GetNameForURL(url);
-      model_->AddURL(dest_node, index, UTF8ToWide(title), url);
+      model_->AddURL(dest_node, index, UTF8ToUTF16(title), url);
       dnd_success = TRUE;
       break;
     }

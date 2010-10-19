@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_COCOA_NEW_TAB_BUTTON
 #define CHROME_BROWSER_COCOA_NEW_TAB_BUTTON
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -18,6 +19,10 @@
  @private
   scoped_nsobject<NSBezierPath> imagePath_;
 }
+
+// Returns YES if the given point is over the button.  |point| is in the
+// superview's coordinate system.
+- (BOOL)pointIsOverButton:(NSPoint)point;
 @end
 
 #endif  // CHROME_BROWSER_COCOA_NEW_TAB_BUTTON

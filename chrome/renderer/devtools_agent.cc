@@ -4,18 +4,18 @@
 
 #include "chrome/renderer/devtools_agent.h"
 
+#include <map>
+
 #include "base/command_line.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/devtools_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/devtools_agent_filter.h"
 #include "chrome/renderer/render_view.h"
 #include "grit/webkit_chromium_resources.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDevToolsAgent.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDevToolsMessageData.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPoint.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "webkit/glue/devtools_message_data.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebDevToolsAgent;
@@ -79,7 +79,9 @@ bool DevToolsAgent::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(DevToolsAgent, message)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_Attach, OnAttach)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_Detach, OnDetach)
-    IPC_MESSAGE_HANDLER(DevToolsAgentMsg_RpcMessage, OnRpcMessage)
+    IPC_MESSAGE_HANDLER(DevToolsAgentMsg_FrontendLoaded, OnFrontendLoaded)
+    IPC_MESSAGE_HANDLER(DevToolsAgentMsg_DispatchOnInspectorBackend,
+                        OnDispatchOnInspectorBackend)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_InspectElement, OnInspectElement)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_SetApuAgentEnabled,
                         OnSetApuAgentEnabled)
@@ -88,11 +90,25 @@ bool DevToolsAgent::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void DevToolsAgent::sendMessageToFrontend(
-    const WebKit::WebDevToolsMessageData& data) {
+void DevToolsAgent::sendMessageToInspectorFrontend(
+    const WebKit::WebString& message) {
   IPC::Message* m = new ViewHostMsg_ForwardToDevToolsClient(
       routing_id_,
-      DevToolsClientMsg_RpcMessage(DevToolsMessageData(data)));
+      DevToolsClientMsg_DispatchOnInspectorFrontend(message.utf8()));
+  render_view_->Send(m);
+}
+
+void DevToolsAgent::sendDebuggerOutput(const WebKit::WebString& data) {
+  IPC::Message* m = new ViewHostMsg_ForwardToDevToolsClient(
+      routing_id_,
+      DevToolsClientMsg_DebuggerOutput(data.utf8()));
+  render_view_->Send(m);
+}
+
+void DevToolsAgent::sendDispatchToAPU(const WebKit::WebString& data) {
+  IPC::Message* m = new ViewHostMsg_ForwardToDevToolsClient(
+      routing_id_,
+      DevToolsClientMsg_DispatchToAPU(data.utf8()));
   render_view_->Send(m);
 }
 
@@ -100,28 +116,22 @@ int DevToolsAgent::hostIdentifier() {
   return routing_id_;
 }
 
-void DevToolsAgent::forceRepaint() {
-  render_view_->GenerateFullRepaint();
-}
-
-void DevToolsAgent::runtimeFeatureStateChanged(const WebKit::WebString& feature,
-                                               bool enabled) {
-  render_view_->Send(new ViewHostMsg_DevToolsRuntimeFeatureStateChanged(
+void DevToolsAgent::runtimeFeatureStateChanged(
+    const WebKit::WebString& feature,
+    bool enabled) {
+  render_view_->Send(new ViewHostMsg_DevToolsRuntimePropertyChanged(
       routing_id_,
       feature.utf8(),
-      enabled));
+      enabled ? "true" : "false"));
 }
 
-WebCString DevToolsAgent::injectedScriptSource() {
-  base::StringPiece injectjsWebkit =
-      webkit_glue::GetDataResource(IDR_DEVTOOLS_INJECT_WEBKIT_JS);
-  return WebCString(injectjsWebkit.data(), injectjsWebkit.length());
-}
-
-WebCString DevToolsAgent::injectedScriptDispatcherSource() {
-  base::StringPiece injectDispatchjs =
-      webkit_glue::GetDataResource(IDR_DEVTOOLS_INJECT_DISPATCH_JS);
-  return WebCString(injectDispatchjs.data(), injectDispatchjs.length());
+void DevToolsAgent::runtimePropertyChanged(
+    const WebKit::WebString& name,
+    const WebKit::WebString& value) {
+  render_view_->Send(new ViewHostMsg_DevToolsRuntimePropertyChanged(
+      routing_id_,
+      name.utf8(),
+      value.utf8()));
 }
 
 WebCString DevToolsAgent::debuggerScriptSource() {
@@ -150,29 +160,36 @@ DevToolsAgent* DevToolsAgent::FromHostId(int host_id) {
   return NULL;
 }
 
-void DevToolsAgent::OnAttach(const std::vector<std::string>& runtime_features) {
+void DevToolsAgent::OnAttach(
+    const DevToolsRuntimeProperties& runtime_properties) {
   WebDevToolsAgent* web_agent = GetWebAgent();
   if (web_agent) {
     web_agent->attach();
-    for (std::vector<std::string>::const_iterator it = runtime_features.begin();
-         it != runtime_features.end(); ++it) {
-      web_agent->setRuntimeFeatureEnabled(WebString::fromUTF8(*it), true);
+    for (DevToolsRuntimeProperties::const_iterator it =
+             runtime_properties.begin();
+         it != runtime_properties.end(); ++it) {
+      web_agent->setRuntimeProperty(WebString::fromUTF8(it->first),
+                                    WebString::fromUTF8(it->second));
     }
   }
 }
 
 void DevToolsAgent::OnDetach() {
   WebDevToolsAgent* web_agent = GetWebAgent();
-  if (web_agent) {
+  if (web_agent)
     web_agent->detach();
-  }
 }
 
-void DevToolsAgent::OnRpcMessage(const DevToolsMessageData& data) {
+void DevToolsAgent::OnFrontendLoaded() {
   WebDevToolsAgent* web_agent = GetWebAgent();
-  if (web_agent) {
-    web_agent->dispatchMessageFromFrontend(data.ToWebDevToolsMessageData());
-  }
+  if (web_agent)
+    web_agent->frontendLoaded();
+}
+
+void DevToolsAgent::OnDispatchOnInspectorBackend(const std::string& message) {
+  WebDevToolsAgent* web_agent = GetWebAgent();
+  if (web_agent)
+    web_agent->dispatchOnInspectorBackend(WebString::fromUTF8(message));
 }
 
 void DevToolsAgent::OnInspectElement(int x, int y) {
@@ -186,7 +203,8 @@ void DevToolsAgent::OnInspectElement(int x, int y) {
 void DevToolsAgent::OnSetApuAgentEnabled(bool enabled) {
   WebDevToolsAgent* web_agent = GetWebAgent();
   if (web_agent)
-    web_agent->setRuntimeFeatureEnabled("apu-agent", enabled);
+    web_agent->setRuntimeProperty("apu-agent", enabled ?
+        WebString::fromUTF8("true") : WebString::fromUTF8("false"));
 }
 
 WebDevToolsAgent* DevToolsAgent::GetWebAgent() {

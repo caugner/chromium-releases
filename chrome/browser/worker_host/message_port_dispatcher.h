@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_WORKER_HOST_MESSAGE_PORT_DISPATCHER_H_
 #define CHROME_BROWSER_WORKER_HOST_MESSAGE_PORT_DISPATCHER_H_
+#pragma once
 
 #include <map>
 #include <utility>
@@ -14,6 +15,7 @@
 #include "base/singleton.h"
 #include "base/string16.h"
 #include "base/task.h"
+#include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "ipc/ipc_message.h"
 

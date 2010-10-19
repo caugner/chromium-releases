@@ -4,11 +4,16 @@
 
 #ifndef CHROME_BROWSER_FIND_BAR_CONTROLLER_H_
 #define CHROME_BROWSER_FIND_BAR_CONTROLLER_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
+#include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
-#include "gfx/rect.h"
+
+namespace gfx {
+class Rect;
+}
 
 class FindBar;
 class TabContents;

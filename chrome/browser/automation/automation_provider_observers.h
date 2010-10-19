@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_OBSERVERS_H_
 #define CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_OBSERVERS_H_
+#pragma once
 
 #include <deque>
 #include <map>
@@ -13,9 +14,11 @@
 #include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/history/history.h"
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/password_manager/password_store.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_type.h"
@@ -28,6 +31,7 @@ class ExtensionProcessManager;
 class NavigationController;
 class SavePackage;
 class TabContents;
+class TranslateInfoBarDelegate;
 
 namespace IPC {
 class Message;
@@ -485,6 +489,47 @@ class MetricEventDurationObserver : public NotificationObserver {
   DISALLOW_COPY_AND_ASSIGN(MetricEventDurationObserver);
 };
 
+class PageTranslatedObserver : public NotificationObserver {
+ public:
+  PageTranslatedObserver(AutomationProvider* automation,
+                         IPC::Message* reply_message,
+                         TabContents* tab_contents);
+
+  // NotificationObserver interface.
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
+ private:
+  NotificationRegistrar registrar_;
+  scoped_refptr<AutomationProvider> automation_;
+  IPC::Message* reply_message_;
+
+  DISALLOW_COPY_AND_ASSIGN(PageTranslatedObserver);
+};
+
+class TabLanguageDeterminedObserver : public NotificationObserver {
+ public:
+  TabLanguageDeterminedObserver(AutomationProvider* automation,
+                                IPC::Message* reply_message,
+                                TabContents* tab_contents,
+                                TranslateInfoBarDelegate* translate_bar);
+
+  // NotificationObserver interface.
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
+ private:
+  NotificationRegistrar registrar_;
+  AutomationProvider* automation_;
+  IPC::Message* reply_message_;
+  TabContents* tab_contents_;
+  TranslateInfoBarDelegate* translate_bar_;
+
+  DISALLOW_COPY_AND_ASSIGN(TabLanguageDeterminedObserver);
+};
+
 #if defined(OS_CHROMEOS)
 // Collects LOGIN_AUTHENTICATION notifications and returns
 // whether authentication succeeded to the automation provider.
@@ -552,27 +597,6 @@ class AutomationProviderBookmarkModelObserver : BookmarkModelObserver {
   DISALLOW_COPY_AND_ASSIGN(AutomationProviderBookmarkModelObserver);
 };
 
-// When asked for pending downloads, the DownloadManager places
-// results in a DownloadManager::Observer.
-class AutomationProviderDownloadManagerObserver
-    : public DownloadManager::Observer {
- public:
-  AutomationProviderDownloadManagerObserver() : DownloadManager::Observer()  {}
-  virtual ~AutomationProviderDownloadManagerObserver() {}
-  virtual void ModelChanged() {}
-  virtual void SetDownloads(std::vector<DownloadItem*>& downloads) {
-    downloads_ = downloads;
-  }
-  std::vector<DownloadItem*> Downloads() {
-    return downloads_;
-  }
- private:
-  std::vector<DownloadItem*> downloads_;
-
-  DISALLOW_COPY_AND_ASSIGN(AutomationProviderDownloadManagerObserver);
-};
-
-
 // Allows the automation provider to wait for all downloads to finish.
 class AutomationProviderDownloadItemObserver : public DownloadItem::Observer {
  public:
@@ -596,6 +620,54 @@ class AutomationProviderDownloadItemObserver : public DownloadItem::Observer {
   int downloads_;
 
   DISALLOW_COPY_AND_ASSIGN(AutomationProviderDownloadItemObserver);
+};
+
+// Allows the automation provider to wait until the download has been updated
+// or opened.
+class AutomationProviderDownloadUpdatedObserver
+    : public DownloadItem::Observer {
+ public:
+  AutomationProviderDownloadUpdatedObserver(
+      AutomationProvider* provider,
+      IPC::Message* reply_message,
+      bool wait_for_open)
+    : provider_(provider),
+      reply_message_(reply_message),
+      wait_for_open_(wait_for_open) {}
+
+  virtual void OnDownloadUpdated(DownloadItem* download);
+  virtual void OnDownloadOpened(DownloadItem* download);
+  virtual void OnDownloadFileCompleted(DownloadItem* download) { }
+
+ private:
+  AutomationProvider* provider_;
+  IPC::Message* reply_message_;
+  bool wait_for_open_;
+
+  DISALLOW_COPY_AND_ASSIGN(AutomationProviderDownloadUpdatedObserver);
+};
+
+// Allows the automation provider to wait until the download model has changed
+// (because a new download has been added or removed).
+class AutomationProviderDownloadModelChangedObserver
+    : public DownloadManager::Observer {
+ public:
+  AutomationProviderDownloadModelChangedObserver(
+      AutomationProvider* provider,
+      IPC::Message* reply_message,
+      DownloadManager* download_manager)
+    : provider_(provider),
+      reply_message_(reply_message),
+      download_manager_(download_manager) {}
+
+  virtual void ModelChanged();
+
+ private:
+  AutomationProvider* provider_;
+  IPC::Message* reply_message_;
+  DownloadManager* download_manager_;
+
+  DISALLOW_COPY_AND_ASSIGN(AutomationProviderDownloadModelChangedObserver);
 };
 
 // Allows the automation provider to wait for history queries to finish.
@@ -635,8 +707,8 @@ class AutomationProviderImportSettingsObserver
 };
 
 // Allows automation provider to wait for getting passwords to finish.
-class AutomationProviderGetPasswordsObserver :
-    public PasswordStoreConsumer {
+class AutomationProviderGetPasswordsObserver
+    : public PasswordStoreConsumer {
  public:
   AutomationProviderGetPasswordsObserver(
       AutomationProvider* provider,

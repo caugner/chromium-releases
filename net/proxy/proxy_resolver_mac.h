@@ -1,11 +1,10 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_PROXY_PROXY_RESOLVER_MAC_H_
 #define NET_PROXY_PROXY_RESOLVER_MAC_H_
-
-#include <string>
+#pragma once
 
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
@@ -30,15 +29,15 @@ class ProxyResolverMac : public ProxyResolver {
     NOTREACHED();
   }
 
- private:
-  virtual int SetPacScript(const GURL& pac_url,
-                           const string16& /*pac_script*/,
-                           CompletionCallback* /*callback*/) {
-    pac_url_ = pac_url;
+  virtual int SetPacScript(
+      const scoped_refptr<ProxyResolverScriptData>& script_data,
+      CompletionCallback* /*callback*/) {
+    script_data_ = script_data;
     return OK;
   }
 
-  GURL pac_url_;
+ private:
+  scoped_refptr<ProxyResolverScriptData> script_data_;
 };
 
 }  // namespace net

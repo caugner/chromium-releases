@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_AUTOFILL_MODEL_ASSOCIATOR_H_
 #define CHROME_BROWSER_SYNC_GLUE_AUTOFILL_MODEL_ASSOCIATOR_H_
+#pragma once
 
 #include <map>
 #include <set>
@@ -13,7 +14,6 @@
 #include "base/basictypes.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/sync/engine/syncapi.h"

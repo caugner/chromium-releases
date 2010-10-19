@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_EXISTING_USER_CONTROLLER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_EXISTING_USER_CONTROLLER_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -11,20 +12,20 @@
 #include "base/ref_counted.h"
 #include "base/task.h"
 #include "base/timer.h"
+#include "chrome/browser/chromeos/login/background_view.h"
 #include "chrome/browser/chromeos/login/captcha_view.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
+#include "chrome/browser/chromeos/login/message_bubble.h"
 #include "chrome/browser/chromeos/login/password_changed_view.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/user_controller.h"
 #include "chrome/browser/chromeos/wm_message_listener.h"
-#include "chrome/browser/views/info_bubble.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "gfx/size.h"
 
 namespace chromeos {
 
 class Authenticator;
-class BackgroundView;
 class MessageBubble;
 
 // ExistingUserController is used to handle login when someone has already
@@ -39,8 +40,9 @@ class MessageBubble;
 // the user logs in (or chooses to see other settings).
 class ExistingUserController : public WmMessageListener::Observer,
                                public UserController::Delegate,
+                               public BackgroundView::Delegate,
                                public LoginStatusConsumer,
-                               public InfoBubbleDelegate,
+                               public MessageBubbleDelegate,
                                public CaptchaView::Delegate,
                                public PasswordChangedView::Delegate {
  public:
@@ -55,6 +57,12 @@ class ExistingUserController : public WmMessageListener::Observer,
   // Takes ownership of the specified background widget and view.
   void OwnBackground(views::Widget* background_widget,
                      chromeos::BackgroundView* background_view);
+
+  // Tries to login from new user pod with given user login and password.
+  void LoginNewUser(const std::string& username, const std::string& password);
+
+  // Selects new user pod.
+  void SelectNewUser();
 
  private:
   friend class DeleteTask<ExistingUserController>;
@@ -78,8 +86,11 @@ class ExistingUserController : public WmMessageListener::Observer,
   virtual void AddStartUrl(const GURL& start_url) { start_url_ = start_url; }
   virtual void SelectUser(int index);
 
+  // BackgroundView::Delegate
+  virtual void OnGoIncognitoButton();
+
   // LoginStatusConsumer:
-  virtual void OnLoginFailure(const std::string& error);
+  virtual void OnLoginFailure(const LoginFailure& error);
   virtual void OnLoginSuccess(const std::string& username,
       const GaiaAuthConsumer::ClientLoginResult& credentials);
   virtual void OnOffTheRecordLoginSuccess();
@@ -93,6 +104,7 @@ class ExistingUserController : public WmMessageListener::Observer,
   }
   virtual bool CloseOnEscape() { return true; }
   virtual bool FadeInOnShow() { return false; }
+  virtual void OnHelpLinkActivated();
 
   // CaptchaView::Delegate:
   virtual void OnCaptchaEntered(const std::string& captcha);
@@ -133,6 +145,10 @@ class ExistingUserController : public WmMessageListener::Observer,
 
   // Index of selected view (user).
   size_t selected_view_index_;
+
+  // Number of login attempts. Used to show help link when > 1 unsuccessful
+  // logins for the same user.
+  size_t num_login_attempts_;
 
   // See comment in ProcessWmMessage.
   base::OneShotTimer<ExistingUserController> delete_timer_;

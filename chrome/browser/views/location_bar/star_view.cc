@@ -31,7 +31,7 @@ void StarView::SetToggled(bool on) {
   // name right after we modify the tooltip text for this view.
   SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_STAR));
   SetImage(ResourceBundle::GetSharedInstance().GetBitmapNamed(
-      on ? IDR_OMNIBOX_STAR_LIT : IDR_OMNIBOX_STAR));
+      on ? IDR_STAR_LIT : IDR_STAR));
 }
 
 bool StarView::GetAccessibleRole(AccessibilityTypes::Role* role) {
@@ -59,8 +59,8 @@ void StarView::OnMouseReleased(const views::MouseEvent& event, bool canceled) {
 }
 
 bool StarView::OnKeyPressed(const views::KeyEvent& e) {
-  if (e.GetKeyCode() == base::VKEY_SPACE ||
-      e.GetKeyCode() == base::VKEY_RETURN) {
+  if (e.GetKeyCode() == app::VKEY_SPACE ||
+      e.GetKeyCode() == app::VKEY_RETURN) {
     command_updater_->ExecuteCommand(IDC_BOOKMARK_PAGE);
     return true;
   }

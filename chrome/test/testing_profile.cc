@@ -5,19 +5,39 @@
 #include "chrome/test/testing_profile.h"
 
 #include "build/build_config.h"
+
+#include "base/base_paths.h"
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/message_loop_proxy.h"
-#include "base/string_util.h"
-#include "chrome/common/url_constants.h"
+#include "base/path_service.h"
+#include "base/string_number_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/ntp_resource_cache.h"
+#include "chrome/browser/favicon_service.h"
+#include "chrome/browser/find_bar_state.h"
+#include "chrome/browser/geolocation/geolocation_content_settings_map.h"
+#include "chrome/browser/geolocation/geolocation_permission_context.h"
+#include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
+#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/host_content_settings_map.h"
+#include "chrome/browser/in_process_webkit/webkit_context.h"
 #include "chrome/browser/net/gaia/token_service.h"
+#include "chrome/browser/notifications/desktop_notification_service.h"
+#include "chrome/browser/prefs/browser_prefs.h"
+#include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
+#include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/notification_service.h"
+#include "chrome/common/url_constants.h"
+#include "chrome/test/testing_pref_service.h"
+#include "net/base/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "webkit/database/database_tracker.h"
@@ -150,23 +170,29 @@ TestingProfile::TestingProfile()
       has_history_service_(false),
       off_the_record_(false),
       last_session_exited_cleanly_(true) {
-  PathService::Get(base::DIR_TEMP, &path_);
-  path_ = path_.Append(FILE_PATH_LITERAL("TestingProfilePath"));
-  file_util::Delete(path_, true);
-  file_util::CreateDirectory(path_);
-}
+  if (!temp_dir_.CreateUniqueTempDir()) {
+    LOG(ERROR) << "Failed to create unique temporary directory.";
 
-TestingProfile::TestingProfile(int count)
-    : start_time_(Time::Now()),
-      created_theme_provider_(false),
-      has_history_service_(false),
-      off_the_record_(false),
-      last_session_exited_cleanly_(true) {
-  PathService::Get(base::DIR_TEMP, &path_);
-  path_ = path_.Append(FILE_PATH_LITERAL("TestingProfilePath"));
-  path_ = path_.AppendASCII(IntToString(count));
-  file_util::Delete(path_, true);
-  file_util::CreateDirectory(path_);
+    // Fallback logic in case we fail to create unique temporary directory.
+    FilePath system_tmp_dir;
+    bool success = PathService::Get(base::DIR_TEMP, &system_tmp_dir);
+
+    // We're severly screwed if we can't get the system temporary
+    // directory. Die now to avoid writing to the filesystem root
+    // or other bad places.
+    CHECK(success);
+
+    FilePath fallback_dir(system_tmp_dir.AppendASCII("TestingProfilePath"));
+    file_util::Delete(fallback_dir, true);
+    file_util::CreateDirectory(fallback_dir);
+    if (!temp_dir_.Set(fallback_dir)) {
+      // That shouldn't happen, but if it does, try to recover.
+      LOG(ERROR) << "Failed to use a fallback temporary directory.";
+
+      // We're screwed if this fails, see CHECK above.
+      CHECK(temp_dir_.Set(system_tmp_dir));
+    }
+  }
 }
 
 TestingProfile::~TestingProfile() {
@@ -178,7 +204,9 @@ TestingProfile::~TestingProfile() {
   // FaviconService depends on HistoryServce so destroying it later.
   DestroyFaviconService();
   DestroyWebDataService();
-  file_util::Delete(path_, true);
+  if (top_sites_.get())
+    top_sites_->ClearProfile();
+  history::TopSites::DeleteTopSites(top_sites_);
 }
 
 void TestingProfile::CreateFaviconService() {
@@ -287,10 +315,25 @@ void TestingProfile::UseThemeProvider(BrowserThemeProvider* theme_provider) {
   theme_provider_.reset(theme_provider);
 }
 
+FilePath TestingProfile::GetPath() {
+  DCHECK(temp_dir_.IsValid());  // TODO(phajdan.jr): do it better.
+  return temp_dir_.path();
+}
+
+TestingPrefService* TestingProfile::GetTestingPrefService() {
+  return static_cast<TestingPrefService*>(GetPrefs());
+}
+
 webkit_database::DatabaseTracker* TestingProfile::GetDatabaseTracker() {
   if (!db_tracker_)
     db_tracker_ = new webkit_database::DatabaseTracker(GetPath(), false);
   return db_tracker_;
+}
+
+net::CookieMonster* TestingProfile::GetCookieMonster() {
+  if (!GetRequestContext())
+    return NULL;
+  return GetRequestContext()->GetCookieStore()->GetCookieMonster();
 }
 
 void TestingProfile::InitThemes() {
@@ -303,6 +346,24 @@ void TestingProfile::InitThemes() {
     theme_provider_->Init(this);
     created_theme_provider_ = true;
   }
+}
+
+PrefService* TestingProfile::GetPrefs() {
+  if (!prefs_.get()) {
+    prefs_.reset(new TestingPrefService());
+    Profile::RegisterUserPrefs(prefs_.get());
+    browser::RegisterAllPrefs(prefs_.get(), prefs_.get());
+  }
+  return prefs_.get();
+}
+
+history::TopSites* TestingProfile::GetTopSites() {
+  if (!top_sites_.get()) {
+    top_sites_ = new history::TopSites(this);
+    FilePath file_name = temp_dir_.path().AppendASCII("TopSites.db");
+    top_sites_->Init(file_name);
+  }
+  return top_sites_;
 }
 
 URLRequestContextGetter* TestingProfile::GetRequestContext() {
@@ -320,14 +381,59 @@ URLRequestContextGetter* TestingProfile::GetRequestContextForExtensions() {
   return extensions_request_context_.get();
 }
 
+FindBarState* TestingProfile::GetFindBarState() {
+  if (!find_bar_state_.get())
+    find_bar_state_.reset(new FindBarState());
+  return find_bar_state_.get();
+}
+
+HostContentSettingsMap* TestingProfile::GetHostContentSettingsMap() {
+  if (!host_content_settings_map_.get())
+    host_content_settings_map_ = new HostContentSettingsMap(this);
+  return host_content_settings_map_.get();
+}
+
+GeolocationContentSettingsMap*
+TestingProfile::GetGeolocationContentSettingsMap() {
+  if (!geolocation_content_settings_map_.get()) {
+    geolocation_content_settings_map_ =
+        new GeolocationContentSettingsMap(this);
+  }
+  return geolocation_content_settings_map_.get();
+}
+
+GeolocationPermissionContext*
+TestingProfile::GetGeolocationPermissionContext() {
+  if (!geolocation_permission_context_.get()) {
+    geolocation_permission_context_ =
+        new GeolocationPermissionContext(this);
+  }
+  return geolocation_permission_context_.get();
+}
+
 void TestingProfile::set_session_service(SessionService* session_service) {
   session_service_ = session_service;
+}
+
+WebKitContext* TestingProfile::GetWebKitContext() {
+  if (webkit_context_ == NULL)
+    webkit_context_ = new WebKitContext(this);
+  return webkit_context_;
 }
 
 NTPResourceCache* TestingProfile::GetNTPResourceCache() {
   if (!ntp_resource_cache_.get())
     ntp_resource_cache_.reset(new NTPResourceCache(this));
   return ntp_resource_cache_.get();
+}
+
+DesktopNotificationService* TestingProfile::GetDesktopNotificationService() {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  if (!desktop_notification_service_.get()) {
+    desktop_notification_service_.reset(new DesktopNotificationService(
+        this, NULL));
+  }
+  return desktop_notification_service_.get();
 }
 
 void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {

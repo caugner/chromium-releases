@@ -4,12 +4,12 @@
 
 #ifndef CHROME_BROWSER_EXTERNAL_TAB_CONTAINER_WIN_H_
 #define CHROME_BROWSER_EXTERNAL_TAB_CONTAINER_WIN_H_
+#pragma once
 
 #include <vector>
 #include <map>
 #include "base/lazy_instance.h"
 #include "chrome/browser/automation/automation_resource_message_filter.h"
-#include "chrome/browser/automation/automation_profile_impl.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
@@ -117,10 +117,10 @@ class ExternalTabContainer : public TabContentsDelegate,
                               const gfx::Rect& initial_pos,
                               bool user_gesture);
   virtual void ActivateContents(TabContents* contents);
+  virtual void DeactivateContents(TabContents* contents);
   virtual void LoadingStateChanged(TabContents* source);
   virtual void CloseContents(TabContents* source);
   virtual void MoveContents(TabContents* source, const gfx::Rect& pos);
-  virtual bool IsPopup(TabContents* source);
   virtual void URLStarredChanged(TabContents* source, bool starred);
   virtual void UpdateTargetURL(TabContents* source, const GURL& url);
   virtual void ContentsZoomChange(bool zoom_in);
@@ -147,8 +147,6 @@ class ExternalTabContainer : public TabContentsDelegate,
                             const GURL& url,
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history);
-
-  virtual Browser* GetBrowser() { return browser_.get(); }
 
   // Overriden from TabContentsDelegate::AutomationResourceRoutingDelegate
   virtual void RegisterRenderViewHost(RenderViewHost* render_view_host);
@@ -219,9 +217,6 @@ class ExternalTabContainer : public TabContentsDelegate,
                           NavigationType::Type nav_type,
                           int relative_offset);
   void Navigate(const GURL& url, const GURL& referrer);
-
-  // Initializes the request context to be used for automation HTTP requests.
-  void InitializeAutomationRequestContext(int tab_handle);
 
  private:
   friend class base::RefCounted<ExternalTabContainer>;

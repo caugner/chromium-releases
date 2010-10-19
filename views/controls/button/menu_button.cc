@@ -31,6 +31,10 @@ static const int64 kMinimumTimeBetweenButtonClicks = 100;
 static const int kMenuMarkerPaddingLeft = 3;
 static const int kMenuMarkerPaddingRight = -1;
 
+// Default menu offset.
+static const int kDefaultMenuOffsetX = -2;
+static const int kDefaultMenuOffsetY = -4;
+
 // static
 const char MenuButton::kViewClassName[] = "views/MenuButton";
 
@@ -46,6 +50,7 @@ MenuButton::MenuButton(ButtonListener* listener,
                        bool show_menu_marker)
     : TextButton(listener, text),
       menu_visible_(false),
+      menu_offset_(kDefaultMenuOffsetX, kDefaultMenuOffsetY),
       menu_delegate_(menu_delegate),
       show_menu_marker_(show_menu_marker),
       menu_marker_(ResourceBundle::GetSharedInstance().GetBitmapNamed(
@@ -130,9 +135,9 @@ bool MenuButton::Activate() {
 
     View::ConvertPointToScreen(this, &menu_position);
     if (base::i18n::IsRTL())
-      menu_position.Offset(2, -4);
+      menu_position.Offset(-menu_offset_.x(), menu_offset_.y());
     else
-      menu_position.Offset(-2, -4);
+      menu_position.Offset(menu_offset_.x(), menu_offset_.y());
 
     int max_x_coordinate = GetMaximumScreenXCoordinate();
     if (max_x_coordinate && max_x_coordinate <= menu_position.x())
@@ -214,10 +219,10 @@ void MenuButton::OnMouseReleased(const MouseEvent& e,
 }
 
 bool MenuButton::OnKeyPressed(const KeyEvent& e) {
-  if (e.GetKeyCode() == base::VKEY_SPACE ||
-      e.GetKeyCode() == base::VKEY_RETURN ||
-      e.GetKeyCode() == base::VKEY_UP ||
-      e.GetKeyCode() == base::VKEY_DOWN) {
+  if (e.GetKeyCode() == app::VKEY_SPACE ||
+      e.GetKeyCode() == app::VKEY_RETURN ||
+      e.GetKeyCode() == app::VKEY_UP ||
+      e.GetKeyCode() == app::VKEY_DOWN) {
     bool result = Activate();
     if (GetFocusManager()->GetFocusedView() == NULL)
       RequestFocus();

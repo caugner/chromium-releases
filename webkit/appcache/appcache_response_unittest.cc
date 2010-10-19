@@ -1,6 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include <stack>
+#include <string>
+#include <utility>
 
 #include "base/compiler_specific.h"
 #include "base/pickle.h"
@@ -8,6 +12,7 @@
 #include "base/waitable_event.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_response_headers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/appcache/appcache_response.h"
 #include "webkit/appcache/mock_appcache_service.h"

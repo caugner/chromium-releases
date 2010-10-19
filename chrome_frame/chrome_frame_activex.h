@@ -13,9 +13,6 @@
 #include <string>
 #include <vector>
 
-#include "base/scoped_bstr_win.h"
-#include "base/scoped_comptr_win.h"
-#include "base/scoped_variant_win.h"
 #include "chrome_frame/chrome_frame_activex_base.h"
 #include "chrome_frame/com_type_info_holder.h"
 #include "grit/chrome_frame_resources.h"
@@ -47,7 +44,6 @@ BEGIN_COM_MAP(ChromeFrameActivex)
   COM_INTERFACE_ENTRY(IObjectWithSite)
   COM_INTERFACE_ENTRY(IObjectSafety)
   COM_INTERFACE_ENTRY(IPersistPropertyBag)
-  COM_INTERFACE_ENTRY(IConnectionPointContainer)
   COM_INTERFACE_ENTRY_CHAIN(Base)
 END_COM_MAP()
 

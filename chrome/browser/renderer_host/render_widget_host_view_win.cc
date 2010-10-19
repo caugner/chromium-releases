@@ -45,6 +45,8 @@
 #include "views/widget/widget_win.h"
 #include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
+#include "webkit/glue/plugins/webplugin.h"
+#include "webkit/glue/webaccessibility.h"
 #include "webkit/glue/webcursor.h"
 
 using base::TimeDelta;
@@ -328,6 +330,11 @@ void RenderWidgetHostViewWin::InitAsPopup(
   MoveWindow(pos.x(), pos.y(), pos.width(), pos.height(), TRUE);
   // Popups are not activated.
   ShowWindow(IsActivatable() ? SW_SHOW : SW_SHOWNA);
+}
+
+void RenderWidgetHostViewWin::InitAsFullscreen(
+    RenderWidgetHostView* parent_host_view) {
+  NOTIMPLEMENTED() << "Fullscreen not implemented on Win";
 }
 
 RenderWidgetHost* RenderWidgetHostViewWin::GetRenderWidgetHost() const {
@@ -691,19 +698,17 @@ void RenderWidgetHostViewWin::DrawResizeCorner(const gfx::Rect& paint_rect,
     canvas.getDevice()->accessBitmap(true).eraseARGB(0, 0, 0, 0);
     int x = resize_corner_rect.x() + resize_corner_rect.width() -
         bitmap->width();
-    bool rtl_dir = base::i18n::IsRTL();
-    if (rtl_dir) {
+    canvas.save();
+    if (base::i18n::IsRTL()) {
       canvas.TranslateInt(bitmap->width(), 0);
       canvas.ScaleInt(-1, 1);
-      canvas.save();
       x = 0;
     }
     canvas.DrawBitmapInt(*bitmap, 0, 0);
     canvas.getTopPlatformDevice().drawToHDC(dc, x,
         resize_corner_rect.y() + resize_corner_rect.height() -
         bitmap->height(), NULL);
-    if (rtl_dir)
-      canvas.restore();
+    canvas.restore();
   }
 }
 
@@ -1499,10 +1504,18 @@ void RenderWidgetHostViewWin::OnAccessibilityFocusChange(int acc_obj_id) {
   }
 }
 
-void RenderWidgetHostViewWin::OnAccessibilityObjectStateChange(int acc_obj_id) {
+void RenderWidgetHostViewWin::OnAccessibilityObjectStateChange(
+    const webkit_glue::WebAccessibility& acc_obj) {
   if (browser_accessibility_manager_.get()) {
-    browser_accessibility_manager_->OnAccessibilityObjectStateChange(
-        acc_obj_id);
+    browser_accessibility_manager_->OnAccessibilityObjectStateChange(acc_obj);
+  }
+}
+
+void RenderWidgetHostViewWin::OnAccessibilityObjectChildrenChange(
+    const std::vector<webkit_glue::WebAccessibility>& acc_changes) {
+  if (browser_accessibility_manager_.get()) {
+    browser_accessibility_manager_->OnAccessibilityObjectChildrenChange(
+        acc_changes);
   }
 }
 
@@ -1546,6 +1559,10 @@ void RenderWidgetHostViewWin::AccessibilityDoDefaultAction(int acc_obj_id) {
   }
 
   render_widget_host_->AccessibilityDoDefaultAction(acc_obj_id);
+}
+
+void RenderWidgetHostViewWin::AccessibilityObjectChildrenChangeAck() {
+  render_widget_host_->AccessibilityObjectChildrenChangeAck();
 }
 
 LRESULT RenderWidgetHostViewWin::OnGetObject(UINT message, WPARAM wparam,

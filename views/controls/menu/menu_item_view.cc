@@ -5,6 +5,7 @@
 #include "views/controls/menu/menu_item_view.h"
 
 #include "app/l10n_util.h"
+#include "base/utf_string_conversions.h"
 #include "gfx/canvas.h"
 #include "grit/app_strings.h"
 #include "views/controls/button/text_button.h"
@@ -64,6 +65,9 @@ int MenuItemView::item_right_margin_;
 
 // static
 int MenuItemView::pref_menu_height_;
+
+// static
+const char MenuItemView::kViewClassName[] = "views/MenuItemView";
 
 MenuItemView::MenuItemView(MenuDelegate* delegate)
     : delegate_(delegate),
@@ -316,7 +320,7 @@ wchar_t MenuItemView::GetMnemonic() {
     if (index != std::wstring::npos) {
       if (index + 1 != title.size() && title[index + 1] != '&') {
         wchar_t char_array[1] = { title[index + 1] };
-        return l10n_util::ToLower(char_array)[0];
+        return UTF16ToWide(l10n_util::ToLower(WideToUTF16(char_array)))[0];
       }
       index++;
     }
@@ -398,6 +402,10 @@ MenuItemView::MenuItemView(MenuItemView* parent,
       show_mnemonics_(false),
       has_icons_(false) {
   Init(parent, command, type, NULL);
+}
+
+std::string MenuItemView::GetClassName() const {
+  return kViewClassName;
 }
 
 // Calculates all sizes that we can from the OS.

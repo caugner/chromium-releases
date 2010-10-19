@@ -8,7 +8,9 @@
 #include "app/l10n_util.h"
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
-#include "base/string_util.h"
+#include "base/string16.h"
+#include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/mock_login_library.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
@@ -46,24 +48,26 @@ class DummyComboboxModel : public ComboboxModel {
  public:
   virtual int GetItemCount() { return 2; }
 
-  virtual std::wstring GetItemAt(int index) {
-    return L"Item " + IntToWString(index);
+  virtual string16 GetItemAt(int index) {
+    return ASCIIToUTF16("Item ") + base::IntToString16(index);
   }
 };
 
 class NetworkScreenTest : public WizardInProcessBrowserTest {
  public:
-  NetworkScreenTest(): WizardInProcessBrowserTest("network") {
+  NetworkScreenTest(): WizardInProcessBrowserTest("network"),
+                       mock_login_library_(NULL),
+                       mock_network_library_(NULL) {
     cellular_.set_name("Cellular network");
     wifi_.set_name("WiFi network");
   }
 
  protected:
   virtual void SetUpInProcessBrowserTestFixture() {
-    InitStatusAreaMocks();
-
+    cros_mock_->InitStatusAreaMocks();
+    mock_network_library_ = cros_mock_->mock_network_library();
     mock_login_library_ = new MockLoginLibrary();
-    test_api()->SetLoginLibrary(mock_login_library_, true);
+    cros_mock_->test_api()->SetLoginLibrary(mock_login_library_, true);
     EXPECT_CALL(*mock_login_library_, EmitLoginPromptReady())
         .Times(1);
 
@@ -90,12 +94,12 @@ class NetworkScreenTest : public WizardInProcessBrowserTest {
     EXPECT_CALL(*mock_network_library_, RemoveObserver(_))
         .Times(1);
 
-    SetStatusAreaMocksExpectations();
+    cros_mock_->SetStatusAreaMocksExpectations();
   }
 
   virtual void TearDownInProcessBrowserTestFixture() {
     CrosInProcessBrowserTest::TearDownInProcessBrowserTestFixture();
-    test_api()->SetLoginLibrary(NULL, false);
+    cros_mock_->test_api()->SetLoginLibrary(NULL, false);
   }
 
   void NetworkChangedExpectations(bool wifi_enabled) {
@@ -184,6 +188,7 @@ class NetworkScreenTest : public WizardInProcessBrowserTest {
   }
 
   MockLoginLibrary* mock_login_library_;
+  MockNetworkLibrary* mock_network_library_;
 
   CellularNetworkVector cellular_networks_;
   WifiNetworkVector wifi_networks_;
@@ -204,7 +209,7 @@ IN_PROC_BROWSER_TEST_F(NetworkScreenTest, Basic) {
   NetworkSelectionView* network_view = network_screen->view();
   ASSERT_TRUE(network_view != NULL);
   ASSERT_EQ(1, network_screen->GetItemCount());
-  EXPECT_EQ(l10n_util::GetString(IDS_STATUSBAR_NO_NETWORKS_MESSAGE),
+  EXPECT_EQ(l10n_util::GetStringUTF16(IDS_STATUSBAR_NO_NETWORKS_MESSAGE),
             network_screen->GetItemAt(0));
 }
 
@@ -224,10 +229,10 @@ IN_PROC_BROWSER_TEST_F(NetworkScreenTest, EnableWifi) {
   WifiCellularNetworksExpectations();
   network_screen->NetworkChanged(network_library);
   ASSERT_EQ(2, network_screen->GetItemCount());
-  EXPECT_EQ(l10n_util::GetString(IDS_STATUSBAR_NO_NETWORKS_MESSAGE),
+  EXPECT_EQ(l10n_util::GetStringUTF16(IDS_STATUSBAR_NO_NETWORKS_MESSAGE),
             network_screen->GetItemAt(0));
-  EXPECT_EQ(l10n_util::GetStringF(IDS_STATUSBAR_NETWORK_DEVICE_ENABLE,
-                l10n_util::GetString(IDS_STATUSBAR_NETWORK_DEVICE_WIFI)),
+  EXPECT_EQ(l10n_util::GetStringFUTF16(IDS_STATUSBAR_NETWORK_DEVICE_ENABLE,
+                l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_WIFI)),
             network_screen->GetItemAt(1));
 
   // Emulate "Enable Wifi" item press.
@@ -258,7 +263,7 @@ IN_PROC_BROWSER_TEST_F(NetworkScreenTest, NetworksConnectedNotSelected) {
   EXPECT_EQ(1, network_view->GetSelectedNetworkItem());
   ASSERT_EQ(network_screen, controller()->current_screen());
   ASSERT_EQ(2, network_screen->GetItemCount());
-  EXPECT_EQ(l10n_util::GetString(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET),
+  EXPECT_EQ(l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET),
             network_screen->GetItemAt(1));
 
   // Ethernet - disconnected, WiFi & Cellular - connected.
@@ -274,8 +279,8 @@ IN_PROC_BROWSER_TEST_F(NetworkScreenTest, NetworksConnectedNotSelected) {
   network_screen->NetworkChanged(network_library);
   ASSERT_EQ(network_screen, controller()->current_screen());
   ASSERT_EQ(3, network_screen->GetItemCount());
-  EXPECT_EQ(ASCIIToWide(wifi_.name()), network_screen->GetItemAt(1));
-  EXPECT_EQ(ASCIIToWide(cellular_.name()), network_screen->GetItemAt(2));
+  EXPECT_EQ(ASCIIToUTF16(wifi_.name()), network_screen->GetItemAt(1));
+  EXPECT_EQ(ASCIIToUTF16(cellular_.name()), network_screen->GetItemAt(2));
 
   // Ethernet, WiFi & Cellular - connected.
   EthernetExpectations(true, false);
@@ -288,10 +293,10 @@ IN_PROC_BROWSER_TEST_F(NetworkScreenTest, NetworksConnectedNotSelected) {
   network_screen->NetworkChanged(network_library);
   ASSERT_EQ(network_screen, controller()->current_screen());
   ASSERT_EQ(4, network_screen->GetItemCount());
-  EXPECT_EQ(l10n_util::GetString(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET),
+  EXPECT_EQ(l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET),
             network_screen->GetItemAt(1));
-  EXPECT_EQ(ASCIIToWide(wifi_.name()), network_screen->GetItemAt(2));
-  EXPECT_EQ(ASCIIToWide(cellular_.name()), network_screen->GetItemAt(3));
+  EXPECT_EQ(ASCIIToUTF16(wifi_.name()), network_screen->GetItemAt(2));
+  EXPECT_EQ(ASCIIToUTF16(cellular_.name()), network_screen->GetItemAt(3));
   // Ethernet is only preselected once.
   EXPECT_EQ(0, network_view->GetSelectedNetworkItem());
 }
@@ -311,7 +316,7 @@ IN_PROC_BROWSER_TEST_F(NetworkScreenTest, EthernetSelected) {
   NetworkChangedExpectations(true);
   network_screen->NetworkChanged(network_library);
   ASSERT_EQ(2, network_screen->GetItemCount());
-  EXPECT_EQ(l10n_util::GetString(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET),
+  EXPECT_EQ(l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET),
             network_screen->GetItemAt(1));
   ASSERT_EQ(network_screen, controller()->current_screen());
 
@@ -352,7 +357,7 @@ IN_PROC_BROWSER_TEST_F(NetworkScreenTest, WifiSelected) {
   NetworkChangedExpectations(true);
   network_screen->NetworkChanged(network_library);
   ASSERT_EQ(2, network_screen->GetItemCount());
-  EXPECT_EQ(ASCIIToWide(wifi_.name()), network_screen->GetItemAt(1));
+  EXPECT_EQ(ASCIIToUTF16(wifi_.name()), network_screen->GetItemAt(1));
 
   DummyComboboxModel combobox_model;
   views::Combobox combobox(&combobox_model);
@@ -413,7 +418,7 @@ IN_PROC_BROWSER_TEST_F(NetworkScreenTest, CellularSelected) {
   NetworkChangedExpectations(true);
   network_screen->NetworkChanged(network_library);
   ASSERT_EQ(2, network_screen->GetItemCount());
-  EXPECT_EQ(ASCIIToWide(cellular_.name()), network_screen->GetItemAt(1));
+  EXPECT_EQ(ASCIIToUTF16(cellular_.name()), network_screen->GetItemAt(1));
 
   DummyComboboxModel combobox_model;
   views::Combobox combobox(&combobox_model);

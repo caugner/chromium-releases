@@ -11,6 +11,7 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/singleton.h"
+#include "base/values.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
@@ -22,6 +23,7 @@
 #include "chrome/test/ui_test_utils.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_test_job.h"
+#include "net/url_request/url_request_unittest.h"
 
 namespace {
 
@@ -76,7 +78,10 @@ class SimpleTestJob : public URLRequestTestJob {
 
 class TestController {
  public:
-  TestController() : result_(false), use_delegate_(false) {}
+  TestController()
+      : result_(false),
+        use_delegate_(false),
+        delegate_(NULL) {}
   void set_result(bool value) {
     result_ = value;
   }

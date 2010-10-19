@@ -4,10 +4,13 @@
 
 #ifndef NET_HTTP_HTTP_AUTH_H_
 #define NET_HTTP_HTTP_AUTH_H_
+#pragma once
 
 #include <set>
+#include <string>
 
 #include "base/scoped_ptr.h"
+#include "base/string16.h"
 #include "net/http/http_util.h"
 
 template <class T> class scoped_refptr;
@@ -67,9 +70,8 @@ class HttpAuth {
 
     IdentitySource source;
     bool invalid;
-    // TODO(wtc): |username| and |password| should be string16.
-    std::wstring username;
-    std::wstring password;
+    string16 username;
+    string16 password;
   };
 
   // Get the name of the header containing the auth challenge
@@ -119,7 +121,11 @@ class HttpAuth {
    public:
     ChallengeTokenizer(std::string::const_iterator begin,
                        std::string::const_iterator end)
-        : props_(begin, end, ','), valid_(true), begin_(begin), end_(end),
+        : props_(begin, end, ','),
+          valid_(true),
+          begin_(begin),
+          end_(end),
+          value_is_quoted_(false),
           expect_base64_token_(false) {
       Init(begin, end);
     }

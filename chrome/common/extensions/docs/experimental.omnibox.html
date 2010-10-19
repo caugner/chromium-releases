@@ -79,8 +79,23 @@
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd>
+            <div></div>
+          </dd>
+
         </div> <!-- /VALUE -->
 
+        <div id="functionParametersTemplate">
+          <h5>Parameters</h5>
+          <dl>
+            <div>
+              <div>
+              </div>
+            </div>
+          </dl>         
+        </div>
       </div> <!-- /SUBTEMPLATES -->
 
   <a id="top"></a>
@@ -142,6 +157,7 @@
         <ul>
           <li><a href="getstarted.html">Getting Started</a></li>
           <li><a href="overview.html">Overview</a></li>
+          <li><a href="whats_new.html">What's New?</a></li>
           <li><h2><a href="devguide.html">Developer's Guide</a></h2>
             <ul>
               <li>Browser UI
@@ -217,10 +233,17 @@
         <div id="toc">
           <h2>Contents</h2>
           <ol>
-            <li style="display: none; ">
-              <a>h2Name</a>
+            <li>
+              <a href="#manifest">Manifest</a>
               <ol>
-                <li>
+                <li style="display: none; ">
+                  <a>h3Name</a>
+                </li>
+              </ol>
+            </li><li>
+              <a href="#examples">Examples</a>
+              <ol>
+                <li style="display: none; ">
                   <a>h3Name</a>
                 </li>
               </ol>
@@ -280,15 +303,84 @@
         </div>
         <!-- /TABLE OF CONTENTS -->
 
+        <!-- Standard content lead-in for experimental API pages -->
+        <p id="classSummary">
+          For information on how to use experimental APIs, see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
+        </p>
+
         <!-- STATIC CONTENT PLACEHOLDER -->
         <div id="static"><!-- BEGIN AUTHORED CONTENT -->
-<p id="classSummary">
-For information on how to use experimental APIs,
-see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
+<p>
+The omnibox API allows you to register a
+keyword with Google Chrome's address bar,
+which is also known as the omnibox.
 </p>
 
+<p>
+<img src="images/omnibox.png" width="480" height="300" alt="A screenshot showing suggestions related to the keyword 'Chromium Search'">
+</p>
+
+<p>
+When the user enters your extension's
+keyword, the user starts
+interacting solely with your extension.
+Each keystroke is sent to your
+extension, and you can provide suggestions
+in response.
+</p>
+
+<p>
+The suggestions can be richly formatted
+in a variety of ways.
+<!-- PENDING: for example? (include a mention of method name, maybe show a code snippet) -->
+When the user accepts
+a suggestion, your extension is notified
+and can take action.
+</p>
+
+<h2 id="manifest">Manifest</h2>
+
+<p>
+To use the omnibox API, your manifest must
+declare the "experimental" permission and
+specify an <code>omnibox_keyword</code> field. You should also
+specify a 16x16-pixel icon, which will be
+displayed in the omnibox when suggesting users
+enter keyword mode.
+</p>
+
+<p>
+For example:
+</p>
+
+<pre>{
+  "name": "Aaron's omnibox extension",
+  "version": "1.0",
+  <b>"permissions": ["experimental"],</b>
+  <b>"omnibox_keyword": "aaron",</b>
+  <b>"icons": {</b>
+    <b>"16": "16-full-color.png"</b>
+  <b>},</b>
+  "background_page": "background.html"
+}</pre>
+
+<p><b class="note">Note:</b> Google Chrome
+automatically creates a greyscale version of
+your 16x16-pixel icon. You should provide
+a full-color version so that it can also be
+used in other situations that require color.
+For example, the <a href="contextMenus.html">context menus API</a> also uses a 16x16-pixel
+icon, but it is displayed in color.
+
+
+</p><h2 id="examples">Examples</h2>
+
+<p>
+You can find samples of this API on the
+<a href="samples.html#omnibox">sample page</a>.
+
 <!-- END AUTHORED CONTENT -->
-</div>
+</p></div>
 
         <!-- API PAGE -->
         <div class="apiPage">
@@ -366,7 +458,7 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
@@ -454,6 +546,12 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -481,7 +579,7 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
@@ -569,6 +667,12 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -596,7 +700,7 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
@@ -684,6 +788,12 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -711,7 +821,7 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
@@ -799,6 +909,12 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -826,7 +942,7 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
@@ -948,6 +1064,12 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div><div>
                     <div>
@@ -1000,6 +1122,146 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd>
+            <div>
+          <h5>Parameters</h5>
+          <dl>
+            <div>
+              <div>
+          <dt>
+            <var>requestId</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>integer</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <dd style="display: none; ">
+            Description of this parameter from the json schema.
+          </dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+            </div><div>
+              <div>
+          <dt>
+            <var style="display: none; ">paramName</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span>
+                          array of <span><span>
+                      <span>
+                        <a href="experimental.omnibox.html#type-SuggestResult">SuggestResult</a>
+                      </span>
+                      <span style="display: none; ">
+                        <span>
+                          array of <span><span></span></span>
+                        </span>
+                        <span>paramType</span>
+                        <span></span>
+                      </span>
+                    </span></span>
+                        </span>
+                        <span style="display: none; ">paramType</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>Array of suggest results</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+            </div>
+          </dl>         
+        </div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -1075,6 +1337,12 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -1214,6 +1482,12 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1266,6 +1540,12 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1331,10 +1611,22 @@ see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
 
             </div> <!-- /apiItem -->

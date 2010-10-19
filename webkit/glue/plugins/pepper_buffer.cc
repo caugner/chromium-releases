@@ -8,10 +8,10 @@
 
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
+#include "third_party/ppapi/c/dev/ppb_buffer_dev.h"
 #include "third_party/ppapi/c/pp_instance.h"
 #include "third_party/ppapi/c/pp_module.h"
 #include "third_party/ppapi/c/pp_resource.h"
-#include "third_party/ppapi/c/ppb_buffer.h"
 #include "webkit/glue/plugins/pepper_plugin_instance.h"
 #include "webkit/glue/plugins/pepper_plugin_module.h"
 
@@ -22,23 +22,22 @@ namespace {
 PP_Resource Create(PP_Module module_id, int32_t size) {
   PluginModule* module = PluginModule::FromPPModule(module_id);
   if (!module)
-    return NULL;
+    return 0;
 
   scoped_refptr<Buffer> buffer(new Buffer(module));
   if (!buffer->Init(size))
-    return NULL;
-  buffer->AddRef();  // AddRef for the caller.
+    return 0;
 
-  return buffer->GetResource();
+  return buffer->GetReference();
 }
 
 bool IsBuffer(PP_Resource resource) {
-  return !!Resource::GetAs<Buffer>(resource).get();
+  return !!Resource::GetAs<Buffer>(resource);
 }
 
 bool Describe(PP_Resource resource, int32_t* size_in_bytes) {
   scoped_refptr<Buffer> buffer(Resource::GetAs<Buffer>(resource));
-  if (!buffer.get())
+  if (!buffer)
     return false;
   buffer->Describe(size_in_bytes);
   return true;
@@ -46,7 +45,7 @@ bool Describe(PP_Resource resource, int32_t* size_in_bytes) {
 
 void* Map(PP_Resource resource) {
   scoped_refptr<Buffer> buffer(Resource::GetAs<Buffer>(resource));
-  if (!buffer.get())
+  if (!buffer)
     return NULL;
   return buffer->Map();
 }
@@ -58,7 +57,7 @@ void Unmap(PP_Resource resource) {
   return buffer->Unmap();
 }
 
-const PPB_Buffer ppb_buffer = {
+const PPB_Buffer_Dev ppb_buffer = {
   &Create,
   &IsBuffer,
   &Describe,
@@ -77,7 +76,7 @@ Buffer::~Buffer() {
 }
 
 // static
-const PPB_Buffer* Buffer::GetInterface() {
+const PPB_Buffer_Dev* Buffer::GetInterface() {
   return &ppb_buffer;
 }
 

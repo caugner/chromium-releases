@@ -12,7 +12,7 @@
 #include "chrome/browser/cocoa/browser_window_controller.h"
 #include "chrome/browser/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/cocoa/find_bar_bridge.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/testing_browser_process.h"
@@ -587,6 +587,10 @@ TEST_F(BrowserWindowFullScreenControllerTest, TestFullscreen) {
   EXPECT_FALSE([controller_ isFullscreen]);
 }
 
+// If this test fails, it is usually a sign that the bots have some sort of
+// problem (such as a modal dialog up).  This tests is a very useful canary, so
+// please do not mark it as flaky without first verifying that there are no bot
+// problems.
 TEST_F(BrowserWindowFullScreenControllerTest, TestActivate) {
   EXPECT_FALSE([controller_ isFullscreen]);
 

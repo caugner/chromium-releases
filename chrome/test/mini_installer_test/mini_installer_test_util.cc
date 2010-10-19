@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/process_util.h"
+#include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/installer/util/logging_installer.h"
@@ -16,15 +17,14 @@
 
 // Change current directory so that chrome.dll from current folder
 // will not be used as fall back.
-bool MiniInstallerTestUtil::ChangeCurrentDirectory(std::wstring *current_path) {
-  wchar_t backup_path[MAX_PATH];
-  DWORD ret = ::GetCurrentDirectory(MAX_PATH, backup_path);
-  if (ret == 0 && ret > MAX_PATH)
+bool MiniInstallerTestUtil::ChangeCurrentDirectory(FilePath* current_path) {
+  FilePath backup_path;
+  if (!file_util::GetCurrentDirectory(&backup_path))
     return false;
-  current_path->assign(backup_path);
-  file_util::UpOneDirectory(current_path);
-  ::SetCurrentDirectory(current_path->c_str());
-  current_path->assign(backup_path);
+
+  if (!file_util::SetCurrentDirectory(backup_path.DirName()))
+    return false;
+  *current_path = backup_path;
   return true;
 }
 
@@ -111,10 +111,7 @@ bool MiniInstallerTestUtil::GetInstaller(const wchar_t* pattern,
   while (builds_list_size != builds_list.rend()) {
     path->assign(mini_installer_constants::kChromeDiffInstallerLocation);
     file_util::AppendToPath(path, builds_list_size->name_);
-    if (chrome_frame)
-      file_util::AppendToPath(path, L"win_cf");
-    else
-      file_util::AppendToPath(path, L"win");
+    file_util::AppendToPath(path, mini_installer_constants::kWinFolder);
     std::wstring installer_path(path->c_str());
     file_util::AppendToPath(&installer_path, L"*.exe");
     if (!GetLatestFile(installer_path.c_str(), pattern, &exe_list)) {
@@ -215,10 +212,9 @@ bool MiniInstallerTestUtil::GetPreviousFullInstaller(
   // Create the full installer path.
   FilePath installer = FilePath(
       mini_installer_constants::kChromeDiffInstallerLocation);
-  if (chrome_frame)
-    installer = installer.Append(build_no).Append(L"win_cf").Append(name);
-  else
-    installer = installer.Append(build_no).Append(L"win").Append(name);
+  installer =
+     installer.Append(build_no)
+         .Append(mini_installer_constants::kWinFolder).Append(name);
   previous->assign(installer.value());
 
   return file_util::PathExists(installer);

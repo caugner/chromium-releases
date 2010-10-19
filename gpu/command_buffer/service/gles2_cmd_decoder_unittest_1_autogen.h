@@ -79,7 +79,7 @@ TEST_F(GLES2DecoderTest1, BindFramebufferInvalidArgs0_0) {
   EXPECT_CALL(*gl_, BindFramebufferEXT(_, _)).Times(0);
   SpecializedSetup<BindFramebuffer, 0>(false);
   BindFramebuffer cmd;
-  cmd.Init(GL_RENDERBUFFER, client_framebuffer_id_);
+  cmd.Init(GL_READ_FRAMEBUFFER, client_framebuffer_id_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
 }
@@ -274,7 +274,7 @@ TEST_F(GLES2DecoderTest1, CheckFramebufferStatusInvalidArgs0_0) {
   EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(_)).Times(0);
   SpecializedSetup<CheckFramebufferStatus, 0>(false);
   CheckFramebufferStatus cmd;
-  cmd.Init(GL_RENDERBUFFER, shared_memory_id_, shared_memory_offset_);
+  cmd.Init(GL_READ_FRAMEBUFFER, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
 }
@@ -344,42 +344,7 @@ TEST_F(GLES2DecoderTest1, ColorMaskValidArgs) {
 // TODO(gman): CompressedTexSubImage2DImmediate
 
 // TODO(gman): CompressedTexSubImage2DBucket
-
-TEST_F(GLES2DecoderTest1, CopyTexImage2DValidArgs) {
-  EXPECT_CALL(*gl_, CopyTexImage2D(GL_TEXTURE_2D, 2, 3, 4, 5, 6, 7, 8));
-  SpecializedSetup<CopyTexImage2D, 0>(true);
-  CopyTexImage2D cmd;
-  cmd.Init(GL_TEXTURE_2D, 2, 3, 4, 5, 6, 7, 8);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-}
-
-TEST_F(GLES2DecoderTest1, CopyTexImage2DInvalidArgs0_0) {
-  EXPECT_CALL(*gl_, CopyTexImage2D(_, _, _, _, _, _, _, _)).Times(0);
-  SpecializedSetup<CopyTexImage2D, 0>(false);
-  CopyTexImage2D cmd;
-  cmd.Init(GL_PROXY_TEXTURE_CUBE_MAP, 2, 3, 4, 5, 6, 7, 8);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
-}
-
-TEST_F(GLES2DecoderTest1, CopyTexImage2DInvalidArgs5_0) {
-  EXPECT_CALL(*gl_, CopyTexImage2D(_, _, _, _, _, _, _, _)).Times(0);
-  SpecializedSetup<CopyTexImage2D, 0>(false);
-  CopyTexImage2D cmd;
-  cmd.Init(GL_TEXTURE_2D, 2, 3, 4, 5, -1, 7, 8);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
-}
-
-TEST_F(GLES2DecoderTest1, CopyTexImage2DInvalidArgs6_0) {
-  EXPECT_CALL(*gl_, CopyTexImage2D(_, _, _, _, _, _, _, _)).Times(0);
-  SpecializedSetup<CopyTexImage2D, 0>(false);
-  CopyTexImage2D cmd;
-  cmd.Init(GL_TEXTURE_2D, 2, 3, 4, 5, 6, -1, 8);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
-}
+// TODO(gman): CopyTexImage2D
 
 TEST_F(GLES2DecoderTest1, CopyTexSubImage2DValidArgs) {
   EXPECT_CALL(*gl_, CopyTexSubImage2D(GL_TEXTURE_2D, 2, 3, 4, 5, 6, 7, 8));
@@ -815,7 +780,7 @@ TEST_F(GLES2DecoderTest1, FramebufferRenderbufferInvalidArgs0_0) {
   SpecializedSetup<FramebufferRenderbuffer, 0>(false);
   FramebufferRenderbuffer cmd;
   cmd.Init(
-      GL_RENDERBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+      GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
       client_renderbuffer_id_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
@@ -851,8 +816,8 @@ TEST_F(GLES2DecoderTest1, FramebufferTexture2DInvalidArgs0_0) {
   SpecializedSetup<FramebufferTexture2D, 0>(false);
   FramebufferTexture2D cmd;
   cmd.Init(
-      GL_RENDERBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, client_texture_id_,
-      5);
+      GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+      client_texture_id_, 5);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
 }
@@ -1335,7 +1300,7 @@ TEST_F(GLES2DecoderTest1, GetFramebufferAttachmentParameterivInvalidArgs0_0) {
   result->size = 0;
   GetFramebufferAttachmentParameteriv cmd;
   cmd.Init(
-      GL_RENDERBUFFER, GL_COLOR_ATTACHMENT0,
+      GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
       GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, shared_memory_id_,
       shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
@@ -1785,6 +1750,8 @@ TEST_F(GLES2DecoderTest1, GetTexParameterivInvalidArgs2_1) {
 // TODO(gman): GetUniformiv
 
 // TODO(gman): GetUniformLocation
+
+// TODO(gman): GetUniformLocationImmediate
 
 #endif  // GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_1_AUTOGEN_H_
 

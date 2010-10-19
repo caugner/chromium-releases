@@ -5,7 +5,6 @@
 #include <atlbase.h>
 #include <iostream>
 
-#include "base/at_exit.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/process_util.h"
@@ -52,12 +51,12 @@ int main(int argc, char **argv) {
   if (CommandLine::ForCurrentProcess()->HasSwitch(kRunAsServer)) {
     ChromeFrameHTTPServer server;
     server.SetUp();
-    GURL server_url(server.server()->TestServerPage(""));
+    GURL server_url(server.test_server()->GetURL(""));
     std::cout << std::endl
               << "Server waiting on " << server_url.spec().c_str()
               << std::endl << std::endl
               << "Test output will be written to "
-              << server.server()->GetDataDirectory().value().c_str() << "\\dump"
+              << server.test_server()->document_root().value() << "\\dump"
               << std::endl << std::endl
               << "Hit Ctrl-C or navigate to "
               << server_url.spec().c_str() << "kill to shut down the server."
@@ -69,6 +68,18 @@ int main(int argc, char **argv) {
   }
 
   SetConfigBool(kChromeFrameHeadlessMode, true);
+
+  // Pretend that a screenreader is in use to cause Chrome to generate the
+  // accessibility tree during page load. Otherwise, Chrome will send back
+  // an unpopulated tree for the first request while it fetches the tree
+  // from the renderer.
+  BOOL is_screenreader_on = FALSE;
+  SystemParametersInfo(SPI_SETSCREENREADER, TRUE, NULL, 0);
+  SystemParametersInfo(SPI_GETSCREENREADER, 0, &is_screenreader_on, 0);
+  if (!is_screenreader_on) {
+    LOG(ERROR) << "Could not set screenreader property. Tests depending on "
+               << "MSAA in CF will likely fail...";
+  }
 
   base::ProcessHandle crash_service = chrome_frame_test::StartCrashService();
   int ret = -1;

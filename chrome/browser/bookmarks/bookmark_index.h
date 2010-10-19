@@ -1,17 +1,18 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_INDEX_H_
 #define CHROME_BROWSER_BOOKMARKS_BOOKMARK_INDEX_H_
+#pragma once
 
 #include <list>
 #include <map>
 #include <set>
-#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/string16.h"
 
 class BookmarkNode;
 class Profile;
@@ -46,13 +47,13 @@ class BookmarkIndex {
 
   // Returns up to |max_count| of bookmarks containing the text |query|.
   void GetBookmarksWithTitlesMatching(
-      const std::wstring& query,
+      const string16& query,
       size_t max_count,
       std::vector<bookmark_utils::TitleMatch>* results);
 
  private:
   typedef std::set<const BookmarkNode*> NodeSet;
-  typedef std::map<std::wstring, NodeSet> Index;
+  typedef std::map<string16, NodeSet> Index;
 
   // Used when finding the set of bookmarks that match a query. Each match
   // represents a set of terms (as an interator into the Index) matching the
@@ -115,7 +116,7 @@ class BookmarkIndex {
   // Populates |matches| for the specified term. If |first_term| is true, this
   // is the first term in the query. Returns true if there is at least one node
   // matching the term.
-  bool GetBookmarksWithTitleMatchingTerm(const std::wstring& term,
+  bool GetBookmarksWithTitleMatchingTerm(const string16& term,
                                          bool first_term,
                                          Matches* matches);
 
@@ -141,13 +142,13 @@ class BookmarkIndex {
                       Matches* result);
 
   // Returns the set of query words from |query|.
-  std::vector<std::wstring> ExtractQueryWords(const std::wstring& query);
+  std::vector<string16> ExtractQueryWords(const string16& query);
 
   // Adds |node| to |index_|.
-  void RegisterNode(const std::wstring& term, const BookmarkNode* node);
+  void RegisterNode(const string16& term, const BookmarkNode* node);
 
   // Removes |node| from |index_|.
-  void UnregisterNode(const std::wstring& term, const BookmarkNode* node);
+  void UnregisterNode(const string16& term, const BookmarkNode* node);
 
   Index index_;
 

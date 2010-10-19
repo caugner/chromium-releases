@@ -4,13 +4,14 @@
 
 // This is the browser side of the resource dispatcher, it receives requests
 // from the child process (i.e. [Renderer, Plugin, Worker]ProcessHost), and
-// dispatches them to URLRequests. It then fowards the messages from the
+// dispatches them to URLRequests. It then forwards the messages from the
 // URLRequests back to the correct process for handling.
 //
 // See http://dev.chromium.org/developers/design-documents/multi-process-resource-loading
 
 #ifndef CHROME_BROWSER_RENDERER_HOST_RESOURCE_DISPATCHER_HOST_H_
 #define CHROME_BROWSER_RENDERER_HOST_RESOURCE_DISPATCHER_HOST_H_
+#pragma once
 
 #include <map>
 #include <string>
@@ -18,9 +19,8 @@
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "base/logging.h"
 #include "base/observer_list.h"
-#include "base/process.h"
+#include "base/scoped_ptr.h"
 #include "base/timer.h"
 #include "chrome/common/child_process_info.h"
 #include "chrome/browser/renderer_host/resource_queue.h"
@@ -71,9 +71,8 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
         const ViewHostMsg_Resource_Request& request_data) = 0;
 
    protected:
-    explicit Receiver(ChildProcessInfo::ProcessType type, int child_id)
-        : ChildProcessInfo(type, child_id) {}
-    virtual ~Receiver() {}
+    explicit Receiver(ChildProcessInfo::ProcessType type, int child_id);
+    virtual ~Receiver();
   };
 
   class Observer {
@@ -266,10 +265,12 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   void DataReceivedACK(int process_unique_id, int request_id);
 
   // Needed for the sync IPC message dispatcher macros.
-  bool Send(IPC::Message* message) {
-    delete message;
-    return false;
-  }
+  bool Send(IPC::Message* message);
+
+  // Controls if we launch or squash prefetch requests as they arrive
+  // from renderers.
+  static bool is_prefetch_enabled();
+  static void set_is_prefetch_enabled(bool value);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ResourceDispatcherHostTest,
@@ -496,6 +497,8 @@ class ResourceDispatcherHost : public URLRequest::Delegate {
   // Used during IPC message dispatching so that the handlers can get a pointer
   // to the source of the message.
   Receiver* receiver_;
+
+  static bool is_prefetch_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceDispatcherHost);
 };

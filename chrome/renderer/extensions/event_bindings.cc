@@ -10,6 +10,8 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/extensions/bindings_utils.h"
 #include "chrome/renderer/extensions/event_bindings.h"
+#include "chrome/renderer/extensions/extension_process_bindings.h"
+#include "chrome/renderer/extensions/extension_renderer_info.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
@@ -20,6 +22,7 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 
 using bindings_utils::CallFunctionInContext;
 using bindings_utils::ContextInfo;
@@ -141,9 +144,9 @@ static bool HasSufficientPermissions(ContextInfo* context,
                                      const GURL& event_url) {
   v8::Context::Scope context_scope(context->context);
 
-  bool incognito_permissions_ok = (!requires_incognito_access ||
-      ExtensionProcessBindings::HasIncognitoEnabled(context->extension_id));
-  if (!incognito_permissions_ok)
+  bool cross_profile_ok = (!requires_incognito_access ||
+      ExtensionProcessBindings::AllowCrossProfile(context->extension_id));
+  if (!cross_profile_ok)
     return false;
 
   // During unit tests, we might be invoked without a v8 context. In these
@@ -165,6 +168,8 @@ static bool HasSufficientPermissions(ContextInfo* context,
 }  // namespace
 
 const char* EventBindings::kName = "chrome/EventBindings";
+const char* EventBindings::kTestingExtensionId =
+    "oooooooooooooooooooooooooooooooo";
 
 v8::Extension* EventBindings::Get() {
   static v8::Extension* extension = new ExtensionImpl();
@@ -255,10 +260,18 @@ void EventBindings::HandleContextCreated(WebFrame* frame, bool content_script) {
   if (!ds)
     ds = frame->dataSource();
   GURL url = ds->request().url();
-  std::string extension_id;
-  if (url.SchemeIs(chrome::kExtensionScheme)) {
-    extension_id = url.host();
-  } else if (!content_script) {
+  std::string extension_id = ExtensionRendererInfo::GetIdByURL(url);
+
+  // Note: because process isolation doesn't work correcly with redirects,
+  // it is possible that a page that IS in an extension process won't have
+  // bindings setup for it, so we must also check IsExtensionProcess, otherwise
+  // we'll attempt to invoke a JS function that doesn't exist.
+  // Fixing crbug.com/53610 should fix this as well.
+  RenderThread* current_thread = RenderThread::current();
+  if ((!current_thread ||
+       !current_thread->IsExtensionProcess() ||
+       !ExtensionRendererInfo::ExtensionBindingsAllowed(url)) &&
+      !content_script) {
     // This context is a regular non-extension web page.  Ignore it.  We only
     // care about content scripts and extension frames.
     // (Unless we're in unit tests, in which case we don't care what the URL
@@ -266,6 +279,10 @@ void EventBindings::HandleContextCreated(WebFrame* frame, bool content_script) {
     DCHECK(frame_context.IsEmpty() || frame_context == context);
     if (!in_unit_tests)
       return;
+
+    // For tests, we want the dispatchOnLoad to actually setup our bindings,
+    // so we give a fake extension id;
+    extension_id = kTestingExtensionId;
   }
 
   v8::Persistent<v8::Context> persistent_context =

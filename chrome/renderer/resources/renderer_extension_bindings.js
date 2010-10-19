@@ -143,14 +143,15 @@ var chrome = chrome || {};
   // This function is called on context initialization for both content scripts
   // and extension contexts.
   chrome.initExtension = function(extensionId, warnOnPrivilegedApiAccess,
-                                  inIncognitoTab) {
+                                  inIncognitoContext) {
     delete chrome.initExtension;
     chromeHidden.extensionId = extensionId;
 
     chrome.extension = chrome.extension || {};
     chrome.self = chrome.extension;
 
-    chrome.extension.inIncognitoTab = inIncognitoTab;
+    chrome.extension.inIncognitoTab = inIncognitoContext;  // deprecated
+    chrome.extension.inIncognitoContext = inIncognitoContext;
 
     // Events for when a message channel is opened to our extension.
     chrome.extension.onConnect = new chrome.Event();
@@ -168,6 +169,8 @@ var chrome = chrome || {};
         targetId = arguments[nextArg++];
       if (typeof(arguments[nextArg]) == "object")
         name = arguments[nextArg++].name || name;
+      if (nextArg != arguments.length)
+        throw new Error("Invalid arguments to connect.");
 
       var portId = OpenChannelToExtension(extensionId, targetId, name);
       if (portId >= 0)
@@ -183,8 +186,10 @@ var chrome = chrome || {};
       if (typeof(arguments[lastArg]) == "function")
         responseCallback = arguments[lastArg--];
       request = arguments[lastArg--];
-      if (lastArg >= 0)
+      if (lastArg >= 0 && typeof(arguments[lastArg]) == "string")
         targetId = arguments[lastArg--];
+      if (lastArg != -1)
+        throw new Error("Invalid arguments to sendRequest.");
 
       var port = chrome.extension.connect(targetId,
                                           {name: chromeHidden.kRequestChannel});
@@ -251,11 +256,18 @@ var chrome = chrome || {};
       "experimental.clipboard",
       "experimental.extension",
       "experimental.infobars",
+      "experimental.input",
+      "experimental.management",
       "experimental.metrics",
       "experimental.omnibox",
       "experimental.popup",
       "experimental.processes",
+      "experimental.tts",
+      "experimental.proxy",
       "experimental.rlz",
+      "experimental.sidebar",
+      "experimental.webNavigation",
+      "experimental.webRequest",
       "history",
       "idle",
       "pageAction",
@@ -263,6 +275,7 @@ var chrome = chrome || {};
       "tabs",
       "test",
       "toolstrip",
+      "webstorePrivate",
       "windows",
 
       // Functions/events/properties within the extension namespace.

@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_CONTROLS_MENU_MENU_SCROLL_VIEW_CONTAINER_H_
 #define VIEWS_CONTROLS_MENU_MENU_SCROLL_VIEW_CONTAINER_H_
+#pragma once
 
 #include "views/view.h"
 
@@ -29,6 +30,7 @@ class MenuScrollViewContainer : public View {
                                const gfx::Rect& current);
   virtual gfx::Size GetPreferredSize();
   virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual bool GetAccessibleState(AccessibilityTypes::State* state);
 
  private:
   class MenuScrollView;

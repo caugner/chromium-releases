@@ -5,9 +5,7 @@
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
-#include "app/win_util.h"
-#include "chrome/test/injection_test_dll.h"
-#include "sandbox/src/sandbox.h"
+#include <windows.h>
 #endif
 
 #include "app/hi_res_timer_manager.h"
@@ -22,11 +20,14 @@
 #include "chrome/common/main_function_params.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/common/sandbox_policy.h"
-#if defined(OS_WIN)
-#include "chrome/nacl/broker_thread.h"
-#endif
 #include "chrome/nacl/nacl_main_platform_delegate.h"
 #include "chrome/nacl/nacl_thread.h"
+
+#if defined(OS_WIN)
+#include "chrome/nacl/broker_thread.h"
+#include "chrome/test/injection_test_dll.h"
+#include "sandbox/src/sandbox.h"
+#endif
 
 #ifdef _WIN64
 
@@ -120,10 +121,17 @@ int NaClMain(const MainFunctionParams& parameters) {
   if (!no_sandbox) {
     platform.EnableSandbox();
   }
-  platform.RunSandboxTests();
+  bool sandbox_test_result = platform.RunSandboxTests();
 
-  LaunchNaClChildProcess();
-
+  if (sandbox_test_result) {
+    LaunchNaClChildProcess();
+  } else {
+    // This indirectly prevents the test-harness-success-cookie from being set,
+    // as a way of communicating test failure, because the nexe won't reply.
+    // TODO(jvoung): find a better way to indicate failure that doesn't
+    // require waiting for a timeout.
+    LOG(INFO) << "Sandbox test failed: Not launching NaCl process";
+  }
 #else
   NOTIMPLEMENTED() << " not implemented startup, plugin startup dialog etc.";
 #endif
@@ -131,5 +139,3 @@ int NaClMain(const MainFunctionParams& parameters) {
   platform.PlatformUninitialize();
   return 0;
 }
-
-

@@ -5,12 +5,22 @@
 #include "chrome/renderer/translate_helper.h"
 
 #include "base/compiler_specific.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/renderer/render_view.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebScriptSource.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "v8/include/v8.h"
+#include "webkit/glue/dom_operations.h"
 
+using WebKit::WebDocument;
+using WebKit::WebElement;
 using WebKit::WebFrame;
 using WebKit::WebScriptSource;
+using WebKit::WebString;
+using WebKit::WebView;
 
 // The delay in millliseconds that we'll wait before checking to see if the
 // translate library injected in the page is ready.
@@ -37,6 +47,9 @@ TranslateHelper::TranslateHelper(RenderView* render_view)
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
 }
 
+TranslateHelper::~TranslateHelper() {
+}
+
 void TranslateHelper::TranslatePage(int page_id,
                                     const std::string& source_lang,
                                     const std::string& target_lang,
@@ -58,7 +71,7 @@ void TranslateHelper::TranslatePage(int page_id,
   page_id_ = page_id;
   // If the source language is undetermined, we'll let the translate element
   // detect it.
-  source_lang_ = (source_lang != RenderView::kUnknownLanguageCode) ?
+  source_lang_ = (source_lang != chrome::kUnknownLanguageCode) ?
                   source_lang : kAutoDetectionLanguage;
   target_lang_ = target_lang;
 
@@ -97,6 +110,60 @@ void TranslateHelper::CancelPendingTranslation() {
   page_id_ = -1;
   source_lang_.clear();
   target_lang_.clear();
+}
+
+// static
+bool TranslateHelper::IsPageTranslatable(WebDocument* document) {
+  std::vector<WebElement> meta_elements;
+  webkit_glue::GetMetaElementsWithAttribute(document,
+                                            ASCIIToUTF16("name"),
+                                            ASCIIToUTF16("google"),
+                                            &meta_elements);
+  std::vector<WebElement>::const_iterator iter;
+  for (iter = meta_elements.begin(); iter != meta_elements.end(); ++iter) {
+    WebString attribute = iter->getAttribute("value");
+    if (attribute.isNull())  // We support both 'value' and 'content'.
+      attribute = iter->getAttribute("content");
+    if (attribute.isNull())
+      continue;
+    if (LowerCaseEqualsASCII(attribute, "notranslate"))
+      return false;
+  }
+  return true;
+}
+
+// static
+std::string TranslateHelper::GetPageLanguageFromMetaTag(WebDocument* document) {
+  // The META language tag looks like:
+  // <meta http-equiv="content-language" content="en">
+  // It can contain more than one language:
+  // <meta http-equiv="content-language" content="en, fr">
+  std::vector<WebElement> meta_elements;
+  webkit_glue::GetMetaElementsWithAttribute(document,
+                                            ASCIIToUTF16("http-equiv"),
+                                            ASCIIToUTF16("content-language"),
+                                            &meta_elements);
+  if (meta_elements.empty())
+    return std::string();
+
+  // We don't expect more than one such tag. If there are several, just use the
+  // first one.
+  WebString attribute = meta_elements[0].getAttribute("content");
+  if (attribute.isEmpty())
+    return std::string();
+
+  // The value is supposed to be ASCII.
+  if (!IsStringASCII(attribute))
+    return std::string();
+
+  std::string language = StringToLowerASCII(UTF16ToASCII(attribute));
+  size_t coma_index = language.find(',');
+  if (coma_index != std::string::npos) {
+    // There are more than 1 language specified, just keep the first one.
+    language = language.substr(0, coma_index);
+  }
+  TrimWhitespaceASCII(language, TRIM_ALL, &language);
+  return language;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -297,7 +364,7 @@ void TranslateHelper::NotifyBrowserTranslationFailed(
 }
 
 WebFrame* TranslateHelper::GetMainFrame() {
-  WebKit::WebView* web_view = render_view_->webview();
+  WebView* web_view = render_view_->webview();
   if (!web_view) {
     // When the WebView is going away, the render view should have called
     // CancelPendingTranslation() which should have stopped any pending work, so

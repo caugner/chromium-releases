@@ -11,15 +11,16 @@
 #include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/ref_counted.h"
 #include "base/task.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
 #include "net/url_request/url_request.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "webkit/appcache/appcache.h"
 #include "webkit/appcache/appcache_host.h"
 #include "webkit/appcache/appcache_interfaces.h"
+#include "webkit/appcache/appcache_response.h"
 #include "webkit/appcache/appcache_storage.h"
 
 namespace appcache {
@@ -49,7 +50,6 @@ class AppCacheUpdateJob : public URLRequest::Delegate,
   typedef std::vector<AppCacheHost*> PendingHosts;
   typedef std::map<GURL, PendingHosts> PendingMasters;
   typedef std::map<GURL, URLRequest*> PendingUrlFetches;
-  typedef std::pair<GURL, bool> UrlsToFetch;  // flag TRUE if storage checked
   typedef std::map<int64, GURL> LoadingResponses;
 
   static const int kRerunDelayMs = 1000;
@@ -82,6 +82,16 @@ class AppCacheUpdateJob : public URLRequest::Delegate,
     STORED,
   };
 
+  struct UrlToFetch {
+    GURL url;
+    bool storage_checked;
+    scoped_refptr<AppCacheResponseInfo> existing_response_info;
+    UrlToFetch(const GURL& url, bool checked, AppCacheResponseInfo* info)
+        : url(url), storage_checked(checked), existing_response_info(info) {}
+  };
+
+  UpdateJobInfo* GetUpdateJobInfo(URLRequest* request);
+
   // Methods for URLRequest::Delegate.
   void OnResponseStarted(URLRequest* request);
   void OnReadCompleted(URLRequest* request, int bytes_read);
@@ -94,7 +104,7 @@ class AppCacheUpdateJob : public URLRequest::Delegate,
   void OnResponseInfoLoaded(AppCacheResponseInfo* response_info,
                             int64 response_id);
   void OnGroupAndNewestCacheStored(AppCacheGroup* group, AppCache* newest_cache,
-                                   bool success);
+                                   bool success, bool would_exceed_quota);
   void OnGroupMadeObsolete(AppCacheGroup* group, bool success);
 
   // Methods for AppCacheHost::Observer.
@@ -108,10 +118,10 @@ class AppCacheUpdateJob : public URLRequest::Delegate,
 
   void FetchManifest(bool is_first_fetch);
 
-  // Add extra HTTP headers to the request based on the response info and
-  // start the URL request.
-  void AddHttpHeadersAndFetch(URLRequest* request,
-                              const net::HttpResponseInfo* info);
+  // Add extra conditional HTTP headers to the request based on the
+  // currently cached response headers.
+  void AddConditionalHeaders(URLRequest* request,
+                             const net::HttpResponseInfo* info);
 
   void OnResponseCompleted(URLRequest* request);
 
@@ -180,7 +190,8 @@ class AppCacheUpdateJob : public URLRequest::Delegate,
   // Returns false if immediately obvious that data cannot be loaded from
   // newest complete cache.
   bool MaybeLoadFromNewestCache(const GURL& url, AppCacheEntry& entry);
-  void LoadFromNewestCacheFailed(const GURL& url);
+  void LoadFromNewestCacheFailed(const GURL& url,
+                                 AppCacheResponseInfo* newest_response_info);
 
   // Does nothing if update process is still waiting for pending master
   // entries or URL fetches to complete downloading. Otherwise, completes
@@ -233,7 +244,7 @@ class AppCacheUpdateJob : public URLRequest::Delegate,
   // Helper container to track which urls have not been fetched yet. URLs are
   // removed when the fetch is initiated. Flag indicates whether an attempt
   // to load the URL from storage has already been tried and failed.
-  std::deque<UrlsToFetch> urls_to_fetch_;
+  std::deque<UrlToFetch> urls_to_fetch_;
 
   // Helper container to track which urls are being loaded from response
   // storage.
@@ -251,6 +262,10 @@ class AppCacheUpdateJob : public URLRequest::Delegate,
   scoped_refptr<net::IOBuffer> read_manifest_buffer_;
   std::string loaded_manifest_data_;
   scoped_ptr<AppCacheResponseReader> manifest_response_reader_;
+
+  // New master entries added to the cache by this job, used to cleanup
+  // in error conditions.
+  std::vector<GURL> added_master_entries_;
 
   // Response ids stored by this update job, used to cleanup in
   // error conditions.
@@ -273,7 +288,8 @@ class AppCacheUpdateJob : public URLRequest::Delegate,
   scoped_refptr<net::CancelableCompletionCallback<AppCacheUpdateJob> >
       policy_callback_;
 
-  FRIEND_TEST(AppCacheGroupTest, QueueUpdate);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheGroupTest, QueueUpdate);
+
   DISALLOW_COPY_AND_ASSIGN(AppCacheUpdateJob);
 };
 

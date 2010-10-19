@@ -1,21 +1,22 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/diagnostics/recon_diagnostics.h"
 
-#include "app/app_paths.h"
+#include <string>
+
 #include "base/file_util.h"
-#include "base/file_version_info.h"
 #include "base/json/json_reader.h"
 #include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/sys_info.h"
 #include "base/path_service.h"
-#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/diagnostics/diagnostics_test.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/json_value_serializer.h"
 
 #if defined(OS_WIN)
@@ -114,26 +115,23 @@ class VersionTest : public DiagnosticTest {
   virtual int GetId() { return 0; }
 
   virtual bool ExecuteImpl(DiagnosticsModel::Observer* observer) {
-    scoped_ptr<FileVersionInfo> version_info(
-        chrome_app::GetChromeVersionInfo());
-    if (!version_info.get()) {
+    chrome::VersionInfo version_info;
+    if (!version_info.is_valid()) {
       RecordFailure(ASCIIToUTF16("No Version"));
       return true;
     }
-    string16 current_version = WideToUTF16(version_info->file_version());
+    std::string current_version = version_info.Version();
     if (current_version.empty()) {
       RecordFailure(ASCIIToUTF16("Empty Version"));
       return true;
     }
-    string16 version_modifier = platform_util::GetVersionStringModifier();
-    if (!version_modifier.empty()) {
-      current_version += ASCIIToUTF16(" ");
-      current_version += version_modifier;
-    }
+    std::string version_modifier = platform_util::GetVersionStringModifier();
+    if (!version_modifier.empty())
+      current_version += " " + version_modifier;
 #if defined(GOOGLE_CHROME_BUILD)
-    current_version += ASCIIToUTF16(" GCB");
+    current_version += " GCB";
 #endif  // defined(GOOGLE_CHROME_BUILD)
-    RecordSuccess(current_version);
+    RecordSuccess(ASCIIToUTF16(current_version));
     return true;
   }
 
@@ -201,8 +199,7 @@ class PathTest : public DiagnosticTest {
       return true;
     }
     DataUnits units = GetByteDisplayUnits(dir_or_file_size);
-    string16 printable_size =
-        WideToUTF16(FormatBytes(dir_or_file_size, units, true));
+    string16 printable_size = FormatBytes(dir_or_file_size, units, true);
 
     if (path_info_.max_size > 0) {
       if (dir_or_file_size > path_info_.max_size) {
@@ -246,8 +243,7 @@ class DiskSpaceTest : public DiagnosticTest {
       return true;
     }
     DataUnits units = GetByteDisplayUnits(disk_space);
-    string16 printable_size =
-        WideToUTF16(FormatBytes(disk_space, units, true));
+    string16 printable_size = FormatBytes(disk_space, units, true);
     if (disk_space < 80 * kOneMeg) {
       RecordFailure(ASCIIToUTF16("Low disk space : ") + printable_size);
       return true;
@@ -294,7 +290,7 @@ class JSONTest : public DiagnosticTest {
     scoped_ptr<Value> json_root(json.Deserialize(&error_code, &error_message));
     if (base::JSONReader::JSON_NO_ERROR != error_code) {
       if (error_message.empty()) {
-        error_message = "Parse error " + IntToString(error_code);
+        error_message = "Parse error " + base::IntToString(error_code);
       }
       RecordFailure(UTF8ToUTF16(error_message));
       return true;

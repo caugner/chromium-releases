@@ -4,12 +4,12 @@
 
 #ifndef APP_OS_EXCHANGE_DATA_PROVIDER_GTK_H_
 #define APP_OS_EXCHANGE_DATA_PROVIDER_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 #include <map>
 #include <set>
 #include <string>
-#include <vector>
 
 #include "app/os_exchange_data.h"
 #include "base/pickle.h"

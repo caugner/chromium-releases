@@ -4,11 +4,14 @@
 
 #import "chrome/browser/app_controller_mac.h"
 
+#include "app/l10n_util.h"
 #include "app/l10n_util_mac.h"
 #include "base/auto_reset.h"
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/mac_util.h"
 #include "base/message_loop.h"
+#include "base/string_number_conversions.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser.h"
@@ -35,7 +38,7 @@
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/options_window.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -47,6 +50,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
@@ -137,6 +141,7 @@ void RecordLastRunAppBundlePath() {
 
 @interface AppController(Private)
 - (void)initMenuState;
+- (void)registerServicesMenuTypesTo:(NSApplication*)app;
 - (void)openUrls:(const std::vector<GURL>&)urls;
 - (void)getUrl:(NSAppleEventDescriptor*)event
      withReply:(NSAppleEventDescriptor*)reply;
@@ -232,21 +237,18 @@ void RecordLastRunAppBundlePath() {
       ![self shouldQuitWithInProgressDownloads])
     return NO;
 
-  // Set the state to "trying to quit", so that closing all browser windows will
-  // lead to termination.
-  browser_shutdown::SetTryingToQuit(true);
-
   // TODO(viettrungluu): Remove Apple Event handlers here? (It's safe to leave
   // them in, but I'm not sure about UX; we'd also want to disable other things
   // though.) http://crbug.com/40861
 
-  if (!BrowserList::size())
-    return YES;
+  size_t num_browsers = BrowserList::size();
 
-  // Try to close all the windows.
-  BrowserList::CloseAllBrowsers(true);
+  // Initiate a shutdown (via BrowserList::CloseAllBrowsers()) if we aren't
+  // already shutting down.
+  if (!browser_shutdown::IsTryingToQuit())
+    BrowserList::CloseAllBrowsers(true);
 
-  return NO;
+  return num_browsers == 0 ? YES : NO;
 }
 
 - (void)stopTryingToTerminateApplication:(NSApplication*)app {
@@ -271,9 +273,9 @@ void RecordLastRunAppBundlePath() {
   // There better be no browser windows left at this point.
   CHECK_EQ(BrowserList::size(), 0u);
 
-  // Release the reference to the browser process. Once all the browsers get
-  // dealloc'd, it will stop the RunLoop and fall back into main().
-  g_browser_process->ReleaseModule();
+  // Tell BrowserList not to keep the browser process alive. Once all the
+  // browsers get dealloc'd, it will stop the RunLoop and fall back into main().
+  BrowserList::EndKeepAlive();
 
   // Close these off if they have open windows.
   [prefsController_ close];
@@ -455,11 +457,9 @@ void RecordLastRunAppBundlePath() {
 // This is called after profiles have been loaded and preferences registered.
 // It is safe to access the default profile here.
 - (void)applicationDidFinishLaunching:(NSNotification*)notify {
-  // Hold an extra ref to the BrowserProcess singleton so it doesn't go away
-  // when all the browser windows get closed. We'll release it on quit which
-  // will be the signal to exit.
-  DCHECK(g_browser_process);
-  g_browser_process->AddRefModule();
+  // Notify BrowserList to keep the application running so it doesn't go away
+  // when all the browser windows get closed.
+  BrowserList::StartKeepAlive();
 
   bookmarkMenuBridge_.reset(new BookmarkMenuBridge([self defaultProfile]));
   historyMenuBridge_.reset(new HistoryMenuBridge([self defaultProfile]));
@@ -485,6 +485,9 @@ void RecordLastRunAppBundlePath() {
   // shim.
   RecordLastRunAppBundlePath();
 
+  // Makes "Services" menu items available.
+  [self registerServicesMenuTypesTo:[notify object]];
+
   startupComplete_ = YES;
 
   // TODO(viettrungluu): This is very temporary, since this should be done "in"
@@ -493,6 +496,11 @@ void RecordLastRunAppBundlePath() {
   if (startupUrls_.size()) {
     [self openUrls:startupUrls_];
     [self clearStartupUrls];
+  }
+
+  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+  if (!parsed_command_line.HasSwitch(switches::kEnableExposeForTabs)) {
+    [tabposeMenuItem_ setHidden:YES];
   }
 }
 
@@ -533,7 +541,7 @@ void RecordLastRunAppBundlePath() {
     // Dialog text: warning and explanation.
     warningText = l10n_util::GetNSStringF(
         IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_WARNING, product_name,
-        IntToString16(downloadCount));
+        base::IntToString16(downloadCount));
     explanationText = l10n_util::GetNSStringF(
         IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION, product_name);
 
@@ -874,6 +882,13 @@ void RecordLastRunAppBundlePath() {
   menuState_->UpdateCommandEnabled(IDC_TASK_MANAGER, true);
 }
 
+- (void)registerServicesMenuTypesTo:(NSApplication*)app {
+  // Note that RenderWidgetHostViewCocoa implements NSServicesRequests which
+  // handles requests from services.
+  NSArray* types = [NSArray arrayWithObjects:NSStringPboardType, nil];
+  [app registerServicesMenuSendTypes:types returnTypes:types];
+}
+
 - (Profile*)defaultProfile {
   // TODO(jrg): Find a better way to get the "default" profile.
   if (g_browser_process->profile_manager())
@@ -902,7 +917,7 @@ void RecordLastRunAppBundlePath() {
   }
 
   CommandLine dummy(CommandLine::ARGUMENTS_ONLY);
-  BrowserInit::LaunchWithProfile launch(std::wstring(), dummy);
+  BrowserInit::LaunchWithProfile launch(FilePath(), dummy);
   launch.OpenURLsInBrowser(browser, false, urls);
 }
 
@@ -954,7 +969,7 @@ void RecordLastRunAppBundlePath() {
   if (parsed_command_line.HasSwitch(switches::kEnableTabbedOptions)) {
     if (Browser* browser = ActivateBrowser([self defaultProfile])) {
       // Show options tab in the active browser window.
-      browser->ShowOptionsTab();
+      browser->ShowOptionsTab(chrome::kDefaultOptionsSubPage);
     } else {
       // No browser window, so create one for the options tab.
       Browser::OpenOptionsWindow([self defaultProfile]);

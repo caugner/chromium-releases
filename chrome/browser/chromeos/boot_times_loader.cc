@@ -12,23 +12,18 @@
 #include "base/histogram.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
+#include "base/singleton.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/thread.h"
 #include "base/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/chromeos/login/authentication_notification_details.h"
+#include "chrome/browser/chromeos/network_state_notifier.h"
 #include "chrome/common/chrome_switches.h"
-
-namespace {
-
-struct Stats {
-  std::string uptime;
-  std::string disk;
-
-  Stats() : uptime(std::string()), disk(std::string()) {}
-};
-
-}
+#include "chrome/common/notification_service.h"
 
 namespace chromeos {
 
@@ -43,7 +38,25 @@ static const char kChromeMain[] = "chrome-main";
 // Delay in milliseconds between file read attempts.
 static const int64 kReadAttemptDelayMs = 250;
 
-BootTimesLoader::BootTimesLoader() : backend_(new Backend()) {
+// Names of login stats files.
+static const char kLoginSuccess[] = "login-success";
+static const char kChromeFirstRender[] = "chrome-first-render";
+
+// Names of login UMA values.
+static const char kUmaAuthenticate[] = "BootTime.Authenticate";
+static const char kUmaLogin[] = "BootTime.Login";
+
+// Name of file collecting login times.
+static const char kLoginTimes[] = "login-times-sent";
+
+BootTimesLoader::BootTimesLoader()
+    : backend_(new Backend()),
+      have_registered_(false) {
+}
+
+// static
+BootTimesLoader* BootTimesLoader::Get() {
+  return Singleton<BootTimesLoader>::get();
 }
 
 BootTimesLoader::Handle BootTimesLoader::GetBootTimes(
@@ -85,7 +98,7 @@ static bool GetTime(const std::string& log, double* value) {
     size_t chars_left =
         space_index != std::string::npos ? space_index : std::string::npos;
     std::string value_string = contents.substr(0, chars_left);
-    return StringToDouble(value_string, value);
+    return base::StringToDouble(value_string, value);
   }
   return false;
 }
@@ -123,16 +136,16 @@ static void SendBootTimesToUMA(const BootTimesLoader::BootTimes& boot_times) {
   // Stores the boot times to a file in /tmp to indicate that the
   // times for the most recent boot event have been reported
   // already. The file will be deleted at system shutdown/reboot.
-  std::string boot_times_text = StringPrintf("total: %.2f\n"
-                                             "firmware: %.2f\n"
-                                             "kernel: %.2f\n"
-                                             "system: %.2f\n"
-                                             "chrome: %.2f\n",
-                                             boot_times.total,
-                                             boot_times.firmware,
-                                             boot_times.pre_startup,
-                                             boot_times.system,
-                                             boot_times.chrome);
+  std::string boot_times_text = base::StringPrintf("total: %.2f\n"
+                                                   "firmware: %.2f\n"
+                                                   "kernel: %.2f\n"
+                                                   "system: %.2f\n"
+                                                   "chrome: %.2f\n",
+                                                   boot_times.total,
+                                                   boot_times.firmware,
+                                                   boot_times.pre_startup,
+                                                   boot_times.system,
+                                                   boot_times.chrome);
   file_util::WriteFile(sent, boot_times_text.data(), boot_times_text.size());
   DCHECK(file_util::PathExists(sent));
 }
@@ -202,14 +215,28 @@ static void RecordStatsDelayed(
     file_util::WriteFile(disk_output, disk.data(), disk.size());
 }
 
-static void RecordStats(
-    const std::string& name, const Stats& stats) {
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
-      NewRunnableFunction(RecordStatsDelayed, name, stats.uptime, stats.disk));
+static void WriteLoginTimes(
+    base::Time login_attempt,
+    base::Time login_success,
+    base::Time chrome_first_render) {
+  const FilePath log_path(kLogPath);
+  std::string output =
+      base::StringPrintf("total: %.2f\nauth: %.2f\nlogin: %.2f\n",
+          (chrome_first_render - login_attempt).InSecondsF(),
+          (login_success - login_attempt).InSecondsF(),
+          (chrome_first_render - login_success).InSecondsF());
+  file_util::WriteFile(
+      log_path.Append(kLoginTimes), output.data(), output.size());
 }
 
-static Stats GetCurrentStats() {
+void BootTimesLoader::RecordStats(const std::string& name, const Stats& stats) {
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
+      NewRunnableFunction(
+          RecordStatsDelayed, name, stats.uptime, stats.disk));
+}
+
+BootTimesLoader::Stats BootTimesLoader::GetCurrentStats() {
   const FilePath kProcUptime("/proc/uptime");
   const FilePath kDiskStat("/sys/block/sda/stat");
   Stats stats;
@@ -219,14 +246,9 @@ static Stats GetCurrentStats() {
   return stats;
 }
 
-// static
 void BootTimesLoader::RecordCurrentStats(const std::string& name) {
-  Stats stats = GetCurrentStats();
-  RecordStats(name, stats);
+  RecordStats(name, GetCurrentStats());
 }
-
-// Used to hold the stats at main().
-static Stats chrome_main_stats_;
 
 void BootTimesLoader::SaveChromeMainStats() {
   chrome_main_stats_ = GetCurrentStats();
@@ -234,6 +256,53 @@ void BootTimesLoader::SaveChromeMainStats() {
 
 void BootTimesLoader::RecordChromeMainStats() {
   RecordStats(kChromeMain, chrome_main_stats_);
+}
+
+void BootTimesLoader::RecordLoginAttempted() {
+  login_attempt_ = base::Time::NowFromSystemTime();
+  if (!have_registered_) {
+    have_registered_ = true;
+    registrar_.Add(this, NotificationType::LOAD_START,
+                   NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::LOGIN_AUTHENTICATION,
+                   NotificationService::AllSources());
+  }
+}
+
+void BootTimesLoader::Observe(
+    NotificationType type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+  if (type == NotificationType::LOGIN_AUTHENTICATION) {
+    Details<AuthenticationNotificationDetails> auth_details(details);
+    if (!login_attempt_.is_null() && auth_details->success()) {
+      login_success_ = base::Time::NowFromSystemTime();
+      RecordCurrentStats(kLoginSuccess);
+      UMA_HISTOGRAM_TIMES(kUmaAuthenticate, login_success_ - login_attempt_);
+      registrar_.Remove(this, NotificationType::LOGIN_AUTHENTICATION,
+                        NotificationService::AllSources());
+    }
+  } else if (type == NotificationType::LOAD_START) {
+    // Only log for first tab to render.  Make sure this is only done once.
+    // If the network isn't connected we'll get a second LOAD_START once it is
+    // and the page is reloaded.
+    if (!login_success_.is_null() &&
+        NetworkStateNotifier::Get()->is_connected()) {
+      // Post difference between first tab and login success time.
+      chrome_first_render_ = base::Time::NowFromSystemTime();
+      RecordCurrentStats(kChromeFirstRender);
+      UMA_HISTOGRAM_TIMES(kUmaLogin, chrome_first_render_ - login_success_);
+      // Post chrome first render stat.
+      registrar_.Remove(this, NotificationType::LOAD_START,
+                        NotificationService::AllSources());
+      ChromeThread::PostTask(
+          ChromeThread::FILE, FROM_HERE,
+          NewRunnableFunction(
+              WriteLoginTimes,
+              login_attempt_, login_success_, chrome_first_render_));
+      have_registered_ = false;
+    }
+  }
 }
 
 }  // namespace chromeos

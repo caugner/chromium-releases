@@ -4,12 +4,15 @@
 
 #ifndef CHROME_TEST_LIVE_SYNC_PROFILE_SYNC_SERVICE_TEST_HARNESS_H_
 #define CHROME_TEST_LIVE_SYNC_PROFILE_SYNC_SERVICE_TEST_HARNESS_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/time.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+
+using browser_sync::sessions::SyncSessionSnapshot;
 
 class Profile;
 
@@ -21,12 +24,16 @@ class Profile;
 class ProfileSyncServiceTestHarness : public ProfileSyncServiceObserver {
  public:
   ProfileSyncServiceTestHarness(Profile* p, const std::string& username,
-                                const std::string& password);
+                                const std::string& password, int id);
 
   // Creates a ProfileSyncService for the profile passed at construction and
   // enables sync.  Returns true only after sync has been fully initialized and
   // authenticated, and we are ready to process changes.
   bool SetupSync();
+
+  // Retries a sync setup when the previous attempt was aborted by an
+  // authentication failure.
+  bool RetryAuthentication();
 
   // ProfileSyncServiceObserver implementation.
   virtual void OnStateChanged();
@@ -44,13 +51,24 @@ class ProfileSyncServiceTestHarness : public ProfileSyncServiceObserver {
   // the |partner| should be the passive responder who responds to the actions
   // of |this|.  This method relies upon the synchronization of callbacks
   // from the message queue. Returns true if two sync cycles have completed.
+  // Note: Use this method when exactly one client makes local change(s), and
+  // exactly one client is waiting to receive those changes.
   bool AwaitMutualSyncCycleCompletion(ProfileSyncServiceTestHarness* partner);
 
   // Blocks the caller until |this| completes its ongoing sync cycle and every
   // other client in |partners| has a timestamp that is greater than or equal to
-  // the timestamp of |this|.
+  // the timestamp of |this|. Note: Use this method when exactly one client
+  // makes local change(s), and more than one client is waiting to receive those
+  // changes.
   bool AwaitGroupSyncCycleCompletion(
       std::vector<ProfileSyncServiceTestHarness*>& partners);
+
+  // Blocks the caller until every client in |clients| completes its ongoing
+  // sync cycle and all the clients' timestamps match.  Note: Use this method
+  // when more than one client makes local change(s), and more than one client
+  // is waiting to receive those changes.
+  static bool AwaitQuiescence(
+      std::vector<ProfileSyncServiceTestHarness*>& clients);
 
   ProfileSyncService* service() { return service_; }
 
@@ -63,6 +81,8 @@ class ProfileSyncServiceTestHarness : public ProfileSyncServiceObserver {
   enum WaitState {
     // The sync client awaits the OnAuthError() callback.
     WAITING_FOR_ON_AUTH_ERROR = 0,
+    // The sync client awaits the OnBackendInitialized() callback.
+    WAITING_FOR_ON_BACKEND_INITIALIZED,
     // The sync client is waiting for notifications_enabled to become true.
     WAITING_FOR_NOTIFICATIONS_ENABLED,
     // The sync client is waiting for an ongoing sync cycle to complete.
@@ -71,7 +91,9 @@ class ProfileSyncServiceTestHarness : public ProfileSyncServiceObserver {
     WAITING_FOR_UPDATES,
     // The sync client is fully synced and there are no pending updates.
     FULLY_SYNCED,
-    NUMBER_OF_STATES
+    // An authentication error has occurred.
+    AUTH_ERROR,
+    NUMBER_OF_STATES,
   };
 
   // Called from the observer when the current wait state has been completed.
@@ -86,13 +108,20 @@ class ProfileSyncServiceTestHarness : public ProfileSyncServiceObserver {
   virtual bool AwaitStatusChangeWithTimeout(int timeout_seconds,
                                             const std::string& reason);
 
-  // Returns true if the service initialized correctly.
-  bool WaitForServiceInit();
+  // Returns true if the service initialized correctly. Set is_auth_retry to
+  // true when calling this method second time after an authentication failure.
+  bool WaitForServiceInit(bool is_auth_retry);
+
+  // Logs message with relevant info about client's sync state (if available).
+  void LogClientInfo(std::string message);
 
   WaitState wait_state_;
 
   Profile* profile_;
   ProfileSyncService* service_;
+
+  // Returns a snapshot of the current sync session.
+  const SyncSessionSnapshot* GetLastSessionSnapshot() const;
 
   // State tracking.  Used for debugging and tracking of state.
   ProfileSyncService::Status last_status_;
@@ -110,6 +139,9 @@ class ProfileSyncServiceTestHarness : public ProfileSyncServiceObserver {
   // Credentials used for GAIA authentication.
   std::string username_;
   std::string password_;
+
+  // Client ID, used for logging purposes.
+  int id_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncServiceTestHarness);
 };

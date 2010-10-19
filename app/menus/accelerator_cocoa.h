@@ -4,6 +4,7 @@
 
 #ifndef APP_MENUS_ACCELERATOR_COCOA_H_
 #define APP_MENUS_ACCELERATOR_COCOA_H_
+#pragma once
 
 #include <Foundation/Foundation.h>
 
@@ -19,7 +20,7 @@ namespace menus {
 class AcceleratorCocoa : public Accelerator {
  public:
   AcceleratorCocoa(NSString* key_code, NSUInteger mask)
-      : Accelerator(base::VKEY_UNKNOWN, mask),
+      : Accelerator(app::VKEY_UNKNOWN, mask),
         characters_([key_code copy]) {
   }
 

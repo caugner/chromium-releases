@@ -1,16 +1,17 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/detachable_toolbar_view.h"
 
 #include "app/resource_bundle.h"
-#include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/themes/browser_theme_provider.h"
 #include "gfx/canvas_skia.h"
 #include "gfx/skia_util.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include "views/window/non_client_view.h"
 
 // How round the 'new tab' style bookmarks bar is.
 static const int kNewtabBarRoundness = 5;
@@ -21,21 +22,18 @@ const SkColor DetachableToolbarView::kMiddleDividerColor =
     SkColorSetRGB(194, 205, 212);
 
 // static
-void DetachableToolbarView::PaintBackgroundAttachedMode(gfx::Canvas* canvas,
-                                                        views::View* view) {
-  gfx::Rect bounds =
-      view->GetBounds(views::View::APPLY_MIRRORING_TRANSFORMATION);
-
+void DetachableToolbarView::PaintBackgroundAttachedMode(
+    gfx::Canvas* canvas,
+    views::View* view,
+    const gfx::Point& background_origin) {
   ThemeProvider* tp = view->GetThemeProvider();
   SkColor theme_toolbar_color =
       tp->GetColor(BrowserThemeProvider::COLOR_TOOLBAR);
   canvas->FillRectInt(theme_toolbar_color, 0, 0,
                       view->width(), view->height());
-
   canvas->TileImageInt(*tp->GetBitmapNamed(IDR_THEME_TOOLBAR),
-      view->GetParent()->GetBounds(
-      views::View::APPLY_MIRRORING_TRANSFORMATION).x() + bounds.x(),
-      bounds.y(), 0, 0, view->width(), view->height());
+                       background_origin.x(), background_origin.y(), 0, 0,
+                       view->width(), view->height());
 }
 
 // static
@@ -57,9 +55,10 @@ void DetachableToolbarView::PaintHorizontalBorder(gfx::Canvas* canvas,
                                                   DetachableToolbarView* view) {
   // Border can be at the top or at the bottom of the view depending on whether
   // the view (bar/shelf) is attached or detached.
-  int y = !view->IsDetached() ? view->height() - 1 : 0;
+  int thickness = views::NonClientFrameView::kClientEdgeThickness;
+  int y = view->IsDetached() ? 0 : (view->height() - thickness);
   canvas->FillRectInt(ResourceBundle::toolbar_separator_color,
-      0, y, view->width(), 1);
+      0, y, view->width(), thickness);
 }
 
 // static

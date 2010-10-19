@@ -4,23 +4,30 @@
 
 #ifndef CHROME_RENDERER_COMMAND_BUFFER_PROXY_H_
 #define CHROME_RENDERER_COMMAND_BUFFER_PROXY_H_
+#pragma once
 
 #if defined(ENABLE_GPU)
 
 #include <map>
 #include <queue>
 
+#include "base/callback.h"
 #include "base/linked_ptr.h"
-#include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "base/shared_memory.h"
-#include "base/task.h"
-#include "gfx/size.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
 
+namespace base {
+class SharedMemory;
+}
+
+namespace gfx {
+class Size;
+}
+
 class PluginChannelHost;
+class Task;
 
 // Client side proxy that forwards messages synchronously to a
 // CommandBufferStub.
@@ -51,15 +58,18 @@ class CommandBufferProxy : public gpu::CommandBuffer,
   virtual gpu::Buffer GetTransferBuffer(int32 handle);
   virtual void SetToken(int32 token);
   virtual void SetParseError(gpu::error::Error error);
+  virtual void OnSwapBuffers();
+
+  // Set a callback that will be invoked when the SwapBuffers call has been
+  // issued.
+  void SetSwapBuffersCallback(Callback0::Type* callback);
 
   // Asynchronously resizes an offscreen frame buffer.
   void ResizeOffscreenFrameBuffer(const gfx::Size& size);
 
   // Set a task that will be invoked the next time the window becomes invalid
   // and needs to be repainted. Takes ownership of task.
-  void SetNotifyRepaintTask(Task* task) {
-    notify_repaint_task_.reset(task);
-  }
+  void SetNotifyRepaintTask(Task* task);
 
 #if defined(OS_MACOSX)
   virtual void SetWindowSize(const gfx::Size& size);
@@ -102,6 +112,8 @@ class CommandBufferProxy : public gpu::CommandBuffer,
   AsyncFlushTaskQueue pending_async_flush_tasks_;
 
   scoped_ptr<Task> notify_repaint_task_;
+
+  scoped_ptr<Callback0::Type> swap_buffers_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CommandBufferProxy);
 };

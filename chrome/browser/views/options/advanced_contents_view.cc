@@ -12,23 +12,26 @@
 #include <vsstyle.h>
 #include <vssym32.h>
 
-#include "app/combobox_model.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/thread.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/gears_integration.h"
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/options_util.h"
-#include "chrome/browser/pref_member.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_member.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_set_observer.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -39,6 +42,7 @@
 #include "chrome/browser/views/options/content_settings_window_view.h"
 #include "chrome/browser/views/options/fonts_languages_window_view.h"
 #include "chrome/browser/views/restart_message_box.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "gfx/canvas_skia.h"
 #include "gfx/native_theme_win.h"
@@ -436,7 +440,7 @@ class PrivacySection : public AdvancedSection,
  protected:
   // OptionsPageView overrides:
   virtual void InitControlLayout();
-  virtual void NotifyPrefChanged(const std::wstring* pref_name);
+  virtual void NotifyPrefChanged(const std::string* pref_name);
 
  private:
   // Controls for this section:
@@ -630,36 +634,34 @@ void PrivacySection::InitControlLayout() {
   safe_browsing_.Init(prefs::kSafeBrowsingEnabled, profile()->GetPrefs(), this);
   enable_metrics_recording_.Init(prefs::kMetricsReportingEnabled,
                                  g_browser_process->local_state(), this);
-
-
-  enable_link_doctor_checkbox_->SetEnabled(!alternate_error_pages_.IsManaged());
-  enable_suggest_checkbox_->SetEnabled(!use_suggest_.IsManaged());
-  enable_dns_prefetching_checkbox_->SetEnabled(
-      !dns_prefetch_enabled_.IsManaged());
-  enable_safe_browsing_checkbox_->SetEnabled(!safe_browsing_.IsManaged());
-#if defined(GOOGLE_CHROME_BUILD)
-  reporting_enabled_checkbox_->SetEnabled(
-      !enable_metrics_recording_.IsManaged());
-#endif
 }
 
-void PrivacySection::NotifyPrefChanged(const std::wstring* pref_name) {
+void PrivacySection::NotifyPrefChanged(const std::string* pref_name) {
   if (!pref_name || *pref_name == prefs::kAlternateErrorPagesEnabled) {
+    enable_link_doctor_checkbox_->SetEnabled(
+        !alternate_error_pages_.IsManaged());
     enable_link_doctor_checkbox_->SetChecked(
         alternate_error_pages_.GetValue());
   }
   if (!pref_name || *pref_name == prefs::kSearchSuggestEnabled) {
+    enable_suggest_checkbox_->SetEnabled(!use_suggest_.IsManaged());
     enable_suggest_checkbox_->SetChecked(use_suggest_.GetValue());
   }
   if (!pref_name || *pref_name == prefs::kDnsPrefetchingEnabled) {
+    enable_dns_prefetching_checkbox_->SetEnabled(
+        !dns_prefetch_enabled_.IsManaged());
     bool enabled = dns_prefetch_enabled_.GetValue();
     enable_dns_prefetching_checkbox_->SetChecked(enabled);
     chrome_browser_net::EnablePredictor(enabled);
   }
-  if (!pref_name || *pref_name == prefs::kSafeBrowsingEnabled)
+  if (!pref_name || *pref_name == prefs::kSafeBrowsingEnabled) {
+    enable_safe_browsing_checkbox_->SetEnabled(!safe_browsing_.IsManaged());
     enable_safe_browsing_checkbox_->SetChecked(safe_browsing_.GetValue());
+  }
   if (reporting_enabled_checkbox_ &&
       (!pref_name || *pref_name == prefs::kMetricsReportingEnabled)) {
+    reporting_enabled_checkbox_->SetEnabled(
+        !enable_metrics_recording_.IsManaged());
     reporting_enabled_checkbox_->SetChecked(
         enable_metrics_recording_.GetValue());
     ResolveMetricsReportingEnabled();
@@ -786,7 +788,7 @@ class SecuritySection : public AdvancedSection,
  protected:
   // OptionsPageView overrides:
   virtual void InitControlLayout();
-  virtual void NotifyPrefChanged(const std::wstring* pref_name);
+  virtual void NotifyPrefChanged(const std::string* pref_name);
 
  private:
   // Controls for this section:
@@ -882,7 +884,7 @@ void SecuritySection::InitControlLayout() {
 }
 
 // This method is called with a null pref_name when the dialog is initialized.
-void SecuritySection::NotifyPrefChanged(const std::wstring* pref_name) {
+void SecuritySection::NotifyPrefChanged(const std::string* pref_name) {
   // These SSL options are system settings and stored in the OS.
   if (!pref_name) {
     net::SSLConfig config;
@@ -946,12 +948,15 @@ class NetworkSection : public AdvancedSection,
  protected:
   // OptionsPageView overrides:
   virtual void InitControlLayout();
-  virtual void NotifyPrefChanged(const std::wstring* pref_name);
+  virtual void NotifyPrefChanged(const std::string* pref_name);
 
  private:
   // Controls for this section:
   views::Label* change_proxies_label_;
   views::NativeButton* change_proxies_button_;
+
+  // Tracks the proxy preferences.
+  scoped_ptr<PrefSetObserver> proxy_prefs_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkSection);
 };
@@ -998,9 +1003,16 @@ void NetworkSection::InitControlLayout() {
                       true);
   AddLeadingControl(layout, change_proxies_button_, indented_view_set_id,
                     false);
+
+  proxy_prefs_.reset(PrefSetObserver::CreateProxyPrefSetObserver(
+      profile()->GetPrefs(), this));
+  NotifyPrefChanged(NULL);
 }
 
-void NetworkSection::NotifyPrefChanged(const std::wstring* pref_name) {
+void NetworkSection::NotifyPrefChanged(const std::string* pref_name) {
+  if (!pref_name || proxy_prefs_->IsObserved(*pref_name)) {
+    change_proxies_button_->SetEnabled(!proxy_prefs_->IsManaged());
+  }
 }
 
 }  // namespace
@@ -1029,7 +1041,7 @@ class DownloadSection : public AdvancedSection,
  protected:
   // OptionsPageView overrides.
   virtual void InitControlLayout();
-  virtual void NotifyPrefChanged(const std::wstring* pref_name);
+  virtual void NotifyPrefChanged(const std::string* pref_name);
 
  private:
   // Controls for this section.
@@ -1092,7 +1104,7 @@ void DownloadSection::ButtonPressed(
     }
     ask_for_save_location_.SetValue(enabled);
   } else if (sender == reset_file_handlers_button_) {
-    profile()->GetDownloadManager()->ResetAutoOpenFiles();
+    profile()->GetDownloadManager()->download_prefs()->ResetAutoOpen();
     UserMetricsRecordAction(UserMetricsAction("Options_ResetAutoOpenFiles"),
                             profile()->GetPrefs());
   }
@@ -1178,7 +1190,7 @@ void DownloadSection::InitControlLayout() {
                         this);
 }
 
-void DownloadSection::NotifyPrefChanged(const std::wstring* pref_name) {
+void DownloadSection::NotifyPrefChanged(const std::string* pref_name) {
   if (!pref_name || *pref_name == prefs::kDownloadDefaultDirectory)
     UpdateDownloadDirectoryDisplay();
 
@@ -1189,7 +1201,7 @@ void DownloadSection::NotifyPrefChanged(const std::wstring* pref_name) {
 
   if (!pref_name || *pref_name == prefs::kDownloadExtensionsToOpen) {
     bool enabled =
-        profile()->GetDownloadManager()->HasAutoOpenFileTypesRegistered();
+        profile()->GetDownloadManager()->download_prefs()->IsAutoOpenUsed();
     reset_file_handlers_label_->SetEnabled(enabled);
     reset_file_handlers_button_->SetEnabled(enabled);
   }
@@ -1215,7 +1227,7 @@ class TranslateSection : public AdvancedSection,
  protected:
   // OptionsPageView overrides:
   virtual void InitControlLayout();
-  virtual void NotifyPrefChanged(const std::wstring* pref_name);
+  virtual void NotifyPrefChanged(const std::string* pref_name);
 
  private:
   // Control for this section:
@@ -1261,9 +1273,95 @@ void TranslateSection::InitControlLayout() {
   enable_translate_.Init(prefs::kEnableTranslate, profile()->GetPrefs(), this);
 }
 
-void TranslateSection::NotifyPrefChanged(const std::wstring* pref_name) {
+void TranslateSection::NotifyPrefChanged(const std::string* pref_name) {
   if (!pref_name || *pref_name == prefs::kEnableTranslate)
     enable_translate_checkbox_->SetChecked(enable_translate_.GetValue());
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// ChromeAppsSection
+
+class ChromeAppsSection : public AdvancedSection,
+                          public views::ButtonListener,
+                          public views::LinkController {
+ public:
+  explicit ChromeAppsSection(Profile* profile);
+  virtual ~ChromeAppsSection() {}
+
+  // Overridden from views::ButtonListener:
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
+  // Overridden from views::LinkController:
+  virtual void LinkActivated(views::Link* source, int event_flags);
+
+ protected:
+  // OptionsPageView overrides:
+  virtual void InitControlLayout();
+  virtual void NotifyPrefChanged(const std::string* pref_name);
+
+ private:
+  // Controls for this section:
+  views::Checkbox* enable_background_mode_checkbox_;
+  views::Link* learn_more_link_;
+
+  // Preferences for this section:
+  BooleanPrefMember enable_background_mode_;
+
+  DISALLOW_COPY_AND_ASSIGN(ChromeAppsSection);
+};
+
+ChromeAppsSection::ChromeAppsSection(Profile* profile)
+    : enable_background_mode_checkbox_(NULL),
+      learn_more_link_(NULL),
+      AdvancedSection(profile, l10n_util::GetString(
+          IDS_OPTIONS_ADVANCED_SECTION_TITLE_CHROME_APPS)) {
+}
+
+void ChromeAppsSection::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
+  DCHECK(sender == enable_background_mode_checkbox_);
+  bool enabled = enable_background_mode_checkbox_->checked();
+  UserMetricsRecordAction(enabled ?
+                          UserMetricsAction("Options_BackgroundMode_Enable") :
+                          UserMetricsAction("Options_BackgroundMode_Disable"),
+                          profile()->GetPrefs());
+  enable_background_mode_.SetValue(enabled);
+}
+
+void ChromeAppsSection::LinkActivated(views::Link* source, int event_flags) {
+  DCHECK(source == learn_more_link_);
+  Browser::Create(profile())->OpenURL(
+      GURL(l10n_util::GetString(IDS_LEARN_MORE_BACKGROUND_MODE_URL)), GURL(),
+      NEW_WINDOW, PageTransition::LINK);
+}
+
+void ChromeAppsSection::InitControlLayout() {
+  AdvancedSection::InitControlLayout();
+
+  GridLayout* layout = new GridLayout(contents_);
+  contents_->SetLayoutManager(layout);
+
+  AddIndentedColumnSet(layout, 0);
+
+  enable_background_mode_checkbox_ = new views::Checkbox(
+      l10n_util::GetString(IDS_OPTIONS_CHROME_APPS_ENABLE_BACKGROUND_MODE));
+  enable_background_mode_checkbox_->set_listener(this);
+  AddWrappingCheckboxRow(layout, enable_background_mode_checkbox_, 0, true);
+
+  // Init member pref so we can update the controls if prefs change.
+  enable_background_mode_.Init(prefs::kBackgroundModeEnabled,
+      profile()->GetPrefs(), this);
+
+  // Add our link to the help center page for this feature.
+  learn_more_link_ = new views::Link(l10n_util::GetString(IDS_LEARN_MORE));
+  learn_more_link_->SetController(this);
+  AddLeadingControl(layout, learn_more_link_, 0, false);
+}
+
+void ChromeAppsSection::NotifyPrefChanged(const std::string* pref_name) {
+  if (!pref_name || *pref_name == prefs::kBackgroundModeEnabled) {
+    enable_background_mode_checkbox_->SetChecked(
+        enable_background_mode_.GetValue());
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1363,6 +1461,11 @@ void AdvancedContentsView::InitControlLayout() {
   layout->AddView(new WebContentSection(profile()));
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(new SecuritySection(profile()));
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBackgroundMode)) {
+    layout->StartRow(0, single_column_view_set_id);
+    layout->AddView(new ChromeAppsSection(profile()));
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1372,7 +1475,7 @@ void AdvancedContentsView::InitClass() {
   static bool initialized = false;
   if (!initialized) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    line_height_ = rb.GetFont(ResourceBundle::BaseFont).height();
+    line_height_ = rb.GetFont(ResourceBundle::BaseFont).GetHeight();
     initialized = true;
   }
 }

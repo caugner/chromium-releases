@@ -242,6 +242,9 @@ bool BufferedResourceHandler::KeepBuffering(int bytes_read) {
   DCHECK(read_buffer_);
   if (my_buffer_) {
     // We are using our own buffer to read, update the main buffer.
+    // TODO(darin): We should handle the case where read_buffer_size_ is small!
+    // See RedirectToFileResourceHandler::BufIsFull to see how this impairs
+    // downstream ResourceHandler implementations.
     CHECK_LT(bytes_read + bytes_read_, read_buffer_size_);
     memcpy(read_buffer_->data() + bytes_read_, my_buffer_->data(), bytes_read);
     my_buffer_ = NULL;
@@ -320,7 +323,8 @@ bool BufferedResourceHandler::CompleteResponseStarted(int request_id,
     }
 
     X509UserCertResourceHandler* x509_cert_handler =
-        new X509UserCertResourceHandler(host_, request_);
+        new X509UserCertResourceHandler(host_, request_,
+                                        info->child_id(), info->route_id());
     UseAlternateResourceHandler(request_id, x509_cert_handler);
   }
 

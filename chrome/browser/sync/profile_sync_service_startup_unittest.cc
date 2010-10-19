@@ -8,6 +8,7 @@
 #include "base/scoped_ptr.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/net/gaia/token_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
 #include "chrome/browser/sync/glue/data_type_manager_mock.h"
 #include "chrome/browser/sync/profile_sync_factory_mock.h"
@@ -203,7 +204,10 @@ TEST_F(ProfileSyncServiceStartupBootstrapTest, SKIP_MACOSX(StartFirstTime)) {
   GaiaAuthConsumer::ClientLoginResult result;
   result.sid = "sid";
   result.lsid = "lsid";
-  profile_.GetTokenService()->SetClientLoginResult(result);
+  profile_.GetTokenService()->Initialize("test",
+                                         &profile_);
+  profile_.GetTokenService()->UpdateCredentials(result);
+
   // Will start sync even though setup hasn't been completed (since
   // setup is bypassed when bootstrapping is enabled).
   service_->Initialize();

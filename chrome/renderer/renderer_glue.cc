@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,20 @@
 
 #include "build/build_config.h"
 
-#include <vector>
-
 #if defined(OS_WIN)
 #include <windows.h>
 #endif
 
+#include <vector>
+
 #include "app/clipboard/clipboard.h"
-#include "app/clipboard/scoped_clipboard_writer.h"
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
-#include "base/file_version_info.h"
 #include "base/ref_counted.h"
 #include "base/string_util.h"
-#include "chrome/app/chrome_version_info.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/socket_stream_dispatcher.h"
 #include "chrome/common/url_constants.h"
@@ -29,10 +28,10 @@
 #include "chrome/renderer/render_process.h"
 #include "chrome/renderer/render_thread.h"
 #include "googleurl/src/url_util.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKitClient.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/scoped_clipboard_writer_glue.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/websocketstreamhandle_bridge.h"
@@ -260,7 +259,8 @@ bool IsProtocolSupportedForMedia(const GURL& url) {
   if (url.SchemeIsFile() || url.SchemeIs(chrome::kHttpScheme) ||
       url.SchemeIs(chrome::kHttpsScheme) ||
       url.SchemeIs(chrome::kDataScheme) ||
-      url.SchemeIs(chrome::kExtensionScheme))
+      url.SchemeIs(chrome::kExtensionScheme) ||
+      url.SchemeIs(chrome::kBlobScheme))
     return true;
   return false;
 }
@@ -301,16 +301,19 @@ void ClearCache() {
 }
 
 std::string GetProductVersion() {
-  scoped_ptr<FileVersionInfo> version_info(
-      chrome_app::GetChromeVersionInfo());
+  chrome::VersionInfo version_info;
   std::string product("Chrome/");
-  product += version_info.get() ? WideToASCII(version_info->product_version())
-                                : "0.0.0.0";
+  product += version_info.is_valid() ? version_info.Version()
+                                     : "0.0.0.0";
   return product;
 }
 
 bool IsSingleProcess() {
   return CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
+}
+
+void EnableSpdy(bool enable) {
+  RenderThread::current()->EnableSpdy(enable);
 }
 
 #if defined(OS_LINUX)

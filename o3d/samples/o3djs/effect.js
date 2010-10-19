@@ -65,6 +65,7 @@ o3djs.effect.TWO_COLOR_CHECKER_EFFECT_NAME =
  * @namespace
  */
 o3djs.effect.o3d = {
+  LANGUAGE: 'o3d',
   FLOAT2: 'float2',
   FLOAT3: 'float3',
   FLOAT4: 'float4',
@@ -78,6 +79,7 @@ o3djs.effect.o3d = {
   VERTEX_VARYING_PREFIX: 'output.',
   PIXEL_VARYING_PREFIX: 'input.',
   TEXTURE: 'tex',
+  SAMPLER: 'sampler',
   BEGIN_IN_STRUCT: 'struct InVertex {\n',
   BEGIN_OUT_STRUCT: 'struct OutVertex {\n',
   END_STRUCT: '};\n'
@@ -92,6 +94,7 @@ o3djs.effect.o3d = {
  * @namespace
  */
 o3djs.effect.glsl = {
+    LANGUAGE: 'glsl',
     FLOAT2: 'vec2',
     FLOAT3: 'vec3',
     FLOAT4: 'vec4',
@@ -105,6 +108,7 @@ o3djs.effect.glsl = {
     VERTEX_VARYING_PREFIX: 'v_',
     PIXEL_VARYING_PREFIX: 'v_',
     TEXTURE: 'texture',
+    SAMPLER: 'sampler2D',
     BEGIN_IN_STRUCT: '',
     BEGIN_OUT_STRUCT: '',
     END_STRUCT: '',
@@ -383,7 +387,19 @@ o3djs.effect.setLanguage = function(language) {
 
   o3djs.effect.TWO_COLOR_CHECKER_FXSTRING =
       o3djs.effect.buildCheckerShaderString();
-}
+};
+
+/**
+ * Gets the language set in the function setLanguage.  Returns a string, either
+ * 'glsl' or 'o3d'.
+ */
+o3djs.effect.getLanguage = function() {
+  var language_namespace = o3djs.effect.o3d;
+  if (language_namespace == o3djs.effect.glsl) {
+    return 'glsl';
+  }
+  return 'o3d';
+};
 
 
 /**
@@ -631,7 +647,7 @@ o3djs.effect.buildCheckerShaderString = function() {
     p.END_STRUCT;
 
   return 'uniform ' + p.MATRIX4 + ' worldViewProjection' +
-  p.semanticSuffix('WORLDVIEWPROJECTION') + ';\n' +
+    p.semanticSuffix('WORLDVIEWPROJECTION') + ';\n' +
     'uniform ' + p.MATRIX4 + ' worldInverseTranspose' +
     p.semanticSuffix('WORLDINVERSETRANSPOSE') + ';\n' +
     'uniform ' + p.MATRIX4 + ' world' +
@@ -691,7 +707,8 @@ o3djs.effect.buildCheckerShaderString = function() {
     ' outColor = directionalIntensity * check;\n' +
     p.endPixelShaderMain(
         p.FLOAT4 + '(outColor.rgb, check.a)') +
-    '\n' + p.entryPoints() +
+    '\n' +
+    p.entryPoints() +
     p.matrixLoadOrder();
 };
 
@@ -1200,7 +1217,7 @@ o3djs.effect.buildStandardShaderString = function(material,
          p.ATTRIBUTE_PREFIX + 'binormal,\n' +
          '                                   ' +
          p.ATTRIBUTE_PREFIX + 'normal);\n' +
-         p.FLOAT3 + ' tangentNormal = tex2D(bumpSampler, ' +
+         p.FLOAT3 + ' tangentNormal = ' + p.TEXTURE + '2D' + '(bumpSampler, ' +
          p.ATTRIBUTE_PREFIX + 'bumpUV.xy).xyz -\n' +
          '                       ' + p.FLOAT3 +
          '(0.5, 0.5, 0.5);\n' + p.FLOAT3 + ' normal = ' +

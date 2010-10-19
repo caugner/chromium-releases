@@ -13,7 +13,6 @@
 
 #include "base/basictypes.h"
 #include "base/string16.h"
-#include "base/values.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/navigation_types.h"
 #include "chrome/test/automation/autocomplete_edit_proxy.h"
@@ -21,6 +20,7 @@
 #include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
+#include "net/url_request/url_request_status.h"
 
 // NOTE: All IPC messages have either a routing_id of 0 (for asynchronous
 //       messages), or one that's been assigned by the proxy (for calls
@@ -40,7 +40,7 @@ IPC_BEGIN_MESSAGES(Automation)
   // in the app (the app is not fully up at this point). The parameter to this
   // message is the version string of the automation provider. This parameter
   // is defined to be the version string as returned by
-  // FileVersionInfo::file_version().
+  // chrome::VersionInfo::Version().
   // The client can choose to use this version string to decide whether or not
   // it can talk to the provider.
   IPC_MESSAGE_ROUTED1(AutomationMsg_Hello, std::string)
@@ -419,7 +419,7 @@ IPC_BEGIN_MESSAGES(Automation)
   // This message requests that a key press be performed.
   // Request:
   //   int - the handle of the window that's the context for this click
-  //   int - the base::KeyboardCode of the key that was pressed.
+  //   int - the app::KeyboardCode of the key that was pressed.
   //   int - the flags which identify the modifiers (shift, ctrl, alt)
   //         associated for, as defined in chrome/views/event.h
   IPC_MESSAGE_ROUTED3(AutomationMsg_WindowKeyPress, int, int, int)
@@ -812,7 +812,7 @@ IPC_BEGIN_MESSAGES(Automation)
   // This messages sets an int-value preference.
   IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_SetIntPreference,
                              int /* browser handle */,
-                             std::wstring /* pref name */,
+                             std::string /* pref name */,
                              int /* value */,
                              bool /* success */)
 
@@ -831,21 +831,21 @@ IPC_BEGIN_MESSAGES(Automation)
   // This messages sets a string-value preference.
   IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_SetStringPreference,
                              int /* browser handle */,
-                             std::wstring /* pref name */,
+                             std::string /* pref name */,
                              std::string /* pref value */,
                              bool)
 
   // This messages gets a boolean-value preference.
   IPC_SYNC_MESSAGE_ROUTED2_2(AutomationMsg_GetBooleanPreference,
                              int /* browser handle */,
-                             std::wstring /* pref name */,
+                             std::string /* pref name */,
                              bool /* success */,
                              bool /* pref value */)
 
   // This messages sets a boolean-value preference.
   IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_SetBooleanPreference,
                              int /* browser handle */,
-                             std::wstring /* pref name */,
+                             std::string /* pref name */,
                              bool /* pref value */,
                              bool /* success */)
 
@@ -1419,5 +1419,13 @@ IPC_BEGIN_MESSAGES(Automation)
   //   None expected
   IPC_MESSAGE_ROUTED3(AutomationMsg_RunUnloadHandlers, int, gfx::NativeWindow,
                       int)
+
+  // This message sets the current zoom level on the tab
+  // Request:
+  //   -int: Tab handle
+  //   -int: Zoom level. Values ZOOM_OUT = -1, RESET = 0, ZOOM_IN  = 1
+  // Response:
+  //   None expected
+  IPC_MESSAGE_ROUTED2(AutomationMsg_SetZoomLevel, int, int)
 
 IPC_END_MESSAGES(Automation)

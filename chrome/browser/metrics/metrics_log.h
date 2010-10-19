@@ -7,6 +7,7 @@
 
 #ifndef CHROME_BROWSER_METRICS_METRICS_LOG_H_
 #define CHROME_BROWSER_METRICS_METRICS_LOG_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "chrome/common/metrics_helpers.h"
@@ -92,7 +93,7 @@ class MetricsLog : public MetricsLogBase {
 
   // Writes metrics for the profile identified by key. This writes all
   // key/value pairs in profile_metrics.
-  void WriteProfileMetrics(const std::wstring& key,
+  void WriteProfileMetrics(const std::string& key,
                            const DictionaryValue& profile_metrics);
 
   DISALLOW_COPY_AND_ASSIGN(MetricsLog);

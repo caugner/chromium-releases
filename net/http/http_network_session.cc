@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
+#include "base/values.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/url_security_manager.h"
 #include "net/spdy/spdy_session_pool.h"
@@ -30,11 +31,21 @@ int g_max_sockets_per_group = 6;
 // http://crbug.com/44501 for details about proxy server connection limits.
 int g_max_sockets_per_proxy_server = 32;
 
-uint16 g_fixed_http_port = 0;
-uint16 g_fixed_https_port = 0;
+// Appends information about all |socket_pools| to the end of |list|.
+template <class MapType>
+static void AddSocketPoolsToList(ListValue* list,
+                                 const MapType& socket_pools,
+                                 const std::string& type) {
+  typename MapType::const_iterator socket_pool_it = socket_pools.begin();
+  for (typename MapType::const_iterator it = socket_pools.begin();
+       it != socket_pools.end(); it++) {
+    list->Append(it->second->GetInfoAsValue(it->first.ToString(), type));
+  }
+}
 
 }  // namespace
 
+// TODO(mbelshe): Move the socket factories into HttpStreamFactory.
 HttpNetworkSession::HttpNetworkSession(
     HostResolver* host_resolver,
     ProxyService* proxy_service,
@@ -48,6 +59,10 @@ HttpNetworkSession::HttpNetworkSession(
       tcp_for_http_proxy_pool_histograms_(
           new ClientSocketPoolHistograms("TCPforHTTPProxy")),
       http_proxy_pool_histograms_(new ClientSocketPoolHistograms("HTTPProxy")),
+      tcp_for_https_proxy_pool_histograms_(
+          new ClientSocketPoolHistograms("TCPforHTTPSProxy")),
+      ssl_for_https_proxy_pool_histograms_(
+          new ClientSocketPoolHistograms("SSLforHTTPSProxy")),
       tcp_for_socks_pool_histograms_(
           new ClientSocketPoolHistograms("TCPforSOCKS")),
       socks_pool_histograms_(new ClientSocketPoolHistograms("SOCK")),
@@ -58,12 +73,13 @@ HttpNetworkSession::HttpNetworkSession(
       ssl_socket_pool_(new SSLClientSocketPool(
           g_max_sockets, g_max_sockets_per_group, ssl_pool_histograms_,
           host_resolver, client_socket_factory, tcp_socket_pool_, NULL,
-          NULL, net_log)),
+          NULL, ssl_config_service, net_log)),
       socket_factory_(client_socket_factory),
       host_resolver_(host_resolver),
       proxy_service_(proxy_service),
       ssl_config_service_(ssl_config_service),
       spdy_session_pool_(spdy_session_pool),
+      http_stream_factory_(new HttpStreamFactory()),
       http_auth_handler_factory_(http_auth_handler_factory),
       network_delegate_(network_delegate),
       net_log_(net_log) {
@@ -92,6 +108,16 @@ HttpNetworkSession::GetSocketPoolForHTTPProxy(const HostPortPair& http_proxy) {
                       g_max_sockets_per_proxy_server, g_max_sockets_per_group,
                       tcp_for_http_proxy_pool_histograms_, host_resolver_,
                       socket_factory_, net_log_),
+                  new SSLClientSocketPool(
+                      g_max_sockets_per_proxy_server, g_max_sockets_per_group,
+                      ssl_for_https_proxy_pool_histograms_, host_resolver_,
+                      socket_factory_,
+                      new TCPClientSocketPool(
+                          g_max_sockets_per_proxy_server,
+                          g_max_sockets_per_group,
+                          tcp_for_https_proxy_pool_histograms_, host_resolver_,
+                          socket_factory_, net_log_),
+                      NULL, NULL, ssl_config_service_, net_log_),
                   net_log_)));
 
   return ret.first->second;
@@ -131,13 +157,36 @@ HttpNetworkSession::GetSocketPoolForSSLWithProxy(
       NULL,
       GetSocketPoolForHTTPProxy(proxy_server),
       GetSocketPoolForSOCKSProxy(proxy_server),
-      net_log_);
+      ssl_config_service_, net_log_);
 
   std::pair<SSLSocketPoolMap::iterator, bool> ret =
       ssl_socket_pools_for_proxies_.insert(std::make_pair(proxy_server,
                                                           new_pool));
 
   return ret.first->second;
+}
+
+Value* HttpNetworkSession::SocketPoolInfoToValue() const {
+  ListValue* list = new ListValue();
+  list->Append(tcp_socket_pool_->GetInfoAsValue("tcp_socket_pool",
+                                                "tcp_socket_pool"));
+  list->Append(ssl_socket_pool_->GetInfoAsValue("ssl_socket_pool",
+                                                "ssl_socket_pool"));
+  AddSocketPoolsToList(list,
+                       http_proxy_socket_pools_,
+                       "http_proxy_socket_pool");
+  AddSocketPoolsToList(list,
+                       socks_socket_pools_,
+                       "proxy_socket_pool");
+  AddSocketPoolsToList(list,
+                       ssl_socket_pools_for_proxies_,
+                       "ssl_socket_pool_for_proxies");
+  return list;
+}
+
+// static
+int HttpNetworkSession::max_sockets_per_group() {
+  return g_max_sockets_per_group;
 }
 
 // static
@@ -149,23 +198,13 @@ void HttpNetworkSession::set_max_sockets_per_group(int socket_count) {
 }
 
 // static
-uint16 HttpNetworkSession::fixed_http_port() {
-  return g_fixed_http_port;
-}
-
-// static
-void HttpNetworkSession::set_fixed_http_port(uint16 port) {
-  g_fixed_http_port = port;
-}
-
-// static
-uint16 HttpNetworkSession::fixed_https_port() {
-  return g_fixed_https_port;
-}
-
-// static
-void HttpNetworkSession::set_fixed_https_port(uint16 port) {
-  g_fixed_https_port = port;
+void HttpNetworkSession::set_max_sockets_per_proxy_server(int socket_count) {
+  DCHECK_LT(0, socket_count);
+  DCHECK_GT(100, socket_count);  // Sanity check.
+  // Assert this case early on. The max number of sockets per group cannot
+  // exceed the max number of sockets per proxy server.
+  DCHECK_LE(g_max_sockets_per_group, socket_count);
+  g_max_sockets_per_proxy_server = socket_count;
 }
 
 }  //  namespace net

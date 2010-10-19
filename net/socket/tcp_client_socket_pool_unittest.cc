@@ -50,6 +50,10 @@ class MockClientSocket : public ClientSocket {
     return net_log_;
   }
 
+  virtual void SetSubresourceSpeculation() {}
+  virtual void SetOmniboxSpeculation() {}
+  virtual bool WasEverUsed() const { return false; }
+
   // Socket methods:
   virtual int Read(IOBuffer* buf, int buf_len,
                    CompletionCallback* callback) {
@@ -90,6 +94,10 @@ class MockFailingClientSocket : public ClientSocket {
   virtual const BoundNetLog& NetLog() const {
     return net_log_;
   }
+
+  virtual void SetSubresourceSpeculation() {}
+  virtual void SetOmniboxSpeculation() {}
+  virtual bool WasEverUsed() const { return false; }
 
   // Socket methods:
   virtual int Read(IOBuffer* buf, int buf_len,
@@ -145,6 +153,10 @@ class MockPendingClientSocket : public ClientSocket {
     return net_log_;
   }
 
+  virtual void SetSubresourceSpeculation() {}
+  virtual void SetOmniboxSpeculation() {}
+  virtual bool WasEverUsed() const { return false; }
+
   // Socket methods:
   virtual int Read(IOBuffer* buf, int buf_len,
                    CompletionCallback* callback) {
@@ -198,8 +210,10 @@ class MockClientSocketFactory : public ClientSocketFactory {
         client_socket_types_(NULL), client_socket_index_(0),
         client_socket_index_max_(0) {}
 
-  virtual ClientSocket* CreateTCPClientSocket(const AddressList& addresses,
-                                              NetLog* /* net_log */) {
+  virtual ClientSocket* CreateTCPClientSocket(
+      const AddressList& addresses,
+      NetLog* /* net_log */,
+      const NetLog::Source& /* source */) {
     allocation_count_++;
 
     ClientSocketType type = client_socket_type_;

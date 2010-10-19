@@ -1488,7 +1488,7 @@ void TableView::OnSelectedStateChanged() {
   }
 }
 
-bool TableView::OnKeyDown(base::KeyboardCode virtual_keycode) {
+bool TableView::OnKeyDown(app::KeyboardCode virtual_keycode) {
   if (!ignore_listview_change_ && table_view_observer_) {
     table_view_observer_->OnKeyDown(virtual_keycode);
   }
@@ -1544,7 +1544,7 @@ gfx::Rect TableView::GetAltTextBounds() {
   gfx::Font font = GetAltTextFont();
   // Pad height by 2 for halo.
   return gfx::Rect(kXOffset, content_offset(), client_rect.width() - kXOffset,
-                   std::max(kImageSize, font.height() + 2));
+                   std::max(kImageSize, font.GetHeight() + 2));
 }
 
 gfx::Font TableView::GetAltTextFont() {

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_PROFILE_IMPORT_PROFILE_IMPORT_THREAD_H_
 #define CHROME_PROFILE_IMPORT_PROFILE_IMPORT_THREAD_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -41,7 +42,8 @@ class ProfileImportThread : public ChildThread {
   void NotifyEnded();
 
   // Bridging methods that move data back across the process boundary.
-  void NotifyHistoryImportReady(const std::vector<history::URLRow> &rows);
+  void NotifyHistoryImportReady(const std::vector<history::URLRow> &rows,
+                                history::VisitSource visit_source);
   void NotifyHomePageImportReady(const GURL& home_page);
   void NotifyBookmarksImportReady(
       const std::vector<ProfileWriter::BookmarkEntry>& bookmarks,

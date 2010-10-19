@@ -36,8 +36,10 @@ typedef HRESULT (STDMETHODCALLTYPE* InternetProtocol_StartEx_Fn)(
     IInternetProtocolEx* this_object, IUri* uri,
     IInternetProtocolSink* prot_sink, IInternetBindInfo* bind_info,
     DWORD flags, HANDLE_PTR reserved);
-typedef HRESULT (STDMETHODCALLTYPE* InternetProtocolRoot_Continue_Fn)(
-    IInternetProtocolRoot* me, PROTOCOLDATA* data);
+typedef HRESULT (STDMETHODCALLTYPE* InternetProtocol_LockRequest_Fn)(
+    IInternetProtocol* this_object, DWORD options);
+typedef HRESULT (STDMETHODCALLTYPE* InternetProtocol_UnlockRequest_Fn)(
+    IInternetProtocol* this_object);
 
 
 enum RendererType {
@@ -130,6 +132,13 @@ class ProtData : public base::RefCounted<ProtData> {
     return referrer_;
   }
 
+  bool is_attach_external_tab_request() const {
+    return read_fun_ == NULL;
+  }
+
+  // Removes the mapping between the protocol and the ProtData.
+  void Invalidate();
+
  private:
   typedef std::map<IInternetProtocol*, ProtData*> ProtocolDataMap;
   static ProtocolDataMap datamap_;
@@ -165,7 +174,7 @@ class ProtData : public base::RefCounted<ProtData> {
 
   HRESULT FillBuffer();
   void SaveSuggestedMimeType(LPCWSTR status_text);
-  void FireSugestedMimeType(IInternetProtocolSink* delegate);
+  void FireSuggestedMimeType(IInternetProtocolSink* delegate);
   void SaveReferrer(IInternetProtocolSink* delegate);
 };
 

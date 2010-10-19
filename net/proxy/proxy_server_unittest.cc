@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@ TEST(ProxyServerTest, FromURI) {
     net::ProxyServer::Scheme expected_scheme;
     const char* expected_host;
     int expected_port;
-    const char* expected_host_and_port;
     const char* expected_pac_string;
   } tests[] = {
     // HTTP proxy URIs:
@@ -26,7 +25,6 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_HTTP,
        "foopy",
        10,
-       "foopy:10",
        "PROXY foopy:10"
     },
     {
@@ -35,7 +33,6 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_HTTP,
        "foopy",
        80,
-       "foopy:80",
        "PROXY foopy:80"
     },
     {
@@ -44,7 +41,6 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_HTTP,
        "foopy",
        10,
-       "foopy:10",
        "PROXY foopy:10"
     },
 
@@ -55,7 +51,6 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_HTTP,
        "FEDC:BA98:7654:3210:FEDC:BA98:7654:3210",
        10,
-       "[FEDC:BA98:7654:3210:FEDC:BA98:7654:3210]:10",
        "PROXY [FEDC:BA98:7654:3210:FEDC:BA98:7654:3210]:10"
     },
     {
@@ -64,7 +59,6 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_HTTP,
        "3ffe:2a00:100:7031::1",
        80,
-       "[3ffe:2a00:100:7031::1]:80",
        "PROXY [3ffe:2a00:100:7031::1]:80"
     },
     {
@@ -73,7 +67,6 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_HTTP,
        "::192.9.5.5",
        80,
-       "[::192.9.5.5]:80",
        "PROXY [::192.9.5.5]:80"
     },
     {
@@ -82,7 +75,6 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_HTTP,
        "::FFFF:129.144.52.38",
        80,
-       "[::FFFF:129.144.52.38]:80",
        "PROXY [::FFFF:129.144.52.38]:80"
     },
 
@@ -93,7 +85,6 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_SOCKS4,
        "foopy",
        1080,
-       "foopy:1080",
        "SOCKS foopy:1080"
     },
     {
@@ -102,7 +93,6 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_SOCKS4,
        "foopy",
        10,
-       "foopy:10",
        "SOCKS foopy:10"
     },
 
@@ -113,7 +103,6 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_SOCKS5,
        "foopy",
        1080,
-       "foopy:1080",
        "SOCKS5 foopy:1080"
     },
     {
@@ -122,7 +111,6 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_SOCKS5,
        "foopy",
        10,
-       "foopy:10",
        "SOCKS5 foopy:10"
     },
 
@@ -133,7 +121,6 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_SOCKS4,
        "foopy",
        1080,
-       "foopy:1080",
        "SOCKS foopy:1080"
     },
     {
@@ -142,8 +129,33 @@ TEST(ProxyServerTest, FromURI) {
        net::ProxyServer::SCHEME_SOCKS4,
        "foopy",
        10,
-       "foopy:10",
        "SOCKS foopy:10"
+    },
+
+    // HTTPS proxy URIs:
+    {
+       "https://foopy",     // No port
+       "https://foopy:443",
+       net::ProxyServer::SCHEME_HTTPS,
+       "foopy",
+       443,
+       "HTTPS foopy:443"
+    },
+    {
+       "https://foopy:10",  // Non-standard port
+       "https://foopy:10",
+       net::ProxyServer::SCHEME_HTTPS,
+       "foopy",
+       10,
+       "HTTPS foopy:10"
+    },
+    {
+       "https://1.2.3.4:10",  // IP Address
+       "https://1.2.3.4:10",
+       net::ProxyServer::SCHEME_HTTPS,
+       "1.2.3.4",
+       10,
+       "HTTPS 1.2.3.4:10"
     },
   };
 
@@ -155,9 +167,8 @@ TEST(ProxyServerTest, FromURI) {
     EXPECT_FALSE(uri.is_direct());
     EXPECT_EQ(tests[i].expected_uri, uri.ToURI());
     EXPECT_EQ(tests[i].expected_scheme, uri.scheme());
-    EXPECT_EQ(tests[i].expected_host, uri.HostNoBrackets());
-    EXPECT_EQ(tests[i].expected_port, uri.port());
-    EXPECT_EQ(tests[i].expected_host_and_port, uri.host_and_port());
+    EXPECT_EQ(tests[i].expected_host, uri.host_port_pair().host());
+    EXPECT_EQ(tests[i].expected_port, uri.host_port_pair().port());
     EXPECT_EQ(tests[i].expected_pac_string, uri.ToPacString());
   }
 }
@@ -189,7 +200,6 @@ TEST(ProxyServerTest, Invalid) {
     "direct://xyz",  // direct is not allowed a host/port.
     "http:/",  // ambiguous, but will fail because of bad port.
     "http:",  // ambiguous, but will fail because of bad port.
-    "https://blah",  // "https" is not a valid proxy scheme.
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
@@ -259,6 +269,14 @@ TEST(ProxyServerTest, FromPACString) {
        " direct  ",
        "direct://",
     },
+    {
+       "https foopy",
+       "https://foopy:443",
+    },
+    {
+       "https foopy:10",
+       "https://foopy:10",
+    },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
@@ -272,6 +290,7 @@ TEST(ProxyServerTest, FromPACString) {
 TEST(ProxyServerTest, FromPACStringInvalid) {
   const char* tests[] = {
     "PROXY",  // missing host/port.
+    "HTTPS",  // missing host/port.
     "SOCKS",  // missing host/port.
     "DIRECT foopy:10",  // direct cannot have host/port.
   };
@@ -279,5 +298,71 @@ TEST(ProxyServerTest, FromPACStringInvalid) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
     net::ProxyServer uri = net::ProxyServer::FromPacString(tests[i]);
     EXPECT_FALSE(uri.is_valid());
+  }
+}
+
+TEST(ProxyServerTest, ComparatorAndEquality) {
+  struct {
+    // Inputs.
+    const char* server1;
+    const char* server2;
+
+    // Expectation.
+    //   -1 means server1 is less than server2
+    //    0 means server1 equals server2
+    //    1 means server1 is greater than server2
+    int expected_comparison;
+  } tests[] = {
+    { // Equal.
+      "foo:11",
+      "http://foo:11",
+      0
+    },
+    { // Port is different.
+      "foo:333",
+      "foo:444",
+      -1
+    },
+    { // Host is different.
+      "foo:33",
+      "bar:33",
+      1
+    },
+    { // Scheme is different.
+      "socks4://foo:33",
+      "http://foo:33",
+      1
+    },
+  };
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+    // Parse the expected inputs to ProxyServer instances.
+    const net::ProxyServer server1 =
+        net::ProxyServer::FromURI(
+            tests[i].server1, net::ProxyServer::SCHEME_HTTP);
+
+    const net::ProxyServer server2 =
+        net::ProxyServer::FromURI(
+            tests[i].server2, net::ProxyServer::SCHEME_HTTP);
+
+    switch (tests[i].expected_comparison) {
+      case -1:
+        EXPECT_TRUE(server1 < server2);
+        EXPECT_FALSE(server2 < server1);
+        EXPECT_FALSE(server2 == server1);
+        break;
+      case 0:
+        EXPECT_FALSE(server1 < server2);
+        EXPECT_FALSE(server2 < server1);
+        EXPECT_TRUE(server2 == server1);
+        break;
+      case 1:
+        EXPECT_FALSE(server1 < server2);
+        EXPECT_TRUE(server2 < server1);
+        EXPECT_FALSE(server2 == server1);
+        break;
+      default:
+        FAIL() << "Invalid expectation. Can be only -1, 0, 1";
+    }
   }
 }

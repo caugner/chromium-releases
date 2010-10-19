@@ -4,6 +4,7 @@
 
 #include "webkit/database/database_tracker.h"
 
+#include <algorithm>
 #include <vector>
 
 #include "app/sql/connection.h"
@@ -13,7 +14,7 @@
 #include "app/sql/transaction.h"
 #include "base/basictypes.h"
 #include "base/file_util.h"
-#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "webkit/database/databases_table.h"
@@ -196,7 +197,7 @@ string16 DatabaseTracker::GetOriginDirectory(
     return it->second;
 
   string16 origin_directory =
-      IntToString16(incognito_origin_directories_generator_++);
+      base::IntToString16(incognito_origin_directories_generator_++);
   incognito_origin_directories_[origin_identifier] = origin_directory;
   return origin_directory;
 }
@@ -214,7 +215,8 @@ FilePath DatabaseTracker::GetFullDBFilePath(
   if (id < 0)
     return FilePath();
 
-  FilePath file_name = FilePath::FromWStringHack(Int64ToWString(id));
+  FilePath file_name = FilePath::FromWStringHack(
+      UTF8ToWide(base::Int64ToString(id)));
   return db_dir_.Append(FilePath::FromWStringHack(
       UTF16ToWide(GetOriginDirectory(origin_identifier)))).Append(file_name);
 }
@@ -519,6 +521,7 @@ int DatabaseTracker::DeleteDatabase(const string16& origin_identifier,
 
 int DatabaseTracker::DeleteDataModifiedSince(
     const base::Time& cutoff,
+    const std::vector<string16>& protected_origins,
     net::CompletionCallback* callback) {
   if (!LazyInit())
     return net::ERR_FAILED;
@@ -535,13 +538,19 @@ int DatabaseTracker::DeleteDataModifiedSince(
        ori != origins.end(); ++ori) {
     if (StartsWith(*ori, ASCIIToUTF16(kExtensionOriginIdentifierPrefix), true))
       continue;
+
+    std::vector<string16>::const_iterator find_iter =
+        std::find(protected_origins.begin(), protected_origins.end(), *ori);
+    if (find_iter != protected_origins.end())
+      continue;
+
     std::vector<DatabaseDetails> details;
     if (!databases_table_->GetAllDatabaseDetailsForOrigin(*ori, &details))
       rv = net::ERR_FAILED;
     for (std::vector<DatabaseDetails>::const_iterator db = details.begin();
          db != details.end(); ++db) {
       FilePath db_file = GetFullDBFilePath(*ori, db->database_name);
-      file_util::FileInfo file_info;
+      base::PlatformFileInfo file_info;
       file_util::GetFileInfo(db_file, &file_info);
       if (file_info.last_modified < cutoff)
         continue;

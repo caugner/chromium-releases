@@ -4,6 +4,7 @@
 
 #ifndef CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H__
 #define CHROME_TEST_AUTOMATION_AUTOMATION_PROXY_H__
+#pragma once
 
 #include <string>
 #include <vector>
@@ -57,7 +58,7 @@ class AutomationMessageSender : public IPC::Message::Sender {
 class AutomationProxy : public IPC::Channel::Listener,
                         public AutomationMessageSender {
  public:
-  explicit AutomationProxy(int command_execution_timeout_ms);
+  AutomationProxy(int command_execution_timeout_ms, bool disconnect_on_failure);
   virtual ~AutomationProxy();
 
   // IPC callback
@@ -235,6 +236,13 @@ class AutomationProxy : public IPC::Channel::Listener,
     return static_cast<int>(command_execution_timeout_.InMilliseconds());
   }
 
+  // Sets the timeout for subsequent automation calls.
+  void set_command_execution_timeout_ms(int timeout_ms) {
+    DCHECK(timeout_ms <= 10 * 60 * 1000 ) << "10+ min of automation timeout "
+        "can make the test hang and be killed by buildbot";
+    command_execution_timeout_ = base::TimeDelta::FromMilliseconds(timeout_ms);
+  }
+
   // Returns the server version of the server connected. You may only call this
   // method after WaitForAppLaunch() has returned SUCCESS or VERSION_MISMATCH.
   // If you call it before this, the return value is undefined.
@@ -284,6 +292,10 @@ class AutomationProxy : public IPC::Channel::Listener,
   // set this to true if building the automation proxy into a module with
   // a version resource.
   bool perform_version_check_;
+
+  // If true, the proxy will disconnect the IPC channel on first failure
+  // to send an IPC message. This helps avoid long timeouts in tests.
+  bool disconnect_on_failure_;
 
   // Delay to let the browser execute the command.
   base::TimeDelta command_execution_timeout_;

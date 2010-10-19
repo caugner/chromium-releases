@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stack>
+#include <string>
+#include <vector>
+
 #include "base/message_loop.h"
 #include "base/thread.h"
 #include "base/waitable_event.h"
@@ -23,8 +27,8 @@ class AppCacheRequestHandlerTest : public testing::Test {
  public:
   class MockFrontend : public AppCacheFrontend {
    public:
-    virtual void OnCacheSelected(int host_id, int64 cache_id ,
-                                 appcache::Status status) {}
+    virtual void OnCacheSelected(
+        int host_id, const appcache::AppCacheInfo& info) {}
 
     virtual void OnStatusChanged(const std::vector<int>& host_ids,
                                  appcache::Status status) {}

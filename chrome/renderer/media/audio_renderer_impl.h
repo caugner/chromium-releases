@@ -36,17 +36,18 @@
 
 #ifndef CHROME_RENDERER_MEDIA_AUDIO_RENDERER_IMPL_H_
 #define CHROME_RENDERER_MEDIA_AUDIO_RENDERER_IMPL_H_
+#pragma once
 
+#include "base/gtest_prod_util.h"
 #include "base/scoped_ptr.h"
 #include "base/lock.h"
 #include "base/shared_memory.h"
-#include "base/waitable_event.h"
 #include "chrome/renderer/audio_message_filter.h"
 #include "media/audio/audio_io.h"
+#include "media/audio/audio_manager.h"
 #include "media/base/factory.h"
 #include "media/base/filters.h"
 #include "media/filters/audio_renderer_base.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class AudioMessageFilter;
 
@@ -98,8 +99,9 @@ class AudioRendererImpl : public media::AudioRendererBase,
 
   // For access to constructor and IO thread methods.
   friend class AudioRendererImplTest;
-  FRIEND_TEST(AudioRendererImplTest, Stop);
-  FRIEND_TEST(AudioRendererImplTest, DestroyedMessageLoop_OnReadComplete);
+  FRIEND_TEST_ALL_PREFIXES(AudioRendererImplTest, Stop);
+  FRIEND_TEST_ALL_PREFIXES(AudioRendererImplTest,
+                           DestroyedMessageLoop_OnReadComplete);
 
   explicit AudioRendererImpl(AudioMessageFilter* filter);
   virtual ~AudioRendererImpl();
@@ -113,8 +115,7 @@ class AudioRendererImpl : public media::AudioRendererBase,
   // The following methods are tasks posted on the IO thread that needs to
   // be executed on that thread. They interact with AudioMessageFilter and
   // sends IPC messages on that thread.
-  void CreateStreamTask(AudioManager::Format format, int channels,
-                        int sample_rate, int bits_per_sample);
+  void CreateStreamTask(AudioParameters params);
   void PlayTask();
   void PauseTask();
   void SeekTask();
@@ -126,9 +127,7 @@ class AudioRendererImpl : public media::AudioRendererBase,
   virtual void WillDestroyCurrentMessageLoop();
 
   // Information about the audio stream.
-  int channels_;
-  int sample_rate_;
-  int sample_bits_;
+  AudioParameters params_;
   uint32 bytes_per_second_;
 
   scoped_refptr<AudioMessageFilter> filter_;

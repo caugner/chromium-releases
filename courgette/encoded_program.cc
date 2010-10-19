@@ -9,11 +9,11 @@
 #include <string>
 #include <vector>
 
-#include "base/env_var.h"
+#include "base/environment.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
-
+#include "base/utf_string_conversions.h"
 #include "courgette/courgette.h"
 #include "courgette/streams.h"
 
@@ -266,9 +266,9 @@ enum FieldSelect {
 static FieldSelect GetFieldSelect() {
 #if 1
   // TODO(sra): Use better configuration.
-  scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
+  scoped_ptr<base::Environment> env(base::Environment::Create());
   std::string s;
-  env->GetEnv("A_FIELDS", &s);
+  env->GetVar("A_FIELDS", &s);
   if (!s.empty()) {
     return static_cast<FieldSelect>(wcstoul(ASCIIToWide(s).c_str(), 0, 0));
   }

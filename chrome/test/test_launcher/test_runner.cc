@@ -4,7 +4,6 @@
 
 #include "chrome/test/test_launcher/test_runner.h"
 
-#include <iostream>
 #include <vector>
 
 #include "base/command_line.h"
@@ -238,7 +237,7 @@ bool RunTests(const TestRunnerFactory& test_runner_factory) {
       ++test_run_count;
       if (!test_runner->RunTest(test_name.c_str())) {
         failed_tests.push_back(test_name);
-        bool ignore_failure = TestSuite::ShouldIgnoreFailure(*test_info);
+        bool ignore_failure = base::TestSuite::ShouldIgnoreFailure(*test_info);
         printer.OnTestEnd(test_info->name(), test_case->name(), true, true,
                           ignore_failure,
                           (base::Time::Now() - start_time).InMillisecondsF());

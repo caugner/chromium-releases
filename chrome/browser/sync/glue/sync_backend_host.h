@@ -4,9 +4,9 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_SYNC_BACKEND_HOST_H_
 #define CHROME_BROWSER_SYNC_GLUE_SYNC_BACKEND_HOST_H_
+#pragma once
 
 #include <map>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -16,13 +16,13 @@
 #include "base/ref_counted.h"
 #include "base/thread.h"
 #include "base/timer.h"
-#include "chrome/browser/google_service_auth_error.h"
 #include "chrome/browser/sync/notification_method.h"
 #include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/ui_model_worker.h"
 #include "chrome/browser/sync/syncable/model_type.h"
+#include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "googleurl/src/gurl.h"
 
@@ -106,6 +106,7 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
                   bool invalidate_sync_login,
                   bool invalidate_sync_xmpp_login,
                   bool use_chrome_async_socket,
+                  bool try_ssltcp_first,
                   NotificationMethod notification_method);
 
   // Called on |frontend_loop_| to kick off asynchronous authentication.
@@ -178,41 +179,12 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
   virtual void GetWorkers(std::vector<browser_sync::ModelSafeWorker*>* out);
   virtual void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out);
 
-#if defined(UNIT_TEST)
-  // Called from unit test to bypass authentication and initialize the syncapi
-  // to a state suitable for testing but not production.
-  void InitializeForTestMode(const std::wstring& test_user,
-                             sync_api::HttpPostProviderFactory* factory,
-                             sync_api::HttpPostProviderFactory* auth_factory,
-                             bool delete_sync_data_folder,
-                             NotificationMethod notification_method) {
-    if (!core_thread_.Start())
-      return;
-    registrar_.workers[GROUP_UI] = new UIModelWorker(frontend_loop_);
-    registrar_.routing_info[syncable::BOOKMARKS] = GROUP_PASSIVE;
-    registrar_.routing_info[syncable::PREFERENCES] = GROUP_PASSIVE;
-    registrar_.routing_info[syncable::AUTOFILL] = GROUP_PASSIVE;
-    registrar_.routing_info[syncable::THEMES] = GROUP_PASSIVE;
-    registrar_.routing_info[syncable::TYPED_URLS] = GROUP_PASSIVE;
-    registrar_.routing_info[syncable::NIGORI] = GROUP_PASSIVE;
-    registrar_.routing_info[syncable::PASSWORDS] = GROUP_PASSIVE;
+  // Determines if the underlying sync engine has made any local changes to
+  // items that have not yet been synced with the server.
+  // ONLY CALL THIS IF OnInitializationComplete was called!
+  bool HasUnsyncedItems() const;
 
-    core_thread_.message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(core_.get(),
-        &SyncBackendHost::Core::DoInitializeForTest,
-        test_user,
-        factory,
-        auth_factory,
-        delete_sync_data_folder,
-        notification_method));
-  }
-#endif
  protected:
-  // InitializationComplete passes through the SyncBackendHost to forward
-  // on to |frontend_|, and so that tests can intercept here if they need to
-  // set up initial conditions.
-  virtual void HandleInitializationCompletedOnFrontendLoop();
-
   // The real guts of SyncBackendHost, to keep the public client API clean.
   class Core : public base::RefCountedThreadSafe<SyncBackendHost::Core>,
                public sync_api::SyncManager::Observer {
@@ -232,7 +204,7 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
     virtual void OnInitializationComplete();
     virtual void OnAuthError(const GoogleServiceAuthError& auth_error);
     virtual void OnPassphraseRequired();
-    virtual void OnPassphraseAccepted();
+    virtual void OnPassphraseAccepted(const std::string& bootstrap_token);
     virtual void OnPaused();
     virtual void OnResumed();
     virtual void OnStopSyncingPermanently();
@@ -248,7 +220,9 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
           bool invalidate_sync_login,
           bool invalidate_sync_xmpp_login,
           bool use_chrome_async_socket,
-          NotificationMethod notification_method)
+          bool try_ssltcp_first,
+          NotificationMethod notification_method,
+          std::string restored_key_for_bootstrapping)
           : service_url(service_url),
             attempt_last_user_authentication(attempt_last_user_authentication),
             http_bridge_factory(http_bridge_factory),
@@ -258,7 +232,9 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
             invalidate_sync_login(invalidate_sync_login),
             invalidate_sync_xmpp_login(invalidate_sync_xmpp_login),
             use_chrome_async_socket(use_chrome_async_socket),
-            notification_method(notification_method) {}
+            try_ssltcp_first(try_ssltcp_first),
+            notification_method(notification_method),
+            restored_key_for_bootstrapping(restored_key_for_bootstrapping) {}
 
       GURL service_url;
       bool attempt_last_user_authentication;
@@ -269,7 +245,9 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
       bool invalidate_sync_login;
       bool invalidate_sync_xmpp_login;
       bool use_chrome_async_socket;
+      bool try_ssltcp_first;
       NotificationMethod notification_method;
+      std::string restored_key_for_bootstrapping;
     };
 
     // Note:
@@ -335,16 +313,17 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
                              NotificationMethod notification_method) {
       DoInitialize(DoInitializeOptions(GURL(), false, factory, auth_factory,
                                        std::string(), delete_sync_data_folder,
-                                       false, false, false,
-                                       notification_method));
+                                       false, false, false, false,
+                                       notification_method, ""));
         syncapi_->SetupForTestMode(test_user);
     }
 #endif
 
    private:
     friend class base::RefCountedThreadSafe<SyncBackendHost::Core>;
+    friend class SyncBackendHostForProfileSyncTest;
 
-    ~Core() {}
+    ~Core();
 
     // Sends a SYNC_PAUSED notification to the notification service on
     // the UI thread.
@@ -377,7 +356,7 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
     void NotifyPassphraseRequired();
 
     // Invoked when the passphrase provided by the user has been accepted.
-    void NotifyPassphraseAccepted();
+    void NotifyPassphraseAccepted(const std::string& bootstrap_token);
 
     // Called from Core::OnSyncCycleCompleted to handle updating frontend
     // thread components.
@@ -404,6 +383,32 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
 
     DISALLOW_COPY_AND_ASSIGN(Core);
   };
+
+  // InitializationComplete passes through the SyncBackendHost to forward
+  // on to |frontend_|, and so that tests can intercept here if they need to
+  // set up initial conditions.
+  virtual void HandleInitializationCompletedOnFrontendLoop();
+
+  // Posts a nudge request on the core thread.
+  virtual void RequestNudge();
+
+  // Allows tests to perform alternate core initialization work.
+  virtual void InitCore(const Core::DoInitializeOptions& options);
+
+  // Factory method for HttpPostProviderFactories.
+  virtual sync_api::HttpPostProviderFactory* MakeHttpBridgeFactory(
+      URLRequestContextGetter* getter);
+
+  MessageLoop* core_loop() { return core_thread_.message_loop(); }
+
+  void set_syncapi_initialized() { syncapi_initialized_ = true; }
+
+  // Helpers to persist a token that can be used to bootstrap sync encryption
+  // across browser restart to avoid requiring the user to re-enter their
+  // passphrase.  |token| must be valid UTF-8 as we use the PrefService for
+  // storage.
+  void PersistEncryptionBootstrapToken(const std::string& token);
+  std::string RestoreEncryptionBootstrapToken();
 
   // Our core, which communicates directly to the syncapi.
   scoped_refptr<Core> core_;
@@ -474,6 +479,9 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
 
   // UI-thread cache of the last SyncSessionSnapshot received from syncapi.
   scoped_ptr<sessions::SyncSessionSnapshot> last_snapshot_;
+
+  // Whether we've processed the initialization complete callback.
+  bool syncapi_initialized_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncBackendHost);
 };

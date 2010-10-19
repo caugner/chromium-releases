@@ -9,11 +9,15 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
+#include "base/timer.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/chromeos/cros/input_method_library.h"
 #include "chrome/browser/chromeos/cros/screen_lock_library.h"
 #include "chrome/browser/chromeos/language_preferences.h"
@@ -24,10 +28,12 @@
 #include "chrome/browser/chromeos/login/screen_lock_view.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
+#include "cros/chromeos_wm_ipc_enums.h"
+#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "third_party/cros/chromeos_wm_ipc_enums.h"
 #include "views/screen.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_gtk.h"
@@ -40,6 +46,9 @@ const int64 kRetryGrabIntervalMs = 500;
 const int kGrabFailureLimit = 60;
 // Each keyboard layout has a dummy input method ID which starts with "xkb:".
 const char kValidInputMethodPrefix[] = "xkb:";
+
+// A idle time to show the screen saver in seconds.
+const int kScreenSaverIdleTimeout = 15;
 
 // Observer to start ScreenLocker when the screen lock
 class ScreenLockObserver : public chromeos::ScreenLockLibrary::Observer,
@@ -107,9 +116,10 @@ class ScreenLockObserver : public chromeos::ScreenLockLibrary::Observer,
       if (value.string_list_value.empty()) {
         value.string_list_value.push_back(kFallbackInputMethodId);  // US qwerty
       }
-      language->SetImeConfig(chromeos::kGeneralSectionName,
-                             chromeos::kPreloadEnginesConfigName,
-                             value);
+      language->SetImeConfig(
+          chromeos::language_prefs::kGeneralSectionName,
+          chromeos::language_prefs::kPreloadEnginesConfigName,
+          value);
     }
   }
 
@@ -122,9 +132,10 @@ class ScreenLockObserver : public chromeos::ScreenLockLibrary::Observer,
       chromeos::ImeConfigValue value;
       value.type = chromeos::ImeConfigValue::kValueTypeStringList;
       value.string_list_value = saved_active_input_method_list_;
-      language->SetImeConfig(chromeos::kGeneralSectionName,
-                             chromeos::kPreloadEnginesConfigName,
-                             value);
+      language->SetImeConfig(
+          chromeos::language_prefs::kGeneralSectionName,
+          chromeos::language_prefs::kPreloadEnginesConfigName,
+          value);
       // Send previous input method id first so Ctrl+space would work fine.
       if (!saved_previous_input_method_id_.empty())
         language->ChangeInputMethod(saved_previous_input_method_id_);
@@ -150,7 +161,7 @@ class ScreenLockObserver : public chromeos::ScreenLockLibrary::Observer,
 class LockWindow : public views::WidgetGtk {
  public:
   LockWindow()
-      : WidgetGtk(views::WidgetGtk::TYPE_POPUP),
+      : WidgetGtk(views::WidgetGtk::TYPE_WINDOW),
         toplevel_focus_widget_(NULL) {
     EnableDoubleBuffer(true);
   }
@@ -165,6 +176,11 @@ class LockWindow : public views::WidgetGtk {
   virtual gboolean OnKeyRelease(GtkWidget* widget, GdkEventKey* event) {
     // Don't handle key event in the lock window.
     return false;
+  }
+
+  virtual void OnDestroy(GtkWidget* object) {
+    LOG(INFO) << "OnDestroy: LockWindow destroyed";
+    views::WidgetGtk::OnDestroy(object);
   }
 
   virtual void ClearNativeFocus() {
@@ -204,6 +220,11 @@ class GrabWidget : public views::WidgetGtk {
 
   virtual void Show() {
     views::WidgetGtk::Show();
+    // Now steal all inputs.
+    TryGrabAllInputs();
+  }
+
+  void ClearGrab() {
     GtkWidget* current_grab_window;
     // Grab gtk input first so that the menu holding grab will close itself.
     gtk_grab_add(window_contents());
@@ -215,9 +236,6 @@ class GrabWidget : public views::WidgetGtk {
     // until it's empty.
     while ((current_grab_window = gtk_grab_get_current()) != NULL)
       gtk_grab_remove(current_grab_window);
-
-    // Now steal all inputs.
-    TryGrabAllInputs();
   }
 
   virtual gboolean OnButtonPress(GtkWidget* widget, GdkEventButton* event) {
@@ -254,9 +272,12 @@ class GrabWidget : public views::WidgetGtk {
 };
 
 void GrabWidget::TryGrabAllInputs() {
-  if (kbd_grab_status_ != GDK_GRAB_SUCCESS)
+  ClearGrab();
+
+  if (kbd_grab_status_ != GDK_GRAB_SUCCESS) {
     kbd_grab_status_ = gdk_keyboard_grab(window_contents()->window, FALSE,
                                          GDK_CURRENT_TIME);
+  }
   if (mouse_grab_status_ != GDK_GRAB_SUCCESS) {
     mouse_grab_status_ =
         gdk_pointer_grab(window_contents()->window,
@@ -271,8 +292,8 @@ void GrabWidget::TryGrabAllInputs() {
   if ((kbd_grab_status_ != GDK_GRAB_SUCCESS ||
        mouse_grab_status_ != GDK_GRAB_SUCCESS) &&
       grab_failure_count_++ < kGrabFailureLimit) {
-    DLOG(WARNING) << "Failed to grab inputs. Trying again in 1 second: kbd="
-                  << kbd_grab_status_ << ", mouse=" << mouse_grab_status_;
+    LOG(WARNING) << "Failed to grab inputs. Trying again in 1 second: kbd="
+        << kbd_grab_status_ << ", mouse=" << mouse_grab_status_;
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         task_factory_.NewRunnableMethod(&GrabWidget::TryGrabAllInputs),
@@ -291,7 +312,7 @@ void GrabWidget::TryGrabAllInputs() {
 // addition to other background components.
 class ScreenLockerBackgroundView : public chromeos::BackgroundView {
  public:
-  ScreenLockerBackgroundView(views::WidgetGtk* lock_widget)
+  explicit ScreenLockerBackgroundView(views::WidgetGtk* lock_widget)
       : lock_widget_(lock_widget) {
   }
 
@@ -328,23 +349,30 @@ ScreenLocker* ScreenLocker::screen_locker_ = NULL;
 // See screen_locker.h for more details.
 class MouseEventRelay : public MessageLoopForUI::Observer {
  public:
-  MouseEventRelay(GdkWindow* src, GdkWindow* dest) : src_(src), dest_(dest) {
+  MouseEventRelay(GdkWindow* src, GdkWindow* dest)
+      : src_(src),
+        dest_(dest),
+        initialized_(false) {
     DCHECK(src_);
     DCHECK(dest_);
-    gint src_x, src_y, dest_x, dest_y, width, height, depth;
-    gdk_window_get_geometry(src_, &src_x, &src_y, &width, &height, &depth);
-    gdk_window_get_geometry(dest_, &dest_x, &dest_y, &width, &height, &depth);
-
-    offset_.SetPoint(dest_x - src_x, dest_y - src_y);
   }
 
   virtual void WillProcessEvent(GdkEvent* event) {}
 
   virtual void DidProcessEvent(GdkEvent* event) {
-    if (event->any.window != src_) {
+    if (event->any.window != src_)
       return;
+    if (!initialized_) {
+      gint src_x, src_y, dest_x, dest_y, width, height, depth;
+      gdk_window_get_geometry(dest_, &dest_x, &dest_y, &width, &height, &depth);
+      // wait to compute offset until the info bubble widget's location
+      // is available.
+      if (dest_x < 0 || dest_y < 0)
+        return;
+      gdk_window_get_geometry(src_, &src_x, &src_y, &width, &height, &depth);
+      offset_.SetPoint(dest_x - src_x, dest_y - src_y);
+      initialized_ = true;
     }
-
     if (event->type == GDK_BUTTON_PRESS ||
         event->type == GDK_BUTTON_RELEASE) {
       GdkEvent* copy = gdk_event_copy(event);
@@ -357,8 +385,8 @@ class MouseEventRelay : public MessageLoopForUI::Observer {
       gdk_event_free(copy);
     } else if (event->type == GDK_MOTION_NOTIFY) {
       GdkEvent* copy = gdk_event_copy(event);
-      copy->button.window = dest_;
-      g_object_ref(copy->button.window);
+      copy->motion.window = dest_;
+      g_object_ref(copy->motion.window);
       copy->motion.x -= offset_.x();
       copy->motion.y -= offset_.y();
 
@@ -370,6 +398,7 @@ class MouseEventRelay : public MessageLoopForUI::Observer {
  private:
   GdkWindow* src_;
   GdkWindow* dest_;
+  bool initialized_;
 
   // Offset from src_'s origin to dest_'s origin.
   gfx::Point offset_;
@@ -379,6 +408,7 @@ class MouseEventRelay : public MessageLoopForUI::Observer {
 
 // A event observer used to unlock the screen upon user's action
 // without asking password. Used in BWSI and auto login mode.
+// TODO(oshima): consolidate InputEventObserver and LockerInputEventObserver.
 class InputEventObserver : public MessageLoopForUI::Observer {
  public:
   explicit InputEventObserver(ScreenLocker* screen_locker)
@@ -409,7 +439,42 @@ class InputEventObserver : public MessageLoopForUI::Observer {
   DISALLOW_COPY_AND_ASSIGN(InputEventObserver);
 };
 
-////////////////////////////////////////////////////////////////////////////////
+// A event observer used to show the screen locker upon
+// user action: mouse or keyboard interactions.
+// TODO(oshima): this has to be disabled while authenticating.
+class LockerInputEventObserver : public MessageLoopForUI::Observer {
+ public:
+  explicit LockerInputEventObserver(ScreenLocker* screen_locker)
+      : screen_locker_(screen_locker),
+        ALLOW_THIS_IN_INITIALIZER_LIST(
+            timer_(base::TimeDelta::FromSeconds(kScreenSaverIdleTimeout), this,
+                   &LockerInputEventObserver::StartScreenSaver)) {
+  }
+
+  virtual void WillProcessEvent(GdkEvent* event) {
+    if ((event->type == GDK_KEY_PRESS ||
+         event->type == GDK_BUTTON_PRESS ||
+         event->type == GDK_MOTION_NOTIFY)) {
+      timer_.Reset();
+      screen_locker_->StopScreenSaver();
+    }
+  }
+
+  virtual void DidProcessEvent(GdkEvent* event) {
+  }
+
+ private:
+  void StartScreenSaver() {
+    screen_locker_->StartScreenSaver();
+  }
+
+  chromeos::ScreenLocker* screen_locker_;
+  base::DelayTimer<LockerInputEventObserver> timer_;
+
+  DISALLOW_COPY_AND_ASSIGN(LockerInputEventObserver);
+};
+
+//////////////////////////////////////////////////////////////////////////////
 // ScreenLocker, public:
 
 ScreenLocker::ScreenLocker(const UserManager::User& user)
@@ -459,14 +524,22 @@ void ScreenLocker::Init() {
   lock_widget_->GetRootView()->SetVisible(false);
   lock_widget_->Show();
 
-  views::View* screen = new ScreenLockerBackgroundView(lock_widget_);
+  // Configuring the background url.
+  std::string url_string = std::string();
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kScreenSaverUrl)) {
+    url_string = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        switches::kScreenSaverUrl);
+  }
+  background_view_ = new ScreenLockerBackgroundView(lock_widget_);
+  background_view_->Init(GURL(url_string));
 
   DCHECK(GTK_WIDGET_REALIZED(lock_window_->GetNativeView()));
   WmIpc::instance()->SetWindowType(
       lock_window_->GetNativeView(),
       WM_IPC_WINDOW_CHROME_SCREEN_LOCKER,
       NULL);
-  lock_window_->SetContentsView(screen);
+
+  lock_window_->SetContentsView(background_view_);
   lock_window_->Show();
 
   // Don't let X draw default background, which was causing flash on
@@ -478,7 +551,7 @@ void ScreenLocker::Init() {
   lock_window->set_toplevel_focus_widget(lock_widget_->window_contents());
 }
 
-void ScreenLocker::OnLoginFailure(const std::string& error) {
+void ScreenLocker::OnLoginFailure(const LoginFailure& error) {
   DLOG(INFO) << "OnLoginFailure";
   EnableInput();
   // Don't enable signout button here as we're showing
@@ -492,8 +565,9 @@ void ScreenLocker::OnLoginFailure(const std::string& error) {
   if (error_info_)
     error_info_->Close();
   std::wstring msg = l10n_util::GetString(IDS_LOGIN_ERROR_AUTHENTICATING);
-  if (!error.empty())
-    msg += L"\n" + ASCIIToWide(error);
+  const std::string error_text = error.GetErrorString();
+  if (!error_text.empty())
+    msg += L"\n" + ASCIIToWide(error_text);
 
   InputMethodLibrary* input_method_library =
       CrosLibrary::Get()->GetInputMethodLibrary();
@@ -506,6 +580,7 @@ void ScreenLocker::OnLoginFailure(const std::string& error) {
       BubbleBorder::BOTTOM_LEFT,
       ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_WARNING),
       msg,
+      std::wstring(),  // TODO: add help link
       this);
   if (mouse_event_relay_.get()) {
     MessageLoopForUI::current()->RemoveObserver(mouse_event_relay_.get());
@@ -518,9 +593,7 @@ void ScreenLocker::OnLoginFailure(const std::string& error) {
 
 void ScreenLocker::OnLoginSuccess(const std::string& username,
     const GaiaAuthConsumer::ClientLoginResult& unused) {
-
-  DLOG(INFO) << "OnLoginSuccess";
-
+  LOG(INFO) << "OnLoginSuccess: Sending Unlock request.";
   if (CrosLibrary::Get()->EnsureLoaded())
     CrosLibrary::Get()->GetScreenLockLibrary()->NotifyScreenUnlockRequested();
 }
@@ -580,16 +653,27 @@ void ScreenLocker::OnGrabInputs() {
 // static
 void ScreenLocker::Show() {
   DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
-  // TODO(oshima): Currently, PowerManager may send a lock screen event
-  // even if a screen is locked. Investigate & solve the issue and
-  // enable this again if it's possible.
-  // DCHECK(!screen_locker_);
+
+  // Exit fullscreen.
+  Browser* browser = BrowserList::GetLastActive();
+  DCHECK(browser);
+  if (browser->window()->IsFullscreen()) {
+    browser->ToggleFullscreenMode();
+  }
+
   if (!screen_locker_) {
+    LOG(INFO) << "Show: Locking screen";
     ScreenLocker* locker =
         new ScreenLocker(UserManager::Get()->logged_in_user());
     locker->Init();
   } else {
-    LOG(INFO) << "Show(): screen locker already exists. ignoring";
+    // PowerManager re-sends lock screen signal if it doesn't
+    // receive the response within timeout. Just send complete
+    // signal.
+    LOG(INFO) << "Show: locker already exists. "
+              << "just sending completion event";
+    if (CrosLibrary::Get()->EnsureLoaded())
+      CrosLibrary::Get()->GetScreenLockLibrary()->NotifyScreenLockCompleted();
   }
 }
 
@@ -597,7 +681,7 @@ void ScreenLocker::Show() {
 void ScreenLocker::Hide() {
   DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
   DCHECK(screen_locker_);
-  LOG(INFO) << "Hide Screen Locker:" << screen_locker_;
+  LOG(INFO) << "Hide: Deleting ScreenLocker:" << screen_locker_;
   MessageLoopForUI::current()->DeleteSoon(FROM_HERE, screen_locker_);
 }
 
@@ -605,13 +689,17 @@ void ScreenLocker::Hide() {
 void ScreenLocker::UnlockScreenFailed() {
   DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
   if (screen_locker_) {
+    // Power manager decided no to unlock the screen even if a user
+    // typed in password, for example, when a user closed the lid
+    // immediately after typing in the password.
+    LOG(INFO) << "UnlockScreenFailed: re-enabling screen locker";
     screen_locker_->EnableInput();
   } else {
     // This can happen when a user requested unlock, but PowerManager
     // rejected because the computer is closed, then PowerManager unlocked
     // because it's open again and the above failure message arrives.
     // This'd be extremely rare, but may still happen.
-    LOG(INFO) << "Screen is unlocked";
+    LOG(INFO) << "UnlockScreenFailed: screen is already unlocked.";
   }
 }
 
@@ -628,12 +716,18 @@ ScreenLocker::~ScreenLocker() {
   ClearErrors();
   if (input_event_observer_.get())
     MessageLoopForUI::current()->RemoveObserver(input_event_observer_.get());
+  if (locker_input_event_observer_.get()) {
+    lock_widget_->GetFocusManager()->UnregisterAccelerator(
+        views::Accelerator(app::VKEY_ESCAPE, false, false, false), this);
+    MessageLoopForUI::current()->RemoveObserver(
+        locker_input_event_observer_.get());
+  }
 
   gdk_keyboard_ungrab(GDK_CURRENT_TIME);
   gdk_pointer_ungrab(GDK_CURRENT_TIME);
 
   DCHECK(lock_window_);
-  LOG(INFO) << "Closing ScreenLocker window";
+  LOG(INFO) << "~ScreenLocker(): Closing ScreenLocker window";
   lock_window_->Close();
   // lock_widget_ will be deleted by gtk's destroy signal.
   screen_locker_ = NULL;
@@ -651,10 +745,20 @@ void ScreenLocker::SetAuthenticator(Authenticator* authenticator) {
 }
 
 void ScreenLocker::ScreenLockReady() {
-  DLOG(INFO) << "ScreenLockReady";
+  LOG(INFO) << "ScreenLockReady: sending completed signal to power manager.";
   // Don't show the password field until we grab all inputs.
   lock_widget_->GetRootView()->SetVisible(true);
-  EnableInput();
+  if (background_view_->ScreenSaverEnabled()) {
+    lock_widget_->GetFocusManager()->RegisterAccelerator(
+        views::Accelerator(app::VKEY_ESCAPE, false, false, false), this);
+    locker_input_event_observer_.reset(new LockerInputEventObserver(this));
+    MessageLoopForUI::current()->AddObserver(
+        locker_input_event_observer_.get());
+    StartScreenSaver();
+  } else {
+    EnableInput();
+  }
+
   bool state = true;
   NotificationService::current()->Notify(
       NotificationType::SCREEN_LOCK_STATE_CHANGED,
@@ -677,6 +781,38 @@ void ScreenLocker::OnWindowManagerReady() {
   drawn_ = true;
   if (input_grabbed_)
     ScreenLockReady();
+}
+
+void ScreenLocker::StopScreenSaver() {
+  if (background_view_->IsScreenSaverVisible()) {
+    LOG(INFO) << "StopScreenSaver";
+    background_view_->HideScreenSaver();
+    if (screen_lock_view_) {
+      screen_lock_view_->SetVisible(true);
+      screen_lock_view_->RequestFocus();
+    }
+    EnableInput();
+  }
+}
+
+void ScreenLocker::StartScreenSaver() {
+  if (!background_view_->IsScreenSaverVisible()) {
+    LOG(INFO) << "StartScreenSaver";
+    background_view_->ShowScreenSaver();
+    if (screen_lock_view_) {
+      screen_lock_view_->SetEnabled(false);
+      screen_lock_view_->SetVisible(false);
+    }
+    ClearErrors();
+  }
+}
+
+bool ScreenLocker::AcceleratorPressed(const views::Accelerator& accelerator) {
+  if (!background_view_->IsScreenSaverVisible()) {
+    StartScreenSaver();
+    return true;
+  }
+  return false;
 }
 
 }  // namespace chromeos

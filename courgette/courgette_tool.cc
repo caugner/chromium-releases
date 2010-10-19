@@ -10,8 +10,9 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
-
+#include "base/utf_string_conversions.h"
 #include "courgette/third_party/bsdiff.h"
 #include "courgette/courgette.h"
 #include "courgette/streams.h"
@@ -234,7 +235,7 @@ void DisassembleAdjustDiff(const std::wstring& model_file,
     if (status != courgette::OK) Problem("-xxx failed.");
 
     WriteSinkToFile(&patch_stream,
-                    output_file_root + L"-" + IntToWString(i));
+                    output_file_root + L"-" + UTF8ToWide(base::IntToString(i)));
   }
 }
 
@@ -339,11 +340,6 @@ void ApplyBSDiffPatch(const std::wstring& old_file,
   WriteSinkToFile(&new_stream, new_file);
 }
 
-bool WideStringToInt(const std::wstring& str, int *output) {
-  string16 copy(str.begin(), str.end());
-  return StringToInt(copy, output);
-}
-
 int main(int argc, const char* argv[]) {
   base::AtExitManager at_exit_manager;
   CommandLine::Init(argc, argv);
@@ -359,14 +355,22 @@ int main(int argc, const char* argv[]) {
   bool cmd_spread_1_adjusted = command_line.HasSwitch("gen1a");
   bool cmd_spread_1_unadjusted = command_line.HasSwitch("gen1u");
 
-  std::vector<std::wstring> values = command_line.GetLooseValues();
+  // TODO(evanm): this whole file should use FilePaths instead of wstrings.
+  std::vector<std::wstring> values;
+  for (size_t i = 0; i < command_line.args().size(); ++i) {
+#if defined(OS_WIN)
+    values.push_back(command_line.args()[i]);
+#else
+    values.push_back(ASCIIToWide(command_line.args()[i]));
+#endif
+  }
 
   // '-repeat=N' is for debugging.  Running many iterations can reveal leaks and
   // bugs in cleanup.
   int repeat_count = 1;
   std::string repeat_switch = command_line.GetSwitchValueASCII("repeat");
   if (!repeat_switch.empty())
-    if (!StringToInt(repeat_switch, &repeat_count))
+    if (!base::StringToInt(repeat_switch, &repeat_count))
       repeat_count = 1;
 
   if (cmd_dis + cmd_asm + cmd_disadj + cmd_make_patch + cmd_apply_patch +

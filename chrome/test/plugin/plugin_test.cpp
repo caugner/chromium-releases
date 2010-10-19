@@ -64,8 +64,8 @@ class PluginTest : public UITest {
       // the new plugin.
       launch_arguments_.AppendSwitch(kUseOldWMPPluginSwitch);
     } else if (strcmp(test_info->name(), "FlashSecurity") == 0) {
-      launch_arguments_.AppendSwitchWithValue(switches::kTestSandbox,
-                                              L"security_tests.dll");
+      launch_arguments_.AppendSwitchASCII(switches::kTestSandbox,
+                                          "security_tests.dll");
     }
 
     UITest::SetUp();
@@ -166,8 +166,12 @@ TEST_F(PluginTest, FlashOctetStream) {
   TestPlugin("flash-octet-stream.html", action_max_timeout_ms(), false);
 }
 
-// http://crbug.com/16114
+#if defined(OS_WIN)
+// http://crbug.com/53926
+TEST_F(PluginTest, FLAKY_FlashLayoutWhilePainting) {
+#else
 TEST_F(PluginTest, FlashLayoutWhilePainting) {
+#endif
   TestPlugin("flash-layout-while-painting.html", action_max_timeout_ms(), true);
 }
 

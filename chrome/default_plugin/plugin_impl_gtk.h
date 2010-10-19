@@ -4,9 +4,9 @@
 
 #ifndef CHROME_DEFAULT_PLUGIN_PLUGIN_IMPL_GTK_H_
 #define CHROME_DEFAULT_PLUGIN_PLUGIN_IMPL_GTK_H_
+#pragma once
 
 #include <string>
-#include <vector>
 
 #include <gtk/gtk.h>
 
@@ -161,7 +161,7 @@ class PluginInstallerImpl {
   }
 
   // Getter for the NPP instance member.
-  const NPP instance() const {
+  NPP instance() const {
     return instance_;
   }
 

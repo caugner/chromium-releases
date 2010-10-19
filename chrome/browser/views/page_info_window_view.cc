@@ -82,7 +82,7 @@ class PageInfoWindowView : public views::View,
   virtual void ModelChanged();
 
  private:
- // This retreives the sections from the model and lay them out.
+  // This retrieves the sections from the model and lays them out.
   void LayoutSections();
 
   // Offsets the specified rectangle so it is showing on the screen and shifted
@@ -217,8 +217,9 @@ void PageInfoWindowView::LayoutSections() {
   for (int i = 0; i < model_.GetSectionCount(); ++i) {
     PageInfoModel::SectionInfo info = model_.GetSectionInfo(i);
     layout->StartRow(0, 0);
-    layout->AddView(new Section(info.title, info.state, info.head_line,
-                                info.description));
+    layout->AddView(new Section(
+        info.title, info.state == PageInfoModel::SECTION_STATE_OK,
+        info.headline, info.description));
     layout->AddPaddingRow(0, kVerticalPadding);
   }
   layout->AddPaddingRow(1, kVerticalPadding);
@@ -240,7 +241,7 @@ std::wstring PageInfoWindowView::GetWindowTitle() const {
 }
 
 std::wstring PageInfoWindowView::GetWindowName() const {
-  return prefs::kPageInfoWindowPlacement;
+  return UTF8ToWide(prefs::kPageInfoWindowPlacement);
 }
 
 views::View* PageInfoWindowView::GetContentsView() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,50 @@
 
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
+#include "gfx/brush.h"
 #include "gfx/font.h"
 #include "gfx/rect.h"
-#include "third_party/skia/include/core/SkShader.h"
+#include "third_party/skia/include/effects/SkGradientShader.h"
 
 #if defined(OS_WIN)
 #include "gfx/canvas_skia_paint.h"
 #endif
 
+namespace {
+
+// A platform wrapper for a Skia shader that makes sure the underlying
+// SkShader object is unref'ed when this object is destroyed.
+class SkiaShader : public gfx::Brush {
+ public:
+  explicit SkiaShader(SkShader* shader) : shader_(shader) {
+  }
+  virtual ~SkiaShader() {
+    shader_->unref();
+  }
+
+  // Accessor for shader, so it can be associated with a SkPaint.
+  SkShader* shader() const { return shader_; }
+
+ private:
+  SkShader* shader_;
+
+  DISALLOW_COPY_AND_ASSIGN(SkiaShader);
+};
+
+
+}  // namespace
+
 namespace gfx {
+
+////////////////////////////////////////////////////////////////////////////////
+// CanvasSkia, public:
+
+// static
+int CanvasSkia::DefaultCanvasTextAlignment() {
+  if (!base::i18n::IsRTL())
+    return gfx::Canvas::TEXT_ALIGN_LEFT;
+  return gfx::Canvas::TEXT_ALIGN_RIGHT;
+}
 
 SkBitmap CanvasSkia::ExtractBitmap() const {
   const SkBitmap& device_bitmap = getDevice()->accessBitmap(false);
@@ -54,31 +89,11 @@ void CanvasSkia::Restore() {
   restore();
 }
 
-bool CanvasSkia::GetClipRect(gfx::Rect* r) {
-  SkRect clip;
-  if (!getClipBounds(&clip)) {
-    if (r)
-      r->SetRect(0, 0, 0, 0);
-    return false;
-  }
-  r->SetRect(SkScalarRound(clip.fLeft), SkScalarRound(clip.fTop),
-             SkScalarRound(clip.fRight - clip.fLeft),
-             SkScalarRound(clip.fBottom - clip.fTop));
-  return true;
-}
-
 bool CanvasSkia::ClipRectInt(int x, int y, int w, int h) {
   SkRect new_clip;
   new_clip.set(SkIntToScalar(x), SkIntToScalar(y),
                SkIntToScalar(x + w), SkIntToScalar(y + h));
   return clipRect(new_clip);
-}
-
-bool CanvasSkia::IntersectsClipRectInt(int x, int y, int w, int h) {
-  SkRect clip;
-  return getClipBounds(&clip) &&
-      clip.intersect(SkIntToScalar(x), SkIntToScalar(y), SkIntToScalar(x + w),
-                     SkIntToScalar(y + h));
 }
 
 void CanvasSkia::TranslateInt(int x, int y) {
@@ -94,19 +109,24 @@ void CanvasSkia::FillRectInt(const SkColor& color, int x, int y, int w, int h) {
   paint.setColor(color);
   paint.setStyle(SkPaint::kFill_Style);
   paint.setXfermodeMode(SkXfermode::kSrcOver_Mode);
-  FillRectInt(x, y, w, h, paint);
+  DrawRectInt(x, y, w, h, paint);
 }
 
-void CanvasSkia::FillRectInt(int x, int y, int w, int h, const SkPaint& paint) {
-  SkIRect rc = {x, y, x + w, y + h};
-  drawIRect(rc, paint);
+void CanvasSkia::FillRectInt(const gfx::Brush* brush,
+                             int x, int y, int w, int h) {
+  const SkiaShader* shader = static_cast<const SkiaShader*>(brush);
+  SkPaint paint;
+  paint.setShader(shader->shader());
+  // TODO(beng): set shader transform to match canvas transform.
+  DrawRectInt(x, y, w, h, paint);
 }
 
 void CanvasSkia::DrawRectInt(const SkColor& color, int x, int y, int w, int h) {
   DrawRectInt(color, x, y, w, h, SkXfermode::kSrcOver_Mode);
 }
 
-void CanvasSkia::DrawRectInt(const SkColor& color, int x, int y, int w, int h,
+void CanvasSkia::DrawRectInt(const SkColor& color,
+                             int x, int y, int w, int h,
                              SkXfermode::Mode mode) {
   SkPaint paint;
   paint.setColor(color);
@@ -117,12 +137,17 @@ void CanvasSkia::DrawRectInt(const SkColor& color, int x, int y, int w, int h,
   paint.setStrokeWidth(SkIntToScalar(0));
   paint.setXfermodeMode(mode);
 
-  SkIRect rc = {x, y, x + w, y + h};
+  DrawRectInt(x, y, w, h, paint);
+}
+
+void CanvasSkia::DrawRectInt(int x, int y, int w, int h, const SkPaint& paint) {
+  SkIRect rc = { x, y, x + w, y + h };
   drawIRect(rc, paint);
 }
 
-void CanvasSkia::DrawLineInt(const SkColor& color, int x1, int y1, int x2,
-                             int y2) {
+void CanvasSkia::DrawLineInt(const SkColor& color,
+                             int x1, int y1,
+                             int x2, int y2) {
   SkPaint paint;
   paint.setColor(color);
   paint.setStrokeWidth(SkIntToScalar(1));
@@ -168,44 +193,36 @@ void CanvasSkia::DrawFocusRect(int x, int y, int width, int height) {
   paint.setShader(shader);
   shader->unref();
 
-  SkRect rect;
-  rect.set(SkIntToScalar(x), SkIntToScalar(y),
-           SkIntToScalar(x + width), SkIntToScalar(y + 1));
-  drawRect(rect, paint);
-  rect.set(SkIntToScalar(x), SkIntToScalar(y + height - 1),
-           SkIntToScalar(x + width), SkIntToScalar(y + height));
-  drawRect(rect, paint);
-
-  rect.set(SkIntToScalar(x), SkIntToScalar(y),
-           SkIntToScalar(x + 1), SkIntToScalar(y + height));
-  drawRect(rect, paint);
-  rect.set(SkIntToScalar(x + width - 1), SkIntToScalar(y),
-           SkIntToScalar(x + width), SkIntToScalar(y + height));
-  drawRect(rect, paint);
+  DrawRectInt(x, y, width, 1, paint);
+  DrawRectInt(x, y + height - 1, width, 1, paint);
+  DrawRectInt(x, y, 1, height, paint);
+  DrawRectInt(x + width - 1, y, 1, height, paint);
 }
 
 void CanvasSkia::DrawBitmapInt(const SkBitmap& bitmap, int x, int y) {
   drawBitmap(bitmap, SkIntToScalar(x), SkIntToScalar(y));
 }
 
-void CanvasSkia::DrawBitmapInt(const SkBitmap& bitmap, int x, int y,
+void CanvasSkia::DrawBitmapInt(const SkBitmap& bitmap,
+                               int x, int y,
                                const SkPaint& paint) {
   drawBitmap(bitmap, SkIntToScalar(x), SkIntToScalar(y), &paint);
 }
 
-void CanvasSkia::DrawBitmapInt(const SkBitmap& bitmap, int src_x, int src_y,
-                               int src_w, int src_h, int dest_x, int dest_y,
-                               int dest_w, int dest_h,
+void CanvasSkia::DrawBitmapInt(const SkBitmap& bitmap,
+                               int src_x, int src_y, int src_w, int src_h,
+                               int dest_x, int dest_y, int dest_w, int dest_h,
                                bool filter) {
   SkPaint p;
   DrawBitmapInt(bitmap, src_x, src_y, src_w, src_h, dest_x, dest_y,
                 dest_w, dest_h, filter, p);
 }
 
-void CanvasSkia::DrawBitmapInt(const SkBitmap& bitmap, int src_x, int src_y,
-                               int src_w, int src_h, int dest_x, int dest_y,
-                               int dest_w, int dest_h,
-                               bool filter, const SkPaint& paint) {
+void CanvasSkia::DrawBitmapInt(const SkBitmap& bitmap,
+                               int src_x, int src_y, int src_w, int src_h,
+                               int dest_x, int dest_y, int dest_w, int dest_h,
+                               bool filter,
+                               const SkPaint& paint) {
   DLOG_ASSERT(src_x + src_w < std::numeric_limits<int16_t>::max() &&
               src_y + src_h < std::numeric_limits<int16_t>::max());
   if (src_w <= 0 || src_h <= 0 || dest_w <= 0 || dest_h <= 0) {
@@ -270,12 +287,13 @@ void CanvasSkia::DrawStringInt(const std::wstring& text,
                 display_rect.width(), display_rect.height());
 }
 
-void CanvasSkia::TileImageInt(const SkBitmap& bitmap, int x, int y, int w,
-                              int h) {
+void CanvasSkia::TileImageInt(const SkBitmap& bitmap,
+                              int x, int y, int w, int h) {
   TileImageInt(bitmap, 0, 0, x, y, w, h);
 }
 
-void CanvasSkia::TileImageInt(const SkBitmap& bitmap, int src_x, int src_y,
+void CanvasSkia::TileImageInt(const SkBitmap& bitmap,
+                              int src_x, int src_y,
                               int dest_x, int dest_y, int w, int h) {
   if (!IntersectsClipRectInt(dest_x, dest_y, w, h))
     return;
@@ -314,11 +332,14 @@ const CanvasSkia* CanvasSkia::AsCanvasSkia() const {
   return this;
 }
 
-// static
-int CanvasSkia::DefaultCanvasTextAlignment() {
-  if (!base::i18n::IsRTL())
-    return gfx::Canvas::TEXT_ALIGN_LEFT;
-  return gfx::Canvas::TEXT_ALIGN_RIGHT;
+////////////////////////////////////////////////////////////////////////////////
+// CanvasSkia, private:
+
+bool CanvasSkia::IntersectsClipRectInt(int x, int y, int w, int h) {
+  SkRect clip;
+  return getClipBounds(&clip) &&
+      clip.intersect(SkIntToScalar(x), SkIntToScalar(y), SkIntToScalar(x + w),
+                     SkIntToScalar(y + h));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

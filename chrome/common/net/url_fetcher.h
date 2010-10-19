@@ -9,6 +9,7 @@
 
 #ifndef CHROME_COMMON_NET_URL_FETCHER_H_
 #define CHROME_COMMON_NET_URL_FETCHER_H_
+#pragma once
 
 #include <string>
 
@@ -73,6 +74,9 @@ class URLFetcher {
                                     int response_code,
                                     const ResponseCookies& cookies,
                                     const std::string& data) = 0;
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   // URLFetcher::Create uses the currently registered Factory to create the
@@ -83,6 +87,9 @@ class URLFetcher {
                                          const GURL& url,
                                          RequestType request_type,
                                          Delegate* d) = 0;
+
+   protected:
+    virtual ~Factory() {}
   };
 
   // |url| is the URL to send the request to.
@@ -133,7 +140,8 @@ class URLFetcher {
 
   // Set the URLRequestContext on the request.  Must be called before the
   // request is started.
-  void set_request_context(URLRequestContextGetter* request_context_getter);
+  void set_request_context(
+      URLRequestContextGetter* request_context_getter);
 
   // If |retry| is false, 5xx responses will be propagated to the observer,
   // if it is true URLFetcher will automatically re-execute the request,

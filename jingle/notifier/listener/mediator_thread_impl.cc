@@ -26,10 +26,12 @@ DISABLE_RUNNABLE_METHOD_REFCOUNT(notifier::MediatorThreadImpl);
 
 namespace notifier {
 
-MediatorThreadImpl::MediatorThreadImpl(bool use_chrome_async_socket)
+MediatorThreadImpl::MediatorThreadImpl(bool use_chrome_async_socket,
+                                       bool try_ssltcp_first)
     : delegate_(NULL),
       parent_message_loop_(MessageLoop::current()),
       use_chrome_async_socket_(use_chrome_async_socket),
+      try_ssltcp_first_(try_ssltcp_first),
       worker_thread_("MediatorThread worker thread") {
   DCHECK(parent_message_loop_);
 }
@@ -172,7 +174,8 @@ void MediatorThreadImpl::DoLogin(
   // TODO(akalin): Use an existing HostResolver from somewhere (maybe
   // the IOThread one).
   host_resolver_ =
-      net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism);
+      net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
+                                    NULL);
 
   // Start a new pump for the login.
   login_.reset();
@@ -204,14 +207,10 @@ void MediatorThreadImpl::DoLogin(
                                    server_list_count,
                                    // talk_base::FirewallManager* is NULL.
                                    NULL,
+                                   try_ssltcp_first_,
                                    // Both the proxy and a non-proxy route
                                    // will be attempted.
-                                   false,
-                                   // |previous_login_successful| is true
-                                   // because we have already done a
-                                   // successful gaia login at this point
-                                   // through another mechanism.
-                                   true));
+                                   false));
 
   login_->SignalClientStateChange.connect(
       this, &MediatorThreadImpl::OnClientStateChangeMessage);
@@ -332,21 +331,16 @@ void MediatorThreadImpl::OnClientStateChangeMessageOnParentThread(
     LoginConnectionState state) {
   DCHECK_EQ(MessageLoop::current(), parent_message_loop_);
   switch (state) {
-    case STATE_CLOSED:
-      if (delegate_) {
-        delegate_->OnConnectionStateChange(false);
-      }
-      break;
-    case STATE_RETRYING:
-    case STATE_OPENING:
+    case STATE_DISCONNECTED:
       LOG(INFO) << "P2P: Thread trying to connect.";
       // Maybe first time logon, maybe intermediate network disruption. Assume
       // the server went down, and lost our subscription for updates.
       if (delegate_) {
+        delegate_->OnConnectionStateChange(false);
         delegate_->OnSubscriptionStateChange(false);
       }
       break;
-    case STATE_OPENED:
+    case STATE_CONNECTED:
       if (delegate_) {
         delegate_->OnConnectionStateChange(true);
       }

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@ class XmppClientSettings;
 }
 
 namespace net {
-struct HostPortPair;
+class HostPortPair;
 class HostResolver;
 }
 
@@ -36,6 +36,7 @@ class LoginSettings {
                 ServerInformation* server_list,
                 int server_count,
                 talk_base::FirewallManager* firewall,
+                bool try_ssltcp_first,
                 bool proxy_only);
 
   ~LoginSettings();
@@ -46,6 +47,10 @@ class LoginSettings {
   // modification of part (FirewallManager) of its state.
   talk_base::FirewallManager* firewall() {
     return firewall_;
+  }
+
+  bool try_ssltcp_first() const {
+    return try_ssltcp_first_;
   }
 
   bool proxy_only() const {
@@ -84,6 +89,7 @@ class LoginSettings {
   void clear_server_override();
 
  private:
+  bool try_ssltcp_first_;
   bool proxy_only_;
   talk_base::FirewallManager* firewall_;
   std::string lang_;

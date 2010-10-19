@@ -6,6 +6,7 @@
   "description": "__MSG_chrome_extension_description__",
   "permissions": ["http://*.google.com/*", "https://*.google.com/*"],
   "allow_reload": false,
+  "is_hosted_app": false,
   "order": 2,
   "enabledIncognito": false,
   "wantsFileAccess": true,
@@ -24,13 +25,15 @@
   "views": [
     {
       "path": "bar.html",
-      "render_proess_id": 42,
-      "render_view_id": 88
+      "renderProcessId": 42,
+      "renderViewId": 88,
+      "incognito": false
     },
     {
       "path": "dog.html",
-      "render_proess_id": 0,
-      "render_view_id": 0
+      "renderProcessId": 0,
+      "renderViewId": 0,
+      "incognito": false
     }
   ],
   "hasPopupAction": false,

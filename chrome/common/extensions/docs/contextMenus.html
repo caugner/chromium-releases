@@ -15,7 +15,7 @@
     </script>
     <script type="text/javascript" src="js/api_page_generator.js"></script>
     <script type="text/javascript" src="js/bootstrap.js"></script>
-  <title>chrome.contextMenus - Google Chrome Extensions - Google Code</title></head>
+  <title>Context Menus - Google Chrome Extensions - Google Code</title></head>
   <body>  <div id="gc-container" class="labs">
       <div id="devModeWarning">
         You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
@@ -79,8 +79,23 @@
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd>
+            <div></div>
+          </dd>
+
         </div> <!-- /VALUE -->
 
+        <div id="functionParametersTemplate">
+          <h5>Parameters</h5>
+          <dl>
+            <div>
+              <div>
+              </div>
+            </div>
+          </dl>         
+        </div>
       </div> <!-- /SUBTEMPLATES -->
 
   <a id="top"></a>
@@ -142,6 +157,7 @@
         <ul>
           <li><a href="getstarted.html">Getting Started</a></li>
           <li><a href="overview.html">Overview</a></li>
+          <li><a href="whats_new.html">What's New?</a></li>
           <li><h2><a href="devguide.html">Developer's Guide</a></h2>
             <ul>
               <li>Browser UI
@@ -211,7 +227,7 @@
 
     <div class="g-unit" id="gc-pagecontent">
       <div id="pageTitle">
-        <h1 class="page_title">chrome.contextMenus</h1>
+        <h1 class="page_title">Context Menus</h1>
       </div>
         <!-- TABLE OF CONTENTS -->
         <div id="toc">
@@ -219,6 +235,13 @@
           <ol>
             <li>
               <a href="#manifest">Manifest</a>
+              <ol>
+                <li style="display: none; ">
+                  <a>h3Name</a>
+                </li>
+              </ol>
+            </li><li>
+              <a href="#examples">Examples</a>
               <ol>
                 <li style="display: none; ">
                   <a>h3Name</a>
@@ -258,11 +281,11 @@
                       </li>
                     </ol>
                   </li>
-                  <li style="display: none; ">
+                  <li>
                     <a href="#types">Types</a>
                     <ol>
                       <li>
-                        <a href="#id-anchor">id</a>
+                        <a href="#type-OnClickData">OnClickData</a>
                       </li>
                     </ol>
                   </li>
@@ -272,8 +295,15 @@
         </div>
         <!-- /TABLE OF CONTENTS -->
 
+        <!-- Standard content lead-in for experimental API pages -->
+        <p id="classSummary" style="display: none; ">
+          For information on how to use experimental APIs, see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
+        </p>
+
         <!-- STATIC CONTENT PLACEHOLDER -->
-        <div id="static"><!-- BEGIN AUTHORED CONTENT -->
+        <div id="static"><div id="pageData-name" class="pageData">Context Menus</div>
+
+<!-- BEGIN AUTHORED CONTENT -->
 <p>
 The context menus module allows you
 to add items to Google Chrome's context menu.
@@ -315,8 +345,14 @@ For example:
   ...
 }</pre>
 
+<h2 id="examples">Examples</h2>
+
+<p>
+You can find samples of this API on the
+<a href="samples.html#contextMenus">sample page</a>.
+
 <!-- END AUTHORED CONTENT -->
-</div>
+</p></div>
 
         <!-- API PAGE -->
         <div class="apiPage">
@@ -462,6 +498,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -514,6 +556,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -566,6 +614,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -629,6 +683,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -661,7 +721,7 @@ For example:
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>Function to be called back when your menu item is clicked.</dd>
+          <dd>A function that will be called back when the menu item is clicked.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -681,6 +741,133 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd>
+            <div>
+          <h5>Parameters</h5>
+          <dl>
+            <div>
+              <div>
+          <dt>
+            <var>info</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="contextMenus.html#type-OnClickData">OnClickData</a>
+                      </span>
+                      <span style="display: none; ">
+                        <span>
+                          array of <span><span></span></span>
+                        </span>
+                        <span>paramType</span>
+                        <span></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>Information about the item clicked and the context where the click happened.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+            </div><div>
+              <div>
+          <dt>
+            <var>tab</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="tabs.html#type-Tab">Tab</a>
+                      </span>
+                      <span style="display: none; ">
+                        <span>
+                          array of <span><span></span></span>
+                        </span>
+                        <span>paramType</span>
+                        <span></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>The details of the tab where the click took place.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+            </div>
+          </dl>         
+        </div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -733,6 +920,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -796,6 +989,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -859,10 +1058,22 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div><div>
                     <div>
@@ -915,6 +1126,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -973,6 +1190,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -991,7 +1214,7 @@ For example:
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span></span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span></span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div style="display: none; ">
                       <div>
@@ -1078,6 +1301,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div><div>
                     <div>
@@ -1130,6 +1359,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -1157,7 +1392,7 @@ For example:
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span></span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span></span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div style="display: none; ">
                       <div>
@@ -1243,6 +1478,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -1270,7 +1511,7 @@ For example:
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span></span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span></span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div style="display: none; ">
                       <div>
@@ -1358,6 +1599,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div><div>
                     <div>
@@ -1457,6 +1704,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1511,6 +1764,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1565,6 +1824,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1630,6 +1895,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1684,6 +1955,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1736,6 +2013,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1801,6 +2084,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1866,10 +2155,22 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div><div>
                     <div>
@@ -1922,6 +2223,12 @@ For example:
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -1949,7 +2256,7 @@ For example:
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span></span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span></span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div style="display: none; ">
                       <div>
@@ -2009,17 +2316,591 @@ For example:
           </div> <!-- /apiGroup -->
 
           <!-- TYPES -->
-          <div class="apiGroup" style="display: none; ">
+          <div class="apiGroup">
             <a name="types"></a>
             <h3 id="types">Types</h3>
 
             <!-- iterates over all types -->
             <div class="apiItem">
-              <a></a>
-              <h4>type name</h4>
+              <a name="type-OnClickData"></a>
+              <h4>OnClickData</h4>
 
               <div>
+          <dt>
+            <var style="display: none; ">paramName</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>object</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>Information sent when a context menu item is clicked.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+              <div>
+                <div>
+          <dt>
+            <var>menuItemId</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>integer</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>The id of the menu item that was clicked.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
               </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>parentMenuItemId</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>integer</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>The parent id, if any, for the item clicked.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>mediaType</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>One of 'image', 'video', or 'audio' if the context menu was activated on one of these types of elements.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>linkUrl</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>If the element is a link, the url it points to.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>srcUrl</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>Will be present for elements with a 'src' url.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>pageUrl</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>The url of the page where the menu item was clicked.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>frameUrl</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd> The url of the frame of the element where the context menu was clicked, if it was in a frame.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>selectionText</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>The text for the context selection, if any.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>editable</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>A flag indicating whether the element is editable (text input, textarea, etc.).</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
 
             </div> <!-- /apiItem -->
 

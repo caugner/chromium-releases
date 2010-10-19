@@ -13,7 +13,6 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSecurityPolicy.h"
 #include "webkit/extensions/v8/gears_extension.h"
-#include "webkit/extensions/v8/interval_extension.h"
 #include "webkit/tools/test_shell/test_shell.h"
 
 #if defined(OS_WIN)
@@ -32,8 +31,6 @@ TestShellWebKitInit::TestShellWebKitInit(bool layout_test_mode) {
   WebKit::WebScriptController::enableV8SingleThreadMode();
   WebKit::WebScriptController::registerExtension(
       extensions_v8::GearsExtension::Get());
-  WebKit::WebScriptController::registerExtension(
-      extensions_v8::IntervalExtension::Get());
   WebKit::WebRuntimeFeatures::enableSockets(true);
   WebKit::WebRuntimeFeatures::enableApplicationCache(true);
   WebKit::WebRuntimeFeatures::enableDatabase(true);
@@ -42,6 +39,11 @@ TestShellWebKitInit::TestShellWebKitInit(bool layout_test_mode) {
   WebKit::WebRuntimeFeatures::enableNotifications(true);
   WebKit::WebRuntimeFeatures::enableTouch(true);
   WebKit::WebRuntimeFeatures::enableIndexedDatabase(true);
+  WebKit::WebRuntimeFeatures::enableSpeechInput(true);
+
+  // TODO(hwennborg): Enable this once the implementation supports it.
+  WebKit::WebRuntimeFeatures::enableDeviceMotion(false);
+  WebKit::WebRuntimeFeatures::enableDeviceOrientation(false);
 
   // Load libraries for media and enable the media player.
   FilePath module_path;
@@ -64,7 +66,9 @@ TestShellWebKitInit::TestShellWebKitInit(bool layout_test_mode) {
 
   WebKit::WebDatabase::setObserver(&database_system_);
 
-  file_system_.set_sandbox_enabled(false);
+  blob_registry_ = new TestShellWebBlobRegistryImpl();
+
+  file_utilities_.set_sandbox_enabled(false);
 
 #if defined(OS_WIN)
   // Ensure we pick up the default theme engine.

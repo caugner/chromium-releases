@@ -13,6 +13,7 @@
 
 #include "app/clipboard/clipboard.h"
 #include "app/clipboard/scoped_clipboard_writer.h"
+#include "app/keyboard_codes.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "app/os_exchange_data.h"
@@ -24,7 +25,6 @@
 #include "base/basictypes.h"
 #include "base/i18n/rtl.h"
 #include "base/iat_patch.h"
-#include "base/keyboard_codes.h"
 #include "base/lazy_instance.h"
 #include "base/ref_counted.h"
 #include "base/utf_string_conversions.h"
@@ -429,7 +429,7 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
 
   Create(hwnd, 0, 0, 0, l10n_util::GetExtendedStyles());
   SetReadOnly(popup_window_mode_);
-  SetFont(font_.hfont());
+  SetFont(font_.GetNativeFont());
 
   // NOTE: Do not use SetWordBreakProcEx() here, that is no longer supported as
   // of Rich Edit 2.0 onward.
@@ -438,7 +438,7 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
 
   // Get the metrics for the font.
   HDC dc = ::GetDC(NULL);
-  SelectObject(dc, font_.hfont());
+  SelectObject(dc, font_.GetNativeFont());
   TEXTMETRIC tm = {0};
   GetTextMetrics(dc, &tm);
   const float kXHeightRatio = 0.7f;  // The ratio of a font's x-height to its
@@ -446,12 +446,12 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
                                      // provide a true value for a font's
                                      // x-height in its text metrics, so we
                                      // approximate.
-  font_x_height_ = static_cast<int>((static_cast<float>(font_.baseline() -
+  font_x_height_ = static_cast<int>((static_cast<float>(font_.GetBaseline() -
       tm.tmInternalLeading) * kXHeightRatio) + 0.5);
   // The distance from the top of the field to the desired baseline of the
   // rendered text.
   const int kTextBaseline = popup_window_mode_ ? 15 : 18;
-  font_y_adjustment_ = kTextBaseline - font_.baseline();
+  font_y_adjustment_ = kTextBaseline - font_.GetBaseline();
 
   // Get the number of twips per pixel, which we need below to offset our text
   // by the desired number of pixels.
@@ -511,13 +511,6 @@ void AutocompleteEditViewWin::SaveStateToTab(TabContents* tab) {
 
 void AutocompleteEditViewWin::Update(
     const TabContents* tab_for_state_restoring) {
-  // If we're switching to a tab with a collapsed toolbar, bail
-  // now, since we won't be showing the Omnibox anyway, and
-  // executing the code below just results in a flicker before
-  // the toolbar hides.
-  if (tab_for_state_restoring && tab_for_state_restoring->is_app())
-    return;
-
   const bool visibly_changed_permanent_text =
       model_->UpdatePermanentText(toolbar_model_->GetText());
 
@@ -698,15 +691,21 @@ void AutocompleteEditViewWin::UpdatePopup() {
   //   * The user is trying to compose something in an IME
   CHARRANGE sel;
   GetSel(sel);
-  model_->StartAutocomplete((sel.cpMax < GetTextLength()) || ime_composing);
+  model_->StartAutocomplete(sel.cpMax != sel.cpMin,
+                            (sel.cpMax < GetTextLength()) || ime_composing);
 }
 
 void AutocompleteEditViewWin::ClosePopup() {
+  if (popup_view_->GetModel()->IsOpen())
+    controller_->OnAutocompleteWillClosePopup();
+
   popup_view_->GetModel()->StopAutocomplete();
 }
 
 void AutocompleteEditViewWin::SetFocus() {
   ::SetFocus(m_hWnd);
+  parent_view_->
+      NotifyAccessibilityEvent(AccessibilityTypes::EVENT_FOCUS, false);
 }
 
 IAccessible* AutocompleteEditViewWin::GetIAccessible() {
@@ -878,10 +877,10 @@ void AutocompleteEditViewWin::PasteAndGo(const std::wstring& text) {
 
 bool AutocompleteEditViewWin::SkipDefaultKeyEventProcessing(
     const views::KeyEvent& e) {
-  base::KeyboardCode key = e.GetKeyCode();
+  app::KeyboardCode key = e.GetKeyCode();
   // We don't process ALT + numpad digit as accelerators, they are used for
   // entering special characters.  We do translate alt-home.
-  if (e.IsAltDown() && (key != base::VKEY_HOME) &&
+  if (e.IsAltDown() && (key != app::VKEY_HOME) &&
       win_util::IsNumPadDigit(key, e.IsExtendedKey()))
     return true;
 
@@ -893,28 +892,28 @@ bool AutocompleteEditViewWin::SkipDefaultKeyEventProcessing(
   // accelerators (e.g., F5 for reload the page should work even when the
   // Omnibox gets focused).
   switch (key) {
-    case base::VKEY_ESCAPE: {
+    case app::VKEY_ESCAPE: {
       ScopedFreeze freeze(this, GetTextObjectModel());
       return model_->OnEscapeKeyPressed();
     }
 
-    case base::VKEY_RETURN:
+    case app::VKEY_RETURN:
       return true;
 
-    case base::VKEY_UP:
-    case base::VKEY_DOWN:
+    case app::VKEY_UP:
+    case app::VKEY_DOWN:
       return !e.IsAltDown();
 
-    case base::VKEY_DELETE:
-    case base::VKEY_INSERT:
+    case app::VKEY_DELETE:
+    case app::VKEY_INSERT:
       return !e.IsAltDown() && e.IsShiftDown() && !e.IsControlDown();
 
-    case base::VKEY_X:
-    case base::VKEY_V:
+    case app::VKEY_X:
+    case app::VKEY_V:
       return !e.IsAltDown() && e.IsControlDown();
 
-    case base::VKEY_BACK:
-    case base::VKEY_OEM_PLUS:
+    case app::VKEY_BACK:
+    case app::VKEY_OEM_PLUS:
       return true;
 
     default:
@@ -1356,6 +1355,9 @@ void AutocompleteEditViewWin::OnKillFocus(HWND focus_wnd) {
     return;
   }
 
+  // This must be invoked before ClosePopup.
+  controller_->OnAutocompleteLosingFocus(focus_wnd);
+
   // Close the popup.
   ClosePopup();
 
@@ -1759,7 +1761,7 @@ void AutocompleteEditViewWin::HandleKeystroke(UINT message,
   ScopedFreeze freeze(this, GetTextObjectModel());
   OnBeforePossibleChange();
 
-  if (key == base::VKEY_HOME || key == base::VKEY_END) {
+  if (key == app::VKEY_HOME || key == app::VKEY_END) {
     // DefWindowProc() might reset the keyboard layout when it receives a
     // keydown event for VKEY_HOME or VKEY_END. When the window was created
     // with WS_EX_LAYOUTRTL and the current keyboard layout is not a RTL one,
@@ -2154,10 +2156,10 @@ void AutocompleteEditViewWin::DrawSlashForInsecureScheme(
   const int kAdditionalSpaceOutsideFont =
       static_cast<int>(ceil(kStrokeWidthPixels * 1.5f));
   const CRect scheme_rect(PosFromChar(insecure_scheme_component_.begin).x,
-                          font_top + font_.baseline() - font_x_height_ -
+                          font_top + font_.GetBaseline() - font_x_height_ -
                               kAdditionalSpaceOutsideFont,
                           PosFromChar(insecure_scheme_component_.end()).x,
-                          font_top + font_.baseline() +
+                          font_top + font_.GetBaseline() +
                               kAdditionalSpaceOutsideFont);
 
   // Clip to the portion we care about and translate to canvas coordinates
@@ -2238,7 +2240,7 @@ void AutocompleteEditViewWin::DrawDropHighlight(
   const CRect highlight_rect(highlight_x,
                              highlight_y,
                              highlight_x + 1,
-                             highlight_y + font_.height());
+                             highlight_y + font_.GetHeight());
 
   // Clip the highlight to the region being painted.
   CRect clip_rect;
@@ -2435,7 +2437,7 @@ void AutocompleteEditViewWin::RepaintDropHighlight(int position) {
   if ((position != -1) && (position <= GetTextLength())) {
     const POINT min_loc(PosFromChar(position));
     const RECT highlight_bounds = {min_loc.x - 1, font_y_adjustment_,
-        min_loc.x + 2, font_.height() + font_y_adjustment_};
+        min_loc.x + 2, font_.GetHeight() + font_y_adjustment_};
     InvalidateRect(&highlight_bounds, false);
   }
 }

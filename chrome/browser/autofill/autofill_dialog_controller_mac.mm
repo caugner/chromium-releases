@@ -16,8 +16,10 @@
 #import "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/browser_process.h"
 #import "chrome/browser/cocoa/window_size_autosaver.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/common/notification_details.h"
+#include "chrome/common/notification_observer.h"
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
 #include "grit/app_resources.h"
@@ -84,6 +86,10 @@ void UpdateProfileLabels(std::vector<AutoFillProfile>* input) {
 // data loading is complete and ready to be used.
 - (void)onPersonalDataLoaded:(const std::vector<AutoFillProfile*>&)profiles
                  creditCards:(const std::vector<CreditCard*>&)creditCards;
+
+// Called upon changes to AutoFill preferences that should be reflected in the
+// UI.
+- (void)onPrefChanged:(const std::string&)prefName;
 
 // Returns true if |row| is an index to a valid profile in |tableView_|, and
 // false otherwise.
@@ -184,11 +190,37 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
                         creditCards:personal_data_manager_->credit_cards()];
 }
 
+// Bridges preference changed notifications to the dialog controller.
+class PrefObserver : public NotificationObserver {
+ public:
+  explicit PrefObserver(AutoFillDialogController* controller)
+      : controller_(controller) {}
+
+  // Overridden from NotificationObserver:
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) {
+    if (type == NotificationType::PREF_CHANGED) {
+      const std::string* pref = Details<std::string>(details).ptr();
+      if (pref) {
+        [controller_ onPrefChanged:*pref];
+      }
+    }
+  }
+
+ private:
+  AutoFillDialogController* controller_;
+
+  DISALLOW_COPY_AND_ASSIGN(PrefObserver);
+};
+
 }  // namespace AutoFillDialogControllerInternal
 
 @implementation AutoFillDialogController
 
 @synthesize autoFillEnabled = autoFillEnabled_;
+@synthesize autoFillManaged = autoFillManaged_;
+@synthesize autoFillManagedAndDisabled = autoFillManagedAndDisabled_;
 @synthesize auxiliaryEnabled = auxiliaryEnabled_;
 @synthesize itemIsSelected = itemIsSelected_;
 @synthesize multipleSelected = multipleSelected_;
@@ -245,9 +277,10 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
 
 // Called when the user clicks the save button.
 - (IBAction)save:(id)sender {
-  // If we have an |observer_| then communicate the changes back.
-  if (observer_) {
-    profile_->GetPrefs()->SetBoolean(prefs::kAutoFillEnabled, autoFillEnabled_);
+  // If we have an |observer_| then communicate the changes back, unless
+  // AutoFill has been disabled through policy in the mean time.
+  if (observer_ && !autoFillManagedAndDisabled_) {
+    prefAutoFillEnabled_.SetValueIfNotManaged(autoFillEnabled_);
     profile_->GetPrefs()->SetBoolean(prefs::kAutoFillAuxiliaryProfilesEnabled,
                                      auxiliaryEnabled_);
     observer_->OnAutoFillDialogApply(&profiles_, &creditCards_);
@@ -318,16 +351,18 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
     // Create a new address and save it to the |profiles_| list.
     AutoFillProfile newAddress(string16(), 0);
     [addressSheetController copyModelToProfile:&newAddress];
-    profiles_.push_back(newAddress);
+    if (!newAddress.IsEmpty()) {
+      profiles_.push_back(newAddress);
 
-    // Refresh the view based on new data.
-    UpdateProfileLabels(&profiles_);
-    [tableView_ reloadData];
+      // Refresh the view based on new data.
+      UpdateProfileLabels(&profiles_);
+      [tableView_ reloadData];
 
-    // Update the selection to the newly added item.
-    NSInteger row = [self rowFromProfileIndex:profiles_.size() - 1];
-    [tableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:row]
-            byExtendingSelection:NO];
+      // Update the selection to the newly added item.
+      NSInteger row = [self rowFromProfileIndex:profiles_.size() - 1];
+      [tableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:row]
+              byExtendingSelection:NO];
+    }
   }
   [sheet orderOut:self];
   addressSheetController.reset(nil);
@@ -343,15 +378,17 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
     // Create a new credit card and save it to the |creditCards_| list.
     CreditCard newCreditCard(string16(), 0);
     [creditCardSheetController copyModelToCreditCard:&newCreditCard];
-    creditCards_.push_back(newCreditCard);
+    if (!newCreditCard.IsEmpty()) {
+      creditCards_.push_back(newCreditCard);
 
-    // Refresh the view based on new data.
-    [tableView_ reloadData];
+      // Refresh the view based on new data.
+      [tableView_ reloadData];
 
-    // Update the selection to the newly added item.
-    NSInteger row = [self rowFromCreditCardIndex:creditCards_.size() - 1];
-    [tableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:row]
-            byExtendingSelection:NO];
+      // Update the selection to the newly added item.
+      NSInteger row = [self rowFromCreditCardIndex:creditCards_.size() - 1];
+      [tableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:row]
+              byExtendingSelection:NO];
+    }
   }
   [sheet orderOut:self];
   creditCardSheetController.reset(nil);
@@ -360,19 +397,16 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
 // Deletes selected items; either addresses, credit cards, or a mixture of the
 // two depending on the items selected.
 - (IBAction)deleteSelection:(id)sender {
-  NSIndexSet* selectedRows = [tableView_ selectedRowIndexes];
+  NSIndexSet* selection = [tableView_ selectedRowIndexes];
   NSInteger selectedRow = [tableView_ selectedRow];
-  NSInteger rowCount = [tableView_ numberOfRows];
 
   // Loop through from last to first deleting selected items as we go.
-  for (NSInteger i = rowCount-1; i>=0; --i) {
-    if (![selectedRows containsIndex:i])
-      continue;
-
+  for (NSUInteger i = [selection lastIndex];
+       i != NSNotFound;
+       i = [selection indexLessThanIndex:i]) {
     // We keep track of the "top most" selection in the list so we know where
-    // to to set new selection below.
-    if (i < selectedRow)
-      selectedRow = i;
+    // to set new selection below.
+    selectedRow = i;
 
     if ([self isProfileRow:i]) {
       profiles_.erase(
@@ -391,7 +425,7 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
     [tableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:selectedRow]
             byExtendingSelection:NO];
   } else {
-    [tableView_ selectRowIndexes:[NSIndexSet indexSet] byExtendingSelection:NO];
+    [tableView_ deselectAll:self];
   }
 
   UpdateProfileLabels(&profiles_);
@@ -457,6 +491,14 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
   if (returnCode) {
     AutoFillProfile* profile = static_cast<AutoFillProfile*>(contextInfo);
     [addressSheetController copyModelToProfile:profile];
+
+    if (profile->IsEmpty())
+      [tableView_ deselectAll:self];
+    profiles_.erase(
+        std::remove_if(profiles_.begin(), profiles_.end(),
+                       std::mem_fun_ref(&AutoFillProfile::IsEmpty)),
+        profiles_.end());
+
     UpdateProfileLabels(&profiles_);
     [tableView_ reloadData];
   }
@@ -473,6 +515,14 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
   if (returnCode) {
     CreditCard* creditCard = static_cast<CreditCard*>(contextInfo);
     [creditCardSheetController copyModelToCreditCard:creditCard];
+
+    if (creditCard->IsEmpty())
+      [tableView_ deselectAll:self];
+    creditCards_.erase(
+        std::remove_if(
+            creditCards_.begin(), creditCards_.end(),
+            std::mem_fun_ref(&CreditCard::IsEmpty)),
+        creditCards_.end());
     [tableView_ reloadData];
   }
   [sheet orderOut:self];
@@ -574,6 +624,19 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
 
   std::vector<AutoFillProfile>::iterator i;
   for (i = profiles_.begin(); i != profiles_.end(); ++i) {
+    FieldTypeSet fields;
+    i->GetAvailableFieldTypes(&fields);
+    if (fields.find(ADDRESS_HOME_LINE1) == fields.end() &&
+        fields.find(ADDRESS_HOME_LINE2) == fields.end() &&
+        fields.find(ADDRESS_HOME_APT_NUM) == fields.end() &&
+        fields.find(ADDRESS_HOME_CITY) == fields.end() &&
+        fields.find(ADDRESS_HOME_STATE) == fields.end() &&
+        fields.find(ADDRESS_HOME_ZIP) == fields.end() &&
+        fields.find(ADDRESS_HOME_COUNTRY) == fields.end()) {
+      // No address information in this profile; it's useless as a billing
+      // address.
+      continue;
+    }
     [array addObject:SysUTF16ToNSString(i->Label())];
   }
 
@@ -601,7 +664,7 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
 
 
 // This is the designated initializer for this class.
-// |profiles| are non-retained immutable list of autofill profiles.
+// |profiles| are non-retained immutable list of AutoFill profiles.
 // |creditCards| are non-retained immutable list of credit card info.
 - (id)initWithObserver:(AutoFillDialogObserver*)observer
                profile:(Profile*)profile
@@ -620,9 +683,15 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
     importedProfile_ = importedProfile;
     importedCreditCard_ = importedCreditCard;
 
-    // Use property here to trigger KVO binding.
-    [self setAutoFillEnabled:profile_->GetPrefs()->GetBoolean(
-        prefs::kAutoFillEnabled)];
+    // Initialize the preference observer and watch kAutoFillEnabled.
+    prefObserver_.reset(
+        new AutoFillDialogControllerInternal::PrefObserver(self));
+    prefAutoFillEnabled_.Init(prefs::kAutoFillEnabled, profile_->GetPrefs(),
+                              prefObserver_.get());
+
+    // Call onPrefChanged in order to initialize UI state of the checkbox and
+    // save button.
+    [self onPrefChanged:prefs::kAutoFillEnabled];
 
     // Use property here to trigger KVO binding.
     [self setAuxiliaryEnabled:profile_->GetPrefs()->GetBoolean(
@@ -688,8 +757,7 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
     sizeSaver_.reset([[WindowSizeAutosaver alloc]
         initWithWindow:[self window]
            prefService:g_browser_process->local_state()
-                  path:prefs::kAutoFillDialogPlacement
-                 state:kSaveWindowPos]);
+                  path:prefs::kAutoFillDialogPlacement]);
   }
 
   [NSApp runModalForWindow:[self window]];
@@ -719,6 +787,17 @@ void PersonalDataManagerObserver::OnPersonalDataLoaded() {
   }
 
   UpdateProfileLabels(&profiles_);
+}
+
+- (void)onPrefChanged:(const std::string&)prefName {
+  if (prefName == prefs::kAutoFillEnabled) {
+    [self setAutoFillEnabled:prefAutoFillEnabled_.GetValue()];
+    [self setAutoFillManaged:prefAutoFillEnabled_.IsManaged()];
+    [self setAutoFillManagedAndDisabled:
+        prefAutoFillEnabled_.IsManaged() && !prefAutoFillEnabled_.GetValue()];
+  } else {
+    NOTREACHED();
+  }
 }
 
 - (BOOL)isProfileRow:(NSInteger)row {

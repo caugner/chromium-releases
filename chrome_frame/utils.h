@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
 #include "base/histogram.h"
 #include "base/lock.h"
 #include "base/logging.h"
@@ -21,14 +20,25 @@
 #include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 
+class FilePath;
+
 // utils.h : Various utility functions and classes
 
 extern const wchar_t kChromeContentPrefix[];
+extern const char kGCFProtocol[];
 extern const wchar_t kChromeProtocolPrefix[];
 extern const wchar_t kChromeFrameHeadlessMode[];
 extern const wchar_t kChromeFrameUnpinnedMode[];
-extern const wchar_t kEnableGCFProtocol[];
+extern const wchar_t kAllowUnsafeURLs[];
+extern const wchar_t kEnableBuggyBhoIntercept[];
 extern const wchar_t kChromeMimeType[];
+extern const wchar_t kChromeFrameAttachTabPattern[];
+extern const wchar_t kChromeFrameConfigKey[];
+extern const wchar_t kRenderInGCFUrlList[];
+extern const wchar_t kRenderInHostUrlList[];
+extern const wchar_t kEnableGCFRendererByDefault[];
+extern const wchar_t kIexploreProfileName[];
+extern const wchar_t kRundllProfileName[];
 
 typedef enum ProtocolPatchMethod {
   PATCH_METHOD_IBROWSER = 0,
@@ -105,11 +115,11 @@ void DisplayVersionMismatchWarning(HWND parent,
 // This class provides a base implementation for ATL modules which want to
 // perform all their registration under HKCU. This class overrides the
 // RegisterServer and UnregisterServer methods and registers the type libraries
-// under HKCU (the rest of the registation is made under HKCU by changing the
+// under HKCU (the rest of the registration is made under HKCU by changing the
 // appropriate .RGS files)
 template < class BaseAtlModule >
 class AtlPerUserModule : public BaseAtlModule {
-  public:
+ public:
   HRESULT RegisterServer(BOOL reg_typelib = FALSE,
                          const CLSID* clsid = NULL) throw() {
     HRESULT hr = BaseAtlModule::RegisterServer(FALSE, clsid);
@@ -189,10 +199,6 @@ FilePath GetIETemporaryFilesFolder();
 // @returns true if the version info was successfully retrieved.
 bool GetModuleVersion(HMODULE module, uint32* high, uint32* low);
 
-// Parses a version string and returns the major, minor versions or 0 if not
-// present in the string.  The rest of the version string is ignored.
-bool ParseVersion(const std::wstring& version, uint32* high, uint32* low);
-
 // @returns the module handle to which an address belongs.
 HMODULE GetModuleFromAddress(void* address);
 
@@ -237,6 +243,9 @@ bool IsHeadlessMode();
 // eviction should be possible.
 bool IsUnpinnedMode();
 
+// Returns true if all HTML pages should be rendered in GCF by default.
+bool IsGcfDefaultRenderer();
+
 // Check if this url is opting into Chrome Frame based on static settings.
 bool IsOptInUrl(const wchar_t* url);
 
@@ -274,7 +283,7 @@ bool CheckForCFNavigation(IBrowserService* browser, bool clear_flag);
 // Returns true if the URL passed in is something which can be handled by
 // Chrome. If this function returns false then we should fail the navigation.
 // When is_privileged is true, chrome extension URLs will be considered valid.
-bool IsValidUrlScheme(const std::wstring& url, bool is_privileged);
+bool IsValidUrlScheme(const GURL& url, bool is_privileged);
 
 // Returns the raw http headers for the current request given an
 // IWinInetHttpInfo pointer.
@@ -451,6 +460,9 @@ ProtocolPatchMethod GetPatchMethod();
 // Returns true if the IMoniker patch is enabled.
 bool IsIBrowserServicePatchEnabled();
 
+// Returns true if we can detect that we are running as SYSTEM, false otherwise.
+bool IsSystemProcess();
+
 // STL helper class that implements a functor to delete objects.
 // E.g: std::for_each(v.begin(), v.end(), utils::DeleteObject());
 namespace utils {
@@ -471,13 +483,66 @@ std::string Bscf2Str(DWORD flags);
 // Reads data from a stream into a string.
 HRESULT ReadStream(IStream* stream, size_t size, std::string* data);
 
-// Parses the attach external tab url, which comes in from Chrome in the course
-// of a window.open operation. The format of this URL is as below:-
-// gcf:attach_external_tab&n1&n2&x&y&width&height
-// n1 -> cookie, n2 -> disposition, x, y, width, height -> dimensions of the
-// window.
-// Returns true on success.
-bool ParseAttachExternalTabUrl(const std::wstring& url, uint64* cookie,
-                               gfx::Rect* dimensions, int* disposition);
+// Parses urls targeted at ChromeFrame. This class maintains state like
+// whether a url is prefixed with the gcf: prefix, whether it is being
+// attached to an existing external tab, etc.
+class ChromeFrameUrl {
+ public:
+  ChromeFrameUrl();
+
+  // Parses the url passed in. Returns true on success.
+  bool Parse(const std::wstring& url);
+
+  bool is_chrome_protocol() const {
+    return is_chrome_protocol_;
+  }
+
+  bool attach_to_external_tab() const {
+    return attach_to_external_tab_;
+  }
+
+  uint64 cookie() const {
+    return cookie_;
+  }
+
+  int disposition() const {
+    return disposition_;
+  }
+
+  const gfx::Rect& dimensions() const {
+    return dimensions_;
+  }
+
+  const GURL& gurl() const {
+    return parsed_url_;
+  }
+
+ private:
+  // If we are attaching to an existing external tab, this function parses the
+  // suffix portion of the URL which contains the attach_external_tab prefix.
+  bool ParseAttachExternalTabUrl();
+
+  // Clear state.
+  void Reset();
+
+  bool attach_to_external_tab_;
+  bool is_chrome_protocol_;
+  uint64 cookie_;
+  gfx::Rect dimensions_;
+  int disposition_;
+
+  GURL parsed_url_;
+};
+
+// Returns true if we can navigate to this URL.
+// This function checks if the url scheme is valid for navigation within
+// chrome and whether it is a restricted URL as per IE settings. In either of
+// these cases it returns false.
+bool CanNavigate(const GURL& url, IInternetSecurityManager* security_manager,
+                 bool is_privileged);
+
+// Utility function that prevents the current module from ever being unloaded.
+// Call if you make irreversible patches.
+void PinModule();
 
 #endif  // CHROME_FRAME_UTILS_H_

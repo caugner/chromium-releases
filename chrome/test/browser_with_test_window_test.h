@@ -1,13 +1,13 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_BROWSER_WITH_TEST_WINDOW_TEST_H_
 #define CHROME_TEST_BROWSER_WITH_TEST_WINDOW_TEST_H_
-
-#include <string>
+#pragma once
 
 #include "base/message_loop.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/renderer_host/test/test_render_view_host.h"
 #include "chrome/test/test_browser_window.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -87,8 +87,10 @@ class BrowserWithTestWindowTest : public testing::Test {
   void NavigateAndCommitActiveTab(const GURL& url);
 
  private:
+
   // We need to create a MessageLoop, otherwise a bunch of things fails.
   MessageLoopForUI ui_loop_;
+  ChromeThread ui_thread_;
 
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<TestBrowserWindow> window_;

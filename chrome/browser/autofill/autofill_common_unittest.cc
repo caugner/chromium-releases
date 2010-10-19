@@ -4,6 +4,7 @@
 
 #include "chrome/browser/autofill/autofill_common_unittest.h"
 
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/credit_card.h"
 #include "webkit/glue/form_field.h"
@@ -31,7 +32,9 @@ void SetProfileInfo(AutoFillProfile* profile,
     const char* address1, const char* address2, const char* city,
     const char* state, const char* zipcode, const char* country,
     const char* phone, const char* fax) {
-  profile->set_label(ASCIIToUTF16(label));
+  // TODO(jhawkins): Remove |label|.
+  if (label)
+    profile->set_label(ASCIIToUTF16(label));
   check_and_set(profile, NAME_FIRST, first_name);
   check_and_set(profile, NAME_MIDDLE, middle_name);
   check_and_set(profile, NAME_LAST, last_name);

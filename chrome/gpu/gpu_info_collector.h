@@ -4,9 +4,7 @@
 
 #ifndef CHROME_GPU_GPU_INFO_COLLECTOR_H__
 #define CHROME_GPU_GPU_INFO_COLLECTOR_H__
-
-
-#include <string>
+#pragma once
 
 #include "base/basictypes.h"
 #include "chrome/common/gpu_info.h"

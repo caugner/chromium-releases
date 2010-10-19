@@ -4,10 +4,10 @@
 
 #ifndef CHROME_TEST_CHROME_PROCESS_UTIL_H_
 #define CHROME_TEST_CHROME_PROCESS_UTIL_H_
+#pragma once
 
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/process_util.h"
 #include "base/scoped_ptr.h"
 

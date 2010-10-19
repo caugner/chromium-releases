@@ -15,7 +15,7 @@
     </script>
     <script type="text/javascript" src="js/api_page_generator.js"></script>
     <script type="text/javascript" src="js/bootstrap.js"></script>
-  <title>chrome.cookies - Google Chrome Extensions - Google Code</title></head>
+  <title>Cookies - Google Chrome Extensions - Google Code</title></head>
   <body>  <div id="gc-container" class="labs">
       <div id="devModeWarning">
         You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
@@ -79,8 +79,23 @@
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd>
+            <div></div>
+          </dd>
+
         </div> <!-- /VALUE -->
 
+        <div id="functionParametersTemplate">
+          <h5>Parameters</h5>
+          <dl>
+            <div>
+              <div>
+              </div>
+            </div>
+          </dl>         
+        </div>
       </div> <!-- /SUBTEMPLATES -->
 
   <a id="top"></a>
@@ -142,6 +157,7 @@
         <ul>
           <li><a href="getstarted.html">Getting Started</a></li>
           <li><a href="overview.html">Overview</a></li>
+          <li><a href="whats_new.html">What's New?</a></li>
           <li><h2><a href="devguide.html">Developer's Guide</a></h2>
             <ul>
               <li>Browser UI
@@ -211,7 +227,7 @@
 
     <div class="g-unit" id="gc-pagecontent">
       <div id="pageTitle">
-        <h1 class="page_title">chrome.cookies</h1>
+        <h1 class="page_title">Cookies</h1>
       </div>
         <!-- TABLE OF CONTENTS -->
         <div id="toc">
@@ -283,8 +299,15 @@
         </div>
         <!-- /TABLE OF CONTENTS -->
 
+        <!-- Standard content lead-in for experimental API pages -->
+        <p id="classSummary" style="display: none; ">
+          For information on how to use experimental APIs, see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
+        </p>
+
         <!-- STATIC CONTENT PLACEHOLDER -->
-        <div id="static"><!-- BEGIN AUTHORED CONTENT -->
+        <div id="static"><div id="pageData-name" class="pageData">Cookies</div>
+
+<!-- BEGIN AUTHORED CONTENT -->
 <h2 id="manifest">Manifest</h2>
 
 <p>To use the cookies API,
@@ -360,7 +383,7 @@ see <a href="samples.html">Samples</a>.
 
               <div class="description">
                 <p class="todo" style="display: none; ">Undocumented.</p>
-                <p>Retrieves information about a single cookie. If more than one cookie of the same name exists for the given URL, the one with the longest domain property will be returned. For cookies with the same domain property length, the one with the longest path length will be returned. If domains and paths are equal, then the cookie with the earliest creation time will be returned.</p>
+                <p>Retrieves information about a single cookie. If more than one cookie of the same name exists for the given URL, the one with the longest path will be returned. For cookies with the same path length, the cookie with the earliest creation time will be returned.</p>
 
                 <!-- PARAMETERS -->
                 <h4>Parameters</h4>
@@ -461,6 +484,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -513,6 +542,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -565,10 +600,22 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div><div>
                     <div>
@@ -623,6 +670,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -650,7 +703,7 @@ see <a href="samples.html">Samples</a>.
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Cookie cookie</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>Cookie cookie</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
@@ -703,6 +756,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                     </div>
                   </dl>
@@ -730,7 +789,7 @@ see <a href="samples.html">Samples</a>.
 
               <div class="description">
                 <p class="todo" style="display: none; ">Undocumented.</p>
-                <p>Retrieves all cookies from a single cookie store that match the given information.</p>
+                <p>Retrieves all cookies from a single cookie store that match the given information.  The cookies returned will be sorted, with those with the longest path first.  If multiple cookies have the same path length, those with the earliest creation time will be first.</p>
 
                 <!-- PARAMETERS -->
                 <h4>Parameters</h4>
@@ -831,6 +890,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -883,6 +948,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -935,6 +1006,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -987,6 +1064,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1039,6 +1122,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1091,6 +1180,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1143,10 +1238,22 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div><div>
                     <div>
@@ -1201,6 +1308,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -1228,7 +1341,7 @@ see <a href="samples.html">Samples</a>.
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>array of Cookie cookies</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>array of Cookie cookies</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
@@ -1292,6 +1405,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                     </div>
                   </dl>
@@ -1376,6 +1495,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -1403,7 +1528,7 @@ see <a href="samples.html">Samples</a>.
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>array of CookieStore cookieStores</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>array of CookieStore cookieStores</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
@@ -1467,6 +1592,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                     </div>
                   </dl>
@@ -1594,6 +1725,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1646,6 +1783,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1698,10 +1841,22 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -1729,7 +1884,7 @@ see <a href="samples.html">Samples</a>.
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
@@ -1860,6 +2015,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1912,6 +2073,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -1964,6 +2131,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2016,6 +2189,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2068,6 +2247,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2120,6 +2305,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2172,6 +2363,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2224,6 +2421,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2276,10 +2479,22 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -2307,7 +2522,7 @@ see <a href="samples.html">Samples</a>.
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
@@ -2450,6 +2665,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2502,10 +2723,22 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
                   </div>
                 </dl>
@@ -2621,6 +2854,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2673,6 +2912,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2725,6 +2970,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2777,6 +3028,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2829,6 +3086,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2881,6 +3144,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2933,6 +3202,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -2985,6 +3260,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -3037,6 +3318,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -3089,10 +3376,22 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
 
             </div><div class="apiItem">
@@ -3194,6 +3493,12 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div><div>
                 <div>
@@ -3257,10 +3562,22 @@ see <a href="samples.html">Samples</a>.
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
         </div>
 
             </div> <!-- /apiItem -->

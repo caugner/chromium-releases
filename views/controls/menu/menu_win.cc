@@ -6,9 +6,9 @@
 
 #include <string>
 
+#include "app/keyboard_codes.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
-#include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
@@ -112,7 +112,7 @@ class MenuHostWindow : public gfx::WindowImpl {
       // If the label contains an accelerator, make room for tab.
       if (data->label.find(L'\t') != std::wstring::npos)
         lpmis->itemWidth += font.GetStringWidth(L" ");
-      lpmis->itemHeight = font.height() + kItemBottomMargin + kItemTopMargin;
+      lpmis->itemHeight = font.GetHeight() + kItemBottomMargin + kItemTopMargin;
     } else {
       // Measure separator size.
       lpmis->itemHeight = GetSystemMetrics(SM_CYMENU) / 2;
@@ -158,8 +158,9 @@ class MenuHostWindow : public gfx::WindowImpl {
       if (!underline_mnemonics)
         format |= DT_HIDEPREFIX;
       gfx::Font font;
-      HGDIOBJ old_font = static_cast<HFONT>(SelectObject(hDC, font.hfont()));
-      int fontsize = font.FontSize();
+      HGDIOBJ old_font =
+          static_cast<HFONT>(SelectObject(hDC, font.GetNativeFont()));
+      int fontsize = font.GetFontSize();
 
       // If an accelerator is specified (with a tab delimiting the rest of the
       // label from the accelerator), we have to justify the fist part on the
@@ -442,7 +443,7 @@ void MenuWin::AddMenuItemInternal(int index,
       delegate()->GetLabel(item_id) : label);
 
   // Find out if there is a shortcut we need to append to the label.
-  views::Accelerator accelerator(base::VKEY_UNKNOWN, false, false, false);
+  views::Accelerator accelerator(app::VKEY_UNKNOWN, false, false, false);
   if (delegate() && delegate()->GetAcceleratorInfo(item_id, &accelerator)) {
     actual_label += L'\t';
     actual_label += accelerator.GetShortcutText();

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_DEFAULT_ENCODING_COMBO_MODEL_H_
 #define CHROME_BROWSER_DEFAULT_ENCODING_COMBO_MODEL_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -23,7 +24,7 @@ class DefaultEncodingComboboxModel : public ComboboxModel {
     return static_cast<int>(sorted_encoding_list_.size());
   }
 
-  virtual std::wstring GetItemAt(int index);
+  virtual string16 GetItemAt(int index);
 
   std::string GetEncodingCharsetByIndex(int index);
 

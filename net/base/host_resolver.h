@@ -4,6 +4,7 @@
 
 #ifndef NET_BASE_HOST_RESOLVER_H_
 #define NET_BASE_HOST_RESOLVER_H_
+#pragma once
 
 #include <string>
 
@@ -13,14 +14,12 @@
 #include "net/base/completion_callback.h"
 #include "net/base/request_priority.h"
 
-class MessageLoop;
-
 namespace net {
 
 class AddressList;
 class BoundNetLog;
-class HostCache;
 class HostResolverImpl;
+class NetLog;
 
 // This class represents the task of resolving hostnames (or IP address
 // literal) to an AddressList object.
@@ -37,14 +36,7 @@ class HostResolver : public base::RefCounted<HostResolver> {
   // the rest are optional (and have reasonable defaults).
   class RequestInfo {
    public:
-    RequestInfo(const std::string& hostname, int port)
-        : hostname_(hostname),
-          address_family_(ADDRESS_FAMILY_UNSPECIFIED),
-          host_resolver_flags_(0),
-          port_(port),
-          allow_cached_response_(true),
-          is_speculative_(false),
-          priority_(MEDIUM) {}
+    RequestInfo(const std::string& hostname, int port);
 
     int port() const { return port_; }
     void set_port(int port) {
@@ -246,7 +238,8 @@ class SingleRequestHostResolver {
 // |max_concurrent_resolves| is how many resolve requests will be allowed to
 // run in parallel. Pass HostResolver::kDefaultParallelism to choose a
 // default value.
-HostResolver* CreateSystemHostResolver(size_t max_concurrent_resolves);
+HostResolver* CreateSystemHostResolver(size_t max_concurrent_resolves,
+                                       NetLog* net_log);
 
 }  // namespace net
 

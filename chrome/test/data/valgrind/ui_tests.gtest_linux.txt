@@ -7,7 +7,12 @@ MetricsServiceTest.CrashRenderers
 ExtensionProxyUITest.*
 # See http://crbug.com/42105
 BrowserTest.PosixSessionEnd
-# See http://crbug.com/42921
+# 4GB of RAM is not enough. See http://crbug.com/42921
 ResourceDispatcherTest.CrossSiteAfterCrash
+NewTabUITest.NTPHasThumbnails
 # http://crbug.com/45574   Unhappy on ChromeOS valgrind
 LayoutPluginTester.UnloadNoCrash
+# http://crbug.com/53825 Times out on CrOS valgrind.
+MediaTest.VideoBear*
+# http://crbug.com/53937 Fails on CrOS valgrind
+UILayoutTest.MediaUILayoutTest

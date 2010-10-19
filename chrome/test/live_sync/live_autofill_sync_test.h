@@ -4,18 +4,20 @@
 
 #ifndef CHROME_TEST_LIVE_SYNC_LIVE_AUTOFILL_SYNC_TEST_H_
 #define CHROME_TEST_LIVE_SYNC_LIVE_AUTOFILL_SYNC_TEST_H_
+#pragma once
 
 #include <map>
 #include <set>
 #include <vector>
 
+#include "base/command_line.h"
 #include "chrome/browser/autofill/autofill_common_unittest.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/browser.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"

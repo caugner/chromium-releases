@@ -7,7 +7,7 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "third_party/sqlite/preprocessed/sqlite3.h"
+#include "third_party/sqlite/sqlite3.h"
 
 namespace webkit_database {
 
@@ -129,7 +129,7 @@ void VfsBackend::OpenFile(const FilePath& file_path,
 
   // Try to open/create the DB file.
   *file_handle =
-      base::CreatePlatformFile(file_path.ToWStringHack(), flags, NULL);
+      base::CreatePlatformFile(file_path, flags, NULL, NULL);
 }
 
 // static
@@ -163,7 +163,7 @@ int VfsBackend::DeleteFile(const FilePath& file_path, bool sync_dir) {
 #if defined(OS_POSIX)
   if (sync_dir) {
     base::PlatformFile dir_fd = base::CreatePlatformFile(
-        file_path.DirName().ToWStringHack(), base::PLATFORM_FILE_READ, NULL);
+        file_path.DirName(), base::PLATFORM_FILE_READ, NULL, NULL);
     if (dir_fd == base::kInvalidPlatformFileValue) {
       error_code = SQLITE_CANTOPEN;
     } else {

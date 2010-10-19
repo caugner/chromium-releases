@@ -13,17 +13,19 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
+#include "base/string_number_conversions.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "media/base/data_buffer.h"
 #include "media/base/media.h"
 #include "media/base/video_frame.h"
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/ffmpeg/file_protocol.h"
 #include "media/filters/bitstream_converter.h"
-#include "media/filters/omx_video_decode_engine.h"
 #include "media/tools/omx_test/color_space_util.h"
 #include "media/tools/omx_test/file_reader_util.h"
 #include "media/tools/omx_test/file_sink.h"
+#include "media/video/omx_video_decode_engine.h"
 
 using media::BlockFileReader;
 using media::Buffer;
@@ -44,7 +46,8 @@ using media::YuvFileReader;
 // decoder.
 // TODO(wjia): AVStream should be replaced with a new structure which is
 // neutral to any video decoder. Also change media.gyp correspondingly.
-class TestApp : public base::RefCountedThreadSafe<TestApp> {
+class TestApp : public base::RefCountedThreadSafe<TestApp>,
+                public media::VideoDecodeEngine::EventHandler {
  public:
   TestApp(AVStream* av_stream,
           FileSink* file_sink,
@@ -70,10 +73,9 @@ class TestApp : public base::RefCountedThreadSafe<TestApp> {
     return true;
   }
 
-  void InitializeDoneCallback() {
-  }
+  virtual void OnInitializeComplete(const media::VideoCodecInfo& info) {}
 
-  void StopCallback() {
+  virtual void OnUninitializeComplete() {
     // If this callback is received, mark the |stopped_| flag so that we don't
     // feed more buffers into the decoder.
     // We need to exit the current message loop because we have no more work
@@ -83,12 +85,24 @@ class TestApp : public base::RefCountedThreadSafe<TestApp> {
     message_loop_.Quit();
   }
 
-  void ErrorCallback() {
+  virtual void OnError() {
     // In case of error, this method is called. Mark the error flag and
     // exit the message loop because we have no more work to do.
     LOG(ERROR) << "Error callback received!";
     error_ = true;
     message_loop_.Quit();
+  }
+
+  virtual void OnFlushComplete() {
+    NOTIMPLEMENTED();
+  }
+
+  virtual void OnSeekComplete() {
+    NOTIMPLEMENTED();
+  }
+
+  virtual void OnFormatChange(media::VideoStreamInfo stream_info) {
+    NOTIMPLEMENTED();
   }
 
   void FormatCallback(
@@ -106,7 +120,7 @@ class TestApp : public base::RefCountedThreadSafe<TestApp> {
                              input_format.video_header.height);
   }
 
-  void FeedDoneCallback(scoped_refptr<Buffer> buffer) {
+  virtual void ProduceVideoSample(scoped_refptr<Buffer> buffer) {
     // We receive this callback when the decoder has consumed an input buffer.
     // In this case, delete the previous buffer and enqueue a new one.
     // There are some conditions we don't want to enqueue, for example when
@@ -117,7 +131,7 @@ class TestApp : public base::RefCountedThreadSafe<TestApp> {
       FeedInputBuffer();
   }
 
-  void DecodeDoneCallback(scoped_refptr<VideoFrame> frame) {
+  virtual void ConsumeVideoFrame(scoped_refptr<VideoFrame> frame) {
     // This callback is received when the decoder has completed a decoding
     // task and given us some output data. The frame is owned by the decoder.
     if (stopped_ || error_)
@@ -128,7 +142,7 @@ class TestApp : public base::RefCountedThreadSafe<TestApp> {
 
     // If we are reading to the end, then stop.
     if (frame->IsEndOfStream()) {
-      engine_->Stop(NewRunnableMethod(this, &TestApp::StopCallback));
+      engine_->Uninitialize();
       return;
     }
 
@@ -148,7 +162,7 @@ class TestApp : public base::RefCountedThreadSafe<TestApp> {
     uint8* data;
     int read;
     file_reader_->Read(&data, &read);
-    engine_->EmptyThisBuffer(new DataBuffer(data, read));
+    engine_->ConsumeVideoSample(new DataBuffer(data, read));
   }
 
   void Run() {
@@ -156,13 +170,26 @@ class TestApp : public base::RefCountedThreadSafe<TestApp> {
 
     // Setup the |engine_| with the message loop of the current thread. Also
     // setup codec format and callbacks.
-    engine_ = new OmxVideoDecodeEngine();
-    engine_->Initialize(&message_loop_,
-                        av_stream_.get(),
-                        NewCallback(this, &TestApp::FeedDoneCallback),
-                        NewCallback(this, &TestApp::DecodeDoneCallback),
-                        NewRunnableMethod(this,
-                                          &TestApp::InitializeDoneCallback));
+    media::VideoCodecConfig config;
+    switch (av_stream_->codec->codec_id) {
+      case CODEC_ID_VC1:
+        config.codec_ = media::kCodecVC1; break;
+      case CODEC_ID_H264:
+        config.codec_ = media::kCodecH264; break;
+      case CODEC_ID_THEORA:
+        config.codec_ = media::kCodecTheora; break;
+      case CODEC_ID_MPEG2VIDEO:
+        config.codec_ = media::kCodecMPEG2; break;
+      case CODEC_ID_MPEG4:
+        config.codec_ = media::kCodecMPEG4; break;
+      default:
+        NOTREACHED(); break;
+    }
+    config.opaque_context_ = NULL;
+    config.width_ = av_stream_->codec->width;
+    config.height_ = av_stream_->codec->height;
+    engine_.reset(new OmxVideoDecodeEngine());
+    engine_->Initialize(&message_loop_, this, config);
 
     // Execute the message loop so that we can run tasks on it. This call
     // will return when we call message_loop_.Quit().
@@ -193,7 +220,7 @@ class TestApp : public base::RefCountedThreadSafe<TestApp> {
     printf("\n");
   }
 
-  scoped_refptr<OmxVideoDecodeEngine> engine_;
+  scoped_ptr<OmxVideoDecodeEngine> engine_;
   MessageLoop message_loop_;
   scoped_ptr<AVStream> av_stream_;
   scoped_ptr<FileReader> file_reader_;
@@ -218,8 +245,11 @@ static bool HasSwitch(const char* name) {
 }
 
 static int GetIntSwitch(const char* name) {
-  if (HasSwitch(name))
-    return StringToInt(GetStringSwitch(name));
+  if (HasSwitch(name)) {
+    int val;
+    base::StringToInt(GetStringSwitch(name), &val);
+    return val;
+  }
   return 0;
 }
 
@@ -273,7 +303,7 @@ static bool InitFFmpeg() {
     return false;
   avcodec_init();
   av_register_all();
-  av_register_protocol(&kFFmpegFileProtocol);
+  av_register_protocol2(&kFFmpegFileProtocol, sizeof(kFFmpegFileProtocol));
   return true;
 }
 

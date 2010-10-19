@@ -4,14 +4,14 @@
 
 #ifndef CHROME_DEFAULT_PLUGIN_PLUGIN_IMPL_MAC_H_
 #define CHROME_DEFAULT_PLUGIN_PLUGIN_IMPL_MAC_H_
+#pragma once
 
 #include <string>
-#include <vector>
 
 #include "gfx/native_widget_types.h"
 #include "third_party/npapi/bindings/npapi.h"
 
-#ifdef __OBJ__
+#ifdef __OBJC__
 @class NSImage;
 @class NSString;
 #else
@@ -167,7 +167,7 @@ class PluginInstallerImpl {
   }
 
   // Getter for the NPP instance member.
-  const NPP instance() const {
+  NPP instance() const {
     return instance_;
   }
 

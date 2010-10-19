@@ -10,23 +10,24 @@
 #include "app/l10n_util.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
-#include "base/file_util.h"
 #include "base/histogram.h"
 #include "base/logging.h"
 #include "base/stl_util-inl.h"
+#include "base/string16.h"
 #include "base/string_util.h"
 #include "base/task.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
+#include "chrome/browser/sync/glue/session_data_type_controller.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/common/chrome_switches.h"
@@ -92,8 +93,8 @@ ProfileSyncService::ProfileSyncService(ProfileSyncFactory* factory,
   // For linux Chromium builds, this could be anything depending on the
   // distribution, so always direct those users to dev server urls.
   // If this is an official build, it will always be one of the above.
-  string16 channel = platform_util::GetVersionStringModifier();
-  if (channel.empty() || channel == ASCIIToUTF16("beta")) {
+  std::string channel = platform_util::GetVersionStringModifier();
+  if (channel.empty() || channel == "beta") {
     LOG(INFO) << "Detected official build, using official sync server.";
     sync_service_url_ = GURL(kSyncServerUrl);
   } else {
@@ -144,7 +145,8 @@ void ProfileSyncService::Initialize() {
     DisableForUser();  // Clean up in case of previous crash / setup abort.
 
     // Automatically start sync in Chromium OS.
-    if (bootstrap_sync_authentication_) {
+    if (bootstrap_sync_authentication_ &&
+        !profile_->GetPrefs()->GetBoolean(prefs::kSyncSuppressStart)) {
       // If the LSID is empty, we're in a CrOS UI test that is not testing sync
       // behavior, so we don't want the sync service to start.
       if (profile()->GetTokenService() &&
@@ -164,6 +166,19 @@ void ProfileSyncService::RegisterDataTypeController(
   DCHECK_EQ(data_type_controllers_.count(data_type_controller->type()), 0U);
   data_type_controllers_[data_type_controller->type()] =
       data_type_controller;
+}
+
+browser_sync::SessionModelAssociator*
+    ProfileSyncService::GetSessionModelAssociator() {
+  if (data_type_controllers_.find(syncable::SESSIONS) ==
+      data_type_controllers_.end() ||
+      data_type_controllers_.find(syncable::SESSIONS)->second->state() !=
+      DataTypeController::RUNNING) {
+    return NULL;
+  }
+  return static_cast<browser_sync::SessionDataTypeController*>(
+      data_type_controllers_.find(
+      syncable::SESSIONS)->second.get())->GetModelAssociator();
 }
 
 void ProfileSyncService::GetDataTypeControllerStates(
@@ -197,7 +212,7 @@ void ProfileSyncService::InitSettings() {
   LOG(INFO) << "Using " << sync_service_url_ << " for sync server URL.";
 
   use_chrome_async_socket_ =
-      command_line.HasSwitch(switches::kSyncUseChromeAsyncSocket);
+      !command_line.HasSwitch(switches::kSyncDisableChromeAsyncSocket);
   if (use_chrome_async_socket_) {
     LOG(INFO) << "Using ChromeAsyncSocket";
   }
@@ -216,6 +231,7 @@ void ProfileSyncService::RegisterPreferences() {
     return;
   pref_service->RegisterInt64Pref(prefs::kSyncLastSyncedTime, 0);
   pref_service->RegisterBooleanPref(prefs::kSyncHasSetupCompleted, false);
+  pref_service->RegisterBooleanPref(prefs::kSyncSuppressStart, false);
 
   // If you've never synced before, or if you're using Chrome OS, all datatypes
   // are on by default.
@@ -235,17 +251,19 @@ void ProfileSyncService::RegisterPreferences() {
   pref_service->RegisterBooleanPref(prefs::kSyncThemes, enable_by_default);
   pref_service->RegisterBooleanPref(prefs::kSyncTypedUrls, enable_by_default);
   pref_service->RegisterBooleanPref(prefs::kSyncExtensions, enable_by_default);
-
+  pref_service->RegisterBooleanPref(prefs::kSyncApps, enable_by_default);
+  pref_service->RegisterBooleanPref(prefs::kSyncSessions, enable_by_default);
   pref_service->RegisterBooleanPref(prefs::kKeepEverythingSynced,
       enable_by_default);
-
   pref_service->RegisterBooleanPref(prefs::kSyncManaged, false);
+  pref_service->RegisterStringPref(prefs::kEncryptionBootstrapToken, "");
 }
 
 void ProfileSyncService::ClearPreferences() {
   PrefService* pref_service = profile_->GetPrefs();
   pref_service->ClearPref(prefs::kSyncLastSyncedTime);
   pref_service->ClearPref(prefs::kSyncHasSetupCompleted);
+  pref_service->ClearPref(prefs::kEncryptionBootstrapToken);
   // TODO(nick): The current behavior does not clear e.g. prefs::kSyncBookmarks.
   // Is that really what we want?
   pref_service->ScheduleSavePersistentPrefs();
@@ -262,11 +280,14 @@ void ProfileSyncService::InitializeBackend(bool delete_sync_data_folder) {
 
   bool invalidate_sync_login = false;
   bool invalidate_sync_xmpp_login = false;
+  bool try_ssltcp_first = false;
 #if !defined(NDEBUG)
   invalidate_sync_login = CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kInvalidateSyncLogin);
   invalidate_sync_xmpp_login = CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kInvalidateSyncXmppLogin);
+  try_ssltcp_first = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kSyncUseSslTcp);
 #endif
 
   syncable::ModelTypeSet types;
@@ -283,7 +304,14 @@ void ProfileSyncService::InitializeBackend(bool delete_sync_data_folder) {
                        invalidate_sync_login,
                        invalidate_sync_xmpp_login,
                        use_chrome_async_socket_,
+                       try_ssltcp_first,
                        notification_method_);
+}
+
+void ProfileSyncService::CreateBackend() {
+  backend_.reset(
+      new SyncBackendHost(this, profile_, profile_->GetPath(),
+                          data_type_controllers_));
 }
 
 void ProfileSyncService::StartUp() {
@@ -298,10 +326,7 @@ void ProfileSyncService::StartUp() {
   last_synced_time_ = base::Time::FromInternalValue(
       profile_->GetPrefs()->GetInt64(prefs::kSyncLastSyncedTime));
 
-  backend_.reset(
-      new SyncBackendHost(this, profile_, profile_->GetPath(),
-                          data_type_controllers_));
-
+  CreateBackend();
   // Initialize the backend.  Every time we start up a new SyncBackendHost,
   // we'll want to start from a fresh SyncDB, so delete any old one that might
   // be there.
@@ -309,8 +334,7 @@ void ProfileSyncService::StartUp() {
 }
 
 void ProfileSyncService::Shutdown(bool sync_disabled) {
-
- // Stop all data type controllers, if needed.
+  // Stop all data type controllers, if needed.
   if (data_type_manager_.get() &&
       data_type_manager_->state() != DataTypeManager::STOPPED) {
     data_type_manager_->Stop();
@@ -366,6 +390,7 @@ bool ProfileSyncService::HasSyncSetupCompleted() const {
 void ProfileSyncService::SetSyncSetupCompleted() {
   PrefService* prefs = profile()->GetPrefs();
   prefs->SetBoolean(prefs::kSyncHasSetupCompleted, true);
+  prefs->SetBoolean(prefs::kSyncSuppressStart, false);
   prefs->ScheduleSavePersistentPrefs();
 }
 
@@ -377,7 +402,7 @@ void ProfileSyncService::UpdateLastSyncedTime() {
 }
 
 // static
-const wchar_t* ProfileSyncService::GetPrefNameForDataType(
+const char* ProfileSyncService::GetPrefNameForDataType(
     syncable::ModelType data_type) {
   switch (data_type) {
     case syncable::BOOKMARKS:
@@ -394,6 +419,10 @@ const wchar_t* ProfileSyncService::GetPrefNameForDataType(
       return prefs::kSyncTypedUrls;
     case syncable::EXTENSIONS:
       return prefs::kSyncExtensions;
+    case syncable::APPS:
+      return prefs::kSyncApps;
+    case syncable::SESSIONS:
+      return prefs::kSyncSessions;
     default:
       NOTREACHED();
       return NULL;
@@ -448,7 +477,11 @@ void ProfileSyncService::OnBackendInitialized() {
   FOR_EACH_OBSERVER(Observer, observers_, OnStateChanged());
 
   if (bootstrap_sync_authentication_) {
-    SetSyncSetupCompleted();
+    if (profile_->GetPrefs()->GetBoolean(prefs::kSyncSuppressStart)) {
+      ShowChooseDataTypes(NULL);
+    } else {
+      SetSyncSetupCompleted();
+    }
   }
 
   if (HasSyncSetupCompleted())
@@ -495,7 +528,7 @@ void ProfileSyncService::OnStopSyncingPermanently() {
     wizard_.Step(SyncSetupWizard::SETUP_ABORTED_BY_PENDING_CLEAR);
     expect_sync_configuration_aborted_ = true;
   }
-
+  profile_->GetPrefs()->SetBoolean(prefs::kSyncSuppressStart, true);
   DisableForUser();
 }
 
@@ -527,14 +560,14 @@ void ProfileSyncService::ShowChooseDataTypes(gfx::NativeWindow parent_window) {
 }
 
 SyncBackendHost::StatusSummary ProfileSyncService::QuerySyncStatusSummary() {
-  if (backend_.get())
+  if (backend_.get() && backend_initialized_)
     return backend_->GetStatusSummary();
   else
     return SyncBackendHost::Status::OFFLINE_UNUSABLE;
 }
 
 SyncBackendHost::Status ProfileSyncService::QueryDetailedSyncStatus() {
-  if (backend_.get()) {
+  if (backend_.get() && backend_initialized_) {
     return backend_->GetDetailedStatus();
   } else {
     SyncBackendHost::Status status =
@@ -543,41 +576,45 @@ SyncBackendHost::Status ProfileSyncService::QueryDetailedSyncStatus() {
   }
 }
 
-std::wstring ProfileSyncService::BuildSyncStatusSummaryText(
+bool ProfileSyncService::SetupInProgress() const {
+  return !HasSyncSetupCompleted() && WizardIsVisible();
+}
+
+std::string ProfileSyncService::BuildSyncStatusSummaryText(
   const sync_api::SyncManager::Status::Summary& summary) {
   switch (summary) {
     case sync_api::SyncManager::Status::OFFLINE:
-      return L"OFFLINE";
+      return "OFFLINE";
     case sync_api::SyncManager::Status::OFFLINE_UNSYNCED:
-      return L"OFFLINE_UNSYNCED";
+      return "OFFLINE_UNSYNCED";
     case sync_api::SyncManager::Status::SYNCING:
-      return L"SYNCING";
+      return "SYNCING";
     case sync_api::SyncManager::Status::READY:
-      return L"READY";
+      return "READY";
     case sync_api::SyncManager::Status::CONFLICT:
-      return L"CONFLICT";
+      return "CONFLICT";
     case sync_api::SyncManager::Status::OFFLINE_UNUSABLE:
-      return L"OFFLINE_UNUSABLE";
+      return "OFFLINE_UNUSABLE";
     case sync_api::SyncManager::Status::INVALID:  // fall through
     default:
-      return L"UNKNOWN";
+      return "UNKNOWN";
   }
 }
 
-std::wstring ProfileSyncService::GetLastSyncedTimeString() const {
+string16 ProfileSyncService::GetLastSyncedTimeString() const {
   if (last_synced_time_.is_null())
-    return l10n_util::GetString(IDS_SYNC_TIME_NEVER);
+    return l10n_util::GetStringUTF16(IDS_SYNC_TIME_NEVER);
 
   base::TimeDelta last_synced = base::Time::Now() - last_synced_time_;
 
   if (last_synced < base::TimeDelta::FromMinutes(1))
-    return l10n_util::GetString(IDS_SYNC_TIME_JUST_NOW);
+    return l10n_util::GetStringUTF16(IDS_SYNC_TIME_JUST_NOW);
 
   return TimeFormat::TimeElapsed(last_synced);
 }
 
 string16 ProfileSyncService::GetAuthenticatedUsername() const {
-  if (backend_.get())
+  if (backend_.get() && backend_initialized_)
     return backend_->GetAuthenticatedUsername();
   else
     return string16();
@@ -615,6 +652,7 @@ void ProfileSyncService::OnUserCancelledDialog() {
   if (!profile_->GetPrefs()->GetBoolean(prefs::kSyncHasSetupCompleted)) {
     // A sync dialog was aborted before authentication.
     // Rollback.
+    expect_sync_configuration_aborted_ = true;
     DisableForUser();
   }
   wizard_.SetParent(NULL);
@@ -643,7 +681,7 @@ void ProfileSyncService::ChangePreferredDataTypes(
     syncable::ModelType model_type = syncable::ModelTypeFromInt(i);
     if (!registered_types.count(model_type))
       continue;
-    const wchar_t* pref_name = GetPrefNameForDataType(model_type);
+    const char* pref_name = GetPrefNameForDataType(model_type);
     if (!pref_name)
       continue;
     profile_->GetPrefs()->SetBoolean(pref_name,
@@ -668,7 +706,7 @@ void ProfileSyncService::GetPreferredDataTypes(
     syncable::ModelType model_type = syncable::ModelTypeFromInt(i);
     if (!registered_types.count(model_type))
       continue;
-    const wchar_t* pref_name = GetPrefNameForDataType(model_type);
+    const char* pref_name = GetPrefNameForDataType(model_type);
     if (!pref_name)
       continue;
     if (profile_->GetPrefs()->GetBoolean(pref_name))
@@ -689,11 +727,12 @@ void ProfileSyncService::GetRegisteredDataTypes(
 }
 
 bool ProfileSyncService::IsCryptographerReady() const {
-  return backend_->GetUserShareHandle()->
-      dir_manager->cryptographer()->is_ready();
+  return backend_.get() && backend_initialized_ &&
+      backend_->GetUserShareHandle()->dir_manager->cryptographer()->is_ready();
 }
 
 void ProfileSyncService::SetPassphrase(const std::string& passphrase) {
+  DCHECK(backend_.get());
   backend_->SetPassphrase(passphrase);
 }
 
@@ -716,6 +755,7 @@ void ProfileSyncService::ActivateDataType(
     NOTREACHED();
     return;
   }
+  DCHECK(backend_initialized_);
   change_processor->Start(profile(), backend_->GetUserShareHandle());
   backend_->ActivateDataType(data_type_controller, change_processor);
 }
@@ -772,7 +812,7 @@ void ProfileSyncService::Observe(NotificationType type,
       break;
     }
     case NotificationType::PREF_CHANGED: {
-      std::wstring* pref_name = Details<std::wstring>(details).ptr();
+      std::string* pref_name = Details<std::string>(details).ptr();
       if (*pref_name == prefs::kSyncManaged) {
         FOR_EACH_OBSERVER(Observer, observers_, OnStateChanged());
         if (*pref_sync_managed_)

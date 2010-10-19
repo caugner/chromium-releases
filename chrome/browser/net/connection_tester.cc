@@ -8,10 +8,12 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/importer/firefox_proxy_settings.h"
 #include "chrome/common/chrome_switches.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/host_resolver_impl.h"
+#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/ssl_config_service_defaults.h"
@@ -80,7 +82,7 @@ class ExperimentURLRequestContext : public URLRequestContext {
     // Create a vanilla HostResolver that disables caching.
     const size_t kMaxJobs = 50u;
     scoped_refptr<net::HostResolverImpl> impl =
-        new net::HostResolverImpl(NULL, NULL, kMaxJobs);
+        new net::HostResolverImpl(NULL, NULL, kMaxJobs, NULL);
 
     *host_resolver = impl;
 
@@ -167,7 +169,8 @@ class ExperimentURLRequestContext : public URLRequestContext {
     return net::ERR_NOT_IMPLEMENTED;
 #else
     config_service->reset(
-        net::ProxyService::CreateSystemProxyConfigService(NULL, NULL));
+        net::ProxyService::CreateSystemProxyConfigService(
+            MessageLoop::current(), NULL));
     return net::OK;
 #endif
   }

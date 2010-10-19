@@ -4,12 +4,17 @@
 
 #ifndef CHROME_RENDERER_WEBGLES2CONTEXT_IMPL_H_
 #define CHROME_RENDERER_WEBGLES2CONTEXT_IMPL_H_
+#pragma once
 
 #if defined(ENABLE_GPU)
 
 #include "chrome/renderer/ggl/ggl.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebGLES2Context.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
+
+#if defined(OS_MACOSX)
+#include "gfx/native_widget_types.h"
+#endif
 
 class WebGLES2ContextImpl : public WebKit::WebGLES2Context {
  public:
@@ -26,12 +31,20 @@ class WebGLES2ContextImpl : public WebKit::WebGLES2Context {
   virtual void resizeOffscreenContent(const WebKit::WebSize&);
   virtual unsigned getOffscreenContentParentTextureId();
 
+#if defined(OS_MACOSX)
+  virtual void resizeOnscreenContent(const WebKit::WebSize&);
+#endif
+
   ggl::Context* context() { return context_; }
 
  private:
   // The GGL context we use for OpenGL rendering.
   ggl::Context* context_;
+
+#if defined(OS_MACOSX)
+  gfx::PluginWindowHandle plugin_handle_;
   WebKit::WebView* web_view_;
+#endif
 };
 
 #endif  // defined(ENABLE_GPU)

@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/callback.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
+#include "base/gtest_prod_util.h"
 #include "third_party/libjingle/source/talk/xmpp/xmppengine.h"
 
 namespace remoting {
@@ -21,7 +21,6 @@ class JingleClient;
 // set_callback(). If multiple IQ stanzas are send with SendIq() then only reply
 // to the last one will be received.
 // The class must be used on the jingle thread only.
-// TODO(sergeyu): Implement unittests for this class.
 class IqRequest : private buzz::XmppIqHandler {
  public:
   typedef Callback1<const buzz::XmlElement*>::Type ReplyCallback;
@@ -32,8 +31,8 @@ class IqRequest : private buzz::XmppIqHandler {
   // Sends stanza of type |type| to |addressee|. |iq_body| contains body of
   // the stanza. Ownership of |iq_body| is transfered to IqRequest. Must
   // be called on the jingle thread.
-  void SendIq(const std::string& type, const std::string& addressee,
-              buzz::XmlElement* iq_body);
+  virtual void SendIq(const std::string& type, const std::string& addressee,
+                      buzz::XmlElement* iq_body);
 
   // Sets callback that is called when reply stanza is received. Callback
   // is called on the jingle thread.
@@ -42,7 +41,7 @@ class IqRequest : private buzz::XmppIqHandler {
   }
 
  private:
-  FRIEND_TEST(IqRequestTest, MakeIqStanza);
+  FRIEND_TEST_ALL_PREFIXES(IqRequestTest, MakeIqStanza);
 
   // XmppIqHandler interface.
   virtual void IqResponse(buzz::XmppIqCookie cookie,

@@ -7,6 +7,7 @@
 #include "chrome/browser/extensions/extension_cookies_helpers.h"
 
 #include "base/logging.h"
+#include "base/values.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/extensions/extension_cookies_api_constants.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
@@ -26,9 +27,11 @@ Profile* ChooseProfileFromStoreId(const std::string& store_id,
                                   Profile* profile,
                                   bool include_incognito) {
   DCHECK(profile);
-  if (store_id == kOriginalProfileStoreId)
+  bool allow_original = !profile->IsOffTheRecord();
+  bool allow_incognito = profile->IsOffTheRecord() || include_incognito;
+  if (store_id == kOriginalProfileStoreId && allow_original)
     return profile->GetOriginalProfile();
-  if (store_id == kOffTheRecordProfileStoreId && include_incognito)
+  if (store_id == kOffTheRecordProfileStoreId && allow_incognito)
     return profile->GetOffTheRecordProfile();
   return NULL;
 }
@@ -40,16 +43,15 @@ const char* GetStoreIdFromProfile(Profile* profile) {
 }
 
 DictionaryValue* CreateCookieValue(
-    const net::CookieMonster::CookieListPair& cookie_pair,
+    const net::CookieMonster::CanonicalCookie& cookie,
     const std::string& store_id) {
   DictionaryValue* result = new DictionaryValue();
 
-  const net::CookieMonster::CanonicalCookie& cookie = cookie_pair.second;
   result->SetString(keys::kNameKey, cookie.Name());
   result->SetString(keys::kValueKey, cookie.Value());
-  result->SetString(keys::kDomainKey, cookie_pair.first);
+  result->SetString(keys::kDomainKey, cookie.Domain());
   result->SetBoolean(keys::kHostOnlyKey,
-                     net::CookieMonster::DomainIsHostOnly(cookie_pair.first));
+                     net::CookieMonster::DomainIsHostOnly(cookie.Domain()));
   result->SetString(keys::kPathKey, cookie.Path());
   result->SetBoolean(keys::kSecureKey, cookie.IsSecure());
   result->SetBoolean(keys::kHttpOnlyKey, cookie.IsHttpOnly());
@@ -82,10 +84,9 @@ net::CookieMonster::CookieList GetCookieListFromStore(
   return monster->GetAllCookies();
 }
 
-GURL GetURLFromCookiePair(
-    const net::CookieMonster::CookieListPair& cookie_pair) {
-  const std::string& domain_key = cookie_pair.first;
-  const net::CookieMonster::CanonicalCookie& cookie = cookie_pair.second;
+GURL GetURLFromCanonicalCookie(
+    const net::CookieMonster::CanonicalCookie& cookie) {
+  const std::string& domain_key = cookie.Domain();
   const std::string scheme =
       cookie.IsSecure() ? chrome::kHttpsScheme : chrome::kHttpScheme;
   const std::string host =
@@ -103,7 +104,7 @@ void AppendMatchingCookiesToList(
   for (it = all_cookies.begin(); it != all_cookies.end(); ++it) {
     // Ignore any cookie whose domain doesn't match the extension's
     // host permissions.
-    GURL cookie_domain_url = GetURLFromCookiePair(*it);
+    GURL cookie_domain_url = GetURLFromCanonicalCookie(*it);
     if (!extension->HasHostPermission(cookie_domain_url))
       continue;
     // Filter the cookie using the match filter.
@@ -129,17 +130,15 @@ MatchFilter::MatchFilter(const DictionaryValue* details)
 }
 
 bool MatchFilter::MatchesCookie(
-    const net::CookieMonster::CookieListPair& cookie_pair) {
-  const net::CookieMonster::CanonicalCookie& cookie = cookie_pair.second;
-  return
-      MatchesString(keys::kNameKey, cookie.Name()) &&
-      MatchesDomain(cookie_pair.first) &&
-      MatchesString(keys::kPathKey, cookie.Path()) &&
-      MatchesBoolean(keys::kSecureKey, cookie.IsSecure()) &&
-      MatchesBoolean(keys::kSessionKey, !cookie.DoesExpire());
+    const net::CookieMonster::CanonicalCookie& cookie) {
+  return MatchesString(keys::kNameKey, cookie.Name()) &&
+         MatchesDomain(cookie.Domain()) &&
+         MatchesString(keys::kPathKey, cookie.Path()) &&
+         MatchesBoolean(keys::kSecureKey, cookie.IsSecure()) &&
+         MatchesBoolean(keys::kSessionKey, !cookie.DoesExpire());
 }
 
-bool MatchFilter::MatchesString(const wchar_t* key, const std::string& value) {
+bool MatchFilter::MatchesString(const char* key, const std::string& value) {
   if (!details_->HasKey(key))
     return true;
   std::string filter_value;
@@ -147,7 +146,7 @@ bool MatchFilter::MatchesString(const wchar_t* key, const std::string& value) {
           value == filter_value);
 }
 
-bool MatchFilter::MatchesBoolean(const wchar_t* key, bool value) {
+bool MatchFilter::MatchesBoolean(const char* key, bool value) {
   if (!details_->HasKey(key))
     return true;
   bool filter_value = false;

@@ -4,6 +4,7 @@
 
 #ifndef NET_BASE_SSL_CONFIG_SERVICE_DEFAULTS_H_
 #define NET_BASE_SSL_CONFIG_SERVICE_DEFAULTS_H_
+#pragma once
 
 #include "net/base/ssl_config_service.h"
 
@@ -19,6 +20,7 @@ class SSLConfigServiceDefaults : public SSLConfigService {
   // Store default SSL config settings in |config|.
   virtual void GetSSLConfig(SSLConfig* config) {
     *config = default_config_;
+    SetSSLConfigFlags(config);
   }
 
  private:

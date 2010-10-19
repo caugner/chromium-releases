@@ -23,8 +23,14 @@
         'audio/audio_io.h',
         'audio/audio_input_controller.cc',
         'audio/audio_input_controller.h',
+        'audio/audio_manager.cc',
+        'audio/audio_manager.h',
+        'audio/audio_manager_base.cc',
+        'audio/audio_manager_base.h',
         'audio/audio_output_controller.cc',
         'audio/audio_output_controller.h',
+        'audio/audio_parameters.cc',
+        'audio/audio_parameters.h',
         'audio/audio_util.cc',
         'audio/audio_util.h',
         'audio/fake_audio_input_stream.cc',
@@ -33,12 +39,18 @@
         'audio/fake_audio_output_stream.h',
         'audio/linux/audio_manager_linux.cc',
         'audio/linux/audio_manager_linux.h',
+        'audio/linux/alsa_input.cc',
+        'audio/linux/alsa_input.h',
         'audio/linux/alsa_output.cc',
         'audio/linux/alsa_output.h',
+        'audio/linux/alsa_util.cc',
+        'audio/linux/alsa_util.h',
         'audio/linux/alsa_wrapper.cc',
         'audio/linux/alsa_wrapper.h',
         'audio/openbsd/audio_manager_openbsd.cc',
         'audio/openbsd/audio_manager_openbsd.h',
+        'audio/mac/audio_input_mac.cc',
+        'audio/mac/audio_input_mac.h',
         'audio/mac/audio_manager_mac.cc',
         'audio/mac/audio_manager_mac.h',
         'audio/mac/audio_output_mac.cc',
@@ -114,17 +126,19 @@
         'filters/ffmpeg_glue.h',
         'filters/ffmpeg_interfaces.cc',
         'filters/ffmpeg_interfaces.h',
-        'filters/ffmpeg_video_decode_engine.cc',
-        'filters/ffmpeg_video_decode_engine.h',
         'filters/ffmpeg_video_decoder.cc',
         'filters/ffmpeg_video_decoder.h',
         'filters/file_data_source.cc',
         'filters/file_data_source.h',
         'filters/null_audio_renderer.cc',
         'filters/null_audio_renderer.h',
-        'filters/video_decode_engine.h',
         'filters/video_renderer_base.cc',
         'filters/video_renderer_base.h',
+        'video/ffmpeg_video_allocator.cc',
+        'video/ffmpeg_video_allocator.h',
+        'video/ffmpeg_video_decode_engine.cc',
+        'video/ffmpeg_video_decode_engine.h',
+        'video/video_decode_engine.h',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
@@ -156,8 +170,6 @@
         }],
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
           'sources': [
-            'filters/omx_video_decode_engine.cc',
-            'filters/omx_video_decode_engine.h',
             'filters/omx_video_decoder.cc',
             'filters/omx_video_decoder.h',
           ],
@@ -176,6 +188,40 @@
       ],
     },
     {
+      'target_name': 'ffmpeg_unittests',
+      'type': 'executable',
+      'dependencies': [
+        'media',
+        '../base/base.gyp:base',
+        '../base/base.gyp:base_i18n',
+        '../base/base.gyp:test_support_base',
+        '../base/base.gyp:test_support_perf',
+        '../testing/gtest.gyp:gtest',
+        '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+      ],
+      'sources': [
+        'ffmpeg/ffmpeg_unittest.cc',
+      ],
+      'conditions': [
+        ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
+          'dependencies': [
+            # Needed for the following #include chain:
+            #   base/run_all_unittests.cc
+            #   ../base/test_suite.h
+            #   gtk/gtk.h
+            '../build/linux/system.gyp:gtk',
+          ],
+          'conditions': [
+            ['linux_use_tcmalloc==1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
+          ],
+        }],
+      ],
+    },
+    {
       'target_name': 'media_unittests',
       'type': 'executable',
       'msvs_guid': 'C8C6183C-B03C-11DD-B471-DFD256D89593',
@@ -183,6 +229,7 @@
         'media',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
+        '../base/base.gyp:test_support_base',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
@@ -193,13 +240,13 @@
       ],
       'sources': [
         'audio/audio_input_controller_unittest.cc',
+        'audio/audio_input_unittest.cc',
         'audio/audio_output_controller_unittest.cc',
         'audio/audio_util_unittest.cc',
         'audio/fake_audio_input_stream_unittest.cc',
         'audio/linux/alsa_output_unittest.cc',
         'audio/mac/audio_output_mac_unittest.cc',
         'audio/simple_sources_unittest.cc',
-        'audio/win/audio_input_win_unittest.cc',
         'audio/win/audio_output_win_unittest.cc',
         'base/clock_impl_unittest.cc',
         'base/data_buffer_unittest.cc',
@@ -223,12 +270,12 @@
         'filters/decoder_base_unittest.cc',
         'filters/ffmpeg_demuxer_unittest.cc',
         'filters/ffmpeg_glue_unittest.cc',
-        'filters/ffmpeg_video_decode_engine_unittest.cc',
         'filters/ffmpeg_video_decoder_unittest.cc',
         'filters/file_data_source_unittest.cc',
         'filters/video_renderer_base_unittest.cc',
         'omx/mock_omx.cc',
         'omx/mock_omx.h',
+        'video/ffmpeg_video_decode_engine_unittest.cc',
       ],
       'conditions': [
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
@@ -250,6 +297,18 @@
             }],
           ],
         }],
+      ],
+    },
+    {
+      'target_name': 'media_test_support',
+      'type': '<(library)',
+      'dependencies': [
+        'media',
+        '../base/base.gyp:base',
+      ],
+      'sources': [
+        'audio/test_audio_input_controller_factory.cc',
+        'audio/test_audio_input_controller_factory.h',
       ],
     },
     {
@@ -362,6 +421,97 @@
             },
           },
         },
+        {
+          'target_name': 'mfdecoder',
+          'type': 'executable',
+          'dependencies': [
+            'media',
+            '../base/base.gyp:base',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'sources': [
+            'tools/mfdecoder/main.cc',
+            'tools/mfdecoder/mfdecoder.h',    
+            'tools/mfdecoder/mfdecoder.cc',
+          ],
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'SubSystem': '1',         # Set /SUBSYSTEM:CONSOLE
+            },
+          },
+        },
+        {
+          'target_name': 'mft_h264_decoder',
+          'type': '<(library)',
+          'dependencies': [
+            'media',
+            '../base/base.gyp:base',
+            '../base/base.gyp:test_support_base',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'sources': [
+            'mf/mft_h264_decoder.cc',
+            'mf/mft_h264_decoder.h',
+          ],
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'SubSystem': '1',         # Set /SUBSYSTEM:CONSOLE
+            },
+          },          
+        },
+        {
+          'target_name': 'mft_h264_decoder_example',
+          'type': 'executable',
+          'dependencies': [
+            'media',
+            'mft_h264_decoder',
+            '../base/base.gyp:base',
+            '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'sources': [
+            'mf/file_reader_util.cc',
+            'mf/file_reader_util.h',
+            'mf/mft_h264_decoder_example.cc',
+          ],
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'SubSystem': '1',         # Set /SUBSYSTEM:CONSOLE
+            },
+          },          
+        },
+        {
+          'target_name': 'mft_h264_decoder_unittests',
+          'type': 'executable',
+          'dependencies': [
+            'media',
+            'mft_h264_decoder',
+            '../base/base.gyp:base',
+            '../base/base.gyp:base_i18n',
+            '../testing/gtest.gyp:gtest',
+            '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'sources': [
+            'mf/file_reader_util.cc',
+            'mf/file_reader_util.h',
+            'mf/test/mft_h264_decoder_unittest.cc',
+            'mf/test/run_all_unittests.cc',
+          ],
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'SubSystem': '1',         # Set /SUBSYSTEM:CONSOLE
+            },
+          },          
+        },
       ],
     }],
     ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
@@ -392,6 +542,7 @@
             'omx_wrapper',
             '../base/base.gyp:base',
             '../base/base.gyp:base_i18n',
+            '../base/base.gyp:test_support_base',
             '../testing/gtest.gyp:gtest',
           ],
           'conditions': [
@@ -416,10 +567,10 @@
             '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
           ],
           'sources': [
-            'filters/omx_video_decode_engine.cc',
-            'filters/omx_video_decode_engine.cc',
             'omx/omx_configurator.cc',
             'omx/omx_configurator.h',
+            'video/omx_video_decode_engine.cc',
+            'video/omx_video_decode_engine.cc',
           ],
           'hard_dependency': 1,
           'export_dependent_settings': [

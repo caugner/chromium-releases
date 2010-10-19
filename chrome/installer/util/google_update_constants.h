@@ -6,6 +6,7 @@
 
 #ifndef CHROME_INSTALLER_UTIL_GOOGLE_UPDATE_CONSTANTS_H_
 #define CHROME_INSTALLER_UTIL_GOOGLE_UPDATE_CONSTANTS_H_
+#pragma once
 
 namespace google_update {
 
@@ -33,6 +34,7 @@ extern const wchar_t kRegLastCheckedField[];
 extern const wchar_t kRegMetricsId[];
 extern const wchar_t kRegMSIField[];
 extern const wchar_t kRegNameField[];
+extern const wchar_t kRegOopcrashesField[];
 extern const wchar_t kRegOldVersionField[];
 extern const wchar_t kRegRenameCmdField[];
 extern const wchar_t kRegRLZBrandField[];

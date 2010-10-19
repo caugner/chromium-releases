@@ -4,12 +4,13 @@
 
 #ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_MANAGER_H_
 #define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_MANAGER_H_
+#pragma once
 
 #include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "chrome/browser/login_model.h"
 #include "chrome/browser/password_manager/password_form_manager.h"
-#include "chrome/browser/pref_member.h"
+#include "chrome/browser/prefs/pref_member.h"
 #include "webkit/glue/password_form.h"
 #include "webkit/glue/password_form_dom_manager.h"
 

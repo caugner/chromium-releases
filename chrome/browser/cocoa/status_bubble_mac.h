@@ -4,12 +4,14 @@
 
 #ifndef CHROME_BROWSER_COCOA_STATUS_BUBBLE_MAC_H_
 #define CHROME_BROWSER_COCOA_STATUS_BUBBLE_MAC_H_
+#pragma once
 
 #include <string>
 
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
 
+#include "base/string16.h"
 #include "base/task.h"
 #include "chrome/browser/status_bubble.h"
 
@@ -33,8 +35,8 @@ class StatusBubbleMac : public StatusBubble {
   virtual ~StatusBubbleMac();
 
   // StatusBubble implementation.
-  virtual void SetStatus(const std::wstring& status);
-  virtual void SetURL(const GURL& url, const std::wstring& languages);
+  virtual void SetStatus(const string16& status);
+  virtual void SetURL(const GURL& url, const string16& languages);
   virtual void Hide();
   virtual void MouseMoved(const gfx::Point& location, bool left_content);
   virtual void UpdateDownloadShelfVisibility(bool visible);
@@ -61,7 +63,7 @@ class StatusBubbleMac : public StatusBubble {
   void SetState(StatusBubbleState state);
 
   // Sets the bubble text for SetStatus and SetURL.
-  void SetText(const std::wstring& text, bool is_url);
+  void SetText(const string16& text, bool is_url);
 
   // Construct the window/widget if it does not already exist. (Safe to call if
   // it does.)

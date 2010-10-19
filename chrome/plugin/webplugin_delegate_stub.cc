@@ -165,9 +165,8 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
   }
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  FilePath path = FilePath::FromWStringHack(
-      command_line.GetSwitchValue(switches::kPluginPath));
-
+  FilePath path =
+      command_line.GetSwitchValuePath(switches::kPluginPath);
 
   gfx::PluginWindowHandle parent = gfx::kNullPluginWindow;
 #if defined(OS_WIN)
@@ -192,11 +191,6 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
                                     params.arg_values,
                                     webplugin_,
                                     params.load_manually);
-#if defined(OS_MACOSX)
-    delegate_->WindowFrameChanged(params.containing_window_frame,
-                                  params.containing_content_frame);
-    delegate_->SetWindowHasFocus(params.containing_window_has_focus);
-#endif
   }
 }
 
@@ -363,8 +357,8 @@ void WebPluginDelegateStub::OnContainerShown(gfx::Rect window_frame,
   delegate_->SetWindowHasFocus(has_focus);
 }
 
-void WebPluginDelegateStub::OnWindowFrameChanged(gfx::Rect window_frame,
-                                                 gfx::Rect view_frame) {
+void WebPluginDelegateStub::OnWindowFrameChanged(const gfx::Rect& window_frame,
+                                                 const gfx::Rect& view_frame) {
   delegate_->WindowFrameChanged(window_frame, view_frame);
 }
 #endif  // OS_MACOSX

@@ -4,7 +4,6 @@
 
 #include "views/drag_utils.h"
 
-#include "app/l10n_util.h"
 #include "app/os_exchange_data.h"
 #include "app/resource_bundle.h"
 #include "base/file_util.h"
@@ -66,7 +65,7 @@ void CreateDragImageForFile(const FilePath::StringType& file_name,
 
   const int width = kFileDragImageMaxWidth;
   // Add +2 here to allow room for the halo.
-  const int height = font.height() + icon->height() +
+  const int height = font.GetHeight() + icon->height() +
                      kLinkDragImageVPadding + 2;
   gfx::CanvasSkia canvas(width, height, false /* translucent */);
 
@@ -78,13 +77,13 @@ void CreateDragImageForFile(const FilePath::StringType& file_name,
   std::wstring name = file_util::GetFilenameFromPath(file_name);
   canvas.DrawStringWithHalo(name, font, kFileDragImageTextColor, SK_ColorWHITE,
                             1, icon->height() + kLinkDragImageVPadding + 1,
-                            width - 2, font.height(),
+                            width - 2, font.GetHeight(),
                             gfx::Canvas::TEXT_ALIGN_CENTER);
 #else
   std::wstring name = FilePath(file_name).BaseName().ToWStringHack();
   canvas.DrawStringInt(name, font, kFileDragImageTextColor,
                        0, icon->height() + kLinkDragImageVPadding,
-                       width, font.height(), gfx::Canvas::TEXT_ALIGN_CENTER);
+                       width, font.GetHeight(), gfx::Canvas::TEXT_ALIGN_CENTER);
 #endif
 
   SetDragImageOnDataObject(canvas, gfx::Size(width, height),

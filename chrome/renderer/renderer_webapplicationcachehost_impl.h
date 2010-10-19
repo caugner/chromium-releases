@@ -4,6 +4,7 @@
 
 #ifndef CHROME_RENDERER_RENDERER_WEBAPPLICATIONCACHEHOST_IMPL_H_
 #define CHROME_RENDERER_RENDERER_WEBAPPLICATIONCACHEHOST_IMPL_H_
+#pragma once
 
 #include "webkit/appcache/web_application_cache_host_impl.h"
 
@@ -21,8 +22,7 @@ class RendererWebApplicationCacheHostImpl
   virtual void OnLogMessage(appcache::LogLevel log_level,
                             const std::string& message);
   virtual void OnContentBlocked(const GURL& manifest_url);
-  virtual void OnCacheSelected(int64 selected_cache_id,
-                               appcache::Status status);
+  virtual void OnCacheSelected(const appcache::AppCacheInfo& info);
 
  private:
   RenderView* GetRenderView();

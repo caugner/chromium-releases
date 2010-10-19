@@ -10,12 +10,11 @@
 
 #ifndef APP_CLIPBOARD_SCOPED_CLIPBOARD_WRITER_H_
 #define APP_CLIPBOARD_SCOPED_CLIPBOARD_WRITER_H_
+#pragma once
 
 #include <string>
-#include <vector>
 
 #include "app/clipboard/clipboard.h"
-#include "base/file_path.h"
 #include "base/string16.h"
 
 class Pickle;

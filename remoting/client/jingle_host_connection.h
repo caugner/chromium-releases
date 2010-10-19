@@ -31,8 +31,9 @@ class MessageLoop;
 
 namespace remoting {
 
-class ClientConfig;
 class JingleThread;
+
+struct ClientConfig;
 
 class JingleHostConnection : public HostConnection,
                              public JingleChannel::Callback,
@@ -41,9 +42,11 @@ class JingleHostConnection : public HostConnection,
   explicit JingleHostConnection(ClientContext* context);
   virtual ~JingleHostConnection();
 
-  virtual void Connect(ClientConfig* config,
+  virtual void Connect(const ClientConfig& config,
                        HostEventCallback* event_callback);
   virtual void Disconnect();
+
+  virtual void SendEvent(const ChromotingClientMessage& msg);
 
   // JingleChannel::Callback interface.
   virtual void OnStateChange(JingleChannel* channel,
@@ -61,7 +64,7 @@ class JingleHostConnection : public HostConnection,
  private:
   MessageLoop* message_loop();
 
-  void DoConnect(ClientConfig* config,
+  void DoConnect(const ClientConfig& config,
                  HostEventCallback* event_callback);
   void DoDisconnect();
 

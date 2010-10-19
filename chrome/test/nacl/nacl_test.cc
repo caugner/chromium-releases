@@ -21,10 +21,10 @@ const char kTestCompleteSuccess[] = "OK";
 const FilePath::CharType kBaseUrl[] =
     FILE_PATH_LITERAL("http://localhost:5103/tests/prebuilt");
 
-}  // anonymous namespace
+}  // namespace
 
 NaClTest::NaClTest()
-    : UITest(), use_x64_nexes_(false) {
+    : UITest(), use_x64_nexes_(false), multiarch_test_(false) {
   launch_arguments_.AppendSwitch(switches::kEnableNaCl);
 
   // Currently we disable some of the sandboxes.  See:
@@ -33,7 +33,7 @@ NaClTest::NaClTest()
 #if defined(OS_LINUX) && defined(USE_SECCOMP_SANDBOX)
   launch_arguments_.AppendSwitch(switches::kDisableSeccompSandbox);
 #endif
-  launch_arguments_.AppendSwitchWithValue(switches::kLoggingLevel, "0");
+  launch_arguments_.AppendSwitchASCII(switches::kLoggingLevel, "0");
 }
 
 NaClTest::~NaClTest() {}
@@ -41,20 +41,21 @@ NaClTest::~NaClTest() {}
 FilePath NaClTest::GetTestRootDir() {
   FilePath path;
   PathService::Get(base::DIR_SOURCE_ROOT, &path);
-  path = path.AppendASCII("native_client");
-  return path;
+  return path.AppendASCII("native_client");
 }
 
 GURL NaClTest::GetTestUrl(const FilePath& filename) {
   FilePath path(kBaseUrl);
-  if (use_x64_nexes_)
-    path = path.AppendASCII("x64");
-  else
-    path = path.AppendASCII("x86");
+  // Multiarch tests are in the directory defined by kBaseUrl.
+  if (!multiarch_test_) {
+    if (use_x64_nexes_)
+      path = path.AppendASCII("x64");
+    else
+      path = path.AppendASCII("x86");
+  }
   path = path.Append(filename);
   return GURL(path.value());
 }
-
 
 void NaClTest::WaitForFinish(const FilePath& filename,
                              int wait_time) {
@@ -75,6 +76,10 @@ void NaClTest::RunTest(const FilePath& filename, int timeout) {
   WaitForFinish(filename, timeout);
 }
 
+void NaClTest::RunMultiarchTest(const FilePath& filename, int timeout) {
+  multiarch_test_ = true;
+  RunTest(filename, timeout);
+}
 
 void NaClTest::SetUp() {
   FilePath nacl_test_dir = GetTestRootDir();
@@ -87,7 +92,7 @@ void NaClTest::SetUp() {
 
   UITest::SetUp();
 
-  StartHttpServerWithPort(nacl_test_dir, L"5103");
+  StartHttpServerWithPort(nacl_test_dir, 5103);
 }
 
 void NaClTest::TearDown() {

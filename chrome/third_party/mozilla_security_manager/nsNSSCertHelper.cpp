@@ -46,10 +46,11 @@
 
 #include "app/l10n_util.h"
 #include "base/i18n/number_formatting.h"
+#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/third_party/mozilla_security_manager/nsNSSCertTrust.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
+#include "net/third_party/mozilla_security_manager/nsNSSCertTrust.h"
 
 namespace {
 
@@ -712,7 +713,7 @@ std::string ProcessUserNotice(SECItem* der_notice) {
         if (itemList != notice->noticeReference.noticeNumbers)
           rv += ", ";
         rv += '#';
-        rv += UTF16ToUTF8(UintToString16(number));
+        rv += UTF16ToUTF8(base::UintToString16(number));
       }
       itemList++;
     }
@@ -1073,9 +1074,9 @@ std::string ProcessSubjectPublicKeyInfo(CERTSubjectPublicKeyInfo* spki) {
       case rsaKey: {
         rv = l10n_util::GetStringFUTF8(
             IDS_CERT_RSA_PUBLIC_KEY_DUMP_FORMAT,
-            UintToString16(key->u.rsa.modulus.len * 8),
+            base::UintToString16(key->u.rsa.modulus.len * 8),
             UTF8ToUTF16(ProcessRawBytes(&key->u.rsa.modulus)),
-            UintToString16(key->u.rsa.publicExponent.len * 8),
+            base::UintToString16(key->u.rsa.publicExponent.len * 8),
             UTF8ToUTF16(ProcessRawBytes(&key->u.rsa.publicExponent)));
         break;
       }
@@ -1088,21 +1089,21 @@ std::string ProcessSubjectPublicKeyInfo(CERTSubjectPublicKeyInfo* spki) {
   return rv;
 }
 
-CertType GetCertType(CERTCertificate *cert) {
+net::CertType GetCertType(CERTCertificate *cert) {
   nsNSSCertTrust trust(cert->trust);
   if (cert->nickname && trust.HasAnyUser())
-    return USER_CERT;
+    return net::USER_CERT;
   if (trust.HasAnyCA())
-    return CA_CERT;
+    return net::CA_CERT;
   if (trust.HasPeer(PR_TRUE, PR_FALSE, PR_FALSE))
-    return SERVER_CERT;
+    return net::SERVER_CERT;
   if (trust.HasPeer(PR_FALSE, PR_TRUE, PR_FALSE) && cert->emailAddr)
-    return EMAIL_CERT;
+    return net::EMAIL_CERT;
   if (CERT_IsCACert(cert, NULL))
-    return CA_CERT;
+    return net::CA_CERT;
   if (cert->emailAddr)
-    return EMAIL_CERT;
-  return UNKNOWN_CERT;
+    return net::EMAIL_CERT;
+  return net::UNKNOWN_CERT;
 }
 
 }  // namespace mozilla_security_manager

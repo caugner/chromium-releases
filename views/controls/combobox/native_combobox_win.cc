@@ -1,13 +1,13 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "views/controls/combobox/native_combobox_win.h"
 
 #include "app/combobox_model.h"
-#include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/i18n/rtl.h"
+#include "base/utf_string_conversions.h"
 #include "gfx/font.h"
 #include "gfx/native_theme_win.h"
 #include "views/controls/combobox/combobox.h"
@@ -47,7 +47,7 @@ void NativeComboboxWin::UpdateFromModel() {
   int max_width = 0;
   int num_items = combobox_->model()->GetItemCount();
   for (int i = 0; i < num_items; ++i) {
-    const std::wstring& text = combobox_->model()->GetItemAt(i);
+    const std::wstring& text = UTF16ToWide(combobox_->model()->GetItemAt(i));
 
     // Inserting the Unicode formatting characters if necessary so that the
     // text is displayed correctly in right-to-left UIs.
@@ -183,7 +183,7 @@ void NativeComboboxWin::NativeControlCreated(HWND native_control) {
 
 void NativeComboboxWin::UpdateFont() {
   HFONT font = ResourceBundle::GetSharedInstance().
-      GetFont(ResourceBundle::BaseFont).hfont();
+      GetFont(ResourceBundle::BaseFont).GetNativeFont();
   SendMessage(native_view(), WM_SETFONT, reinterpret_cast<WPARAM>(font), FALSE);
 }
 

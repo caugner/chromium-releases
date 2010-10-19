@@ -4,6 +4,7 @@
 
 #ifndef NET_HTTP_HTTP_PROXY_CLIENT_SOCKET_H_
 #define NET_HTTP_HTTP_PROXY_CLIENT_SOCKET_H_
+#pragma once
 
 #include <string>
 
@@ -25,7 +26,7 @@ namespace net {
 class AddressList;
 class ClientSocketHandle;
 class HttpStream;
-class IOBuffer;;
+class IOBuffer;
 
 class HttpProxyClientSocket : public ClientSocket {
  public:
@@ -33,9 +34,13 @@ class HttpProxyClientSocket : public ClientSocket {
   // by the time Connect() is called.  If tunnel is true then on Connect()
   // this socket will establish an Http tunnel.
   HttpProxyClientSocket(ClientSocketHandle* transport_socket,
-                        const GURL& request_url, const HostPortPair& endpoint,
-                        const scoped_refptr<HttpAuthController>& auth,
-                        bool tunnel);
+                        const GURL& request_url,
+                        const std::string& user_agent,
+                        const HostPortPair& endpoint,
+                        const HostPortPair& proxy_server,
+                        const scoped_refptr<HttpNetworkSession>& session,
+                        bool tunnel,
+                        bool using_spdy);
 
   // On destruction Disconnect() is called.
   virtual ~HttpProxyClientSocket();
@@ -45,12 +50,16 @@ class HttpProxyClientSocket : public ClientSocket {
   // RestartWithAuth.
   int RestartWithAuth(CompletionCallback* callback);
 
-  // Indicates if RestartWithAuth needs to be called. i.e. if Connect
-  // returned PROXY_AUTH_REQUESTED.  Only valid after Connect has been called.
-  bool NeedsRestartWithAuth() const;
-
   const HttpResponseInfo* GetResponseInfo() const {
-      return response_.headers ? &response_ : NULL;
+    return response_.headers ? &response_ : NULL;
+  }
+
+  const scoped_refptr<HttpAuthController>& auth_controller() {
+    return auth_;
+  }
+
+  bool using_spdy() {
+    return using_spdy_;
   }
 
   // ClientSocket methods:
@@ -61,6 +70,9 @@ class HttpProxyClientSocket : public ClientSocket {
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const;
   virtual const BoundNetLog& NetLog() const { return net_log_; }
+  virtual void SetSubresourceSpeculation();
+  virtual void SetOmniboxSpeculation();
+  virtual bool WasEverUsed() const;
 
   // Socket methods:
   virtual int Read(IOBuffer* buf, int buf_len, CompletionCallback* callback);
@@ -80,10 +92,10 @@ class HttpProxyClientSocket : public ClientSocket {
     STATE_SEND_REQUEST_COMPLETE,
     STATE_READ_HEADERS,
     STATE_READ_HEADERS_COMPLETE,
-    STATE_RESOLVE_CANONICAL_NAME,
-    STATE_RESOLVE_CANONICAL_NAME_COMPLETE,
     STATE_DRAIN_BODY,
     STATE_DRAIN_BODY_COMPLETE,
+    STATE_TCP_RESTART,
+    STATE_TCP_RESTART_COMPLETE,
     STATE_DONE,
   };
 
@@ -111,6 +123,8 @@ class HttpProxyClientSocket : public ClientSocket {
   int DoReadHeadersComplete(int result);
   int DoDrainBody();
   int DoDrainBodyComplete(int result);
+  int DoTCPRestart();
+  int DoTCPRestartComplete(int result);
 
   CompletionCallbackImpl<HttpProxyClientSocket> io_callback_;
   State next_state_;
@@ -132,6 +146,8 @@ class HttpProxyClientSocket : public ClientSocket {
   const HostPortPair endpoint_;
   scoped_refptr<HttpAuthController> auth_;
   const bool tunnel_;
+  // If true, then the connection to the proxy is a SPDY connection.
+  const bool using_spdy_;
 
   std::string request_headers_;
 

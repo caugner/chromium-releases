@@ -8,8 +8,9 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -17,7 +18,8 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/chrome_process_util.h"
-#include "chrome/test/ui/ui_test.h"
+#include "chrome/test/test_switches.h"
+#include "chrome/test/ui/ui_perf_test.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 
@@ -149,9 +151,10 @@ void PopulateBufferCache(const FilePath& test_dir) {
   LOG(INFO) << "Buffer cache should be primed with " << loaded << " files.";
 }
 
-class PageCyclerTest : public UITest {
+class PageCyclerTest : public UIPerfTest {
  protected:
   bool print_times_only_;
+  int num_test_iterations_;
 #if defined(OS_MACOSX)
   rlim_t fd_limit_;
 #endif
@@ -160,10 +163,18 @@ class PageCyclerTest : public UITest {
       : print_times_only_(false) {
     show_window_ = true;
 
+    const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
+    num_test_iterations_ = TEST_ITERATIONS;
+
+    if (parsed_command_line.HasSwitch(switches::kPageCyclerIterations)) {
+      std::string str = parsed_command_line.GetSwitchValueASCII(
+          switches::kPageCyclerIterations);
+      base::StringToInt(str, &num_test_iterations_);
+    }
 
     // Expose garbage collection for the page cycler tests.
-    launch_arguments_.AppendSwitchWithValue(switches::kJavaScriptFlags,
-                                            L"--expose_gc");
+    launch_arguments_.AppendSwitchASCII(switches::kJavaScriptFlags,
+                                        "--expose_gc");
 #if defined(OS_MACOSX)
     static rlim_t initial_fd_limit = GetFileDescriptorLimit();
     fd_limit_ = initial_fd_limit;
@@ -192,7 +203,7 @@ class PageCyclerTest : public UITest {
   }
 
   virtual int GetTestIterations() {
-    return TEST_ITERATIONS;
+    return num_test_iterations_;
   }
 
   // For HTTP tests, the name must be safe for use in a URL without escaping.
@@ -215,7 +226,7 @@ class PageCyclerTest : public UITest {
     // run N iterations
     GURL::Replacements replacements;
     const std::string query_string =
-        "iterations=" + IntToString(GetTestIterations()) + "&auto=1";
+        "iterations=" + base::IntToString(GetTestIterations()) + "&auto=1";
     replacements.SetQuery(
         query_string.c_str(),
         url_parse::Component(0, query_string.length()));
@@ -356,7 +367,7 @@ static bool HasDatabaseErrors(const std::string timings) {
     if (new_pos == std::string::npos)
       new_pos = timings.length();
     time_str = timings.substr(pos, new_pos - pos);
-    if (!StringToInt(time_str, &time)) {
+    if (!base::StringToInt(time_str, &time)) {
       LOG(ERROR) << "Invalid time reported: " << time_str;
       return true;
     }
@@ -480,6 +491,8 @@ PAGE_CYCLER_HTTP_TESTS("dom", DomHttp);
 PAGE_CYCLER_HTTP_TESTS("bloat", BloatHttp);
 
 // HTML5 database tests
+// These tests are _really_ slow on XP/Vista.
+#if !defined(OS_WIN)
 PAGE_CYCLER_DATABASE_TESTS("select-transactions",
                            SelectTransactions);
 PAGE_CYCLER_DATABASE_TESTS("select-readtransactions",
@@ -494,5 +507,6 @@ PAGE_CYCLER_DATABASE_TESTS("delete-transactions",
                            DeleteTransactions);
 PAGE_CYCLER_DATABASE_TESTS("pseudo-random-transactions",
                            PseudoRandomTransactions);
+#endif
 
 }  // namespace

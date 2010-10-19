@@ -22,6 +22,9 @@ namespace views {
 // static
 const int SubmenuView::kSubmenuBorderSize = 3;
 
+// static
+const char SubmenuView::kViewClassName[] = "views/SubmenuView";
+
 SubmenuView::SubmenuView(MenuItemView* parent)
     : parent_menu_item_(parent),
       host_(NULL),
@@ -83,9 +86,11 @@ void SubmenuView::Layout() {
   int menu_item_width = width() - insets.width();
   for (int i = 0; i < GetChildViewCount(); ++i) {
     View* child = GetChildViewAt(i);
-    gfx::Size child_pref_size = child->GetPreferredSize();
-    child->SetBounds(x, y, menu_item_width, child_pref_size.height());
-    y += child_pref_size.height();
+    if (child->IsVisible()) {
+      gfx::Size child_pref_size = child->GetPreferredSize();
+      child->SetBounds(x, y, menu_item_width, child_pref_size.height());
+      y += child_pref_size.height();
+    }
   }
 }
 
@@ -98,7 +103,8 @@ gfx::Size SubmenuView::GetPreferredSize() {
   int height = 0;
   for (int i = 0; i < GetChildViewCount(); ++i) {
     View* child = GetChildViewAt(i);
-    gfx::Size child_pref_size = child->GetPreferredSize();
+    gfx::Size child_pref_size = child->IsVisible() ?
+        child->GetPreferredSize() : gfx::Size();
     max_width = std::max(max_width, child_pref_size.width());
     height += child_pref_size.height();
     if (child->GetID() == MenuItemView::kMenuItemViewID) {
@@ -119,6 +125,11 @@ gfx::Size SubmenuView::GetPreferredSize() {
 void SubmenuView::DidChangeBounds(const gfx::Rect& previous,
                                   const gfx::Rect& current) {
   SchedulePaint();
+}
+
+bool SubmenuView::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  *role = AccessibilityTypes::ROLE_MENUPOPUP;
+  return true;
 }
 
 void SubmenuView::PaintChildren(gfx::Canvas* canvas) {
@@ -224,6 +235,11 @@ void SubmenuView::ShowAt(gfx::NativeWindow parent,
                          bool do_capture) {
   if (host_) {
     host_->ShowMenuHost(do_capture);
+
+    GetScrollViewContainer()->NotifyAccessibilityEvent(
+        AccessibilityTypes::EVENT_MENUSTART);
+
+    NotifyAccessibilityEvent(AccessibilityTypes::EVENT_MENUPOPUPSTART);
     return;
   }
 
@@ -233,6 +249,11 @@ void SubmenuView::ShowAt(gfx::NativeWindow parent,
   // Make sure the first row is visible.
   ScrollRectToVisible(gfx::Rect(gfx::Point(), gfx::Size(1, 1)));
   host_->Init(parent, bounds, scroll_view_container_, do_capture);
+
+  GetScrollViewContainer()->NotifyAccessibilityEvent(
+      AccessibilityTypes::EVENT_MENUSTART);
+
+  NotifyAccessibilityEvent(AccessibilityTypes::EVENT_MENUPOPUPSTART);
 }
 
 void SubmenuView::Reposition(const gfx::Rect& bounds) {
@@ -242,6 +263,11 @@ void SubmenuView::Reposition(const gfx::Rect& bounds) {
 
 void SubmenuView::Close() {
   if (host_) {
+    NotifyAccessibilityEvent(AccessibilityTypes::EVENT_MENUPOPUPEND);
+
+    GetScrollViewContainer()->NotifyAccessibilityEvent(
+        AccessibilityTypes::EVENT_MENUEND);
+
     host_->DestroyMenuHost();
     host_ = NULL;
   }
@@ -285,6 +311,12 @@ MenuScrollViewContainer* SubmenuView::GetScrollViewContainer() {
     scroll_view_container_ = new MenuScrollViewContainer(this);
     // Otherwise MenuHost would delete us.
     scroll_view_container_->set_parent_owned(false);
+
+    // Use the parent menu item accessible name for the menu view.
+    std::wstring accessible_name;
+    GetMenuItem()->GetAccessibleName(&accessible_name);
+    scroll_view_container_->SetAccessibleName(accessible_name);
+    SetAccessibleName(accessible_name);
   }
   return scroll_view_container_;
 }
@@ -296,6 +328,10 @@ gfx::NativeWindow SubmenuView::native_window() const {
 void SubmenuView::MenuHostDestroyed() {
   host_ = NULL;
   GetMenuItem()->GetMenuController()->Cancel(MenuController::EXIT_DESTROYED);
+}
+
+std::string SubmenuView::GetClassName() const {
+  return kViewClassName;
 }
 
 void SubmenuView::PaintDropIndicator(gfx::Canvas* canvas,

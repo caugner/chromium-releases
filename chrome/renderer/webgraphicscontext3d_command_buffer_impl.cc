@@ -7,9 +7,14 @@
 #include "chrome/renderer/webgraphicscontext3d_command_buffer_impl.h"
 
 #include <GLES2/gl2.h>
+#ifndef GL_GLEXT_PROTOTYPES
+#define GL_GLEXT_PROTOTYPES 1
+#endif
+#include <GLES2/gl2ext.h>
 
 #include <algorithm>
 
+#include "base/string_tokenizer.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "chrome/common/chrome_switches.h"
@@ -64,7 +69,7 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
     return false;
   // TODO(gman): Remove this.
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (!command_line.HasSwitch(switches::kEnableGLSLTranslator)) {
+  if (command_line.HasSwitch(switches::kDisableGLSLTranslator)) {
     DisableShaderTranslation(context_);
   }
   return true;
@@ -106,6 +111,18 @@ bool WebGraphicsContext3DCommandBufferImpl::isGLES2Compliant() {
   return true;
 }
 
+bool WebGraphicsContext3DCommandBufferImpl::isGLES2ParameterStrict() {
+  return false;
+}
+
+bool WebGraphicsContext3DCommandBufferImpl::isGLES2NPOTStrict() {
+  return false;
+}
+
+bool WebGraphicsContext3DCommandBufferImpl::isErrorGeneratedOnOutOfBoundsAccesses() {
+  return false;
+}
+
 unsigned int WebGraphicsContext3DCommandBufferImpl::getPlatformTextureId() {
   DCHECK(context_);
   return ggl::GetParentTextureId(context_);
@@ -131,6 +148,18 @@ void WebGraphicsContext3DCommandBufferImpl::reshape(int width, int height) {
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
   scanline_.reset(new uint8[width * 4]);
 #endif  // FLIP_FRAMEBUFFER_VERTICALLY
+}
+
+unsigned WebGraphicsContext3DCommandBufferImpl::createCompositorTexture(
+    unsigned width, unsigned height) {
+  makeContextCurrent();
+  return ggl::CreateParentTexture(context_, gfx::Size(width, height));
+}
+
+void WebGraphicsContext3DCommandBufferImpl::deleteCompositorTexture(
+    unsigned parent_texture) {
+  makeContextCurrent();
+  ggl::DeleteParentTexture(context_, parent_texture);
 }
 
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
@@ -205,6 +234,24 @@ void WebGraphicsContext3DCommandBufferImpl::synthesizeGLError(
       synthetic_errors_.end()) {
     synthetic_errors_.push_back(error);
   }
+}
+
+static bool supports_extension(const char *ext_name) {
+  const char* extensions = (const char *) glGetString(GL_EXTENSIONS);
+  CStringTokenizer t(extensions, extensions + strlen(extensions), " ");
+  while (t.GetNext()) {
+    if (t.token() == ext_name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool WebGraphicsContext3DCommandBufferImpl::supportsBGRA() {
+  static bool is_supported =
+    supports_extension("GL_EXT_texture_format_BGRA8888") &&
+    supports_extension("GL_EXT_read_format_bgra");
+  return is_supported;
 }
 
 // Helper macros to reduce the amount of code.
@@ -838,6 +885,13 @@ void WebGraphicsContext3DCommandBufferImpl::deleteShader(unsigned shader) {
 void WebGraphicsContext3DCommandBufferImpl::deleteTexture(unsigned texture) {
   makeContextCurrent();
   glDeleteTextures(1, &texture);
+}
+
+void WebGraphicsContext3DCommandBufferImpl::copyTextureToCompositor(
+    unsigned texture, unsigned parentTexture) {
+  makeContextCurrent();
+  glCopyTextureToParentTexture(texture, parentTexture);
+  glFlush();
 }
 
 #endif  // defined(ENABLE_GPU)

@@ -1,9 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_TASK_MANAGER_H_
 #define CHROME_BROWSER_TASK_MANAGER_H_
+#pragma once
 
 #include <map>
 #include <string>
@@ -17,6 +18,7 @@
 #include "base/process_util.h"
 #include "base/ref_counted.h"
 #include "base/singleton.h"
+#include "base/string16.h"
 #include "base/timer.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "net/url_request/url_request_job_tracker.h"
@@ -25,10 +27,7 @@
 class Extension;
 class SkBitmap;
 class TabContents;
-class TaskManager;
 class TaskManagerModel;
-
-struct BytesReadParam;
 
 namespace base {
 class ProcessMetrics;
@@ -151,6 +150,10 @@ class TaskManager {
   FRIEND_TEST_ALL_PREFIXES(TaskManagerTest, Basic);
   FRIEND_TEST_ALL_PREFIXES(TaskManagerTest, Resources);
   FRIEND_TEST_ALL_PREFIXES(TaskManagerTest, RefreshCalled);
+  FRIEND_TEST_ALL_PREFIXES(TaskManagerWindowControllerTest, Init);
+  FRIEND_TEST_ALL_PREFIXES(TaskManagerWindowControllerTest, Sort);
+  FRIEND_TEST_ALL_PREFIXES(TaskManagerWindowControllerTest,
+                           SelectionAdaptsToSorting);
 
   // Obtain an instance via GetInstance().
   TaskManager();
@@ -195,19 +198,19 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   int ResourceCount() const;
 
   // Methods to return formatted resource information.
-  std::wstring GetResourceTitle(int index) const;
-  std::wstring GetResourceNetworkUsage(int index) const;
-  std::wstring GetResourceCPUUsage(int index) const;
-  std::wstring GetResourcePrivateMemory(int index) const;
-  std::wstring GetResourceSharedMemory(int index) const;
-  std::wstring GetResourcePhysicalMemory(int index) const;
-  std::wstring GetResourceProcessId(int index) const;
-  std::wstring GetResourceWebCoreImageCacheSize(int index) const;
-  std::wstring GetResourceWebCoreScriptsCacheSize(int index) const;
-  std::wstring GetResourceWebCoreCSSCacheSize(int index) const;
-  std::wstring GetResourceSqliteMemoryUsed(int index) const;
-  std::wstring GetResourceGoatsTeleported(int index) const;
-  std::wstring GetResourceV8MemoryAllocatedSize(int index) const;
+  string16 GetResourceTitle(int index) const;
+  string16 GetResourceNetworkUsage(int index) const;
+  string16 GetResourceCPUUsage(int index) const;
+  string16 GetResourcePrivateMemory(int index) const;
+  string16 GetResourceSharedMemory(int index) const;
+  string16 GetResourcePhysicalMemory(int index) const;
+  string16 GetResourceProcessId(int index) const;
+  string16 GetResourceWebCoreImageCacheSize(int index) const;
+  string16 GetResourceWebCoreScriptsCacheSize(int index) const;
+  string16 GetResourceWebCoreCSSCacheSize(int index) const;
+  string16 GetResourceSqliteMemoryUsed(int index) const;
+  string16 GetResourceGoatsTeleported(int index) const;
+  string16 GetResourceV8MemoryAllocatedSize(int index) const;
 
   // Returns true if the resource is first in its group (resources
   // rendered by the same process are groupped together).
@@ -238,7 +241,7 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   void OnJobRemoved(URLRequestJob* job);
   void OnJobDone(URLRequestJob* job, const URLRequestStatus& status);
   void OnJobRedirect(URLRequestJob* job, const GURL& location, int status_code);
-  void OnBytesRead(URLRequestJob* job, int byte_count);
+  void OnBytesRead(URLRequestJob* job, const char* buf, int byte_count);
 
   void AddResourceProvider(TaskManager::ResourceProvider* provider);
   void RemoveResourceProvider(TaskManager::ResourceProvider* provider);
@@ -357,7 +360,7 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
 
   // Given a number, this function returns the formatted string that should be
   // displayed in the task manager's memory cell.
-  std::wstring GetMemCellText(int64 number) const;
+  string16 GetMemCellText(int64 number) const;
 
   // Looks up the data for |handle| and puts it in the mutable cache
   // |memory_usage_map_|.

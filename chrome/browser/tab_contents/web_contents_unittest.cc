@@ -2,12 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <vector>
+
 #include "app/message_box_flags.h"
 #include "base/logging.h"
-#include "chrome/browser/pref_service.h"
-#include "chrome/browser/pref_value_store.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
+#include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/renderer_host/test/test_render_view_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/tab_contents/interstitial_page.h"
@@ -15,8 +19,11 @@
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/test_tab_contents.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/test/testing_pref_service.h"
 #include "chrome/test/testing_profile.h"
 #include "ipc/ipc_channel.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -37,32 +44,9 @@ static void InitNavigateParams(ViewHostMsg_FrameNavigate_Params* params,
   params->password_form = PasswordForm();
   params->security_info = std::string();
   params->gesture = NavigationGestureUser;
+  params->was_within_same_page = false;
   params->is_post = false;
 }
-
-// Subclass the TestingProfile so that it can return certain services we need.
-class TabContentsTestingProfile : public TestingProfile {
- public:
-  TabContentsTestingProfile() : TestingProfile() {
-    CreateBookmarkModel(false);
-  }
-
-  virtual PrefService* GetPrefs() {
-    if (!prefs_.get()) {
-      FilePath source_path;
-      PathService::Get(chrome::DIR_TEST_DATA, &source_path);
-      source_path = source_path.AppendASCII("profiles")
-          .AppendASCII("chrome_prefs").AppendASCII("Preferences");
-
-      // Create a preference service that only contains user defined
-      // preference values.
-      prefs_.reset(PrefService::CreateUserPrefService(source_path));
-      Profile::RegisterUserPrefs(prefs_.get());
-      browser::RegisterAllPrefs(prefs_.get(), prefs_.get());
-    }
-    return prefs_.get();
-  }
-};
 
 class TestInterstitialPage : public InterstitialPage {
  public:
@@ -76,6 +60,9 @@ class TestInterstitialPage : public InterstitialPage {
    public:
     virtual void TestInterstitialPageDeleted(
         TestInterstitialPage* interstitial) = 0;
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   // IMPORTANT NOTE: if you pass stack allocated values for |state| and
@@ -206,7 +193,27 @@ class TabContentsTest : public RenderViewHostTestHarness {
   // Supply our own profile so we use the correct profile data. The test harness
   // is not supposed to overwrite a profile if it's already created.
   virtual void SetUp() {
-    profile_.reset(new TabContentsTestingProfile());
+    TestingProfile* profile = new TestingProfile();
+    profile_.reset(profile);
+
+    // Set some (WebKit) user preferences.
+    TestingPrefService* pref_services = profile->GetTestingPrefService();
+#if defined(TOOLKIT_USES_GTK)
+    pref_services->SetUserPref(prefs::kUsesSystemTheme,
+                               Value::CreateBooleanValue(false));
+#endif
+    pref_services->SetUserPref(prefs::kDefaultCharset,
+                               Value::CreateStringValue("utf8"));
+    pref_services->SetUserPref(prefs::kWebKitDefaultFontSize,
+                               Value::CreateIntegerValue(20));
+    pref_services->SetUserPref(prefs::kWebKitTextAreasAreResizable,
+                               Value::CreateBooleanValue(false));
+    pref_services->SetUserPref(prefs::kWebKitUsesUniversalDetector,
+                               Value::CreateBooleanValue(true));
+    pref_services->SetUserPref(prefs::kWebKitStandardFontIsSerif,
+                               Value::CreateBooleanValue(true));
+    pref_services->SetUserPref("webkit.webprefs.foo",
+                               Value::CreateStringValue("bar"));
 
     RenderViewHostTestHarness::SetUp();
   }
@@ -760,7 +767,7 @@ TEST_F(TabContentsTest, WebKitPrefs) {
 #if defined(OS_MACOSX)
   const wchar_t kDefaultFont[] = L"Times";
 #elif defined(OS_CHROMEOS)
-  const wchar_t kDefaultFont[] = L"Ascender Serif";
+  const wchar_t kDefaultFont[] = L"Tinos";
 #else
   const wchar_t kDefaultFont[] = L"Times New Roman";
 #endif
@@ -1475,4 +1482,93 @@ TEST_F(TabContentsTest, NoJSMessageOnInterstitials) {
       kGURL, MessageBoxFlags::kIsJavascriptAlert, dummy_message,
       &did_suppress_message);
   EXPECT_TRUE(did_suppress_message);
+}
+
+// Makes sure that if the source passed to CopyStateFromAndPrune has an
+// interstitial it isn't copied over to the destination.
+TEST_F(TabContentsTest, CopyStateFromAndPruneSourceInterstitial) {
+  // Navigate to a page.
+  GURL url1("http://www.google.com");
+  rvh()->SendNavigate(1, url1);
+  EXPECT_EQ(1, controller().entry_count());
+
+  // Initiate a browser navigation that will trigger the interstitial
+  controller().LoadURL(GURL("http://www.evil.com"), GURL(),
+                        PageTransition::TYPED);
+
+  // Show an interstitial.
+  TestInterstitialPage::InterstitialState state =
+      TestInterstitialPage::UNDECIDED;
+  bool deleted = false;
+  GURL url2("http://interstitial");
+  TestInterstitialPage* interstitial =
+      new TestInterstitialPage(contents(), true, url2, &state, &deleted);
+  TestInterstitialPageStateGuard state_guard(interstitial);
+  interstitial->Show();
+  interstitial->TestDidNavigate(1, url2);
+  EXPECT_TRUE(interstitial->is_showing());
+  EXPECT_EQ(2, controller().entry_count());
+
+  // Create another NavigationController.
+  GURL url3("http://foo2");
+  scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
+  NavigationController& other_controller = other_contents->controller();
+  other_contents->NavigateAndCommit(url3);
+  other_controller.CopyStateFromAndPrune(controller());
+
+  // The merged controller should only have two entries: url1 and url2.
+  ASSERT_EQ(2, other_controller.entry_count());
+  EXPECT_EQ(1, other_controller.GetCurrentEntryIndex());
+  EXPECT_EQ(url1, other_controller.GetEntryAtIndex(0)->url());
+  EXPECT_EQ(url3, other_controller.GetEntryAtIndex(1)->url());
+
+  // And the merged controller shouldn't be showing an interstitial.
+  EXPECT_FALSE(other_contents->showing_interstitial_page());
+}
+
+// Makes sure that CopyStateFromAndPrune does the right thing if the object
+// CopyStateFromAndPrune is invoked on is showing an interstitial.
+TEST_F(TabContentsTest, CopyStateFromAndPruneTargetInterstitial) {
+  // Navigate to a page.
+  GURL url1("http://www.google.com");
+  contents()->NavigateAndCommit(url1);
+
+  // Create another NavigationController.
+  scoped_ptr<TestTabContents> other_contents(CreateTestTabContents());
+  NavigationController& other_controller = other_contents->controller();
+
+  // Navigate it to url2.
+  GURL url2("http://foo2");
+  other_contents->NavigateAndCommit(url2);
+
+  // Show an interstitial.
+  TestInterstitialPage::InterstitialState state =
+      TestInterstitialPage::UNDECIDED;
+  bool deleted = false;
+  GURL url3("http://interstitial");
+  TestInterstitialPage* interstitial =
+      new TestInterstitialPage(other_contents.get(), true, url3, &state,
+                               &deleted);
+  TestInterstitialPageStateGuard state_guard(interstitial);
+  interstitial->Show();
+  interstitial->TestDidNavigate(1, url3);
+  EXPECT_TRUE(interstitial->is_showing());
+  EXPECT_EQ(2, other_controller.entry_count());
+
+  other_controller.CopyStateFromAndPrune(controller());
+
+  // The merged controller should only have two entries: url1 and url2.
+  ASSERT_EQ(2, other_controller.entry_count());
+  EXPECT_EQ(1, other_controller.GetCurrentEntryIndex());
+  EXPECT_EQ(url1, other_controller.GetEntryAtIndex(0)->url());
+  EXPECT_EQ(url3, other_controller.GetEntryAtIndex(1)->url());
+
+  // It should have a transient entry.
+  EXPECT_TRUE(other_controller.GetTransientEntry());
+
+  // And the interstitial should be showing.
+  EXPECT_TRUE(other_contents->showing_interstitial_page());
+
+  // And the interstitial should do a reload on don't proceed.
+  EXPECT_TRUE(other_contents->interstitial_page()->reload_on_dont_proceed());
 }

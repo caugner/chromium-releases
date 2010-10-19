@@ -13,6 +13,7 @@ import operator
 import random
 import threading
 
+import app_specifics_pb2
 import autofill_specifics_pb2
 import bookmark_specifics_pb2
 import extension_specifics_pb2
@@ -21,6 +22,7 @@ import password_specifics_pb2
 import preference_specifics_pb2
 import theme_specifics_pb2
 import typed_url_specifics_pb2
+import session_specifics_pb2
 import sync_pb2
 
 # An enumeration of the various kinds of data that can be synced.
@@ -29,26 +31,28 @@ import sync_pb2
 # of a program, it is useful to have an enumeration.
 ALL_TYPES = (
     TOP_LEVEL,  # The type of the 'Google Chrome' folder.
+    APPS,
     AUTOFILL,
     BOOKMARK,
     EXTENSIONS,
     NIGORI,
     PASSWORD,
     PREFERENCE,
-    # SESSION,
+    SESSION,
     THEME,
-    TYPED_URL) = range(9)
+    TYPED_URL) = range(11)
 
 # Given a sync type from ALL_TYPES, find the extension token corresponding
 # to that datatype.  Note that TOP_LEVEL has no such token.
 SYNC_TYPE_TO_EXTENSION = {
+    APPS: app_specifics_pb2.app,
     AUTOFILL: autofill_specifics_pb2.autofill,
     BOOKMARK: bookmark_specifics_pb2.bookmark,
     EXTENSIONS: extension_specifics_pb2.extension,
     NIGORI: nigori_specifics_pb2.nigori,
     PASSWORD: password_specifics_pb2.password,
     PREFERENCE: preference_specifics_pb2.preference,
-    # SESSION: session_specifics_pb2.session,     # Disabled
+    SESSION: session_specifics_pb2.session,
     THEME: theme_specifics_pb2.theme,
     TYPED_URL: typed_url_specifics_pb2.typed_url,
     }
@@ -166,15 +170,16 @@ class SyncDataModel(object):
                     parent_tag='google_chrome', sync_type=EXTENSIONS),
       PermanentItem('google_chrome_passwords', name='Passwords',
                     parent_tag='google_chrome', sync_type=PASSWORD),
-      # TODO(rsimha): Disabled since the protocol does not support it yet.
-      # PermanentItem('google_chrome_sessions', name='Sessions',
-      #               parent_tag='google_chrome', SESSION),
+      PermanentItem('google_chrome_sessions', name='Sessions',
+                    parent_tag='google_chrome', sync_type=SESSION),
       PermanentItem('google_chrome_themes', name='Themes',
                     parent_tag='google_chrome', sync_type=THEME),
       PermanentItem('google_chrome_typed_urls', name='Typed URLs',
                     parent_tag='google_chrome', sync_type=TYPED_URL),
       PermanentItem('google_chrome_nigori', name='Nigori',
                     parent_tag='google_chrome', sync_type=NIGORI),
+      PermanentItem('google_chrome_apps', name='Apps',
+                    parent_tag='google_chrome', sync_type=APPS),
       ]
 
   def __init__(self):
@@ -509,15 +514,50 @@ class SyncDataModel(object):
     # tombstone.  A sync server must track deleted IDs forever, since it does
     # not keep track of client knowledge (there's no deletion ACK event).
     if entry.deleted:
-      # Only the ID, version and deletion state are preserved on a tombstone.
-      # TODO(nick): Does the production server not preserve the type?  Not
-      # doing so means that tombstones cannot be filtered based on
-      # requested_types at GetUpdates time.
-      tombstone = sync_pb2.SyncEntity()
-      tombstone.id_string = entry.id_string
-      tombstone.deleted = True
-      tombstone.name = ''
-      entry = tombstone
+      def MakeTombstone(id_string):
+        """Make a tombstone entry that will replace the entry being deleted.
+
+        Args:
+          id_string: Index of the SyncEntity to be deleted.
+        Returns:
+          A new SyncEntity reflecting the fact that the entry is deleted.
+        """
+        # Only the ID, version and deletion state are preserved on a tombstone.
+        # TODO(nick): Does the production server not preserve the type?  Not
+        # doing so means that tombstones cannot be filtered based on
+        # requested_types at GetUpdates time.
+        tombstone = sync_pb2.SyncEntity()
+        tombstone.id_string = id_string
+        tombstone.deleted = True
+        tombstone.name = ''
+        return tombstone
+
+      def IsChild(child_id):
+        """Check if a SyncEntity is a child of entry, or any of its children.
+
+        Args:
+          child_id: Index of the SyncEntity that is a possible child of entry.
+        Returns:
+          True if it is a child; false otherwise.
+        """
+        if child_id not in self._entries:
+          return False
+        if self._entries[child_id].parent_id_string == entry.id_string:
+          return True
+        return IsChild(self._entries[child_id].parent_id_string)
+
+      # Identify any children entry might have.
+      child_ids = []
+      for possible_child in self._entries.itervalues():
+        if IsChild(possible_child.id_string):
+          child_ids.append(possible_child.id_string)
+
+      # Mark all children that were identified as deleted.
+      for child_id in child_ids:
+        self._SaveEntry(MakeTombstone(child_id))
+
+      # Delete entry itself.
+      entry = MakeTombstone(entry.id_string)
     else:
       # Comments in sync.proto detail how the representation of positional
       # ordering works: the 'insert_after_item_id' field specifies a
@@ -543,7 +583,6 @@ class SyncDataModel(object):
 
     # Commit the change.  This also updates the version number.
     self._SaveEntry(entry)
-    # TODO(nick): Handle recursive deletion.
     return entry
 
 class TestServer(object):
@@ -558,6 +597,19 @@ class TestServer(object):
     # The implementation supports exactly one account; its state is here.
     self.account = SyncDataModel()
     self.account_lock = threading.Lock()
+    self.account_user_email = 'syncjuser@chromium.org'
+
+  def HandleConfigure(self, config):
+    """Handles various test configuration parameters sent from the client.
+
+    Args:
+      config: Dictionary of configuration parameters.
+    Returns:
+      True if configuration was successful.
+    """
+    if config.has_key('user_email'):
+      self.account_user_email = config['user_email'][0]
+    return True
 
   def HandleCommand(self, raw_request):
     """Decode and handle a sync command from a raw input of bytes.
@@ -587,7 +639,7 @@ class TestServer(object):
         print 'Authenticate'
         # We accept any authentication token, and support only one account.
         # TODO(nick): Mock out the GAIA authentication as well; hook up here.
-        response.authenticate.user.email = 'syncjuser@chromium'
+        response.authenticate.user.email = self.account_user_email
         response.authenticate.user.display_name = 'Sync J User'
       elif contents == sync_pb2.ClientToServerMessage.COMMIT:
         print 'Commit'

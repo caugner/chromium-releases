@@ -3,15 +3,18 @@
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/gles2_cmd_decoder_unittest_base.h"
+
 #include <algorithm>
 #include <string>
+
 #include "app/gfx/gl/gl_mock.h"
-#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/program_manager.h"
+#include "gpu/command_buffer/service/test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::gfx::MockGLInterface;
@@ -39,53 +42,7 @@ void GLES2DecoderTestBase::InitDecoder(const char* extensions) {
 
   InSequence sequence;
 
-  EXPECT_CALL(*gl_, GetString(GL_EXTENSIONS))
-      .WillOnce(Return(reinterpret_cast<const uint8*>(extensions)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_VERTEX_ATTRIBS, _))
-      .WillOnce(SetArgumentPointee<1>(kNumVertexAttribs))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, _))
-      .WillOnce(SetArgumentPointee<1>(kNumTextureUnits))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_TEXTURE_SIZE, _))
-      .WillOnce(SetArgumentPointee<1>(kMaxTextureSize))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_CUBE_MAP_TEXTURE_SIZE, _))
-      .WillOnce(SetArgumentPointee<1>(kMaxCubeMapTextureSize))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, _))
-      .WillOnce(SetArgumentPointee<1>(kMaxTextureImageUnits))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, _))
-      .WillOnce(SetArgumentPointee<1>(kMaxVertexTextureImageUnits))
-      .RetiresOnSaturation();
-
-#if defined(GLES2_GPU_SERVICE_BACKEND_NATIVE_GLES2)
-
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_FRAGMENT_UNIFORM_VECTORS, _))
-      .WillOnce(SetArgumentPointee<1>(kMaxFragmentUniformVectors * 4))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_VARYING_VECTORS, _))
-      .WillOnce(SetArgumentPointee<1>(kMaxVaryingVectors * 4))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_VERTEX_UNIFORM_VECTORS, _))
-      .WillOnce(SetArgumentPointee<1>(kMaxVertexUniformVectors * 4))
-      .RetiresOnSaturation();
-
-#else  // !defined(GLES2_GPU_SERVICE_BACKEND_NATIVE_GLES2)
-
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS, _))
-      .WillOnce(SetArgumentPointee<1>(kMaxFragmentUniformVectors))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_VARYING_FLOATS, _))
-      .WillOnce(SetArgumentPointee<1>(kMaxVaryingVectors))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_VERTEX_UNIFORM_COMPONENTS, _))
-      .WillOnce(SetArgumentPointee<1>(kMaxVertexUniformVectors))
-      .RetiresOnSaturation();
-
-#endif  // !defined(GLES2_GPU_SERVICE_BACKEND_NATIVE_GLES2)
+  TestHelper::SetupContextGroupInitExpectations(gl_.get(), "");
 
   EXPECT_CALL(*gl_, EnableVertexAttribArray(0))
       .Times(1)
@@ -107,45 +64,23 @@ void GLES2DecoderTestBase::InitDecoder(const char* extensions) {
       .Times(1)
       .RetiresOnSaturation();
 
-  static GLuint black_ids[] = {
-    kServiceBlackTexture2dId,
-    kServiceBlackTextureCubemapId,
-  };
-  EXPECT_CALL(*gl_, GenTextures(arraysize(black_ids), _))
-      .WillOnce(SetArrayArgument<1>(black_ids,
-                                    black_ids + arraysize(black_ids)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_2D, kServiceBlackTexture2dId))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA,
-                               GL_UNSIGNED_BYTE, _))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_2D, 0))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_CUBE_MAP,
-                                kServiceBlackTextureCubemapId))
-      .Times(1)
-      .RetiresOnSaturation();
-  static GLenum faces[] = {
-      GL_TEXTURE_CUBE_MAP_POSITIVE_X,
-      GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
-      GL_TEXTURE_CUBE_MAP_POSITIVE_Y,
-      GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,
-      GL_TEXTURE_CUBE_MAP_POSITIVE_Z,
-      GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
-  };
-  for (size_t ii = 0; ii < arraysize(faces); ++ii) {
-    EXPECT_CALL(*gl_, TexImage2D(faces[ii], 0, GL_RGBA, 1, 1, 0, GL_RGBA,
-                                 GL_UNSIGNED_BYTE, _))
+  for (GLint tt = 0; tt < TestHelper::kNumTextureUnits; ++tt) {
+    EXPECT_CALL(*gl_, ActiveTexture(GL_TEXTURE0 + tt))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, BindTexture(
+        GL_TEXTURE_CUBE_MAP, TestHelper::kServiceDefaultTextureCubemapId))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, BindTexture(
+        GL_TEXTURE_2D, TestHelper::kServiceDefaultTexture2dId))
         .Times(1)
         .RetiresOnSaturation();
   }
-  EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_CUBE_MAP, 0))
+  EXPECT_CALL(*gl_, ActiveTexture(GL_TEXTURE0))
       .Times(1)
       .RetiresOnSaturation();
+
   EXPECT_CALL(*gl_, Enable(GL_VERTEX_PROGRAM_POINT_SIZE))
       .Times(1)
       .RetiresOnSaturation();
@@ -202,9 +137,6 @@ void GLES2DecoderTestBase::InitDecoder(const char* extensions) {
 void GLES2DecoderTestBase::TearDown() {
   // All Tests should have read all their GLErrors before getting here.
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  EXPECT_CALL(*gl_, DeleteTextures(1, _))
-      .Times(2)
-      .RetiresOnSaturation();
   EXPECT_CALL(*gl_, DeleteBuffersARB(1, _))
       .Times(1)
       .RetiresOnSaturation();
@@ -249,6 +181,86 @@ void GLES2DecoderTestBase::SetBucketAsCString(
     cmd2.Init(bucket_id, 0, size, kSharedMemoryId, kSharedMemoryOffset);
     EXPECT_EQ(error::kNoError, ExecuteCmd(cmd2));
     ClearSharedMemory();
+  }
+}
+
+void GLES2DecoderTestBase::SetupExpectationsForFramebufferAttachment(
+    GLuint clear_bits,
+    GLclampf restore_red,
+    GLclampf restore_green,
+    GLclampf restore_blue,
+    GLclampf restore_alpha,
+    GLuint restore_color_mask,
+    GLuint restore_stencil,
+    GLuint restore_stencil_front_mask,
+    GLuint restore_stencil_back_mask,
+    GLclampf restore_depth,
+    GLboolean restore_depth_mask,
+    bool restore_scissor_test) {
+  InSequence sequence;
+  EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
+      .WillOnce(Return(GL_FRAMEBUFFER_COMPLETE))
+      .RetiresOnSaturation();
+  if ((clear_bits & GL_COLOR_BUFFER_BIT) != 0) {
+    EXPECT_CALL(*gl_, ClearColor(0, 0, 0, 0))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, ColorMask(1, 1, 1, 1))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+  if ((clear_bits & GL_STENCIL_BUFFER_BIT) != 0) {
+    EXPECT_CALL(*gl_, ClearStencil(0))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, StencilMask(static_cast<GLuint>(-1)))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+  if ((clear_bits & GL_DEPTH_BUFFER_BIT) != 0) {
+    EXPECT_CALL(*gl_, ClearDepth(1.0f))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, DepthMask(1))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+  EXPECT_CALL(*gl_, Disable(GL_SCISSOR_TEST))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, Clear(clear_bits))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, ClearColor(
+      restore_red, restore_green, restore_blue, restore_alpha))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, ColorMask(
+      ((restore_color_mask & 0x1000) != 0) ? 1 : 0,
+      ((restore_color_mask & 0x0100) != 0) ? 1 : 0,
+      ((restore_color_mask & 0x0010) != 0) ? 1 : 0,
+      ((restore_color_mask & 0x0001) != 0) ? 1 : 0))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, ClearStencil(restore_stencil))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, StencilMaskSeparate(GL_FRONT, restore_stencil_front_mask))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, StencilMaskSeparate(GL_BACK, restore_stencil_back_mask))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, ClearDepth(restore_depth))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, DepthMask(restore_depth_mask))
+      .Times(1)
+      .RetiresOnSaturation();
+  if (restore_scissor_test) {
+    EXPECT_CALL(*gl_, Enable(GL_SCISSOR_TEST))
+        .Times(1)
+        .RetiresOnSaturation();
   }
 }
 
@@ -332,9 +344,15 @@ void GLES2DecoderTestBase::DoTexImage2D(
     GLsizei width, GLsizei height, GLint border,
     GLenum format, GLenum type,
     uint32 shared_memory_id, uint32 shared_memory_offset) {
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
   EXPECT_CALL(*gl_, TexImage2D(target, level, internal_format,
                                width, height, border, format, type, _))
       .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
       .RetiresOnSaturation();
   TexImage2D cmd;
   cmd.Init(target, level, internal_format, width, height, border, format,
@@ -365,9 +383,6 @@ const GLint GLES2DecoderTestBase::kMaxVertexTextureImageUnits;
 const GLint GLES2DecoderTestBase::kMaxFragmentUniformVectors;
 const GLint GLES2DecoderTestBase::kMaxVaryingVectors;
 const GLint GLES2DecoderTestBase::kMaxVertexUniformVectors;
-
-const GLuint GLES2DecoderTestBase::kServiceBlackTexture2dId;
-const GLuint GLES2DecoderTestBase::kServiceBlackTextureCubemapId;
 
 const GLuint GLES2DecoderTestBase::kServiceAttrib0BufferId;
 
@@ -525,7 +540,7 @@ void GLES2DecoderTestBase::SetupShader(
           }
           for (GLsizei jj = 1; jj < info.size; ++jj) {
             std::string element_name(
-                std::string(base_name) + "[" + IntToString(jj) + "]");
+                std::string(base_name) + "[" + base::IntToString(jj) + "]");
             EXPECT_CALL(*gl_, GetUniformLocation(program_service_id,
                                                  StrEq(element_name)))
                 .WillOnce(Return(info.location + jj * 2))

@@ -9,11 +9,14 @@
 
 #ifndef CHROME_RENDERER_GGL_GGL_H_
 #define CHROME_RENDERER_GGL_GGL_H_
+#pragma once
 
+#include "base/callback.h"
 #include "gfx/native_widget_types.h"
 #include "gfx/size.h"
 
 class GpuChannelHost;
+class GpuVideoDecoderHost;
 
 namespace ggl {
 
@@ -35,8 +38,33 @@ bool Initialize();
 // have completed.
 bool Terminate();
 
-// Create a GGL context that renders directly to a view.
-Context* CreateViewContext(GpuChannelHost* channel, gfx::NativeViewId view);
+// Create a GGL context that renders directly to a view. The view and the
+// associated window must not be destroyed until the returned context has been
+// destroyed, otherwise the GPU process might attempt to render to an invalid
+// window handle.
+//
+// NOTE: on Mac OS X, this entry point is only used to set up the
+// accelerated compositor's output. On this platform, we actually pass
+// a gfx::PluginWindowHandle in place of the gfx::NativeViewId,
+// because the facility to allocate a fake PluginWindowHandle is
+// already in place. We could add more entry points and messages to
+// allocate both fake PluginWindowHandles and NativeViewIds and map
+// from fake NativeViewIds to PluginWindowHandles, but this seems like
+// unnecessary complexity at the moment.
+//
+// The render_view_id is currently also only used on Mac OS X.
+// TODO(kbr): clean up the arguments to this function and make them
+// more cross-platform.
+Context* CreateViewContext(GpuChannelHost* channel,
+                           gfx::NativeViewId view,
+                           int render_view_id);
+
+#if defined(OS_MACOSX)
+// On Mac OS X only, view contexts actually behave like offscreen contexts, and
+// require an explicit resize operation which is slightly different from that
+// of offscreen contexts.
+void ResizeOnscreenContext(Context* context, const gfx::Size& size);
+#endif
 
 // Create a GGL context that renders to an offscreen frame buffer. If parent is
 // not NULL, that context can access a copy of the created
@@ -60,6 +88,18 @@ void ResizeOffscreenContext(Context* context, const gfx::Size& size);
 // parent.
 uint32 GetParentTextureId(Context* context);
 
+// Create a new texture in the parent's context.  Returns zero if context
+// does not have a parent.
+uint32 CreateParentTexture(Context* context, const gfx::Size& size);
+
+// Deletes a texture in the parent's context.
+void DeleteParentTexture(Context* context, uint32 texture);
+
+// Provides a callback that will be invoked when SwapBuffers has completed
+// service side.
+void SetSwapBuffersCallback(Context* context,
+                            Callback1<Context*>::Type* callback);
+
 // Set the current GGL context for the calling thread.
 bool MakeCurrent(Context* context);
 
@@ -74,6 +114,9 @@ bool SwapBuffers(Context* context);
 
 // Destroy the given GGL context.
 bool DestroyContext(Context* context);
+
+// Create a hardware video decoder corresponding to the context.
+GpuVideoDecoderHost* CreateVideoDecoder(Context* context);
 
 // TODO(gman): Remove this
 void DisableShaderTranslation(Context* context);

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -19,6 +19,7 @@
 #include "base/registry.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
+#include "base/values.h"
 #include "base/win_util.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -54,7 +55,7 @@ bool InstallUtil::ExecuteExeAsAdmin(const std::wstring& exe,
 std::wstring InstallUtil::GetChromeUninstallCmd(bool system_install) {
   HKEY root = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  RegKey key(root, dist->GetUninstallRegPath().c_str());
+  RegKey key(root, dist->GetUninstallRegPath().c_str(), KEY_READ);
   std::wstring uninstall_cmd;
   key.ReadValue(installer_util::kUninstallStringField, &uninstall_cmd);
   return uninstall_cmd;
@@ -239,6 +240,7 @@ bool InstallUtil::BuildDLLRegistrationList(const std::wstring& install_path,
                                            const wchar_t** const dll_names,
                                            int dll_names_count,
                                            bool do_register,
+                                           bool user_level_registration,
                                            WorkItemList* registration_list) {
   DCHECK(NULL != registration_list);
   bool success = true;
@@ -246,7 +248,7 @@ bool InstallUtil::BuildDLLRegistrationList(const std::wstring& install_path,
     std::wstring dll_file_path(install_path);
     file_util::AppendToPath(&dll_file_path, dll_names[i]);
     success = registration_list->AddSelfRegWorkItem(dll_file_path,
-        do_register) && success;
+        do_register, user_level_registration) && success;
   }
   return (dll_names_count > 0) && success;
 }

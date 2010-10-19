@@ -19,14 +19,17 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/extensions/bindings_utils.h"
 #include "chrome/renderer/extensions/event_bindings.h"
+#include "chrome/renderer/extensions/extension_renderer_info.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/renderer/user_script_slave.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
+#include "chrome/renderer/render_view_visitor.h"
 #include "grit/common_resources.h"
 #include "grit/renderer_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -35,6 +38,7 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSecurityPolicy.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 
 using bindings_utils::GetStringResource;
 using bindings_utils::ContextInfo;
@@ -53,14 +57,15 @@ namespace {
 // A map of extension ID to vector of page action ids.
 typedef std::map< std::string, std::vector<std::string> > PageActionIdMap;
 
-// A map of permission name to whether its enabled for this extension.
-typedef std::map<std::string, bool> PermissionsMap;
+// A list of permissions that are enabled for this extension.
+typedef std::vector<std::string> PermissionsList;
 
 // A map of extension ID to permissions map.
-typedef std::map<std::string, PermissionsMap> ExtensionPermissionsMap;
+typedef std::map<std::string, PermissionsList> ExtensionPermissionsList;
 
-// A map of extension ID to whether this extension was enabled in incognito.
-typedef std::map<std::string, bool> IncognitoEnabledMap;
+// A map of extension ID to whether this extension can access data from other
+// profiles.
+typedef std::map<std::string, bool> CrossProfileAccessMap;
 
 const char kExtensionName[] = "chrome/ExtensionProcessBindings";
 const char* kExtensionDeps[] = {
@@ -71,27 +76,11 @@ const char* kExtensionDeps[] = {
   ExtensionApiTestV8Extension::kName,
 };
 
-// A list of the API packages which have no associated permission.
-// TODO(erikkay) It might be nice if for consistency we could merge these with
-// the permissions list, or at least have them in one place.
-const char* kNonPermissionExtensionPackages[] = {
-  "extension",
-  // TODO(erikkay): We're inconsistent about the the package name in the events
-  // for pageAction and browserAction.
-  "pageAction",
-  "pageActions",
-  "browserAction",
-  "browserActions",
-  "i18n",
-  "devtools",
-  "test"
-};
-
 struct SingletonData {
   std::set<std::string> function_names_;
   PageActionIdMap page_action_ids_;
-  ExtensionPermissionsMap permissions_;
-  IncognitoEnabledMap incognito_enabled_map_;
+  ExtensionPermissionsList permissions_;
+  CrossProfileAccessMap cross_profile_access_map_;
 };
 
 static std::set<std::string>* GetFunctionNameSet() {
@@ -102,19 +91,19 @@ static PageActionIdMap* GetPageActionMap() {
   return &Singleton<SingletonData>()->page_action_ids_;
 }
 
-static PermissionsMap* GetPermissionsMap(const std::string& extension_id) {
+static PermissionsList* GetPermissionsList(const std::string& extension_id) {
   return &Singleton<SingletonData>()->permissions_[extension_id];
 }
 
-static IncognitoEnabledMap* GetIncognitoEnabledMap() {
-  return &Singleton<SingletonData>()->incognito_enabled_map_;
+static CrossProfileAccessMap* GetCrossProfileAccessMap() {
+  return &Singleton<SingletonData>()->cross_profile_access_map_;
 }
 
 static void GetActiveExtensionIDs(std::set<std::string>* extension_ids) {
-  ExtensionPermissionsMap& permissions =
+  ExtensionPermissionsList& permissions =
       Singleton<SingletonData>()->permissions_;
 
-  for (ExtensionPermissionsMap::iterator iter = permissions.begin();
+  for (ExtensionPermissionsList::iterator iter = permissions.begin();
        iter != permissions.end(); ++iter) {
     extension_ids->insert(iter->first);
   }
@@ -199,13 +188,6 @@ class ExtensionViewAccumulator : public RenderViewVisitor {
     if (match == ViewType::INVALID)
       return true;
 
-    // TODO(erikkay) for now, special case mole as a type of toolstrip.
-    // Perhaps this isn't the right long-term thing to do.
-    if (match == ViewType::EXTENSION_TOOLSTRIP &&
-        type == ViewType::EXTENSION_MOLE) {
-      return true;
-    }
-
     return false;
   }
 
@@ -238,10 +220,10 @@ class ExtensionImpl : public ExtensionBase {
       return std::string();  // this can happen as a tab is closing.
 
     GURL url = renderview->webview()->mainFrame()->url();
-    if (!url.SchemeIs(chrome::kExtensionScheme))
+    if (!ExtensionRendererInfo::ExtensionBindingsAllowed(url))
       return std::string();
 
-    return url.host();
+    return ExtensionRendererInfo::GetIdByURL(url);
   }
 
   virtual v8::Handle<v8::FunctionTemplate> GetNativeFunction(
@@ -264,10 +246,12 @@ class ExtensionImpl : public ExtensionBase {
       return v8::FunctionTemplate::New(GetPopupView);
     } else if (name->Equals(v8::String::New("GetPopupParentWindow"))) {
       return v8::FunctionTemplate::New(GetPopupParentWindow);
-    } else if (name->Equals(v8::String::New("SetExtensionActionIcon"))) {
-      return v8::FunctionTemplate::New(SetExtensionActionIcon);
+    } else if (name->Equals(v8::String::New("SetIconCommon"))) {
+      return v8::FunctionTemplate::New(SetIconCommon);
     } else if (name->Equals(v8::String::New("IsExtensionProcess"))) {
       return v8::FunctionTemplate::New(IsExtensionProcess);
+    } else if (name->Equals(v8::String::New("IsIncognitoProcess"))) {
+      return v8::FunctionTemplate::New(IsIncognitoProcess);
     }
 
     return ExtensionBase::GetNativeFunction(name);
@@ -287,17 +271,18 @@ class ExtensionImpl : public ExtensionBase {
     // a single pop-up view for a given extension.  By doing so, we can find
     // the pop-up view by simply searching for the only pop-up view present.
     // We also assume that if the current view is a pop-up, we can find the
-    // hosting view by searching for a TOOLSTRIP view.
+    // hosting view by searching for a tab contents view.
     if (args.Length() != 0)
       return v8::Undefined();
 
     if (viewtype_to_find != ViewType::EXTENSION_POPUP &&
-        viewtype_to_find != ViewType::EXTENSION_TOOLSTRIP) {
-      NOTREACHED() << L"Requesting invalid view type.";
+        viewtype_to_find != ViewType::EXTENSION_INFOBAR &&
+        viewtype_to_find != ViewType::TAB_CONTENTS) {
+      NOTREACHED() << "Requesting invalid view type.";
     }
 
-    // Disallow searching for a host view if we are a popup view, and likewise
-    // if we are a toolstrip view.
+    // Disallow searching for the same view type as the current view:
+    // Popups can only look for hosts, and hosts can only look for popups.
     RenderView* render_view = bindings_utils::GetRenderViewForCurrentContext();
     if (!render_view ||
         render_view->view_type() == viewtype_to_find) {
@@ -327,7 +312,11 @@ class ExtensionImpl : public ExtensionBase {
   }
 
   static v8::Handle<v8::Value> GetPopupParentWindow(const v8::Arguments& args) {
-    return PopupViewFinder(args, ViewType::EXTENSION_TOOLSTRIP);
+    v8::Handle<v8::Value> view = PopupViewFinder(args, ViewType::TAB_CONTENTS);
+    if (view == v8::Undefined()) {
+      view = PopupViewFinder(args, ViewType::EXTENSION_INFOBAR);
+    }
+    return view;
   }
 
   static v8::Handle<v8::Value> GetExtensionViews(const v8::Arguments& args) {
@@ -345,11 +334,7 @@ class ExtensionImpl : public ExtensionBase {
     StringToUpperASCII(&view_type_string);
     // |view_type| == ViewType::INVALID means getting any type of views.
     ViewType::Type view_type = ViewType::INVALID;
-    if (view_type_string == ViewType::kToolstrip) {
-      view_type = ViewType::EXTENSION_TOOLSTRIP;
-    } else if (view_type_string == ViewType::kMole) {
-      view_type = ViewType::EXTENSION_MOLE;
-    } else if (view_type_string == ViewType::kBackgroundPage) {
+    if (view_type_string == ViewType::kBackgroundPage) {
       view_type = ViewType::EXTENSION_BACKGROUND_PAGE;
     } else if (view_type_string == ViewType::kInfobar) {
       view_type = ViewType::EXTENSION_INFOBAR;
@@ -425,8 +410,9 @@ class ExtensionImpl : public ExtensionBase {
 
   // Common code for starting an API request to the browser. |value_args|
   // contains the request's arguments.
+  // Steals value_args contents for efficiency.
   static v8::Handle<v8::Value> StartRequestCommon(
-      const v8::Arguments& args, const ListValue& value_args) {
+      const v8::Arguments& args, ListValue* value_args) {
     // Get the current RenderView so that we can send a routed IPC message from
     // the correct source.
     RenderView* renderview = bindings_utils::GetRenderViewForCurrentContext();
@@ -457,8 +443,14 @@ class ExtensionImpl : public ExtensionBase {
     GetPendingRequestMap()[request_id].reset(new PendingRequest(
         current_context, name));
 
-    renderview->SendExtensionRequest(name, value_args, source_url,
-                                     request_id, has_callback);
+    ViewHostMsg_DomMessage_Params params;
+    params.name = name;
+    params.arguments.Swap(value_args);
+    params.source_url = source_url;
+    params.request_id = request_id;
+    params.has_callback = has_callback;
+    params.user_gesture = webframe->isProcessingUserGesture();
+    renderview->SendExtensionRequest(params);
 
     return v8::Undefined();
   }
@@ -478,15 +470,11 @@ class ExtensionImpl : public ExtensionBase {
       return v8::Undefined();
     }
 
-    return StartRequestCommon(args, static_cast<const ListValue&>(
-        *value_args.get()));
+    return StartRequestCommon(args, static_cast<ListValue*>(value_args.get()));
   }
 
-  // A special request for setting the extension action icon. This function
-  // accepts a canvas ImageData object, so it needs to do extra processing
-  // before sending the request to the browser.
-  static v8::Handle<v8::Value> SetExtensionActionIcon(
-      const v8::Arguments& args) {
+  static bool ConvertImageDataToBitmapValue(
+      const v8::Arguments& args, Value** bitmap_value) {
     v8::Local<v8::Object> extension_args = args[1]->ToObject();
     v8::Local<v8::Object> details =
         extension_args->Get(v8::String::New("0"))->ToObject();
@@ -500,7 +488,7 @@ class ExtensionImpl : public ExtensionBase {
     int data_length = data->Get(v8::String::New("length"))->Int32Value();
     if (data_length != 4 * width * height) {
       NOTREACHED() << "Invalid argument to setIcon. Expecting ImageData.";
-      return v8::Undefined();
+      return false;
     }
 
     SkBitmap bitmap;
@@ -521,21 +509,37 @@ class ExtensionImpl : public ExtensionBase {
     // Construct the Value object.
     IPC::Message bitmap_pickle;
     IPC::WriteParam(&bitmap_pickle, bitmap);
-    Value* bitmap_value = BinaryValue::CreateWithCopiedBuffer(
+    *bitmap_value = BinaryValue::CreateWithCopiedBuffer(
         static_cast<const char*>(bitmap_pickle.data()), bitmap_pickle.size());
 
+    return true;
+  }
+
+  // A special request for setting the extension action icon and the sidebar
+  // mini tab icon. This function accepts a canvas ImageData object, so it needs
+  // to do extra processing before sending the request to the browser.
+  static v8::Handle<v8::Value> SetIconCommon(
+      const v8::Arguments& args) {
+    Value* bitmap_value = NULL;
+    if (!ConvertImageDataToBitmapValue(args, &bitmap_value))
+      return v8::Undefined();
+
+    v8::Local<v8::Object> extension_args = args[1]->ToObject();
+    v8::Local<v8::Object> details =
+        extension_args->Get(v8::String::New("0"))->ToObject();
+
     DictionaryValue* dict = new DictionaryValue();
-    dict->Set(L"imageData", bitmap_value);
+    dict->Set("imageData", bitmap_value);
 
     if (details->Has(v8::String::New("tabId"))) {
-      dict->SetInteger(L"tabId",
+      dict->SetInteger("tabId",
                        details->Get(v8::String::New("tabId"))->Int32Value());
     }
 
     ListValue list_value;
     list_value.Append(dict);
 
-    return StartRequestCommon(args, list_value);
+    return StartRequestCommon(args, &list_value);
   }
 
   static v8::Handle<v8::Value> GetRenderViewId(const v8::Arguments& args) {
@@ -549,6 +553,13 @@ class ExtensionImpl : public ExtensionBase {
     bool retval = false;
     if (EventBindings::GetRenderThread())
       retval = EventBindings::GetRenderThread()->IsExtensionProcess();
+    return v8::Boolean::New(retval);
+  }
+
+  static v8::Handle<v8::Value> IsIncognitoProcess(const v8::Arguments& args) {
+    bool retval = false;
+    if (EventBindings::GetRenderThread())
+      retval = EventBindings::GetRenderThread()->IsIncognitoProcess();
     return v8::Boolean::New(retval);
   }
 };
@@ -571,14 +582,18 @@ void ExtensionProcessBindings::SetFunctionNames(
 }
 
 void ExtensionProcessBindings::SetIncognitoEnabled(
-    const std::string& extension_id, bool enabled) {
-  (*GetIncognitoEnabledMap())[extension_id] = enabled;
+    const std::string& extension_id, bool enabled, bool incognito_split_mode) {
+  // We allow the extension to see events and data from another profile iff it
+  // uses "spanning" behavior and it has incognito access. "split" mode
+  // extensions only see events for a matching profile.
+  (*GetCrossProfileAccessMap())[extension_id] =
+      enabled && !incognito_split_mode;
 }
 
 // static
-bool ExtensionProcessBindings::HasIncognitoEnabled(
+bool ExtensionProcessBindings::AllowCrossProfile(
     const std::string& extension_id) {
-  return (!extension_id.empty() && (*GetIncognitoEnabledMap())[extension_id]);
+  return (!extension_id.empty() && (*GetCrossProfileAccessMap())[extension_id]);
 }
 
 // static
@@ -630,13 +645,8 @@ void ExtensionProcessBindings::SetPageActions(
 void ExtensionProcessBindings::SetAPIPermissions(
     const std::string& extension_id,
     const std::vector<std::string>& permissions) {
-  PermissionsMap& permissions_map = *GetPermissionsMap(extension_id);
-
-  // Default all the API permissions to off. We will reset them below.
-  for (size_t i = 0; i < Extension::kNumPermissions; ++i)
-    permissions_map[Extension::kPermissionNames[i]] = false;
-  for (size_t i = 0; i < permissions.size(); ++i)
-    permissions_map[permissions[i]] = true;
+  PermissionsList& permissions_list = *GetPermissionsList(extension_id);
+  permissions_list.assign(permissions.begin(), permissions.end());
 }
 
 // static
@@ -681,17 +691,8 @@ bool ExtensionProcessBindings::HasPermission(const std::string& extension_id,
   if (separator != std::string::npos)
     permission_name = permission.substr(0, separator);
 
-  // windows and tabs are the same permission.
-  if (permission_name == "windows")
-    permission_name = Extension::kTabPermission;
-
-  for (size_t i = 0; i < arraysize(kNonPermissionExtensionPackages); ++i)
-    if (permission_name == kNonPermissionExtensionPackages[i])
-      return true;
-
-  PermissionsMap& permissions_map = *GetPermissionsMap(extension_id);
-  PermissionsMap::iterator it = permissions_map.find(permission_name);
-  return (it != permissions_map.end() && it->second);
+  PermissionsList& permissions_list = *GetPermissionsList(extension_id);
+  return Extension::HasApiPermission(permissions_list, permission_name);
 }
 
 // static
@@ -707,24 +708,3 @@ v8::Handle<v8::Value>
       v8::String::New(error_msg.c_str())));
 }
 
-// static
-void ExtensionProcessBindings::SetViewType(WebView* view,
-                                           ViewType::Type type) {
-  DCHECK(type == ViewType::EXTENSION_MOLE ||
-         type == ViewType::EXTENSION_TOOLSTRIP);
-  const char* type_str;
-  if (type == ViewType::EXTENSION_MOLE)
-    type_str = "mole";
-  else if (type == ViewType::EXTENSION_TOOLSTRIP)
-    type_str = "toolstrip";
-  else
-    return;
-
-  v8::HandleScope handle_scope;
-  WebFrame* frame = view->mainFrame();
-  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
-  v8::Handle<v8::Value> argv[1];
-  argv[0] = v8::String::New(type_str);
-  bindings_utils::CallFunctionInContext(context, "setViewType",
-                                        arraysize(argv), argv);
-}

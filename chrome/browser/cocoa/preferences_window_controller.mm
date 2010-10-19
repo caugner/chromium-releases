@@ -11,6 +11,7 @@
 #include "app/resource_bundle.h"
 #include "base/logging.h"
 #include "base/mac_util.h"
+#include "base/scoped_aedesc.h"
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
@@ -31,18 +32,19 @@
 #import "chrome/browser/cocoa/vertical_gradient_view.h"
 #import "chrome/browser/cocoa/window_size_autosaver.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/managed_prefs_banner_base.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/options_window.h"
 #include "chrome/browser/options_util.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/options_window.h"
+#include "chrome/browser/policy/managed_prefs_banner_base.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/session_startup_pref.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util.h"
@@ -58,8 +60,8 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
-#import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
+#import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 
 namespace {
 
@@ -321,7 +323,7 @@ CGFloat AutoSizeUnderTheHoodContent(NSView* view,
 @interface PreferencesWindowController(Private)
 // Callback when preferences are changed. |prefName| is the name of the
 // pref that has changed.
-- (void)prefChanged:(std::wstring*)prefName;
+- (void)prefChanged:(std::string*)prefName;
 // Callback when sync state has changed.  syncService_ needs to be
 // queried to find out what happened.
 - (void)syncStateChanged;
@@ -341,11 +343,12 @@ CGFloat AutoSizeUnderTheHoodContent(NSView* view,
 - (void)setUseSuggest:(BOOL)value;
 - (void)setDnsPrefetch:(BOOL)value;
 - (void)setSafeBrowsing:(BOOL)value;
-- (void)setMetricsRecording:(BOOL)value;
+- (void)setMetricsReporting:(BOOL)value;
 - (void)setAskForSaveLocation:(BOOL)value;
 - (void)setFileHandlerUIEnabled:(BOOL)value;
 - (void)setTranslateEnabled:(BOOL)value;
 - (void)setTabsToLinks:(BOOL)value;
+- (void)setBackgroundModeEnabled:(BOOL)value;
 - (void)displayPreferenceViewForPage:(OptionsPage)page
                              animate:(BOOL)animate;
 - (void)resetSubViews;
@@ -372,7 +375,7 @@ class PrefObserverBridge : public NotificationObserver,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
     if (type == NotificationType::PREF_CHANGED)
-      [controller_ prefChanged:Details<std::wstring>(details).ptr()];
+      [controller_ prefChanged:Details<std::string>(details).ptr()];
   }
 
   // Overridden from ProfileSyncServiceObserver.
@@ -392,8 +395,9 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
 
   explicit ManagedPrefsBannerState(PreferencesWindowController* controller,
                                    OptionsPage page,
+                                   PrefService* local_state,
                                    PrefService* prefs)
-      : ManagedPrefsBannerBase(prefs, page),
+    : ManagedPrefsBannerBase(local_state, prefs, page),
         controller_(controller),
         page_(page) { }
 
@@ -415,6 +419,19 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
 }  // namespace PreferencesWindowControllerInternal
 
 @implementation PreferencesWindowController
+
+@synthesize restoreButtonsEnabled = restoreButtonsEnabled_;
+@synthesize restoreURLsEnabled = restoreURLsEnabled_;
+@synthesize showHomeButtonEnabled = showHomeButtonEnabled_;
+@synthesize passwordManagerChoiceEnabled = passwordManagerChoiceEnabled_;
+@synthesize passwordManagerButtonEnabled = passwordManagerButtonEnabled_;
+@synthesize autoFillSettingsButtonEnabled = autoFillSettingsButtonEnabled_;
+@synthesize showAlternateErrorPagesEnabled = showAlternateErrorPagesEnabled_;
+@synthesize useSuggestEnabled = useSuggestEnabled_;
+@synthesize dnsPrefetchEnabled = dnsPrefetchEnabled_;
+@synthesize safeBrowsingEnabled = safeBrowsingEnabled_;
+@synthesize metricsReportingEnabled = metricsReportingEnabled_;
+@synthesize proxiesConfigureButtonEnabled = proxiesConfigureButtonEnabled_;
 
 - (id)initWithProfile:(Profile*)profile initialPage:(OptionsPage)initialPage {
   DCHECK(profile);
@@ -483,6 +500,27 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
     PersonalDataManager* personalDataManager =
         profile_->GetPersonalDataManager();
     [autoFillSettingsButton_ setHidden:(personalDataManager == NULL)];
+    bool autofill_disabled_by_policy =
+        autoFillEnabled_.IsManaged() && !autoFillEnabled_.GetValue();
+    [self setAutoFillSettingsButtonEnabled:!autofill_disabled_by_policy];
+    [self setPasswordManagerChoiceEnabled:!askSavePasswords_.IsManaged()];
+    [self setPasswordManagerButtonEnabled:
+        !askSavePasswords_.IsManaged() || askSavePasswords_.GetValue()];
+
+    // Initialize the enabled state of the show home button and
+    // restore on startup elements.
+    [self setShowHomeButtonEnabled:!showHomeButton_.IsManaged()];
+    [self setEnabledStateOfRestoreOnStartup];
+
+    // Initialize UI state for the advanced page.
+    [self setShowAlternateErrorPagesEnabled:!alternateErrorPages_.IsManaged()];
+    [self setUseSuggestEnabled:!useSuggest_.IsManaged()];
+    [self setDnsPrefetchEnabled:!dnsPrefetch_.IsManaged()];
+    [self setSafeBrowsingEnabled:!safeBrowsing_.IsManaged()];
+    [self setMetricsReportingEnabled:!metricsReporting_.IsManaged()];
+    proxyPrefs_.reset(
+        PrefSetObserver::CreateProxyPrefSetObserver(prefs_, observer_.get()));
+    [self setProxiesConfigureButtonEnabled:!proxyPrefs_->IsManaged()];
   }
   return self;
 }
@@ -511,6 +549,15 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
   // remove the checkbox and slide everything above it down.
   RemoveViewFromView(underTheHoodContentView_, enableLoggingCheckbox_);
 #endif  // !defined(GOOGLE_CHROME_BUILD)
+
+  // If BackgroundMode is not enabled, hide the related prefs UI.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBackgroundMode)) {
+    RemoveViewFromView(underTheHoodContentView_, backgroundModeTitle_);
+    RemoveViewFromView(underTheHoodContentView_, backgroundModeCheckbox_);
+    RemoveViewFromView(underTheHoodContentView_, backgroundModeDescription_);
+    RemoveViewFromView(underTheHoodContentView_, backgroundModeLearnMore_);
+  }
 
   // There are four problem children within the groups:
   //   Basics - Default Browser
@@ -684,8 +731,7 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
     sizeSaver_.reset([[WindowSizeAutosaver alloc]
        initWithWindow:[self window]
           prefService:g_browser_process->local_state()
-                 path:prefs::kPreferencesWindowPlacement
-                state:kSaveWindowRect]);
+                 path:prefs::kPreferencesWindowPlacement]);
   }
 
   // Initialize the banner gradient and stroke color.
@@ -745,6 +791,7 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
   // Personal Stuff panel
   askSavePasswords_.Init(prefs::kPasswordManagerEnabled,
                          prefs_, observer_.get());
+  autoFillEnabled_.Init(prefs::kAutoFillEnabled, prefs_, observer_.get());
   currentTheme_.Init(prefs::kCurrentThemeID, prefs_, observer_.get());
 
   // Under the hood panel
@@ -756,6 +803,8 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
   autoOpenFiles_.Init(
       prefs::kDownloadExtensionsToOpen, prefs_, observer_.get());
   translateEnabled_.Init(prefs::kEnableTranslate, prefs_, observer_.get());
+  backgroundModeEnabled_.Init(prefs::kBackgroundModeEnabled, prefs_,
+                              observer_.get());
   tabsToLinks_.Init(prefs::kWebkitTabsToLinks, prefs_, observer_.get());
 
   // During unit tests, there is no local state object, so we fall back to
@@ -764,7 +813,7 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
   PrefService* local = g_browser_process->local_state();
   if (!local)
     local = prefs_;
-  metricsRecording_.Init(prefs::kMetricsReportingEnabled,
+  metricsReporting_.Init(prefs::kMetricsReportingEnabled,
                          local, observer_.get());
   defaultDownloadLocation_.Init(prefs::kDownloadDefaultDirectory, prefs_,
                                 observer_.get());
@@ -813,7 +862,7 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
   if ([key isEqualToString:@"isHomepageURLEnabled"]) {
     paths = [paths setByAddingObject:@"newTabPageIsHomePageIndex"];
     paths = [paths setByAddingObject:@"homepageURL"];
-  } else if ([key isEqualToString:@"enableRestoreButtons"]) {
+  } else if ([key isEqualToString:@"restoreURLsEnabled"]) {
     paths = [paths setByAddingObject:@"restoreOnStartupIndex"];
   } else if ([key isEqualToString:@"isHomepageChoiceEnabled"]) {
     paths = [paths setByAddingObject:@"newTabPageIsHomePageIndex"];
@@ -869,17 +918,17 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
 // Windows, we don't need to use this method for initializing, that's handled by
 // Cocoa Bindings.
 // Handles prefs for the "Basics" panel.
-- (void)basicsPrefChanged:(std::wstring*)prefName {
+- (void)basicsPrefChanged:(std::string*)prefName {
   if (*prefName == prefs::kRestoreOnStartup) {
     const SessionStartupPref startupPref =
         SessionStartupPref::GetStartupPref(prefs_);
     [self setRestoreOnStartupIndex:startupPref.type];
+    [self setEnabledStateOfRestoreOnStartup];
   }
 
   if (*prefName == prefs::kURLsToRestoreOnStartup) {
-    const SessionStartupPref startupPref =
-        SessionStartupPref::GetStartupPref(prefs_);
-    [customPagesSource_ setURLs:startupPref.urls];
+    [customPagesSource_ reloadURLs];
+    [self setEnabledStateOfRestoreOnStartup];
   }
 
   if (*prefName == prefs::kHomePageIsNewTabPage) {
@@ -893,6 +942,7 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
 
   if (*prefName == prefs::kShowHomeButton) {
     [self setShowHomeButton:showHomeButton_.GetValue() ? YES : NO];
+    [self setShowHomeButtonEnabled:!showHomeButton_.IsManaged()];
   }
 }
 
@@ -934,10 +984,13 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
   [self saveSessionStartupWithType:startupType];
 }
 
-// Returns whether or not the +/-/Current buttons should be enabled, based on
-// the current pref value for the startup urls.
-- (BOOL)enableRestoreButtons {
-  return [self restoreOnStartupIndex] == SessionStartupPref::URLS;
+// Enables or disables the restoreOnStartup elements
+- (void) setEnabledStateOfRestoreOnStartup {
+  const SessionStartupPref startupPref =
+      SessionStartupPref::GetStartupPref(prefs_);
+  [self setRestoreButtonsEnabled:!SessionStartupPref::TypeIsManaged(prefs_)];
+  [self setRestoreURLsEnabled:!SessionStartupPref::URLsAreManaged(prefs_) &&
+      [self restoreOnStartupIndex] == SessionStartupPref::URLS];
 }
 
 // Getter for the |customPagesSource| property for bindings.
@@ -1054,10 +1107,13 @@ enum { kHomepageNewTabPage, kHomepageURL };
 // appropriate user metric.
 - (void)setNewTabPageIsHomePageIndex:(NSInteger)index {
   bool useNewTabPage = index == kHomepageNewTabPage ? true : false;
-  if (useNewTabPage)
+  if (useNewTabPage) {
     [self recordUserAction:UserMetricsAction("Options_Homepage_UseNewTab")];
-  else
+  } else {
     [self recordUserAction:UserMetricsAction("Options_Homepage_UseURL")];
+    if ([self isHomepageNewTabUIURL])
+      homepage_.SetValueIfNotManaged(std::string());
+  }
   newTabPageIsHomePage_.SetValueIfNotManaged(useNewTabPage);
 }
 
@@ -1105,7 +1161,7 @@ enum { kHomepageNewTabPage, kHomepageURL };
   else
     [self recordUserAction:UserMetricsAction(
                            "Options_Homepage_HideHomeButton")];
-  showHomeButton_.SetValue(value ? true : false);
+  showHomeButton_.SetValueIfNotManaged(value ? true : false);
 }
 
 // Getter for the |searchEngineModel| property for bindings.
@@ -1175,9 +1231,10 @@ enum { kHomepageNewTabPage, kHomepageURL };
     stringId = IDS_OPTIONS_DEFAULTBROWSER_NOTDEFAULT;
   else
     stringId = IDS_OPTIONS_DEFAULTBROWSER_UNKNOWN;
-  std::wstring text =
-      l10n_util::GetStringF(stringId, l10n_util::GetString(IDS_PRODUCT_NAME));
-  return base::SysWideToNSString(text);
+  string16 text =
+      l10n_util::GetStringFUTF16(stringId,
+                                 l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+  return base::SysUTF16ToNSString(text);
 }
 
 //-------------------------------------------------------------------------
@@ -1192,10 +1249,18 @@ const int kDisabledIndex = 1;
 // that has changed. Unlike on Windows, we don't need to use this method for
 // initializing, that's handled by Cocoa Bindings.
 // Handles prefs for the "Personal Stuff" panel.
-- (void)userDataPrefChanged:(std::wstring*)prefName {
+- (void)userDataPrefChanged:(std::string*)prefName {
   if (*prefName == prefs::kPasswordManagerEnabled) {
     [self setPasswordManagerEnabledIndex:askSavePasswords_.GetValue() ?
         kEnabledIndex : kDisabledIndex];
+    [self setPasswordManagerChoiceEnabled:!askSavePasswords_.IsManaged()];
+    [self setPasswordManagerButtonEnabled:
+        !askSavePasswords_.IsManaged() || askSavePasswords_.GetValue()];
+  }
+  if (*prefName == prefs::kAutoFillEnabled) {
+    bool autofill_disabled_by_policy =
+        autoFillEnabled_.IsManaged() && !autoFillEnabled_.GetValue();
+    [self setAutoFillSettingsButtonEnabled:!autofill_disabled_by_policy];
   }
   if (*prefName == prefs::kCurrentThemeID) {
     [self setIsUsingDefaultTheme:currentTheme_.GetValue().length() == 0];
@@ -1318,16 +1383,11 @@ const int kDisabledIndex = 1;
   else
     [self recordUserAction:UserMetricsAction(
                            "Options_PasswordManager_Disable")];
-  askSavePasswords_.SetValue(value == kEnabledIndex ? true : false);
+  askSavePasswords_.SetValueIfNotManaged(value == kEnabledIndex ? true : false);
 }
 
 - (NSInteger)passwordManagerEnabledIndex {
   return askSavePasswords_.GetValue() ? kEnabledIndex : kDisabledIndex;
-}
-
-// Returns whether the password manager buttons should be enabled.
-- (BOOL)isPasswordManagerEnabled {
-  return !askSavePasswords_.IsManaged();
 }
 
 - (void)setIsUsingDefaultTheme:(BOOL)value {
@@ -1350,22 +1410,32 @@ const int kDisabledIndex = 1;
 // that has changed. Unlike on Windows, we don't need to use this method for
 // initializing, that's handled by Cocoa Bindings.
 // Handles prefs for the "Under the hood" panel.
-- (void)underHoodPrefChanged:(std::wstring*)prefName {
+- (void)underHoodPrefChanged:(std::string*)prefName {
   if (*prefName == prefs::kAlternateErrorPagesEnabled) {
     [self setShowAlternateErrorPages:
         alternateErrorPages_.GetValue() ? YES : NO];
+    [self setShowAlternateErrorPagesEnabled:!alternateErrorPages_.IsManaged()];
   }
   else if (*prefName == prefs::kSearchSuggestEnabled) {
     [self setUseSuggest:useSuggest_.GetValue() ? YES : NO];
+    [self setUseSuggestEnabled:!useSuggest_.IsManaged()];
   }
   else if (*prefName == prefs::kDnsPrefetchingEnabled) {
     [self setDnsPrefetch:dnsPrefetch_.GetValue() ? YES : NO];
+    [self setDnsPrefetchEnabled:!dnsPrefetch_.IsManaged()];
   }
   else if (*prefName == prefs::kSafeBrowsingEnabled) {
     [self setSafeBrowsing:safeBrowsing_.GetValue() ? YES : NO];
+    [self setSafeBrowsingEnabled:!safeBrowsing_.IsManaged()];
   }
   else if (*prefName == prefs::kMetricsReportingEnabled) {
-    [self setMetricsRecording:metricsRecording_.GetValue() ? YES : NO];
+    [self setMetricsReporting:metricsReporting_.GetValue() ? YES : NO];
+    [self setMetricsReportingEnabled:!metricsReporting_.IsManaged()];
+  }
+  else if (*prefName == prefs::kDownloadDefaultDirectory) {
+    // Poke KVO.
+    [self willChangeValueForKey:@"defaultDownloadLocation"];
+    [self didChangeValueForKey:@"defaultDownloadLocation"];
   }
   else if (*prefName == prefs::kPromptForDownload) {
     [self setAskForSaveLocation:askForSaveLocation_.GetValue() ? YES : NO];
@@ -1373,12 +1443,19 @@ const int kDisabledIndex = 1;
   else if (*prefName == prefs::kEnableTranslate) {
     [self setTranslateEnabled:translateEnabled_.GetValue() ? YES : NO];
   }
+  else if (*prefName == prefs::kBackgroundModeEnabled) {
+    [self setBackgroundModeEnabled:backgroundModeEnabled_.GetValue() ?
+          YES : NO];
+  }
   else if (*prefName == prefs::kWebkitTabsToLinks) {
     [self setTabsToLinks:tabsToLinks_.GetValue() ? YES : NO];
   }
   else if (*prefName == prefs::kDownloadExtensionsToOpen) {
     // Poke KVC.
     [self setFileHandlerUIEnabled:[self fileHandlerUIEnabled]];
+  }
+  else if (proxyPrefs_->IsObserved(*prefName)) {
+    [self setProxiesConfigureButtonEnabled:!proxyPrefs_->IsManaged()];
   }
 }
 
@@ -1433,8 +1510,16 @@ const int kDisabledIndex = 1;
                    GURL(), NEW_WINDOW, PageTransition::LINK);
 }
 
+- (IBAction)backgroundModeLearnMore:(id)sender {
+  // We open a new browser window so the Options dialog doesn't get lost
+  // behind other windows.
+  Browser::Create(profile_)->OpenURL(
+      GURL(l10n_util::GetStringUTF16(IDS_LEARN_MORE_BACKGROUND_MODE_URL)),
+      GURL(), NEW_WINDOW, PageTransition::LINK);
+}
+
 - (IBAction)resetAutoOpenFiles:(id)sender {
-  profile_->GetDownloadManager()->ResetAutoOpenFiles();
+  profile_->GetDownloadManager()->download_prefs()->ResetAutoOpen();
   [self recordUserAction:UserMetricsAction("Options_ResetAutoOpenFiles")];
 }
 
@@ -1443,21 +1528,18 @@ const int kDisabledIndex = 1;
       @"/System/Library/PreferencePanes/Network.prefPane"]];
 
   const char* proxyPrefCommand = "Proxies";
-  AEDesc openParams = { typeNull, NULL };
+  scoped_aedesc<> openParams;
   OSStatus status = AECreateDesc('ptru',
                                  proxyPrefCommand,
                                  strlen(proxyPrefCommand),
-                                 &openParams);
+                                 openParams.OutPointer());
   LOG_IF(ERROR, status != noErr) << "Failed to create open params: " << status;
 
   LSLaunchURLSpec launchSpec = { 0 };
   launchSpec.itemURLs = (CFArrayRef)itemsToOpen;
-  launchSpec.passThruParams = &openParams;
+  launchSpec.passThruParams = openParams;
   launchSpec.launchFlags = kLSLaunchAsync | kLSLaunchDontAddToRecents;
   LSOpenFromURLSpec(&launchSpec, NULL);
-
-  if (openParams.descriptorType != typeNull)
-    AEDisposeDesc(&openParams);
 }
 
 // Returns whether the alternate error page checkbox should be checked based
@@ -1475,12 +1557,7 @@ const int kDisabledIndex = 1;
   else
     [self recordUserAction:UserMetricsAction(
                            "Options_LinkDoctorCheckbox_Disable")];
-  alternateErrorPages_.SetValue(value ? true : false);
-}
-
-// Returns whether the alternate error page checkbox should be enabled.
-- (BOOL)isAlternateErrorPagesEnabled {
-  return !alternateErrorPages_.IsManaged();
+  alternateErrorPages_.SetValueIfNotManaged(value ? true : false);
 }
 
 // Returns whether the suggest checkbox should be checked based on the
@@ -1498,12 +1575,7 @@ const int kDisabledIndex = 1;
   else
     [self recordUserAction:UserMetricsAction(
                            "Options_UseSuggestCheckbox_Disable")];
-  useSuggest_.SetValue(value ? true : false);
-}
-
-// Returns whether the suggest checkbox should be enabled.
-- (BOOL)isSuggestEnabled {
-  return !useSuggest_.IsManaged();
+  useSuggest_.SetValueIfNotManaged(value ? true : false);
 }
 
 // Returns whether the DNS prefetch checkbox should be checked based on the
@@ -1521,13 +1593,8 @@ const int kDisabledIndex = 1;
   else
     [self recordUserAction:UserMetricsAction(
                            "Options_DnsPrefetchCheckbox_Disable")];
-  dnsPrefetch_.SetValue(value ? true : false);
-  chrome_browser_net::EnablePredictor(value ? true : false);
-}
-
-// Returns whether the DNS prefetch checkbox should be enabled.
-- (BOOL)isDnsPrefetchEnabled {
-  return !dnsPrefetch_.IsManaged();
+  dnsPrefetch_.SetValueIfNotManaged(value ? true : false);
+  chrome_browser_net::EnablePredictor(dnsPrefetch_.GetValue());
 }
 
 // Returns whether the safe browsing checkbox should be checked based on the
@@ -1545,36 +1612,37 @@ const int kDisabledIndex = 1;
   else
     [self recordUserAction:UserMetricsAction(
                            "Options_SafeBrowsingCheckbox_Disable")];
-  bool enabled = value ? true : false;
-  safeBrowsing_.SetValue(enabled);
+  safeBrowsing_.SetValueIfNotManaged(value ? true : false);
   SafeBrowsingService* safeBrowsingService =
       g_browser_process->resource_dispatcher_host()->safe_browsing_service();
-  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-      safeBrowsingService, &SafeBrowsingService::OnEnable, enabled));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(safeBrowsingService,
+                        &SafeBrowsingService::OnEnable,
+                        safeBrowsing_.GetValue()));
 }
 
-// Returns whether the safe browsing checkbox should be enabled.
-- (BOOL)isSafeBrowsingEnabled {
-  return !safeBrowsing_.IsManaged();
-}
-
-// Returns whether the metrics recording checkbox should be checked based on the
+// Returns whether the metrics reporting checkbox should be checked based on the
 // preference.
-- (BOOL)metricsRecording {
-  return metricsRecording_.GetValue() ? YES : NO;
+- (BOOL)metricsReporting {
+  return metricsReporting_.GetValue() ? YES : NO;
 }
 
-// Sets the backend pref for whether or not the metrics recording checkbox
+// Sets the backend pref for whether or not the metrics reporting checkbox
 // should be displayed based on |value|.
-- (void)setMetricsRecording:(BOOL)value {
+- (void)setMetricsReporting:(BOOL)value {
   if (value)
     [self recordUserAction:UserMetricsAction(
                            "Options_MetricsReportingCheckbox_Enable")];
   else
     [self recordUserAction:UserMetricsAction(
                            "Options_MetricsReportingCheckbox_Disable")];
-  bool enabled = value ? true : false;
 
+  // TODO(pinkerton): windows shows a dialog here telling the user they need to
+  // restart for this to take effect. http://crbug.com/34653
+  metricsReporting_.SetValueIfNotManaged(value ? true : false);
+
+  bool enabled = metricsReporting_.GetValue();
   GoogleUpdateSettings::SetCollectStatsConsent(enabled);
   bool update_pref = GoogleUpdateSettings::GetCollectStatsConsent();
   if (enabled != update_pref) {
@@ -1595,15 +1663,6 @@ const int kDisabledIndex = 1;
     else
       metrics->Stop();
   }
-
-  // TODO(pinkerton): windows shows a dialog here telling the user they need to
-  // restart for this to take effect. http://crbug.com/34653
-  metricsRecording_.SetValue(enabled);
-}
-
-// Returns whether the metrics recording checkbox should be enabled.
-- (BOOL)isMetricsRecordingEnabled {
-  return !metricsRecording_.IsManaged();
 }
 
 - (NSURL*)defaultDownloadLocation {
@@ -1630,7 +1689,7 @@ const int kDisabledIndex = 1;
 - (BOOL)fileHandlerUIEnabled {
   if (!profile_->GetDownloadManager())  // Not set in unit tests.
     return NO;
-  return profile_->GetDownloadManager()->HasAutoOpenFileTypesRegistered();
+  return profile_->GetDownloadManager()->download_prefs()->IsAutoOpenUsed();
 }
 
 - (void)setFileHandlerUIEnabled:(BOOL)value {
@@ -1648,6 +1707,19 @@ const int kDisabledIndex = 1;
     [self recordUserAction:UserMetricsAction("Options_Translate_Disable")];
   }
   translateEnabled_.SetValue(value);
+}
+
+- (BOOL)backgroundModeEnabled {
+  return backgroundModeEnabled_.GetValue();
+}
+
+- (void)setBackgroundModeEnabled:(BOOL)value {
+  if (value) {
+    [self recordUserAction:UserMetricsAction("Options_BackgroundMode_Enable")];
+  } else {
+    [self recordUserAction:UserMetricsAction("Options_BackgroundMode_Disable")];
+  }
+  backgroundModeEnabled_.SetValue(value);
 }
 
 - (BOOL)tabsToLinks {
@@ -1721,7 +1793,7 @@ const int kDisabledIndex = 1;
 
 // Callback when preferences are changed. |prefName| is the name of the
 // pref that has changed and should not be NULL.
-- (void)prefChanged:(std::wstring*)prefName {
+- (void)prefChanged:(std::string*)prefName {
   DCHECK(prefName);
   if (!prefName) return;
   [self basicsPrefChanged:prefName];
@@ -1950,9 +2022,16 @@ const int kDisabledIndex = 1;
 // preferences relevant to the given options |page|.
 - (void)initBannerStateForPage:(OptionsPage)page {
   page = [self normalizePage:page];
+
+  // During unit tests, there is no local state object, so we fall back to
+  // the prefs object (where we've explicitly registered this pref so we
+  // know it's there).
+  PrefService* local = g_browser_process->local_state();
+  if (!local)
+    local = prefs_;
   bannerState_.reset(
       new PreferencesWindowControllerInternal::ManagedPrefsBannerState(
-          self, page, prefs_));
+          self, page, local, prefs_));
 }
 
 - (void)switchToPage:(OptionsPage)page animate:(BOOL)animate {

@@ -4,19 +4,23 @@
 
 #ifndef CHROME_BROWSER_HISTORY_HISTORY_TYPES_H_
 #define CHROME_BROWSER_HISTORY_HISTORY_TYPES_H_
+#pragma once
 
+#include <deque>
 #include <map>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/ref_counted_memory.h"
 #include "base/stack_container.h"
 #include "base/string16.h"
 #include "base/time.h"
 #include "chrome/browser/history/snippet.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/common/ref_counted_util.h"
+#include "chrome/common/thumbnail_score.h"
 #include "googleurl/src/gurl.h"
 
 namespace history {
@@ -172,9 +176,27 @@ class URLRow {
   // We support the implicit copy constuctor and operator=.
 };
 
-// VisitRow -------------------------------------------------------------------
+// The enumeration of all possible sources of visits is listed below.
+// The source will be propogated along with a URL or a visit item
+// and eventually be stored in the history database,
+// visit_source table specifically.
+// Different from page transition types, they describe the origins of visits.
+// (Warning): Please don't change any existing values while it is ok to add
+// new values when needed.
+typedef enum {
+  SOURCE_SYNCED = 0,         // Synchronized from somewhere else.
+  SOURCE_BROWSED = 1,        // User browsed.
+  SOURCE_EXTENSION = 2,      // Added by an externsion.
+  SOURCE_FIREFOX_IMPORTED = 3,
+  SOURCE_IE_IMPORTED = 4,
+  SOURCE_SAFARI_IMPORTED = 5,
+} VisitSource;
 
 typedef int64 VisitID;
+// Structure to hold the mapping between each visit's id and its source.
+typedef std::map<VisitID, VisitSource> VisitSourceMap;
+
+// VisitRow -------------------------------------------------------------------
 
 // Holds all information associated with a specific visit. A visit holds time
 // and referrer information for one time a URL is visited.
@@ -310,7 +332,7 @@ struct StarredEntry {
 
   // If type == URL, this is the ID of the URL of the primary page that was
   // starred.
-  history::URLID url_id;
+  URLID url_id;
 
   // Time the entry was last modified. This is only used for groups and
   // indicates the last time a URL was added as a child to the group.
@@ -525,8 +547,57 @@ struct MostVisitedURL {
   }
 };
 
+// Used by TopSites to store the thumbnails.
+struct Images {
+  scoped_refptr<RefCountedBytes> thumbnail;
+  ThumbnailScore thumbnail_score;
+
+  // TODO(brettw): this will eventually store the favicon.
+  // scoped_refptr<RefCountedBytes> favicon;
+};
+
 typedef std::vector<MostVisitedURL> MostVisitedURLList;
 
-}  // history
+// Navigation -----------------------------------------------------------------
+
+// Marshalling structure for AddPage.
+class HistoryAddPageArgs
+    : public base::RefCountedThreadSafe<HistoryAddPageArgs> {
+ public:
+  HistoryAddPageArgs(const GURL& arg_url,
+                     base::Time arg_time,
+                     const void* arg_id_scope,
+                     int32 arg_page_id,
+                     const GURL& arg_referrer,
+                     const history::RedirectList& arg_redirects,
+                     PageTransition::Type arg_transition,
+                     VisitSource arg_source,
+                     bool arg_did_replace_entry);
+
+  // Returns a new HistoryAddPageArgs that is a copy of this (ref count is
+  // of course reset). Ownership of returned object passes to caller.
+  HistoryAddPageArgs* Clone() const;
+
+  GURL url;
+  base::Time time;
+
+  const void* id_scope;
+  int32 page_id;
+
+  GURL referrer;
+  history::RedirectList redirects;
+  PageTransition::Type transition;
+  VisitSource visit_source;
+  bool did_replace_entry;
+
+ private:
+  friend class base::RefCountedThreadSafe<HistoryAddPageArgs>;
+
+  ~HistoryAddPageArgs() {}
+
+  DISALLOW_COPY_AND_ASSIGN(HistoryAddPageArgs);
+};
+
+}  // namespace history
 
 #endif  // CHROME_BROWSER_HISTORY_HISTORY_TYPES_H_

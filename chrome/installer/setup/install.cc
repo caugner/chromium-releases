@@ -27,8 +27,8 @@
 #include "chrome/installer/util/work_item_list.h"
 
 // Build-time generated include file.
-#include "installer_util_strings.h"
-#include "registered_dlls.h"
+#include "installer_util_strings.h"  // NOLINT
+#include "registered_dlls.h"  // NOLINT
 
 namespace {
 
@@ -473,6 +473,7 @@ bool DoPostInstallTasks(HKEY reg_root,
       scoped_ptr<WorkItemList> old_dll_list(WorkItem::CreateWorkItemList());
       if (InstallUtil::BuildDLLRegistrationList(old_dll_path, kDllsToRegister,
                                                 kNumDllsToRegister, false,
+                                                !is_system_install,
                                                 old_dll_list.get())) {
         // Don't abort the install as a result of a failure to unregister old
         // DLLs.
@@ -485,6 +486,7 @@ bool DoPostInstallTasks(HKEY reg_root,
     scoped_ptr<WorkItemList> dll_list(WorkItem::CreateWorkItemList());
     if (InstallUtil::BuildDLLRegistrationList(dll_path, kDllsToRegister,
                                               kNumDllsToRegister, true,
+                                              !is_system_install,
                                               dll_list.get())) {
       if (!dll_list->Do()) {
         dll_list->Rollback();
@@ -666,6 +668,10 @@ installer_util::InstallStatus InstallNewVersion(
                                        product_name,
                                        true);    // overwrite name also
   install_list->AddSetRegValueWorkItem(reg_root, version_key,
+                                       google_update::kRegOopcrashesField,
+                                       1,
+                                       false);   // set during first install
+  install_list->AddSetRegValueWorkItem(reg_root, version_key,
                                        google_update::kRegVersionField,
                                        new_version.GetString(),
                                        true);    // overwrite version
@@ -773,8 +779,21 @@ installer_util::InstallStatus installer::InstallOrUpdateChrome(
       installer_util::GetDistroBooleanPreference(prefs,
           installer_util::master_preferences::kMakeChromeDefault,
           &make_chrome_default);
+
+      // If this is not the user's first Chrome install, but they have chosen
+      // Chrome to become their default browser on the download page, we must
+      // force it here because the master_preferences file will not get copied
+      // into the build.
+      bool force_chrome_default_for_user = false;
+      if (result == installer_util::NEW_VERSION_UPDATED ||
+          result == installer_util::INSTALL_REPAIRED) {
+        installer_util::GetDistroBooleanPreference(prefs,
+            installer_util::master_preferences::kMakeChromeDefaultForUser,
+            &force_chrome_default_for_user);
+      }
+
       RegisterChromeOnMachine(install_path, system_install,
-                              make_chrome_default);
+          make_chrome_default || force_chrome_default_for_user);
     }
 
     std::wstring latest_version_to_keep(new_version.GetString());

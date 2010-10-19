@@ -217,7 +217,7 @@ void MenuScrollViewContainer::PaintBackground(gfx::Canvas* canvas) {
   paint.setStyle(SkPaint::kFill_Style);
   paint.setXfermodeMode(SkXfermode::kSrc_Mode);
 
-  canvas->FillRectInt(0, 0, width(), height(), paint);
+  canvas->DrawRectInt(0, 0, width(), height(), paint);
 #else
   // This is the same as COLOR_TOOLBAR.
   canvas->AsCanvasSkia()->drawColor(SkColorSetRGB(210, 225, 246),
@@ -270,7 +270,16 @@ gfx::Size MenuScrollViewContainer::GetPreferredSize() {
 bool MenuScrollViewContainer::GetAccessibleRole(
     AccessibilityTypes::Role* role) {
   DCHECK(role);
-  *role = AccessibilityTypes::ROLE_MENUPOPUP;
+  *role = AccessibilityTypes::ROLE_MENUBAR;
+  return true;
+}
+
+bool MenuScrollViewContainer::GetAccessibleState(
+    AccessibilityTypes::State* state) {
+  DCHECK(state);
+  // Some AT (like NVDA) will not process focus events on menu item children
+  // unless a parent claims to be focused.
+  *state = AccessibilityTypes::STATE_FOCUSED;
   return true;
 }
 

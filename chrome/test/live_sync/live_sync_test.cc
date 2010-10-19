@@ -6,17 +6,78 @@
 
 #include <vector>
 
+#include "base/command_line.h"
+#include "base/message_loop.h"
+#include "base/path_service.h"
 #include "base/string_util.h"
+#include "base/task.h"
+#include "base/waitable_event.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/url_fetcher.h"
+#include "chrome/common/net/url_request_context_getter.h"
+#include "chrome/test/testing_browser_process.h"
+#include "googleurl/src/gurl.h"
+#include "net/base/escape.h"
+#include "net/proxy/proxy_config.h"
+#include "net/proxy/proxy_config_service_fixed.h"
+#include "net/proxy/proxy_service.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_status.h"
 
 namespace switches {
 const std::string kPasswordFileForTest = "password-file-for-test";
 const std::string kSyncUserForTest = "sync-user-for-test";
 const std::string kSyncPasswordForTest = "sync-password-for-test";
 }
+
+class ConfigureURLFectcherDelegate : public URLFetcher::Delegate {
+ public:
+  ConfigureURLFectcherDelegate() : success_(false) {}
+
+  virtual void OnURLFetchComplete(const URLFetcher* source,
+                                  const GURL& url,
+                                  const URLRequestStatus& status,
+                                  int response_code,
+                                  const ResponseCookies& cookies,
+                                  const std::string& data) {
+    if (status.status() == URLRequestStatus::SUCCESS && response_code == 200)
+      success_ = true;
+    MessageLoop::current()->Quit();
+  }
+
+  bool success() const { return success_; }
+
+ private:
+  bool success_;
+};
+
+class SetProxyConfigTask : public Task {
+ public:
+  SetProxyConfigTask(base::WaitableEvent* done,
+                     URLRequestContextGetter* url_request_context_getter,
+                     const net::ProxyConfig& proxy_config)
+      : done_(done),
+        url_request_context_getter_(url_request_context_getter),
+        proxy_config_(proxy_config) {
+  }
+
+  void Run() {
+    net::ProxyService* proxy_service =
+        url_request_context_getter_->GetURLRequestContext()->proxy_service();
+    proxy_service->ResetConfigService(
+        new net::ProxyConfigServiceFixed(proxy_config_));
+    done_->Signal();
+  }
+
+ private:
+  base::WaitableEvent* done_;
+  URLRequestContextGetter* url_request_context_getter_;
+  net::ProxyConfig proxy_config_;
+};
 
 void LiveSyncTest::SetUp() {
   // At this point, the browser hasn't been launched, and no services are
@@ -58,8 +119,17 @@ void LiveSyncTest::SetUp() {
   // TODO(rsimha): Until we implement a fake Tango server against which tests
   // can run, we need to set the --sync-notification-method to "transitional".
   if (!cl->HasSwitch(switches::kSyncNotificationMethod)) {
-    cl->AppendSwitchWithValue(switches::kSyncNotificationMethod,
-        "transitional");
+    cl->AppendSwitchASCII(switches::kSyncNotificationMethod,
+                          "transitional");
+  }
+
+  // The chrome sync builders are behind a firewall that blocks port 5222, the
+  // default port for XMPP notifications. This causes the tests to spend up to a
+  // minute waiting for a connection on port 5222 before they fail over to port
+  // 443, the default SSL/TCP port. This switch causes the tests to use port 443
+  // by default, without having to try port 5222.
+  if (!cl->HasSwitch(switches::kSyncUseSslTcp)) {
+    cl->AppendSwitch(switches::kSyncUseSslTcp);
   }
 
   // Unless a sync server was explicitly provided, run a test one locally.
@@ -119,12 +189,10 @@ bool LiveSyncTest::SetupClients() {
   for (int i = 0; i < num_clients_; ++i) {
     profiles_.push_back(MakeProfile(
         StringPrintf(FILE_PATH_LITERAL("Profile%d"), i)));
-    if (GetProfile(i) == NULL)
-      return false;
+    EXPECT_FALSE(GetProfile(i) == NULL) << "GetProfile(" << i << ") failed.";
     clients_.push_back(new ProfileSyncServiceTestHarness(
-        GetProfile(i), username_, password_));
-    if (GetClient(i) == NULL)
-      return false;
+        GetProfile(i), username_, password_, i));
+    EXPECT_FALSE(GetClient(i) == NULL) << "GetClient(" << i << ") failed.";
   }
 
   // Create the verifier profile.
@@ -135,15 +203,14 @@ bool LiveSyncTest::SetupClients() {
 bool LiveSyncTest::SetupSync() {
   // Create sync profiles and clients if they haven't already been created.
   if (profiles_.empty()) {
-    if (!SetupClients())
-      return false;
+    EXPECT_TRUE(SetupClients()) << "SetupClients() failed.";
   }
 
   // Sync each of the profiles.
   for (int i = 0; i < num_clients_; ++i) {
-    if (!GetClient(i)->SetupSync())
-      return false;
+    EXPECT_TRUE(GetClient(i)->SetupSync()) << "SetupSync() failed.";
   }
+
   return true;
 }
 
@@ -173,20 +240,67 @@ void LiveSyncTest::TearDownInProcessBrowserTestFixture() {
 }
 
 void LiveSyncTest::SetUpLocalTestServer() {
-  bool success = server_.Start(net::TestServerLauncher::ProtoHTTP,
-      server_.kHostName, server_.kOKHTTPSPort,
-      FilePath(), FilePath(), std::wstring());
-  ASSERT_TRUE(success);
+  ASSERT_TRUE(test_server_.Start());
 
   started_local_test_server_ = true;
 
   CommandLine* cl = CommandLine::ForCurrentProcess();
-  cl->AppendSwitchWithValue(switches::kSyncServiceURL,
-      StringPrintf("http://%s:%d/chromiumsync", server_.kHostName,
-          server_.kOKHTTPSPort));
+  cl->AppendSwitchASCII(switches::kSyncServiceURL,
+      StringPrintf("http://%s:%d/chromiumsync",
+                   test_server_.host_port_pair().host().c_str(),
+                   test_server_.host_port_pair().port()));
 }
 
 void LiveSyncTest::TearDownLocalTestServer() {
-  bool success = server_.Stop();
-  ASSERT_TRUE(success);
+  ASSERT_TRUE(test_server_.Stop());
+}
+
+
+void LiveSyncTest::EnableNetwork(Profile* profile) {
+  SetProxyConfig(profile->GetRequestContext(),
+                 net::ProxyConfig::CreateDirect());
+}
+
+void LiveSyncTest::DisableNetwork(Profile* profile) {
+  // Set the current proxy configuration to a nonexistent proxy to
+  // effectively disable networking.
+  net::ProxyConfig config;
+  config.proxy_rules().ParseFromString("http=127.0.0.1:0");
+  SetProxyConfig(profile->GetRequestContext(), config);
+}
+
+bool LiveSyncTest::EnsureSyncServerConfiguration() {
+  const CommandLine* cl = CommandLine::ForCurrentProcess();
+  if (!cl->HasSwitch(switches::kSyncServiceURL))
+    return true;
+
+  return ConfigureSyncServer("user_email", username_);
+}
+
+void LiveSyncTest::SetProxyConfig(URLRequestContextGetter* context_getter,
+                                  const net::ProxyConfig& proxy_config) {
+  base::WaitableEvent done(false, false);
+  ChromeThread::PostTask(
+      ChromeThread::IO,
+      FROM_HERE,
+      new SetProxyConfigTask(&done,
+                             context_getter,
+                             proxy_config));
+  done.Wait();
+}
+
+bool LiveSyncTest::ConfigureSyncServer(const std::string& name,
+                                       const std::string& value) {
+  std::string url = StringPrintf("http://%s:%d/chromiumsync/configure",
+                                 test_server_.host_port_pair().host().c_str(),
+                                 test_server_.host_port_pair().port());
+  std::string data = EscapePath(name) + "=" + EscapePath(value);
+  ConfigureURLFectcherDelegate delegate;
+  scoped_ptr<URLFetcher> fetcher(
+      URLFetcher::Create(0, GURL(url), URLFetcher::POST, &delegate));
+  fetcher->set_request_context(Profile::GetDefaultRequestContext());
+  fetcher->set_upload_data("application/x-www-form-urlencoded", data);
+  fetcher->Start();
+  MessageLoop::current()->Run();
+  return delegate.success();
 }

@@ -7,7 +7,7 @@
 #include "app/message_box_flags.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/host_content_settings_map.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
@@ -24,6 +24,7 @@ CookiePromptModalDialog::CookiePromptModalDialog(
       dialog_type_(DIALOG_TYPE_COOKIE),
       origin_(origin),
       cookie_line_(cookie_line),
+      estimated_size_(0),
       delegate_(delegate) {
 }
 
@@ -41,6 +42,7 @@ CookiePromptModalDialog::CookiePromptModalDialog(
       origin_(origin),
       local_storage_key_(key),
       local_storage_value_(value),
+      estimated_size_(0),
       delegate_(delegate) {
 }
 
@@ -73,6 +75,7 @@ CookiePromptModalDialog::CookiePromptModalDialog(
       host_content_settings_map_(host_content_settings_map),
       dialog_type_(DIALOG_TYPE_APPCACHE),
       origin_(appcache_manifest_url.GetOrigin()),
+      estimated_size_(0),
       appcache_manifest_url_(appcache_manifest_url),
       delegate_(delegate) {
 }
@@ -83,7 +86,7 @@ CookiePromptModalDialog::~CookiePromptModalDialog() {
 bool CookiePromptModalDialog::IsValid() {
   ContentSetting content_setting =
       host_content_settings_map_->GetContentSetting(
-          origin_, CONTENT_SETTINGS_TYPE_COOKIES);
+          origin_, CONTENT_SETTINGS_TYPE_COOKIES, "");
   if (content_setting != CONTENT_SETTING_ASK) {
     if (content_setting == CONTENT_SETTING_ALLOW) {
       AllowSiteData(false, false);
@@ -105,10 +108,11 @@ void CookiePromptModalDialog::AllowSiteData(bool remember,
     // to insert for exactly this URL.
     host_content_settings_map_->SetContentSetting(
         HostContentSettingsMap::Pattern::FromURLNoWildcard(origin_),
-        CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_DEFAULT);
+        CONTENT_SETTINGS_TYPE_COOKIES, "", CONTENT_SETTING_DEFAULT);
     host_content_settings_map_->SetContentSetting(
         HostContentSettingsMap::Pattern::FromURL(origin_),
         CONTENT_SETTINGS_TYPE_COOKIES,
+        "",
         session_expire ? CONTENT_SETTING_SESSION_ONLY : CONTENT_SETTING_ALLOW);
   }
 
@@ -124,10 +128,10 @@ void CookiePromptModalDialog::BlockSiteData(bool remember) {
     // to insert for exactly this URL.
     host_content_settings_map_->SetContentSetting(
         HostContentSettingsMap::Pattern::FromURLNoWildcard(origin_),
-        CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_DEFAULT);
+        CONTENT_SETTINGS_TYPE_COOKIES, "", CONTENT_SETTING_DEFAULT);
     host_content_settings_map_->SetContentSetting(
         HostContentSettingsMap::Pattern::FromURL(origin_),
-        CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_BLOCK);
+        CONTENT_SETTINGS_TYPE_COOKIES, "", CONTENT_SETTING_BLOCK);
   }
 
   if (delegate_) {

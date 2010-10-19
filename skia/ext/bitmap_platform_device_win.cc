@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "skia/ext/bitmap_platform_device_win.h"
 
+#include "skia/ext/bitmap_platform_device_data.h"
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkRegion.h"
@@ -14,95 +15,14 @@
 
 namespace skia {
 
-namespace {
-
-// Constrains position and size to fit within available_size. If |size| is -1,
-// all the available_size is used. Returns false if the position is out of
-// available_size.
-bool Constrain(int available_size, int* position, int *size) {
-  if (*size < -2)
-    return false;
-
-  if (*position < 0) {
-    if (*size != -1)
-      *size += *position;
-    *position = 0;
-  }
-  if (*size == 0 || *position >= available_size)
-    return false;
-
-  if (*size > 0) {
-    int overflow = (*position + *size) - available_size;
-    if (overflow > 0) {
-      *size -= overflow;
-    }
-  } else {
-    // Fill up available size.
-    *size = available_size - *position;
-  }
-  return true;
-}
-
-}  // namespace
-
-class BitmapPlatformDevice::BitmapPlatformDeviceData : public SkRefCnt {
- public:
-  explicit BitmapPlatformDeviceData(HBITMAP hbitmap);
-
-  // Create/destroy hdc_, which is the memory DC for our bitmap data.
-  HDC GetBitmapDC();
-  void ReleaseBitmapDC();
-  bool IsBitmapDCCreated() const;
-
-  // Sets the transform and clip operations. This will not update the DC,
-  // but will mark the config as dirty. The next call of LoadConfig will
-  // pick up these changes.
-  void SetMatrixClip(const SkMatrix& transform, const SkRegion& region);
-
-  const SkMatrix& transform() const {
-    return transform_;
-  }
-
- protected:
-  // Loads the current transform and clip into the DC. Can be called even when
-  // the DC is NULL (will be a NOP).
-  void LoadConfig();
-
-  // Windows bitmap corresponding to our surface.
-  HBITMAP hbitmap_;
-
-  // Lazily-created DC used to draw into the bitmap, see getBitmapDC.
-  HDC hdc_;
-
-  // True when there is a transform or clip that has not been set to the DC.
-  // The DC is retrieved for every text operation, and the transform and clip
-  // do not change as much. We can save time by not loading the clip and
-  // transform for every one.
-  bool config_dirty_;
-
-  // Translation assigned to the DC: we need to keep track of this separately
-  // so it can be updated even if the DC isn't created yet.
-  SkMatrix transform_;
-
-  // The current clipping
-  SkRegion clip_region_;
-
- private:
-  virtual ~BitmapPlatformDeviceData();
-
-  // Copy & assign are not supported.
-  BitmapPlatformDeviceData(const BitmapPlatformDeviceData&);
-  BitmapPlatformDeviceData& operator=(const BitmapPlatformDeviceData&);
-};
-
 BitmapPlatformDevice::BitmapPlatformDeviceData::BitmapPlatformDeviceData(
     HBITMAP hbitmap)
-    : hbitmap_(hbitmap),
+    : bitmap_context_(hbitmap),
       hdc_(NULL),
       config_dirty_(true) {  // Want to load the config next time.
   // Initialize the clip region to the entire bitmap.
   BITMAP bitmap_data;
-  if (GetObject(hbitmap_, sizeof(BITMAP), &bitmap_data)) {
+  if (GetObject(bitmap_context_, sizeof(BITMAP), &bitmap_data)) {
     SkIRect rect;
     rect.set(0, 0, bitmap_data.bmWidth, bitmap_data.bmHeight);
     clip_region_ = SkRegion(rect);
@@ -116,14 +36,14 @@ BitmapPlatformDevice::BitmapPlatformDeviceData::~BitmapPlatformDeviceData() {
     ReleaseBitmapDC();
 
   // this will free the bitmap data as well as the bitmap handle
-  DeleteObject(hbitmap_);
+  DeleteObject(bitmap_context_);
 }
 
 HDC BitmapPlatformDevice::BitmapPlatformDeviceData::GetBitmapDC() {
   if (!hdc_) {
     hdc_ = CreateCompatibleDC(NULL);
     InitializeDC(hdc_);
-    HGDIOBJ old_bitmap = SelectObject(hdc_, hbitmap_);
+    HGDIOBJ old_bitmap = SelectObject(hdc_, bitmap_context_);
     // When the memory DC is created, its display surface is exactly one
     // monochrome pixel wide and one monochrome pixel high. Since we select our
     // own bitmap, we must delete the previous one.
@@ -333,34 +253,6 @@ void BitmapPlatformDevice::drawToHDC(HDC dc, int x, int y,
 
   if (created_dc)
     data_->ReleaseBitmapDC();
-}
-
-void BitmapPlatformDevice::makeOpaque(int x, int y, int width, int height) {
-  const SkBitmap& bitmap = accessBitmap(true);
-  SkASSERT(bitmap.config() == SkBitmap::kARGB_8888_Config);
-
-  // FIXME(brettw): This is kind of lame, we shouldn't be dealing with
-  // transforms at this level. Probably there should be a PlatformCanvas
-  // function that does the transform (using the actual transform not just the
-  // translation) and calls us with the transformed rect.
-  const SkMatrix& matrix = data_->transform();
-  int bitmap_start_x = SkScalarRound(matrix.getTranslateX()) + x;
-  int bitmap_start_y = SkScalarRound(matrix.getTranslateY()) + y;
-
-  if (Constrain(bitmap.width(), &bitmap_start_x, &width) &&
-      Constrain(bitmap.height(), &bitmap_start_y, &height)) {
-    SkAutoLockPixels lock(bitmap);
-    SkASSERT(bitmap.rowBytes() % sizeof(uint32_t) == 0u);
-    size_t row_words = bitmap.rowBytes() / sizeof(uint32_t);
-    // Set data to the first pixel to be modified.
-    uint32_t* data = bitmap.getAddr32(0, 0) + (bitmap_start_y * row_words) +
-                     bitmap_start_x;
-    for (int i = 0; i < height; i++) {
-      for (int j = 0; j < width; j++)
-        data[j] |= (0xFF << SK_A32_SHIFT);
-      data += row_words;
-    }
-  }
 }
 
 // Returns the color value at the specified location.

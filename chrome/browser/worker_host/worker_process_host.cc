@@ -12,6 +12,7 @@
 #include "base/debug_util.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/appcache/appcache_dispatcher_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/child_process_security_policy.h"
@@ -27,6 +28,7 @@
 #include "chrome/common/debug_flags.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/common/worker_messages.h"
 #include "ipc/ipc_switches.h"
@@ -105,56 +107,24 @@ bool WorkerProcessHost::Init() {
     return false;
 
   CommandLine* cmd_line = new CommandLine(exe_path);
-  cmd_line->AppendSwitchWithValue(switches::kProcessType,
-                                  switches::kWorkerProcess);
-  cmd_line->AppendSwitchWithValue(switches::kProcessChannelID,
-                                  ASCIIToWide(channel_id()));
+  cmd_line->AppendSwitchASCII(switches::kProcessType, switches::kWorkerProcess);
+  cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id());
   SetCrashReporterCommandLine(cmd_line);
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableNativeWebWorkers)) {
-    cmd_line->AppendSwitch(switches::kEnableNativeWebWorkers);
-  }
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kWebWorkerShareProcesses)) {
-    cmd_line->AppendSwitch(switches::kWebWorkerShareProcesses);
-  }
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableApplicationCache)) {
-    cmd_line->AppendSwitch(switches::kDisableApplicationCache);
-  }
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableDatabases)) {
-    cmd_line->AppendSwitch(switches::kDisableDatabases);
-  }
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableLogging)) {
-    cmd_line->AppendSwitch(switches::kEnableLogging);
-  }
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kLoggingLevel)) {
-    const std::wstring level =
-        CommandLine::ForCurrentProcess()->GetSwitchValue(
-            switches::kLoggingLevel);
-    cmd_line->AppendSwitchWithValue(
-        switches::kLoggingLevel, level);
-  }
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableWebSockets)) {
-    cmd_line->AppendSwitch(switches::kDisableWebSockets);
-  }
-
+  static const char* const kSwitchNames[] = {
+    switches::kEnableNativeWebWorkers,
+    switches::kWebWorkerShareProcesses,
+    switches::kDisableApplicationCache,
+    switches::kDisableDatabases,
+    switches::kEnableLogging,
+    switches::kLoggingLevel,
+    switches::kDisableWebSockets,
 #if defined(OS_WIN)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableDesktopNotifications)) {
-    cmd_line->AppendSwitch(switches::kDisableDesktopNotifications);
-  }
+    switches::kDisableDesktopNotifications,
 #endif
+  };
+  cmd_line->CopySwitchesFrom(*CommandLine::ForCurrentProcess(), kSwitchNames,
+                             arraysize(kSwitchNames));
 
 #if defined(OS_POSIX)
   if (CommandLine::ForCurrentProcess()->HasSwitch(
@@ -174,16 +144,15 @@ bool WorkerProcessHost::Init() {
     if (value.empty() || value == switches::kWorkerProcess) {
       // launches a new xterm, and runs the worker process in gdb, reading
       // optional commands from gdb_chrome file in the working directory.
-      cmd_line->PrependWrapper(L"xterm -e gdb -x gdb_chrome --args");
+      cmd_line->PrependWrapper("xterm -e gdb -x gdb_chrome --args");
     }
   }
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kRendererCmdPrefix)) {
-    const std::wstring prefix =
-        CommandLine::ForCurrentProcess()->GetSwitchValue(
-            switches::kRendererCmdPrefix);
-    cmd_line->PrependWrapper(prefix);
+    cmd_line->PrependWrapper(
+        CommandLine::ForCurrentProcess()->GetSwitchValueNative(
+            switches::kRendererCmdPrefix));
   }
 #endif
 

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_WIN_H_
 #define CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_WIN_H_
+#pragma once
 
 #include <atlbase.h>
 #include <atlapp.h>
@@ -18,6 +19,7 @@
 #include "chrome/browser/browser_accessibility_manager_win.h"
 #include "chrome/browser/ime_input.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
+#include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "webkit/glue/webcursor.h"
 
@@ -119,6 +121,7 @@ class RenderWidgetHostViewWin
   // Implementation of RenderWidgetHostView:
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
                            const gfx::Rect& pos);
+  virtual void InitAsFullscreen(RenderWidgetHostView* parent_host_view);
   virtual RenderWidgetHost* GetRenderWidgetHost() const;
   virtual void DidBecomeSelected();
   virtual void WasHidden();
@@ -153,7 +156,10 @@ class RenderWidgetHostViewWin
   virtual void UpdateAccessibilityTree(
       const webkit_glue::WebAccessibility& tree);
   virtual void OnAccessibilityFocusChange(int acc_obj_id);
-  virtual void OnAccessibilityObjectStateChange(int acc_obj_id);
+  virtual void OnAccessibilityObjectStateChange(
+      const webkit_glue::WebAccessibility& acc_obj);
+  virtual void OnAccessibilityObjectChildrenChange(
+      const std::vector<webkit_glue::WebAccessibility>& acc_obj);
 
   // Implementation of NotificationObserver:
   virtual void Observe(NotificationType type,
@@ -163,6 +169,7 @@ class RenderWidgetHostViewWin
   // Implementation of BrowserAccessibilityDelegate:
   virtual void SetAccessibilityFocus(int acc_obj_id);
   virtual void AccessibilityDoDefaultAction(int acc_obj_id);
+  virtual void AccessibilityObjectChildrenChangeAck();
 
  protected:
   // Windows Message Handlers

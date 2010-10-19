@@ -7,8 +7,7 @@
 #include <dwmapi.h>
 #include <shellapi.h>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
+#include "app/keyboard_code_conversion_win.h"
 #include "app/theme_provider.h"
 #include "app/win_util.h"
 #include "base/i18n/rtl.h"
@@ -244,6 +243,12 @@ void WindowWin::Activate() {
   ::SetWindowPos(GetNativeView(), HWND_TOP, 0, 0, 0, 0,
                  SWP_NOSIZE | SWP_NOMOVE);
   SetForegroundWindow(GetNativeView());
+}
+
+void WindowWin::Deactivate() {
+  HWND hwnd = ::GetNextWindow(GetNativeView(), GW_HWNDNEXT);
+  if (hwnd)
+    ::SetForegroundWindow(hwnd);
 }
 
 void WindowWin::Close() {
@@ -1116,7 +1121,7 @@ void WindowWin::OnSysCommand(UINT notification_code, CPoint click) {
   // Handle SC_KEYMENU, which means that the user has pressed the ALT
   // key and released it, so we should focus the menu bar.
   if ((notification_code & sc_mask) == SC_KEYMENU && click.x == 0) {
-    Accelerator accelerator(win_util::WinToKeyboardCode(VK_MENU),
+    Accelerator accelerator(app::KeyboardCodeForWindowsKeyCode(VK_MENU),
                             false, false, false);
     GetFocusManager()->ProcessAccelerator(accelerator);
     return;

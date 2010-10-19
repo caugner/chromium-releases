@@ -4,6 +4,7 @@
 
 #include "remoting/base/protocol_decoder.h"
 
+#include "base/logging.h"
 #include "remoting/base/multiple_array_input_stream.h"
 #include "talk/base/byteorder.h"
 
@@ -18,12 +19,12 @@ ProtocolDecoder::ProtocolDecoder()
 
 void ProtocolDecoder::ParseClientMessages(scoped_refptr<media::DataBuffer> data,
                                           ClientMessageList* messages) {
-  ParseMessages<ClientMessage>(data, messages);
+  ParseMessages<ChromotingClientMessage>(data, messages);
 }
 
 void ProtocolDecoder::ParseHostMessages(scoped_refptr<media::DataBuffer> data,
                                         HostMessageList* messages) {
-  ParseMessages<HostMessage>(data, messages);
+  ParseMessages<ChromotingHostMessage>(data, messages);
 }
 
 template <typename T>

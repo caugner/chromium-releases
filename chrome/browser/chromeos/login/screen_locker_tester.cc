@@ -6,7 +6,7 @@
 
 #include <gdk/gdkkeysyms.h>
 
-#include "app/l10n_util.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/mock_authenticator.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
@@ -15,6 +15,7 @@
 #include "views/controls/label.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/widget/widget_gtk.h"
+#include "views/widget/root_view.h"
 
 namespace chromeos {
 
@@ -24,8 +25,9 @@ test::ScreenLockerTester* ScreenLocker::GetTester() {
 
 namespace test {
 
-bool ScreenLockerTester::IsOpen() {
-  return chromeos::ScreenLocker::screen_locker_ != NULL;
+bool ScreenLockerTester::IsLocked() {
+  return ScreenLocker::screen_locker_ != NULL &&
+      ScreenLocker::screen_locker_->lock_widget_->GetRootView()->IsVisible();
 }
 
 void ScreenLockerTester::InjectMockAuthenticator(
@@ -61,6 +63,11 @@ views::Textfield* ScreenLockerTester::GetPasswordField() {
 views::Widget* ScreenLockerTester::GetWidget() {
   DCHECK(ScreenLocker::screen_locker_);
   return ScreenLocker::screen_locker_->lock_window_;
+}
+
+views::Widget* ScreenLockerTester::GetChildWidget() {
+  DCHECK(ScreenLocker::screen_locker_);
+  return ScreenLocker::screen_locker_->lock_widget_;
 }
 
 }  // namespace test

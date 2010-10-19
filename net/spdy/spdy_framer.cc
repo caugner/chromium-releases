@@ -27,6 +27,7 @@ static const size_t kControlFrameBufferMaxSize = 64 * 1024;
 
 // By default is compression on or off.
 bool SpdyFramer::compression_default_ = true;
+int SpdyFramer::spdy_version_ = kSpdyProtocolVersion;
 
 #ifdef DEBUG_SPDY_STATE_CHANGES
 #define CHANGE_STATE(newstate) \
@@ -259,7 +260,7 @@ void SpdyFramer::ProcessControlFrameHeader() {
 
   // We check version before we check validity: version can never be 'invalid',
   // it can only be unsupported.
-  if (current_control_frame.version() != kSpdyProtocolVersion) {
+  if (current_control_frame.version() != spdy_version_) {
     set_error(SPDY_UNSUPPORTED_VERSION);
     return;
   }
@@ -304,18 +305,17 @@ void SpdyFramer::ProcessControlFrameHeader() {
           SpdySettingsControlFrame::size() - SpdyControlFrame::size())
         set_error(SPDY_INVALID_CONTROL_FRAME);
       break;
+    case WINDOW_UPDATE:
+      if (current_control_frame.length() !=
+          SpdyWindowUpdateControlFrame::size() - SpdyFrame::size())
+        set_error(SPDY_INVALID_CONTROL_FRAME);
+      break;
     default:
       LOG(WARNING) << "Valid spdy control frame with unknown type: "
                    << current_control_frame.type();
       DCHECK(false);
       set_error(SPDY_INVALID_CONTROL_FRAME);
       break;
-  }
-
-  // We only support version 1 of this protocol.
-  if (current_control_frame.version() != kSpdyProtocolVersion) {
-    set_error(SPDY_UNSUPPORTED_VERSION);
-    return;
   }
 
   remaining_control_payload_ = current_control_frame.length();
@@ -521,7 +521,7 @@ SpdySynStreamControlFrame* SpdyFramer::CreateSynStream(
   DCHECK_EQ(0u, stream_id & ~kStreamIdMask);
   DCHECK_EQ(0u, associated_stream_id & ~kStreamIdMask);
 
-  frame.WriteUInt16(kControlFlagMask | kSpdyProtocolVersion);
+  frame.WriteUInt16(kControlFlagMask | spdy_version_);
   frame.WriteUInt16(SYN_STREAM);
   frame.WriteUInt32(0);  // Placeholder for the length and flags
   frame.WriteUInt32(stream_id);
@@ -563,7 +563,7 @@ SpdyRstStreamControlFrame* SpdyFramer::CreateRstStream(SpdyStreamId stream_id,
   DCHECK_LT(status, NUM_STATUS_CODES);
 
   SpdyFrameBuilder frame;
-  frame.WriteUInt16(kControlFlagMask | kSpdyProtocolVersion);
+  frame.WriteUInt16(kControlFlagMask | spdy_version_);
   frame.WriteUInt16(RST_STREAM);
   frame.WriteUInt32(8);
   frame.WriteUInt32(stream_id);
@@ -577,7 +577,7 @@ SpdyGoAwayControlFrame* SpdyFramer::CreateGoAway(
   DCHECK_EQ(0u, last_accepted_stream_id & ~kStreamIdMask);
 
   SpdyFrameBuilder frame;
-  frame.WriteUInt16(kControlFlagMask | kSpdyProtocolVersion);
+  frame.WriteUInt16(kControlFlagMask | spdy_version_);
   frame.WriteUInt16(GOAWAY);
   size_t go_away_size = SpdyGoAwayControlFrame::size() - SpdyFrame::size();
   frame.WriteUInt32(go_away_size);
@@ -592,10 +592,10 @@ SpdyWindowUpdateControlFrame* SpdyFramer::CreateWindowUpdate(
   DCHECK_GT(stream_id, 0u);
   DCHECK_EQ(0u, stream_id & ~kStreamIdMask);
   DCHECK_GT(delta_window_size, 0u);
-  DCHECK_LE(delta_window_size, 0x80000000u);  // 2^31
+  DCHECK_LT(delta_window_size, 0x80000000u);  // 2^31
 
   SpdyFrameBuilder frame;
-  frame.WriteUInt16(kControlFlagMask | kSpdyProtocolVersion);
+  frame.WriteUInt16(kControlFlagMask | spdy_version_);
   frame.WriteUInt16(WINDOW_UPDATE);
   size_t window_update_size = SpdyWindowUpdateControlFrame::size() -
       SpdyFrame::size();
@@ -609,7 +609,7 @@ SpdyWindowUpdateControlFrame* SpdyFramer::CreateWindowUpdate(
 SpdySettingsControlFrame* SpdyFramer::CreateSettings(
     const SpdySettings& values) {
   SpdyFrameBuilder frame;
-  frame.WriteUInt16(kControlFlagMask | kSpdyProtocolVersion);
+  frame.WriteUInt16(kControlFlagMask | spdy_version_);
   frame.WriteUInt16(SETTINGS);
   size_t settings_size = SpdySettingsControlFrame::size() - SpdyFrame::size() +
       8 * values.size();
@@ -631,7 +631,7 @@ SpdySynReplyControlFrame* SpdyFramer::CreateSynReply(SpdyStreamId stream_id,
 
   SpdyFrameBuilder frame;
 
-  frame.WriteUInt16(kControlFlagMask | kSpdyProtocolVersion);
+  frame.WriteUInt16(kControlFlagMask | spdy_version_);
   frame.WriteUInt16(SYN_REPLY);
   frame.WriteUInt32(0);  // Placeholder for the length and flags.
   frame.WriteUInt32(stream_id);
@@ -698,7 +698,7 @@ SpdyDataFrame* SpdyFramer::CreateDataFrame(SpdyStreamId stream_id,
 /* static */
 SpdyControlFrame* SpdyFramer::CreateNopFrame() {
   SpdyFrameBuilder frame;
-  frame.WriteUInt16(kControlFlagMask | kSpdyProtocolVersion);
+  frame.WriteUInt16(kControlFlagMask | spdy_version_);
   frame.WriteUInt16(NOOP);
   frame.WriteUInt32(0);
   return reinterpret_cast<SpdyControlFrame*>(frame.take());

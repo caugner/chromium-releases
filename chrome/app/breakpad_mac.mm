@@ -1,9 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/app/breakpad_mac.h"
 
+#include <CoreFoundation/CoreFoundation.h>
 #import <Foundation/Foundation.h>
 
 #include "base/base_switches.h"
@@ -13,11 +14,15 @@
 #include "base/file_util.h"
 #import "base/logging.h"
 #include "base/mac_util.h"
+#include "base/path_service.h"
+#include "base/scoped_cftyperef.h"
 #import "base/scoped_nsautorelease_pool.h"
 #include "base/sys_string_conversions.h"
 #import "breakpad/src/client/mac/Framework/Breakpad.h"
 #include "chrome/common/child_process_logging.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/policy_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
 
 namespace {
@@ -42,20 +47,38 @@ void InitCrashReporter() {
   DCHECK(gBreakpadRef == NULL);
   base::ScopedNSAutoreleasePool autorelease_pool;
 
-  // Check whether the user has consented to stats and crash reporting.  The
-  // browser process can make this determination directly.  Helper processes
-  // may not have access to the disk or to the same data as the browser
-  // process, so the browser passes the consent preference to them on the
+  // Check whether crash reporting should be enabled. If enterprise
+  // configuration management controls crash reporting, it takes precedence.
+  // Otherwise, check whether the user has consented to stats and crash
+  // reporting. The browser process can make this determination directly.
+  // Helper processes may not have access to the disk or to the same data as
+  // the browser process, so the browser passes the decision to them on the
   // command line.
   NSBundle* main_bundle = mac_util::MainAppBundle();
   bool is_browser = !mac_util::IsBackgroundOnlyProcess();
+  bool enable_breakpad = false;
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  bool enable_breakpad =
-      is_browser ? GoogleUpdateSettings::GetCollectStatsConsent() :
-                   command_line->HasSwitch(switches::kEnableCrashReporter);
 
-  if (command_line->HasSwitch(switches::kDisableBreakpad)) {
-    enable_breakpad = false;
+  if (is_browser) {
+    // Since the configuration management infrastructure is possibly not
+    // initialized when this code runs, read the policy preference directly.
+    scoped_cftyperef<CFStringRef> key(
+        base::SysUTF8ToCFStringRef(policy::key::kMetricsReportingEnabled));
+    Boolean key_valid;
+    Boolean metrics_reporting_enabled = CFPreferencesGetAppBooleanValue(key,
+        kCFPreferencesCurrentApplication, &key_valid);
+    if (key_valid &&
+        CFPreferencesAppValueIsForced(key, kCFPreferencesCurrentApplication)) {
+      // Controlled by configuration manangement.
+      enable_breakpad = metrics_reporting_enabled;
+    } else {
+      // Controlled by the user.
+      enable_breakpad = GoogleUpdateSettings::GetCollectStatsConsent() &&
+          !command_line->HasSwitch(switches::kDisableBreakpad);
+    }
+  } else {
+    // This is a helper process, check the command line switch.
+    enable_breakpad = command_line->HasSwitch(switches::kEnableCrashReporter);
   }
 
   if (!enable_breakpad) {
@@ -96,15 +119,9 @@ void InitCrashReporter() {
       LOG(ERROR) << "Directory " << alternate_minidump_location <<
           " doesn't exist";
     } else {
-      NSFileManager* file_manager = [NSFileManager defaultManager];
-      size_t minidump_location_len = strlen(alternate_minidump_location);
-      DCHECK(minidump_location_len > 0);
-      NSString* minidump_location = [file_manager
-          stringWithFileSystemRepresentation:alternate_minidump_location
-                                      length:minidump_location_len];
-      [breakpad_config
-          setObject:minidump_location
-             forKey:@BREAKPAD_DUMP_DIRECTORY];
+      PathService::Override(
+          chrome::DIR_CRASH_DUMPS,
+          FilePath(alternate_minidump_location));
       if (is_browser) {
         // Print out confirmation message to the stdout, but only print
         // from browser process so we don't flood the terminal.
@@ -113,6 +130,11 @@ void InitCrashReporter() {
       }
     }
   }
+
+  FilePath dir_crash_dumps;
+  PathService::Get(chrome::DIR_CRASH_DUMPS, &dir_crash_dumps);
+  [breakpad_config setObject:base::SysUTF8ToNSString(dir_crash_dumps.value())
+                      forKey:@BREAKPAD_DUMP_DIRECTORY];
 
   // Initialize Breakpad.
   gBreakpadRef = BreakpadCreate(breakpad_config);
@@ -134,8 +156,8 @@ void InitCrashReporter() {
 
   if (!is_browser) {
     // Get the guid from the command line switch.
-    std::string guid = WideToASCII(
-        command_line->GetSwitchValue(switches::kEnableCrashReporter));
+    std::string guid =
+        command_line->GetSwitchValueASCII(switches::kEnableCrashReporter);
     child_process_logging::SetClientId(guid);
    }
 }
@@ -147,10 +169,11 @@ void InitCrashProcessInfo() {
 
   // Determine the process type.
   NSString* process_type = @"browser";
-  std::wstring process_type_switch =
-      CommandLine::ForCurrentProcess()->GetSwitchValue(switches::kProcessType);
+  std::string process_type_switch =
+      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kProcessType);
   if (!process_type_switch.empty()) {
-    process_type = base::SysWideToNSString(process_type_switch);
+    process_type = base::SysUTF8ToNSString(process_type_switch);
   }
 
   // Store process type in crash dump.

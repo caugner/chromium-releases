@@ -4,6 +4,7 @@
 
 #ifndef GFX_CANVAS_SKIA_H_
 #define GFX_CANVAS_SKIA_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "gfx/canvas.h"
@@ -47,8 +48,10 @@ class CanvasSkia : public skia::PlatformCanvas,
   // Attempts to fit the text with the provided width and height. Increases
   // height and then width as needed to make the text fit. This method
   // supports multiple lines.
-  static void SizeStringInt(const std::wstring& text, const gfx::Font& font,
-                            int* width, int* height, int flags);
+  static void SizeStringInt(const std::wstring& text,
+                            const gfx::Font& font,
+                            int* width, int* height,
+                            int flags);
 
   // Returns the default text alignment to be used when drawing text on a
   // gfx::CanvasSkia based on the directionality of the system locale language.
@@ -73,7 +76,8 @@ class CanvasSkia : public skia::PlatformCanvas,
                           const gfx::Font& font,
                           const SkColor& text_color,
                           const SkColor& halo_color,
-                          int x, int y, int w, int h, int flags);
+                          int x, int y, int w, int h,
+                          int flags);
 #endif
 
   // Extracts a bitmap from the contents of this canvas.
@@ -84,43 +88,49 @@ class CanvasSkia : public skia::PlatformCanvas,
   virtual void SaveLayerAlpha(uint8 alpha);
   virtual void SaveLayerAlpha(uint8 alpha, const gfx::Rect& layer_bounds);
   virtual void Restore();
-  virtual bool GetClipRect(gfx::Rect* clip_rect);
   virtual bool ClipRectInt(int x, int y, int w, int h);
-  virtual bool IntersectsClipRectInt(int x, int y, int w, int h);
   virtual void TranslateInt(int x, int y);
   virtual void ScaleInt(int x, int y);
-  virtual void FillRectInt(int x, int y, int w, int h,
-                           const SkPaint& paint);
-  virtual void FillRectInt(const SkColor& color, int x, int y, int w,
-                           int h);
-  virtual void DrawRectInt(const SkColor& color, int x, int y, int w,
-                           int h);
-  virtual void DrawRectInt(const SkColor& color, int x, int y, int w, int h,
+  virtual void FillRectInt(const SkColor& color, int x, int y, int w, int h);
+  virtual void FillRectInt(const gfx::Brush* brush, int x, int y, int w, int h);
+  virtual void DrawRectInt(const SkColor& color, int x, int y, int w, int h);
+  virtual void DrawRectInt(const SkColor& color,
+                           int x, int y, int w, int h,
                            SkXfermode::Mode mode);
-  virtual void DrawLineInt(const SkColor& color, int x1, int y1, int x2,
-                           int y2);
+  virtual void DrawRectInt(int x, int y, int w, int h, const SkPaint& paint);
+  virtual void DrawLineInt(const SkColor& color,
+                           int x1, int y1,
+                           int x2, int y2);
   virtual void DrawBitmapInt(const SkBitmap& bitmap, int x, int y);
-  virtual void DrawBitmapInt(const SkBitmap& bitmap, int x, int y,
+  virtual void DrawBitmapInt(const SkBitmap& bitmap,
+                             int x, int y,
                              const SkPaint& paint);
-  virtual void DrawBitmapInt(const SkBitmap& bitmap, int src_x, int src_y,
-                             int src_w, int src_h, int dest_x, int dest_y,
-                             int dest_w, int dest_h, bool filter);
-  virtual void DrawBitmapInt(const SkBitmap& bitmap, int src_x, int src_y,
-                             int src_w, int src_h, int dest_x, int dest_y,
-                             int dest_w, int dest_h, bool filter,
+  virtual void DrawBitmapInt(const SkBitmap& bitmap,
+                             int src_x, int src_y, int src_w, int src_h,
+                             int dest_x, int dest_y, int dest_w, int dest_h,
+                             bool filter);
+  virtual void DrawBitmapInt(const SkBitmap& bitmap,
+                             int src_x, int src_y, int src_w, int src_h,
+                             int dest_x, int dest_y, int dest_w, int dest_h,
+                             bool filter,
                              const SkPaint& paint);
-  virtual void DrawStringInt(const std::wstring& text, const gfx::Font& font,
-                             const SkColor& color, int x, int y, int w,
-                             int h);
-  virtual void DrawStringInt(const std::wstring& text, const gfx::Font& font,
+  virtual void DrawStringInt(const std::wstring& text,
+                             const gfx::Font& font,
+                             const SkColor& color,
+                             int x, int y, int w, int h);
+  virtual void DrawStringInt(const std::wstring& text,
+                             const gfx::Font& font,
                              const SkColor& color,
                              const gfx::Rect& display_rect);
-  virtual void DrawStringInt(const std::wstring& text, const gfx::Font& font,
-                             const SkColor& color, int x, int y, int w, int h,
+  virtual void DrawStringInt(const std::wstring& text,
+                             const gfx::Font& font,
+                             const SkColor& color,
+                             int x, int y, int w, int h,
                              int flags);
   virtual void DrawFocusRect(int x, int y, int width, int height);
   virtual void TileImageInt(const SkBitmap& bitmap, int x, int y, int w, int h);
-  virtual void TileImageInt(const SkBitmap& bitmap, int src_x, int src_y,
+  virtual void TileImageInt(const SkBitmap& bitmap,
+                            int src_x, int src_y,
                             int dest_x, int dest_y, int w, int h);
   virtual gfx::NativeDrawingContext BeginPlatformPaint();
   virtual void EndPlatformPaint();
@@ -128,12 +138,17 @@ class CanvasSkia : public skia::PlatformCanvas,
   virtual const CanvasSkia* AsCanvasSkia() const;
 
  private:
+  // Test whether the provided rectangle intersects the current clip rect.
+  bool IntersectsClipRectInt(int x, int y, int w, int h);
+
 #if defined(OS_WIN)
   // Draws text with the specified color, font and location. The text is
   // aligned to the left, vertically centered, clipped to the region. If the
   // text is too big, it is truncated and '...' is added to the end.
-  void DrawStringInt(const std::wstring& text, HFONT font,
-                     const SkColor& color, int x, int y, int w, int h,
+  void DrawStringInt(const std::wstring& text,
+                     HFONT font,
+                     const SkColor& color,
+                     int x, int y, int w, int h,
                      int flags);
 #endif
 

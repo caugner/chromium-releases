@@ -9,6 +9,8 @@
 
 #include "app/tree_node_iterator.h"
 #include "base/rand_util.h"
+#include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/test/live_sync/live_bookmarks_sync_test.h"
@@ -130,11 +132,13 @@ const BookmarkNode* BookmarkModelVerifier::AddGroup(BookmarkModel* model,
     const BookmarkNode* parent, int index, const wstring& title) {
   const BookmarkNode* v_parent = NULL;
   FindNodeInVerifier(model, parent, &v_parent);
-  const BookmarkNode* result = model->AddGroup(parent, index, title);
+  const BookmarkNode* result = model->AddGroup(parent, index,
+                                               WideToUTF16Hack(title));
   EXPECT_TRUE(result);
   if (!result)
     return NULL;
-  const BookmarkNode* v_node = model_->AddGroup(v_parent, index, title);
+  const BookmarkNode* v_node = model_->AddGroup(v_parent, index,
+                                                WideToUTF16Hack(title));
   EXPECT_TRUE(v_node);
   if (!v_node)
     return NULL;
@@ -153,20 +157,20 @@ const BookmarkNode* BookmarkModelVerifier::AddNonEmptyGroup(
     int random_int = base::RandInt(1, 100);
     // To create randomness in order, 60% of time add bookmarks
     if (random_int > 40) {
-      wstring child_bm_title(bm_folder->GetTitle());
+      wstring child_bm_title(UTF16ToWideHack(bm_folder->GetTitle()));
       child_bm_title.append(L"-ChildBM");
-      child_bm_title.append(IntToWString(index));
+      child_bm_title.append(UTF8ToWide(base::IntToString(index)));
       string url("http://www.nofaviconurl");
-      url.append(IntToString(index));
+      url.append(base::IntToString(index));
       url.append(".com");
       const BookmarkNode* child_nofavicon_bm =
          AddURL(model, bm_folder, child_index, child_bm_title, GURL(url));
       EXPECT_TRUE(child_nofavicon_bm != NULL);
     } else {
       // Remaining % of time - Add Bookmark folders
-      wstring child_bmfolder_title(bm_folder->GetTitle());
+      wstring child_bmfolder_title(UTF16ToWideHack(bm_folder->GetTitle()));
       child_bmfolder_title.append(L"-ChildBMFolder");
-      child_bmfolder_title.append(IntToWString(index));
+      child_bmfolder_title.append(UTF8ToWide(base::IntToString(index)));
       const BookmarkNode* child_bm_folder =
           AddGroup(model, bm_folder, child_index, child_bmfolder_title);
       EXPECT_TRUE(child_bm_folder != NULL);
@@ -180,11 +184,13 @@ const BookmarkNode* BookmarkModelVerifier::AddURL(BookmarkModel* model,
     const GURL& url) {
   const BookmarkNode* v_parent = NULL;
   FindNodeInVerifier(model, parent, &v_parent);
-  const BookmarkNode* result = model->AddURL(parent, index, title, url);
+  const BookmarkNode* result = model->AddURL(parent, index,
+                                             WideToUTF16Hack(title), url);
   EXPECT_TRUE(result);
   if (!result)
     return NULL;
-  const BookmarkNode* v_node = model_->AddURL(v_parent, index, title, url);
+  const BookmarkNode* v_node = model_->AddURL(v_parent, index,
+                                              WideToUTF16Hack(title), url);
   EXPECT_TRUE(v_node);
   if (!v_node)
     return NULL;
@@ -197,8 +203,8 @@ void BookmarkModelVerifier::SetTitle(BookmarkModel* model,
                                      const wstring& title) {
   const BookmarkNode* v_node = NULL;
   FindNodeInVerifier(model, node, &v_node);
-  model->SetTitle(node, title);
-  model_->SetTitle(v_node, title);
+  model->SetTitle(node, WideToUTF16Hack(title));
+  model_->SetTitle(v_node, WideToUTF16Hack(title));
 }
 
 void BookmarkModelVerifier::Move(BookmarkModel* model, const BookmarkNode* node,

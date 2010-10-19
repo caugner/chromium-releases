@@ -10,6 +10,7 @@ for more details about the presubmit API built into gcl.
 
 _EXCLUDED_PATHS = (
     r"breakpad[\\\/].*",
+    r"net/tools/spdyshark/[\\\/].*",
     r"skia[\\\/].*",
     r"v8[\\\/].*",
 )
@@ -27,6 +28,27 @@ _LICENSE_HEADER = (
      r".*? found in the LICENSE file\."
        "\n"
 )
+
+
+def _CheckConstNSObject(input_api, output_api, source_file_filter):
+  """Checks to make sure no objective-c files have |const NSSomeClass*|."""
+  pattern = input_api.re.compile(r'const\s+NS\w*\s*\*')
+  files = []
+  for f in input_api.AffectedSourceFiles(source_file_filter):
+    if f.LocalPath().endswith('.h') or f.LocalPath().endswith('.mm'):
+      contents = input_api.ReadFile(f)
+      if pattern.search(contents):
+        files.append(f)
+
+  if len(files):
+    if input_api.is_committing:
+      res_type = output_api.PresubmitPromptWarning
+    else:
+      res_type = output_api.PresubmitNotifyResult
+    return [ res_type('|const NSClass*| is wrong, see ' +
+                      'http://dev.chromium.org/developers/clang-mac',
+                      files) ]
+  return []
 
 
 def _CommonChecks(input_api, output_api):
@@ -57,6 +79,8 @@ def _CommonChecks(input_api, output_api):
       input_api, output_api))
   results.extend(input_api.canned_checks.CheckLicense(
       input_api, output_api, _LICENSE_HEADER, source_file_filter=sources))
+  results.extend(_CheckConstNSObject(
+      input_api, output_api, source_file_filter=sources))
   return results
 
 
@@ -87,8 +111,7 @@ def CheckChangeOnCommit(input_api, output_api):
   results.extend(input_api.canned_checks.CheckTreeIsOpen(
       input_api,
       output_api,
-      'http://chromium-status.appspot.com/current?format=raw',
-      '(?i).*closed.*'))
+      json_url='http://chromium-status.appspot.com/current?format=json'))
   results.extend(input_api.canned_checks.CheckRietveldTryJobExecution(input_api,
       output_api, 'http://codereview.chromium.org', ('win', 'linux', 'mac'),
       'tryserver@chromium.org'))

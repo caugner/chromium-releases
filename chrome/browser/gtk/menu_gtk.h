@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_GTK_MENU_GTK_H_
 #define CHROME_BROWSER_GTK_MENU_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -62,7 +63,8 @@ class MenuGtk {
                                           const std::string& label);
   GtkWidget* AppendSeparator();
   GtkWidget* AppendMenuItem(int command_id, GtkWidget* menu_item);
-  GtkWidget* AppendMenuItemToMenu(int command_id,
+  GtkWidget* AppendMenuItemToMenu(int index,
+                                  menus::MenuModel* model,
                                   GtkWidget* menu_item,
                                   GtkWidget* menu,
                                   bool connect_to_activate);
@@ -81,6 +83,10 @@ class MenuGtk {
 
   // Displays the menu at the given coords. |point| is intentionally not const.
   void PopupAsContextAt(guint32 event_time, gfx::Point point);
+
+  // Displays the menu as a context menu for the passed status icon.
+  void PopupAsContextForStatusIcon(guint32 event_time, guint32 button,
+                                   GtkStatusIcon* icon);
 
   // Displays the menu following a keyboard event (such as selecting |widget|
   // and pressing "enter").

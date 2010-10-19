@@ -28,10 +28,10 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/time.h"
-#include "base/waitable_event.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_resolver_impl.h"
@@ -324,7 +324,7 @@ bool ParseCommandLine(CommandLine* command_line, CommandLineOptions* options) {
   options->async = command_line->HasSwitch(kAsync);
   if (command_line->HasSwitch(kCacheSize)) {
     std::string cache_size = command_line->GetSwitchValueASCII(kCacheSize);
-    bool valid_size = StringToInt(cache_size, &options->cache_size);
+    bool valid_size = base::StringToInt(cache_size, &options->cache_size);
     if (valid_size) {
       valid_size = options->cache_size >= 0;
     }
@@ -336,7 +336,7 @@ bool ParseCommandLine(CommandLine* command_line, CommandLineOptions* options) {
 
   if (command_line->HasSwitch(kCacheTtl)) {
     std::string cache_ttl = command_line->GetSwitchValueASCII(kCacheTtl);
-    bool valid_ttl = StringToInt(cache_ttl, &options->cache_ttl);
+    bool valid_ttl = base::StringToInt(cache_ttl, &options->cache_ttl);
     if (valid_ttl) {
       valid_ttl = options->cache_ttl >= 0;
     }
@@ -354,14 +354,18 @@ bool ParseCommandLine(CommandLine* command_line, CommandLineOptions* options) {
 }
 
 bool ReadHostsAndTimesFromLooseValues(
-    const std::vector<std::wstring>& loose_args,
+    const std::vector<CommandLine::StringType>& args,
     std::vector<HostAndTime>* hosts_and_times) {
-  std::vector<std::wstring>::const_iterator loose_args_end = loose_args.end();
-  for (std::vector<std::wstring>::const_iterator it = loose_args.begin();
-       it != loose_args_end;
+  for (std::vector<CommandLine::StringType>::const_iterator it =
+           args.begin();
+       it != args.end();
        ++it) {
     // TODO(cbentzel): Read time offset.
+#if defined(OS_WIN)
     HostAndTime host_and_time = {WideToASCII(*it), 0};
+#else
+    HostAndTime host_and_time = {*it, 0};
+#endif
     hosts_and_times->push_back(host_and_time);
   }
   return true;
@@ -396,7 +400,7 @@ bool ReadHostsAndTimesFromFile(const FilePath& path,
       }
       case 2: {
         int timestamp;
-        if (!StringToInt(tokens[1], &timestamp)) {
+        if (!base::StringToInt(tokens[1], &timestamp)) {
           // Unexpected value - keep going.
         }
         if (timestamp < previous_timestamp) {
@@ -431,7 +435,7 @@ int main(int argc, char** argv) {
   // file into memory.
   std::vector<HostAndTime> hosts_and_times;
   if (options.input_path.empty()) {
-    if (!ReadHostsAndTimesFromLooseValues(command_line->GetLooseValues(),
+    if (!ReadHostsAndTimesFromLooseValues(command_line->args(),
                                           &hosts_and_times)) {
       exit(1);
     }
@@ -447,7 +451,7 @@ int main(int argc, char** argv) {
       base::TimeDelta::FromSeconds(0));
 
   scoped_refptr<net::HostResolver> host_resolver(
-      new net::HostResolverImpl(NULL, cache, 100u));
+      new net::HostResolverImpl(NULL, cache, 100u, NULL));
   ResolverInvoker invoker(host_resolver.get());
   invoker.ResolveAll(hosts_and_times, options.async);
 

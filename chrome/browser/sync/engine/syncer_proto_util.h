@@ -4,13 +4,13 @@
 
 #ifndef CHROME_BROWSER_SYNC_ENGINE_SYNCER_PROTO_UTIL_H_
 #define CHROME_BROWSER_SYNC_ENGINE_SYNCER_PROTO_UTIL_H_
+#pragma once
 
 #include <string>
 
 #include "base/gtest_prod_util.h"
 #include "chrome/browser/sync/syncable/blob.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/util/sync_types.h"
 
 namespace syncable {
 class Directory;

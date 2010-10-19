@@ -13,8 +13,9 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/i18n/rtl.h"
-#include "base/string_util.h"
 #include "base/path_service.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_action.h"
@@ -24,9 +25,13 @@
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/common/url_constants.h"
 #include "gfx/codec/png_codec.h"
+#include "googleurl/src/gurl.h"
 #include "net/base/mime_sniffer.h"
 #include "skia/ext/image_operations.h"
+#include "chrome/test/ui_test_utils.h"
+#include "net/base/mock_host_resolver.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 namespace keys = extension_manifest_keys;
 namespace values = extension_manifest_values;
@@ -123,7 +128,7 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   DictionaryValue* icons = NULL;
   input_value->GetDictionary(keys::kIcons, &icons);
   ASSERT_FALSE(NULL == icons);
-  icons->SetInteger(ASCIIToWide(IntToString(128)), 42);
+  icons->SetInteger(base::IntToString(128), 42);
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
   EXPECT_TRUE(MatchPatternASCII(error, errors::kInvalidIconPath));
 
@@ -351,7 +356,7 @@ TEST(ExtensionTest, InitFromValueValidNameInRTL) {
   GtkTextDirection gtk_dir = gtk_widget_get_default_direction();
   gtk_widget_set_default_direction(GTK_TEXT_DIR_RTL);
 #else
-  std::string locale = l10n_util::GetApplicationLocale(std::wstring());
+  std::string locale = l10n_util::GetApplicationLocale("");
   base::i18n::SetICUDefaultLocale("he");
 #endif
 
@@ -367,7 +372,7 @@ TEST(ExtensionTest, InitFromValueValidNameInRTL) {
   input_value.SetString(keys::kVersion, "1.0.0.0");
   // No strong RTL characters in name.
   std::wstring name(L"Dictionary (by Google)");
-  input_value.SetString(keys::kName, name);
+  input_value.SetString(keys::kName, WideToUTF16Hack(name));
   EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
   EXPECT_EQ("", error);
   std::wstring localized_name(name);
@@ -376,7 +381,7 @@ TEST(ExtensionTest, InitFromValueValidNameInRTL) {
 
   // Strong RTL characters in name.
   name = L"Dictionary (\x05D1\x05D2"L" Google)";
-  input_value.SetString(keys::kName, name);
+  input_value.SetString(keys::kName, WideToUTF16Hack(name));
   EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
   EXPECT_EQ("", error);
   localized_name = name;
@@ -553,8 +558,8 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   ASSERT_STREQ(
       ExtensionErrorUtils::FormatErrorMessage(
           errors::kInvalidPageActionOldAndNewKeys,
-          WideToASCII(keys::kPageActionDefaultPopup),
-          WideToASCII(keys::kPageActionPopup)).c_str(),
+          keys::kPageActionDefaultPopup,
+          keys::kPageActionPopup).c_str(),
       error_msg.c_str());
   error_msg = "";
 
@@ -730,89 +735,90 @@ static Extension* LoadManifest(const std::string& dir,
 
 TEST(ExtensionTest, EffectiveHostPermissions) {
   scoped_ptr<Extension> extension;
-  std::set<std::string> hosts;
+  ExtensionExtent hosts;
 
   extension.reset(LoadManifest("effective_host_permissions", "empty.json"));
-  EXPECT_EQ(0u, extension->GetEffectiveHostPermissions().size());
+  EXPECT_EQ(0u, extension->GetEffectiveHostPermissions().patterns().size());
   EXPECT_FALSE(extension->HasAccessToAllHosts());
 
   extension.reset(LoadManifest("effective_host_permissions", "one_host.json"));
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(1u, hosts.size());
-  EXPECT_TRUE(hosts.find("www.google.com") != hosts.end());
+  EXPECT_EQ(1u, hosts.patterns().size());
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.google.com")));
   EXPECT_FALSE(extension->HasAccessToAllHosts());
 
   extension.reset(LoadManifest("effective_host_permissions",
                                "one_host_wildcard.json"));
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(1u, hosts.size());
-  EXPECT_TRUE(hosts.find("google.com") != hosts.end());
+  EXPECT_EQ(1u, hosts.patterns().size());
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://google.com")));
   EXPECT_FALSE(extension->HasAccessToAllHosts());
 
   extension.reset(LoadManifest("effective_host_permissions",
                                "two_hosts.json"));
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(2u, hosts.size());
-  EXPECT_TRUE(hosts.find("www.google.com") != hosts.end());
-  EXPECT_TRUE(hosts.find("www.reddit.com") != hosts.end());
+  EXPECT_EQ(2u, hosts.patterns().size());
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.google.com")));
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.reddit.com")));
   EXPECT_FALSE(extension->HasAccessToAllHosts());
 
   extension.reset(LoadManifest("effective_host_permissions",
                                "duplicate_host.json"));
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(1u, hosts.size());
-  EXPECT_TRUE(hosts.find("google.com") != hosts.end());
+  EXPECT_EQ(1u, hosts.patterns().size());
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://google.com")));
   EXPECT_FALSE(extension->HasAccessToAllHosts());
 
   extension.reset(LoadManifest("effective_host_permissions",
                                "https_not_considered.json"));
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(1u, hosts.size());
-  EXPECT_TRUE(hosts.find("google.com") != hosts.end());
+  EXPECT_EQ(1u, hosts.patterns().size());
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://google.com")));
   EXPECT_FALSE(extension->HasAccessToAllHosts());
 
   extension.reset(LoadManifest("effective_host_permissions",
                                "two_content_scripts.json"));
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(3u, hosts.size());
-  EXPECT_TRUE(hosts.find("google.com") != hosts.end());
-  EXPECT_TRUE(hosts.find("www.reddit.com") != hosts.end());
-  EXPECT_TRUE(hosts.find("news.ycombinator.com") != hosts.end());
+  EXPECT_EQ(3u, hosts.patterns().size());
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://google.com")));
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.reddit.com")));
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://news.ycombinator.com")));
   EXPECT_FALSE(extension->HasAccessToAllHosts());
 
   extension.reset(LoadManifest("effective_host_permissions",
                                "duplicate_content_script.json"));
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(2u, hosts.size());
-  EXPECT_TRUE(hosts.find("google.com") != hosts.end());
-  EXPECT_TRUE(hosts.find("www.reddit.com") != hosts.end());
+  EXPECT_EQ(3u, hosts.patterns().size());
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://google.com")));
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.reddit.com")));
   EXPECT_FALSE(extension->HasAccessToAllHosts());
 
   extension.reset(LoadManifest("effective_host_permissions",
                                "all_hosts.json"));
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(1u, hosts.size());
-  EXPECT_TRUE(hosts.find("") != hosts.end());
+  EXPECT_EQ(1u, hosts.patterns().size());
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://test/")));
   EXPECT_TRUE(extension->HasAccessToAllHosts());
 
   extension.reset(LoadManifest("effective_host_permissions",
                                "all_hosts2.json"));
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(2u, hosts.size());
-  EXPECT_TRUE(hosts.find("") != hosts.end());
-  EXPECT_TRUE(hosts.find("www.google.com") != hosts.end());
+  EXPECT_EQ(2u, hosts.patterns().size());
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://test/")));
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.google.com")));
   EXPECT_TRUE(extension->HasAccessToAllHosts());
 
   extension.reset(LoadManifest("effective_host_permissions",
                                "all_hosts3.json"));
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(2u, hosts.size());
-  EXPECT_TRUE(hosts.find("") != hosts.end());
-  EXPECT_TRUE(hosts.find("www.google.com") != hosts.end());
+  EXPECT_EQ(2u, hosts.patterns().size());
+  EXPECT_TRUE(hosts.ContainsURL(GURL("https://test/")));
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.google.com")));
   EXPECT_TRUE(extension->HasAccessToAllHosts());
 }
 
-TEST(ExtensionTest, IsPrivilegeIncrease) {
+// See http://crbug.com/54332
+TEST(ExtensionTest, DISABLED_IsPrivilegeIncrease) {
   const struct {
     const char* base_name;
     bool expect_success;
@@ -828,9 +834,14 @@ TEST(ExtensionTest, IsPrivilegeIncrease) {
     { "permissions2", true },  // tabs -> tabs,bookmarks
     { "permissions3", true },  // http://a -> http://a,tabs
     { "permissions4", false },  // plugin -> plugin,tabs
+    { "permissions5", true },  // bookmarks -> bookmarks,history
     { "plugin1", false },  // plugin -> plugin
     { "plugin2", false },  // plugin -> none
+#if defined(OS_CHROMEOS)
+    { "plugin3", false },  // none -> plugin (illegal on Chrome OS)
+#else
     { "plugin3", true },  // none -> plugin
+#endif
     { "storage", false },  // none -> storage
     { "notifications", false }  // none -> notifications
   };
@@ -931,4 +942,32 @@ TEST(ExtensionTest, ImageCaching) {
                          original_size));
   EXPECT_EQ(extension->GetCachedImage(resource, original_size).getPixels(),
             extension->GetCachedImage(resource, size128).getPixels());
+}
+
+// Tests that the old permission name "unlimited_storage" still works for
+// backwards compatability (we renamed it to "unlimitedStorage").
+TEST(ExtensionTest, OldUnlimitedStoragePermission) {
+  ScopedTempDir directory;
+  ASSERT_TRUE(directory.CreateUniqueTempDir());
+  FilePath extension_path = directory.path();
+  DictionaryValue dictionary;
+
+  // The two required keys.
+  dictionary.SetString(extension_manifest_keys::kName, "test");
+  dictionary.SetString(extension_manifest_keys::kVersion, "0.1");
+
+  // Create a permissions list containing "unlimited_storage" and add it.
+  ListValue* permissions = new ListValue();
+  const char* old_unlimited = "unlimited_storage";
+  EXPECT_STREQ(old_unlimited, Extension::kOldUnlimitedStoragePermission);
+  permissions->Append(Value::CreateStringValue(old_unlimited));
+  dictionary.Set(extension_manifest_keys::kPermissions, permissions);
+
+  // Initialize the extension and make sure the permission for unlimited storage
+  // is present.
+  Extension extension(extension_path);
+  std::string errors;
+  EXPECT_TRUE(extension.InitFromValue(dictionary, false, &errors));
+  EXPECT_TRUE(extension.HasApiPermission(
+      Extension::kUnlimitedStoragePermission));
 }

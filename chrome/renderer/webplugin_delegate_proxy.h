@@ -4,22 +4,20 @@
 
 #ifndef CHROME_RENDERER_WEBPLUGIN_DELEGATE_PROXY_H_
 #define CHROME_RENDERER_WEBPLUGIN_DELEGATE_PROXY_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "app/surface/transport_dib.h"
-#include "base/file_path.h"
 #include "base/ref_counted.h"
+#include "base/scoped_ptr.h"
 #include "base/weak_ptr.h"
-#include "chrome/renderer/plugin_channel_host.h"
 #include "gfx/native_widget_types.h"
 #include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
-#include "gpu/command_buffer/common/command_buffer.h"
+#include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
-#include "skia/ext/platform_canvas.h"
-#include "webkit/glue/plugins/webplugin.h"
 #include "webkit/glue/plugins/webplugininfo.h"
 #include "webkit/glue/plugins/webplugin_delegate.h"
 
@@ -32,6 +30,7 @@ class CommandBufferProxy;
 struct NPObject;
 class NPObjectStub;
 struct NPVariant_Param;
+class PluginChannelHost;
 struct PluginHostMsg_URLRequest_Params;
 class RenderView;
 class SkBitmap;
@@ -39,6 +38,14 @@ class SkBitmap;
 namespace base {
 class SharedMemory;
 class WaitableEvent;
+}
+
+namespace skia {
+class PlatformCanvas;
+}
+
+namespace webkit_glue {
+class WebPlugin;
 }
 
 // An implementation of WebPluginDelegate that proxies all calls to

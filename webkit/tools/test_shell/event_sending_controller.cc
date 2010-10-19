@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,13 +19,14 @@
 #include <queue>
 #include <vector>
 
+#include "app/keyboard_codes.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/time.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDragData.h"
@@ -111,9 +112,11 @@ static const int kMultiClickRadiusPixels = 5;
 // match the WebKit impl and layout test results.
 static const float kScrollbarPixelsPerTick = 40.0f;
 
-inline bool outside_multiclick_radius(const gfx::Point &a, const gfx::Point &b) {
-  return ((a.x() - b.x()) * (a.x() - b.x()) + (a.y() - b.y()) * (a.y() - b.y())) >
-    kMultiClickRadiusPixels * kMultiClickRadiusPixels;
+inline bool outside_multiclick_radius(const gfx::Point &a,
+                                      const gfx::Point &b) {
+  return ((a.x() - b.x()) * (a.x() - b.x()) +
+          (a.y() - b.y()) * (a.y() - b.y())) >
+      kMultiClickRadiusPixels * kMultiClickRadiusPixels;
 }
 
 // Used to offset the time the event hander things an event happened.  This is
@@ -214,16 +217,16 @@ bool GetEditCommand(const WebKeyboardEvent& event, std::string* name) {
     return false;
 
   switch (event.windowsKeyCode) {
-    case base::VKEY_LEFT:
+    case app::VKEY_LEFT:
       *name = "MoveToBeginningOfLine";
       break;
-    case base::VKEY_RIGHT:
+    case app::VKEY_RIGHT:
       *name = "MoveToEndOfLine";
       break;
-    case base::VKEY_UP:
+    case app::VKEY_UP:
       *name = "MoveToBeginningOfDocument";
       break;
-    case base::VKEY_DOWN:
+    case app::VKEY_DOWN:
       *name = "MoveToEndOfDocument";
       break;
     default:
@@ -261,7 +264,6 @@ EventSendingController::EventSendingController(TestShell* shell)
   BindMethod("mouseUp", &EventSendingController::mouseUp);
   BindMethod("contextClick", &EventSendingController::contextClick);
   BindMethod("mouseMoveTo", &EventSendingController::mouseMoveTo);
-  BindMethod("mouseWheelTo", &EventSendingController::mouseWheelTo);
   BindMethod("leapForward", &EventSendingController::leapForward);
   BindMethod("keyDown", &EventSendingController::keyDown);
   BindMethod("dispatchMessage", &EventSendingController::dispatchMessage);
@@ -274,6 +276,9 @@ EventSendingController::EventSendingController(TestShell* shell)
   BindMethod("textZoomOut", &EventSendingController::textZoomOut);
   BindMethod("zoomPageIn", &EventSendingController::zoomPageIn);
   BindMethod("zoomPageOut", &EventSendingController::zoomPageOut);
+  BindMethod("mouseScrollBy", &EventSendingController::mouseScrollBy);
+  BindMethod("continuousMouseScrollBy",
+             &EventSendingController::continuousMouseScrollBy);
   BindMethod("scheduleAsynchronousClick",
              &EventSendingController::scheduleAsynchronousClick);
   BindMethod("beginDragWithFiles",
@@ -302,6 +307,9 @@ EventSendingController::EventSendingController(TestShell* shell)
   BindProperty("WM_SYSCHAR", &wmSysChar);
   BindProperty("WM_SYSDEADCHAR", &wmSysDeadChar);
 #endif
+}
+
+EventSendingController::~EventSendingController() {
 }
 
 void EventSendingController::Reset() {
@@ -339,7 +347,8 @@ WebView* EventSendingController::webview() {
 void EventSendingController::DoDragDrop(const WebDragData& drag_data,
                                         WebDragOperationsMask mask) {
   WebMouseEvent event;
-  InitMouseEvent(WebInputEvent::MouseDown, pressed_button_, last_mouse_pos_, &event);
+  InitMouseEvent(WebInputEvent::MouseDown, pressed_button_, last_mouse_pos_,
+                 &event);
   WebPoint client_point(event.x, event.y);
   WebPoint screen_point(event.globalX, event.globalY);
   current_drag_data = drag_data;
@@ -494,32 +503,6 @@ void EventSendingController::mouseMoveTo(
   }
 }
 
-void EventSendingController::mouseWheelTo(
-    const CppArgumentList& args, CppVariant* result) {
-  result->SetNull();
-
-  if (args.size() >= 2 && args[0].isNumber() && args[1].isNumber()) {
-    // Force a layout here just to make sure every position has been
-    // determined before we send events (as well as all the other methods
-    // that send an event do). The layout test calling this
-    // (scrollbars/overflow-scrollbar-horizontal-wheel-scroll.html, only one
-    // for now) does not rely on this though.
-    webview()->layout();
-
-    int horizontal = args[0].ToInt32();
-    int vertical = args[1].ToInt32();
-
-    WebMouseWheelEvent event;
-    InitMouseEvent(WebInputEvent::MouseWheel, pressed_button_,
-                   last_mouse_pos_, &event);
-    event.wheelTicksX = static_cast<float>(horizontal);
-    event.wheelTicksY = static_cast<float>(vertical);
-    event.deltaX = -horizontal * kScrollbarPixelsPerTick;
-    event.deltaY = -vertical * kScrollbarPixelsPerTick;
-    webview()->handleInputEvent(event);
-  }
-}
-
 void EventSendingController::DoMouseMove(const WebMouseEvent& e) {
   last_mouse_pos_.SetPoint(e.x, e.y);
 
@@ -554,25 +537,29 @@ void EventSendingController::keyDown(
     bool needs_shift_key_modifier = false;
     if (L"\n" == code_str) {
       generate_char = true;
-      text = code = base::VKEY_RETURN;
+      text = code = app::VKEY_RETURN;
     } else if (L"rightArrow" == code_str) {
-      code = base::VKEY_RIGHT;
+      code = app::VKEY_RIGHT;
     } else if (L"downArrow" == code_str) {
-      code = base::VKEY_DOWN;
+      code = app::VKEY_DOWN;
     } else if (L"leftArrow" == code_str) {
-      code = base::VKEY_LEFT;
+      code = app::VKEY_LEFT;
     } else if (L"upArrow" == code_str) {
-      code = base::VKEY_UP;
+      code = app::VKEY_UP;
+    } else if (L"insert" == code_str) {
+      code = app::VKEY_INSERT;
     } else if (L"delete" == code_str) {
-      code = base::VKEY_BACK;
+      code = app::VKEY_BACK;
     } else if (L"pageUp" == code_str) {
-      code = base::VKEY_PRIOR;
+      code = app::VKEY_PRIOR;
     } else if (L"pageDown" == code_str) {
-      code = base::VKEY_NEXT;
+      code = app::VKEY_NEXT;
     } else if (L"home" == code_str) {
-      code = base::VKEY_HOME;
+      code = app::VKEY_HOME;
     } else if (L"end" == code_str) {
-      code = base::VKEY_END;
+      code = app::VKEY_END;
+    } else if (L"printScreen" == code_str) {
+      code = app::VKEY_SNAPSHOT;
     } else {
       // Compare the input string with the function-key names defined by the
       // DOM spec (i.e. "F1",...,"F24"). If the input string is a function-key
@@ -580,9 +567,9 @@ void EventSendingController::keyDown(
       for (int i = 1; i <= 24; ++i) {
         std::wstring function_key_name;
         function_key_name += L"F";
-        function_key_name += IntToWString(i);
+        function_key_name += UTF8ToWide(base::IntToString(i));
         if (function_key_name == code_str) {
-          code = base::VKEY_F1 + (i - 1);
+          code = app::VKEY_F1 + (i - 1);
           break;
         }
       }
@@ -738,6 +725,17 @@ void EventSendingController::zoomPageOut(
     const CppArgumentList& args, CppVariant* result) {
   webview()->setZoomLevel(false, webview()->zoomLevel() - 1);
   result->SetNull();
+}
+
+void EventSendingController::mouseScrollBy(const CppArgumentList& args,
+                                           CppVariant* result) {
+  handleMouseWheel(args, result, false);
+}
+
+void EventSendingController::continuousMouseScrollBy(
+    const CppArgumentList& args,
+    CppVariant* result) {
+  handleMouseWheel(args, result, true);
 }
 
 void EventSendingController::ReplaySavedEvents() {
@@ -944,6 +942,39 @@ void EventSendingController::SendCurrentTouchEvent(
       ++i;
     }
   }
+}
+
+void EventSendingController::handleMouseWheel(const CppArgumentList& args,
+                                              CppVariant* result,
+                                              bool continuous) {
+  result->SetNull();
+
+  if (args.size() < 2 || !args[0].isNumber() || !args[1].isNumber())
+      return;
+
+  // Force a layout here just to make sure every position has been
+  // determined before we send events (as well as all the other methods
+  // that send an event do).
+  webview()->layout();
+
+  int horizontal = args[0].ToInt32();
+  int vertical = args[1].ToInt32();
+
+  WebMouseWheelEvent event;
+  InitMouseEvent(WebInputEvent::MouseWheel, pressed_button_, last_mouse_pos_,
+                 &event);
+  event.wheelTicksX = static_cast<float>(horizontal);
+  event.wheelTicksY = static_cast<float>(vertical);
+  event.deltaX = event.wheelTicksX;
+  event.deltaY = event.wheelTicksY;
+  if (continuous) {
+      event.wheelTicksX /= kScrollbarPixelsPerTick;
+      event.wheelTicksY /= kScrollbarPixelsPerTick;
+  } else {
+      event.deltaX *= kScrollbarPixelsPerTick;
+      event.deltaY *= kScrollbarPixelsPerTick;
+  }
+  webview()->handleInputEvent(event);
 }
 
 void EventSendingController::touchEnd(

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/gfx/gl/gl_implementation.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/common/id_allocator.h"
 #include "gpu/command_buffer/service/buffer_manager.h"
@@ -10,6 +11,7 @@
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 #include "gpu/command_buffer/service/shader_manager.h"
 #include "gpu/command_buffer/service/texture_manager.h"
+#include "gpu/GLES2/gles2_command_buffer.h"
 
 namespace gpu {
 namespace gles2 {
@@ -53,9 +55,20 @@ bool ContextGroup::Initialize() {
 
   AddExtensionString("GL_CHROMIUM_map_sub");
 
-  // Check if we should allow GL_EXT_texture_compression_dxt1.
-  if (strstr(extensions, "GL_EXT_texture_compression_dxt1") ||
-      strstr(extensions, "GL_EXT_texture_compression_s3tc")) {
+  // Check if we should allow GL_EXT_texture_compression_dxt1 and
+  // GL_EXT_texture_compression_s3tc.
+  bool enable_dxt1 = false;
+  bool enable_s3tc = false;
+
+  if (strstr(extensions, "GL_EXT_texture_compression_dxt1")) {
+    enable_dxt1 = true;
+  }
+  if (strstr(extensions, "GL_EXT_texture_compression_s3tc")) {
+    enable_dxt1 = true;
+    enable_s3tc = true;
+  }
+
+  if (enable_dxt1) {
     AddExtensionString("GL_EXT_texture_compression_dxt1");
     validators_.compressed_texture_format.AddValue(
         GL_COMPRESSED_RGB_S3TC_DXT1_EXT);
@@ -63,13 +76,74 @@ bool ContextGroup::Initialize() {
         GL_COMPRESSED_RGBA_S3TC_DXT1_EXT);
   }
 
+  if (enable_s3tc) {
+    AddExtensionString("GL_EXT_texture_compression_s3tc");
+    validators_.compressed_texture_format.AddValue(
+        GL_COMPRESSED_RGBA_S3TC_DXT3_EXT);
+    validators_.compressed_texture_format.AddValue(
+        GL_COMPRESSED_RGBA_S3TC_DXT5_EXT);
+  }
+
+  // Check if we should enable GL_EXT_texture_filter_anisotropic.
+  if (strstr(extensions, "GL_EXT_texture_filter_anisotropic")) {
+    AddExtensionString("GL_EXT_texture_filter_anisotropic");
+    validators_.texture_parameter.AddValue(
+        GL_TEXTURE_MAX_ANISOTROPY_EXT);
+    validators_.g_l_state.AddValue(
+        GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT);
+  }
+
+  // Check if we should support GL_OES_packed_depth_stencil and/or
+  // GL_GOOGLE_depth_texture.
+  bool enable_depth_texture = false;
+  if (strstr(extensions, "GL_ARB_depth_texture") ||
+      strstr(extensions, "GL_OES_depth_texture")) {
+    enable_depth_texture = true;
+    AddExtensionString("GL_GOOGLE_depth_texture");
+    validators_.texture_internal_format.AddValue(GL_DEPTH_COMPONENT);
+    validators_.texture_format.AddValue(GL_DEPTH_COMPONENT);
+    validators_.pixel_type.AddValue(GL_UNSIGNED_SHORT);
+    validators_.pixel_type.AddValue(GL_UNSIGNED_INT);
+  }
+  // TODO(gman): Add depth types fo ElementsPerGroup and BytesPerElement
+
+  if (strstr(extensions, "GL_EXT_packed_depth_stencil") ||
+      strstr(extensions, "GL_OES_packed_depth_stencil")) {
+    AddExtensionString("GL_OES_packed_depth_stencil");
+    if (enable_depth_texture) {
+      validators_.texture_internal_format.AddValue(GL_DEPTH_STENCIL);
+      validators_.texture_format.AddValue(GL_DEPTH_STENCIL);
+      validators_.pixel_type.AddValue(GL_UNSIGNED_INT_24_8);
+    }
+    validators_.render_buffer_format.AddValue(GL_DEPTH24_STENCIL8);
+  }
+
+  bool enable_texture_format_bgra8888 = false;
+  bool enable_read_format_bgra = false;
   // Check if we should allow GL_EXT_texture_format_BGRA8888
   if (strstr(extensions, "GL_EXT_texture_format_BGRA8888") ||
-      strstr(extensions, "GL_APPLE_texture_format_BGRA8888") ||
-      strstr(extensions, "GL_EXT_bgra")) {
+      strstr(extensions, "GL_APPLE_texture_format_BGRA8888")) {
+    enable_texture_format_bgra8888 = true;
+  }
+
+  if (strstr(extensions, "GL_EXT_bgra")) {
+    enable_texture_format_bgra8888 = true;
+    enable_read_format_bgra = true;
+  }
+
+  if (strstr(extensions, "GL_EXT_read_format_bgra")) {
+    enable_read_format_bgra = true;
+  }
+
+  if (enable_texture_format_bgra8888) {
     AddExtensionString("GL_EXT_texture_format_BGRA8888");
     validators_.texture_internal_format.AddValue(GL_BGRA_EXT);
     validators_.texture_format.AddValue(GL_BGRA_EXT);
+  }
+
+  if (enable_read_format_bgra) {
+    AddExtensionString("GL_EXT_read_format_bgra");
+    validators_.read_pixel_format.AddValue(GL_BGRA_EXT);
   }
 
   // Check if we should allow GL_OES_texture_npot
@@ -79,12 +153,68 @@ bool ContextGroup::Initialize() {
     npot_ok = true;
   }
 
+  // Check if we should allow GL_OES_texture_float, GL_OES_texture_half_float,
+  // GL_OES_texture_float_linear, GL_OES_texture_half_float_linear
+  bool enable_texture_float = false;
+  bool enable_texture_float_linear = false;
+  bool enable_texture_half_float = false;
+  bool enable_texture_half_float_linear = false;
+  if (strstr(extensions, "GL_ARB_texture_float")) {
+    enable_texture_float = true;
+    enable_texture_float_linear = true;
+    enable_texture_half_float = true;
+    enable_texture_half_float_linear = true;
+  } else {
+    if (strstr(extensions, "GL_OES_texture_float")) {
+      enable_texture_float = true;
+      if (strstr(extensions, "GL_OES_texture_float_linear")) {
+        enable_texture_float_linear = true;
+      }
+    }
+    if (strstr(extensions, "GL_OES_texture_half_float")) {
+      enable_texture_half_float = true;
+      if (strstr(extensions, "GL_OES_texture_half_float_linear")) {
+        enable_texture_half_float_linear = true;
+      }
+    }
+  }
+
+  if (enable_texture_float) {
+    validators_.pixel_type.AddValue(GL_FLOAT);
+    AddExtensionString("GL_OES_texture_float");
+    if (enable_texture_float_linear) {
+      AddExtensionString("GL_OES_texture_float_linear");
+    }
+  }
+
+  if (enable_texture_half_float) {
+    validators_.pixel_type.AddValue(GL_HALF_FLOAT_OES);
+    AddExtensionString("GL_OES_texture_half_float");
+    if (enable_texture_half_float_linear) {
+      AddExtensionString("GL_OES_texture_half_float_linear");
+    }
+  }
+
+  // Check for multisample support
+  if (strstr(extensions, "GL_EXT_framebuffer_multisample")) {
+    extension_flags_.ext_framebuffer_multisample = true;
+    validators_.frame_buffer_target.AddValue(GL_READ_FRAMEBUFFER_EXT);
+    validators_.frame_buffer_target.AddValue(GL_DRAW_FRAMEBUFFER_EXT);
+    validators_.g_l_state.AddValue(GL_READ_FRAMEBUFFER_BINDING_EXT);
+    validators_.render_buffer_parameter.AddValue(GL_MAX_SAMPLES_EXT);
+    AddExtensionString("GL_EXT_framebuffer_multisample");
+    AddExtensionString("GL_EXT_framebuffer_blit");
+  }
+
+  if (strstr(extensions, "GL_OES_depth24") ||
+      gfx::GetGLImplementation() == gfx::kGLImplementationDesktopGL) {
+    AddExtensionString("GL_OES_depth24");
+    validators_.render_buffer_format.AddValue(GL_DEPTH_COMPONENT24);
+  }
+
   // TODO(gman): Add support for these extensions.
-  //     GL_OES_depth24
   //     GL_OES_depth32
-  //     GL_OES_packed_depth_stencil
   //     GL_OES_element_index_uint
-  //     GL_EXT_texture_format_BGRA8888
 
   buffer_manager_.reset(new BufferManager());
   framebuffer_manager_.reset(new FramebufferManager());
@@ -94,18 +224,22 @@ bool ContextGroup::Initialize() {
 
   // Lookup GL things we need to know.
   GetIntegerv(GL_MAX_VERTEX_ATTRIBS, &max_vertex_attribs_);
-  const GLuint kGLES2RequiredMiniumumVertexAttribs = 8u;
-  DCHECK_GE(max_vertex_attribs_, kGLES2RequiredMiniumumVertexAttribs);
+  const GLuint kGLES2RequiredMinimumVertexAttribs = 8u;
+  if (max_vertex_attribs_ < kGLES2RequiredMinimumVertexAttribs)
+    return false;
 
   GetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_texture_units_);
-  const GLuint kGLES2RequiredMiniumumTextureUnits = 8u;
-  DCHECK_GE(max_texture_units_, kGLES2RequiredMiniumumTextureUnits);
+  const GLuint kGLES2RequiredMinimumTextureUnits = 8u;
+  if (max_texture_units_ < kGLES2RequiredMinimumTextureUnits)
+    return false;
 
   GLint max_texture_size;
   GLint max_cube_map_texture_size;
   glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
   glGetIntegerv(GL_MAX_CUBE_MAP_TEXTURE_SIZE, &max_cube_map_texture_size);
   texture_manager_.reset(new TextureManager(npot_ok,
+                                            enable_texture_float_linear,
+                                            enable_texture_half_float_linear,
                                             max_texture_size,
                                             max_cube_map_texture_size));
 
@@ -113,23 +247,24 @@ bool ContextGroup::Initialize() {
   GetIntegerv(
       GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, &max_vertex_texture_image_units_);
 
-#if defined(GLES2_GPU_SERVICE_BACKEND_NATIVE_GLES2)
+  if (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2) {
+    GetIntegerv(GL_MAX_FRAGMENT_UNIFORM_VECTORS,
+        &max_fragment_uniform_vectors_);
+    GetIntegerv(GL_MAX_VARYING_VECTORS, &max_varying_vectors_);
+    GetIntegerv(GL_MAX_VERTEX_UNIFORM_VECTORS, &max_vertex_uniform_vectors_);
+  } else {
+    GetIntegerv(
+        GL_MAX_FRAGMENT_UNIFORM_COMPONENTS, &max_fragment_uniform_vectors_);
+    max_fragment_uniform_vectors_ /= 4;
+    GetIntegerv(GL_MAX_VARYING_FLOATS, &max_varying_vectors_);
+    max_varying_vectors_ /= 4;
+    GetIntegerv(GL_MAX_VERTEX_UNIFORM_COMPONENTS, &max_vertex_uniform_vectors_);
+    max_vertex_uniform_vectors_ /= 4;
+  }
 
-  GetIntegerv(GL_MAX_FRAGMENT_UNIFORM_VECTORS, &max_fragment_uniform_vectors_);
-  GetIntegerv(GL_MAX_VARYING_VECTORS, &max_varying_vectors_);
-  GetIntegerv(GL_MAX_VERTEX_UNIFORM_VECTORS, &max_vertex_uniform_vectors_);
-
-#else  // !defined(GLES2_GPU_SERVICE_BACKEND_NATIVE_GLES2)
-
-  GetIntegerv(
-      GL_MAX_FRAGMENT_UNIFORM_COMPONENTS, &max_fragment_uniform_vectors_);
-  max_fragment_uniform_vectors_ /= 4;
-  GetIntegerv(GL_MAX_VARYING_FLOATS, &max_varying_vectors_);
-  max_varying_vectors_ /= 4;
-  GetIntegerv(GL_MAX_VERTEX_UNIFORM_COMPONENTS, &max_vertex_uniform_vectors_);
-  max_vertex_uniform_vectors_ /= 4;
-
-#endif  // !defined(GLES2_GPU_SERVICE_BACKEND_NATIVE_GLES2)
+  if (!texture_manager_->Initialize()) {
+    return false;
+  }
 
   initialized_ = true;
   return true;
@@ -168,7 +303,7 @@ void ContextGroup::Destroy(bool have_context) {
 }
 
 void ContextGroup::AddExtensionString(const std::string& str) {
-  extensions_ += (extensions_.empty() ? " " : "") + str;
+  extensions_ += (extensions_.empty() ? "" : " ") + str;
 }
 
 IdAllocator* ContextGroup::GetIdAllocator(unsigned namespace_id) {

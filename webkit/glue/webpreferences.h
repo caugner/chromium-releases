@@ -64,7 +64,7 @@ struct WebPreferences {
   bool experimental_webgl_enabled;
   bool show_composited_layer_borders;
   bool accelerated_compositing_enabled;
-  bool enable_html5_parser;
+  bool accelerated_2d_canvas_enabled;
   bool memory_info_enabled;
 
   // We try to keep the default values the same as the default values in
@@ -110,7 +110,7 @@ struct WebPreferences {
         experimental_webgl_enabled(false),
         show_composited_layer_borders(false),
         accelerated_compositing_enabled(false),
-        enable_html5_parser(true),
+        accelerated_2d_canvas_enabled(false),
         memory_info_enabled(false) {
   }
 

@@ -7,6 +7,7 @@
 
 #ifndef NET_HTTP_HTTP_AUTH_SSPI_WIN_H_
 #define NET_HTTP_HTTP_AUTH_SSPI_WIN_H_
+#pragma once
 
 // security.h needs to be included for CredHandle. Unfortunately CredHandle
 // is a typedef and can't be forward declared.
@@ -16,12 +17,10 @@
 
 #include <string>
 
+#include "base/string16.h"
 #include "net/http/http_auth.h"
 
 namespace net {
-
-struct HttpRequestInfo;
-class ProxyInfo;
 
 // SSPILibrary is introduced so unit tests can mock the calls to Windows' SSPI
 // implementation. The default implementation simply passes the arguments on to
@@ -92,14 +91,19 @@ class HttpAuthSSPI {
   // obtained using |*username| and |*password|. If |username| and |password|
   // are both NULL, the credentials for the currently logged in user are used
   // instead.
-  int GenerateAuthToken(const std::wstring* username,
-                        const std::wstring* password,
+  int GenerateAuthToken(const string16* username,
+                        const string16* password,
                         const std::wstring& spn,
                         std::string* auth_token);
 
+  // Delegation is allowed on the Kerberos ticket. This allows certain servers
+  // to act as the user, such as an IIS server retrieiving data from a
+  // Kerberized MSSQL server.
+  void Delegate();
+
  private:
-  int OnFirstRound(const std::wstring* username,
-                   const std::wstring* password);
+  int OnFirstRound(const string16* username,
+                   const string16* password);
 
   int GetNextSecurityToken(
       const std::wstring& spn,
@@ -117,6 +121,7 @@ class HttpAuthSSPI {
   ULONG max_token_length_;
   CredHandle cred_;
   CtxtHandle ctxt_;
+  bool can_delegate_;
 };
 
 // Splits |combined| into domain and username.
@@ -125,9 +130,9 @@ class HttpAuthSSPI {
 // If |combined| is of form "bar", |domain| will be empty and |user| will
 // contain "bar".
 // |domain| and |user| must be non-NULL.
-void SplitDomainAndUser(const std::wstring& combined,
-                        std::wstring* domain,
-                        std::wstring* user);
+void SplitDomainAndUser(const string16& combined,
+                        string16* domain,
+                        string16* user);
 
 // Determines the maximum token length in bytes for a particular SSPI package.
 //

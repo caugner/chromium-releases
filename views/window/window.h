@@ -1,9 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef VIEWS_WINDOW_WINDOW_H_
 #define VIEWS_WINDOW_WINDOW_H_
+#pragma once
 
 #include "gfx/native_widget_types.h"
 
@@ -11,7 +12,7 @@ namespace gfx {
 class Font;
 class Rect;
 class Size;
-}
+}  // namespace gfx
 
 namespace views {
 
@@ -92,8 +93,12 @@ class Window {
   virtual void DisableInactiveRendering() = 0;
 #endif
 
-  // Activate the window, assuming it already exists and is visible.
+  // Activates the window, assuming it already exists and is visible.
   virtual void Activate() = 0;
+
+  // Deactivates the window, making the next window in the Z order the active
+  // window.
+  virtual void Deactivate() = 0;
 
   // Closes the window, ultimately destroying it. This isn't immediate (it
   // occurs after a return to the message loop. Implementors must also make sure

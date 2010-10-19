@@ -11,9 +11,9 @@
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
+#include "net/http/http_response_headers.h"
 #include "webkit/appcache/appcache_group.h"
 #include "webkit/appcache/appcache_policy.h"
-#include "webkit/appcache/appcache_response.h"
 
 namespace appcache {
 
@@ -43,8 +43,8 @@ class UpdateJobInfo :  public URLRequest::UserData {
   }
 
   void SetUpResponseWriter(AppCacheResponseWriter* writer,
-                         AppCacheUpdateJob* update,
-                         URLRequest* request) {
+                           AppCacheUpdateJob* update,
+                           URLRequest* request) {
     DCHECK(!response_writer_.get());
     response_writer_.reset(writer);
     update_job_ = update;
@@ -59,6 +59,9 @@ class UpdateJobInfo :  public URLRequest::UserData {
   RequestType type_;
   scoped_refptr<net::IOBuffer> buffer_;
   int retry_503_attempts_;
+
+  // The entry from the newest cache for this url, used for 304 responses.
+  AppCacheEntry existing_entry_;
 
   // Info needed to write responses to storage and process callbacks.
   scoped_ptr<AppCacheResponseWriter> response_writer_;
@@ -157,6 +160,10 @@ AppCacheUpdateJob::~AppCacheUpdateJob() {
     group_->SetUpdateStatus(AppCacheGroup::IDLE);
 
   policy_callback_->Cancel();
+}
+
+UpdateJobInfo* AppCacheUpdateJob::GetUpdateJobInfo(URLRequest* request) {
+  return static_cast<UpdateJobInfo*>(request->GetUserData(this));
 }
 
 void AppCacheUpdateJob::StartUpdate(AppCacheHost* host,
@@ -285,44 +292,41 @@ void AppCacheUpdateJob::FetchManifest(bool is_first_fetch) {
       service_->storage()->LoadResponseInfo(manifest_url_,
                                             entry->response_id(), this);
     } else {
-      AddHttpHeadersAndFetch(manifest_url_request_, NULL);
+      manifest_url_request_->Start();
     }
   } else {
     DCHECK(internal_state_ == REFETCH_MANIFEST);
     DCHECK(manifest_response_info_.get());
-    AddHttpHeadersAndFetch(manifest_url_request_,
-                           manifest_response_info_.get());
+    AddConditionalHeaders(manifest_url_request_,
+                          manifest_response_info_.get());
+    manifest_url_request_->Start();
   }
 }
 
-void AppCacheUpdateJob::AddHttpHeadersAndFetch(
+void AppCacheUpdateJob::AddConditionalHeaders(
     URLRequest* request, const net::HttpResponseInfo* info) {
-  DCHECK(request);
-  if (info) {
-    net::HttpRequestHeaders extra_headers;
+  DCHECK(request && info);
+  net::HttpRequestHeaders extra_headers;
 
-    // Add If-Modified-Since header if response info has Last-Modified header.
-    const std::string last_modified = "Last-Modified";
-    std::string last_modified_value;
-    info->headers->EnumerateHeader(NULL, last_modified, &last_modified_value);
-    if (!last_modified_value.empty()) {
-      extra_headers.SetHeader(net::HttpRequestHeaders::kIfModifiedSince,
-                              last_modified_value);
-    }
-
-    // Add If-None-Match header if resposne info has ETag header.
-    const std::string etag = "ETag";
-    std::string etag_value;
-    info->headers->EnumerateHeader(NULL, etag, &etag_value);
-    if (!etag_value.empty()) {
-      extra_headers.SetHeader(net::HttpRequestHeaders::kIfNoneMatch,
-                              etag_value);
-    }
-
-    if (!extra_headers.IsEmpty())
-      request->SetExtraRequestHeaders(extra_headers);
+  // Add If-Modified-Since header if response info has Last-Modified header.
+  const std::string last_modified = "Last-Modified";
+  std::string last_modified_value;
+  info->headers->EnumerateHeader(NULL, last_modified, &last_modified_value);
+  if (!last_modified_value.empty()) {
+    extra_headers.SetHeader(net::HttpRequestHeaders::kIfModifiedSince,
+                            last_modified_value);
   }
-  request->Start();
+
+  // Add If-None-Match header if resposne info has ETag header.
+  const std::string etag = "ETag";
+  std::string etag_value;
+  info->headers->EnumerateHeader(NULL, etag, &etag_value);
+  if (!etag_value.empty()) {
+    extra_headers.SetHeader(net::HttpRequestHeaders::kIfNoneMatch,
+                            etag_value);
+  }
+  if (!extra_headers.IsEmpty())
+    request->SetExtraRequestHeaders(extra_headers);
 }
 
 void AppCacheUpdateJob::OnResponseStarted(URLRequest *request) {
@@ -330,8 +334,7 @@ void AppCacheUpdateJob::OnResponseStarted(URLRequest *request) {
       (request->GetResponseCode() / 100) == 2) {
     // Write response info to storage for URL fetches. Wait for async write
     // completion before reading any response data.
-    UpdateJobInfo* info =
-        static_cast<UpdateJobInfo*>(request->GetUserData(this));
+    UpdateJobInfo* info = GetUpdateJobInfo(request);
     if (info->type_ == UpdateJobInfo::URL_FETCH ||
         info->type_ == UpdateJobInfo::MASTER_ENTRY_FETCH) {
       info->SetUpResponseWriter(
@@ -357,8 +360,7 @@ void AppCacheUpdateJob::ReadResponseData(URLRequest* request) {
   }
 
   int bytes_read = 0;
-  UpdateJobInfo* info =
-      static_cast<UpdateJobInfo*>(request->GetUserData(this));
+  UpdateJobInfo* info = GetUpdateJobInfo(request);
   request->Read(info->buffer_, kBufferSize, &bytes_read);
   OnReadCompleted(request, bytes_read);
 }
@@ -366,9 +368,7 @@ void AppCacheUpdateJob::ReadResponseData(URLRequest* request) {
 void AppCacheUpdateJob::OnReadCompleted(URLRequest* request, int bytes_read) {
   bool data_consumed = true;
   if (request->status().is_success() && bytes_read > 0) {
-    UpdateJobInfo* info =
-        static_cast<UpdateJobInfo*>(request->GetUserData(this));
-
+    UpdateJobInfo* info = GetUpdateJobInfo(request);
     data_consumed = ConsumeResponseData(request, info, bytes_read);
     if (data_consumed) {
       bytes_read = 0;
@@ -439,8 +439,7 @@ void AppCacheUpdateJob::OnResponseCompleted(URLRequest* request) {
     return;
   }
 
-  UpdateJobInfo* info =
-      static_cast<UpdateJobInfo*>(request->GetUserData(this));
+  UpdateJobInfo* info = GetUpdateJobInfo(request);
   switch (info->type_) {
     case UpdateJobInfo::MANIFEST_FETCH:
       HandleManifestFetchCompleted(request);
@@ -462,8 +461,7 @@ void AppCacheUpdateJob::OnResponseCompleted(URLRequest* request) {
 }
 
 bool AppCacheUpdateJob::RetryRequest(URLRequest* request) {
-  UpdateJobInfo* info =
-      static_cast<UpdateJobInfo*>(request->GetUserData(this));
+  UpdateJobInfo* info = GetUpdateJobInfo(request);
   if (info->retry_503_attempts_ >= kMax503Retries) {
     return false;
   }
@@ -475,6 +473,7 @@ bool AppCacheUpdateJob::RetryRequest(URLRequest* request) {
   URLRequest* retry = new URLRequest(url, this);
   UpdateJobInfo* retry_info = new UpdateJobInfo(info->type_);
   retry_info->retry_503_attempts_ = info->retry_503_attempts_ + 1;
+  retry_info->existing_entry_ = info->existing_entry_;
   retry->SetUserData(this, retry_info);
   retry->set_context(request->context());
   retry->set_load_flags(request->load_flags());
@@ -509,12 +508,16 @@ void AppCacheUpdateJob::HandleManifestFetchCompleted(URLRequest* request) {
 
   int response_code = -1;
   std::string mime_type;
+  bool is_valid_response_code = false;
+  bool is_valid_mime_type = false;
   if (request->status().is_success()) {
     response_code = request->GetResponseCode();
+    is_valid_response_code = (response_code / 100 == 2);
     request->GetMimeType(&mime_type);
+    is_valid_mime_type = (mime_type == kManifestMimeType);
   }
 
-  if ((response_code / 100 == 2) && mime_type == kManifestMimeType) {
+  if (is_valid_response_code && is_valid_mime_type) {
     manifest_response_info_.reset(
         new net::HttpResponseInfo(request->response_info()));
     if (update_type_ == UPGRADE_ATTEMPT)
@@ -526,9 +529,17 @@ void AppCacheUpdateJob::HandleManifestFetchCompleted(URLRequest* request) {
   } else if (response_code == 404 || response_code == 410) {
     service_->storage()->MakeGroupObsolete(group_, this);  // async
   } else {
-    const char* kFormatString = "Manifest fetch failed (%d) %s";
-    const std::string message = StringPrintf(kFormatString, response_code,
-                                             manifest_url_.spec().c_str());
+    std::string message;
+    if (!is_valid_response_code) {
+      const char* kFormatString = "Manifest fetch failed (%d) %s";
+      message = StringPrintf(kFormatString, response_code,
+                             manifest_url_.spec().c_str());
+    } else {
+      DCHECK(!is_valid_mime_type);
+      const char* kFormatString = "Invalid manifest mime type (%s) %s";
+      message = StringPrintf(kFormatString, mime_type.c_str(),
+                             manifest_url_.spec().c_str());
+    }
     HandleCacheFailure(message);
   }
 }
@@ -598,6 +609,7 @@ void AppCacheUpdateJob::ContinueHandleManifestFetchCompleted(bool changed) {
 
 void AppCacheUpdateJob::HandleUrlFetchCompleted(URLRequest* request) {
   DCHECK(internal_state_ == DOWNLOADING);
+  UpdateJobInfo* info = GetUpdateJobInfo(request);
 
   const GURL& url = request->original_url();
   pending_url_fetches_.erase(url);
@@ -608,14 +620,11 @@ void AppCacheUpdateJob::HandleUrlFetchCompleted(URLRequest* request) {
       ? request->GetResponseCode() : -1;
   AppCacheEntry& entry = url_file_list_.find(url)->second;
 
-  if (request->status().is_success() && (response_code / 100 == 2)) {
+  if (response_code / 100 == 2) {
     // Associate storage with the new entry.
-    UpdateJobInfo* info =
-        static_cast<UpdateJobInfo*>(request->GetUserData(this));
     DCHECK(info->response_writer_.get());
     entry.set_response_id(info->response_writer_->response_id());
     entry.set_response_size(info->response_writer_->amount_written());
-
     if (!inprogress_cache_->AddOrModifyEntry(url, entry))
       duplicate_response_ids_.push_back(entry.response_id());
 
@@ -629,22 +638,29 @@ void AppCacheUpdateJob::HandleUrlFetchCompleted(URLRequest* request) {
         << " os_error: " << request->status().os_error()
         << " response code: " << response_code;
     if (entry.IsExplicit() || entry.IsFallback()) {
-      const char* kFormatString = "Resource fetch failed (%d) %s";
-      const std::string message = StringPrintf(kFormatString, response_code,
-                                               request->url().spec().c_str());
-      HandleCacheFailure(message);
-      return;
+      if (response_code == 304 && info->existing_entry_.has_response_id()) {
+        // Keep the existing response.
+        entry.set_response_id(info->existing_entry_.response_id());
+        entry.set_response_size(info->existing_entry_.response_size());
+        inprogress_cache_->AddOrModifyEntry(url, entry);
+      } else {
+        const char* kFormatString = "Resource fetch failed (%d) %s";
+        const std::string message = StringPrintf(kFormatString, response_code,
+                                                 request->url().spec().c_str());
+        HandleCacheFailure(message);
+        return;
+      }
     } else if (response_code == 404 || response_code == 410) {
       // Entry is skipped.  They are dropped from the cache.
-    } else if (update_type_ == UPGRADE_ATTEMPT) {
-      // Copy the response from the newest complete cache.
-      AppCache* cache = group_->newest_complete_cache();
-      AppCacheEntry* copy = cache->GetEntry(url);
-      if (copy) {
-        entry.set_response_id(copy->response_id());
-        entry.set_response_size(copy->response_size());
-        inprogress_cache_->AddOrModifyEntry(url, entry);
-      }
+    } else if (update_type_ == UPGRADE_ATTEMPT &&
+               info->existing_entry_.has_response_id()) {
+      // Keep the existing response.
+      // TODO(michaeln): Not sure this is a good idea. This is spec compliant
+      // but the old resource may or may not be compatible with the new contents
+      // of the cache. Impossible to know one way or the other.
+      entry.set_response_id(info->existing_entry_.response_id());
+      entry.set_response_size(info->existing_entry_.response_size());
+      inprogress_cache_->AddOrModifyEntry(url, entry);
     }
   }
 
@@ -676,15 +692,16 @@ void AppCacheUpdateJob::HandleMasterEntryFetchCompleted(URLRequest* request) {
   // Section 6.9.4. No update case: step 7.3, else step 22.
   if (response_code / 100 == 2) {
     // Add fetched master entry to the appropriate cache.
-    UpdateJobInfo* info =
-        static_cast<UpdateJobInfo*>(request->GetUserData(this));
+    UpdateJobInfo* info = GetUpdateJobInfo(request);
     AppCache* cache = inprogress_cache_ ? inprogress_cache_.get() :
         group_->newest_complete_cache();
     DCHECK(info->response_writer_.get());
     AppCacheEntry master_entry(AppCacheEntry::MASTER,
                                info->response_writer_->response_id(),
                                info->response_writer_->amount_written());
-    if (!cache->AddOrModifyEntry(url, master_entry))
+    if (cache->AddOrModifyEntry(url, master_entry))
+      added_master_entries_.push_back(url);
+    else
       duplicate_response_ids_.push_back(master_entry.response_id());
 
     // In no-update case, associate host with the newest cache.
@@ -806,7 +823,8 @@ void AppCacheUpdateJob::StoreGroupAndCache() {
 
 void AppCacheUpdateJob::OnGroupAndNewestCacheStored(AppCacheGroup* group,
                                                     AppCache* newest_cache,
-                                                    bool success) {
+                                                    bool success,
+                                                    bool would_exceed_quota) {
   DCHECK(stored_state_ == STORING);
   if (success) {
     stored_state_ = STORED;
@@ -817,7 +835,10 @@ void AppCacheUpdateJob::OnGroupAndNewestCacheStored(AppCacheGroup* group,
     if (newest_cache != group->newest_complete_cache())
       inprogress_cache_ = newest_cache;
 
-    HandleCacheFailure("Failed to commit new cache to storage");
+    std::string message("Failed to commit new cache to storage");
+    if (would_exceed_quota)
+      message.append(", would exceed quota");
+    HandleCacheFailure(message);
   }
 }
 
@@ -943,7 +964,7 @@ void AppCacheUpdateJob::AddUrlToFileList(const GURL& url, int type) {
       AppCache::EntryMap::value_type(url, AppCacheEntry(type)));
 
   if (ret.second)
-    urls_to_fetch_.push_back(UrlsToFetch(url, false));
+    urls_to_fetch_.push_back(UrlToFetch(url, false, NULL));
   else
     ret.first->second.add_types(type);  // URL already exists. Merge types.
 }
@@ -956,30 +977,46 @@ void AppCacheUpdateJob::FetchUrls() {
   // each fetch completes.
   while (pending_url_fetches_.size() < kMaxConcurrentUrlFetches &&
          !urls_to_fetch_.empty()) {
-    const GURL url = urls_to_fetch_.front().first;
-    bool storage_checked = urls_to_fetch_.front().second;
+    UrlToFetch url_to_fetch = urls_to_fetch_.front();
     urls_to_fetch_.pop_front();
 
-    AppCache::EntryMap::iterator it = url_file_list_.find(url);
+    AppCache::EntryMap::iterator it = url_file_list_.find(url_to_fetch.url);
     DCHECK(it != url_file_list_.end());
     AppCacheEntry& entry = it->second;
     if (ShouldSkipUrlFetch(entry)) {
-      NotifyAllProgress(url);
+      NotifyAllProgress(url_to_fetch.url);
       ++url_fetches_completed_;
-    } else if (AlreadyFetchedEntry(url, entry.types())) {
-      NotifyAllProgress(url);
+    } else if (AlreadyFetchedEntry(url_to_fetch.url, entry.types())) {
+      NotifyAllProgress(url_to_fetch.url);
       ++url_fetches_completed_;  // saved a URL request
-    } else if (!storage_checked && MaybeLoadFromNewestCache(url, entry)) {
+    } else if (!url_to_fetch.storage_checked &&
+               MaybeLoadFromNewestCache(url_to_fetch.url, entry)) {
       // Continues asynchronously after data is loaded from newest cache.
     } else {
+      UpdateJobInfo* info = new UpdateJobInfo(UpdateJobInfo::URL_FETCH);
+      const net::HttpResponseInfo* http_info = NULL;
+      if (url_to_fetch.existing_response_info.get()) {
+        DCHECK(group_->newest_complete_cache());
+        AppCacheEntry* existing_entry =
+            group_->newest_complete_cache()->GetEntry(url_to_fetch.url);
+        DCHECK(existing_entry);
+        DCHECK(existing_entry->response_id() ==
+               url_to_fetch.existing_response_info->response_id());
+        info->existing_entry_ = *existing_entry;
+        http_info = url_to_fetch.existing_response_info->http_response_info();
+      }
+
       // Send URL request for the resource.
-      URLRequest* request = new URLRequest(url, this);
-      request->SetUserData(this, new UpdateJobInfo(UpdateJobInfo::URL_FETCH));
+      URLRequest* request = new URLRequest(url_to_fetch.url, this);
+      request->SetUserData(this, info);
       request->set_context(service_->request_context());
       request->set_load_flags(
           request->load_flags() | net::LOAD_DISABLE_INTERCEPT);
+      if (http_info)
+        AddConditionalHeaders(request, http_info);
       request->Start();
-      pending_url_fetches_.insert(PendingUrlFetches::value_type(url, request));
+      pending_url_fetches_.insert(
+          PendingUrlFetches::value_type(url_to_fetch.url, request));
     }
   }
 }
@@ -998,6 +1035,10 @@ void AppCacheUpdateJob::CancelAllUrlFetches() {
 }
 
 bool AppCacheUpdateJob::ShouldSkipUrlFetch(const AppCacheEntry& entry) {
+  // 6.6.4 Step 17
+  // If the resource URL being processed was flagged as neither an
+  // "explicit entry" nor or a "fallback entry", then the user agent
+  // may skip this URL.
   if (entry.IsExplicit() || entry.IsFallback()) {
     return false;
   }
@@ -1161,7 +1202,9 @@ void AppCacheUpdateJob::OnResponseInfoLoaded(
 
   // Needed response info for a manifest fetch request.
   if (internal_state_ == FETCH_MANIFEST) {
-    AddHttpHeadersAndFetch(manifest_url_request_, http_info);
+    if (http_info)
+      AddConditionalHeaders(manifest_url_request_, http_info);
+    manifest_url_request_->Start();
     return;
   }
 
@@ -1170,7 +1213,7 @@ void AppCacheUpdateJob::OnResponseInfoLoaded(
   const GURL& url = found->second;
 
   if (!http_info) {
-    LoadFromNewestCacheFailed(url);  // no response found
+    LoadFromNewestCacheFailed(url, NULL);  // no response found
   } else {
     // Check if response can be re-used according to HTTP caching semantics.
     // Responses with a "vary" header get treated as expired.
@@ -1181,8 +1224,7 @@ void AppCacheUpdateJob::OnResponseInfoLoaded(
                                                http_info->response_time,
                                                base::Time::Now()) ||
         http_info->headers->EnumerateHeader(&iter, name, &value)) {
-      // TODO(michaeln): Make a conditional request when we can in this case.
-      LoadFromNewestCacheFailed(url);
+      LoadFromNewestCacheFailed(url, response_info);
     } else {
       DCHECK(group_->newest_complete_cache());
       AppCacheEntry* copy_me = group_->newest_complete_cache()->GetEntry(url);
@@ -1204,12 +1246,13 @@ void AppCacheUpdateJob::OnResponseInfoLoaded(
   MaybeCompleteUpdate();
 }
 
-void AppCacheUpdateJob::LoadFromNewestCacheFailed(const GURL& url) {
+void AppCacheUpdateJob::LoadFromNewestCacheFailed(
+    const GURL& url, AppCacheResponseInfo* response_info) {
   if (internal_state_ == CACHE_FAILURE)
     return;
 
   // Re-insert url at front of fetch list. Indicate storage has been checked.
-  urls_to_fetch_.push_front(AppCacheUpdateJob::UrlsToFetch(url, true));
+  urls_to_fetch_.push_front(UrlToFetch(url, true, response_info));
   FetchUrls();
 }
 
@@ -1322,8 +1365,15 @@ void AppCacheUpdateJob::ClearPendingMasterEntries() {
 void AppCacheUpdateJob::DiscardInprogressCache() {
   service_->storage()->DoomResponses(manifest_url_, stored_response_ids_);
 
-  if (!inprogress_cache_)
+  if (!inprogress_cache_) {
+    // We have to undo the changes we made, if any, to the existing cache.
+    for (std::vector<GURL>::iterator iter = added_master_entries_.begin();
+         iter != added_master_entries_.end(); ++iter) {
+      DCHECK(group_->newest_complete_cache());
+      group_->newest_complete_cache()->RemoveEntry(*iter);
+    }
     return;
+  }
 
   AppCache::AppCacheHosts& hosts = inprogress_cache_->associated_hosts();
   while (!hosts.empty())

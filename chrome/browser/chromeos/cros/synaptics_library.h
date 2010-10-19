@@ -4,16 +4,18 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_CROS_SYNAPTICS_LIBRARY_H_
 #define CHROME_BROWSER_CHROMEOS_CROS_SYNAPTICS_LIBRARY_H_
+#pragma once
 
 #include "base/singleton.h"
-#include "third_party/cros/chromeos_synaptics.h"
+#include "cros/chromeos_synaptics.h"
 
 namespace chromeos {
 
 // This interface defines interaction with the ChromeOS synaptics library APIs.
 // Users can get an instance of this library class like this:
-//   SynapticsLibrary::Get()
-// For a list of SynapticsPrameters, see third_party/cros/chromeos_synaptics.h
+//   chromeos::CrosLibrary::Get()->GetSynapticsLibrary()
+// For a list of SynapticsPrameters, see chromeos_synaptics.h
+// in third_party/cros or /usr/include/cros
 class SynapticsLibrary {
  public:
   virtual ~SynapticsLibrary() {}
@@ -23,30 +25,12 @@ class SynapticsLibrary {
   // Sets a range parameter. The actual call will be run on the FILE thread.
   // Value should be between 1 and 10 inclusive.
   virtual void SetRangeParameter(SynapticsParameter param, int value) = 0;
+
+  // Factory function, creates a new instance and returns ownership.
+  // For normal usage, access the singleton via CrosLibrary::Get().
+  static SynapticsLibrary* GetImpl(bool stub);
 };
 
-
-// This class handles the interaction with the ChromeOS synaptics library APIs.
-// Users can get an instance of this library class like this:
-//   SynapticsLibrary::Get()
-// For a list of SynapticsPrameters, see third_party/cros/chromeos_synaptics.h
-class SynapticsLibraryImpl : public SynapticsLibrary {
- public:
-  SynapticsLibraryImpl() {}
-  virtual ~SynapticsLibraryImpl() {}
-
-  // SynapticsLibrary overrides.
-  virtual void SetBoolParameter(SynapticsParameter param, bool value);
-  virtual void SetRangeParameter(SynapticsParameter param, int value);
-
- private:
-
-  // This helper methods calls into the libcros library to set the parameter.
-  // This call is run on the FILE thread.
-  void SetParameter(SynapticsParameter param, int value);
-
-  DISALLOW_COPY_AND_ASSIGN(SynapticsLibraryImpl);
-};
 
 }  // namespace chromeos
 

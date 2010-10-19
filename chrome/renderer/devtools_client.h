@@ -4,6 +4,7 @@
 
 #ifndef CHROME_RENDERER_DEVTOOLS_CLIENT_H_
 #define CHROME_RENDERER_DEVTOOLS_CLIENT_H_
+#pragma once
 
 #include <string>
 
@@ -19,6 +20,7 @@ class RenderView;
 
 namespace WebKit {
 class WebDevToolsFrontend;
+class WebString;
 }
 
 struct DevToolsMessageData;
@@ -39,10 +41,9 @@ class DevToolsClient : public WebKit::WebDevToolsFrontendClient {
   bool OnMessageReceived(const IPC::Message& message);
 
   // WebDevToolsFrontendClient implementation
-  virtual void sendMessageToAgent(
-      const WebKit::WebDevToolsMessageData& data);
+  virtual void sendFrontendLoaded();
+  virtual void sendMessageToBackend(const WebKit::WebString&);
   virtual void sendDebuggerCommandToAgent(const WebKit::WebString& command);
-  virtual void sendDebuggerPauseScript();
 
   virtual void activateWindow();
   virtual void closeWindow();
@@ -52,7 +53,7 @@ class DevToolsClient : public WebKit::WebDevToolsFrontendClient {
   virtual bool shouldHideScriptsPanel();
 
  private:
-  void OnRpcMessage(const DevToolsMessageData& data);
+  void OnDispatchOnInspectorFrontend(const std::string& message);
 
   // Sends message to DevToolsAgent.
   void Send(const IPC::Message& tools_agent_message);

@@ -46,10 +46,10 @@ namespace webkit_support {
 // TODO(tkent): Implement some of the followings for platform-dependent tasks
 // such as loading resource.
 
-void BeforeInitialize() {
+void BeforeInitialize(bool unit_test_mode) {
 }
 
-void AfterInitialize() {
+void AfterInitialize(bool unit_test_mode) {
 }
 
 void BeforeShutdown() {
@@ -112,8 +112,6 @@ base::StringPiece GetDataResource(int resource_id) {
   case IDR_MEDIA_SOUND_DISABLED:
   case IDR_MEDIA_SLIDER_THUMB:
   case IDR_MEDIA_VOLUME_SLIDER_THUMB:
-  case IDR_DEVTOOLS_INJECT_WEBKIT_JS:
-  case IDR_DEVTOOLS_INJECT_DISPATCH_JS:
   case IDR_DEVTOOLS_DEBUGGER_SCRIPT_JS:
     return NetResourceProvider(resource_id);
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #ifndef APP_L10N_UTIL_H_
 #define APP_L10N_UTIL_H_
+#pragma once
 
 #include <algorithm>
 #include <functional>
@@ -16,7 +17,6 @@
 #include "build/build_config.h"
 
 #include "base/basictypes.h"
-#include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/string_util.h"
@@ -24,8 +24,6 @@
 #if defined(OS_MACOSX)
 #include "app/l10n_util_mac.h"
 #endif  // OS_MACOSX
-
-class PrefService;
 
 namespace l10n_util {
 
@@ -38,7 +36,7 @@ namespace l10n_util {
 // as |pref_locale|), finally, we fall back on the system locale. We only return
 // a value if there's a corresponding resource DLL for the locale.  Otherwise,
 // we fall back to en-us.
-std::string GetApplicationLocale(const std::wstring& pref_locale);
+std::string GetApplicationLocale(const std::string& pref_locale);
 
 // Given a locale code, return true if the OS is capable of supporting it.
 // For instance, Oriya is not well supported on Windows XP and we return
@@ -168,10 +166,6 @@ std::wstring GetStringF(int message_id, int64 a);
 std::wstring TruncateString(const std::wstring& string, size_t length);
 
 // Returns the lower case equivalent of string.
-#if defined(WCHAR_T_IS_UTF32)
-// Deprecated.  The string16 version should be used instead.
-std::wstring ToLower(const std::wstring& string);
-#endif  // defined(WCHAR_T_IS_UTF32)
 string16 ToLower(const string16& string);
 
 // Returns the upper case equivalent of string.

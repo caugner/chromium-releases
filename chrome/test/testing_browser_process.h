@@ -9,6 +9,7 @@
 
 #ifndef CHROME_TEST_TESTING_BROWSER_PROCESS_H_
 #define CHROME_TEST_TESTING_BROWSER_PROCESS_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -18,6 +19,8 @@
 #include "base/string_util.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/google/google_url_tracker.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/notification_service.h"
 
 class IOThread;
@@ -27,7 +30,8 @@ class TestingBrowserProcess : public BrowserProcess {
   TestingBrowserProcess()
       : shutdown_event_(new base::WaitableEvent(true, false)),
         module_ref_count_(0),
-        app_locale_("en") {
+        app_locale_("en"),
+        pref_service_(NULL) {
   }
 
   virtual ~TestingBrowserProcess() {
@@ -71,11 +75,7 @@ class TestingBrowserProcess : public BrowserProcess {
   }
 
   virtual PrefService* local_state() {
-    return NULL;
-  }
-
-  virtual WebAppInstallerService* web_app_installer_service() {
-    return NULL;
+    return pref_service_;
   }
 
   virtual IconManager* icon_manager() {
@@ -87,6 +87,10 @@ class TestingBrowserProcess : public BrowserProcess {
   }
 
   virtual DevToolsManager* devtools_manager() {
+    return NULL;
+  }
+
+  virtual SidebarManager* sidebar_manager() {
     return NULL;
   }
 
@@ -106,12 +110,8 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
-  virtual StatusTrayManager* status_tray_manager() {
-    return NULL;
-  }
-
   virtual GoogleURLTracker* google_url_tracker() {
-    return NULL;
+    return google_url_tracker_.get();
   }
 
   virtual IntranetRedirectDetector* intranet_redirect_detector() {
@@ -131,10 +131,6 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual unsigned int ReleaseModule() {
     DCHECK(module_ref_count_ > 0);
     return --module_ref_count_;
-  }
-
-  unsigned int module_ref_count() {
-    return module_ref_count_;
   }
 
   virtual bool IsShuttingDown() {
@@ -168,12 +164,22 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual void SetIPCLoggingEnabled(bool enable) {}
 #endif
 
+  void SetPrefService(PrefService* pref_service) {
+    pref_service_ = pref_service;
+  }
+  void SetGoogleURLTracker(GoogleURLTracker* google_url_tracker) {
+    google_url_tracker_.reset(google_url_tracker);
+  }
+
  private:
   NotificationService notification_service_;
   scoped_ptr<base::WaitableEvent> shutdown_event_;
   unsigned int module_ref_count_;
   scoped_ptr<Clipboard> clipboard_;
   std::string app_locale_;
+
+  PrefService* pref_service_;
+  scoped_ptr<GoogleURLTracker> google_url_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(TestingBrowserProcess);
 };

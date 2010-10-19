@@ -4,6 +4,7 @@
 
 #ifndef CHROME_TEST_TEST_BROWSER_WINDOW_H_
 #define CHROME_TEST_TEST_BROWSER_WINDOW_H_
+#pragma once
 
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
@@ -22,13 +23,13 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void SetBounds(const gfx::Rect& bounds) {}
   virtual void Close() {}
   virtual void Activate() {}
+  virtual void Deactivate() {}
   virtual bool IsActive() const { return false; }
   virtual void FlashFrame() {}
   virtual gfx::NativeWindow GetNativeHandle() { return NULL; }
   virtual BrowserWindowTesting* GetBrowserWindowTesting() { return NULL; }
   virtual StatusBubble* GetStatusBubble() { return NULL; }
   virtual void SelectedTabToolbarSizeChanged(bool is_animating) {}
-  virtual void SelectedTabExtensionShelfSizeChanged() {}
   virtual void UpdateTitleBar() {}
   virtual void ShelfVisibilityChanged() {}
   virtual void UpdateDevTools() {}
@@ -69,7 +70,6 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) {}
   virtual void ToggleBookmarkBar() {}
-  virtual void ToggleExtensionShelf() {}
   virtual views::Window* ShowAboutChromeDialog() { return NULL; }
   virtual void ShowUpdateChromeDialog() {}
   virtual void ShowTaskManager() {}
@@ -102,7 +102,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void Copy() { }
   virtual void Paste() { }
   virtual void ToggleTabStripMode() {}
-  virtual void SetToolbarCollapsedMode(bool val) {}
+  virtual void OpenTabpose() {}
 
  protected:
   virtual void DestroyBrowser() {}

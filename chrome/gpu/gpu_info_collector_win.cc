@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/scoped_native_library.h"
 #include "base/string_util.h"
@@ -69,7 +70,7 @@ bool CollectGraphicsInfoD3D(IDirect3D9* d3d,
   uint32 vertex_shader_version = d3d_caps.VertexShaderVersion;
 
   gpu_info.SetGraphicsInfo(vendor_id, device_id, driver_version,
-                           pixel_shader_version, vertex_shader_version);
+                           pixel_shader_version, vertex_shader_version, 0);
   return true;
 }
 
@@ -99,7 +100,7 @@ bool CollectGraphicsInfoGL(GPUInfo& gpu_info) {
   uint32 pixel_shader_version = 0;
   uint32 vertex_shader_version = 0;
   gpu_info.SetGraphicsInfo(vendor_id, device_id, driver_version,
-                           pixel_shader_version, vertex_shader_version);
+                           pixel_shader_version, vertex_shader_version, 0);
   return true;
 
   // TODO(rlp): Add driver and pixel versions

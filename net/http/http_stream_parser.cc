@@ -6,18 +6,23 @@
 
 #include "base/compiler_specific.h"
 #include "base/histogram.h"
+#include "net/base/auth.h"
 #include "net/base/io_buffer.h"
+#include "net/base/ssl_cert_request_info.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
+#include "net/socket/ssl_client_socket.h"
+#include "net/socket/client_socket_handle.h"
 
 namespace net {
 
 HttpStreamParser::HttpStreamParser(ClientSocketHandle* connection,
+                                   const HttpRequestInfo* request,
                                    GrowableIOBuffer* read_buffer,
                                    const BoundNetLog& net_log)
     : io_state_(STATE_NONE),
-      request_(NULL),
+      request_(request),
       request_headers_(NULL),
       request_body_(NULL),
       read_buf_(read_buffer),
@@ -36,8 +41,9 @@ HttpStreamParser::HttpStreamParser(ClientSocketHandle* connection,
   DCHECK_EQ(0, read_buffer->offset());
 }
 
-int HttpStreamParser::SendRequest(const HttpRequestInfo* request,
-                                  const std::string& headers,
+HttpStreamParser::~HttpStreamParser() {}
+
+int HttpStreamParser::SendRequest(const std::string& headers,
                                   UploadDataStream* request_body,
                                   HttpResponseInfo* response,
                                   CompletionCallback* callback) {
@@ -46,7 +52,6 @@ int HttpStreamParser::SendRequest(const HttpRequestInfo* request,
   DCHECK(callback);
   DCHECK(response);
 
-  request_ = request;
   response_ = response;
   scoped_refptr<StringIOBuffer> headers_io_buf = new StringIOBuffer(headers);
   request_headers_ = new DrainableIOBuffer(headers_io_buf,
@@ -87,6 +92,12 @@ int HttpStreamParser::ReadResponseHeaders(CompletionCallback* callback) {
     user_callback_ = callback;
 
   return result > 0 ? OK : result;
+}
+
+void HttpStreamParser::Close(bool not_reusable) {
+  if (not_reusable && connection_->socket())
+    connection_->socket()->Disconnect();
+  connection_->Reset();
 }
 
 int HttpStreamParser::ReadResponseBody(IOBuffer* buf, int buf_len,
@@ -262,8 +273,10 @@ int HttpStreamParser::DoReadHeadersComplete(int result) {
     io_state_ = STATE_DONE;
     return result;
   }
+  // If we've used the connection before, then we know it is not a HTTP/0.9
+  // response and return ERR_CONNECTION_CLOSED.
   if (result == ERR_CONNECTION_CLOSED && read_buf_->offset() == 0 &&
-      connection_->ShouldResendFailedRequest(result)) {
+      connection_->is_reused()) {
     io_state_ = STATE_DONE;
     return result;
   }
@@ -552,6 +565,37 @@ bool HttpStreamParser::CanFindEndOfResponse() const {
 
 bool HttpStreamParser::IsMoreDataBuffered() const {
   return read_buf_->offset() > read_buf_unused_offset_;
+}
+
+bool HttpStreamParser::IsConnectionReused() const {
+  ClientSocketHandle::SocketReuseType reuse_type = connection_->reuse_type();
+  return connection_->is_reused() ||
+         reuse_type == ClientSocketHandle::UNUSED_IDLE;
+}
+
+void HttpStreamParser::SetConnectionReused() {
+  connection_->set_is_reused(true);
+}
+
+void HttpStreamParser::GetSSLInfo(SSLInfo* ssl_info) {
+  if (request_->url.SchemeIs("https")) {
+    if (!connection_->socket() || !connection_->socket()->IsConnected())
+      return;
+    SSLClientSocket* ssl_socket =
+        static_cast<SSLClientSocket*>(connection_->socket());
+    ssl_socket->GetSSLInfo(ssl_info);
+  }
+}
+
+void HttpStreamParser::GetSSLCertRequestInfo(
+    SSLCertRequestInfo* cert_request_info) {
+  if (request_->url.SchemeIs("https")) {
+    if (!connection_->socket() || !connection_->socket()->IsConnected())
+      return;
+    SSLClientSocket* ssl_socket =
+        static_cast<SSLClientSocket*>(connection_->socket());
+    ssl_socket->GetSSLCertRequestInfo(cert_request_info);
+  }
 }
 
 }  // namespace net

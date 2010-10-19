@@ -4,11 +4,13 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_FRAME_PANEL_CONTROLLER_H_
 #define CHROME_BROWSER_CHROMEOS_FRAME_PANEL_CONTROLLER_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
 #include "app/x11_util.h"
 #include "views/controls/button/button.h"
+#include "cros/chromeos_wm_ipc_enums.h"
 
 class BrowserView;
 class SkBitmap;
@@ -52,7 +54,8 @@ class PanelController {
 
   // Initializes the panel controller with the initial state of the focus and
   // the window bounds.
-  void Init(bool initial_focus, const gfx::Rect& init_bounds, XID creator_xid);
+  void Init(bool initial_focus, const gfx::Rect& init_bounds, XID creator_xid,
+            WmIpcPanelUserResizeType resize_type);
 
   bool TitleMousePressed(const views::MouseEvent& event);
   void TitleMouseReleased(const views::MouseEvent& event, bool canceled);
@@ -71,7 +74,7 @@ class PanelController {
                            public views::ButtonListener {
    public:
     explicit TitleContentView(PanelController* panelController);
-    virtual ~TitleContentView() {}
+    virtual ~TitleContentView();
     virtual void Layout();
     virtual bool OnMousePressed(const views::MouseEvent& event);
     virtual void OnMouseReleased(const views::MouseEvent& event, bool canceled);

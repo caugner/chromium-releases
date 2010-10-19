@@ -4,11 +4,12 @@
 
 #include "chrome/browser/host_zoom_map.h"
 
+#include "base/string_piece.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/scoped_pref_update.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/scoped_pref_update.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_source.h"
@@ -42,12 +43,12 @@ void HostZoomMap::Load() {
   if (host_zoom_dictionary != NULL) {
     for (DictionaryValue::key_iterator i(host_zoom_dictionary->begin_keys());
          i != host_zoom_dictionary->end_keys(); ++i) {
-      std::wstring wide_host(*i);
+      const std::string& host(*i);
       int zoom_level = 0;
       bool success = host_zoom_dictionary->GetIntegerWithoutPathExpansion(
-          wide_host, &zoom_level);
+          host, &zoom_level);
       DCHECK(success);
-      host_zoom_levels_[WideToUTF8(wide_host)] = zoom_level;
+      host_zoom_levels_[host] = zoom_level;
     }
   }
 }
@@ -94,13 +95,11 @@ void HostZoomMap::SetZoomLevel(const GURL& url, int level) {
     ScopedPrefUpdate update(profile_->GetPrefs(), prefs::kPerHostZoomLevels);
     DictionaryValue* host_zoom_dictionary =
         profile_->GetPrefs()->GetMutableDictionary(prefs::kPerHostZoomLevels);
-    std::wstring wide_host(UTF8ToWide(host));
     if (level == 0) {
-      host_zoom_dictionary->RemoveWithoutPathExpansion(wide_host, NULL);
+      host_zoom_dictionary->RemoveWithoutPathExpansion(host, NULL);
     } else {
       host_zoom_dictionary->SetWithoutPathExpansion(
-          wide_host,
-          Value::CreateIntegerValue(level));
+          host, Value::CreateIntegerValue(level));
     }
   }
   updating_preferences_ = false;
@@ -150,7 +149,7 @@ void HostZoomMap::Observe(
     if (updating_preferences_)
       return;
 
-    std::wstring* name = Details<std::wstring>(details).ptr();
+    std::string* name = Details<std::string>(details).ptr();
     if (prefs::kPerHostZoomLevels == *name) {
       Load();
       return;

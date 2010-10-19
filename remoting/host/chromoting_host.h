@@ -8,12 +8,12 @@
 #include <string>
 
 #include "base/thread.h"
+#include "remoting/base/encoder.h"
+#include "remoting/host/access_verifier.h"
 #include "remoting/host/capturer.h"
 #include "remoting/host/client_connection.h"
-#include "remoting/host/encoder.h"
 #include "remoting/host/event_executor.h"
 #include "remoting/host/heartbeat_sender.h"
-#include "remoting/host/session_manager.h"
 #include "remoting/jingle_glue/jingle_client.h"
 #include "remoting/jingle_glue/jingle_thread.h"
 
@@ -21,8 +21,12 @@ class Task;
 
 namespace remoting {
 
+class Capturer;
 class ChromotingHostContext;
+class Encoder;
+class EventExecutor;
 class MutableHostConfig;
+class SessionManager;
 
 // A class to implement the functionality of a host process.
 //
@@ -129,6 +133,8 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
 
   // Objects that takes care of sending heartbeats to the chromoting bot.
   scoped_refptr<HeartbeatSender> heartbeat_sender_;
+
+  AccessVerifier access_verifier_;
 
   // A ClientConnection manages the connectino to a remote client.
   // TODO(hclam): Expand this to a list of clients.

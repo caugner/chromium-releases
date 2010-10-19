@@ -4,8 +4,10 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_HOST_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_HOST_H_
+#pragma once
 
 #include <string>
+#include <list>
 
 #include "base/perftimer.h"
 #include "base/scoped_ptr.h"
@@ -22,12 +24,9 @@
 #endif
 #include "chrome/common/notification_registrar.h"
 
-
 class Browser;
 class Extension;
-class ExtensionProcessManager;
 class RenderProcessHost;
-class RenderWidgetHost;
 class RenderWidgetHostView;
 class TabContents;
 struct WebPreferences;
@@ -46,6 +45,9 @@ class ExtensionHost : public RenderViewHostDelegate,
 
   // Enable DOM automation in created render view hosts.
   static void EnableDOMAutomation() { enable_dom_automation_ = true; }
+
+  typedef std::list<ExtensionHost*> HostPointerList;
+  static HostPointerList* recently_deleted();
 
   ExtensionHost(Extension* extension, SiteInstance* site_instance,
                 const GURL& url, ViewType::Type host_type);
@@ -90,9 +92,6 @@ class ExtensionHost : public RenderViewHostDelegate,
     associated_tab_contents_ = associated_tab_contents;
   }
 
-  // Sets the the ViewType of this host (e.g. mole, toolstrip).
-  void SetRenderViewType(ViewType::Type type);
-
   // Returns true if the render view is initialized and didn't crash.
   bool IsRenderViewLive() const;
 
@@ -106,9 +105,6 @@ class ExtensionHost : public RenderViewHostDelegate,
 
   // Insert a default style sheet for Extension Infobars.
   void InsertInfobarCSS();
-
-  // Insert the theme CSS for a toolstrip/mole.
-  void InsertThemedToolstripCSS();
 
   // Tell the renderer not to draw scrollbars on windows smaller than
   // |size_limit| in both width and height.
@@ -129,11 +125,7 @@ class ExtensionHost : public RenderViewHostDelegate,
       RenderViewHost* render_view_host);
 
   virtual WebPreferences GetWebkitPrefs();
-  virtual void ProcessDOMUIMessage(const std::string& message,
-                                   const ListValue* content,
-                                   const GURL& source_url,
-                                   int request_id,
-                                   bool has_callback);
+  virtual void ProcessDOMUIMessage(const ViewHostMsg_DomMessage_Params& params);
   virtual void RunJavaScriptMessage(const std::wstring& message,
                                     const std::wstring& default_prompt,
                                     const GURL& frame_url,
@@ -149,12 +141,15 @@ class ExtensionHost : public RenderViewHostDelegate,
       WindowContainerType window_container_type,
       const string16& frame_name);
   virtual void CreateNewWidget(int route_id, WebKit::WebPopupType popup_type);
+  virtual void CreateNewFullscreenWidget(int route_id,
+                                         WebKit::WebPopupType popup_type);
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_pos,
                                  bool user_gesture);
   virtual void ShowCreatedWidget(int route_id,
                                  const gfx::Rect& initial_pos);
+  virtual void ShowCreatedFullscreenWidget(int route_id);
   virtual void ShowContextMenu(const ContextMenuParams& params);
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask allowed_operations,
@@ -163,10 +158,13 @@ class ExtensionHost : public RenderViewHostDelegate,
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
+  virtual void Activate();
+  virtual void Deactivate();
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
-  virtual void HandleMouseEvent();
+  virtual void HandleMouseMove();
+  virtual void HandleMouseDown();
   virtual void HandleMouseLeave();
   virtual void UpdatePreferredSize(const gfx::Size& new_size);
 
@@ -176,8 +174,6 @@ class ExtensionHost : public RenderViewHostDelegate,
                        const NotificationDetails& details);
 
   // JavaScriptMessageBoxClient
-  virtual std::wstring GetMessageBoxTitle(const GURL& frame_url,
-                                          bool is_alert);
   virtual gfx::NativeWindow GetMessageBoxRootWindow();
   virtual void OnMessageBoxClosed(IPC::Message* reply_msg,
                                   bool success,
@@ -262,7 +258,7 @@ class ExtensionHost : public RenderViewHostDelegate,
 
   scoped_ptr<ExtensionFunctionDispatcher> extension_function_dispatcher_;
 
-  // Only EXTENSION_TOOLSTRIP, EXTENSION_POPUP, and EXTENSION_BACKGROUND_PAGE
+  // Only EXTENSION_INFOBAR, EXTENSION_POPUP, and EXTENSION_BACKGROUND_PAGE
   // are used here, others are not hosted by ExtensionHost.
   ViewType::Type extension_host_type_;
 

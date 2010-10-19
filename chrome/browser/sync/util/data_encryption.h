@@ -4,13 +4,13 @@
 
 #ifndef CHROME_BROWSER_SYNC_UTIL_DATA_ENCRYPTION_H_
 #define CHROME_BROWSER_SYNC_UTIL_DATA_ENCRYPTION_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "chrome/browser/sync/util/sync_types.h"
 
 using std::string;
 using std::vector;

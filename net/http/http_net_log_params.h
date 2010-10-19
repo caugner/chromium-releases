@@ -4,9 +4,9 @@
 
 #ifndef NET_HTTP_HTTP_NET_LOG_PARAMS_H_
 #define NET_HTTP_HTTP_NET_LOG_PARAMS_H_
+#pragma once
 
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
@@ -27,7 +27,7 @@ class NetLogHttpRequestParameter : public NetLog::EventParameters {
 
   Value* ToValue() const {
     DictionaryValue* dict = new DictionaryValue();
-    dict->SetString(L"line", line_);
+    dict->SetString("line", line_);
     ListValue* headers = new ListValue();
     HttpRequestHeaders::Iterator iterator(headers_);
     while (iterator.GetNext()) {
@@ -36,7 +36,7 @@ class NetLogHttpRequestParameter : public NetLog::EventParameters {
                                        iterator.name().c_str(),
                                        iterator.value().c_str())));
     }
-    dict->Set(L"headers", headers);
+    dict->Set("headers", headers);
     return dict;
   }
 
@@ -66,7 +66,7 @@ class NetLogHttpResponseParameter : public NetLog::EventParameters {
       headers->Append(
           new StringValue(StringPrintf("%s: %s", name.c_str(), value.c_str())));
     }
-    dict->Set(L"headers", headers);
+    dict->Set("headers", headers);
     return dict;
   }
 

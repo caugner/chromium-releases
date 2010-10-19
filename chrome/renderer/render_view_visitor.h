@@ -4,6 +4,9 @@
 
 #ifndef CHROME_RENDERER_RENDER_VIEW_VISITOR_H_
 #define CHROME_RENDERER_RENDER_VIEW_VISITOR_H_
+#pragma once
+
+class RenderView;
 
 class RenderViewVisitor {
  public:
@@ -11,7 +14,7 @@ class RenderViewVisitor {
   virtual bool Visit(RenderView* render_view) = 0;
 
  protected:
-  ~RenderViewVisitor() {}
+  virtual ~RenderViewVisitor() {}
 };
 
 #endif  // CHROME_RENDERER_RENDER_VIEW_VISITOR_H_

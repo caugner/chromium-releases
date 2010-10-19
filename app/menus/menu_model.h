@@ -4,6 +4,7 @@
 
 #ifndef APP_MENUS_MENU_MODEL_H_
 #define APP_MENUS_MENU_MODEL_H_
+#pragma once
 
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
@@ -92,6 +93,9 @@ class MenuModel {
 
   // Returns the enabled state of the item at the specified index.
   virtual bool IsEnabledAt(int index) const = 0;
+
+  // Returns true if the menu item is visible.
+  virtual bool IsVisibleAt(int index) const;
 
   // Returns the model for the submenu at the specified index.
   virtual MenuModel* GetSubmenuModelAt(int index) const = 0;

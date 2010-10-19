@@ -4,7 +4,6 @@
 
 #include "base/crypto/rsa_private_key.h"
 
-#include <iostream>
 #include <list>
 
 #include "base/logging.h"
@@ -37,6 +36,12 @@ RSAPrivateKey* RSAPrivateKey::Create(uint16 num_bits) {
     return NULL;
 
   return result.release();
+}
+
+// static
+RSAPrivateKey* RSAPrivateKey::CreateSensitive(uint16 num_bits) {
+  NOTIMPLEMENTED();
+  return NULL;
 }
 
 // static
@@ -102,6 +107,20 @@ RSAPrivateKey* RSAPrivateKey::CreateFromPrivateKeyInfo(
   }
 
   return result.release();
+}
+
+// static
+RSAPrivateKey* RSAPrivateKey::CreateSensitiveFromPrivateKeyInfo(
+    const std::vector<uint8>& input) {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
+// static
+RSAPrivateKey* RSAPrivateKey::FindFromPublicKeyInfo(
+    const std::vector<uint8>& input) {
+  NOTIMPLEMENTED();
+  return NULL;
 }
 
 RSAPrivateKey::RSAPrivateKey() : provider_(NULL), key_(NULL) {}

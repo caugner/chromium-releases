@@ -73,6 +73,8 @@
 #include "core/cross/gl/renderer_gl.h"
 #elif defined(RENDERER_GLES2)
 #include "core/cross/gles2/renderer_gles2.h"
+#elif defined(RENDERER_CAIRO)
+#include "core/cross/cairo/renderer_cairo.h"
 #else
 #error Renderer not recognized.
 #endif

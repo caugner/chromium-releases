@@ -6,10 +6,10 @@
 
 #include "app/l10n_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/google_service_auth_error.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/options_window.h"
+#include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 
@@ -59,10 +59,9 @@ string16 GetSyncedStateStatusLabel(ProfileSyncService* service) {
   if (user_name.empty())
     return label;
 
-  return l10n_util::GetStringFUTF16(
-      IDS_SYNC_ACCOUNT_SYNCED_TO_USER_WITH_TIME,
-      user_name,
-      WideToUTF16(service->GetLastSyncedTimeString()));
+  return l10n_util::GetStringFUTF16(IDS_SYNC_ACCOUNT_SYNCED_TO_USER_WITH_TIME,
+                                    user_name,
+                                    service->GetLastSyncedTimeString());
 }
 
 // TODO(akalin): Write unit tests for these three functions below.

@@ -268,7 +268,7 @@
       </message>
 
       <!-- The width of the list box in the Content Settings dialog box, in characters (character width = -->
-      <!-- average character width for default dialog box font) -->
+      <!-- average character width for default list box font) -->
       <message name="IDS_CONTENT_SETTINGS_DIALOG_LISTBOX_WIDTH_CHARS" use_name_for_id="true">
         18
       </message>
@@ -362,6 +362,19 @@
       </message>
       <message name="IDS_PAGEINFO_DIALOG_HEIGHT_LINES" use_name_for_id="true">
         25
+      </message>
+
+      <!-- The URL for the "Learn more" page for the Privacy section under Options. -->
+      <message name="IDS_PAGE_INFO_HELP_CENTER" translateable="false">
+        http://www.google.com/support/chrome/bin/answer.py?hl=[GRITLANGCODE]&amp;answer=95617
+      </message> 
+      
+      <!-- The width and height of the Page Info bubble characters and lines (See above). -->
+      <message name="IDS_PAGEINFOBUBBLE_WIDTH_CHARS" use_name_for_id="true">
+        50
+      </message>
+      <message name="IDS_PAGEINFOBUBBLE_HEIGHT_LINES" use_name_for_id="true">
+        30
       </message>
 
       <!-- The width and height of the Search Engines dialog box in characters and -->
@@ -507,6 +520,11 @@
       <!-- The URL for the "Learn more" page for the Privacy section under Options. -->
       <message name="IDS_LEARN_MORE_PRIVACY_URL" translateable="false">
         http://www.google.com/support/chrome/bin/answer.py?answer=114836&amp;hl=[GRITLANGCODE]
+      </message>
+
+      <!-- The URL for the "Learn more" page for the Chrome Web Apps section under Options.-->
+      <message name="IDS_LEARN_MORE_BACKGROUND_MODE_URL" translateable="false">
+        http://www.google.com/support/chrome/bin/answer.py?answer=188022&amp;hl=[GRITLANGCODE]
       </message>
 
       <!-- The URL for the "Learn more" page for the usage/crash reporting option in the first run dialog. -->

@@ -17,6 +17,7 @@
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request_about_job.h"
 #include "net/url_request/url_request_filter.h"
+#include "views/widget/widget_gtk.h"
 
 namespace chromeos {
 
@@ -86,9 +87,7 @@ void RegistrationScreen::OnPageLoaded() {
   if (g_browser_process) {
     const std::string locale = g_browser_process->GetApplicationLocale();
     input_method::EnableInputMethods(
-        locale, input_method::kKeyboardLayoutsOnly, "");
-    // TODO(yusukes,suzhe): Change the 2nd argument to kAllInputMethods when
-    // crosbug.com/2670 is fixed.
+        locale, input_method::kAllInputMethods, "");
   }
   view()->ShowPageContent();
 }
@@ -106,9 +105,11 @@ void RegistrationScreen::OnPageLoadFailed(const std::string& url) {
                                          PageTransition::Type transition) {
   if (url.spec() == kRegistrationSuccessUrl) {
     source->Stop();
+    LOG(INFO) << "Registration form completed.";
     CloseScreen(ScreenObserver::REGISTRATION_SUCCESS);
   } else if (url.spec() == kRegistrationSkippedUrl) {
     source->Stop();
+    LOG(INFO) << "Registration form skipped.";
     CloseScreen(ScreenObserver::REGISTRATION_SKIPPED);
   } else {
     source->Stop();
@@ -116,6 +117,13 @@ void RegistrationScreen::OnPageLoadFailed(const std::string& url) {
     // OEM partner doesn't contain links to external URLs.
     LOG(WARNING) << "Navigate to unsupported url: " << url.spec();
   }
+}
+
+void RegistrationScreen::HandleKeyboardEvent(
+    const NativeWebKeyboardEvent& event) {
+  views::Widget* widget = view()->GetWidget();
+  if (widget && event.os_event && !event.skip_in_browser)
+    static_cast<views::WidgetGtk*>(widget)->HandleKeyboardEvent(event.os_event);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

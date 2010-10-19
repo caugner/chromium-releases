@@ -1,9 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_GTK_GTK_TREE_H_
 #define CHROME_BROWSER_GTK_GTK_TREE_H_
+#pragma once
 
 #include <gtk/gtk.h>
 #include <set>
@@ -94,7 +95,6 @@ class TableAdapter : public TableModelObserver {
 
 // A helper class for populating a GtkTreeStore from a TreeModel.
 // TODO(mattm): support SetRootShown(true)
-// TODO(mattm): implement TreeNodeChildrenReordered
 class TreeAdapter : public TreeModelObserver {
  public:
   // Column ids for |tree_store_|.
@@ -113,6 +113,9 @@ class TreeAdapter : public TreeModelObserver {
 
     // Called after any change to the GtkTreeStore.
     virtual void OnAnyModelUpdate() {}
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   TreeAdapter(Delegate* delegate, TreeModel* tree_model);
@@ -127,7 +130,7 @@ class TreeAdapter : public TreeModelObserver {
   // Get the TreeModelNode corresponding to iter in the tree store.
   TreeModelNode* GetNode(GtkTreeIter* iter);
 
-  // TreeModelObserver implementation.
+  // Begin TreeModelObserver implementation.
   virtual void TreeNodesAdded(TreeModel* model,
                               TreeModelNode* parent,
                               int start,
@@ -136,9 +139,8 @@ class TreeAdapter : public TreeModelObserver {
                                 TreeModelNode* parent,
                                 int start,
                                 int count);
-  virtual void TreeNodeChildrenReordered(TreeModel* model,
-                                         TreeModelNode* parent);
   virtual void TreeNodeChanged(TreeModel* model, TreeModelNode* node);
+  // End TreeModelObserver implementation.
 
  private:
   // Fill the tree store values for a given node.
@@ -158,6 +160,8 @@ class TreeAdapter : public TreeModelObserver {
   GtkTreeStore* tree_store_;
   TreeModel* tree_model_;
   std::vector<GdkPixbuf*> pixbufs_;
+
+  DISALLOW_COPY_AND_ASSIGN(TreeAdapter);
 };
 
 }  // namespace gtk_tree

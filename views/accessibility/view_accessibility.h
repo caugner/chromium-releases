@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_ACCESSIBILITY_VIEW_ACCESSIBILITY_H_
 #define VIEWS_ACCESSIBILITY_VIEW_ACCESSIBILITY_H_
+#pragma once
 
 #include <atlbase.h>
 #include <atlcom.h>
@@ -116,10 +117,6 @@ class ATL_NO_VTABLE ViewAccessibility
   static int32 MSAAState(AccessibilityTypes::State state);
 
  private:
-  // Checks to see if child_id is within the child bounds of view. Returns true
-  // if the child is within the bounds, false otherwise.
-  bool IsValidChild(int child_id, views::View* view) const;
-
   // Determines navigation direction for accNavigate, based on left, up and
   // previous being mapped all to previous and right, down, next being mapped
   // to next. Returns true if navigation direction is next, false otherwise.
@@ -131,6 +128,9 @@ class ATL_NO_VTABLE ViewAccessibility
                   int start_id,
                   int lower_bound,
                   int upper_bound) const;
+
+  // Determines if the child id variant is valid.
+  bool IsValidId(const VARIANT& child) const;
 
   // Wrapper to retrieve the view's instance of IAccessible.
   ViewAccessibilityWrapper* GetViewAccessibilityWrapper(views::View* v) const {

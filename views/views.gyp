@@ -163,8 +163,8 @@
         'controls/native/native_view_host_wrapper.h',
         'controls/progress_bar.h',
         'controls/progress_bar.cc',
-        'controls/resize_gripper.cc',
-        'controls/resize_gripper.h',
+        'controls/resize_area.cc',
+        'controls/resize_area.h',
         'controls/scroll_view.cc',
         'controls/scroll_view.h',
         'controls/scrollbar/bitmap_scroll_bar.cc',
@@ -250,6 +250,8 @@
         'grid_layout.h',
         'layout_manager.cc',
         'layout_manager.h',
+        'mouse_watcher.cc',
+        'mouse_watcher.h',
         'painter.cc',
         'painter.h',
         'repeat_controller.cc',
@@ -262,10 +264,11 @@
         'view.h',
         'view_constants.cc',
         'view_constants.h',
+        'view_gtk.cc',
         'view_text_utils.cc',
         'view_text_utils.h',
-        'view_gtk.cc',
         'view_win.cc',
+        'views_delegate.h',
         'widget/aero_tooltip_manager.cc',
         'widget/aero_tooltip_manager.h',
         'widget/default_theme_provider.cc',
@@ -278,6 +281,8 @@
         'widget/drop_target_win.h',
         'widget/gtk_views_fixed.cc',
         'widget/gtk_views_fixed.h',
+        'widget/gtk_views_window.cc',
+        'widget/gtk_views_window.h',
         'widget/root_view.cc',
         'widget/root_view.h',
         'widget/root_view_gtk.cc',
@@ -355,16 +360,78 @@
           ],
         }],
         ['OS=="win"', {
-          'defines': [
-            '__STD_C',
-            '_CRT_SECURE_NO_DEPRECATE',
-            '_SCL_SECURE_NO_DEPRECATE',
-          ],
           'sources!': [
             'controls/slider/slider.cc',
             'controls/slider/slider.h',
             'controls/slider/native_slider_wrapper.h',
           ],
+          'include_dirs': [
+            '<(DEPTH)/third_party/wtl/include',
+          ],
+        }],
+      ],
+    },
+    {
+      'target_name': 'view_unit_tests',
+      'type': 'executable',
+      'dependencies': [
+        '../app/app.gyp:app_resources',
+        '../app/app.gyp:app_strings',
+        '../base/base.gyp:base',
+        '../base/base.gyp:test_support_base',
+        '../skia/skia.gyp:skia',
+        '../testing/gmock.gyp:gmock',
+        '../testing/gtest.gyp:gtest',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
+        'views',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'animation/bounds_animator_unittest.cc',
+        'box_layout_unittest.cc',
+        'controls/label_unittest.cc',
+        'controls/progress_bar_unittest.cc',
+        'controls/tabbed_pane/tabbed_pane_unittest.cc',
+        'controls/table/table_view_unittest.cc',
+        'focus/accelerator_handler_gtk_unittest.cc',
+        'focus/focus_manager_unittest.cc',
+        'grid_layout_unittest.cc',
+        'run_all_unittests.cc',
+        'view_unittest.cc',
+
+        '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.rc',
+      ],
+      'conditions': [
+        ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
+          'dependencies': [
+            '../build/linux/system.gyp:gtk',
+            '../chrome/chrome.gyp:packed_resources',
+          ],
+          'conditions': [
+            ['linux_use_tcmalloc==1', {
+               'dependencies': [
+                 '../base/allocator/allocator.gyp:allocator',
+               ],
+            }],
+          ],
+        },
+        ],
+        ['OS=="win"', {
+          'dependencies': [
+            # TODO(jcivelli): ideally the resource needed by views would be
+            #                 factored out. (for some reason it pulls in a bunch
+            #                 unrelated things like v8, sqlite nss...).
+            '../chrome/app/locales/locales.gyp:en-US',
+          ],
+          'link_settings': {
+            'libraries': [
+              '-limm32.lib',
+              '-loleacc.lib',
+            ]
+          },
           'include_dirs': [
             '<(DEPTH)/third_party/wtl/include',
           ],

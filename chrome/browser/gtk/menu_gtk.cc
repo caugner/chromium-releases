@@ -6,11 +6,9 @@
 
 #include <map>
 
-#include "app/l10n_util.h"
 #include "app/menus/accelerator_gtk.h"
 #include "app/menus/button_menu_item_model.h"
 #include "app/menus/menu_model.h"
-#include "app/resource_bundle.h"
 #include "base/gtk_util.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
@@ -80,24 +78,25 @@ void OnSubmenuShowButtonMenuItem(GtkWidget* widget, GtkButton* button) {
   int index = GPOINTER_TO_INT(g_object_get_data(
       G_OBJECT(button), "button-model-id"));
 
-  std::string label =
-      ConvertAcceleratorsFromWindowsStyle(
-          UTF16ToUTF8(model->GetLabelAt(index)));
-  gtk_button_set_label(GTK_BUTTON(button), label.c_str());
+  if (model->IsLabelDynamicAt(index)) {
+    std::string label =
+        ConvertAcceleratorsFromWindowsStyle(
+            UTF16ToUTF8(model->GetLabelAt(index)));
+    gtk_button_set_label(GTK_BUTTON(button), label.c_str());
+  }
+  gtk_widget_set_sensitive(GTK_WIDGET(button), model->IsEnabledAt(index));
 }
 
-void SetupDynamicLabelMenuButton(GtkWidget* button,
-                                 GtkWidget* menu,
-                                 menus::ButtonMenuItemModel* model,
-                                 int index) {
-  if (model->IsLabelDynamicAt(index)) {
-    g_object_set_data(G_OBJECT(button), "button-model",
-                      model);
-    g_object_set_data(G_OBJECT(button), "button-model-id",
-                      GINT_TO_POINTER(index));
-    g_signal_connect(menu, "show", G_CALLBACK(OnSubmenuShowButtonMenuItem),
-                     button);
-  }
+void SetupButtonShowHandler(GtkWidget* button,
+                            GtkWidget* menu,
+                            menus::ButtonMenuItemModel* model,
+                            int index) {
+  g_object_set_data(G_OBJECT(button), "button-model",
+                    model);
+  g_object_set_data(G_OBJECT(button), "button-model-id",
+                    GINT_TO_POINTER(index));
+  g_signal_connect(menu, "show", G_CALLBACK(OnSubmenuShowButtonMenuItem),
+                   button);
 }
 
 void OnSubmenuShowButtonImage(GtkWidget* widget, GtkButton* button) {
@@ -215,22 +214,31 @@ GtkWidget* MenuGtk::AppendSeparator() {
 }
 
 GtkWidget* MenuGtk::AppendMenuItem(int command_id, GtkWidget* menu_item) {
-  return AppendMenuItemToMenu(command_id, menu_item, menu_, true);
+  return AppendMenuItemToMenu(command_id, NULL, menu_item, menu_, true);
 }
 
-GtkWidget* MenuGtk::AppendMenuItemToMenu(int command_id,
+GtkWidget* MenuGtk::AppendMenuItemToMenu(int index,
+                                         menus::MenuModel* model,
                                          GtkWidget* menu_item,
                                          GtkWidget* menu,
                                          bool connect_to_activate) {
   // Native menu items do their own thing, so only selectively listen for the
   // activate signal.
   if (connect_to_activate) {
-    SetMenuItemID(menu_item, command_id);
+    SetMenuItemID(menu_item, index);
     g_signal_connect(menu_item, "activate",
                      G_CALLBACK(OnMenuItemActivated), this);
   }
 
-  gtk_widget_show(menu_item);
+  // AppendMenuItemToMenu is used both internally when we control menu creation
+  // from a model (where the model can choose to hide certain menu items), and
+  // with immediate commands which don't provide the option.
+  if (model) {
+    if (model->IsVisibleAt(index))
+      gtk_widget_show(menu_item);
+  } else {
+    gtk_widget_show(menu_item);
+  }
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), menu_item);
   return menu_item;
 }
@@ -258,6 +266,12 @@ void MenuGtk::PopupAsContext(guint32 event_time) {
 void MenuGtk::PopupAsContextAt(guint32 event_time, gfx::Point point) {
   gtk_menu_popup(GTK_MENU(menu_), NULL, NULL,
                  PointMenuPositionFunc, &point, 3, event_time);
+}
+
+void MenuGtk::PopupAsContextForStatusIcon(guint32 event_time, guint32 button,
+                                          GtkStatusIcon* icon) {
+  gtk_menu_popup(GTK_MENU(menu_), NULL, NULL, gtk_status_icon_position_menu,
+                 icon, button, event_time);
 }
 
 void MenuGtk::PopupAsFromKeyEvent(GtkWidget* widget) {
@@ -356,7 +370,7 @@ void MenuGtk::BuildSubmenuFromModel(menus::MenuModel* model, GtkWidget* menu) {
     }
 
     g_object_set_data(G_OBJECT(menu_item), "model", model);
-    AppendMenuItemToMenu(i, menu_item, menu, connect_to_activate);
+    AppendMenuItemToMenu(i, model, menu_item, menu, connect_to_activate);
 
     if (model->IsLabelDynamicAt(i)) {
       g_signal_connect(menu, "show", G_CALLBACK(OnSubmenuShow),
@@ -401,7 +415,7 @@ GtkWidget* MenuGtk::BuildButtomMenuItem(menus::ButtonMenuItemModel* model,
                   UTF16ToUTF8(model->GetLabelAt(i))).c_str());
         }
 
-        SetupDynamicLabelMenuButton(button, menu, model, i);
+        SetupButtonShowHandler(button, menu, model, i);
         break;
       }
       case menus::ButtonMenuItemModel::TYPE_BUTTON_LABEL: {
@@ -412,7 +426,7 @@ GtkWidget* MenuGtk::BuildButtomMenuItem(menus::ButtonMenuItemModel* model,
             GTK_BUTTON(button),
             RemoveWindowsStyleAccelerators(
                 UTF16ToUTF8(model->GetLabelAt(i))).c_str());
-        SetupDynamicLabelMenuButton(button, menu, model, i);
+        SetupButtonShowHandler(button, menu, model, i);
         break;
       }
     }
@@ -465,7 +479,7 @@ void MenuGtk::OnMenuButtonPressed(GtkMenuItem* menu_item, int command_id,
   menus::ButtonMenuItemModel* model =
       reinterpret_cast<menus::ButtonMenuItemModel*>(
           g_object_get_data(G_OBJECT(menu_item), "button-model"));
-  if (model) {
+  if (model && model->IsCommandIdEnabled(command_id)) {
     if (menu->delegate_)
       menu->delegate_->CommandWillBeExecuted();
 
@@ -597,6 +611,11 @@ void MenuGtk::SetMenuItemInfo(GtkWidget* widget, gpointer userdata) {
 
   if (GTK_IS_MENU_ITEM(widget)) {
     gtk_widget_set_sensitive(widget, model->IsEnabledAt(id));
+
+    if (model->IsVisibleAt(id))
+      gtk_widget_show(widget);
+    else
+      gtk_widget_hide(widget);
 
     GtkWidget* submenu = gtk_menu_item_get_submenu(GTK_MENU_ITEM(widget));
     if (submenu) {

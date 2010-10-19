@@ -8,8 +8,11 @@
 #include "base/task.h"
 #include "build/build_config.h"
 #include "remoting/base/constants.h"
+#include "remoting/base/encoder.h"
 #include "remoting/base/protocol_decoder.h"
 #include "remoting/host/chromoting_host_context.h"
+#include "remoting/host/capturer.h"
+#include "remoting/host/event_executor.h"
 #include "remoting/host/host_config.h"
 #include "remoting/host/session_manager.h"
 #include "remoting/jingle_glue/jingle_channel.h"
@@ -65,15 +68,12 @@ void ChromotingHost::OnClientConnected(ClientConnection* client) {
                                   context_->main_message_loop(),
                                   capturer_.get(),
                                   encoder_.get());
-
-    // Immediately add the client and start the session.
-    session_->AddClient(client);
-    session_->Start();
-    LOG(INFO) << "Session manager started";
-  } else {
-    // If a session manager already exists we simply add the new client.
-    session_->AddClient(client);
   }
+
+  // Immediately add the client and start the session.
+  session_->AddClient(client);
+  session_->Start();
+  LOG(INFO) << "Session manager started";
 }
 
 void ChromotingHost::OnClientDisconnected(ClientConnection* client) {
@@ -86,6 +86,9 @@ void ChromotingHost::OnClientDisconnected(ClientConnection* client) {
     session_->Pause();
   }
 
+  // Close the connection to client just to be safe.
+  client->Disconnect();
+
   // Also remove reference to ClientConnection from this object.
   client_ = NULL;
 }
@@ -93,7 +96,7 @@ void ChromotingHost::OnClientDisconnected(ClientConnection* client) {
 ////////////////////////////////////////////////////////////////////////////
 // ClientConnection::EventHandler implementations
 void ChromotingHost::HandleMessages(ClientConnection* client,
-                                ClientMessageList* messages) {
+                                    ClientMessageList* messages) {
   DCHECK_EQ(context_->main_message_loop(), MessageLoop::current());
 
   // Delegate the messages to EventExecutor and delete the unhandled
@@ -114,7 +117,6 @@ void ChromotingHost::OnConnectionOpened(ClientConnection* client) {
 void ChromotingHost::OnConnectionClosed(ClientConnection* client) {
   DCHECK_EQ(context_->main_message_loop(), MessageLoop::current());
 
-  // Completes the client connection.
   LOG(INFO) << "Connection to client closed.";
   OnClientDisconnected(client_.get());
 }
@@ -122,7 +124,6 @@ void ChromotingHost::OnConnectionClosed(ClientConnection* client) {
 void ChromotingHost::OnConnectionFailed(ClientConnection* client) {
   DCHECK_EQ(context_->main_message_loop(), MessageLoop::current());
 
-  // The client has disconnected.
   LOG(ERROR) << "Connection failed unexpectedly.";
   OnClientDisconnected(client_.get());
 }
@@ -136,12 +137,13 @@ void ChromotingHost::OnStateChange(JingleClient* jingle_client,
     LOG(INFO) << "Host connected as "
               << jingle_client->GetFullJid() << "." << std::endl;
 
-    // Start heartbeating after we connected
-    heartbeat_sender_ = new HeartbeatSender();
-    heartbeat_sender_->Start(config_, jingle_client_.get());
+    // Start heartbeating after we've connected.
+    heartbeat_sender_->Start();
   } else if (state == JingleClient::CLOSED) {
     LOG(INFO) << "Host disconnected from talk network." << std::endl;
-    heartbeat_sender_ = NULL;
+
+    // Stop heartbeating.
+    heartbeat_sender_->Stop();
 
     // TODO(sergeyu): We should try reconnecting here instead of terminating
     // the host.
@@ -162,6 +164,10 @@ bool ChromotingHost::OnAcceptConnection(
 
   // TODO(hclam): Allow multiple clients to connect to the host.
   if (client_.get())
+    return false;
+
+  // Check that the user has access to the host.
+  if (!access_verifier_.VerifyPermissions(jid))
     return false;
 
   LOG(INFO) << "Client connected: " << jid << std::endl;
@@ -208,14 +214,23 @@ void ChromotingHost::DoStart(Task* shutdown_task) {
   std::string xmpp_auth_token;
   if (!config_->GetString(kXmppLoginConfigPath, &xmpp_login) ||
       !config_->GetString(kXmppAuthTokenConfigPath, &xmpp_auth_token)) {
-    LOG(ERROR) << "XMMP credentials are not defined in config.";
+    LOG(ERROR) << "XMPP credentials are not defined in the config.";
     return;
   }
+
+  if (!access_verifier_.Init(config_))
+    return;
 
   // Connect to the talk network with a JingleClient.
   jingle_client_ = new JingleClient(context_->jingle_thread());
   jingle_client_->Init(xmpp_login, xmpp_auth_token,
                        kChromotingTokenServiceName, this);
+
+  heartbeat_sender_ = new HeartbeatSender();
+  if (!heartbeat_sender_->Init(config_, jingle_client_.get())) {
+    LOG(ERROR) << "Failed to initialize HeartbeatSender.";
+    return;
+  }
 }
 
 void ChromotingHost::DoShutdown() {
@@ -243,6 +258,11 @@ void ChromotingHost::DoShutdown() {
   // Disconnect from the talk network.
   if (jingle_client_) {
     jingle_client_->Close();
+  }
+
+  // Stop the heartbeat sender.
+  if (heartbeat_sender_) {
+    heartbeat_sender_->Stop();
   }
 
   // Lastly call the shutdown task.

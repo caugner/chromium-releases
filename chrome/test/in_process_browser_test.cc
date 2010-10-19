@@ -9,6 +9,7 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/scoped_nsautorelease_pool.h"
+#include "base/string_number_conversions.h"
 #include "base/test/test_file_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
@@ -36,6 +37,7 @@
 #include "chrome/test/testing_browser_process.h"
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/mock_host_resolver.h"
+#include "net/test/test_server.h"
 #include "sandbox/src/dep.h"
 
 #if defined(OS_LINUX)
@@ -76,6 +78,8 @@ const int kSubsequentTimeoutInMS = 5000;
 
 InProcessBrowserTest::InProcessBrowserTest()
     : browser_(NULL),
+      test_server_(net::TestServer::TYPE_HTTP,
+                   FilePath(FILE_PATH_LITERAL("chrome/test/data"))),
       show_window_(false),
       dom_automation_enabled_(false),
       tab_closeable_state_watcher_enabled_(false),
@@ -135,15 +139,16 @@ void InProcessBrowserTest::SetUp() {
   // Turn off tip loading for tests; see http://crbug.com/17725
   command_line->AppendSwitch(switches::kDisableWebResources);
 
-  command_line->AppendSwitchWithValue(switches::kUserDataDir,
-                                      user_data_dir.ToWStringHack());
+  // Turn off preconnects because they break the brittle python webserver.
+  command_line->AppendSwitch(switches::kDisablePreconnect);
+
+  command_line->AppendSwitchPath(switches::kUserDataDir, user_data_dir);
 
   // Don't show the first run ui.
   command_line->AppendSwitch(switches::kNoFirstRun);
 
   // This is a Browser test.
-  command_line->AppendSwitchWithValue(switches::kTestType,
-                                      ASCIIToWide(kBrowserTestType));
+  command_line->AppendSwitchASCII(switches::kTestType, kBrowserTestType);
 
   // Single-process mode is not set in BrowserMain so it needs to be processed
   // explicitly.
@@ -154,8 +159,8 @@ void InProcessBrowserTest::SetUp() {
 #if defined(OS_WIN)
   // The Windows sandbox requires that the browser and child processes are the
   // same binary.  So we launch browser_process.exe which loads chrome.dll
-  command_line->AppendSwitchWithValue(switches::kBrowserSubprocessPath,
-                                      command_line->GetProgram().value());
+  command_line->AppendSwitchPath(switches::kBrowserSubprocessPath,
+                                 command_line->GetProgram());
 #else
   // Explicitly set the path of the binary used for child processes, otherwise
   // they'll try to use browser_tests which doesn't contain ChromeMain.
@@ -164,14 +169,22 @@ void InProcessBrowserTest::SetUp() {
   subprocess_path = subprocess_path.DirName();
   subprocess_path = subprocess_path.AppendASCII(WideToASCII(
       chrome::kBrowserProcessExecutablePath));
-  command_line->AppendSwitchWithValue(switches::kBrowserSubprocessPath,
-                                      subprocess_path.ToWStringHack());
+#if defined(OS_MACOSX)
+  // Recreate the real environment, run the helper within the app bundle.
+  subprocess_path = subprocess_path.DirName().DirName();
+  DCHECK_EQ(subprocess_path.BaseName().value(), "Contents");
+  subprocess_path =
+      subprocess_path.Append("Versions").Append(chrome::kChromeVersion);
+  subprocess_path =
+      subprocess_path.Append(chrome::kHelperProcessExecutablePath);
+#endif
+  command_line->AppendSwitchPath(switches::kBrowserSubprocessPath,
+                                 subprocess_path);
 #endif
 
   // Enable warning level logging so that we can see when bad stuff happens.
   command_line->AppendSwitch(switches::kEnableLogging);
-  command_line->AppendSwitchWithValue(switches::kLoggingLevel,
-                                      IntToWString(1));  // warning
+  command_line->AppendSwitchASCII(switches::kLoggingLevel, "1");  // warning
 
   // If ncecessary, disable TabCloseableStateWatcher.
   if (!tab_closeable_state_watcher_enabled_)
@@ -238,15 +251,6 @@ void InProcessBrowserTest::TearDown() {
   RenderProcessHost::set_run_renderer_in_process(original_single_process_);
 }
 
-HTTPTestServer* InProcessBrowserTest::StartHTTPServer() {
-  // The HTTPServer must run on the IO thread.
-  DCHECK(!http_server_.get());
-  http_server_ = HTTPTestServer::CreateServer(
-      L"chrome/test/data",
-      g_browser_process->io_thread()->message_loop());
-  return http_server_.get();
-}
-
 // Creates a browser with a single tab (about:blank), waits for the tab to
 // finish loading and shows the browser.
 Browser* InProcessBrowserTest::CreateBrowser(Profile* profile) {
@@ -254,7 +258,8 @@ Browser* InProcessBrowserTest::CreateBrowser(Profile* profile) {
 
   browser->AddTabWithURL(GURL(chrome::kAboutBlankURL), GURL(),
                          PageTransition::START_PAGE, -1,
-                         TabStripModel::ADD_SELECTED, NULL, std::string());
+                         TabStripModel::ADD_SELECTED, NULL, std::string(),
+                         &browser);
 
   // Wait for the page to finish loading.
   ui_test_utils::WaitForNavigation(
@@ -314,9 +319,6 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
 
   QuitBrowsers();
   pool.Recycle();
-
-  // Stop the HTTP server.
-  http_server_ = NULL;
 }
 
 void InProcessBrowserTest::QuitBrowsers() {
@@ -334,12 +336,13 @@ void InProcessBrowserTest::QuitBrowsers() {
 
 void InProcessBrowserTest::TimedOut() {
   std::string error_message = "Test timed out. Each test runs for a max of ";
-  error_message += IntToString(kInitialTimeoutInMS);
+  error_message += base::IntToString(initial_timeout_);
   error_message += " ms (kInitialTimeoutInMS).";
 
-  GTEST_NONFATAL_FAILURE_(error_message.c_str());
-
   MessageLoopForUI::current()->Quit();
+
+  // WARNING: This must be after Quit as it returns.
+  FAIL() << error_message;
 }
 
 void InProcessBrowserTest::SetInitialTimeoutInMS(int timeout_value) {

@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_CONTROLS_MENU_VIEW_MENU_DELEGATE_H_
 #define VIEWS_CONTROLS_MENU_VIEW_MENU_DELEGATE_H_
+#pragma once
 
 #include "gfx/native_widget_types.h"
 
@@ -29,6 +30,9 @@ class ViewMenuDelegate {
   // Create and show a menu at the specified position. Source is the view the
   // ViewMenuDelegate was set on.
   virtual void RunMenu(View* source, const gfx::Point& pt) = 0;
+
+ protected:
+  virtual ~ViewMenuDelegate() {}
 };
 
 }  // namespace views

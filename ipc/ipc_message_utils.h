@@ -4,6 +4,7 @@
 
 #ifndef IPC_IPC_MESSAGE_UTILS_H_
 #define IPC_IPC_MESSAGE_UTILS_H_
+#pragma once
 
 #include <algorithm>
 #include <string>
@@ -11,20 +12,35 @@
 #include <map>
 #include <set>
 
-#include "base/file_path.h"
 #include "base/format_macros.h"
-#include "base/nullable_string16.h"
 #include "base/string16.h"
 #include "base/string_util.h"
-#include "base/utf_string_conversions.h"
-#include "base/time.h"
 #include "base/tuple.h"
-#include "base/values.h"
-#if defined(OS_POSIX)
-#include "ipc/file_descriptor_set_posix.h"
-#endif
-#include "ipc/ipc_channel_handle.h"
+#include "ipc/ipc_param_traits.h"
 #include "ipc/ipc_sync_message.h"
+
+#if defined(COMPILER_GCC)
+// GCC "helpfully" tries to inline template methods in release mode. Except we
+// want the majority of the template junk being expanded once in the
+// implementation file (and only provide the definitions in
+// ipc_message_utils_impl.h in those files) and exported, instead of expanded
+// at every call site. Special note: GCC happily accepts the attribute before
+// the method declaration, but only acts on it if it is after.
+#if (__GNUC__ * 10000 + __GNUC_MINOR__ * 100) >= 40500
+// Starting in gcc 4.5, the noinline no longer implies the concept covered by
+// the introduced noclone attribute, which will create specialized versions of
+// functions/methods when certain types are constant.
+// www.gnu.org/software/gcc/gcc-4.5/changes.html
+#define IPC_MSG_NOINLINE  __attribute__((noinline, noclone));
+#else
+#define IPC_MSG_NOINLINE  __attribute__((noinline));
+#endif
+#elif defined(COMPILER_MSVC)
+// MSVC++ doesn't do this.
+#define IPC_MSG_NOINLINE
+#else
+#error "Please add the noinline property for your new compiler here."
+#endif
 
 // Used by IPC_BEGIN_MESSAGES so that each message class starts from a unique
 // base.  Messages have unique IDs across channels in order for the IPC logging
@@ -56,12 +72,28 @@ enum IPCMessageStart {
   GpuMsgStart,
   GpuHostMsgStart,
   GpuChannelMsgStart,
+  GpuVideoDecoderHostMsgStart,
+  GpuVideoDecoderMsgStart,
+  ServiceMsgStart,
+  ServiceHostMsgStart,
   // NOTE: When you add a new message class, also update
   // IPCStatusView::IPCStatusView to ensure logging works.
   LastMsgIndex
 };
 
+class DictionaryValue;
+class FilePath;
+class ListValue;
+class NullableString16;
+
+namespace base {
+class Time;
+struct FileDescriptor;
+}
+
 namespace IPC {
+
+struct ChannelHandle;
 
 //-----------------------------------------------------------------------------
 // An iterator class for reading the fields contained within a Message.
@@ -101,14 +133,6 @@ class MessageIterator {
 //-----------------------------------------------------------------------------
 // ParamTraits specializations, etc.
 
-template <class P> struct ParamTraits {
-};
-
-template <class P>
-struct SimilarTypeTraits {
-  typedef P Type;
-};
-
 template <class P>
 static inline void WriteParam(Message* m, const P& p) {
   typedef typename SimilarTypeTraits<P>::Type Type;
@@ -123,7 +147,7 @@ static inline bool WARN_UNUSED_RESULT ReadParam(const Message* m, void** iter,
 }
 
 template <class P>
-static inline void LogParam(const P& p, std::wstring* l) {
+static inline void LogParam(const P& p, std::string* l) {
   typedef typename SimilarTypeTraits<P>::Type Type;
   ParamTraits<Type>::Log(static_cast<const Type& >(p), l);
 }
@@ -137,8 +161,8 @@ struct ParamTraits<bool> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadBool(iter, r);
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(p ? L"true" : L"false");
+  static void Log(const param_type& p, std::string* l) {
+    l->append(p ? "true" : "false");
   }
 };
 
@@ -151,9 +175,7 @@ struct ParamTraits<int> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadInt(iter, r);
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"%d", p));
-  }
+  static void Log(const param_type& p, std::string* l);
 };
 
 template <>
@@ -165,9 +187,7 @@ struct ParamTraits<unsigned int> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadInt(iter, reinterpret_cast<int*>(r));
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"%d", p));
-  }
+  static void Log(const param_type& p, std::string* l);
 };
 
 template <>
@@ -179,9 +199,7 @@ struct ParamTraits<long> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadLong(iter, r);
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"%ld", p));
-  }
+  static void Log(const param_type& p, std::string* l);
 };
 
 template <>
@@ -193,9 +211,7 @@ struct ParamTraits<unsigned long> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadLong(iter, reinterpret_cast<long*>(r));
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"%lu", p));
-  }
+  static void Log(const param_type& p, std::string* l);
 };
 
 template <>
@@ -207,9 +223,7 @@ struct ParamTraits<long long> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadInt64(iter, reinterpret_cast<int64*>(r));
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(Int64ToWString(static_cast<int64>(p)));
-  }
+  static void Log(const param_type& p, std::string* l);
 };
 
 template <>
@@ -221,9 +235,7 @@ struct ParamTraits<unsigned long long> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadInt64(iter, reinterpret_cast<int64*>(r));
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(Uint64ToWString(p));
-  }
+  static void Log(const param_type& p, std::string* l);
 };
 
 // Note that the IPC layer doesn't sanitize NaNs and +/- INF values.  Clients
@@ -246,8 +258,8 @@ struct ParamTraits<float> {
     memcpy(r, data, sizeof(param_type));
     return true;
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"e", p));
+  static void Log(const param_type& p, std::string* l) {
+    l->append(StringPrintf("%e", p));
   }
 };
 
@@ -268,51 +280,17 @@ struct ParamTraits<double> {
     memcpy(r, data, sizeof(param_type));
     return true;
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"e", p));
-  }
-};
-
-template <>
-struct ParamTraits<wchar_t> {
-  typedef wchar_t param_type;
-  static void Write(Message* m, const param_type& p) {
-    m->WriteData(reinterpret_cast<const char*>(&p), sizeof(param_type));
-  }
-  static bool Read(const Message* m, void** iter, param_type* r) {
-    const char *data;
-    int data_size = 0;
-    bool result = m->ReadData(iter, &data, &data_size);
-    if (result && data_size == sizeof(param_type)) {
-      memcpy(r, data, sizeof(param_type));
-    } else {
-      result = false;
-      NOTREACHED();
-    }
-
-    return result;
-  }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"%lc", p));
+  static void Log(const param_type& p, std::string* l) {
+    l->append(StringPrintf("%e", p));
   }
 };
 
 template <>
 struct ParamTraits<base::Time> {
   typedef base::Time param_type;
-  static void Write(Message* m, const param_type& p) {
-    ParamTraits<int64>::Write(m, p.ToInternalValue());
-  }
-  static bool Read(const Message* m, void** iter, param_type* r) {
-    int64 value;
-    if (!ParamTraits<int64>::Read(m, iter, &value))
-      return false;
-    *r = base::Time::FromInternalValue(value);
-    return true;
-  }
-  static void Log(const param_type& p, std::wstring* l) {
-    ParamTraits<int64>::Log(p.ToInternalValue(), l);
-  }
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
 };
 
 #if defined(OS_WIN)
@@ -335,8 +313,8 @@ struct ParamTraits<LOGFONT> {
 
     return result;
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"<LOGFONT>"));
+  static void Log(const param_type& p, std::string* l) {
+    l->append(StringPrintf("<LOGFONT>"));
   }
 };
 
@@ -359,6 +337,9 @@ struct ParamTraits<MSG> {
 
     return result;
   }
+  static void Log(const param_type& p, std::string* l) {
+    l->append("<MSG>");
+  }
 };
 #endif  // defined(OS_WIN)
 
@@ -367,7 +348,7 @@ struct ParamTraits<DictionaryValue> {
   typedef DictionaryValue param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
-  static void Log(const param_type& p, std::wstring* l);
+  static void Log(const param_type& p, std::string* l);
 };
 
 template <>
@@ -375,7 +356,7 @@ struct ParamTraits<ListValue> {
   typedef ListValue param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
-  static void Log(const param_type& p, std::wstring* l);
+  static void Log(const param_type& p, std::string* l);
 };
 
 template <>
@@ -387,13 +368,13 @@ struct ParamTraits<std::string> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadString(iter, r);
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(UTF8ToWide(p));
+  static void Log(const param_type& p, std::string* l) {
+    l->append(p);
   }
 };
 
 template<typename CharType>
-static void LogBytes(const std::vector<CharType>& data, std::wstring* out) {
+static void LogBytes(const std::vector<CharType>& data, std::string* out) {
 #if defined(OS_WIN)
   // Windows has a GUI for logging, which can handle arbitrary binary data.
   for (size_t i = 0; i < data.size(); ++i)
@@ -405,11 +386,11 @@ static void LogBytes(const std::vector<CharType>& data, std::wstring* out) {
     if (isprint(data[i]))
       out->push_back(data[i]);
     else
-      out->append(StringPrintf(L"[%02X]", static_cast<unsigned char>(data[i])));
+      out->append(StringPrintf("[%02X]", static_cast<unsigned char>(data[i])));
   }
   if (data.size() > kMaxBytesToLog) {
     out->append(
-        StringPrintf(L" and %u more bytes",
+        StringPrintf(" and %u more bytes",
                      static_cast<unsigned>(data.size() - kMaxBytesToLog)));
   }
 #endif
@@ -436,7 +417,7 @@ struct ParamTraits<std::vector<unsigned char> > {
       memcpy(&r->front(), data, data_size);
     return true;
   }
-  static void Log(const param_type& p, std::wstring* l) {
+  static void Log(const param_type& p, std::string* l) {
     LogBytes(p, l);
   }
 };
@@ -461,7 +442,7 @@ struct ParamTraits<std::vector<char> > {
       memcpy(&r->front(), data, data_size);
     return true;
   }
-  static void Log(const param_type& p, std::wstring* l) {
+  static void Log(const param_type& p, std::string* l) {
     LogBytes(p, l);
   }
 };
@@ -489,10 +470,10 @@ struct ParamTraits<std::vector<P> > {
     }
     return true;
   }
-  static void Log(const param_type& p, std::wstring* l) {
+  static void Log(const param_type& p, std::string* l) {
     for (size_t i = 0; i < p.size(); ++i) {
       if (i != 0)
-        l->append(L" ");
+        l->append(" ");
       LogParam((p[i]), l);
     }
   }
@@ -519,8 +500,8 @@ struct ParamTraits<std::set<P> > {
     }
     return true;
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(L"<std::set>");
+  static void Log(const param_type& p, std::string* l) {
+    l->append("<std::set>");
   }
 };
 
@@ -550,8 +531,8 @@ struct ParamTraits<std::map<K, V> > {
     }
     return true;
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(L"<std::map>");
+  static void Log(const param_type& p, std::string* l) {
+    l->append("<std::map>");
   }
 };
 
@@ -565,9 +546,7 @@ struct ParamTraits<std::wstring> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadWString(iter, r);
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(p);
-  }
+  static void Log(const param_type& p, std::string* l);
 };
 
 template <class A, class B>
@@ -580,39 +559,21 @@ struct ParamTraits<std::pair<A, B> > {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return ReadParam(m, iter, &r->first) && ReadParam(m, iter, &r->second);
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(L"(");
+  static void Log(const param_type& p, std::string* l) {
+    l->append("(");
     LogParam(p.first, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.second, l);
-    l->append(L")");
+    l->append(")");
   }
 };
 
 template <>
 struct ParamTraits<NullableString16> {
   typedef NullableString16 param_type;
-  static void Write(Message* m, const param_type& p) {
-    WriteParam(m, p.string());
-    WriteParam(m, p.is_null());
-  }
-  static bool Read(const Message* m, void** iter, param_type* r) {
-    string16 string;
-    if (!ReadParam(m, iter, &string))
-      return false;
-    bool is_null;
-    if (!ReadParam(m, iter, &is_null))
-      return false;
-    *r = NullableString16(string, is_null);
-    return true;
-  }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(L"(");
-    LogParam(p.string(), l);
-    l->append(L", ");
-    LogParam(p.is_null(), l);
-    l->append(L")");
-  }
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
 };
 
 // If WCHAR_T_IS_UTF16 is defined, then string16 is a std::wstring so we don't
@@ -627,9 +588,7 @@ struct ParamTraits<string16> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return m->ReadString16(iter, r);
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(UTF16ToWide(p));
-  }
+  static void Log(const param_type& p, std::string* l);
 };
 #endif
 
@@ -647,8 +606,8 @@ struct ParamTraits<HANDLE> {
     DCHECK_EQ(sizeof(param_type), sizeof(uint32));
     return m->ReadUInt32(iter, reinterpret_cast<uint32*>(r));
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"0x%X", p));
+  static void Log(const param_type& p, std::string* l) {
+    l->append(StringPrintf("0x%X", p));
   }
 };
 
@@ -662,8 +621,8 @@ struct ParamTraits<HCURSOR> {
     DCHECK_EQ(sizeof(param_type), sizeof(uint32));
     return m->ReadUInt32(iter, reinterpret_cast<uint32*>(r));
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"0x%X", p));
+  static void Log(const param_type& p, std::string* l) {
+    l->append(StringPrintf("0x%X", p));
   }
 };
 
@@ -694,8 +653,8 @@ struct ParamTraits<POINT> {
     r->y = y;
     return true;
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(StringPrintf(L"(%d, %d)", p.x, p.y));
+  static void Log(const param_type& p, std::string* l) {
+    l->append(StringPrintf("(%d, %d)", p.x, p.y));
   }
 };
 #endif  // defined(OS_WIN)
@@ -703,19 +662,9 @@ struct ParamTraits<POINT> {
 template <>
 struct ParamTraits<FilePath> {
   typedef FilePath param_type;
-  static void Write(Message* m, const param_type& p) {
-    ParamTraits<FilePath::StringType>::Write(m, p.value());
-  }
-  static bool Read(const Message* m, void** iter, param_type* r) {
-    FilePath::StringType value;
-    if (!ParamTraits<FilePath::StringType>::Read(m, iter, &value))
-      return false;
-    *r = FilePath(value);
-    return true;
-  }
-  static void Log(const param_type& p, std::wstring* l) {
-    ParamTraits<FilePath::StringType>::Log(p.value(), l);
-  }
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
 };
 
 #if defined(OS_POSIX)
@@ -737,35 +686,9 @@ struct ParamTraits<FilePath> {
 template<>
 struct ParamTraits<base::FileDescriptor> {
   typedef base::FileDescriptor param_type;
-  static void Write(Message* m, const param_type& p) {
-    const bool valid = p.fd >= 0;
-    WriteParam(m, valid);
-
-    if (valid) {
-      if (!m->WriteFileDescriptor(p))
-        NOTREACHED();
-    }
-  }
-  static bool Read(const Message* m, void** iter, param_type* r) {
-    bool valid;
-    if (!ReadParam(m, iter, &valid))
-      return false;
-
-    if (!valid) {
-      r->fd = -1;
-      r->auto_close = false;
-      return true;
-    }
-
-    return m->ReadFileDescriptor(iter, r);
-  }
-  static void Log(const param_type& p, std::wstring* l) {
-    if (p.auto_close) {
-      l->append(StringPrintf(L"FD(%d auto-close)", p.fd));
-    } else {
-      l->append(StringPrintf(L"FD(%d)", p.fd));
-    }
-  }
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
 };
 #endif  // defined(OS_POSIX)
 
@@ -775,26 +698,9 @@ struct ParamTraits<base::FileDescriptor> {
 template<>
 struct ParamTraits<IPC::ChannelHandle> {
   typedef ChannelHandle param_type;
-  static void Write(Message* m, const param_type& p) {
-    WriteParam(m, p.name);
-#if defined(OS_POSIX)
-    WriteParam(m, p.socket);
-#endif
-  }
-  static bool Read(const Message* m, void** iter, param_type* r) {
-    return ReadParam(m, iter, &r->name)
-#if defined(OS_POSIX)
-        && ReadParam(m, iter, &r->socket)
-#endif
-        ;
-  }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(ASCIIToWide(StringPrintf("ChannelHandle(%s", p.name.c_str())));
-#if defined(OS_POSIX)
-    ParamTraits<base::FileDescriptor>::Log(p.socket, l);
-#endif
-    l->append(L")");
-  }
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
 };
 
 #if defined(OS_WIN)
@@ -817,8 +723,8 @@ struct ParamTraits<XFORM> {
 
     return result;
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(L"<XFORM>");
+  static void Log(const param_type& p, std::string* l) {
+    l->append("<XFORM>");
   }
 };
 #endif  // defined(OS_WIN)
@@ -827,14 +733,14 @@ struct LogData {
   std::string channel;
   int32 routing_id;
   uint32 type;  // "User-defined" message type, from ipc_message.h.
-  std::wstring flags;
+  std::string flags;
   int64 sent;  // Time that the message was sent (i.e. at Send()).
   int64 receive;  // Time before it was dispatched (i.e. before calling
                   // OnMessageReceived).
   int64 dispatch;  // Time after it was dispatched (i.e. after calling
                    // OnMessageReceived).
-  std::wstring message_name;
-  std::wstring params;
+  std::string message_name;
+  std::string params;
 };
 
 template <>
@@ -864,7 +770,7 @@ struct ParamTraits<LogData> {
     r->type = static_cast<uint16>(type);
     return result;
   }
-  static void Log(const param_type& p, std::wstring* l) {
+  static void Log(const param_type& p, std::string* l) {
     // Doesn't make sense to implement this!
   }
 };
@@ -885,8 +791,8 @@ struct ParamTraits<Message> {
     *r = Message(data, size);
     return true;
   }
-  static void Log(const Message& p, std::wstring* l) {
-    l->append(L"<IPC::Message>");
+  static void Log(const Message& p, std::string* l) {
+    l->append("<IPC::Message>");
   }
 };
 
@@ -898,7 +804,7 @@ struct ParamTraits<Tuple0> {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return true;
   }
-  static void Log(const param_type& p, std::wstring* l) {
+  static void Log(const param_type& p, std::string* l) {
   }
 };
 
@@ -911,7 +817,7 @@ struct ParamTraits< Tuple1<A> > {
   static bool Read(const Message* m, void** iter, param_type* r) {
     return ReadParam(m, iter, &r->a);
   }
-  static void Log(const param_type& p, std::wstring* l) {
+  static void Log(const param_type& p, std::string* l) {
     LogParam(p.a, l);
   }
 };
@@ -927,9 +833,9 @@ struct ParamTraits< Tuple2<A, B> > {
     return (ReadParam(m, iter, &r->a) &&
             ReadParam(m, iter, &r->b));
   }
-  static void Log(const param_type& p, std::wstring* l) {
+  static void Log(const param_type& p, std::string* l) {
     LogParam(p.a, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.b, l);
   }
 };
@@ -947,11 +853,11 @@ struct ParamTraits< Tuple3<A, B, C> > {
             ReadParam(m, iter, &r->b) &&
             ReadParam(m, iter, &r->c));
   }
-  static void Log(const param_type& p, std::wstring* l) {
+  static void Log(const param_type& p, std::string* l) {
     LogParam(p.a, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.b, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.c, l);
   }
 };
@@ -971,13 +877,13 @@ struct ParamTraits< Tuple4<A, B, C, D> > {
             ReadParam(m, iter, &r->c) &&
             ReadParam(m, iter, &r->d));
   }
-  static void Log(const param_type& p, std::wstring* l) {
+  static void Log(const param_type& p, std::string* l) {
     LogParam(p.a, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.b, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.c, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.d, l);
   }
 };
@@ -999,15 +905,15 @@ struct ParamTraits< Tuple5<A, B, C, D, E> > {
             ReadParam(m, iter, &r->d) &&
             ReadParam(m, iter, &r->e));
   }
-  static void Log(const param_type& p, std::wstring* l) {
+  static void Log(const param_type& p, std::string* l) {
     LogParam(p.a, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.b, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.c, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.d, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.e, l);
   }
 };
@@ -1020,20 +926,15 @@ template <class ParamType>
 class MessageWithTuple : public Message {
  public:
   typedef ParamType Param;
-  typedef typename ParamType::ParamTuple RefParam;
+  typedef typename TupleTypes<ParamType>::ParamTuple RefParam;
 
-  MessageWithTuple(int32 routing_id, uint32 type, const RefParam& p)
-      : Message(routing_id, type, PRIORITY_NORMAL) {
-    WriteParam(this, p);
-  }
+  // The constructor and the Read() method's templated implementations are in
+  // ipc_message_utils_impl.h. The subclass constructor and Log() methods call
+  // the templated versions of these and make sure there are instantiations in
+  // those translation units.
+  MessageWithTuple(int32 routing_id, uint32 type, const RefParam& p);
 
-  static bool Read(const Message* msg, Param* p) {
-    void* iter = NULL;
-    if (ReadParam(msg, &iter, p))
-      return true;
-    NOTREACHED() << "Error deserializing message " << msg->type();
-    return false;
-  }
+  static bool Read(const Message* msg, Param* p) IPC_MSG_NOINLINE;
 
   // Generic dispatcher.  Should cover most cases.
   template<class T, class Method>
@@ -1105,12 +1006,6 @@ class MessageWithTuple : public Message {
     return false;
   }
 
-  static void Log(const Message* msg, std::wstring* l) {
-    Param p;
-    if (Read(msg, &p))
-      LogParam(p, l);
-  }
-
   // Functions used to do manual unpacking.  Only used by the automation code,
   // these should go away once that code uses SyncChannel.
   template<typename TA, typename TB>
@@ -1160,8 +1055,54 @@ class MessageWithTuple : public Message {
   }
 };
 
+// defined in ipc_logging.cc
+void GenerateLogData(const std::string& channel, const Message& message,
+                     LogData* data);
+
+
+#if defined(IPC_MESSAGE_LOG_ENABLED)
+inline void AddOutputParamsToLog(const Message* msg, std::string* l) {
+  const std::string& output_params = msg->output_params();
+  if (!l->empty() && !output_params.empty())
+    l->append(", ");
+
+  l->append(output_params);
+}
+
+template <class ReplyParamType>
+inline void LogReplyParamsToMessage(const ReplyParamType& reply_params,
+                                    const Message* msg) {
+  if (msg->received_time() != 0) {
+    std::string output_params;
+    LogParam(reply_params, &output_params);
+    msg->set_output_params(output_params);
+  }
+}
+
+inline void ConnectMessageAndReply(const Message* msg, Message* reply) {
+  if (msg->sent_time()) {
+    // Don't log the sync message after dispatch, as we don't have the
+    // output parameters at that point.  Instead, save its data and log it
+    // with the outgoing reply message when it's sent.
+    LogData* data = new LogData;
+    GenerateLogData("", *msg, data);
+    msg->set_dont_log();
+    reply->set_sync_log_data(data);
+  }
+}
+#else
+inline void AddOutputParamsToLog(const Message* msg, std::string* l) {}
+
+template <class ReplyParamType>
+inline void LogReplyParamsToMessage(const ReplyParamType& reply_params,
+                                    const Message* msg) {}
+
+inline void ConnectMessageAndReply(const Message* msg, Message* reply) {}
+#endif
+
 // This class assumes that its template argument is a RefTuple (a Tuple with
-// reference elements).
+// reference elements). This would go into ipc_message_utils_impl.h, but it is
+// also used by chrome_frame.
 template <class RefTuple>
 class ParamDeserializer : public MessageReplyDeserializer {
  public:
@@ -1174,67 +1115,32 @@ class ParamDeserializer : public MessageReplyDeserializer {
   RefTuple out_;
 };
 
-// defined in ipc_logging.cc
-void GenerateLogData(const std::string& channel, const Message& message,
-                     LogData* data);
-
 // Used for synchronous messages.
 template <class SendParamType, class ReplyParamType>
 class MessageWithReply : public SyncMessage {
  public:
   typedef SendParamType SendParam;
-  typedef typename SendParam::ParamTuple RefSendParam;
+  typedef typename TupleTypes<SendParam>::ParamTuple RefSendParam;
   typedef ReplyParamType ReplyParam;
 
   MessageWithReply(int32 routing_id, uint32 type,
-                   const RefSendParam& send, const ReplyParam& reply)
-      : SyncMessage(routing_id, type, PRIORITY_NORMAL,
-                    new ParamDeserializer<ReplyParam>(reply)) {
-    WriteParam(this, send);
-  }
-
-  static void Log(const Message* msg, std::wstring* l) {
-    if (msg->is_sync()) {
-      SendParam p;
-      void* iter = SyncMessage::GetDataIterator(msg);
-      if (ReadParam(msg, &iter, &p))
-        LogParam(p, l);
-
-#if defined(IPC_MESSAGE_LOG_ENABLED)
-      const std::wstring& output_params = msg->output_params();
-      if (!l->empty() && !output_params.empty())
-        l->append(L", ");
-
-      l->append(output_params);
-#endif
-    } else {
-      // This is an outgoing reply.  Now that we have the output parameters, we
-      // can finally log the message.
-      typename ReplyParam::ValueTuple p;
-      void* iter = SyncMessage::GetDataIterator(msg);
-      if (ReadParam(msg, &iter, &p))
-        LogParam(p, l);
-    }
-  }
+                   const RefSendParam& send, const ReplyParam& reply);
+  static bool ReadSendParam(const Message* msg, SendParam* p) IPC_MSG_NOINLINE;
+  static bool ReadReplyParam(
+      const Message* msg,
+      typename TupleTypes<ReplyParam>::ValueTuple* p) IPC_MSG_NOINLINE;
 
   template<class T, class Method>
   static bool Dispatch(const Message* msg, T* obj, Method func) {
     SendParam send_params;
-    void* iter = GetDataIterator(msg);
     Message* reply = GenerateReply(msg);
     bool error;
-    if (ReadParam(msg, &iter, &send_params)) {
-      typename ReplyParam::ValueTuple reply_params;
+    if (ReadSendParam(msg, &send_params)) {
+      typename TupleTypes<ReplyParam>::ValueTuple reply_params;
       DispatchToMethod(obj, func, send_params, &reply_params);
       WriteParam(reply, reply_params);
       error = false;
-#ifdef IPC_MESSAGE_LOG_ENABLED
-      if (msg->received_time() != 0) {
-        std::wstring output_params;
-        LogParam(reply_params, &output_params);
-        msg->set_output_params(output_params);
-      }
-#endif
+      LogReplyParamsToMessage(reply_params, msg);
     } else {
       NOTREACHED() << "Error deserializing message " << msg->type();
       reply->set_reply_error();
@@ -1248,23 +1154,11 @@ class MessageWithReply : public SyncMessage {
   template<class T, class Method>
   static bool DispatchDelayReply(const Message* msg, T* obj, Method func) {
     SendParam send_params;
-    void* iter = GetDataIterator(msg);
     Message* reply = GenerateReply(msg);
     bool error;
-    if (ReadParam(msg, &iter, &send_params)) {
+    if (ReadSendParam(msg, &send_params)) {
       Tuple1<Message&> t = MakeRefTuple(*reply);
-
-#ifdef IPC_MESSAGE_LOG_ENABLED
-      if (msg->sent_time()) {
-        // Don't log the sync message after dispatch, as we don't have the
-        // output parameters at that point.  Instead, save its data and log it
-        // with the outgoing reply message when it's sent.
-        LogData* data = new LogData;
-        GenerateLogData("", *msg, data);
-        msg->set_dont_log();
-        reply->set_sync_log_data(data);
-      }
-#endif
+      ConnectMessageAndReply(msg, reply);
       DispatchToMethod(obj, func, send_params, &t);
       error = false;
     } else {

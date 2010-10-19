@@ -8,6 +8,7 @@
 
 #include "base/file_path.h"
 #include "base/path_service.h"
+#include "base/utf_string_conversions.h"
 #include "chrome_frame/chrome_frame_automation.h"
 #include "chrome_frame/chrome_frame_plugin.h"
 #include "chrome_frame/test/http_server.h"
@@ -32,17 +33,12 @@ class AutomationMockDelegate
         chrome_frame_test::GetProfilePath(profile_name));
 
     automation_client_ = new ChromeFrameAutomationClient;
-    ChromeFrameLaunchParams clp = {
-      launch_timeout,
-      GURL(),
-      GURL(),
-      profile_path,
-      profile_name,
-      extra_chrome_arguments,
-      perform_version_check,
-      incognito,
-      is_widget_mode
-    };
+    GURL empty;
+    scoped_refptr<ChromeFrameLaunchParams> clp(
+        new ChromeFrameLaunchParams(empty, empty, profile_path, profile_name,
+            extra_chrome_arguments, incognito, is_widget_mode));
+    clp->set_launch_timeout(launch_timeout);
+    clp->set_version_check(perform_version_check);
     automation_client_->Initialize(this, clp);
   }
   ~AutomationMockDelegate() {

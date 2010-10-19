@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_COCOA_TAB_STRIP_CONTROLLER_H_
 #define CHROME_BROWSER_COCOA_TAB_STRIP_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -13,6 +14,7 @@
 #import "chrome/browser/cocoa/url_drop_target.h"
 #import "third_party/GTM/AppKit/GTMWindowSheetController.h"
 
+@class NewTabButton;
 @class TabContentsController;
 @class TabView;
 @class TabStripView;
@@ -40,17 +42,20 @@ class ToolbarModel;
   BOOL verticalLayout_;
 
  @private
-  TabContents* currentTab_;   // weak, tab for which we're showing state
   scoped_nsobject<TabStripView> tabStripView_;
   NSView* switchView_;  // weak
   scoped_nsobject<NSView> dragBlockingView_;  // avoid bad window server drags
-  NSButton* newTabButton_;  // weak, obtained from the nib.
+  NewTabButton* newTabButton_;  // weak, obtained from the nib.
 
   // Tracks the newTabButton_ for rollovers.
   scoped_nsobject<NSTrackingArea> newTabTrackingArea_;
   scoped_ptr<TabStripModelObserverBridge> bridge_;
   Browser* browser_;  // weak
   TabStripModel* tabStripModel_;  // weak
+
+  // YES if the new tab button is currently displaying the hover image (if the
+  // mouse is currently over the button).
+  BOOL newTabButtonShowingHoverImage_;
 
   // Access to the TabContentsControllers (which own the parent view
   // for the toolbar and associated tab contents) given an index. Call
@@ -157,6 +162,11 @@ class ToolbarModel;
 // Return the view at a given index.
 - (NSView*)viewAtIndex:(NSUInteger)index;
 
+// Return the number of tab views in the tab strip. It's same as number of tabs
+// in the model, except when a tab is closing, which will be counted in views
+// count, but no longer in the model.
+- (NSUInteger)viewsCount;
+
 // Set the placeholder for a dragged tab, allowing the |frame| and |strechiness|
 // to be specified. This causes this tab to be rendered in an arbitrary position
 - (void)insertPlaceholderForTab:(TabView*)tab
@@ -212,6 +222,7 @@ class ToolbarModel;
 - (void)attachConstrainedWindow:(ConstrainedWindowMac*)window;
 - (void)removeConstrainedWindow:(ConstrainedWindowMac*)window;
 - (void)updateDevToolsForContents:(TabContents*)contents;
+- (void)updateSidebarForContents:(TabContents*)contents;
 
 @end
 

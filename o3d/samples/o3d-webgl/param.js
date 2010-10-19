@@ -341,6 +341,29 @@ o3d.ParamParamArray = function() {
 };
 o3d.inherit('ParamParamArray', 'Param');
 
+/**
+ * Acts like ParamParamArray, but asks its owner object to update the array
+ * contents every time its value is queried.
+ *
+ * @constructor
+ * @extends {o3d.ParamParamArray}
+ */
+o3d.ParamParamArrayOutput = function() {
+  o3d.ParamParamArray.call(this);
+};
+o3d.inherit('ParamParamArrayOutput', 'ParamParamArray');
+o3d.ParamParamArrayOutput.prototype.__defineGetter__("value",
+    function() {
+      this.owner_.updateOutputs(this);
+      return this.value_;
+    }
+);
+o3d.ParamParamArrayOutput.prototype.__defineSetter__("value",
+    function(value) {
+      // Creating a new array is fine.
+      this.value_ = value;
+    }
+);
 
 /**
  * @constructor
@@ -441,6 +464,15 @@ o3d.ParamTransform = function() {
 };
 o3d.inherit('ParamTransform', 'Param');
 
+
+/**
+ * @constructor
+ */
+o3d.ParamVertexBufferStream = function() {
+  o3d.Param.call(this);
+  this.stream = null;
+};
+o3d.inherit('ParamVertexBufferStream', 'Param');
 
 /**
  * Base class for the types of matrix4 params that compute their own
@@ -840,13 +872,14 @@ o3d.ParamMatrix4.prototype.applyToLocation = function(gl, location) {
  *    to which to apply the values.
  */
 o3d.ParamParamArray.prototype.applyToLocations = function(gl, locationArray) {
-  if (locationArray.length != this.value.length) {
+  var computedValue = this.value;
+  if (locationArray.length != computedValue.length) {
     gl.client.error_callback(
         'Invalid uniform param array: incorrect number of elements.');
   }
-  for (var i = 0; i < this.value.length; i++) {
+  for (var i = 0; i < computedValue.length; i++) {
     // Cannot have a ParamArray of ParamArrays, so safe to call applyToLocation
-    this.value.getParam(i).applyToLocation(gl, locationArray[i]);
+    computedValue.getParam(i).applyToLocation(gl, locationArray[i]);
   }
 };
 
@@ -860,8 +893,12 @@ o3d.Param.texture_index_ = 0;
  * Called to specify the value of a uniform variable.
  * @param {WebGLContext} gl The current context.
  * @param {WebGLUniformLocation} location The location to which to apply.
+ * @param {boolean} opt_isCube Optional boolean indicating whether the Sampler
+ *     connects to a samplerCube type uniform.  If set to true, and there is an
+ *     error, we use the error cube map.
  */
-o3d.ParamSampler.prototype.applyToLocation = function(gl, location) {
+o3d.ParamSampler.prototype.applyToLocation =
+    function(gl, location, opt_isCube) {
   // When before the effect object assigns values to parameters,
   // it sets this variable to 0.
   var i = o3d.Param.texture_index_;
@@ -881,7 +918,7 @@ o3d.ParamSampler.prototype.applyToLocation = function(gl, location) {
     }
   }
 
-  sampler.bindAndSetParameters_();
+  sampler.bindAndSetParameters_(opt_isCube);
   gl.uniform1i(location, i);
   o3d.Param.texture_index_++;
 };

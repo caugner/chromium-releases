@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@
 
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "base/test/test_file_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -136,24 +137,30 @@ void UILayoutTest::InitializeForLayoutTest(const FilePath& test_parent_dir,
 }
 
 void UILayoutTest::AddResourceForLayoutTest(const FilePath& parent_dir,
-                                            const FilePath& resource_dir) {
+                                            const FilePath& resource_name) {
   FilePath root_dir;
   PathService::Get(base::DIR_SOURCE_ROOT, &root_dir);
 
-  FilePath src_dir = root_dir.AppendASCII("chrome");
-  src_dir = src_dir.AppendASCII("test");
-  src_dir = src_dir.AppendASCII("data");
-  src_dir = src_dir.AppendASCII("layout_tests");
-  src_dir = src_dir.AppendASCII("LayoutTests");
-  src_dir = src_dir.Append(parent_dir);
-  src_dir = src_dir.Append(resource_dir);
-  ASSERT_TRUE(file_util::DirectoryExists(src_dir));
+  FilePath source = root_dir.AppendASCII("chrome");
+  source = source.AppendASCII("test");
+  source = source.AppendASCII("data");
+  source = source.AppendASCII("layout_tests");
+  source = source.AppendASCII("LayoutTests");
+  source = source.Append(parent_dir);
+  source = source.Append(resource_name);
+
+  ASSERT_TRUE(file_util::PathExists(source));
 
   FilePath dest_parent_dir = temp_test_dir_.
       AppendASCII("LayoutTests").Append(parent_dir);
   ASSERT_TRUE(file_util::CreateDirectory(dest_parent_dir));
-  FilePath dest_dir = dest_parent_dir.Append(resource_dir);
-  ASSERT_TRUE(file_util::CopyDirectory(src_dir, dest_dir, true));
+  FilePath dest = dest_parent_dir.Append(resource_name);
+
+  if (file_util::DirectoryExists(source)) {
+    ASSERT_TRUE(file_util::CopyDirectory(source, dest, true));
+  } else {
+    ASSERT_TRUE(file_util::CopyFile(source, dest));
+  }
 }
 
 static size_t FindInsertPosition(const std::string& html) {
@@ -175,7 +182,7 @@ void UILayoutTest::RunLayoutTest(const std::string& test_case_file_name,
   // Creates a new cookie name. We will have to use a new cookie because
   // this function could be called multiple times.
   std::string status_cookie(kTestCompleteCookie);
-  status_cookie += IntToString(test_count_);
+  status_cookie += base::IntToString(test_count_);
   test_count_++;
 
   // Reads the layout test HTML file.

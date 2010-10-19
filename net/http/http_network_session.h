@@ -4,6 +4,7 @@
 
 #ifndef NET_HTTP_HTTP_NETWORK_SESSION_H_
 #define NET_HTTP_HTTP_NETWORK_SESSION_H_
+#pragma once
 
 #include <map>
 #include "base/non_thread_safe.h"
@@ -18,6 +19,7 @@
 #include "net/http/http_network_delegate.h"
 #include "net/http/http_network_transaction.h"
 #include "net/http/http_proxy_client_socket_pool.h"
+#include "net/http/http_stream_factory.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/client_socket_pool_histograms.h"
 #include "net/socket/socks_client_socket_pool.h"
@@ -100,13 +102,17 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
     return network_delegate_;
   }
 
+  const scoped_refptr<HttpStreamFactory>& http_stream_factory() {
+    return http_stream_factory_;
+  }
+
+  // Creates a Value summary of the state of the socket pools. The caller is
+  // responsible for deleting the returned value.
+  Value* SocketPoolInfoToValue() const;
+
+  static int max_sockets_per_group();
   static void set_max_sockets_per_group(int socket_count);
-
-  static uint16 fixed_http_port();
-  static void set_fixed_http_port(uint16 port);
-
-  static uint16 fixed_https_port();
-  static void set_fixed_https_port(uint16 port);
+  static void set_max_sockets_per_proxy_server(int socket_count);
 
 #ifdef UNIT_TEST
   void FlushSocketPools() {
@@ -154,6 +160,10 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
   scoped_refptr<ClientSocketPoolHistograms> tcp_pool_histograms_;
   scoped_refptr<ClientSocketPoolHistograms> tcp_for_http_proxy_pool_histograms_;
   scoped_refptr<ClientSocketPoolHistograms> http_proxy_pool_histograms_;
+  scoped_refptr<ClientSocketPoolHistograms>
+    tcp_for_https_proxy_pool_histograms_;
+  scoped_refptr<ClientSocketPoolHistograms>
+    ssl_for_https_proxy_pool_histograms_;
   scoped_refptr<ClientSocketPoolHistograms> tcp_for_socks_pool_histograms_;
   scoped_refptr<ClientSocketPoolHistograms> socks_pool_histograms_;
   scoped_refptr<ClientSocketPoolHistograms> ssl_pool_histograms_;
@@ -167,6 +177,7 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
   scoped_refptr<ProxyService> proxy_service_;
   scoped_refptr<SSLConfigService> ssl_config_service_;
   scoped_refptr<SpdySessionPool> spdy_session_pool_;
+  scoped_refptr<HttpStreamFactory> http_stream_factory_;
   HttpAuthHandlerFactory* http_auth_handler_factory_;
   HttpNetworkDelegate* const network_delegate_;
   NetLog* net_log_;

@@ -4,13 +4,18 @@
 
 #ifndef CHROME_TEST_IN_PROCESS_BROWSER_TEST_H_
 #define CHROME_TEST_IN_PROCESS_BROWSER_TEST_H_
+#pragma once
 
 #include "base/compiler_specific.h"
-#include "net/url_request/url_request_unittest.h"
+#include "base/ref_counted.h"
+#include "base/scoped_ptr.h"
+#include "net/test/test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class Browser;
+class CommandLine;
 class Profile;
+
 namespace net {
 class RuleBasedHostResolverProc;
 }
@@ -96,8 +101,8 @@ class InProcessBrowserTest : public testing::Test {
   // Sets Initial Timeout value.
   void SetInitialTimeoutInMS(int initial_timeout);
 
-  // Starts an HTTP server.
-  HTTPTestServer* StartHTTPServer() WARN_UNUSED_RESULT;
+  // Returns the testing server. Guaranteed to be non-NULL.
+  net::TestServer* test_server() { return &test_server_; }
 
   // Creates a browser with a single tab (about:blank), waits for the tab to
   // finish loading and shows the browser.
@@ -131,8 +136,8 @@ class InProcessBrowserTest : public testing::Test {
   // Browser created from CreateBrowser.
   Browser* browser_;
 
-  // HTTPServer, created when StartHTTPServer is invoked.
-  scoped_refptr<HTTPTestServer> http_server_;
+  // Testing server, started on demand.
+  net::TestServer test_server_;
 
   // Whether this test requires the browser windows to be shown (interactive
   // tests for example need the windows shown).

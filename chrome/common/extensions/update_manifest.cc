@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,10 @@
 
 #include <algorithm>
 
+#include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
-#include "base/values.h"
+#include "base/string_number_conversions.h"
 #include "base/version.h"
 #include "chrome/common/libxml_utils.h"
 #include "libxml/tree.h"
@@ -237,7 +238,7 @@ bool UpdateManifest::Parse(const std::string& manifest_xml) {
     xmlNode* first = daystarts[0];
     std::string elapsed_seconds = GetAttribute(first, "elapsed_seconds");
     int parsed_elapsed = kNoDaystart;
-    if (StringToInt(elapsed_seconds, &parsed_elapsed)) {
+    if (base::StringToInt(elapsed_seconds, &parsed_elapsed)) {
       results_.daystart_elapsed_seconds = parsed_elapsed;
     }
   }

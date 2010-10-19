@@ -23,6 +23,7 @@ found in the LICENSE file.
     <script src="logviewpainter.js"></script>
     <script src="loggrouper.js"></script>
     <script src="proxyview.js"></script>
+    <script src="socketsview.js"></script>
   </head>
   <body onload="onLoaded()">
     <!-- Tab switcher for main categories. -->
@@ -42,9 +43,25 @@ found in the LICENSE file.
     <div id=proxyTabContent>
       <h4>
         Current proxy settings
-        <input type=button value="Reload settings" id=proxyReloadSettings />
+        <input type=button value="Re-apply settings" id=proxyReloadSettings />
       </h4>
-      <pre id=proxyCurrentConfig></pre>
+
+      <table><tr>
+
+      <td valign=top>
+      <h3>Effective settings</h3>
+      <pre id=proxyEffectiveSettings></pre>
+      </pre>
+      </td>
+
+      <td style='width: 30px'>&nbsp;</td>
+
+      <td valign=top>
+      <h3>Original settings</h3>
+      <pre id=proxyOriginalSettings></pre>
+      </td>
+
+      </tr></table>
 
       <h4>
         Proxies which have failed recently, and are marked as bad
@@ -87,8 +104,26 @@ found in the LICENSE file.
         </tbody>
       </table>
     </div>
-    <!-- Sections TODO -->
-    <div id=socketsTabContent>TODO: display socket information (outstanding connect jobs)</div>
+    <div id=socketsTabContent>
+      <h4>Socket pools</h4>
+      <table class="styledTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Handed Out</th>
+            <th>Connecting</th>
+            <th>Idle</th>
+            <th>Max</th>
+            <th>Max Per Group</th>
+            <th>Generation Number</th>
+          </tr>
+        </thead>
+        <tbody id=socketTabTbody>
+        </tbody>
+      </table>
+      <div id=socketPoolGroupsDiv>
+      </div>
+    </div>
     <div id=httpCacheTabContent>
       <h4>Entries</h4>
       <a href="chrome://view-http-cache" target=_blank>Explore cache entries</a>
@@ -104,7 +139,8 @@ found in the LICENSE file.
 <ol>
 <li>Reproduce the network problem.</li>
 <li>Click this button:
-  <button id=exportToText style="font-size: 110%"><b>Dump to text</b> </button>
+  <button id=exportToText style="font-size: 110%"><b>Dump to text</b> </button><br>
+  (<input id=stripCookiesCheckbox type=checkbox checked=yes> Remove cookies)
 </li>
 
 <li>Copy-paste the data on this page to a text file.</li>
@@ -136,6 +172,8 @@ function toggleMoreExplanation() {
 <ul>
 <li>You can edit the log to obscure information if you like, but sometimes it
   is relevant to the bug.</li>
+<li>If you choose not to have cookies removed from the log, you must toggle
+  the checkbox before clicking the button.</li>
 </ul>
 <li>Ideally you would have this tool running <b>before</b> you reproduce the 
   bug.
@@ -154,7 +192,7 @@ function toggleMoreExplanation() {
 <li>Chrome keeps around a small buffer of network events for the
   <b>most recent</b> requests. That way if you open chrome://net-internals/
   <b>shortly after</b> encountering a problem, you can still find the relevant
-  data. </b>
+  data.
   These <b>passively captured</b> events are less accurate however, and will
   be prefixed in the log with <span style="font-family: monospace;">(P)</span>.
 </li>
@@ -192,9 +230,9 @@ function toggleMoreExplanation() {
         <thead>
           <tr>
             <td><input type=checkbox id=selectAll /></td>
-            <td>ID</td>
-            <td>Source</td>
-            <td width=99%>Description</td>
+            <td id=sortById>ID</td>
+            <td id=sortBySource>Source</td>
+            <td id=sortByDescription width=99%>Description</td>
           </tr>
         </thead>
         <!-- Requests table body: This is where request rows go into -->

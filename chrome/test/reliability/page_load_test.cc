@@ -35,25 +35,25 @@
 // --savedebuglog: save Chrome, V8, and test debug log for each page loaded.
 
 #include <fstream>
-#include <iostream>
 
+#include "app/keyboard_codes.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
-#include "base/keyboard_codes.h"
 #include "base/i18n/time_formatting.h"
 #include "base/path_service.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/test/test_file_util.h"
 #include "base/time.h"
-#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/json_pref_store.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
@@ -158,20 +158,22 @@ class PageLoadTest : public UITest {
     g_test_log_path = FilePath(FILE_PATH_LITERAL("test_log.log"));
     test_log.open(g_test_log_path.value().c_str());
 
+    // Get the version of Chrome we're running.
+    std::string last_change;
+#if defined(OS_WIN)
     // Check file version info for chrome dll.
     scoped_ptr<FileVersionInfo> file_info;
-#if defined(OS_WIN)
     file_info.reset(FileVersionInfo::CreateFileVersionInfo(kChromeDll));
+    last_change = WideToASCII(file_info->last_change());
 #elif defined(OS_LINUX) || defined(OS_MACOSX)
     // TODO(fmeawad): On Mac, the version retrieved here belongs to the test
     // module and not the chrome binary, need to be changed to chrome binary
     // instead.
-    file_info.reset(chrome_app::GetChromeVersionInfo());
+    chrome::VersionInfo version_info;
+    last_change = version_info.LastChange();
 #endif  // !defined(OS_WIN)
-    std::wstring last_change = file_info->last_change();
     test_log << "Last Change: ";
     test_log << last_change << std::endl;
-
 
     // Log timestamp for test start.
     base::Time time_now = base::Time::Now();
@@ -207,9 +209,9 @@ class PageLoadTest : public UITest {
             scoped_refptr<WindowProxy> window(browser->GetWindow());
             if (window.get()) {
               if (browser->BringToFront()) {
-                window->SimulateOSKeyPress(base::VKEY_NEXT, 0);
+                window->SimulateOSKeyPress(app::VKEY_NEXT, 0);
                 PlatformThread::Sleep(sleep_timeout_ms());
-                window->SimulateOSKeyPress(base::VKEY_NEXT, 0);
+                window->SimulateOSKeyPress(app::VKEY_NEXT, 0);
                 PlatformThread::Sleep(sleep_timeout_ms());
               }
             }
@@ -456,7 +458,7 @@ class PageLoadTest : public UITest {
   FilePath ConstructSavedDebugLogPath(const FilePath& debug_log_path,
                                       int index) {
     std::string suffix("_");
-    suffix.append(IntToString(index));
+    suffix.append(base::IntToString(index));
     return debug_log_path.InsertBeforeExtensionASCII(suffix);
   }
 
@@ -628,11 +630,13 @@ void SetPageRange(const CommandLine& parsed_command_line) {
   if (parsed_command_line.HasSwitch(kStartPageSwitch)) {
     ASSERT_TRUE(parsed_command_line.HasSwitch(kEndPageSwitch));
     ASSERT_TRUE(
-        StringToInt(WideToUTF16(parsed_command_line.GetSwitchValue(
-            kStartPageSwitch)), &g_start_page));
+        base::StringToInt(parsed_command_line.GetSwitchValueASCII(
+                              kStartPageSwitch),
+                          &g_start_page));
     ASSERT_TRUE(
-        StringToInt(WideToUTF16(parsed_command_line.GetSwitchValue(
-            kEndPageSwitch)), &g_end_page));
+        base::StringToInt(parsed_command_line.GetSwitchValueASCII(
+                              kEndPageSwitch),
+                          &g_end_page));
     ASSERT_TRUE(g_start_page > 0 && g_end_page > 0);
     ASSERT_TRUE(g_start_page < g_end_page);
     g_append_page_id = true;
@@ -641,20 +645,22 @@ void SetPageRange(const CommandLine& parsed_command_line) {
   }
 
   if (parsed_command_line.HasSwitch(kSiteSwitch)) {
-    g_server_url = WideToUTF8(parsed_command_line.GetSwitchValue(kSiteSwitch));
+    g_server_url = parsed_command_line.GetSwitchValueASCII(kSiteSwitch);
   }
 
   if (parsed_command_line.HasSwitch(kStartIndexSwitch)) {
     ASSERT_TRUE(
-        StringToInt(WideToUTF16(parsed_command_line.GetSwitchValue(
-            kStartIndexSwitch)), &g_start_index));
+        base::StringToInt(parsed_command_line.GetSwitchValueASCII(
+                              kStartIndexSwitch),
+                          &g_start_index));
     ASSERT_GT(g_start_index, 0);
   }
 
   if (parsed_command_line.HasSwitch(kEndIndexSwitch)) {
     ASSERT_TRUE(
-        StringToInt(WideToUTF16(parsed_command_line.GetSwitchValue(
-            kEndIndexSwitch)), &g_end_index));
+        base::StringToInt(parsed_command_line.GetSwitchValueASCII(
+                              kEndIndexSwitch),
+                          &g_end_index));
     ASSERT_GT(g_end_index, 0);
   }
 
@@ -665,8 +671,9 @@ void SetPageRange(const CommandLine& parsed_command_line) {
 
   if (parsed_command_line.HasSwitch(kIterationSwitch)) {
     ASSERT_TRUE(
-        StringToInt(WideToUTF16(parsed_command_line.GetSwitchValue(
-            kIterationSwitch)), &g_iterations));
+        base::StringToInt(parsed_command_line.GetSwitchValueASCII(
+                              kIterationSwitch),
+                          &g_iterations));
     ASSERT_GT(g_iterations, 0);
   }
 
@@ -676,18 +683,17 @@ void SetPageRange(const CommandLine& parsed_command_line) {
   if (parsed_command_line.HasSwitch(kContinuousLoadSwitch))
     g_continuous_load = true;
 
-  if (parsed_command_line.HasSwitch(kEndURLSwitch)) {
-    g_end_url = WideToUTF8(
-        parsed_command_line.GetSwitchValue(kEndURLSwitch));
-  }
+  if (parsed_command_line.HasSwitch(kEndURLSwitch))
+    g_end_url = parsed_command_line.GetSwitchValueASCII(kEndURLSwitch);
 
   if (parsed_command_line.HasSwitch(kLogFileSwitch))
     g_log_file_path = parsed_command_line.GetSwitchValuePath(kLogFileSwitch);
 
   if (parsed_command_line.HasSwitch(kTimeoutSwitch)) {
     ASSERT_TRUE(
-        StringToInt(WideToUTF16(parsed_command_line.GetSwitchValue(
-            kTimeoutSwitch)), &g_timeout_ms));
+        base::StringToInt(parsed_command_line.GetSwitchValueASCII(
+                              kTimeoutSwitch),
+                          &g_timeout_ms));
     ASSERT_GT(g_timeout_ms, 0);
   }
 

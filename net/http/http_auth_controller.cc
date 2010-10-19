@@ -4,13 +4,16 @@
 
 #include "net/http/http_auth_controller.h"
 
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "net/base/auth.h"
 #include "net/base/host_resolver.h"
 #include "net/base/net_util.h"
+#include "net/http/http_auth_handler.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_request_info.h"
+#include "net/http/http_response_headers.h"
 
 namespace net {
 
@@ -73,8 +76,8 @@ int HttpAuthController::MaybeGenerateAuthToken(const HttpRequestInfo* request,
   bool needs_auth = HaveAuth() || SelectPreemptiveAuth(net_log);
   if (!needs_auth)
     return OK;
-  const std::wstring* username = NULL;
-  const std::wstring* password = NULL;
+  const string16* username = NULL;
+  const string16* password = NULL;
   if (identity_.source != HttpAuth::IDENT_SRC_DEFAULT_CREDENTIALS) {
     username = &identity_.username;
     password = &identity_.password;
@@ -88,7 +91,7 @@ int HttpAuthController::MaybeGenerateAuthToken(const HttpRequestInfo* request,
                                        &auth_token_);
   if (rv == ERR_IO_PENDING)
     user_callback_ = callback;
-  if (rv != ERR_IO_PENDING)
+  else
     OnIOComplete(rv);
   // This error occurs with GSSAPI, if the user has not already logged in.
   if (rv == ERR_MISSING_AUTH_CREDENTIALS)
@@ -219,8 +222,8 @@ int HttpAuthController::HandleAuthChallenge(
   return OK;
 }
 
-void HttpAuthController::ResetAuth(const std::wstring& username,
-                                   const std::wstring& password) {
+void HttpAuthController::ResetAuth(const string16& username,
+                                   const string16& password) {
   DCHECK(identity_.invalid || (username.empty() && password.empty()));
 
   if (identity_.invalid) {
@@ -342,7 +345,7 @@ void HttpAuthController::OnIOComplete(int result) {
   // In that case, disable the current scheme as it cannot succeed.
   if (result == ERR_MISSING_AUTH_CREDENTIALS) {
     DisableAuthScheme(handler_->scheme());
-    auth_token_.erase();
+    auth_token_.clear();
     result = OK;
   }
   if (user_callback_) {
@@ -350,6 +353,10 @@ void HttpAuthController::OnIOComplete(int result) {
     user_callback_ = NULL;
     c->Run(result);
   }
+}
+
+scoped_refptr<AuthChallengeInfo> HttpAuthController::auth_info() {
+  return auth_info_;
 }
 
 bool HttpAuthController::IsAuthSchemeDisabled(const std::string& scheme) const {

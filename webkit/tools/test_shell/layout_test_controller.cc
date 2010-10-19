@@ -13,8 +13,13 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebAnimationController.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebConsoleMessage.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebGeolocationServiceMock.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
@@ -37,14 +42,20 @@
 using std::string;
 using std::wstring;
 
+using WebKit::WebBindings;
 using WebKit::WebConsoleMessage;
+using WebKit::WebElement;
+using WebKit::WebGeolocationServiceMock;
 using WebKit::WebScriptSource;
 using WebKit::WebSecurityPolicy;
+using WebKit::WebSize;
 using WebKit::WebString;
+using WebKit::WebURL;
 
 TestShell* LayoutTestController::shell_ = NULL;
 // Most of these flags need to be cleared in Reset() so that they get turned
 // off between each test run.
+bool LayoutTestController::generate_pixel_results_ = true;
 bool LayoutTestController::dump_as_text_ = false;
 bool LayoutTestController::dump_editing_callbacks_ = false;
 bool LayoutTestController::dump_frame_load_callbacks_ = false;
@@ -120,6 +131,8 @@ LayoutTestController::LayoutTestController(TestShell* shell) :
   BindMethod("setSelectTrailingWhitespaceEnabled", &LayoutTestController::setSelectTrailingWhitespaceEnabled);
   BindMethod("pauseAnimationAtTimeOnElementWithId", &LayoutTestController::pauseAnimationAtTimeOnElementWithId);
   BindMethod("pauseTransitionAtTimeOnElementWithId", &LayoutTestController::pauseTransitionAtTimeOnElementWithId);
+  BindMethod("suspendAnimations", &LayoutTestController::suspendAnimations);
+  BindMethod("resumeAnimations", &LayoutTestController::resumeAnimations);
   BindMethod("elementDoesAutoCompleteForElementWithId", &LayoutTestController::elementDoesAutoCompleteForElementWithId);
   BindMethod("numberOfActiveAnimations", &LayoutTestController::numberOfActiveAnimations);
   BindMethod("disableImageLoading", &LayoutTestController::disableImageLoading);
@@ -177,6 +190,8 @@ LayoutTestController::LayoutTestController(TestShell* shell) :
   BindMethod("setMockGeolocationPosition", &LayoutTestController::setMockGeolocationPosition);
   BindMethod("setMockGeolocationError", &LayoutTestController::setMockGeolocationError);
 
+  BindMethod("markerTextForListItem", &LayoutTestController::markerTextForListItem);
+
   // The fallback method is called when an unknown method is invoked.
   BindFallbackMethod(&LayoutTestController::fallbackMethod);
 
@@ -186,6 +201,12 @@ LayoutTestController::LayoutTestController(TestShell* shell) :
   BindProperty("globalFlag", &globalFlag_);
   // webHistoryItemCount is used by tests in LayoutTests\http\tests\history
   BindProperty("webHistoryItemCount", &webHistoryItemCount_);
+}
+
+LayoutTestController::~LayoutTestController() {
+}
+
+LayoutTestController::WorkQueue::WorkQueue() {
 }
 
 LayoutTestController::WorkQueue::~WorkQueue() {
@@ -236,8 +257,11 @@ void LayoutTestController::WorkQueue::AddWork(WorkItem* work) {
 }
 
 void LayoutTestController::dumpAsText(const CppArgumentList& args,
-                                                   CppVariant* result) {
+                                      CppVariant* result) {
   dump_as_text_ = true;
+  generate_pixel_results_ = false;
+  if (args.size() > 0 && args[0].isBool())
+      generate_pixel_results_ = args[0].value.boolValue;
   result->SetNull();
 }
 
@@ -474,6 +498,7 @@ void LayoutTestController::Reset() {
 #endif  // defined(TOOLKIT_GTK)
     shell_->webView()->removeAllUserContent();
   }
+  generate_pixel_results_ = true;
   dump_as_text_ = false;
   dump_editing_callbacks_ = false;
   dump_frame_load_callbacks_ = false;
@@ -818,6 +843,34 @@ void LayoutTestController::pauseTransitionAtTimeOnElementWithId(
   }
 }
 
+void LayoutTestController::suspendAnimations(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+
+  WebKit::WebFrame* web_frame = shell_->webView()->mainFrame();
+  if (!web_frame)
+    return;
+
+  WebKit::WebAnimationController* controller = web_frame->animationController();
+  if (!controller)
+    return;  
+  controller->suspendAnimations();
+}
+
+void LayoutTestController::resumeAnimations(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+
+  WebKit::WebFrame* web_frame = shell_->webView()->mainFrame();
+  if (!web_frame)
+    return;
+
+  WebKit::WebAnimationController* controller = web_frame->animationController();
+  if (!controller)
+    return;
+  controller->resumeAnimations();
+}
+
 void LayoutTestController::elementDoesAutoCompleteForElementWithId(
     const CppArgumentList& args,
     CppVariant* result) {
@@ -889,7 +942,7 @@ void LayoutTestController::dumpSelectionRect(
 void LayoutTestController::display(
     const CppArgumentList& args, CppVariant* result) {
   WebViewHost* view_host = shell_->webViewHost();
-  const WebKit::WebSize& size = view_host->webview()->size();
+  const WebSize& size = view_host->webview()->size();
   gfx::Rect rect(size.width, size.height);
   view_host->UpdatePaintRect(rect);
   view_host->Paint();
@@ -1021,7 +1074,7 @@ int32 LayoutTestController::CppVariantToInt32(const CppVariant& value) {
     return value.ToInt32();
   else if (value.isString()) {
     int number;
-    if (StringToInt(value.ToString(), &number))
+    if (base::StringToInt(value.ToString(), &number))
       return number;
   }
   LogErrorToConsole("Invalid value for preference. Expected integer value.");
@@ -1128,7 +1181,7 @@ void LayoutTestController::addOriginAccessWhitelistEntry(
       !args[2].isString() || !args[3].isBool())
     return;
 
-  WebKit::WebURL url(GURL(args[0].ToString()));
+  WebURL url(GURL(args[0].ToString()));
   if (!url.isValid())
     return;
 
@@ -1147,7 +1200,7 @@ void LayoutTestController::removeOriginAccessWhitelistEntry(
       !args[2].isString() || !args[3].isBool())
     return;
 
-  WebKit::WebURL url(GURL(args[0].ToString()));
+  WebURL url(GURL(args[0].ToString()));
   if (!url.isValid())
     return;
 
@@ -1318,7 +1371,7 @@ void LayoutTestController::setMockGeolocationPosition(
   if (args.size() < 3 ||
       !args[0].isNumber() || !args[1].isNumber() || !args[2].isNumber())
     return;
-  WebKit::WebGeolocationServiceMock::setMockGeolocationPosition(
+  WebGeolocationServiceMock::setMockGeolocationPosition(
       args[0].ToDouble(), args[1].ToDouble(), args[2].ToDouble());
 }
 
@@ -1327,6 +1380,16 @@ void LayoutTestController::setMockGeolocationError(const CppArgumentList& args,
   if (args.size() < 2 ||
       !args[0].isInt32() || !args[1].isString())
     return;
-  WebKit::WebGeolocationServiceMock::setMockGeolocationError(
+  WebGeolocationServiceMock::setMockGeolocationError(
       args[0].ToInt32(), WebString::fromUTF8(args[1].ToString()));
+}
+
+void LayoutTestController::markerTextForListItem(const CppArgumentList& args,
+                                                 CppVariant* result) {
+  WebElement element;
+  if (!WebBindings::getElement(args[0].value.objectValue, &element))
+    result->SetNull();
+  else
+    result->Set(
+        element.document().frame()->markerTextForListItem(element).utf8());
 }

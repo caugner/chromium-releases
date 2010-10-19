@@ -6,11 +6,11 @@
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/stl_util-inl.h"
-#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/test_extension_prefs.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -172,7 +172,7 @@ class ExtensionPrefsBlacklist : public ExtensionPrefsTest {
 
     // Install 5 extensions.
     for (int i = 0; i < 5; i++) {
-      std::string name = "test" + IntToString(i);
+      std::string name = "test" + base::IntToString(i);
       extensions_.push_back(linked_ptr<Extension>(prefs_.AddExtension(name)));
     }
     EXPECT_EQ(NULL, prefs()->GetInstalledExtensionInfo(not_installed_id_));
@@ -225,8 +225,9 @@ class ExtensionPrefsIdleInstallInfo : public ExtensionPrefsTest {
  public:
   // Sets idle install information for one test extension.
   void SetIdleInfo(std::string id, int num) {
-    prefs()->SetIdleInstallInfo(id, basedir_.AppendASCII(IntToString(num)),
-                                "1." + IntToString(num),
+    prefs()->SetIdleInstallInfo(id,
+                                basedir_.AppendASCII(base::IntToString(num)),
+                                "1." + base::IntToString(num),
                                 now_ + TimeDelta::FromSeconds(num));
   }
 
@@ -239,8 +240,8 @@ class ExtensionPrefsIdleInstallInfo : public ExtensionPrefsTest {
     ASSERT_TRUE(prefs()->GetIdleInstallInfo(id, &crx_path, &version,
                                             &fetch_time));
     ASSERT_EQ(crx_path.value(),
-              basedir_.AppendASCII(IntToString(num)).value());
-    ASSERT_EQ("1." + IntToString(num), version);
+              basedir_.AppendASCII(base::IntToString(num)).value());
+    ASSERT_EQ("1." + base::IntToString(num), version);
     ASSERT_TRUE(fetch_time == now_ + TimeDelta::FromSeconds(num));
   }
 
@@ -310,41 +311,6 @@ class ExtensionPrefsIdleInstallInfo : public ExtensionPrefsTest {
   std::string id4_;
 };
 TEST_F(ExtensionPrefsIdleInstallInfo, IdleInstallInfo) {}
-
-class ExtensionPrefsAppToolbars : public ExtensionPrefsTest {
- public:
-  virtual void Initialize() {
-    // We test three different configurations -- the default value, and being
-    // overrridden set to on or off.
-    extension_id_default_ =
-        prefs_.AddExtensionAndReturnId("app_toolbars_default");
-
-    extension_id_overridden_on_ =
-        prefs_.AddExtensionAndReturnId("app_toolbars_overridden_on");
-    prefs()->SetAppTabToolbarVisibility(extension_id_overridden_on_, true);
-
-    extension_id_overridden_off_ =
-        prefs_.AddExtensionAndReturnId("app_toolbars_overridden_off");
-    prefs()->SetAppTabToolbarVisibility(extension_id_overridden_off_, false);
-  }
-
-  virtual void Verify() {
-    // Toolbars default to hidden.
-    EXPECT_FALSE(prefs()->AreAppTabToolbarsVisible(extension_id_default_));
-
-    EXPECT_TRUE(prefs()->AreAppTabToolbarsVisible(
-        extension_id_overridden_on_));
-    EXPECT_FALSE(prefs()->AreAppTabToolbarsVisible(
-        extension_id_overridden_off_));
-  }
-
- private:
-  // The ids of our three test extensions.
-  std::string extension_id_default_;
-  std::string extension_id_overridden_on_;
-  std::string extension_id_overridden_off_;
-};
-TEST_F(ExtensionPrefsAppToolbars, ExtensionPrefsAppToolbars) {}
 
 class ExtensionPrefsOnExtensionInstalled : public ExtensionPrefsTest {
  public:

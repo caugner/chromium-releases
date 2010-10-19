@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_EXAMPLES_TABLE2_EXAMPLE_H_
 #define VIEWS_EXAMPLES_TABLE2_EXAMPLE_H_
+#pragma once
 
 #include <vector>
 
@@ -129,7 +130,7 @@ class Table2Example
 
   virtual void OnMiddleClick() {}
 
-  virtual void OnKeyDown(base::KeyboardCode virtual_keycode) {}
+  virtual void OnKeyDown(app::KeyboardCode virtual_keycode) {}
 
   virtual void OnTableViewDelete(views::TableView* table_view) {}
 

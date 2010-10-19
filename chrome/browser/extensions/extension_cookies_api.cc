@@ -8,6 +8,7 @@
 
 #include "base/json/json_writer.h"
 #include "base/task.h"
+#include "base/values.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/extension_cookies_api_constants.h"
@@ -58,14 +59,14 @@ void ExtensionCookiesEventRouter::CookieChanged(
   dict->SetBoolean(keys::kRemovedKey, details->removed);
   dict->Set(
       keys::kCookieKey,
-      extension_cookies_helpers::CreateCookieValue(*details->cookie_pair,
+      extension_cookies_helpers::CreateCookieValue(*details->cookie,
           extension_cookies_helpers::GetStoreIdFromProfile(profile)));
   args.Append(dict);
 
   std::string json_args;
   base::JSONWriter::Write(&args, false, &json_args);
   GURL cookie_domain =
-      extension_cookies_helpers::GetURLFromCookiePair(*details->cookie_pair);
+      extension_cookies_helpers::GetURLFromCanonicalCookie(*details->cookie);
   DispatchEvent(profile, keys::kOnChanged, json_args, cookie_domain);
 }
 
@@ -75,7 +76,7 @@ void ExtensionCookiesEventRouter::DispatchEvent(Profile* profile,
                                                 GURL& cookie_domain) {
   if (profile && profile->GetExtensionMessageService()) {
     profile->GetExtensionMessageService()->DispatchEventToRenderers(
-        event_name, json_args, profile->IsOffTheRecord(), cookie_domain);
+        event_name, json_args, profile, cookie_domain);
   }
 }
 
@@ -190,9 +191,9 @@ void GetCookieFunction::RespondOnUIThread() {
   net::CookieMonster::CookieList::iterator it;
   for (it = cookie_list_.begin(); it != cookie_list_.end(); ++it) {
     // Return the first matching cookie. Relies on the fact that the
-    // CookieMonster retrieves them in reverse domain-length order.
-    const net::CookieMonster::CanonicalCookie& cookie = it->second;
-    if (cookie.Name() == name_) {
+    // CookieMonster returns them in canonical order (longest path, then
+    // earliest creation time).
+    if (it->Name() == name_) {
       result_.reset(
           extension_cookies_helpers::CreateCookieValue(*it, store_id_));
       break;
@@ -206,7 +207,7 @@ void GetCookieFunction::RespondOnUIThread() {
   SendResponse(true);
 }
 
-GetAllCookiesFunction::GetAllCookiesFunction() {}
+GetAllCookiesFunction::GetAllCookiesFunction() : details_(NULL) {}
 
 bool GetAllCookiesFunction::RunImpl() {
   // Return false if the arguments are malformed.
@@ -251,13 +252,18 @@ void GetAllCookiesFunction::RespondOnUIThread() {
   if (extension) {
     ListValue* matching_list = new ListValue();
     extension_cookies_helpers::AppendMatchingCookiesToList(
-        cookie_list_, store_id_, url_, details_, GetExtension(), matching_list);
+        cookie_list_, store_id_, url_, details_,
+        GetExtension(), matching_list);
     result_.reset(matching_list);
   }
   SendResponse(true);
 }
 
-SetCookieFunction::SetCookieFunction() : secure_(false), http_only_(false) {}
+SetCookieFunction::SetCookieFunction()
+    : secure_(false),
+      http_only_(false),
+      success_(false) {
+}
 
 bool SetCookieFunction::RunImpl() {
   // Return false if the arguments are malformed.
@@ -399,7 +405,7 @@ bool RemoveCookieFunction::RunImpl() {
 }
 
 bool GetAllCookieStoresFunction::RunImpl() {
-  Profile* original_profile = profile()->GetOriginalProfile();
+  Profile* original_profile = profile();
   DCHECK(original_profile);
   scoped_ptr<ListValue> original_tab_ids(new ListValue());
   Profile* incognito_profile = NULL;
@@ -409,6 +415,8 @@ bool GetAllCookieStoresFunction::RunImpl() {
     if (incognito_profile)
       incognito_tab_ids.reset(new ListValue());
   }
+  DCHECK(original_profile != incognito_profile);
+
   // Iterate through all browser instances, and for each browser,
   // add its tab IDs to either the regular or incognito tab ID list depending
   // whether the browser is regular or incognito.

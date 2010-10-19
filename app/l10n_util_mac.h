@@ -4,8 +4,11 @@
 
 #ifndef APP_L10N_UTIL_MAC_H_
 #define APP_L10N_UTIL_MAC_H_
+#pragma once
 
-#include "app/l10n_util.h"
+#include <string>
+#include <vector>
+
 #include "base/basictypes.h"
 #include "base/string16.h"
 

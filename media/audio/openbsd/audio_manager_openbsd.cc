@@ -4,7 +4,6 @@
 
 #include "media/audio/openbsd/audio_manager_openbsd.h"
 
-#include "base/at_exit.h"
 #include "base/logging.h"
 
 namespace {
@@ -22,21 +21,15 @@ bool AudioManagerOpenBSD::HasAudioInputDevices() {
   return false;
 }
 
-AudioInputStream* AudioManagerOpenBSD::MakeAudioInputStream(
-    Format format,
-    int channels,
-    int sample_rate,
-    char bits_per_sample,
-    uint32 samples_per_packet) {
+AudioOutputStream* AudioManagerOpenBSD::MakeAudioOutputStream(
+    AudioParameters params) {
   NOTIMPLEMENTED();
   return NULL;
 }
 
-AudioOutputStream* AudioManagerOpenBSD::MakeAudioOutputStream(
-    Format format,
-    int channels,
-    int sample_rate,
-    char bits_per_sample) {
+AudioInputStream* AudioManagerOpenBSD::MakeAudioInputStream(
+    AudioParameters params,
+    uint32 samples_per_packet) {
   NOTIMPLEMENTED();
   return NULL;
 }
@@ -48,6 +41,7 @@ AudioManagerOpenBSD::~AudioManagerOpenBSD() {
 }
 
 void AudioManagerOpenBSD::Init() {
+  AudioManagerBase::Init();
 }
 
 void AudioManagerOpenBSD::MuteAll() {
@@ -58,16 +52,7 @@ void AudioManagerOpenBSD::UnMuteAll() {
   NOTIMPLEMENTED();
 }
 
-void DestroyAudioManagerOpenBSD(void* not_used) {
-  delete g_audio_manager;
-  g_audio_manager = NULL;
-}
-
-AudioManager* AudioManager::GetAudioManager() {
-  if (!g_audio_manager) {
-    g_audio_manager = new AudioManagerOpenBSD();
-    g_audio_manager->Init();
-    base::AtExitManager::RegisterCallback(&DestroyAudioManagerOpenBSD, NULL);
-  }
-  return g_audio_manager;
+// static
+AudioManager* AudioManager::CreateAudioManager() {
+  return new AudioManagerOpenBSD();
 }

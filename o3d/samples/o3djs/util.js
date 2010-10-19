@@ -39,6 +39,7 @@
 o3djs.provide('o3djs.util');
 
 o3djs.require('o3djs.io');
+o3djs.require('o3djs.effect');
 o3djs.require('o3djs.event');
 o3djs.require('o3djs.error');
 
@@ -263,6 +264,7 @@ o3djs.util.getBoundingBoxOfTree = function(treeRoot) {
  */
 o3djs.util.getPowerOfTwoSize = function(size) {
   var powerOfTwo = 1;
+  size = size - 1;
   while (size) {
     size = size >> 1;
     powerOfTwo = powerOfTwo << 1;
@@ -814,6 +816,10 @@ o3djs.util.createClient = function(element, opt_features, opt_requestVersion) {
     objElem.style.height = '100%';
     objElem.setAttribute('o3d_features', opt_features);
     element.appendChild(objElem);
+  }
+
+  if (objElem.client.clientInfo.glsl) {
+    o3djs.effect.setLanguage('glsl');
   }
 
   return objElem;

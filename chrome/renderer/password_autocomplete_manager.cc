@@ -4,17 +4,21 @@
 
 #include "chrome/renderer/password_autocomplete_manager.h"
 
-#include "base/keyboard_codes.h"
+#include "app/keyboard_codes.h"
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
+#include "chrome/common/render_messages.h"
+#include "chrome/renderer/render_view.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFormElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/form_field.h"
+#include "webkit/glue/password_form.h"
 #include "webkit/glue/password_form_dom_manager.h"
 
 namespace {
@@ -166,7 +170,8 @@ bool DoUsernamesMatch(const string16& username1,
 
 PasswordAutocompleteManager::PasswordAutocompleteManager(
     RenderView* render_view)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+    : render_view_(render_view),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
 }
 
 PasswordAutocompleteManager::~PasswordAutocompleteManager() {
@@ -208,44 +213,43 @@ void PasswordAutocompleteManager::ReceivedPasswordFormFillData(
 
 void PasswordAutocompleteManager::FrameClosing(const WebKit::WebFrame* frame) {
   for (LoginToPasswordInfoMap::iterator iter = login_to_password_info_.begin();
-       iter != login_to_password_info_.end(); ++iter) {
+       iter != login_to_password_info_.end();) {
     if (iter->first.document().frame() == frame)
-      login_to_password_info_.erase(iter);
+      login_to_password_info_.erase(iter++);
+    else
+      ++iter;
   }
 }
 
-void PasswordAutocompleteManager::TextFieldDidBeginEditing(
-    const WebKit::WebInputElement& element) {
-}
-
-void PasswordAutocompleteManager::TextFieldDidEndEditing(
+bool PasswordAutocompleteManager::TextFieldDidEndEditing(
     const WebKit::WebInputElement& element) {
   LoginToPasswordInfoMap::const_iterator iter =
       login_to_password_info_.find(element);
   if (iter == login_to_password_info_.end())
-    return;
+    return false;
 
   const webkit_glue::PasswordFormFillData& fill_data =
       iter->second.fill_data;
 
   // If wait_for_username is false, we should have filled when the text changed.
   if (!fill_data.wait_for_username)
-    return;
+    return false;
 
   WebKit::WebInputElement password = iter->second.password_field;
   if (!IsElementEditable(password))
-    return;
+    return false;
 
   WebKit::WebInputElement username = element;  // We need a non-const.
   FillUserNameAndPassword(&username, &password, fill_data, true);
+  return true;
 }
 
-void PasswordAutocompleteManager::TextDidChangeInTextField(
+bool PasswordAutocompleteManager::TextDidChangeInTextField(
     const WebKit::WebInputElement& element) {
   LoginToPasswordInfoMap::const_iterator iter =
       login_to_password_info_.find(element);
   if (iter == login_to_password_info_.end())
-    return;
+    return false;
 
   // The input text is being changed, so any autocompleted password is now
   // outdated.
@@ -259,25 +263,25 @@ void PasswordAutocompleteManager::TextDidChangeInTextField(
 
   // If wait_for_username is true we will fill when the username loses focus.
   if (iter->second.fill_data.wait_for_username)
-    return;
+    return false;
 
   if (!element.isEnabledFormControl() ||
       element.inputType() != WebKit::WebInputElement::Text ||
       !element.autoComplete() || element.isReadOnly()) {
-    return;
+    return false;
   }
 
   // Don't inline autocomplete if the user is deleting, that would be confusing.
   if (iter->second.backspace_pressed_last)
-    return;
+    return false;
 
   WebKit::WebString name = element.nameForAutofill();
   if (name.isEmpty())
-    return;    // If the field has no name, then we won't have values.
+    return false;  // If the field has no name, then we won't have values.
 
   // Don't attempt to autocomplete with values that are too large.
   if (element.value().length() > kMaximumTextSizeForAutocomplete)
-    return;
+    return false;
 
   // We post a task for doing the autocomplete as the caret position is not set
   // properly at this point (http://bugs.webkit.org/show_bug.cgi?id=16976) and
@@ -285,6 +289,7 @@ void PasswordAutocompleteManager::TextDidChangeInTextField(
   MessageLoop::current()->PostTask(FROM_HERE, method_factory_.NewRunnableMethod(
       &PasswordAutocompleteManager::PerformInlineAutocomplete,
       element, password, iter->second.fill_data));
+  return true;
 }
 
 void PasswordAutocompleteManager::TextFieldHandlingKeyDown(
@@ -297,7 +302,7 @@ void PasswordAutocompleteManager::TextFieldHandlingKeyDown(
 
   int win_key_code = event.windowsKeyCode;
   iter->second.backspace_pressed_last =
-      (win_key_code == base::VKEY_BACK || win_key_code == base::VKEY_DELETE);
+      (win_key_code == app::VKEY_BACK || win_key_code == app::VKEY_DELETE);
 }
 
 bool PasswordAutocompleteManager::FillPassword(
@@ -336,6 +341,54 @@ void PasswordAutocompleteManager::PerformInlineAutocomplete(
 
   // Fill the user and password field with the most relevant match.
   FillUserNameAndPassword(&username, &password, fill_data, false);
+}
+
+void PasswordAutocompleteManager::SendPasswordForms(WebKit::WebFrame* frame,
+                                                    bool only_visible) {
+  // Make sure that this security origin is allowed to use password manager.
+  WebKit::WebSecurityOrigin security_origin = frame->securityOrigin();
+  if (!security_origin.canAccessPasswordManager())
+    return;
+
+  WebKit::WebVector<WebKit::WebFormElement> forms;
+  frame->forms(forms);
+
+  std::vector<webkit_glue::PasswordForm> password_forms;
+  for (size_t i = 0; i < forms.size(); ++i) {
+    const WebKit::WebFormElement& form = forms[i];
+
+    // Respect autocomplete=off.
+    if (!form.autoComplete())
+      continue;
+    if (only_visible && !form.hasNonEmptyBoundingBox())
+      continue;
+    scoped_ptr<webkit_glue::PasswordForm> password_form(
+        webkit_glue::PasswordFormDomManager::CreatePasswordForm(form));
+    if (password_form.get())
+      password_forms.push_back(*password_form);
+  }
+
+  if (password_forms.empty())
+    return;
+
+  if (only_visible) {
+    render_view_->Send(
+        new ViewHostMsg_PasswordFormsVisible(GetRoutingID(), password_forms));
+  } else {
+    render_view_->Send(
+      new ViewHostMsg_PasswordFormsFound(GetRoutingID(), password_forms));
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// PageClickListener implementation:
+
+bool PasswordAutocompleteManager::InputElementClicked(
+    const WebKit::WebInputElement& element,
+    bool was_focused,
+    bool is_focused) {
+  // TODO(jcivelli): http://crbug.com/51644 Implement behavior.
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -414,3 +467,6 @@ bool PasswordAutocompleteManager::FillUserNameAndPassword(
   return true;
 }
 
+int PasswordAutocompleteManager::GetRoutingID() const {
+  return render_view_->routing_id();
+}

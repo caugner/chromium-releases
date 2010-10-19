@@ -36,6 +36,7 @@
     '<(DEPTH)/chrome/browser/gtk/bookmark_bar_gtk_interactive_uitest.cc',
     '<(DEPTH)/chrome/browser/notifications/notifications_interactive_uitest.cc',
     '<(DEPTH)/chrome/browser/views/bookmark_bar_view_test.cc',
+    '<(DEPTH)/chrome/browser/views/browser_keyboard_accessibility_test_win.cc',
     '<(DEPTH)/chrome/browser/views/find_bar_host_interactive_uitest.cc',
     '<(DEPTH)/chrome/browser/views/tabs/tab_dragging_test.cc',
     '<(DEPTH)/chrome/test/in_process_browser_test.cc',
@@ -88,8 +89,6 @@
       'sources!': [
         # TODO(port)
         '<(DEPTH)/chrome/browser/autocomplete/autocomplete_edit_view_browsertest.cc',
-        '<(DEPTH)/chrome/browser/browser_focus_uitest.cc',
-        '<(DEPTH)/chrome/browser/browser_keyevents_browsertest.cc',
         '<(DEPTH)/chrome/browser/debugger/devtools_sanity_unittest.cc',
         '<(DEPTH)/chrome/browser/views/bookmark_bar_view_test.cc',
         '<(DEPTH)/chrome/browser/views/find_bar_host_interactive_uitest.cc',
@@ -99,6 +98,8 @@
         '<(DEPTH)/chrome/test/interactive_ui/view_event_test_base.cc',
         '<(DEPTH)/chrome/test/interactive_ui/view_event_test_base.h',
       ],
+      # See comment about the same line in chrome/chrome_tests.gypi.
+      'xcode_settings': {'OTHER_LDFLAGS': ['-Wl,-ObjC']},
     }],  # OS=="mac"
     ['toolkit_views==1', {
       'dependencies': [
@@ -115,6 +116,7 @@
         '<(DEPTH)/chrome/chrome.gyp:crash_service',  # run time dependency
         '<(DEPTH)/chrome/chrome.gyp:installer_util_strings',
         '<(DEPTH)/sandbox/sandbox.gyp:sandbox',
+        '<(DEPTH)/third_party/iaccessible2/iaccessible2.gyp:iaccessible2',
       ],
       'sources': [
         '<(DEPTH)/webkit/glue/resources/aliasb.cur',
@@ -144,6 +146,8 @@
         '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.rc',
 
         '<(DEPTH)/chrome/browser/accessibility_win_browsertest.cc',
+        # TODO: port sidebar.
+        '<(DEPTH)/chrome/browser/sidebar/sidebar_test.cc',
         '<(DEPTH)/chrome/browser/views/browser_views_accessibility_browsertest.cc',
       ],
       'conditions': [

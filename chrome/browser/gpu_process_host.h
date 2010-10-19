@@ -4,17 +4,18 @@
 
 #ifndef CHROME_BROWSER_GPU_PROCESS_HOST_H_
 #define CHROME_BROWSER_GPU_PROCESS_HOST_H_
+#pragma once
 
 #include <queue>
 
 #include "base/basictypes.h"
-#include "base/scoped_ptr.h"
+#include "base/ref_counted.h"
 #include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/renderer_host/resource_message_filter.h"
 #include "chrome/common/gpu_info.h"
 #include "gfx/native_widget_types.h"
 
-class CommandBufferProxy;
+struct GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params;
 
 namespace IPC {
 struct ChannelHandle;
@@ -86,16 +87,16 @@ class GpuProcessHost : public BrowserChildProcessHost {
   void OnSynchronizeReply();
 #if defined(OS_LINUX)
   void OnGetViewXID(gfx::NativeViewId id, unsigned long* xid);
+#elif defined(OS_MACOSX)
+  void OnAcceleratedSurfaceSetIOSurface(
+      const GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params& params);
+  void OnAcceleratedSurfaceBuffersSwapped(int32 renderer_id,
+                                          int32 render_view_id,
+                                          gfx::PluginWindowHandle window);
 #endif
 
   void ReplyToRenderer(const IPC::ChannelHandle& channel,
                        ResourceMessageFilter* filter);
-
-  // Copies applicable command line switches from the given |browser_cmd| line
-  // flags to the output |gpu_cmd| line flags. Not all switches will be
-  // copied over.
-  void PropagateBrowserCommandLineToGpu(const CommandLine& browser_cmd,
-                                        CommandLine* gpu_cmd) const;
 
   // ResourceDispatcherHost::Receiver implementation:
   virtual URLRequestContext* GetRequestContext(

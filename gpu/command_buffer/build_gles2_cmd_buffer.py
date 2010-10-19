@@ -56,7 +56,7 @@ GL_APICALL void         GL_APIENTRY glColorMask (GLboolean red, GLboolean green,
 GL_APICALL void         GL_APIENTRY glCompileShader (GLidShader shader);
 GL_APICALL void         GL_APIENTRY glCompressedTexImage2D (GLenumTextureTarget target, GLint level, GLenumCompressedTextureFormat internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void* data);
 GL_APICALL void         GL_APIENTRY glCompressedTexSubImage2D (GLenumTextureTarget target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenumCompressedTextureFormat format, GLsizei imageSize, const void* data);
-GL_APICALL void         GL_APIENTRY glCopyTexImage2D (GLenumTextureTarget target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border);
+GL_APICALL void         GL_APIENTRY glCopyTexImage2D (GLenumTextureTarget target, GLint level, GLenumTextureInternalFormat internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border);
 GL_APICALL void         GL_APIENTRY glCopyTexSubImage2D (GLenumTextureTarget target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height);
 GL_APICALL GLuint       GL_APIENTRY glCreateProgram (void);
 GL_APICALL GLuint       GL_APIENTRY glCreateShader (GLenumShaderType type);
@@ -175,6 +175,8 @@ GL_APICALL void         GL_APIENTRY glVertexAttrib4f (GLuint indx, GLfloat x, GL
 GL_APICALL void         GL_APIENTRY glVertexAttrib4fv (GLuint indx, const GLfloat* values);
 GL_APICALL void         GL_APIENTRY glVertexAttribPointer (GLuint indx, GLintVertexAttribSize size, GLenumVertexAttribType type, GLboolean normalized, GLsizei stride, const void* ptr);
 GL_APICALL void         GL_APIENTRY glViewport (GLint x, GLint y, GLsizei width, GLsizei height);
+GL_APICALL void         GL_APIENTRY glBlitFramebufferEXT (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenumBlitFilter filter);
+GL_APICALL void         GL_APIENTRY glRenderbufferStorageMultisampleEXT (GLenumRenderBufferTarget target, GLsizei samples, GLenumRenderBufferFormat internalformat, GLsizei width, GLsizei height);
 // Non-GL commands.
 GL_APICALL void         GL_APIENTRY glSwapBuffers (void);
 GL_APICALL GLuint       GL_APIENTRY glGetMaxValueInBuffer (GLidBuffer buffer_id, GLsizei count, GLenumGetMaxIndexType type, GLuint offset);
@@ -186,6 +188,7 @@ GL_APICALL void*        GL_APIENTRY glMapBufferSubData (GLuint target, GLintptr 
 GL_APICALL void         GL_APIENTRY glUnmapBufferSubData (const void* mem);
 GL_APICALL void*        GL_APIENTRY glMapTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, GLenum access);
 GL_APICALL void         GL_APIENTRY glUnmapTexSubImage2D (const void* mem);
+GL_APICALL void         GL_APIENTRY glCopyTextureToParentTexture (GLidBindTexture client_child_id, GLidBindTexture client_parent_id);
 """
 
 # This is the list of all commmands that will be generated and their Id.
@@ -383,18 +386,31 @@ _CMD_ID_TABLE = {
   'CommandBufferEnable':                                       442,
   'CompressedTexImage2DBucket':                                443,
   'CompressedTexSubImage2DBucket':                             444,
+  'RenderbufferStorageMultisampleEXT':                         445,
+  'BlitFramebufferEXT':                                        446,
+  'CopyTextureToParentTexture':                                447,
 }
 
 # This is a list of enum names and their valid values. It is used to map
 # GLenum arguments to a specific set of valid values.
 _ENUM_LISTS = {
+  'BlitFilter': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_NEAREST',
+      'GL_LINEAR',
+    ],
+    'invalid': [
+      'GL_LINEAR_MIPMAP_LINEAR',
+    ],
+  },
   'FrameBufferTarget': {
     'type': 'GLenum',
     'valid': [
       'GL_FRAMEBUFFER',
     ],
     'invalid': [
-      'GL_RENDERBUFFER',
+      'GL_READ_FRAMEBUFFER' ,
     ],
   },
   'RenderBufferTarget': {
@@ -1030,6 +1046,10 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoBindTexture',
     'gen_func': 'GenTextures',
   },
+  'BlitFramebufferEXT': {
+    'decoder_func': 'DoBlitFramebufferEXT',
+    'unit_test': False,
+  },
   'BufferData': {'type': 'Manual', 'immediate': True},
   'BufferSubData': {'type': 'Data', 'decoder_func': 'DoBufferSubData'},
   'CheckFramebufferStatus': {
@@ -1038,7 +1058,13 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glCheckFramebufferStatusEXT',
     'result': ['GLenum'],
   },
-  'ClearDepthf': {'decoder_func': 'glClearDepth'},
+  'ClearColor': {'decoder_func': 'DoClearColor'},
+  'ClearDepthf': {
+    'decoder_func': 'DoClearDepthf',
+    'gl_test_func': 'glClearDepth',
+  },
+  'ColorMask': {'decoder_func': 'DoColorMask'},
+  'ClearStencil': {'decoder_func': 'DoClearStencil'},
   'CommandBufferEnable': {
     'type': 'Custom',
     'immediate': False,
@@ -1056,6 +1082,14 @@ _FUNCTION_INFO = {
   'CompressedTexSubImage2D': {
     'type': 'Data',
     'bucket': True,
+    'decoder_func': 'DoCompressedTexSubImage2D',
+  },
+  'CopyTexImage2D': {
+    'decoder_func': 'DoCopyTexImage2D',
+    'unit_test': False,
+  },
+  'CopyTexSubImage2D': {
+    'decoder_func': 'DoCopyTexSubImage2D',
   },
   'CreateProgram': {'type': 'Create'},
   'CreateShader': {'type': 'Create'},
@@ -1083,7 +1117,11 @@ _FUNCTION_INFO = {
   },
   'DeleteTextures': {'type': 'DELn'},
   'DepthRangef': {'decoder_func': 'glDepthRange'},
+  'DepthMask': {'decoder_func': 'DoDepthMask'},
   'DetachShader': {'decoder_func': 'DoDetachShader'},
+  'Disable': {
+    'decoder_func': 'DoDisable',
+  },
   'DisableVertexAttribArray': {
     'decoder_func': 'DoDisableVertexAttribArray',
     'impl_decl': False,
@@ -1096,6 +1134,9 @@ _FUNCTION_INFO = {
   'DrawElements': {
     'type': 'Manual',
     'cmd_args': 'GLenum mode, GLsizei count, GLenum type, GLuint index_offset',
+  },
+  'Enable': {
+    'decoder_func': 'DoEnable',
   },
   'EnableVertexAttribArray': {
     'decoder_func': 'DoEnableVertexAttribArray',
@@ -1334,6 +1375,12 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glRenderbufferStorageEXT',
     'expectation': False,
   },
+  'RenderbufferStorageMultisampleEXT': {
+    'decoder_func': 'DoRenderbufferStorageMultisample',
+    'gl_test_func': 'glRenderbufferStorageMultisampleEXT',
+    'expectation': False,
+    'unit_test': False,
+  },
   'ReadPixels': {
     'cmd_comment':
         '// ReadPixels has the result separated from the pixel buffer so that\n'
@@ -1368,6 +1415,8 @@ _FUNCTION_INFO = {
     'cmd_args':
         'GLuint shader, const char* data',
   },
+  'StencilMask': {'decoder_func': 'DoStencilMask'},
+  'StencilMaskSeparate': {'decoder_func': 'DoStencilMaskSeparate'},
   'SwapBuffers': {
     'type': 'Custom',
     'impl_func': False,
@@ -1388,7 +1437,10 @@ _FUNCTION_INFO = {
     'count': 1,
     'decoder_func': 'DoTexParameteriv',
   },
-  'TexSubImage2D': {'type': 'Data'},
+  'TexSubImage2D': {
+    'type': 'Data',
+    'decoder_func': 'DoTexSubImage2D',
+  },
   'Uniform1f': {'type': 'PUTXn', 'data_type': 'GLfloat', 'count': 1},
   'Uniform1fv': {
     'type': 'PUTn',
@@ -1469,6 +1521,10 @@ _FUNCTION_INFO = {
       'type': 'Manual',
       'cmd_args': 'GLuint indx, GLint size, GLenum type, GLboolean normalized, '
                   'GLsizei stride, GLuint offset',
+  },
+  'CopyTextureToParentTexture': {
+      'decoder_func': 'DoCopyTextureToParentTexture',
+      'unit_test': False
   },
 }
 
@@ -1597,7 +1653,6 @@ class CHeaderWriter(CWriter):
 
   def __init__(self, filename, file_comment = None):
     CWriter.__init__(self, filename)
-
     base = os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     hpath = os.path.abspath(filename)[len(base) + 1:]

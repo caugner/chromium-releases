@@ -5,7 +5,6 @@
 #include <atlbase.h>
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/scoped_comptr_win.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
@@ -15,6 +14,11 @@
 #include "chrome/common/notification_type.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
+#include "ia2_api_all.h"  // Generated
+
+using std::auto_ptr;
+using std::vector;
+using std::wstring;
 
 namespace {
 
@@ -58,8 +62,14 @@ void AccessibilityWinBrowserTest::TearDownInProcessBrowserTestFixture() {
 
 class AccessibleChecker {
  public:
-  AccessibleChecker(std::wstring expected_name, int32 expected_role);
-  AccessibleChecker(std::wstring expected_name, std::wstring expected_role);
+  AccessibleChecker(
+      wstring expected_name,
+      int32 expected_role,
+      wstring expected_value);
+  AccessibleChecker(
+      wstring expected_name,
+      wstring expected_role,
+      wstring expected_value);
 
   // Append an AccessibleChecker that verifies accessibility information for
   // a child IAccessible. Order is important.
@@ -70,19 +80,33 @@ class AccessibleChecker {
   // initialized with.
   void CheckAccessible(IAccessible* accessible);
 
-  typedef std::vector<AccessibleChecker*> AccessibleCheckerVector;
+  // Set the expected value for this AccessibleChecker.
+  void SetExpectedValue(wstring expected_value);
+
+  // Set the expected state for this AccessibleChecker.
+  void SetExpectedState(LONG expected_state);
 
  private:
   void CheckAccessibleName(IAccessible* accessible);
   void CheckAccessibleRole(IAccessible* accessible);
+  void CheckAccessibleValue(IAccessible* accessible);
+  void CheckAccessibleState(IAccessible* accessible);
   void CheckAccessibleChildren(IAccessible* accessible);
 
  private:
+  typedef vector<AccessibleChecker*> AccessibleCheckerVector;
+
   // Expected accessible name. Checked against IAccessible::get_accName.
-  std::wstring name_;
+  wstring name_;
 
   // Expected accessible role. Checked against IAccessible::get_accRole.
   CComVariant role_;
+
+  // Expected accessible value. Checked against IAccessible::get_accValue.
+  wstring value_;
+
+  // Expected accessible state. Checked against IAccessible::get_accState.
+  LONG state_;
 
   // Expected accessible children. Checked using IAccessible::get_accChildCount
   // and ::AccessibleChildren.
@@ -107,13 +131,75 @@ IAccessible* GetAccessibleFromResultVariant(IAccessible* parent, VARIANT *var) {
     case VT_I4: {
       CComPtr<IDispatch> dispatch;
       HRESULT hr = parent->get_accChild(CreateI4Variant(V_I4(var)), &dispatch);
-      EXPECT_EQ(hr, S_OK);
+      EXPECT_TRUE(SUCCEEDED(hr));
       return CComQIPtr<IAccessible>(dispatch).Detach();
       break;
     }
   }
 
   return NULL;
+}
+
+HRESULT QueryIAccessible2(IAccessible* accessible, IAccessible2** accessible2) {
+  // TODO(ctguil): For some reason querying the IAccessible2 interface from
+  // IAccessible fails.
+  ScopedComPtr<IServiceProvider> service_provider;
+  HRESULT hr = accessible->QueryInterface(service_provider.Receive());
+  if (FAILED(hr))
+    return hr;
+
+  hr = service_provider->QueryService(IID_IAccessible2, accessible2);
+  return hr;
+}
+
+// Sets result to true if the child is located in the parent's tree. An
+// exhustive search is perform here because we determine equality using
+// IAccessible2::get_uniqueID which is only supported by the child node.
+void AccessibleContainsAccessible(
+    IAccessible* parent, IAccessible2* child, bool* result) {
+  vector<ScopedComPtr<IAccessible>> accessible_list;
+  accessible_list.push_back(ScopedComPtr<IAccessible>(parent));
+
+  LONG unique_id;
+  HRESULT hr = child->get_uniqueID(&unique_id);
+  ASSERT_EQ(hr, S_OK);
+  *result = false;
+
+  while (accessible_list.size()) {
+    ScopedComPtr<IAccessible> accessible = accessible_list.back();
+    accessible_list.pop_back();
+
+    ScopedComPtr<IAccessible2> accessible2;
+    hr = QueryIAccessible2(accessible, accessible2.Receive());
+    if (SUCCEEDED(hr)) {
+      LONG child_id;
+      accessible2->get_uniqueID(&child_id);
+      if (child_id == unique_id) {
+        *result = true;
+        break;
+      }
+    }
+
+    LONG child_count;
+    hr = accessible->get_accChildCount(&child_count);
+    ASSERT_EQ(hr, S_OK);
+    if (child_count == 0)
+      continue;
+
+    auto_ptr<VARIANT> child_array(new VARIANT[child_count]);
+    LONG obtained_count = 0;
+    hr = AccessibleChildren(
+        accessible, 0, child_count, child_array.get(), &obtained_count);
+    ASSERT_EQ(hr, S_OK);
+    ASSERT_EQ(child_count, obtained_count);
+
+    for (int index = 0; index < obtained_count; index++) {
+      ScopedComPtr<IAccessible> child_accessible(
+        GetAccessibleFromResultVariant(accessible, &child_array.get()[index]));
+      if (child_accessible.get())
+        accessible_list.push_back(ScopedComPtr<IAccessible>(child_accessible));
+    }
+  }
 }
 
 // Retrieve the MSAA client accessibility object for the Render Widget Host View
@@ -135,15 +221,19 @@ AccessibilityWinBrowserTest::GetRenderWidgetHostViewClientAccessible() {
 }
 
 AccessibleChecker::AccessibleChecker(
-    std::wstring expected_name, int32 expected_role) :
+    wstring expected_name, int32 expected_role, wstring expected_value) :
     name_(expected_name),
-    role_(expected_role) {
+    role_(expected_role),
+    value_(expected_value),
+    state_(-1) {
 }
 
 AccessibleChecker::AccessibleChecker(
-    std::wstring expected_name, std::wstring expected_role) :
+    wstring expected_name, wstring expected_role, wstring expected_value) :
     name_(expected_name),
-    role_(expected_role.c_str()) {
+    role_(expected_role.c_str()),
+    value_(expected_value),
+    state_(-1) {
 }
 
 void AccessibleChecker::AppendExpectedChild(
@@ -154,7 +244,17 @@ void AccessibleChecker::AppendExpectedChild(
 void AccessibleChecker::CheckAccessible(IAccessible* accessible) {
   CheckAccessibleName(accessible);
   CheckAccessibleRole(accessible);
+  CheckAccessibleValue(accessible);
+  CheckAccessibleState(accessible);
   CheckAccessibleChildren(accessible);
+}
+
+void AccessibleChecker::SetExpectedValue(wstring expected_value) {
+  value_ = expected_value;
+}
+
+void AccessibleChecker::SetExpectedState(LONG expected_state) {
+  state_ = expected_state;
 }
 
 void AccessibleChecker::CheckAccessibleName(IAccessible* accessible) {
@@ -168,9 +268,8 @@ void AccessibleChecker::CheckAccessibleName(IAccessible* accessible) {
   } else {
     // Test that the correct string was returned.
     EXPECT_EQ(hr, S_OK);
-    EXPECT_EQ(CompareString(LOCALE_NEUTRAL, 0, name, SysStringLen(name),
-                  name_.c_str(), name_.length()),
-              CSTR_EQUAL);
+    EXPECT_STREQ(name_.c_str(),
+                 wstring(name.m_str, SysStringLen(name)).c_str());
   }
 }
 
@@ -182,13 +281,36 @@ void AccessibleChecker::CheckAccessibleRole(IAccessible* accessible) {
   ASSERT_TRUE(role_ == var_role);
 }
 
+void AccessibleChecker::CheckAccessibleValue(IAccessible* accessible) {
+  CComBSTR value;
+  HRESULT hr =
+      accessible->get_accValue(CreateI4Variant(CHILDID_SELF), &value);
+  EXPECT_EQ(hr, S_OK);
+
+  // Test that the correct string was returned.
+  EXPECT_STREQ(value_.c_str(),
+               wstring(value.m_str, SysStringLen(value)).c_str());
+}
+
+void AccessibleChecker::CheckAccessibleState(IAccessible* accessible) {
+  if (state_ < 0)
+    return;
+
+  VARIANT var_state = {0};
+  HRESULT hr =
+      accessible->get_accState(CreateI4Variant(CHILDID_SELF), &var_state);
+  EXPECT_EQ(hr, S_OK);
+  EXPECT_EQ(VT_I4, V_VT(&var_state));
+  ASSERT_TRUE(state_ == V_I4(&var_state));
+}
+
 void AccessibleChecker::CheckAccessibleChildren(IAccessible* parent) {
   LONG child_count = 0;
   HRESULT hr = parent->get_accChildCount(&child_count);
   EXPECT_EQ(hr, S_OK);
   ASSERT_EQ(child_count, children_.size());
 
-  std::auto_ptr<VARIANT> child_array(new VARIANT[child_count]);
+  auto_ptr<VARIANT> child_array(new VARIANT[child_count]);
   LONG obtained_count = 0;
   hr = AccessibleChildren(parent, 0, child_count,
                           child_array.get(), &obtained_count);
@@ -201,6 +323,7 @@ void AccessibleChecker::CheckAccessibleChildren(IAccessible* parent) {
        ++child_checker, ++child) {
     ScopedComPtr<IAccessible> child_accessible;
     child_accessible.Attach(GetAccessibleFromResultVariant(parent, child));
+    ASSERT_TRUE(child_accessible.get());
     (*child_checker)->CheckAccessible(child_accessible);
   }
 }
@@ -236,14 +359,14 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   document_accessible = GetRenderWidgetHostViewClientAccessible();
   ASSERT_NE(document_accessible.get(), reinterpret_cast<IAccessible*>(NULL));
 
-  AccessibleChecker button_checker(L"push", ROLE_SYSTEM_PUSHBUTTON);
-  AccessibleChecker checkbox_checker(L"", ROLE_SYSTEM_CHECKBUTTON);
+  AccessibleChecker button_checker(L"push", ROLE_SYSTEM_PUSHBUTTON, L"push");
+  AccessibleChecker checkbox_checker(L"", ROLE_SYSTEM_CHECKBUTTON, L"");
 
-  AccessibleChecker grouping_checker(L"", L"div");
+  AccessibleChecker grouping_checker(L"", L"div", L"");
   grouping_checker.AppendExpectedChild(&button_checker);
   grouping_checker.AppendExpectedChild(&checkbox_checker);
 
-  AccessibleChecker document_checker(L"", ROLE_SYSTEM_DOCUMENT);
+  AccessibleChecker document_checker(L"", ROLE_SYSTEM_DOCUMENT, L"");
   document_checker.AppendExpectedChild(&grouping_checker);
 
   // Check the accessible tree of the renderer.
@@ -262,13 +385,149 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   // Verify that the IAccessible reference still points to a valid object and
   // that calls to its methods fail since the tree is no longer valid after
   // the page navagation.
-  // Todo(ctguil): Currently this is giving a false positive because E_FAIL is
-  // returned when BrowserAccessibilityManager::RequestAccessibilityInfo fails
-  // since the previous render view host connection is lost. Verify that
-  // instances are actually marked as invalid once the browse side cache is
-  // checked in.
   CComBSTR name;
   hr = document_accessible->get_accName(CreateI4Variant(CHILDID_SELF), &name);
   ASSERT_EQ(E_FAIL, hr);
+}
+
+IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
+                       TestDynamicAccessibilityTree) {
+  // By requesting an accessible chrome will believe a screen reader has been
+  // detected. Request and wait for the accessibility tree to be updated.
+  GURL tree_url(
+      "data:text/html,<html><body><div onclick=\"this.innerHTML='<b>new text"
+      "</b>';\"><b>old text</b></div><div><input type='checkbox' /></div>"
+      "</body></html>");
+  browser()->OpenURL(tree_url, GURL(), CURRENT_TAB, PageTransition::TYPED);
+  ScopedComPtr<IAccessible> document_accessible(
+      GetRenderWidgetHostViewClientAccessible());
+  ui_test_utils::WaitForNotification(
+      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+
+  AccessibleChecker text_checker(L"", ROLE_SYSTEM_TEXT, L"old text");
+
+  AccessibleChecker div1_checker(L"", L"div", L"");
+  div1_checker.AppendExpectedChild(&text_checker);
+
+  AccessibleChecker checkbox_checker(L"", ROLE_SYSTEM_CHECKBUTTON, L"");
+  checkbox_checker.SetExpectedState(
+      STATE_SYSTEM_FOCUSABLE | STATE_SYSTEM_READONLY);
+
+  AccessibleChecker div2_checker(L"", L"div", L"");
+  div2_checker.AppendExpectedChild(&checkbox_checker);
+
+  AccessibleChecker document_checker(L"", ROLE_SYSTEM_DOCUMENT, L"");
+  document_checker.AppendExpectedChild(&div1_checker);
+  document_checker.AppendExpectedChild(&div2_checker);
+
+  // TODO(ctguil): Fix: We should not be expecting busy state here.
+  document_checker.SetExpectedState(STATE_SYSTEM_BUSY);
+
+  // Check the accessible tree of the browser.
+  document_accessible = GetRenderWidgetHostViewClientAccessible();
+  ASSERT_NE(document_accessible.get(), reinterpret_cast<IAccessible*>(NULL));
+  document_checker.CheckAccessible(document_accessible);
+
+  // Perform the default action on the div1 which executes the script that
+  // updates text node within the div.
+  CComPtr<IDispatch> div1_dispatch;
+  HRESULT hr = document_accessible->get_accChild(CreateI4Variant(1),
+                                                 &div1_dispatch);
+  EXPECT_EQ(hr, S_OK);
+  CComQIPtr<IAccessible> div1_accessible(div1_dispatch);
+  hr = div1_accessible->accDoDefaultAction(CreateI4Variant(CHILDID_SELF));
+  EXPECT_EQ(hr, S_OK);
+  ui_test_utils::WaitForNotification(
+      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+
+  // Check that the accessibility tree of the browser has been updated.
+  text_checker.SetExpectedValue(L"new text");
+  document_checker.CheckAccessible(document_accessible);
+
+  // Perform the default action on the checkbox which marks it as checked.
+  CComPtr<IDispatch> div2_dispatch;
+  hr = document_accessible->get_accChild(CreateI4Variant(2), &div2_dispatch);
+  EXPECT_EQ(hr, S_OK);
+  CComQIPtr<IAccessible> div2_accessible(div2_dispatch);
+  CComPtr<IDispatch> checkbox_dispatch;
+  hr = div2_accessible->get_accChild(CreateI4Variant(1), &checkbox_dispatch);
+  EXPECT_EQ(hr, S_OK);
+  CComQIPtr<IAccessible> checkbox_accessible(checkbox_dispatch);
+  hr = checkbox_accessible->accDoDefaultAction(CreateI4Variant(CHILDID_SELF));
+  EXPECT_EQ(hr, S_OK);
+  ui_test_utils::WaitForNotification(
+      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+
+  // Check that the accessibility tree of the browser has been updated.
+  checkbox_checker.SetExpectedState(
+      STATE_SYSTEM_CHECKED | STATE_SYSTEM_FOCUSABLE | STATE_SYSTEM_FOCUSED |
+      STATE_SYSTEM_READONLY);
+  document_checker.CheckAccessible(document_accessible);
+}
+
+// FAILS crbug.com/54220
+// This test verifies that browser-side cache of the renderer accessibility
+// tree is reachable from the browser's tree. Tools that analyze windows
+// accessibility trees like AccExplorer32 should be able to drill into the
+// cached renderer accessibility tree.
+IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
+                       FAILS_ContainsRendererAccessibilityTree) {
+  // By requesting an accessible chrome will believe a screen reader has been
+  // detected. Request and wait for the accessibility tree to be updated.
+  GURL tree_url("data:text/html,<body><input type='checkbox' /></body>");
+  browser()->OpenURL(tree_url, GURL(), CURRENT_TAB, PageTransition::TYPED);
+  ScopedComPtr<IAccessible> document_accessible(
+      GetRenderWidgetHostViewClientAccessible());
+  ui_test_utils::WaitForNotification(
+      NotificationType::RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
+
+  // Get the accessibility object for the browser window.
+  HWND browser_hwnd = browser()->window()->GetNativeHandle();
+  ScopedComPtr<IAccessible> browser_accessible;
+  HRESULT hr = AccessibleObjectFromWindow(
+      browser_hwnd,
+      OBJID_WINDOW,
+      IID_IAccessible,
+      reinterpret_cast<void**>(browser_accessible.Receive()));
+  ASSERT_EQ(S_OK, hr);
+
+  // Get the accessibility object for the renderer client document.
+  document_accessible = GetRenderWidgetHostViewClientAccessible();
+  ScopedComPtr<IAccessible2> document_accessible2;
+  hr = QueryIAccessible2(document_accessible, document_accessible2.Receive());
+  ASSERT_EQ(S_OK, hr);
+
+  // TODO(ctguil): Pointer comparison of retrieved IAccessible pointers dosen't
+  // seem to work for here. Perhaps make IAccessible2 available in views to make
+  // unique id comparison available.
+  bool found = false;
+  ScopedComPtr<IAccessible> parent = document_accessible;
+  while (parent.get()) {
+    ScopedComPtr<IDispatch> parent_dispatch;
+    hr = parent->get_accParent(parent_dispatch.Receive());
+    ASSERT_TRUE(SUCCEEDED(hr));
+    if (!parent_dispatch.get()) {
+      ASSERT_EQ(hr, S_FALSE);
+      break;
+    }
+
+    parent.Release();
+    hr = parent_dispatch.QueryInterface(parent.Receive());
+    ASSERT_EQ(S_OK, hr);
+
+    if (parent.get() == browser_accessible.get()) {
+      found = true;
+      break;
+    }
+  }
+
+  // If pointer comparison fails resort to the exhuasive search that can use
+  // IAccessible2::get_uniqueID for equality comparison.
+  if (!found) {
+    AccessibleContainsAccessible(
+        browser_accessible, document_accessible2, &found);
+  }
+
+  ASSERT_EQ(found, true);
 }
 }  // namespace.

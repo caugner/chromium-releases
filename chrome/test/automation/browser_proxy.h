@@ -4,6 +4,7 @@
 
 #ifndef CHROME_TEST_AUTOMATION_BROWSER_PROXY_H_
 #define CHROME_TEST_AUTOMATION_BROWSER_PROXY_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -180,18 +181,18 @@ class BrowserProxy : public AutomationResourceProxy {
   bool SetShelfVisible(bool is_visible) WARN_UNUSED_RESULT;
 
   // Sets the int value of the specified preference.
-  bool SetIntPreference(const std::wstring& name, int value) WARN_UNUSED_RESULT;
+  bool SetIntPreference(const std::string& name, int value) WARN_UNUSED_RESULT;
 
   // Sets the string value of the specified preference.
-  bool SetStringPreference(const std::wstring& name,
+  bool SetStringPreference(const std::string& name,
                            const std::string& value) WARN_UNUSED_RESULT;
 
   // Gets the boolean value of the specified preference.
-  bool GetBooleanPreference(const std::wstring& name,
+  bool GetBooleanPreference(const std::string& name,
                             bool* value) WARN_UNUSED_RESULT;
 
   // Sets the boolean value of the specified preference.
-  bool SetBooleanPreference(const std::wstring& name,
+  bool SetBooleanPreference(const std::string& name,
                             bool value) WARN_UNUSED_RESULT;
 
   // Sets default content settings.

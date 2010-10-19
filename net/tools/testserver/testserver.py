@@ -23,12 +23,14 @@ import SocketServer
 import sys
 import time
 import urllib2
+import warnings
+
+# Ignore deprecation warnings, they make our output more cluttered.
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import pyftpdlib.ftpserver
 import tlslite
 import tlslite.api
-
-import chromiumsync
 
 try:
   import hashlib
@@ -59,13 +61,21 @@ class StoppableHTTPServer(BaseHTTPServer.HTTPServer):
 class HTTPSServer(tlslite.api.TLSSocketServerMixIn, StoppableHTTPServer):
   """This is a specialization of StoppableHTTPerver that add https support."""
 
-  def __init__(self, server_address, request_hander_class, cert_path):
+  def __init__(self, server_address, request_hander_class, cert_path,
+               ssl_client_auth, ssl_client_cas):
     s = open(cert_path).read()
     x509 = tlslite.api.X509()
     x509.parse(s)
     self.cert_chain = tlslite.api.X509CertChain([x509])
     s = open(cert_path).read()
     self.private_key = tlslite.api.parsePEMKey(s, private=True)
+    self.ssl_client_auth = ssl_client_auth
+    self.ssl_client_cas = []
+    for ca_file in ssl_client_cas:
+        s = open(ca_file).read()
+        x509 = tlslite.api.X509()
+        x509.parse(s)
+        self.ssl_client_cas.append(x509.subject)
 
     self.session_cache = tlslite.api.SessionCache()
     StoppableHTTPServer.__init__(self, server_address, request_hander_class)
@@ -75,22 +85,17 @@ class HTTPSServer(tlslite.api.TLSSocketServerMixIn, StoppableHTTPServer):
     try:
       tlsConnection.handshakeServer(certChain=self.cert_chain,
                                     privateKey=self.private_key,
-                                    sessionCache=self.session_cache)
+                                    sessionCache=self.session_cache,
+                                    reqCert=self.ssl_client_auth,
+                                    reqCAs=self.ssl_client_cas)
       tlsConnection.ignoreAbruptClose = True
+      return True
+    except tlslite.api.TLSAbruptCloseError:
+      # Ignore abrupt close.
       return True
     except tlslite.api.TLSError, error:
       print "Handshake failure:", str(error)
       return False
-
-class ForkingHTTPServer(SocketServer.ForkingMixIn, StoppableHTTPServer):
-  """This is a specialization of of StoppableHTTPServer which serves each
-  request in a separate process"""
-  pass
-
-class ForkingHTTPSServer(SocketServer.ForkingMixIn, HTTPSServer):
-  """This is a specialization of of HTTPSServer which serves each
-  request in a separate process"""
-  pass
 
 class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
@@ -136,6 +141,7 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       self.WriteFile,
       self.EchoTitleHandler,
       self.EchoAllHandler,
+      self.ChromiumSyncConfigureHandler,
       self.ChromiumSyncCommandHandler,
       self.EchoHandler] + self._get_handlers
     self._put_handlers = [
@@ -155,8 +161,10 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     BaseHTTPServer.BaseHTTPRequestHandler.__init__(self, request,
                                                    client_address,
                                                    socket_server)
-  # Class variable; shared across requests.
-  _sync_handler = chromiumsync.TestServer()
+
+  def log_request(self, *args, **kwargs):
+    # Disable request logging to declutter test log output.
+    pass
 
   def _ShouldHandleRequest(self, handler_name):
     """Determines if the path can be handled by the handler.
@@ -1018,6 +1026,29 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     self.end_headers()
     return True
 
+  def ChromiumSyncConfigureHandler(self):
+    """Handle updating the configuration of the sync server.
+
+    The name and value pairs of the post payload will update the
+    configuration of the sync server.  Supported tuples are:
+      user_email,<email address> - Sets the email for the fake user account
+    """
+    test_name = "/chromiumsync/configure"
+    if not self._ShouldHandleRequest(test_name):
+      return False
+
+    length = int(self.headers.getheader('content-length'))
+    raw_request = self.rfile.read(length)
+    config = cgi.parse_qs(raw_request, keep_blank_values=1)
+
+    success = self._sync_handler.HandleConfigure(config)
+    if success:
+      self.send_response(200)
+    else:
+      self.send_response(500)
+    self.end_headers()
+    return True
+
   def ChromiumSyncCommandHandler(self):
     """Handle a chromiumsync command arriving via http.
 
@@ -1031,7 +1062,11 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     length = int(self.headers.getheader('content-length'))
     raw_request = self.rfile.read(length)
 
-    http_response, raw_reply = self._sync_handler.HandleCommand(raw_request)
+    if not self.server._sync_handler:
+      import chromiumsync
+      self.server._sync_handler = chromiumsync.TestServer()
+    http_response, raw_reply = self.server._sync_handler.HandleCommand(
+        raw_request)
     self.send_response(http_response)
     self.end_headers()
     self.wfile.write(raw_reply)
@@ -1173,49 +1208,55 @@ def MakeDataDir():
 
   return my_data_dir
 
-def TryKillingOldServer(port):
-  # Note that an HTTP /kill request to the FTP server has the effect of
-  # killing it.
-  for protocol in ["http", "https"]:
-    try:
-      urllib2.urlopen("%s://localhost:%d/kill" % (protocol, port)).read()
-      print "Killed old server instance on port %d (via %s)" % (port, protocol)
-    except urllib2.URLError:
-      # Common case, indicates no server running.
-      pass
+class FileMultiplexer:
+  def __init__(self, fd1, fd2) :
+    self.__fd1 = fd1
+    self.__fd2 = fd2
+
+  def __del__(self) :
+    if self.__fd1 != sys.stdout and self.__fd1 != sys.stderr:
+      self.__fd1.close()
+    if self.__fd2 != sys.stdout and self.__fd2 != sys.stderr:
+      self.__fd2.close()
+
+  def write(self, text) :
+    self.__fd1.write(text)
+    self.__fd2.write(text)
+
+  def flush(self) :
+    self.__fd1.flush()
+    self.__fd2.flush()
 
 def main(options, args):
-  # redirect output to a log file so it doesn't spam the unit test output
   logfile = open('testserver.log', 'w')
-  sys.stderr = sys.stdout = logfile
+  sys.stdout = FileMultiplexer(sys.stdout, logfile)
+  sys.stderr = FileMultiplexer(sys.stderr, logfile)
 
   port = options.port
-
-  # Try to free up the port if there's an orphaned old instance.
-  TryKillingOldServer(port)
 
   if options.server_type == SERVER_HTTP:
     if options.cert:
       # let's make sure the cert file exists.
       if not os.path.isfile(options.cert):
-        print 'specified cert file not found: ' + options.cert + ' exiting...'
+        print 'specified server cert file not found: ' + options.cert + \
+              ' exiting...'
         return
-      if options.forking:
-        server_class = ForkingHTTPSServer
-      else:
-        server_class = HTTPSServer
-      server = server_class(('127.0.0.1', port), TestPageHandler, options.cert)
+      for ca_cert in options.ssl_client_ca:
+        if not os.path.isfile(ca_cert):
+          print 'specified trusted client CA file not found: ' + ca_cert + \
+                ' exiting...'
+          return
+      server = HTTPSServer(('127.0.0.1', port), TestPageHandler, options.cert,
+                           options.ssl_client_auth, options.ssl_client_ca)
       print 'HTTPS server started on port %d...' % port
     else:
-      if options.forking:
-        server_class = ForkingHTTPServer
-      else:
-        server_class = StoppableHTTPServer
-      server = server_class(('127.0.0.1', port), TestPageHandler)
+      server = StoppableHTTPServer(('127.0.0.1', port), TestPageHandler)
       print 'HTTP server started on port %d...' % port
 
     server.data_dir = MakeDataDir()
     server.file_root_url = options.file_root_url
+    server._sync_handler = None
+
     MakeDumpDir(server.data_dir)
 
   # means FTP Server
@@ -1263,9 +1304,6 @@ if __name__ == '__main__':
                            const=SERVER_FTP, default=SERVER_HTTP,
                            dest='server_type',
                            help='FTP or HTTP server: default is HTTP.')
-  option_parser.add_option('--forking', action='store_true', default=False,
-                           dest='forking',
-                           help='Serve each request in a separate process.')
   option_parser.add_option('', '--port', default='8888', type='int',
                            help='Port used by the server.')
   option_parser.add_option('', '--data-dir', dest='data_dir',
@@ -1274,6 +1312,12 @@ if __name__ == '__main__':
                            help='Specify that https should be used, specify '
                            'the path to the cert containing the private key '
                            'the server should use.')
+  option_parser.add_option('', '--ssl-client-auth', action='store_true',
+                           help='Require SSL client auth on every connection.')
+  option_parser.add_option('', '--ssl-client-ca', action='append', default=[],
+                           help='Specify that the client certificate request '
+                           'should indicate that it supports the CA contained '
+                           'in the specified certificate file')
   option_parser.add_option('', '--file-root-url', default='/files/',
                            help='Specify a root URL for files served.')
   option_parser.add_option('', '--never-die', default=False,

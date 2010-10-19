@@ -9,9 +9,9 @@
 #include "base/process.h"
 #include "base/shared_memory.h"
 #include "base/sys_info.h"
-#include "base/waitable_event.h"
 #include "chrome/browser/renderer_host/audio_sync_reader.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "ipc/ipc_logging.h"
 
 // The minimum number of samples in a hardware packet.
@@ -55,23 +55,23 @@ static size_t GetMaxAudioStreamsAllowed() {
   return kMaxStreams;
 }
 
-static uint32 SelectHardwarePacketSize(int channels, int sample_rate,
-                                       int bits_per_sample) {
+static uint32 SelectHardwarePacketSize(AudioParameters params) {
   // Select the number of samples that can provide at least
   // |kMillisecondsPerHardwarePacket| worth of audio data.
   int samples = kMinSamplesPerHardwarePacket;
   while (samples <= kMaxSamplesPerHardwarePacket &&
          samples * base::Time::kMillisecondsPerSecond <
-         sample_rate * kMillisecondsPerHardwarePacket) {
+         params.sample_rate * kMillisecondsPerHardwarePacket) {
     samples *= 2;
   }
-  return channels * samples * bits_per_sample / 8;
+  return params.channels * samples * params.bits_per_sample / 8;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // AudioRendererHost implementations.
 AudioRendererHost::AudioRendererHost()
-    : process_handle_(0),
+    : process_id_(0),
+      process_handle_(0),
       ipc_sender_(NULL) {
   // Increase the ref count of this object so it is active until we do
   // Release().
@@ -331,9 +331,7 @@ void AudioRendererHost::OnCreateStream(
   // Select the hardwaer packet size if not specified.
   uint32 hardware_packet_size = params.packet_size;
   if (!hardware_packet_size) {
-    hardware_packet_size = SelectHardwarePacketSize(params.channels,
-                                                    params.sample_rate,
-                                                    params.bits_per_sample);
+    hardware_packet_size = SelectHardwarePacketSize(params.params);
   }
 
   scoped_ptr<AudioEntry> entry(new AudioEntry());
@@ -354,18 +352,13 @@ void AudioRendererHost::OnCreateStream(
     entry->reader.reset(reader.release());
     controller =
         media::AudioOutputController::CreateLowLatency(
-            this, params.format, params.channels,
-            params.sample_rate,
-            params.bits_per_sample,
+            this, params.params,
             hardware_packet_size,
             entry->reader.get());
   } else {
     // The choice of buffer capacity is based on experiment.
     controller =
-        media::AudioOutputController::Create(this, params.format,
-                                             params.channels,
-                                             params.sample_rate,
-                                             params.bits_per_sample,
+        media::AudioOutputController::Create(this, params.params,
                                              hardware_packet_size,
                                              3 * hardware_packet_size);
   }

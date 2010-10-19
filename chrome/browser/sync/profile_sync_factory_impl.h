@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_SYNC_PROFILE_SYNC_FACTORY_IMPL_H__
 #define CHROME_BROWSER_SYNC_PROFILE_SYNC_FACTORY_IMPL_H__
+#pragma once
 
 #include "base/basictypes.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
@@ -22,6 +23,10 @@ class ProfileSyncFactoryImpl : public ProfileSyncFactory {
   virtual browser_sync::DataTypeManager* CreateDataTypeManager(
       browser_sync::SyncBackendHost* backend,
       const browser_sync::DataTypeController::TypeMap& controllers);
+
+  virtual SyncComponents CreateAppSyncComponents(
+      ProfileSyncService* profile_sync_service,
+      browser_sync::UnrecoverableErrorHandler* error_handler);
 
   virtual SyncComponents CreateAutofillSyncComponents(
       ProfileSyncService* profile_sync_service,
@@ -53,6 +58,10 @@ class ProfileSyncFactoryImpl : public ProfileSyncFactory {
   virtual SyncComponents CreateTypedUrlSyncComponents(
       ProfileSyncService* profile_sync_service,
       history::HistoryBackend* history_backend,
+      browser_sync::UnrecoverableErrorHandler* error_handler);
+
+  virtual SyncComponents CreateSessionSyncComponents(
+      ProfileSyncService* profile_sync_service,
       browser_sync::UnrecoverableErrorHandler* error_handler);
 
  private:

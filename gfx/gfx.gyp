@@ -5,6 +5,9 @@
 {
   'variables': {
     'chromium_code': 1,
+    'grit_info_cmd': ['python', '../tools/grit/grit_info.py'],
+    'grit_cmd': ['python', '../tools/grit/grit.py'],    
+    'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/gfx',
   },
   'targets': [
     {
@@ -13,6 +16,8 @@
       'msvs_guid': 'C8BD2821-EAE5-4AC6-A0E4-F82CAC2956CC',
       'dependencies': [
         'gfx',
+        'gfx_resources',
+        '../base/base.gyp:test_support_base',
         '../skia/skia.gyp:skia',
         '../testing/gtest.gyp:gtest',
       ],
@@ -27,6 +32,7 @@
         'run_all_unittests.cc',
         'skbitmap_operations_unittest.cc',
         'test_suite.h',
+        '<(SHARED_INTERMEDIATE_DIR)/gfx/gfx_resources.rc',
       ],
       'include_dirs': [
         '..',
@@ -76,6 +82,7 @@
       'sources': [
         'blit.cc',
         'blit.h',
+        'brush.h',
         'canvas.h',
         'canvas_skia.h',
         'canvas_skia.cc',
@@ -91,9 +98,7 @@
         'color_utils.h',
         'favicon_size.h',
         'font.h',
-        'font_gtk.cc',
-        'font_mac.mm',
-        'font_win.cc',
+        'font.cc',
         'gfx_paths.cc',
         'gfx_paths.h',
         'insets.cc',
@@ -103,6 +108,13 @@
         'path.h',
         'path_gtk.cc',
         'path_win.cc',
+        'platform_font.h',
+        'platform_font_gtk.h',
+        'platform_font_gtk.cc',
+        'platform_font_mac.h',
+        'platform_font_mac.mm',
+        'platform_font_win.h',
+        'platform_font_win.cc',
         'point.cc',
         'point.h',
         'rect.cc',
@@ -145,7 +157,6 @@
             '../build/linux/system.gyp:gtk',
           ],
           'sources': [
-            'font_skia.cc',
             'gtk_native_view_id_manager.cc',
             'gtk_native_view_id_manager.h',
             'gtk_util.cc',
@@ -154,7 +165,49 @@
           ],
         }],
       ],
-    },    
+    },
+    {
+      # theme_resources also generates a .cc file, so it can't use the rules above.
+      'target_name': 'gfx_resources',
+      'type': 'none',
+      'msvs_guid' : '5738AE53-E919-4987-A2EF-15FDBD8F90F6',
+      'actions': [
+        {
+          'action_name': 'gfx_resources',
+          'variables': {
+            'input_path': 'gfx_resources.grd',
+          },
+          'inputs': [
+            '<!@(<(grit_info_cmd) --inputs <(input_path))',
+          ],
+          'outputs': [
+            '<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(input_path))',
+          ],
+          'action': [
+            '<@(grit_cmd)',
+            '-i', '<(input_path)', 'build',
+            '-o', '<(grit_out_dir)',
+          ],
+          'conditions': [
+            ['use_titlecase_in_grd_files==1', {
+              'action': ['-D', 'use_titlecase'],
+            }],
+          ],
+          'message': 'Generating resources from <(input_path)',
+        },
+      ],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '<(grit_out_dir)',
+        ],
+      },
+      'conditions': [
+        ['OS=="win"', {
+          'dependencies': ['../build/win/system.gyp:cygwin'],
+        }],
+      ],
+    },
+    
   ],
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/logging.h"
-
-#include "testing/gtest/include/gtest/gtest_prod.h"
+#include "base/gtest_prod_util.h"
 
 // FFmpeg types.
 struct AVBitStreamFilterContext;
@@ -66,9 +64,10 @@ class FFmpegBitstreamConverter : public BitstreamConverter {
   virtual bool ConvertPacket(AVPacket* packet);
 
  private:
-  FRIEND_TEST(BitstreamConverterTest, ConvertPacket_FailedFilter);
-  FRIEND_TEST(BitstreamConverterTest, ConvertPacket_Success);
-  FRIEND_TEST(BitstreamConverterTest, ConvertPacket_SuccessInPlace);
+  FRIEND_TEST_ALL_PREFIXES(BitstreamConverterTest, ConvertPacket_FailedFilter);
+  FRIEND_TEST_ALL_PREFIXES(BitstreamConverterTest, ConvertPacket_Success);
+  FRIEND_TEST_ALL_PREFIXES(BitstreamConverterTest,
+                           ConvertPacket_SuccessInPlace);
 
   std::string filter_name_;
   AVBitStreamFilterContext* stream_filter_;

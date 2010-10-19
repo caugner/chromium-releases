@@ -9,7 +9,6 @@
 #include "base/file_util.h"
 #include "base/histogram.h"
 #include "base/message_loop.h"
-#include "base/rand_util.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/timer.h"
@@ -259,7 +258,7 @@ class FinalCleanup : public Task {
 };
 
 void FinalCleanup::Run() {
-  backend_->StartCleanup();
+  backend_->CleanupCache();
 }
 
 }  // namespace
@@ -328,6 +327,7 @@ int BackendImpl::CreateBackend(const FilePath& full_path, bool force,
                                uint32 flags, base::MessageLoopProxy* thread,
                                Backend** backend,
                                CompletionCallback* callback) {
+  DCHECK(callback);
   CacheCreator* creator = new CacheCreator(full_path, force, max_bytes, type,
                                            flags, thread, backend, callback);
   // This object will self-destroy when finished.
@@ -337,6 +337,49 @@ int BackendImpl::CreateBackend(const FilePath& full_path, bool force,
 int BackendImpl::Init(CompletionCallback* callback) {
   background_queue_.Init(callback);
   return net::ERR_IO_PENDING;
+}
+
+BackendImpl::BackendImpl(const FilePath& path,
+                         base::MessageLoopProxy* cache_thread)
+    : ALLOW_THIS_IN_INITIALIZER_LIST(background_queue_(this, cache_thread)),
+      path_(path),
+      block_files_(path),
+      mask_(0),
+      max_size_(0),
+      cache_type_(net::DISK_CACHE),
+      uma_report_(0),
+      user_flags_(0),
+      init_(false),
+      restarted_(false),
+      unit_test_(false),
+      read_only_(false),
+      new_eviction_(false),
+      first_timer_(true),
+      done_(true, false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(ptr_factory_(this)) {
+}
+
+BackendImpl::BackendImpl(const FilePath& path,
+                         uint32 mask,
+                         base::MessageLoopProxy* cache_thread)
+    : ALLOW_THIS_IN_INITIALIZER_LIST(background_queue_(this, cache_thread)),
+      path_(path),
+      block_files_(path),
+      mask_(mask),
+      max_size_(0),
+      cache_type_(net::DISK_CACHE),
+      uma_report_(0),
+      user_flags_(kMask),
+      init_(false),
+      restarted_(false),
+      unit_test_(false),
+      read_only_(false),
+      new_eviction_(false),
+      first_timer_(true),
+      done_(true, false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(ptr_factory_(this)) {
 }
 
 BackendImpl::~BackendImpl() {
@@ -465,6 +508,7 @@ int BackendImpl::SyncInit() {
   entry_count_ = byte_count_ = 0;
 
   if (!restarted_) {
+    buffer_bytes_ = 0;
     trace_object_ = TraceObject::GetTraceObject();
     // Create a recurrent timer of 30 secs.
     int timer_delay = unit_test_ ? 1000 : 30000;
@@ -510,6 +554,12 @@ int BackendImpl::SyncInit() {
   if (!block_files_.Init(create_files))
     return net::ERR_FAILED;
 
+  // We want to minimize the changes to cache for an AppCache.
+  if (cache_type() == net::APP_CACHE) {
+    DCHECK(!new_eviction_);
+    read_only_ = true;
+  }
+
   // stats_ and rankings_ may end up calling back to us so we better be enabled.
   disabled_ = false;
   if (!stats_.Init(this, &data_->header.stats))
@@ -525,26 +575,23 @@ int BackendImpl::SyncInit() {
   return disabled_ ? net::ERR_FAILED : net::OK;
 }
 
-void BackendImpl::StartCleanup() {
-  Trace("Backend StartCleanup");
-  eviction_.Stop();
-
-  // Give a chance for any posted evictions to be discarded.
-  MessageLoop::current()->PostTask(FROM_HERE,
-        factory_.NewRunnableMethod(&BackendImpl::CleanupCache));
-}
-
 void BackendImpl::CleanupCache() {
   Trace("Backend Cleanup");
+  eviction_.Stop();
+  timer_.Stop();
+
   if (init_) {
     if (data_)
       data_->header.crash = 0;
 
-    timer_.Stop();
     File::WaitForPendingIO(&num_pending_io_);
-    DCHECK(!num_refs_);
+    if (user_flags_ & kNoRandom) {
+      // This is a net_unittest, verify that we are not 'leaking' entries.
+      DCHECK(!num_refs_);
+    }
   }
   factory_.RevokeAll();
+  ptr_factory_.InvalidateWeakPtrs();
   done_.Signal();
 }
 
@@ -599,6 +646,7 @@ int BackendImpl::SyncDoomAllEntries() {
 
 int BackendImpl::SyncDoomEntriesBetween(const base::Time initial_time,
                                         const base::Time end_time) {
+  DCHECK_NE(net::APP_CACHE, cache_type_);
   if (end_time.is_null())
     return SyncDoomEntriesSince(initial_time);
 
@@ -636,6 +684,7 @@ int BackendImpl::SyncDoomEntriesBetween(const base::Time initial_time,
 // We use OpenNextEntryImpl to retrieve elements from the cache, until we get
 // entries that are too old.
 int BackendImpl::SyncDoomEntriesSince(const base::Time initial_time) {
+  DCHECK_NE(net::APP_CACHE, cache_type_);
   if (disabled_)
     return net::ERR_FAILED;
 
@@ -746,7 +795,8 @@ EntryImpl* BackendImpl::CreateEntryImpl(const std::string& key) {
     return NULL;
   }
 
-  scoped_refptr<EntryImpl> cache_entry(new EntryImpl(this, entry_address));
+  scoped_refptr<EntryImpl> cache_entry(
+      new EntryImpl(this, entry_address, false));
   IncreaseNumRefs();
 
   if (!cache_entry->CreateEntry(node_address, key, hash)) {
@@ -840,7 +890,7 @@ bool BackendImpl::CreateExternalFile(Addr* address) {
                 base::PLATFORM_FILE_CREATE |
                 base::PLATFORM_FILE_EXCLUSIVE_WRITE;
     scoped_refptr<disk_cache::File> file(new disk_cache::File(
-        base::CreatePlatformFile(name, flags, NULL)));
+        base::CreatePlatformFile(name, flags, NULL, NULL)));
     if (!file->IsValid())
       continue;
 
@@ -972,6 +1022,22 @@ void BackendImpl::ModifyStorageSize(int32 old_size, int32 new_size) {
 
 void BackendImpl::TooMuchStorageRequested(int32 size) {
   stats_.ModifyStorageStats(0, size);
+}
+
+bool BackendImpl::IsAllocAllowed(int current_size, int new_size) {
+  DCHECK_GT(new_size, current_size);
+  int to_add = new_size - current_size;
+  if (buffer_bytes_ + to_add > MaxBuffersSize())
+    return false;
+
+  buffer_bytes_ += to_add;
+  CACHE_UMA(COUNTS_50000, "BufferBytes", 0, buffer_bytes_ / 1024);
+  return true;
+}
+
+void BackendImpl::BufferDeleted(int size) {
+  buffer_bytes_ -= size;
+  DCHECK_GE(size, 0);
 }
 
 bool BackendImpl::IsLoaded() const {
@@ -1217,7 +1283,7 @@ bool BackendImpl::InitBackingStore(bool* file_created) {
               base::PLATFORM_FILE_OPEN_ALWAYS |
               base::PLATFORM_FILE_EXCLUSIVE_WRITE;
   scoped_refptr<disk_cache::File> file(new disk_cache::File(
-      base::CreatePlatformFile(index_name, flags, file_created)));
+      base::CreatePlatformFile(index_name, flags, file_created, NULL)));
 
   if (!file->IsValid())
     return false;
@@ -1328,7 +1394,8 @@ int BackendImpl::NewEntry(Addr address, EntryImpl** entry, bool* dirty) {
     return 0;
   }
 
-  scoped_refptr<EntryImpl> cache_entry(new EntryImpl(this, address));
+  scoped_refptr<EntryImpl> cache_entry(
+      new EntryImpl(this, address, read_only_));
   IncreaseNumRefs();
   *entry = NULL;
 
@@ -1646,7 +1713,7 @@ void BackendImpl::AddStorageSize(int32 bytes) {
   data_->header.num_bytes += bytes;
   DCHECK_GE(data_->header.num_bytes, 0);
 
-  if (data_->header.num_bytes > max_size_)
+  if (data_->header.num_bytes > max_size_ && !read_only_)
     eviction_.TrimCache(false);
 }
 
@@ -1869,6 +1936,24 @@ int BackendImpl::CheckAllEntries() {
 bool BackendImpl::CheckEntry(EntryImpl* cache_entry) {
   RankingsNode* rankings = cache_entry->rankings()->Data();
   return !rankings->dummy;
+}
+
+int BackendImpl::MaxBuffersSize() {
+  static int64 total_memory = base::SysInfo::AmountOfPhysicalMemory();
+  static bool done = false;
+
+  if (!done) {
+    const int kMaxBuffersSize = 30 * 1024 * 1024;
+
+    // We want to use up to 2% of the computer's memory.
+    total_memory = total_memory * 2 / 100;
+    if (total_memory > kMaxBuffersSize || total_memory <= 0)
+      total_memory = kMaxBuffersSize;
+
+    done = true;
+  }
+
+  return static_cast<int>(total_memory);
 }
 
 }  // namespace disk_cache

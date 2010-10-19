@@ -1,14 +1,15 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef APP_TREE_MODEL_H_
 #define APP_TREE_MODEL_H_
+#pragma once
 
-#include <string>
 #include <vector>
 
 #include "base/logging.h"
+#include "base/string16.h"
 
 class SkBitmap;
 
@@ -20,7 +21,7 @@ class TreeModel;
 class TreeModelNode {
  public:
   // Returns the title for the node.
-  virtual std::wstring GetTitle() const = 0;
+  virtual const string16& GetTitle() const = 0;
 
  protected:
   virtual ~TreeModelNode() {}
@@ -40,11 +41,6 @@ class TreeModelObserver {
                                 TreeModelNode* parent,
                                 int start,
                                 int count) = 0;
-
-  // Notification the children of |parent| have been reordered. Note, only
-  // the direct children of |parent| have been reordered, not descendants.
-  virtual void TreeNodeChildrenReordered(TreeModel* model,
-                                         TreeModelNode* parent) = 0;
 
   // Notification that the contents of a node has changed.
   virtual void TreeNodeChanged(TreeModel* model, TreeModelNode* node) = 0;
@@ -83,7 +79,7 @@ class TreeModel {
   // Sets the title of the specified node.
   // This is only invoked if the node is editable and the user edits a node.
   virtual void SetTitle(TreeModelNode* node,
-                        const std::wstring& title) {
+                        const string16& title) {
     NOTREACHED();
   }
 

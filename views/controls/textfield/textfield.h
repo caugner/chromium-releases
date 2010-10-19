@@ -4,16 +4,21 @@
 
 #ifndef VIEWS_CONTROLS_TEXTFIELD_TEXTFIELD_H_
 #define VIEWS_CONTROLS_TEXTFIELD_TEXTFIELD_H_
+#pragma once
 
-#if defined (OS_LINUX)
+#include "build/build_config.h"
+
+#if defined(OS_LINUX)
 #include <gdk/gdk.h>
 #endif
 
 #include <string>
 
+#include "app/keyboard_codes.h"
 #include "base/basictypes.h"
-#include "base/keyboard_codes.h"
+#if !defined(OS_LINUX)
 #include "base/logging.h"
+#endif
 #include "base/string16.h"
 #include "gfx/font.h"
 #include "views/view.h"
@@ -60,7 +65,7 @@ class Textfield : public View {
     }
     const GdkEventKey* event() const { return &event_; }
 #endif
-    base::KeyboardCode GetKeyboardCode() const;
+    app::KeyboardCode GetKeyboardCode() const;
     bool IsControlHeld() const;
     bool IsShiftHeld() const;
 

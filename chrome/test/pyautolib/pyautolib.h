@@ -7,6 +7,7 @@
 
 #ifndef CHROME_TEST_PYAUTOLIB_PYAUTOLIB_H_
 #define CHROME_TEST_PYAUTOLIB_PYAUTOLIB_H_
+#pragma once
 
 #include "base/message_loop.h"
 #include "base/scoped_nsautorelease_pool.h"
@@ -147,15 +148,34 @@ class PyUITestBase : public UITestBase {
   // automation proxy additions.  Returns response as JSON dict.
   std::string _SendJSONRequest(int window_index, std::string& request);
 
+  // Execute javascript in a given tab, and return the response. This is
+  // a low-level method intended for use mostly by GetDOMValue(). Note that
+  // any complicated manipulation of the page should be done by something
+  // like WebDriver, not PyAuto. Also note that in order for the script to
+  // return a value to the calling code, it invoke
+  // window.domAutomationController.send(), passing in the intended return
+  // value.
+  std::wstring ExecuteJavascript(const std::wstring& script,
+                                 int window_index = 0,
+                                 int tab_index = 0,
+                                 const std::wstring& frame_xpath = L"");
+
+  // Evaluate a Javascript expression and return the result as a string. This
+  // method is intended largely to read values out of the frame DOM.
+  std::wstring GetDOMValue(const std::wstring& expr,
+                           int window_index = 0,
+                           int tab_index = 0,
+                           const std::wstring& frame_xpath = L"");
+
   // Resets to the default theme. Returns true on success.
   bool ResetToDefaultTheme();
 
   // Sets a cookie value for a url. Returns true on success.
   bool SetCookie(const GURL& cookie_url, const std::string& value,
-                 int window_index=0, int tab_index=0);
+                 int window_index = 0, int tab_index = 0);
   // Gets a cookie value for the given url.
-  std::string GetCookie(const GURL& cookie_url, int window_index=0,
-                        int tab_index=0);
+  std::string GetCookie(const GURL& cookie_url, int window_index = 0,
+                        int tab_index = 0);
 
  private:
   // Enables PostTask to main thread.
@@ -168,4 +188,3 @@ class PyUITestBase : public UITestBase {
 };
 
 #endif  // CHROME_TEST_PYAUTOLIB_PYAUTOLIB_H_
-

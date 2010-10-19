@@ -6,10 +6,10 @@
 #define WEBKIT_APPCACHE_APPCACHE_HOST_H_
 
 #include "base/callback.h"
+#include "base/gtest_prod_util.h"
 #include "base/observer_list.h"
 #include "base/ref_counted.h"
 #include "googleurl/src/gurl.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "webkit/appcache/appcache_group.h"
 #include "webkit/appcache/appcache_interfaces.h"
 #include "webkit/appcache/appcache_service.h"
@@ -73,6 +73,9 @@ class AppCacheHost : public AppCacheStorage::Delegate,
   // May return NULL if the request isn't subject to retrieval from an appache.
   AppCacheRequestHandler* CreateRequestHandler(
       URLRequest* request, ResourceType::Type resource_type);
+
+  // Support for devtools inspecting appcache resources.
+  void GetResourceList(std::vector<AppCacheResourceInfo>* resource_infos);
 
   // Establishes an association between this host and a cache. 'cache' may be
   // NULL to break any existing association. Associations are established
@@ -199,22 +202,26 @@ class AppCacheHost : public AppCacheStorage::Delegate,
   bool main_resource_blocked_;
   GURL blocked_manifest_url_;
 
+  // Tells if info about associated cache is pending. Info is pending
+  // when update job has not returned success yet.
+  bool associated_cache_info_pending_;
 
   // List of objects observing us.
   ObserverList<Observer> observers_;
 
   friend class AppCacheRequestHandlerTest;
   friend class AppCacheUpdateJobTest;
-  FRIEND_TEST(AppCacheTest, CleanupUnusedCache);
-  FRIEND_TEST(AppCacheGroupTest, CleanupUnusedGroup);
-  FRIEND_TEST(AppCacheHostTest, Basic);
-  FRIEND_TEST(AppCacheHostTest, SelectNoCache);
-  FRIEND_TEST(AppCacheHostTest, ForeignEntry);
-  FRIEND_TEST(AppCacheHostTest, FailedCacheLoad);
-  FRIEND_TEST(AppCacheHostTest, FailedGroupLoad);
-  FRIEND_TEST(AppCacheHostTest, SetSwappableCache);
-  FRIEND_TEST(AppCacheHostTest, ForDedicatedWorker);
-  FRIEND_TEST(AppCacheGroupTest, QueueUpdate);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheTest, CleanupUnusedCache);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheGroupTest, CleanupUnusedGroup);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheHostTest, Basic);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheHostTest, SelectNoCache);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheHostTest, ForeignEntry);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheHostTest, FailedCacheLoad);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheHostTest, FailedGroupLoad);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheHostTest, SetSwappableCache);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheHostTest, ForDedicatedWorker);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheGroupTest, QueueUpdate);
+
   DISALLOW_COPY_AND_ASSIGN(AppCacheHost);
 };
 

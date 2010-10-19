@@ -4,6 +4,7 @@
 
 #ifndef CHROME_RENDERER_TRANSLATE_HELPER_H_
 #define CHROME_RENDERER_TRANSLATE_HELPER_H_
+#pragma once
 
 #include <string>
 
@@ -12,6 +13,7 @@
 
 class RenderView;
 namespace WebKit {
+class WebDocument;
 class WebFrame;
 }
 
@@ -21,7 +23,7 @@ class WebFrame;
 class TranslateHelper {
  public:
   explicit TranslateHelper(RenderView* render_view);
-  virtual ~TranslateHelper() {}
+  virtual ~TranslateHelper();
 
   // Translates the page contents from |source_lang| to |target_lang|.
   // Does nothing if |page_id| is not the current page id.
@@ -37,6 +39,18 @@ class TranslateHelper {
   // Cancels any translation that is currently being performed.  This does not
   // revert existing translations.
   void CancelPendingTranslation();
+
+  // Returns whether the page associated with |document| is a candidate for
+  // translation.  Some pages can explictly specify (via a meta-tag) that they
+  // should not be translated.
+  static bool IsPageTranslatable(WebKit::WebDocument* document);
+
+  // Returns the language specified in the language meta tag of |document|, or
+  // an empty string if no such tag was found.
+  // The tag may specify several languages, the first one is returned.
+  // Example of such meta-tag:
+  // <meta http-equiv="content-language" content="en, fr">
+  static std::string GetPageLanguageFromMetaTag(WebKit::WebDocument* document);
 
  protected:
   // The following methods are protected so they can be overridden in

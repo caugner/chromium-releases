@@ -20,6 +20,7 @@
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/scoped_ptr.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "gfx/codec/png_codec.h"
 
@@ -363,19 +364,15 @@ int main(int argc, const char* argv[]) {
     return 0;
   }
 
-  // TODO: CommandLine::GetLooseValues() should eventually return
-  // CommandLine::StringType (which is the same as
-  // FilePath::StringType and can convert to FilePaths directly).
-  std::vector<std::wstring> values = parsed_command_line.GetLooseValues();
+  const std::vector<CommandLine::StringType>& args = parsed_command_line.args();
   if (parsed_command_line.HasSwitch(kOptionGenerateDiff)) {
-    if (values.size() == 3) {
-      return DiffImages(FilePath::FromWStringHack(values[0]),
-                        FilePath::FromWStringHack(values[1]),
-                        FilePath::FromWStringHack(values[2]));
+    if (args.size() == 3) {
+      return DiffImages(FilePath(args[0]),
+                        FilePath(args[1]),
+                        FilePath(args[2]));
     }
-  } else if (values.size() == 2) {
-    return CompareImages(FilePath::FromWStringHack(values[0]),
-                         FilePath::FromWStringHack(values[1]));
+  } else if (args.size() == 2) {
+    return CompareImages(FilePath(args[0]), FilePath(args[1]));
   }
 
   PrintHelp();

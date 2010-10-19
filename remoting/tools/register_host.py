@@ -11,15 +11,19 @@ import getpass
 import os
 import urllib
 import urllib2
-import uuid
+import random
 import socket
 import sys
 
 import gaia_auth
 import keygen
 
-server = 'www-googleapis-test.sandbox.google.com'
-url = 'http://' + server + '/chromoting/v1/@me/hosts'
+def random_uuid():
+  return ("%04x%04x-%04x-%04x-%04x-%04x%04x%04x" %
+    tuple(map(lambda x: random.randrange(0,65536), range(8))))
+
+server = 'www.googleapis.com'
+url = 'https://' + server + '/chromoting/v1/@me/hosts'
 
 settings_filepath = os.path.join(os.path.expanduser('~'),
                                  '.ChromotingConfig.json')
@@ -28,10 +32,10 @@ print "Email:",
 email = raw_input()
 password = getpass.getpass("Password: ")
 
-xapi_auth = gaia_auth.GaiaAuthenticator('xapi')
-xapi_token = xapi_auth.authenticate(email, password)
+chromoting_auth = gaia_auth.GaiaAuthenticator('chromoting')
+auth_token = chromoting_auth.authenticate(email, password)
 
-host_id = str(uuid.uuid1())
+host_id = random_uuid()
 print "HostId:", host_id
 host_name = socket.gethostname()
 print "HostName:", host_name
@@ -41,12 +45,12 @@ print "Generating RSA key pair...",
 print "Done"
 
 params = ('{"data":{' + \
-          '"host_id": "%(host_id)s",' + \
-          '"host_name": "%(host_name)s",' + \
-          '"public_key": "%(public_key)s"}}') % \
-          {'host_id': host_id, 'host_name': host_name,
-           'public_key': public_key}
-headers = {"Authorization": "GoogleLogin auth=" + xapi_token,
+          '"hostId": "%(hostId)s",' + \
+          '"hostName": "%(hostName)s",' + \
+          '"publicKey": "%(publicKey)s"}}') % \
+          {'hostId': host_id, 'hostName': host_name,
+           'publicKey': public_key}
+headers = {"Authorization": "GoogleLogin auth=" + auth_token,
            "Content-Type": "application/json" }
 request = urllib2.Request(url, params, headers)
 

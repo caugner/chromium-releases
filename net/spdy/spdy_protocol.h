@@ -6,6 +6,7 @@
 
 #ifndef NET_SPDY_SPDY_PROTOCOL_H_
 #define NET_SPDY_SPDY_PROTOCOL_H_
+#pragma once
 
 #ifdef WIN32
 #include <winsock2.h>
@@ -118,8 +119,11 @@
 
 namespace spdy {
 
-// This implementation of Spdy is version 1.
-const int kSpdyProtocolVersion = 1;
+// The SPDY version of this implementation.
+const int kSpdyProtocolVersion = 2;
+
+// Default initial window size.
+const int kInitialWindowSize = 64 * 1024;
 
 // Note: all protocol data structures are on-the-wire format.  That means that
 //       data is stored in network-normalized order.  Readers must use the
@@ -184,7 +188,9 @@ enum SpdyStatusCodes {
   UNSUPPORTED_VERSION = 4,
   CANCEL = 5,
   INTERNAL_ERROR = 6,
-  NUM_STATUS_CODES = 7
+  FLOW_CONTROL_ERROR = 7,
+  INVALID_ASSOCIATED_STREAM = 8,
+  NUM_STATUS_CODES = 9
 };
 
 // A SPDY stream id is a 31 bit entity.
@@ -403,9 +409,8 @@ class SpdyControlFrame : public SpdyFrame {
   }
 
   void set_version(uint16 version) {
-    const uint16 kControlBit = 0x80;
-    DCHECK_EQ(0, version & kControlBit);
-    mutable_block()->control_.version_ = kControlBit | htons(version);
+    DCHECK_EQ(0u, version & kControlFlagMask);
+    mutable_block()->control_.version_ = htons(kControlFlagMask | version);
   }
 
   SpdyControlType type() const {

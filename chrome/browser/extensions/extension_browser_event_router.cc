@@ -68,7 +68,7 @@ static void DispatchEvent(Profile* profile,
                           const std::string json_args) {
   if (profile->GetExtensionMessageService()) {
     profile->GetExtensionMessageService()->DispatchEventToRenderers(
-        event_name, json_args, profile->IsOffTheRecord(), GURL());
+        event_name, json_args, profile, GURL());
   }
 }
 
@@ -133,7 +133,8 @@ void ExtensionBrowserEventRouter::Init(Profile* profile) {
 
 ExtensionBrowserEventRouter::ExtensionBrowserEventRouter()
     : initialized_(false),
-      focused_window_id_(extension_misc::kUnknownWindowId) { }
+      focused_window_id_(extension_misc::kUnknownWindowId),
+      profile_(NULL) { }
 
 void ExtensionBrowserEventRouter::OnBrowserAdded(const Browser* browser) {
   RegisterForBrowserNotifications(browser);

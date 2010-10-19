@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_FOCUS_FOCUS_MANAGER_H_
 #define VIEWS_FOCUS_FOCUS_MANAGER_H_
+#pragma once
 
 #include <list>
 #include <map>
@@ -92,6 +93,9 @@ class FocusTraversable {
   // It is used when walking up the view hierarchy tree to find which view
   // should be used as the starting view for finding the next/previous view.
   virtual View* GetFocusTraversableParentView() = 0;
+
+ protected:
+  virtual ~FocusTraversable() {}
 };
 
 // This interface should be implemented by classes that want to be notified when
@@ -99,6 +103,9 @@ class FocusTraversable {
 class FocusChangeListener {
  public:
   virtual void FocusWillChange(View* focused_before, View* focused_now) = 0;
+
+ protected:
+  virtual ~FocusChangeListener() {}
 };
 
 // This interface should be implemented by classes that want to be notified when
@@ -110,6 +117,9 @@ class WidgetFocusChangeListener {
  public:
   virtual void NativeFocusWillChange(gfx::NativeView focused_before,
                                      gfx::NativeView focused_now) = 0;
+
+ protected:
+  virtual ~WidgetFocusChangeListener() {}
 };
 
 class FocusManager {

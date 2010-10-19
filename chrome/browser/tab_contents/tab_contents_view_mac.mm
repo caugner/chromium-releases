@@ -9,20 +9,20 @@
 #include <string>
 
 #import "base/chrome_application_mac.h"
-#include "chrome/browser/browser.h" // TODO(beng): this dependency is awful.
 #import "chrome/browser/cocoa/focus_tracker.h"
-#import "chrome/browser/cocoa/chrome_browser_window.h"
 #import "chrome/browser/cocoa/browser_window_controller.h"
 #include "chrome/browser/global_keyboard_shortcuts_mac.h"
 #include "chrome/browser/cocoa/sad_tab_controller.h"
 #import "chrome/browser/cocoa/web_drag_source.h"
 #import "chrome/browser/cocoa/web_drop_target.h"
+#import "chrome/browser/cocoa/view_id_util.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_factory.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_mac.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_mac.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
@@ -127,7 +127,7 @@ gfx::NativeWindow TabContentsViewMac::GetTopLevelNativeWindow() const {
 }
 
 void TabContentsViewMac::GetContainerBounds(gfx::Rect* out) const {
-  *out = [cocoa_view_.get() NSRectToRect:[cocoa_view_.get() bounds]];
+  *out = [cocoa_view_.get() flipNSRectToRect:[cocoa_view_.get() bounds]];
 }
 
 void TabContentsViewMac::StartDragging(
@@ -182,7 +182,7 @@ void TabContentsViewMac::SizeContents(const gfx::Size& size) {
   // See tab_contents_view.h.
   gfx::Rect rect(gfx::Point(), size);
   TabContentsViewCocoa* view = cocoa_view_.get();
-  [view setFrame:[view RectToNSRect:rect]];
+  [view setFrame:[view flipRectToNSRect:rect]];
 }
 
 void TabContentsViewMac::Focus() {
@@ -330,11 +330,17 @@ void TabContentsViewMac::Observe(NotificationType type,
     dropTarget_.reset(
         [[WebDropTarget alloc] initWithTabContents:[self tabContents]]);
     [self registerDragTypes];
+    // TabContentsViewCocoa's ViewID may be changed to VIEW_ID_DEV_TOOLS_DOCKED
+    // by TabContentsController, so we can't just override -viewID method to
+    // return it.
+    view_id_util::SetID(self, VIEW_ID_TAB_CONTAINER);
   }
   return self;
 }
 
 - (void)dealloc {
+  view_id_util::UnsetID(self);
+
   // Cancel any deferred tab closes, just in case.
   [self cancelDeferredClose];
 

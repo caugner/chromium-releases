@@ -231,21 +231,21 @@ error::Error GLES2DecoderImpl::HandleClearColor(
   GLclampf green = static_cast<GLclampf>(c.green);
   GLclampf blue = static_cast<GLclampf>(c.blue);
   GLclampf alpha = static_cast<GLclampf>(c.alpha);
-  glClearColor(red, green, blue, alpha);
+  DoClearColor(red, green, blue, alpha);
   return error::kNoError;
 }
 
 error::Error GLES2DecoderImpl::HandleClearDepthf(
     uint32 immediate_data_size, const gles2::ClearDepthf& c) {
   GLclampf depth = static_cast<GLclampf>(c.depth);
-  glClearDepth(depth);
+  DoClearDepthf(depth);
   return error::kNoError;
 }
 
 error::Error GLES2DecoderImpl::HandleClearStencil(
     uint32 immediate_data_size, const gles2::ClearStencil& c) {
   GLint s = static_cast<GLint>(c.s);
-  glClearStencil(s);
+  DoClearStencil(s);
   return error::kNoError;
 }
 
@@ -255,7 +255,7 @@ error::Error GLES2DecoderImpl::HandleColorMask(
   GLboolean green = static_cast<GLboolean>(c.green);
   GLboolean blue = static_cast<GLboolean>(c.blue);
   GLboolean alpha = static_cast<GLboolean>(c.alpha);
-  glColorMask(red, green, blue, alpha);
+  DoColorMask(red, green, blue, alpha);
   return error::kNoError;
 }
 
@@ -304,7 +304,7 @@ error::Error GLES2DecoderImpl::HandleCompressedTexSubImage2D(
   if (data == NULL) {
     return error::kOutOfBounds;
   }
-  glCompressedTexSubImage2D(
+  DoCompressedTexSubImage2D(
       target, level, xoffset, yoffset, width, height, format, imageSize, data);
   return error::kNoError;
 }
@@ -348,7 +348,7 @@ error::Error GLES2DecoderImpl::HandleCompressedTexSubImage2DImmediate(
   if (data == NULL) {
     return error::kOutOfBounds;
   }
-  glCompressedTexSubImage2D(
+  DoCompressedTexSubImage2D(
       target, level, xoffset, yoffset, width, height, format, imageSize, data);
   return error::kNoError;
 }
@@ -367,6 +367,11 @@ error::Error GLES2DecoderImpl::HandleCopyTexImage2D(
     SetGLError(GL_INVALID_ENUM, "glCopyTexImage2D: target GL_INVALID_ENUM");
     return error::kNoError;
   }
+  if (!validators_->texture_internal_format.IsValid(internalformat)) {
+    SetGLError(
+        GL_INVALID_ENUM, "glCopyTexImage2D: internalformat GL_INVALID_ENUM");
+    return error::kNoError;
+  }
   if (width < 0) {
     SetGLError(GL_INVALID_VALUE, "glCopyTexImage2D: width < 0");
     return error::kNoError;
@@ -375,7 +380,7 @@ error::Error GLES2DecoderImpl::HandleCopyTexImage2D(
     SetGLError(GL_INVALID_VALUE, "glCopyTexImage2D: height < 0");
     return error::kNoError;
   }
-  glCopyTexImage2D(target, level, internalformat, x, y, width, height, border);
+  DoCopyTexImage2D(target, level, internalformat, x, y, width, height, border);
   return error::kNoError;
 }
 
@@ -401,7 +406,7 @@ error::Error GLES2DecoderImpl::HandleCopyTexSubImage2D(
     SetGLError(GL_INVALID_VALUE, "glCopyTexSubImage2D: height < 0");
     return error::kNoError;
   }
-  glCopyTexSubImage2D(target, level, xoffset, yoffset, x, y, width, height);
+  DoCopyTexSubImage2D(target, level, xoffset, yoffset, x, y, width, height);
   return error::kNoError;
 }
 
@@ -613,7 +618,7 @@ error::Error GLES2DecoderImpl::HandleDepthFunc(
 error::Error GLES2DecoderImpl::HandleDepthMask(
     uint32 immediate_data_size, const gles2::DepthMask& c) {
   GLboolean flag = static_cast<GLboolean>(c.flag);
-  glDepthMask(flag);
+  DoDepthMask(flag);
   return error::kNoError;
 }
 
@@ -640,7 +645,7 @@ error::Error GLES2DecoderImpl::HandleDisable(
     SetGLError(GL_INVALID_ENUM, "glDisable: cap GL_INVALID_ENUM");
     return error::kNoError;
   }
-  glDisable(cap);
+  DoDisable(cap);
   return error::kNoError;
 }
 
@@ -675,7 +680,7 @@ error::Error GLES2DecoderImpl::HandleEnable(
     SetGLError(GL_INVALID_ENUM, "glEnable: cap GL_INVALID_ENUM");
     return error::kNoError;
   }
-  glEnable(cap);
+  DoEnable(cap);
   return error::kNoError;
 }
 
@@ -1609,7 +1614,7 @@ error::Error GLES2DecoderImpl::HandleStencilFuncSeparate(
 error::Error GLES2DecoderImpl::HandleStencilMask(
     uint32 immediate_data_size, const gles2::StencilMask& c) {
   GLuint mask = static_cast<GLuint>(c.mask);
-  glStencilMask(mask);
+  DoStencilMask(mask);
   return error::kNoError;
 }
 
@@ -1621,7 +1626,7 @@ error::Error GLES2DecoderImpl::HandleStencilMaskSeparate(
     SetGLError(GL_INVALID_ENUM, "glStencilMaskSeparate: face GL_INVALID_ENUM");
     return error::kNoError;
   }
-  glStencilMaskSeparate(face, mask);
+  DoStencilMaskSeparate(face, mask);
   return error::kNoError;
 }
 
@@ -1852,7 +1857,7 @@ error::Error GLES2DecoderImpl::HandleTexSubImage2D(
   if (pixels == NULL) {
     return error::kOutOfBounds;
   }
-  glTexSubImage2D(
+  DoTexSubImage2D(
       target, level, xoffset, yoffset, width, height, format, type, pixels);
   return error::kNoError;
 }
@@ -1897,7 +1902,7 @@ error::Error GLES2DecoderImpl::HandleTexSubImage2DImmediate(
   if (pixels == NULL) {
     return error::kOutOfBounds;
   }
-  glTexSubImage2D(
+  DoTexSubImage2D(
       target, level, xoffset, yoffset, width, height, format, type, pixels);
   return error::kNoError;
 }
@@ -2723,6 +2728,68 @@ error::Error GLES2DecoderImpl::HandleViewport(
   return error::kNoError;
 }
 
+error::Error GLES2DecoderImpl::HandleBlitFramebufferEXT(
+    uint32 immediate_data_size, const gles2::BlitFramebufferEXT& c) {
+  GLint srcX0 = static_cast<GLint>(c.srcX0);
+  GLint srcY0 = static_cast<GLint>(c.srcY0);
+  GLint srcX1 = static_cast<GLint>(c.srcX1);
+  GLint srcY1 = static_cast<GLint>(c.srcY1);
+  GLint dstX0 = static_cast<GLint>(c.dstX0);
+  GLint dstY0 = static_cast<GLint>(c.dstY0);
+  GLint dstX1 = static_cast<GLint>(c.dstX1);
+  GLint dstY1 = static_cast<GLint>(c.dstY1);
+  GLbitfield mask = static_cast<GLbitfield>(c.mask);
+  GLenum filter = static_cast<GLenum>(c.filter);
+  if (!validators_->blit_filter.IsValid(filter)) {
+    SetGLError(
+        GL_INVALID_ENUM, "glBlitFramebufferEXT: filter GL_INVALID_ENUM");
+    return error::kNoError;
+  }
+  DoBlitFramebufferEXT(
+      srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter);
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleRenderbufferStorageMultisampleEXT(
+    uint32 immediate_data_size,
+    const gles2::RenderbufferStorageMultisampleEXT& c) {
+  GLenum target = static_cast<GLenum>(c.target);
+  GLsizei samples = static_cast<GLsizei>(c.samples);
+  GLenum internalformat = static_cast<GLenum>(c.internalformat);
+  GLsizei width = static_cast<GLsizei>(c.width);
+  GLsizei height = static_cast<GLsizei>(c.height);
+  if (!validators_->render_buffer_target.IsValid(target)) {
+    SetGLError(
+        GL_INVALID_ENUM,
+        "glRenderbufferStorageMultisampleEXT: target GL_INVALID_ENUM");
+    return error::kNoError;
+  }
+  if (samples < 0) {
+    SetGLError(
+        GL_INVALID_VALUE, "glRenderbufferStorageMultisampleEXT: samples < 0");
+    return error::kNoError;
+  }
+  if (!validators_->render_buffer_format.IsValid(internalformat)) {
+    SetGLError(
+        GL_INVALID_ENUM,
+        "glRenderbufferStorageMultisampleEXT: internalformat GL_INVALID_ENUM");
+    return error::kNoError;
+  }
+  if (width < 0) {
+    SetGLError(
+        GL_INVALID_VALUE, "glRenderbufferStorageMultisampleEXT: width < 0");
+    return error::kNoError;
+  }
+  if (height < 0) {
+    SetGLError(
+        GL_INVALID_VALUE, "glRenderbufferStorageMultisampleEXT: height < 0");
+    return error::kNoError;
+  }
+  DoRenderbufferStorageMultisample(
+      target, samples, internalformat, width, height);
+  return error::kNoError;
+}
+
 error::Error GLES2DecoderImpl::HandleGetMaxValueInBuffer(
     uint32 immediate_data_size, const gles2::GetMaxValueInBuffer& c) {
   GLuint buffer_id = c.buffer_id;
@@ -2744,6 +2811,14 @@ error::Error GLES2DecoderImpl::HandleGetMaxValueInBuffer(
     return error::kNoError;
   }
   *result_dst = DoGetMaxValueInBuffer(buffer_id, count, type, offset);
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleCopyTextureToParentTexture(
+    uint32 immediate_data_size, const gles2::CopyTextureToParentTexture& c) {
+  GLuint client_child_id = c.client_child_id;
+  GLuint client_parent_id = c.client_parent_id;
+  DoCopyTextureToParentTexture(client_child_id, client_parent_id);
   return error::kNoError;
 }
 

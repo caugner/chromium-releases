@@ -1,9 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef VIEWS_CONTROLS_TABLE_NATIVE_TABLE_WRAPPER_H_
 #define VIEWS_CONTROLS_TABLE_NATIVE_TABLE_WRAPPER_H_
+#pragma once
 
 #include "gfx/native_widget_types.h"
 
@@ -69,6 +70,9 @@ class NativeTableWrapper {
 
   // Creates an appropriate NativeButtonWrapper for the platform.
   static NativeTableWrapper* CreateNativeWrapper(TableView2* table);
+
+ protected:
+  virtual ~NativeTableWrapper() {}
 };
 
 }  // namespace views

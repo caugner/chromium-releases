@@ -1,4 +1,4 @@
-# Copyright (c) 2009-2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2010 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -130,9 +130,6 @@
       'variables': {
         'chrome_exe_target': 1,
       },
-      'dependencies': [
-        'chrome_version_info',
-      ],
       'conditions': [
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
           'actions': [
@@ -198,6 +195,7 @@
             {
               'destination': '<(PRODUCT_DIR)',
               'files': ['tools/build/linux/chrome-wrapper',
+                        '../third_party/xdg-utils/scripts/xdg-mime',
                         '../third_party/xdg-utils/scripts/xdg-settings',
                         ],
               # The wrapper script above may need to generate a .desktop file,
@@ -220,11 +218,13 @@
               'mac_bundle_resources': [
                 'app/theme/google_chrome/app.icns',
                 'app/theme/google_chrome/document.icns',
+                'browser/cocoa/applescript/scripting.sdef',
               ],
             }, {  # else: 'branding!="Chrome"
               'mac_bundle_resources': [
                 'app/theme/chromium/app.icns',
                 'app/theme/chromium/document.icns',
+                'browser/cocoa/applescript/scripting.sdef',
               ],
             }],
             ['mac_breakpad==1', {
@@ -280,6 +280,10 @@
           'dependencies': [
             'helper_app',
             'infoplist_strings_tool',
+            'chrome_manifest_bundle',
+          ],
+          'mac_bundle_resources': [
+            '<(PRODUCT_DIR)/<(mac_bundle_id).manifest',
           ],
           'actions': [
             {
@@ -322,31 +326,6 @@
                 '<@(locales)',
               ],
               'message': 'Generating the language InfoPlist.strings files',
-              'process_outputs_as_mac_bundle_resources': 1,
-            },
-            {
-              # Massage the manifest and add it as a resource
-              'action_name': 'Generate MCX manifest file',
-              'variables': {
-                'tool_path': 'tools/build/mac/copy_mcx_manifest.sh',
-                'input_path': 'app/policy/mac/app-Manifest.plist',
-                'output_path': '<(INTERMEDIATE_DIR)/<(mac_bundle_id).manifest',
-              },
-              'inputs': [
-                '<(tool_path)',
-                '<(input_path)',
-              ],
-              'outputs': [
-                '<(output_path)',
-              ],
-              'action': [
-                '<(tool_path)',
-                '<(mac_product_name)',
-                '<(mac_bundle_id)',
-                '<(input_path)',
-                '<(output_path)',
-              ],
-              'message': 'Generating the MCX policy manifest file',
               'process_outputs_as_mac_bundle_resources': 1,
             },
           ],
@@ -467,68 +446,6 @@
         }],
       ],
     },
-    {
-      'target_name': 'chrome_version_info',
-      'type': '<(library)',
-      'sources': [
-        'app/chrome_version_info.cc',
-        'app/chrome_version_info.h',
-      ],
-      'include_dirs': [
-        '<(DEPTH)',
-      ],
-      'conditions': [
-        [ 'OS == "linux" or OS == "freebsd" or OS == "openbsd" or OS == "solaris"', {
-          'include_dirs': [
-            '<(SHARED_INTERMEDIATE_DIR)',
-          ],
-          'actions': [
-            {
-              'action_name': 'posix_version',
-              'variables': {
-                'lastchange_path':
-                  '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
-                'version_py_path': 'tools/build/version.py',
-                'version_path': 'VERSION',
-                'template_input_path': 'app/chrome_version_info_posix.h.version',
-              },
-              'conditions': [
-                [ 'branding == "Chrome"', {
-                  'variables': {
-                     'branding_path':
-                       'app/theme/google_chrome/BRANDING',
-                  },
-                }, { # else branding!="Chrome"
-                  'variables': {
-                     'branding_path':
-                       'app/theme/chromium/BRANDING',
-                  },
-                }],
-              ],
-              'inputs': [
-                '<(template_input_path)',
-                '<(version_path)',
-                '<(branding_path)',
-                '<(lastchange_path)',
-              ],
-              'outputs': [
-                '<(SHARED_INTERMEDIATE_DIR)/chrome/app/chrome_version_info_posix.h',
-              ],
-              'action': [
-                'python',
-                '<(version_py_path)',
-                '-f', '<(version_path)',
-                '-f', '<(branding_path)',
-                '-f', '<(lastchange_path)',
-                '<(template_input_path)',
-                '<@(_outputs)',
-              ],
-              'message': 'Generating version information',
-            },
-          ],
-        }],
-      ]
-    }
   ],
   'conditions': [
     ['OS=="win"', {
@@ -574,5 +491,75 @@
         },
       ],
     }],
+    ['OS=="mac"', {
+      'targets': [
+        {
+          # This is the bundle of the manifest file of Chrome.
+          # It contains the manifest file and its string tables.
+          'target_name': 'chrome_manifest_bundle',
+          'type': 'loadable_module',
+          'mac_bundle': 1,
+          'product_extension': 'manifest',
+          'product_name': '<(mac_bundle_id)',
+          'variables': {
+            # This avoids stripping debugging symbols from the target, which
+            # would fail because there is no binary code here.
+            'mac_strip': 0,
+          },
+          'dependencies': [
+             # Provides app-Manifest.plist and its string tables:
+            'policy_templates',
+          ],
+          'actions': [
+            {
+              'action_name': 'Copy MCX manifest file to manifest bundle',
+              'inputs': [
+                '<(grit_out_dir)/app/policy/mac/app-Manifest.plist',
+              ],
+              'outputs': [
+                '<(INTERMEDIATE_DIR)/app_manifest/<(mac_bundle_id).manifest',
+              ],
+              'action': [
+                'cp',
+                '<@(_inputs)',
+                '<@(_outputs)',
+              ],
+              'message':
+                'Copying the MCX policy manifest file to the manifest bundle',
+              'process_outputs_as_mac_bundle_resources': 1,
+            },
+            {
+              'action_name':
+                'Copy Localizable.strings files to manifest bundle',
+              'variables': {
+                'input_path': '<(grit_out_dir)/app/policy/mac/strings',
+                # Directory to collect the Localizable.strings files before
+                # they are copied to the bundle.
+                'output_path': '<(INTERMEDIATE_DIR)/app_manifest',
+                # TODO(gfeher): replace this with <(locales) when we have real
+                # translations
+                'available_locales': 'en',
+              },
+              'inputs': [
+                # TODO: remove this helper when we have loops in GYP
+                '>!@(<(apply_locales_cmd) -d \'<(input_path)/ZZLOCALE.lproj/Localizable.strings\' <(available_locales))',
+              ],
+              'outputs': [
+                # TODO: remove this helper when we have loops in GYP
+                '>!@(<(apply_locales_cmd) -d \'<(output_path)/ZZLOCALE.lproj/Localizable.strings\' <(available_locales))',
+              ],
+              'action': [
+                'cp', '-R',
+                '<(input_path)/',
+                '<(output_path)',
+              ],
+              'message':
+                'Copy the Localizable.strings files to the manifest bundle',
+              'process_outputs_as_mac_bundle_resources': 1,
+            },
+          ],
+        },
+      ]
+    }]
   ],
 }

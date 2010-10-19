@@ -4,8 +4,9 @@
 
 #ifndef APP_TWEEN_H_
 #define APP_TWEEN_H_
+#pragma once
 
-#include "base/logging.h"
+#include "base/basictypes.h"
 
 namespace gfx {
 class Rect;

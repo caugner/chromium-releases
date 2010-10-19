@@ -9,8 +9,6 @@
 
 #include <algorithm>
 
-#include "app/clipboard/clipboard.h"
-#include "app/clipboard/scoped_clipboard_writer.h"
 #include "app/l10n_util.h"
 #include "base/gtk_util.h"
 #include "base/logging.h"
@@ -481,10 +479,16 @@ void AutocompleteEditViewGtk::UpdatePopup() {
   // Don't inline autocomplete when the caret/selection isn't at the end of
   // the text.
   CharRange sel = GetSelection();
-  model_->StartAutocomplete(std::max(sel.cp_max, sel.cp_min) < GetTextLength());
+  model_->StartAutocomplete(sel.cp_min != sel.cp_max,
+                            std::max(sel.cp_max, sel.cp_min) < GetTextLength());
 }
 
 void AutocompleteEditViewGtk::ClosePopup() {
+#if defined(TOOLKIT_VIEWS)
+  if (popup_view_->GetModel()->IsOpen())
+    controller_->OnAutocompleteWillClosePopup();
+#endif
+
   popup_view_->GetModel()->StopAutocomplete();
 }
 
@@ -915,6 +919,12 @@ gboolean AutocompleteEditViewGtk::HandleViewFocusIn(GtkWidget* sender,
 
 gboolean AutocompleteEditViewGtk::HandleViewFocusOut(GtkWidget* sender,
                                                      GdkEventFocus* event) {
+#if defined(TOOLKIT_VIEWS)
+  // This must be invoked before ClosePopup.
+  // TODO: figure out who is getting focus.
+  controller_->OnAutocompleteLosingFocus(NULL);
+#endif
+
   // Close the popup.
   ClosePopup();
   // Tell the model to reset itself.

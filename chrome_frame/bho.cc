@@ -9,9 +9,7 @@
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/registry.h"
 #include "base/scoped_bstr_win.h"
-#include "base/scoped_variant_win.h"
 #include "base/string_util.h"
 #include "chrome_tab.h" // NOLINT
 #include "chrome_frame/crash_reporting/crash_metrics.h"
@@ -302,7 +300,7 @@ void Bho::ProcessOptInUrls(IWebBrowser2* browser, BSTR url) {
 #endif
 
   std::wstring current_url(url, SysStringLen(url));
-  if (IsValidUrlScheme(current_url, false)) {
+  if (IsValidUrlScheme(GURL(current_url), false)) {
     bool cf_protocol = StartsWith(current_url, kChromeProtocolPrefix, false);
     if (!cf_protocol && IsOptInUrl(current_url.c_str())) {
       DLOG(INFO) << "Opt-in URL. Switching to cf.";
@@ -314,34 +312,12 @@ void Bho::ProcessOptInUrls(IWebBrowser2* browser, BSTR url) {
   }
 }
 
-namespace {
-// Utility function that prevents the current module from ever being unloaded.
-void PinModule() {
-  FilePath module_path;
-  if (PathService::Get(base::FILE_MODULE, &module_path)) {
-    HMODULE unused;
-    if (!GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_PIN,
-                           module_path.value().c_str(), &unused)) {
-      NOTREACHED() << "Failed to pin module " << module_path.value().c_str()
-                   << " , last error: " << GetLastError();
-    }
-  } else {
-    NOTREACHED() << "Could not get module path.";
-  }
-}
-}  // namespace
-
 bool PatchHelper::InitializeAndPatchProtocolsIfNeeded() {
   bool ret = false;
 
   _pAtlModule->m_csStaticDataInitAndTypeInfo.Lock();
 
   if (state_ == UNKNOWN) {
-    // If we're going to start patching things for reals, we'd better make sure
-    // that we stick around for ever more:
-    if (!IsUnpinnedMode())
-      PinModule();
-
     ProtocolPatchMethod patch_method = GetPatchMethod();
     if (patch_method == PATCH_METHOD_INET_PROTOCOL) {
       g_trans_hooks.InstallHooks();
@@ -385,4 +361,3 @@ void PatchHelper::UnpatchIfNeeded() {
 
   state_ = UNKNOWN;
 }
-

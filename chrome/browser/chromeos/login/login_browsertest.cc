@@ -50,6 +50,8 @@ class LoginTestBase : public InProcessBrowserTest {
     testApi_->SetPowerLibrary(&mock_power_library_, false);
     EXPECT_CALL(mock_power_library_, battery_time_to_empty())
         .WillRepeatedly((Return(base::TimeDelta::FromMinutes(42))));
+    EXPECT_CALL(mock_power_library_, battery_time_to_full())
+        .WillRepeatedly((Return(base::TimeDelta::FromMinutes(24))));
 
     testApi_->SetSynapticsLibrary(&mock_synaptics_library_, false);
     testApi_->SetCryptohomeLibrary(&mock_cryptohome_library_, false);
@@ -81,9 +83,8 @@ class LoginUserTest : public LoginTestBase {
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) {
-    command_line->AppendSwitchWithValue(
-        switches::kLoginUser, "TestUser@gmail.com");
-    command_line->AppendSwitchWithValue(switches::kLoginProfile, "user");
+    command_line->AppendSwitchASCII(switches::kLoginUser, "TestUser@gmail.com");
+    command_line->AppendSwitchASCII(switches::kLoginProfile, "user");
     command_line->AppendSwitch(switches::kNoFirstRun);
   }
 };
@@ -96,7 +97,7 @@ class LoginProfileTest : public LoginTestBase {
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) {
-    command_line->AppendSwitchWithValue(switches::kLoginProfile, "user");
+    command_line->AppendSwitchASCII(switches::kLoginProfile, "user");
     command_line->AppendSwitch(switches::kNoFirstRun);
   }
 };

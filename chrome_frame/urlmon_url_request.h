@@ -12,9 +12,7 @@
 #include <string>
 
 #include "base/lock.h"
-#include "base/scoped_comptr_win.h"
 #include "base/thread.h"
-#include "base/waitable_event.h"
 #include "chrome_frame/plugin_url_request.h"
 #include "chrome_frame/urlmon_moniker.h"
 #include "chrome_frame/utils.h"
@@ -129,4 +127,3 @@ class UrlmonUrlRequestManager
 };
 
 #endif  // CHROME_FRAME_URLMON_URL_REQUEST_H_
-

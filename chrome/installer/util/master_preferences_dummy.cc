@@ -13,12 +13,13 @@
 #include <windows.h>
 
 #include "base/logging.h"
+#include "base/values.h"
 #include "googleurl/src/gurl.h"
 
 namespace installer_util {
 
 bool GetDistroBooleanPreference(const DictionaryValue* prefs,
-                                const std::wstring& name,
+                                const std::string& name,
                                 bool* value) {
   // This function is called by InstallUtil::IsChromeFrameProcess()
   // We return false because GetInstallPreferences returns an empty value below.
@@ -26,7 +27,7 @@ bool GetDistroBooleanPreference(const DictionaryValue* prefs,
 }
 
 bool GetDistroIntegerPreference(const DictionaryValue* prefs,
-                                const std::wstring& name,
+                                const std::string& name,
                                 int* value) {
   NOTREACHED();
   return false;
@@ -55,7 +56,7 @@ std::vector<GURL> GetDefaultBookmarks(const DictionaryValue* prefs) {
 }
 
 bool SetDistroBooleanPreference(DictionaryValue* prefs,
-                                const std::wstring& name,
+                                const std::string& name,
                                 bool value) {
   NOTREACHED();
   return false;

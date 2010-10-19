@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,6 +7,7 @@
 
 #ifndef CHROME_INSTALLER_UTIL_UTIL_CONSTANTS_H_
 #define CHROME_INSTALLER_UTIL_UTIL_CONSTANTS_H_
+#pragma once
 
 namespace installer_util {
 
@@ -61,25 +62,26 @@ extern const wchar_t kDoNotRegisterForUpdateLaunch[];
 extern const wchar_t kDoNotRemoveSharedItems[];
 extern const wchar_t kEnableLogging[];
 extern const wchar_t kForceUninstall[];
-extern const wchar_t kInstallArchive[];
-extern const wchar_t kInstallerData[];
+extern const char kInstallArchive[];
+extern const char kInstallerData[];
 extern const wchar_t kLogFile[];
 extern const wchar_t kMakeChromeDefault[];
 extern const wchar_t kMsi[];
-extern const wchar_t kNewSetupExe[];
-extern const wchar_t kRegisterChromeBrowser[];
-extern const wchar_t kRegisterChromeBrowserSuffix[];
+extern const char kNewSetupExe[];
+extern const char kRegisterChromeBrowser[];
+extern const char kRegisterChromeBrowserSuffix[];
 extern const wchar_t kRenameChromeExe[];
 extern const wchar_t kRemoveChromeRegistration[];
 extern const wchar_t kRunAsAdmin[];
 extern const wchar_t kSystemLevel[];
 extern const wchar_t kUninstall[];
-extern const wchar_t kUpdateSetupExe[];
+extern const char kUpdateSetupExe[];
 extern const wchar_t kVerboseLogging[];
-extern const wchar_t kShowEula[];
+extern const char kShowEula[];
 extern const wchar_t kAltDesktopShortcut[];
-extern const wchar_t kInactiveUserToast[];
+extern const char kInactiveUserToast[];
 extern const wchar_t kSystemLevelToast[];
+extern const wchar_t kToastResultsKey[];
 }  // namespace switches
 
 extern const wchar_t kGoogleChromeInstallSubDir1[];
@@ -100,7 +102,7 @@ extern const wchar_t kSxSSuffix[];
 extern const wchar_t kUninstallStringField[];
 extern const wchar_t kUninstallArgumentsField[];
 extern const wchar_t kUninstallDisplayNameField[];
-extern const wchar_t kUninstallMetricsName[];
+extern const char kUninstallMetricsName[];
 extern const wchar_t kUninstallInstallationDate[];
 
 }  // namespace installer_util

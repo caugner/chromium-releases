@@ -9,6 +9,7 @@
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
@@ -27,18 +28,41 @@ namespace {
 
 class MockProxyConfigService: public ProxyConfigService {
  public:
-  MockProxyConfigService() {}  // Direct connect.
-  explicit MockProxyConfigService(const ProxyConfig& pc) : config(pc) {}
-  explicit MockProxyConfigService(const std::string& pac_url) {
-    config.set_pac_url(GURL(pac_url));
+  explicit MockProxyConfigService(const ProxyConfig& config)
+      : has_config_(true), config_(config) {
   }
 
-  virtual int GetProxyConfig(ProxyConfig* results) {
-    *results = config;
-    return OK;
+  explicit MockProxyConfigService(const std::string& pac_url)
+      : has_config_(true),
+        config_(ProxyConfig::CreateFromCustomPacURL(GURL(pac_url))) {
   }
 
-  ProxyConfig config;
+  virtual void AddObserver(Observer* observer) {
+    observers_.AddObserver(observer);
+  }
+
+  virtual void RemoveObserver(Observer* observer) {
+    observers_.RemoveObserver(observer);
+  }
+
+  virtual bool GetLatestProxyConfig(ProxyConfig* results) {
+    if (has_config_) {
+      *results = config_;
+      return true;
+    }
+    return false;
+  }
+
+  void SetConfig(const ProxyConfig& config) {
+    has_config_ = true;
+    config_ = config;
+    FOR_EACH_OBSERVER(Observer, observers_, OnProxyConfigChanged(config));
+  }
+
+ private:
+  bool has_config_;
+  ProxyConfig config_;
+  ObserverList<Observer, true> observers_;
 };
 
 }  // namespace
@@ -91,7 +115,8 @@ class MockProxyScriptFetcher : public ProxyScriptFetcher {
 TEST(ProxyServiceTest, Direct) {
   MockAsyncProxyResolver* resolver = new MockAsyncProxyResolver;
   scoped_refptr<ProxyService> service(
-      new ProxyService(new MockProxyConfigService, resolver, NULL));
+      new ProxyService(new MockProxyConfigService(
+          ProxyConfig::CreateDirect()), resolver, NULL));
 
   GURL url("http://www.google.com/");
 
@@ -105,11 +130,14 @@ TEST(ProxyServiceTest, Direct) {
   EXPECT_TRUE(info.is_direct());
 
   // Check the NetLog was filled correctly.
-  EXPECT_EQ(5u, log.entries().size());
+  EXPECT_EQ(3u, log.entries().size());
   EXPECT_TRUE(LogContainsBeginEvent(
       log.entries(), 0, NetLog::TYPE_PROXY_SERVICE));
+  EXPECT_TRUE(LogContainsEvent(
+      log.entries(), 1, NetLog::TYPE_PROXY_SERVICE_RESOLVED_PROXY_LIST,
+      NetLog::PHASE_NONE));
   EXPECT_TRUE(LogContainsEndEvent(
-      log.entries(), 4, NetLog::TYPE_PROXY_SERVICE));
+      log.entries(), 2, NetLog::TYPE_PROXY_SERVICE));
 }
 
 TEST(ProxyServiceTest, PAC) {
@@ -131,7 +159,7 @@ TEST(ProxyServiceTest, PAC) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -146,15 +174,15 @@ TEST(ProxyServiceTest, PAC) {
   EXPECT_EQ("foopy:80", info.proxy_server().ToURI());
 
   // Check the NetLog was filled correctly.
-  EXPECT_EQ(7u, log.entries().size());
+  EXPECT_EQ(5u, log.entries().size());
   EXPECT_TRUE(LogContainsBeginEvent(
       log.entries(), 0, NetLog::TYPE_PROXY_SERVICE));
   EXPECT_TRUE(LogContainsBeginEvent(
-      log.entries(), 3, NetLog::TYPE_PROXY_SERVICE_WAITING_FOR_INIT_PAC));
+      log.entries(), 1, NetLog::TYPE_PROXY_SERVICE_WAITING_FOR_INIT_PAC));
   EXPECT_TRUE(LogContainsEndEvent(
-      log.entries(), 4, NetLog::TYPE_PROXY_SERVICE_WAITING_FOR_INIT_PAC));
+      log.entries(), 2, NetLog::TYPE_PROXY_SERVICE_WAITING_FOR_INIT_PAC));
   EXPECT_TRUE(LogContainsEndEvent(
-      log.entries(), 6, NetLog::TYPE_PROXY_SERVICE));
+      log.entries(), 4, NetLog::TYPE_PROXY_SERVICE));
 }
 
 // Test that the proxy resolver does not see the URL's username/password
@@ -176,7 +204,7 @@ TEST(ProxyServiceTest, PAC_NoIdentityOrHash) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -204,7 +232,7 @@ TEST(ProxyServiceTest, PAC_FailoverWithoutDirect) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -262,7 +290,7 @@ TEST(ProxyServiceTest, PAC_FailoverAfterDirect) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -328,7 +356,7 @@ TEST(ProxyServiceTest, ProxyResolverFails) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -382,7 +410,7 @@ TEST(ProxyServiceTest, ProxyFallback) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -472,7 +500,7 @@ TEST(ProxyServiceTest, ProxyFallbackToDirect) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -535,7 +563,7 @@ TEST(ProxyServiceTest, ProxyFallback_NewSettings) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -552,8 +580,8 @@ TEST(ProxyServiceTest, ProxyFallback_NewSettings) {
   EXPECT_EQ("foopy1:8080", info.proxy_server().ToURI());
 
   // Fake an error on the proxy, and also a new configuration on the proxy.
-  config_service->config = ProxyConfig();
-  config_service->config.set_pac_url(GURL("http://foopy-new/proxy.pac"));
+  config_service->SetConfig(
+      ProxyConfig::CreateFromCustomPacURL(GURL("http://foopy-new/proxy.pac")));
 
   TestCompletionCallback callback2;
   rv = service->ReconsiderProxyAfterError(url, &info, &callback2, NULL,
@@ -561,7 +589,7 @@ TEST(ProxyServiceTest, ProxyFallback_NewSettings) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(GURL("http://foopy-new/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -583,8 +611,9 @@ TEST(ProxyServiceTest, ProxyFallback_NewSettings) {
   EXPECT_EQ("foopy2:9090", info.proxy_server().ToURI());
 
   // We simulate a new configuration.
-  config_service->config = ProxyConfig();
-  config_service->config.set_pac_url(GURL("http://foopy-new2/proxy.pac"));
+  config_service->SetConfig(
+      ProxyConfig::CreateFromCustomPacURL(
+          GURL("http://foopy-new2/proxy.pac")));
 
   // We fake another error. It should go back to the first proxy.
   TestCompletionCallback callback4;
@@ -593,7 +622,7 @@ TEST(ProxyServiceTest, ProxyFallback_NewSettings) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(GURL("http://foopy-new2/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -627,7 +656,7 @@ TEST(ProxyServiceTest, ProxyFallback_BadConfig) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
   ASSERT_EQ(1u, resolver->pending_requests().size());
   EXPECT_EQ(url, resolver->pending_requests()[0]->url());
@@ -859,7 +888,7 @@ TEST(ProxyServiceTest, CancelInProgressRequest) {
 
   // Successfully initialize the PAC script.
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -958,7 +987,7 @@ TEST(ProxyServiceTest, InitialPACScriptDownload) {
   // Now that the PAC script is downloaded, it will have been sent to the proxy
   // resolver.
   EXPECT_EQ(ASCIIToUTF16("pac-v1"),
-            resolver->pending_set_pac_script_request()->pac_script());
+            resolver->pending_set_pac_script_request()->script_data()->utf16());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(3u, resolver->pending_requests().size());
@@ -1039,7 +1068,7 @@ TEST(ProxyServiceTest, ChangeScriptFetcherWhilePACDownloadInProgress) {
   // Now that the PAC script is downloaded, it will have been sent to the proxy
   // resolver.
   EXPECT_EQ(ASCIIToUTF16("pac-v1"),
-            resolver->pending_set_pac_script_request()->pac_script());
+            resolver->pending_set_pac_script_request()->script_data()->utf16());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(2u, resolver->pending_requests().size());
@@ -1102,7 +1131,7 @@ TEST(ProxyServiceTest, CancelWhilePACFetching) {
   // Now that the PAC script is downloaded, it will have been sent to the
   // proxy resolver.
   EXPECT_EQ(ASCIIToUTF16("pac-v1"),
-            resolver->pending_set_pac_script_request()->pac_script());
+            resolver->pending_set_pac_script_request()->script_data()->utf16());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -1121,17 +1150,17 @@ TEST(ProxyServiceTest, CancelWhilePACFetching) {
   EXPECT_FALSE(callback2.have_result());  // Cancelled.
 
   // Check the NetLog for request 1 (which was cancelled) got filled properly.
-  EXPECT_EQ(6u, log1.entries().size());
+  EXPECT_EQ(4u, log1.entries().size());
   EXPECT_TRUE(LogContainsBeginEvent(
       log1.entries(), 0, NetLog::TYPE_PROXY_SERVICE));
   EXPECT_TRUE(LogContainsBeginEvent(
-      log1.entries(), 3, NetLog::TYPE_PROXY_SERVICE_WAITING_FOR_INIT_PAC));
+      log1.entries(), 1, NetLog::TYPE_PROXY_SERVICE_WAITING_FOR_INIT_PAC));
   // Note that TYPE_PROXY_SERVICE_WAITING_FOR_INIT_PAC is never completed before
   // the cancellation occured.
   EXPECT_TRUE(LogContainsEvent(
-      log1.entries(), 4, NetLog::TYPE_CANCELLED, NetLog::PHASE_NONE));
+      log1.entries(), 2, NetLog::TYPE_CANCELLED, NetLog::PHASE_NONE));
   EXPECT_TRUE(LogContainsEndEvent(
-      log1.entries(), 5, NetLog::TYPE_PROXY_SERVICE));
+      log1.entries(), 3, NetLog::TYPE_PROXY_SERVICE));
 }
 
 // Test that if auto-detect fails, we fall-back to the custom pac.
@@ -1180,7 +1209,7 @@ TEST(ProxyServiceTest, FallbackFromAutodetectToCustomPac) {
   fetcher->NotifyFetchCompletion(OK, "custom-pac-script");
 
   EXPECT_EQ(ASCIIToUTF16("custom-pac-script"),
-            resolver->pending_set_pac_script_request()->pac_script());
+            resolver->pending_set_pac_script_request()->script_data()->utf16());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   // Now finally, the pending requests should have been sent to the resolver
@@ -1246,7 +1275,7 @@ TEST(ProxyServiceTest, FallbackFromAutodetectToCustomPac2) {
 
   // Simulate a parse error.
   EXPECT_EQ(ASCIIToUTF16("invalid-script-contents"),
-            resolver->pending_set_pac_script_request()->pac_script());
+            resolver->pending_set_pac_script_request()->script_data()->utf16());
   resolver->pending_set_pac_script_request()->CompleteNow(
       ERR_PAC_SCRIPT_FAILED);
 
@@ -1256,7 +1285,7 @@ TEST(ProxyServiceTest, FallbackFromAutodetectToCustomPac2) {
   fetcher->NotifyFetchCompletion(OK, "custom-pac-script");
 
   EXPECT_EQ(ASCIIToUTF16("custom-pac-script"),
-            resolver->pending_set_pac_script_request()->pac_script());
+            resolver->pending_set_pac_script_request()->script_data()->utf16());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   // Now finally, the pending requests should have been sent to the resolver
@@ -1372,7 +1401,7 @@ TEST(ProxyServiceTest, BypassDoesntApplyToPac) {
   fetcher->NotifyFetchCompletion(OK, "auto-detect");
 
   EXPECT_EQ(ASCIIToUTF16("auto-detect"),
-            resolver->pending_set_pac_script_request()->pac_script());
+            resolver->pending_set_pac_script_request()->script_data()->utf16());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -1411,8 +1440,8 @@ TEST(ProxyServiceTest, BypassDoesntApplyToPac) {
 // have any memory errors (used to be that the ProxyScriptFetcher was
 // being deleted prior to the InitProxyResolver).
 TEST(ProxyServiceTest, DeleteWhileInitProxyResolverHasOutstandingFetch) {
-  ProxyConfig config;
-  config.set_pac_url(GURL("http://foopy/proxy.pac"));
+  ProxyConfig config =
+    ProxyConfig::CreateFromCustomPacURL(GURL("http://foopy/proxy.pac"));
 
   MockProxyConfigService* config_service = new MockProxyConfigService(config);
   MockAsyncProxyResolverExpectsBytes* resolver =
@@ -1464,7 +1493,7 @@ TEST(ProxyServiceTest, DeleteWhileInitProxyResolverHasOutstandingSet) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
-            resolver->pending_set_pac_script_request()->pac_url());
+            resolver->pending_set_pac_script_request()->script_data()->url());
 
   // Delete the ProxyService.
   service = NULL;
@@ -1496,60 +1525,10 @@ TEST(ProxyServiceTest, ResetProxyConfigService) {
   EXPECT_EQ("foopy2:8080", info.proxy_server().ToURI());
 }
 
-// Check that after we have done the auto-detect test, and the configuration
-// is updated (with no change), we don't re-try the autodetect test.
-// Regression test for http://crbug.com/18526 -- the configuration was being
-// mutated to cancel out the automatic settings, which meant UpdateConfig()
-// thought it had received a new configuration.
-TEST(ProxyServiceTest, UpdateConfigAfterFailedAutodetect) {
-  ProxyConfig config;
-  config.set_auto_detect(true);
-
-  MockProxyConfigService* config_service = new MockProxyConfigService(config);
-  MockAsyncProxyResolver* resolver = new MockAsyncProxyResolver;
-  scoped_refptr<ProxyService> service(
-      new ProxyService(config_service, resolver, NULL));
-
-  // Start 1 requests.
-
-  ProxyInfo info1;
-  TestCompletionCallback callback1;
-  int rv = service->ResolveProxy(
-      GURL("http://www.google.com"), &info1, &callback1, NULL, BoundNetLog());
-  EXPECT_EQ(ERR_IO_PENDING, rv);
-
-  // Check that nothing has been sent to the proxy resolver yet.
-  ASSERT_EQ(0u, resolver->pending_requests().size());
-
-  // Fail the setting of autodetect script.
-  EXPECT_EQ(GURL(), resolver->pending_set_pac_script_request()->pac_url());
-  resolver->pending_set_pac_script_request()->CompleteNow(ERR_FAILED);
-
-  // Verify that request ran as expected -- should have fallen back to direct.
-  EXPECT_EQ(OK, callback1.WaitForResult());
-  EXPECT_TRUE(info1.is_direct());
-
-  // Force the ProxyService to pull down a new proxy configuration.
-  // (Even though the configuration isn't old/bad).
-  service->UpdateConfig(BoundNetLog());
-
-  // Start another request -- the effective configuration has not
-  // changed, so we shouldn't re-run the autodetect step.
-  // Rather, it should complete synchronously as direct-connect.
-  ProxyInfo info2;
-  TestCompletionCallback callback2;
-  rv = service->ResolveProxy(
-      GURL("http://www.google.com"), &info2, &callback2, NULL, BoundNetLog());
-  EXPECT_EQ(OK, rv);
-
-  EXPECT_TRUE(info2.is_direct());
-}
-
 // Test that when going from a configuration that required PAC to one
 // that does NOT, we unset the variable |should_use_proxy_resolver_|.
 TEST(ProxyServiceTest, UpdateConfigFromPACToDirect) {
-  ProxyConfig config;
-  config.set_auto_detect(true);
+  ProxyConfig config = ProxyConfig::CreateAutoDetect();
 
   MockProxyConfigService* config_service = new MockProxyConfigService(config);
   MockAsyncProxyResolver* resolver = new MockAsyncProxyResolver;
@@ -1568,7 +1547,8 @@ TEST(ProxyServiceTest, UpdateConfigFromPACToDirect) {
   ASSERT_EQ(0u, resolver->pending_requests().size());
 
   // Successfully set the autodetect script.
-  EXPECT_EQ(GURL(), resolver->pending_set_pac_script_request()->pac_url());
+  EXPECT_EQ(ProxyResolverScriptData::TYPE_AUTO_DETECT,
+            resolver->pending_set_pac_script_request()->script_data()->type());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   // Complete the pending request.
@@ -1585,9 +1565,7 @@ TEST(ProxyServiceTest, UpdateConfigFromPACToDirect) {
   //
   // This new configuration no longer has auto_detect set, so
   // requests should complete synchronously now as direct-connect.
-  config.set_auto_detect(false);
-  config_service->config = config;
-  service->UpdateConfig(BoundNetLog());
+  config_service->SetConfig(ProxyConfig::CreateDirect());
 
   // Start another request -- the effective configuration has changed.
   ProxyInfo info2;
@@ -1612,6 +1590,10 @@ TEST(ProxyServiceTest, NetworkChangeTriggersPacRefetch) {
   MockProxyScriptFetcher* fetcher = new MockProxyScriptFetcher;
   service->SetProxyScriptFetcher(fetcher);
 
+  // Disable the "wait after IP address changes" hack, so this unit-test can
+  // complete quickly.
+  service->set_stall_proxy_auto_config_delay(base::TimeDelta());
+
   // Start 1 request.
 
   ProxyInfo info1;
@@ -1635,7 +1617,7 @@ TEST(ProxyServiceTest, NetworkChangeTriggersPacRefetch) {
   // Now that the PAC script is downloaded, the request will have been sent to
   // the proxy resolver.
   EXPECT_EQ(ASCIIToUTF16("pac-v1"),
-            resolver->pending_set_pac_script_request()->pac_script());
+            resolver->pending_set_pac_script_request()->script_data()->utf16());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());
@@ -1677,7 +1659,7 @@ TEST(ProxyServiceTest, NetworkChangeTriggersPacRefetch) {
   // Now that the PAC script is downloaded, the second request will have been
   // sent to the proxy resolver.
   EXPECT_EQ(ASCIIToUTF16("pac-v2"),
-            resolver->pending_set_pac_script_request()->pac_script());
+            resolver->pending_set_pac_script_request()->script_data()->utf16());
   resolver->pending_set_pac_script_request()->CompleteNow(OK);
 
   ASSERT_EQ(1u, resolver->pending_requests().size());

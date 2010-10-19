@@ -8,6 +8,7 @@
 #include <iterator>
 
 #include "base/logging.h"
+#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/autofill/autofill_field.h"
@@ -16,7 +17,7 @@
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/webdata/web_data_service.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 
 namespace {
@@ -27,17 +28,27 @@ const int kMinImportSize = 3;
 
 const char kUnlabeled[] = "Unlabeled";
 
-bool IsEmptyProfile(const AutoFillProfile& profile) {
-  FieldTypeSet types;
-  profile.GetAvailableFieldTypes(&types);
-  return types.empty();
-}
+template<typename T>
+class FormGroupIDMatchesFunctor {
+ public:
+  explicit FormGroupIDMatchesFunctor(int id) : id_(id) {}
 
-bool IsEmptyCreditCard(const CreditCard& credit_card) {
-  FieldTypeSet types;
-  credit_card.GetAvailableFieldTypes(&types);
-  return types.empty() && credit_card.billing_address().empty();
-}
+  bool operator()(const T& form_group) {
+    return form_group.unique_id() == id_;
+  }
+
+ private:
+  int id_;
+};
+
+template<typename T>
+class DereferenceFunctor {
+ public:
+  template<typename T_Iterator>
+  const T& operator()(const T_Iterator& iterator) {
+    return *iterator;
+  }
+};
 
 }  // namespace
 
@@ -94,7 +105,7 @@ void PersonalDataManager::OnAutoFillDialogApply(
 }
 
 void PersonalDataManager::SetObserver(PersonalDataManager::Observer* observer) {
-  // TODO: RemoveObserver is for compatability with old code, it should be
+  // TODO: RemoveObserver is for compatibility with old code, it should be
   // nuked.
   observers_.RemoveObserver(observer);
   observers_.AddObserver(observer);
@@ -231,10 +242,9 @@ void PersonalDataManager::SetProfiles(std::vector<AutoFillProfile>* profiles) {
 
   // Remove empty profiles from input.
   profiles->erase(
-      std::remove_if(profiles->begin(), profiles->end(), IsEmptyProfile),
+      std::remove_if(profiles->begin(), profiles->end(),
+                     std::mem_fun_ref(&AutoFillProfile::IsEmpty)),
       profiles->end());
-
-  SetUniqueProfileLabels(profiles);
 
   WebDataService* wds = profile_->GetWebDataService(Profile::EXPLICIT_ACCESS);
   if (!wds)
@@ -282,11 +292,8 @@ void PersonalDataManager::SetProfiles(std::vector<AutoFillProfile>* profiles) {
     // unique ID.  This also means we need to add this profile to the web
     // database.
     if (iter->unique_id() == 0) {
-      iter->set_unique_id(CreateNextUniqueID(&unique_ids_));
+      iter->set_unique_id(CreateNextUniqueIDFor(&unique_profile_ids_));
       wds->AddAutoFillProfile(*iter);
-
-      // Update the list of unique profile IDs.
-      unique_profile_ids_.insert(iter->unique_id());
     }
   }
 
@@ -310,7 +317,8 @@ void PersonalDataManager::SetCreditCards(
   // Remove empty credit cards from input.
   credit_cards->erase(
       std::remove_if(
-          credit_cards->begin(), credit_cards->end(), IsEmptyCreditCard),
+          credit_cards->begin(), credit_cards->end(),
+          std::mem_fun_ref(&CreditCard::IsEmpty)),
       credit_cards->end());
 
   SetUniqueCreditCardLabels(credit_cards);
@@ -362,11 +370,8 @@ void PersonalDataManager::SetCreditCards(
     // unique ID.  This also means we need to add this credit card to the web
     // database.
     if (iter->unique_id() == 0) {
-      iter->set_unique_id(CreateNextUniqueID(&unique_ids_));
+      iter->set_unique_id(CreateNextUniqueIDFor(&unique_creditcard_ids_));
       wds->AddCreditCard(*iter);
-
-      // Update the list of unique credit card IDs.
-      unique_creditcard_ids_.insert(iter->unique_id());
     }
   }
 
@@ -377,6 +382,95 @@ void PersonalDataManager::SetCreditCards(
   }
 
   FOR_EACH_OBSERVER(Observer, observers_, OnPersonalDataChanged());
+}
+
+// TODO(jhawkins): Refactor SetProfiles so this isn't so hacky.
+void PersonalDataManager::AddProfile(const AutoFillProfile& profile) {
+  // Set to true if |profile| is merged into the profile list.
+  bool merged = false;
+
+  // Don't save a web profile if the data in the profile is a subset of an
+  // auxiliary profile.
+  for (std::vector<AutoFillProfile*>::const_iterator iter =
+           auxiliary_profiles_.begin();
+       iter != auxiliary_profiles_.end(); ++iter) {
+    if (profile.IsSubsetOf(**iter))
+      return;
+  }
+
+  std::vector<AutoFillProfile> profiles;
+  for (std::vector<AutoFillProfile*>::const_iterator iter =
+           web_profiles_.begin();
+       iter != web_profiles_.end(); ++iter) {
+    if (profile.IsSubsetOf(**iter)) {
+      // In this case, the existing profile already contains all of the data
+      // in |profile|, so consider the profiles already merged.
+      merged = true;
+    } else if ((*iter)->IntersectionOfTypesHasEqualValues(profile)) {
+      // |profile| contains all of the data in this profile, plus
+      // more.
+      merged = true;
+      (*iter)->MergeWith(profile);
+    }
+
+    profiles.push_back(**iter);
+  }
+
+  if (!merged)
+    profiles.push_back(profile);
+
+  SetProfiles(&profiles);
+}
+
+void PersonalDataManager::UpdateProfile(const AutoFillProfile& profile) {
+  WebDataService* wds = profile_->GetWebDataService(Profile::EXPLICIT_ACCESS);
+  if (!wds)
+    return;
+
+  // Update the cached profile.
+  for (std::vector<AutoFillProfile*>::iterator iter = web_profiles_->begin();
+       iter != web_profiles_->end(); ++iter) {
+    if ((*iter)->unique_id() == profile.unique_id()) {
+      delete *iter;
+      *iter = new AutoFillProfile(profile);
+      break;
+    }
+  }
+
+  wds->UpdateAutoFillProfile(profile);
+  FOR_EACH_OBSERVER(Observer, observers_, OnPersonalDataChanged());
+}
+
+void PersonalDataManager::RemoveProfile(int unique_id) {
+  // TODO(jhawkins): Refactor SetProfiles so this isn't so hacky.
+  std::vector<AutoFillProfile> profiles(web_profiles_.size());
+  std::transform(web_profiles_.begin(), web_profiles_.end(),
+                 profiles.begin(),
+                 DereferenceFunctor<AutoFillProfile>());
+
+  // Remove the profile that matches |unique_id|.
+  profiles.erase(
+      std::remove_if(profiles.begin(), profiles.end(),
+                     FormGroupIDMatchesFunctor<AutoFillProfile>(unique_id)),
+      profiles.end());
+
+  SetProfiles(&profiles);
+}
+
+void PersonalDataManager::RemoveCreditCard(int unique_id) {
+  // TODO(jhawkins): Refactor SetCreditCards so this isn't so hacky.
+  std::vector<CreditCard> credit_cards(credit_cards_.size());
+  std::transform(credit_cards_.begin(), credit_cards_.end(),
+                 credit_cards.begin(),
+                 DereferenceFunctor<CreditCard>());
+
+  // Remove the credit card that matches |unique_id|.
+  credit_cards.erase(
+      std::remove_if(credit_cards.begin(), credit_cards.end(),
+                     FormGroupIDMatchesFunctor<CreditCard>(unique_id)),
+      credit_cards.end());
+
+  SetCreditCards(&credit_cards);
 }
 
 void PersonalDataManager::GetPossibleFieldTypes(const string16& text,
@@ -456,9 +550,7 @@ AutoFillProfile* PersonalDataManager::CreateNewEmptyAutoFillProfileForDBThread(
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
   AutoLock lock(unique_ids_lock_);
   AutoFillProfile* p = new AutoFillProfile(label,
-      CreateNextUniqueID(&unique_ids_));
-  // Also update the unique profile IDs.
-  unique_profile_ids_.insert(p->unique_id());
+      CreateNextUniqueIDFor(&unique_profile_ids_));
   return p;
 }
 
@@ -480,14 +572,15 @@ void PersonalDataManager::Init(Profile* profile) {
   LoadCreditCards();
 }
 
-int PersonalDataManager::CreateNextUniqueID(std::set<int>* unique_ids) {
+int PersonalDataManager::CreateNextUniqueIDFor(std::set<int>* id_set) {
   // Profile IDs MUST start at 1 to allow 0 as an error value when reading
   // the ID from the WebDB (see LoadData()).
   unique_ids_lock_.AssertAcquired();
   int id = 1;
-  while (unique_ids->count(id) != 0)
+  while (unique_ids_.count(id) != 0)
     ++id;
-  unique_ids->insert(id);
+  unique_ids_.insert(id);
+  id_set->insert(id);
   return id;
 }
 
@@ -540,6 +633,7 @@ void PersonalDataManager::ReceiveLoadedProfiles(WebDataService::Handle h,
   for (std::vector<AutoFillProfile*>::iterator iter = profiles.begin();
        iter != profiles.end(); ++iter) {
     unique_profile_ids_.insert((*iter)->unique_id());
+    unique_ids_.insert((*iter)->unique_id());
     web_profiles_.push_back(*iter);
   }
 }
@@ -560,6 +654,7 @@ void PersonalDataManager::ReceiveLoadedCreditCards(
   for (std::vector<CreditCard*>::iterator iter = credit_cards.begin();
        iter != credit_cards.end(); ++iter) {
     unique_creditcard_ids_.insert((*iter)->unique_id());
+    unique_ids_.insert((*iter)->unique_id());
     credit_cards_.push_back(*iter);
   }
 }
@@ -575,28 +670,6 @@ void PersonalDataManager::CancelPendingQuery(WebDataService::Handle* handle) {
     web_data_service->CancelRequest(*handle);
   }
   *handle = 0;
-}
-
-void PersonalDataManager::SetUniqueProfileLabels(
-    std::vector<AutoFillProfile>* profiles) {
-  std::map<string16, std::vector<AutoFillProfile*> > label_map;
-  for (std::vector<AutoFillProfile>::iterator iter = profiles->begin();
-       iter != profiles->end(); ++iter) {
-    label_map[iter->Label()].push_back(&(*iter));
-  }
-
-  for (std::map<string16, std::vector<AutoFillProfile*> >::iterator iter =
-           label_map.begin();
-       iter != label_map.end(); ++iter) {
-    // Start at the second element because the first label should not be
-    // renamed.  The appended label number starts at 2, because the first label
-    // has an implicit index of 1.
-    for (size_t i = 1; i < iter->second.size(); ++i) {
-      string16 newlabel = iter->second[i]->Label() +
-          UintToString16(static_cast<unsigned int>(i + 1));
-      iter->second[i]->set_label(newlabel);
-    }
-  }
 }
 
 void PersonalDataManager::SetUniqueCreditCardLabels(
@@ -615,7 +688,7 @@ void PersonalDataManager::SetUniqueCreditCardLabels(
     // has an implicit index of 1.
     for (size_t i = 1; i < iter->second.size(); ++i) {
       string16 newlabel = iter->second[i]->Label() +
-          UintToString16(static_cast<unsigned int>(i + 1));
+          base::UintToString16(static_cast<unsigned int>(i + 1));
       iter->second[i]->set_label(newlabel);
     }
   }
@@ -628,43 +701,7 @@ void PersonalDataManager::SaveImportedProfile() {
   if (!imported_profile_.get())
     return;
 
-  // Set to true if |imported_profile_| is merged into the profile list.
-  bool merged = false;
-
-  imported_profile_->set_label(ASCIIToUTF16(kUnlabeled));
-
-  // Don't save a web profile if the data in the profile is a subset of an
-  // auxiliary profile.
-  for (std::vector<AutoFillProfile*>::const_iterator iter =
-           auxiliary_profiles_.begin();
-       iter != auxiliary_profiles_.end(); ++iter) {
-    if (imported_profile_->IsSubsetOf(**iter))
-      return;
-  }
-
-  std::vector<AutoFillProfile> profiles;
-  for (std::vector<AutoFillProfile*>::const_iterator iter =
-           web_profiles_.begin();
-       iter != web_profiles_.end(); ++iter) {
-    if (imported_profile_->IsSubsetOf(**iter)) {
-      // In this case, the existing profile already contains all of the data
-      // in |imported_profile_|, so consider the profiles already merged.
-      merged = true;
-    } else if ((*iter)->IntersectionOfTypesHasEqualValues(
-        *imported_profile_)) {
-      // |imported_profile| contains all of the data in this profile, plus
-      // more.
-      merged = true;
-      (*iter)->MergeWith(*imported_profile_);
-    }
-
-    profiles.push_back(**iter);
-  }
-
-  if (!merged)
-    profiles.push_back(*imported_profile_);
-
-  SetProfiles(&profiles);
+  AddProfile(*imported_profile_);
 }
 
 // TODO(jhawkins): Refactor and merge this with SaveImportedProfile.

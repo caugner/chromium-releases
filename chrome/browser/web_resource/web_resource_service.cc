@@ -1,9 +1,13 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 #include "chrome/browser/web_resource/web_resource_service.h"
 
 #include "base/command_line.h"
+#include "base/file_path.h"
+#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -17,8 +21,8 @@
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_status.h"
 
-const wchar_t* WebResourceService::kCurrentTipPrefName = L"current_tip";
-const wchar_t* WebResourceService::kTipCachePrefName = L"tips";
+const char* WebResourceService::kCurrentTipPrefName = "current_tip";
+const char* WebResourceService::kTipCachePrefName = "tips";
 
 class WebResourceService::WebResourceFetcher
     : public URLFetcher::Delegate {
@@ -236,21 +240,21 @@ void WebResourceService::OnWebResourceUnpacked(
 
   DictionaryValue* topic_dict;
   ListValue* answer_list;
-  std::wstring topic_id;
-  std::wstring inproduct;
+  std::string topic_id;
+  std::string inproduct;
   int tip_counter = 0;
 
-  if (parsed_json.GetDictionary(L"topic", &topic_dict)) {
-    if (topic_dict->GetString(L"topic_id", &topic_id))
-      web_resource_cache_->SetString(L"topic_id", topic_id);
-    if (topic_dict->GetList(L"answers", &answer_list)) {
+  if (parsed_json.GetDictionary("topic", &topic_dict)) {
+    if (topic_dict->GetString("topic_id", &topic_id))
+      web_resource_cache_->SetString("topic_id", topic_id);
+    if (topic_dict->GetList("answers", &answer_list)) {
       for (ListValue::const_iterator tip_iter = answer_list->begin();
            tip_iter != answer_list->end(); ++tip_iter) {
         if (!(*tip_iter)->IsType(Value::TYPE_DICTIONARY))
           continue;
         DictionaryValue* a_dic =
             static_cast<DictionaryValue*>(*tip_iter);
-        if (a_dic->GetString(L"inproduct", &inproduct)) {
+        if (a_dic->GetString("inproduct", &inproduct)) {
           tip_holder->Append(Value::CreateStringValue(inproduct));
         }
         tip_counter++;
@@ -272,9 +276,11 @@ void WebResourceService::StartAfterDelay() {
     std::string last_update_pref =
       prefs_->GetString(prefs::kNTPTipsCacheUpdate);
     if (!last_update_pref.empty()) {
+      double last_update_value;
+      base::StringToDouble(last_update_pref, &last_update_value);
       int ms_until_update = kCacheUpdateDelay -
           static_cast<int>((base::Time::Now() - base::Time::FromDoubleT(
-          StringToDouble(last_update_pref))).InMilliseconds());
+          last_update_value)).InMilliseconds());
 
       delay = ms_until_update > kCacheUpdateDelay ?
               kCacheUpdateDelay : (ms_until_update < kStartResourceFetchDelay ?
@@ -292,6 +298,6 @@ void WebResourceService::UpdateResourceCache(const std::string& json_data) {
 
   // Update resource server and cache update time in preferences.
   prefs_->SetString(prefs::kNTPTipsCacheUpdate,
-      DoubleToString(base::Time::Now().ToDoubleT()));
+      base::DoubleToString(base::Time::Now().ToDoubleT()));
   prefs_->SetString(prefs::kNTPTipsServer, web_resource_server_);
 }

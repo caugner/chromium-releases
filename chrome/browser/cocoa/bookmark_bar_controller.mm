@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
-#import "chrome/browser/browser_theme_provider.h"
 #import "chrome/browser/cocoa/background_gradient_view.h"
 #import "chrome/browser/cocoa/bookmark_bar_bridge.h"
 #import "chrome/browser/cocoa/bookmark_bar_constants.h"
@@ -29,16 +28,19 @@
 #import "chrome/browser/cocoa/bookmark_name_folder_controller.h"
 #import "chrome/browser/cocoa/browser_window_controller.h"
 #import "chrome/browser/cocoa/event_utils.h"
+#import "chrome/browser/cocoa/fullscreen_controller.h"
 #import "chrome/browser/cocoa/import_settings_dialog.h"
 #import "chrome/browser/cocoa/menu_button.h"
 #import "chrome/browser/cocoa/themed_window.h"
 #import "chrome/browser/cocoa/toolbar_controller.h"
+#import "chrome/browser/cocoa/view_id_util.h"
 #import "chrome/browser/cocoa/view_resizer.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
+#import "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/common/pref_names.h"
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
@@ -226,11 +228,15 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
     folderImage_.reset([rb.GetNSImageNamed(IDR_BOOKMARK_BAR_FOLDER) retain]);
     defaultImage_.reset([rb.GetNSImageNamed(IDR_DEFAULT_FAVICON) retain]);
 
-    // Register for theme changes.
+    // Register for theme changes, bookmark button pulsing, ...
     NSNotificationCenter* defaultCenter = [NSNotificationCenter defaultCenter];
     [defaultCenter addObserver:self
                       selector:@selector(themeDidChangeNotification:)
                           name:kBrowserThemeDidChangeNotification
+                        object:nil];
+    [defaultCenter addObserver:self
+                      selector:@selector(pulseBookmarkNotification:)
+                          name:bookmark_button::kPulseBookmarkButtonNotification
                         object:nil];
 
     // This call triggers an awakeFromNib, which builds the bar, which
@@ -239,6 +245,40 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
     [[self animatableView] setResizeDelegate:resizeDelegate];
   }
   return self;
+}
+
+- (void)pulseBookmarkNotification:(NSNotification*)notification {
+  NSDictionary* dict = [notification userInfo];
+  const BookmarkNode* node = NULL;
+  NSValue *value = [dict objectForKey:bookmark_button::kBookmarkKey];
+  DCHECK(value);
+  if (value)
+    node = static_cast<const BookmarkNode*>([value pointerValue]);
+  NSNumber* number = [dict
+                       objectForKey:bookmark_button::kBookmarkPulseFlagKey];
+  DCHECK(number);
+  BOOL doPulse = number ? [number boolValue] : NO;
+
+  // 3 cases:
+  // button on the bar: flash it
+  // button in "other bookmarks" folder: flash other bookmarks
+  // button in "off the side" folder: flash the chevron
+  for (BookmarkButton* button in [self buttons]) {
+    if ([button bookmarkNode] == node) {
+      [button setIsContinuousPulsing:doPulse];
+      return;
+    }
+  }
+  if ([otherBookmarksButton_ bookmarkNode] == node) {
+    [otherBookmarksButton_ setIsContinuousPulsing:doPulse];
+    return;
+  }
+  if (node->GetParent() == bookmarkModel_->GetBookmarkBarNode()) {
+    [offTheSideButton_ setIsContinuousPulsing:doPulse];
+    return;
+  }
+
+  NOTREACHED() << "no bookmark button found to pulse!";
 }
 
 - (void)dealloc {
@@ -304,6 +344,18 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
            name:NSViewFrameDidChangeNotification
          object:[self view]];
 
+  // Watch for things going to or from fullscreen.
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(willEnterOrLeaveFullscreen:)
+           name:kWillEnterFullscreenNotification
+         object:nil];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(willEnterOrLeaveFullscreen:)
+           name:kWillLeaveFullscreenNotification
+         object:nil];
+
   // Don't pass ourself along (as 'self') until our init is completely
   // done.  Thus, this call is (almost) last.
   bridge_.reset(new BookmarkBarBridge(self, bookmarkModel_));
@@ -332,6 +384,23 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
                     selector:@selector(parentWindowDidResignKey:)
                         name:NSWindowDidResignKeyNotification
                       object:[[self view] window]];
+}
+
+// When going fullscreen we can run into trouble.  Our view is removed
+// from the non-fullscreen window before the non-fullscreen window
+// loses key, so our parentDidResignKey: callback never gets called.
+// In addition, a bookmark folder controller needs to be autoreleased
+// (in case it's in the event chain when closed), but the release
+// implicitly needs to happen while it's connected to the original
+// (non-fullscreen) window to "unlock bar visibility".  Such a
+// contract isn't honored when going fullscreen with the menu option
+// (not with the keyboard shortcut).  We fake it as best we can here.
+// We have a similar problem leaving fullscreen.
+- (void)willEnterOrLeaveFullscreen:(NSNotification*)notification {
+  if (folderController_) {
+    [self childFolderWillClose:folderController_];
+    [self closeFolderAndStopTrackingMenus];
+  }
 }
 
 // NSNotificationCenter callback.
@@ -450,6 +519,7 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
 
 // Redirect to our logic shared with BookmarkBarFolderController.
 - (IBAction)openBookmarkFolderFromButton:(id)sender {
+  DCHECK(sender != offTheSideButton_);
   // Toggle presentation of bar folder menus.
   showFolderMenus_ = !showFolderMenus_;
   [folderTarget_ openBookmarkFolderFromButton:sender];
@@ -667,6 +737,13 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
 // Configure the off-the-side button (e.g. specify the node range,
 // check if we should enable or disable it, etc).
 - (void)configureOffTheSideButtonContentsAndVisibility {
+  // If deleting a button while off-the-side is open, buttons may be
+  // promoted from off-the-side to the bar.  Accomodate.
+  if (folderController_ &&
+      ([folderController_ parentButton] == offTheSideButton_)) {
+    [folderController_ reconfigureMenu];
+  }
+
   [[offTheSideButton_ cell] setStartingChildIndex:displayedButtonCount_];
   [[offTheSideButton_ cell]
    setBookmarkNode:bookmarkModel_->GetBookmarkBarNode()];
@@ -907,7 +984,7 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
     // Add a tooltip
     std::string url_string = child->GetURL().possibly_invalid_spec();
     NSString* tooltip = [NSString stringWithFormat:@"%@\n%s",
-                         base::SysWideToNSString(child->GetTitle()),
+                         base::SysUTF16ToNSString(child->GetTitle()),
                          url_string.c_str()];
     [item setToolTip:tooltip];
   }
@@ -936,7 +1013,7 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
 - (NSMenu *)menuForFolderNode:(const BookmarkNode*)node {
   if (!node->is_folder())
     return nil;
-  NSString* title = base::SysWideToNSString(node->GetTitle());
+  NSString* title = base::SysUTF16ToNSString(node->GetTitle());
   NSMenu* menu = [[[NSMenu alloc] initWithTitle:title] autorelease];
   [self addFolderNode:node toMenu:menu];
 
@@ -1028,7 +1105,7 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
     [button setTarget:self];
     [button setAction:@selector(openBookmark:)];
     // Add a tooltip.
-    NSString* title = base::SysWideToNSString(node->GetTitle());
+    NSString* title = base::SysUTF16ToNSString(node->GetTitle());
     std::string url_string = node->GetURL().possibly_invalid_spec();
     NSString* tooltip = [NSString stringWithFormat:@"%@\n%s", title,
                          url_string.c_str()];
@@ -1086,6 +1163,7 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
   BookmarkButton* button = [[BookmarkButton alloc] initWithFrame:frame];
   [button setDraggable:NO];
   otherBookmarksButton_.reset(button);
+  view_id_util::SetID(button, VIEW_ID_OTHER_BOOKMARKS);
 
   // Make sure this button, like all other BookmarkButtons, lives
   // until the end of the current event loop.
@@ -1295,6 +1373,7 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
     if (NSMaxX([button frame]) < maxViewX)
       break;
     [buttons_ removeLastObject];
+    [button setDelegate:nil];
     [button removeFromSuperview];
     --displayedButtonCount_;
   }
@@ -1362,7 +1441,10 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
 // Delete all buttons (bookmarks, chevron, "other bookmarks") from the
 // bookmark bar; reset knowledge of bookmarks.
 - (void)clearBookmarkBar {
-  [buttons_ makeObjectsPerformSelector:@selector(removeFromSuperview)];
+  for (BookmarkButton* button in buttons_.get()) {
+    [button setDelegate:nil];
+    [button removeFromSuperview];
+  }
   [buttons_ removeAllObjects];
   [self clearMenuTagMap];
   displayedButtonCount_ = 0;
@@ -2209,8 +2291,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
       if (gurl.is_valid()) {
         bookmarkModel_->AddURL(destParent,
                                destIndex++,
-                               base::SysNSStringToWide([titles
-                                   objectAtIndex:i]),
+                               base::SysNSStringToUTF16(
+                                  [titles objectAtIndex:i]),
                                gurl);
         nodesWereAdded = YES;
       }
@@ -2301,6 +2383,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     poofPoint = [oldButton convertPoint:poofPoint toView:nil];
     poofPoint = [[oldButton window] convertBaseToScreen:poofPoint];
     NSRect oldFrame = [oldButton frame];
+    [oldButton setDelegate:nil];
     [oldButton removeFromSuperview];
     if (animate && !ignoreAnimations_ && [self isVisible])
       NSShowAnimationEffect(NSAnimationEffectDisappearingItemDefault, poofPoint,

@@ -32,12 +32,12 @@
 
 #include <string>
 
+#include "base/gtest_prod_util.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "base/thread.h"
 #include "media/audio/audio_io.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
+#include "media/audio/audio_parameters.h"
 
 namespace media {
 class SeekableBuffer;
@@ -45,6 +45,7 @@ class SeekableBuffer;
 
 class AlsaWrapper;
 class AudioManagerLinux;
+class MessageLoop;
 
 class AlsaPcmOutputStream :
     public AudioOutputStream,
@@ -72,10 +73,7 @@ class AlsaPcmOutputStream :
   //
   // If unsure of what to use for |device_name|, use |kAutoSelectDevice|.
   AlsaPcmOutputStream(const std::string& device_name,
-                      AudioManager::Format format,
-                      uint32 channels,
-                      uint32 sample_rate,
-                      uint32 bits_per_sample,
+                      AudioParameters params,
                       AlsaWrapper* wrapper,
                       AudioManagerLinux* manager,
                       MessageLoop* message_loop);
@@ -91,26 +89,29 @@ class AlsaPcmOutputStream :
  private:
   friend class base::RefCountedThreadSafe<AlsaPcmOutputStream>;
   friend class AlsaPcmOutputStreamTest;
-  FRIEND_TEST(AlsaPcmOutputStreamTest, AutoSelectDevice_DeviceSelect);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, AutoSelectDevice_FallbackDevices);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, AutoSelectDevice_HintFail);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, BufferPacket);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, BufferPacket_Negative);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, BufferPacket_StopStream);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, BufferPacket_Underrun);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, BufferPacket_FullBuffer);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, ConstructedState);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, LatencyFloor);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, OpenClose);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, PcmOpenFailed);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, PcmSetParamsFailed);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, ScheduleNextWrite);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, ScheduleNextWrite_StopStream);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, StartStop);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, WritePacket_FinishedPacket);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, WritePacket_NormalPacket);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, WritePacket_StopStream);
-  FRIEND_TEST(AlsaPcmOutputStreamTest, WritePacket_WriteFails);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest,
+                           AutoSelectDevice_DeviceSelect);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest,
+                           AutoSelectDevice_FallbackDevices);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, AutoSelectDevice_HintFail);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, BufferPacket);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, BufferPacket_Negative);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, BufferPacket_StopStream);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, BufferPacket_Underrun);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, BufferPacket_FullBuffer);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, ConstructedState);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, LatencyFloor);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, OpenClose);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, PcmOpenFailed);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, PcmSetParamsFailed);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, ScheduleNextWrite);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest,
+                           ScheduleNextWrite_StopStream);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, StartStop);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, WritePacket_FinishedPacket);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, WritePacket_NormalPacket);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, WritePacket_StopStream);
+  FRIEND_TEST_ALL_PREFIXES(AlsaPcmOutputStreamTest, WritePacket_WriteFails);
 
   virtual ~AlsaPcmOutputStream();
 
@@ -141,10 +142,6 @@ class AlsaPcmOutputStream :
   static uint32 FramesToMicros(uint32 frames, uint32 sample_rate);
   static uint32 FramesToMillis(uint32 frames, uint32 sample_rate);
   std::string FindDeviceForChannels(uint32 channels);
-  snd_pcm_t* OpenDevice(const std::string& device_name,
-                        uint32 channels,
-                        uint32 latency);
-  bool CloseDevice(snd_pcm_t* handle);
   snd_pcm_sframes_t GetAvailableFrames();
 
   // Attempts to find the best matching linux audio device for the given number

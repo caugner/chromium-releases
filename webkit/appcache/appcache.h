@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,12 @@
 
 #include <map>
 #include <set>
-#include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/ref_counted.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "webkit/appcache/appcache_database.h"
 #include "webkit/appcache/appcache_entry.h"
 #include "webkit/appcache/manifest_parser.h"
@@ -51,6 +50,9 @@ class AppCache : public base::RefCounted<AppCache> {
   // is added, false if the flags are merged into an existing entry.
   bool AddOrModifyEntry(const GURL& url, const AppCacheEntry& entry);
 
+  // Removes an entry from the EntryMap, the URL must be in the set.
+  void RemoveEntry(const GURL& url);
+
   // Do not store the returned object as it could be deleted anytime.
   AppCacheEntry* GetEntry(const GURL& url);
 
@@ -72,6 +74,9 @@ class AppCache : public base::RefCounted<AppCache> {
   }
 
   base::Time update_time() const { return update_time_; }
+
+  int64 cache_size() const { return cache_size_; }
+
   void set_update_time(base::Time ticks) { update_time_ = ticks; }
 
   // Initializes the cache with information in the manifest.
@@ -135,10 +140,13 @@ class AppCache : public base::RefCounted<AppCache> {
   // when this cache was last updated
   base::Time update_time_;
 
+  int64 cache_size_;
+
   // to notify service when cache is deleted
   AppCacheService* service_;
 
-  FRIEND_TEST(AppCacheTest, InitializeWithManifest);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheTest, InitializeWithManifest);
+
   DISALLOW_COPY_AND_ASSIGN(AppCache);
 };
 

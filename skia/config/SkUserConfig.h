@@ -16,6 +16,7 @@
 
 #ifndef SkUserConfig_DEFINED
 #define SkUserConfig_DEFINED
+#pragma once
 
 /*  SkTypes.h, the root of the public header files, does the following trick:
  
@@ -58,6 +59,13 @@
     can go either way.
  */
 //#define SK_CAN_USE_FLOAT
+
+/*  Temporarily turn on SK_USE_FLOATBITS so critical float->int conversions in Skia
+    are done with saturation.
+    TODO(wjmaclean@chromium.org): Remove this once saturating float->int implemented
+    throughout Skia.
+ */
+#define SK_USE_FLOATBITS
 
 /*  For some performance-critical scalar operations, skia will optionally work
     around the standard float operators if it knows that the CPU does not have

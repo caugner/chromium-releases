@@ -180,10 +180,9 @@ o3d.Sampler.prototype.convertAddressMode_ = function(o3d_mode) {
       gl_mode = this.gl.CLAMP_TO_EDGE;
       break;
     case o3d.Sampler.BORDER:
-      gl_mode = this.gl.CLAMP_TO_BORDER;
-      break;
+      // This is not supported in WebGL.
     default:
-      this.gl.client.error_callback("Unknown Address mode");
+      this.gl.client.error_callback("Unknown/Unavailable Address mode");
       break;
   }
   return gl_mode;
@@ -261,13 +260,19 @@ o3d.Sampler.defaultSampler_.magFilter = o3d.Sampler.POINT;
 /**
  * Binds the texture for this sampler and sets texParameters according to the
  * states of the sampler.
+ * @param {boolean} opt_isCube Optional boolean indicating if this is a cube
+ *     map, so we can use the right error texture.
  */
-o3d.Sampler.prototype.bindAndSetParameters_ = function() {
+o3d.Sampler.prototype.bindAndSetParameters_ = function(opt_isCube) {
   var currentTexture = null;
   if (this.texture) {
     currentTexture = this.texture;
   } else if (!this.gl.client.reportErrors_()) {
-    currentTexture = this.gl.client.error_texture_;
+    if (opt_isCube) {
+      currentTexture = this.gl.client.error_texture_cube_;
+    } else {
+      currentTexture = this.gl.client.error_texture_;
+    }
   } else {
     currentTexture = this.gl.client.fallback_error_texture_;
     this.gl.client.error_callback("Missing texture for sampler " + this.name);

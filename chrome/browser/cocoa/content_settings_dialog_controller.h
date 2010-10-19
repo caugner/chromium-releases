@@ -7,7 +7,7 @@
 #import "base/cocoa_protocols_mac.h"
 #include "base/scoped_ptr.h"
 #include "chrome/common/content_settings_types.h"
-#include "chrome/browser/pref_member.h"
+#include "chrome/browser/prefs/pref_member.h"
 
 // Index of the "enabled" and "disabled" radio group settings in all tabs except
 // for the cookies tab.
@@ -16,7 +16,8 @@ const NSInteger kContentSettingsDisabledIndex = 1;
 
 // Indices of the various cookie settings in the cookie radio group.
 const NSInteger kCookieEnabledIndex = 0;
-const NSInteger kCookieDisabledIndex = 1;
+const NSInteger kCookieAskIndex = 1;
+const NSInteger kCookieDisabledIndex = 2;
 
 // Indices of the various geolocation settings in the geolocation radio group.
 const NSInteger kGeolocationEnabledIndex = 0;
@@ -43,6 +44,7 @@ class Profile;
   IBOutlet NSTabView* tabView_;
   IBOutlet TabViewPickerTable* tabViewPicker_;
   Profile* profile_;  // weak
+  BOOL disableCookiePrompt_;
   IntegerPrefMember lastSelectedTab_;
   BooleanPrefMember clearSiteDataOnExit_;
   scoped_ptr<ContentSettingsDialogControllerInternal::PrefObserverBridge>

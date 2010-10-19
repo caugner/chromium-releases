@@ -6,14 +6,37 @@
 
 namespace remoting {
 
-PepperInputHandler::PepperInputHandler() {
+PepperInputHandler::PepperInputHandler(ClientContext* context,
+                                       HostConnection* connection,
+                                       ChromotingView* view)
+  : InputHandler(context, connection, view) {
 }
 
 PepperInputHandler::~PepperInputHandler() {
 }
 
 void PepperInputHandler::Initialize() {
-  // TODO(garykac): Implement this.
+}
+
+void PepperInputHandler::HandleMouseMoveEvent(const PP_Event_Mouse& event) {
+  SendMouseMoveEvent(static_cast<int>(event.x),
+                     static_cast<int>(event.y));
+}
+
+void PepperInputHandler::HandleMouseButtonEvent(bool button_down,
+                                                const PP_Event_Mouse& event) {
+  MouseButton button = MouseButtonUndefined;
+  if (event.button == PP_EVENT_MOUSEBUTTON_LEFT) {
+    button = MouseButtonLeft;
+  } else if (event.button == PP_EVENT_MOUSEBUTTON_MIDDLE) {
+    button = MouseButtonMiddle;
+  } else if (event.button == PP_EVENT_MOUSEBUTTON_RIGHT) {
+    button = MouseButtonRight;
+  }
+
+  if (button != MouseButtonUndefined) {
+    SendMouseButtonEvent(button_down, button);
+  }
 }
 
 }  // namespace remoting

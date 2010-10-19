@@ -377,6 +377,10 @@ TEST(GLES2CommandIdTest, CommandIdsMatch) {
                  GLES2_VertexAttribPointer_kCmdId_mismatch);
   COMPILE_ASSERT(Viewport::kCmdId == 430,
                  GLES2_Viewport_kCmdId_mismatch);
+  COMPILE_ASSERT(BlitFramebufferEXT::kCmdId == 446,
+                 GLES2_BlitFramebufferEXT_kCmdId_mismatch);
+  COMPILE_ASSERT(RenderbufferStorageMultisampleEXT::kCmdId == 445,
+                 GLES2_RenderbufferStorageMultisampleEXT_kCmdId_mismatch);
   COMPILE_ASSERT(SwapBuffers::kCmdId == 431,
                  GLES2_SwapBuffers_kCmdId_mismatch);
   COMPILE_ASSERT(GetMaxValueInBuffer::kCmdId == 438,
@@ -389,6 +393,8 @@ TEST(GLES2CommandIdTest, CommandIdsMatch) {
                  GLES2_RegisterSharedIds_kCmdId_mismatch);
   COMPILE_ASSERT(CommandBufferEnable::kCmdId == 442,
                  GLES2_CommandBufferEnable_kCmdId_mismatch);
+  COMPILE_ASSERT(CopyTextureToParentTexture::kCmdId == 447,
+                 GLES2_CopyTextureToParentTexture_kCmdId_mismatch);
 }
 
 #endif  // GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_ID_TEST_AUTOGEN_H_

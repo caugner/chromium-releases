@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_GTK_BROWSER_WINDOW_GTK_H_
 #define CHROME_BROWSER_GTK_BROWSER_WINDOW_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -16,7 +17,7 @@
 #include "base/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/pref_member.h"
+#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/notification_registrar.h"
 #include "gfx/rect.h"
@@ -52,13 +53,13 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void SetBounds(const gfx::Rect& bounds);
   virtual void Close();
   virtual void Activate();
+  virtual void Deactivate();
   virtual bool IsActive() const;
   virtual void FlashFrame();
   virtual gfx::NativeWindow GetNativeHandle();
   virtual BrowserWindowTesting* GetBrowserWindowTesting();
   virtual StatusBubble* GetStatusBubble();
   virtual void SelectedTabToolbarSizeChanged(bool is_animating);
-  virtual void SelectedTabExtensionShelfSizeChanged();
   virtual void UpdateTitleBar();
   virtual void ShelfVisibilityChanged();
   virtual void UpdateDevTools();
@@ -86,7 +87,6 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile);
   virtual void ToggleBookmarkBar();
-  virtual void ToggleExtensionShelf();
   virtual views::Window* ShowAboutChromeDialog();
   virtual void ShowUpdateChromeDialog();
   virtual void ShowTaskManager();
@@ -123,7 +123,6 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void Copy();
   virtual void Paste();
   virtual void ToggleTabStripMode() {}
-  virtual void SetToolbarCollapsedMode(bool val) {}
 
   // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
@@ -343,6 +342,9 @@ class BrowserWindowGtk : public BrowserWindow,
 
   // Returns |true| if we should use the custom frame.
   bool UseCustomFrame();
+
+  // Returns |true| if the window bounds match the monitor size.
+  bool BoundsMatchMonitorSize();
 
   // Put the bookmark bar where it belongs.
   void PlaceBookmarkBar(bool is_floating);

@@ -5,10 +5,8 @@
 #include "chrome/browser/chromeos/dom_ui/labs_handler.h"
 
 #include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/i18n/time_formatting.h"
 #include "base/stl_util-inl.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -30,15 +28,15 @@ void LabsHandler::GetLocalizedValues(
     DictionaryValue* localized_strings) {
   DCHECK(localized_strings);
   // Labs page - ChromeOS
-  localized_strings->SetString(L"labsPage",
-      l10n_util::GetString(IDS_OPTIONS_LABS_TAB_LABEL));
-  localized_strings->SetString(L"mediaplayer_title",
-     l10n_util::GetString(IDS_OPTIONS_SETTINGS_SECTION_TITLE_MEDIAPLAYER));
-  localized_strings->SetString(L"mediaplayer",
-     l10n_util::GetString(IDS_OPTIONS_SETTINGS_MEDIAPLAYER_DESCRIPTION));
+  localized_strings->SetString("labsPage",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_LABS_TAB_LABEL));
+  localized_strings->SetString("mediaplayer_title",
+     l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_SECTION_TITLE_MEDIAPLAYER));
+  localized_strings->SetString("mediaplayer",
+     l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_MEDIAPLAYER_DESCRIPTION));
 
-  localized_strings->SetString(L"advanced_file_title",
-     l10n_util::GetString(IDS_OPTIONS_SETTINGS_SECTION_TITLE_ADVANCEDFS));
-  localized_strings->SetString(L"advanced_filesystem",
-     l10n_util::GetString(IDS_OPTIONS_SETTINGS_ADVANCEDFS_DESCRIPTION));
+  localized_strings->SetString("advanced_file_title",
+     l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_SECTION_TITLE_ADVANCEDFS));
+  localized_strings->SetString("advanced_filesystem",
+     l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_ADVANCEDFS_DESCRIPTION));
 }

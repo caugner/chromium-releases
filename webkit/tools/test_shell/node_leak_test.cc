@@ -5,6 +5,7 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/path_service.h"
+#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "net/http/http_cache.h"
 #include "net/url_request/url_request_context.h"
@@ -40,11 +41,10 @@ class NodeLeakTest : public TestShellTest {
     }
 
     if (parsed_command_line.HasSwitch(test_shell::kTestShellTimeOut)) {
-      const std::wstring timeout_str = parsed_command_line.GetSwitchValue(
+      const std::string timeout_str = parsed_command_line.GetSwitchValueASCII(
           test_shell::kTestShellTimeOut);
-      int timeout_ms =
-          static_cast<int>(StringToInt64(WideToUTF16Hack(timeout_str.c_str())));
-      if (timeout_ms > 0)
+      int timeout_ms;
+      if (base::StringToInt(timeout_str, &timeout_ms) && timeout_ms > 0)
         TestShell::SetFileTestTimeout(timeout_ms);
     }
 
@@ -63,8 +63,8 @@ class NodeLeakTest : public TestShellTest {
     SimpleResourceLoaderBridge::Shutdown();
   }
 
-  void NavigateToURL(const std::wstring& test_url) {
-    test_shell_->LoadURL(GURL(WideToUTF8(test_url)));
+  void NavigateToURL(const std::string& test_url) {
+    test_shell_->LoadURL(GURL(test_url));
     test_shell_->WaitTestFinished();
 
     // Depends on TestShellTests::TearDown to load blank page and
@@ -75,7 +75,7 @@ class NodeLeakTest : public TestShellTest {
 TEST_F(NodeLeakTest, TestURL) {
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(kTestUrlSwitch))
-    NavigateToURL(parsed_command_line.GetSwitchValue(kTestUrlSwitch).c_str());
+    NavigateToURL(parsed_command_line.GetSwitchValueASCII(kTestUrlSwitch));
 }
 
 }  // namespace

@@ -9,7 +9,6 @@
 #include "remoting/base/protocol_decoder.h"
 #include "remoting/host/capturer.h"
 #include "remoting/host/client_connection.h"
-#include "remoting/host/encoder.h"
 #include "remoting/host/event_executor.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -19,12 +18,13 @@ class MockCapturer : public Capturer {
  public:
   MockCapturer() {}
 
-  MOCK_METHOD1(CaptureInvalidRects, void(CaptureCompletedCallback* callback));
-  MOCK_METHOD2(CaptureRects, void(const RectVector& rects,
-                                  CaptureCompletedCallback* callback));
-  MOCK_METHOD1(InvalidateRects, void(const RectVector& inval_rects));
-  MOCK_METHOD0(InvalidateFullScreen, void());
   MOCK_METHOD0(ScreenConfigurationChanged, void());
+  MOCK_METHOD1(InvalidateRects, void(const InvalidRects& inval_rects));
+  MOCK_METHOD0(InvalidateFullScreen, void());
+  MOCK_METHOD0(CalculateInvalidRects, void());
+  MOCK_METHOD1(CaptureInvalidRects, void(CaptureCompletedCallback* callback));
+  MOCK_METHOD2(CaptureRects, void(const InvalidRects& rects,
+                                  CaptureCompletedCallback* callback));
   MOCK_CONST_METHOD0(width, int());
   MOCK_CONST_METHOD0(height, int());
 
@@ -32,22 +32,9 @@ class MockCapturer : public Capturer {
   DISALLOW_COPY_AND_ASSIGN(MockCapturer);
 };
 
-class MockEncoder : public Encoder {
- public:
-  MockEncoder() {}
-
-  MOCK_METHOD3(Encode, void(
-      scoped_refptr<Capturer::CaptureData> capture_data,
-      bool key_frame,
-      DataAvailableCallback* data_available_callback));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockEncoder);
-};
-
 class MockEventExecutor : public EventExecutor {
  public:
-  MockEventExecutor() {}
+   MockEventExecutor(Capturer* capturer) : EventExecutor(capturer) {}
 
   MOCK_METHOD1(HandleInputEvents, void(ClientMessageList* messages));
 

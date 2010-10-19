@@ -1,15 +1,14 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_PLUGIN_WEBPLUGIN_DELEGATE_STUB_H_
 #define CHROME_PLUGIN_WEBPLUGIN_DELEGATE_STUB_H_
+#pragma once
 
-#include <queue>
 #include <string>
 #include <vector>
 
-#include "app/surface/transport_dib.h"
 #include "base/ref_counted.h"
 #include "base/shared_memory.h"
 #include "base/task.h"
@@ -84,7 +83,8 @@ class WebPluginDelegateStub : public IPC::Channel::Listener,
   void OnContainerHidden();
   void OnContainerShown(gfx::Rect window_frame, gfx::Rect view_frame,
                         bool has_focus);
-  void OnWindowFrameChanged(gfx::Rect window_frame, gfx::Rect view_frame);
+  void OnWindowFrameChanged(const gfx::Rect& window_frame,
+                            const gfx::Rect& view_frame);
 #endif
 
   void OnDidReceiveManualResponse(

@@ -4,13 +4,11 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_NEW_USER_VIEW_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_NEW_USER_VIEW_H_
+#pragma once
 
 #include <string>
-#include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
 #include "views/accelerator.h"
 #include "views/controls/button/button.h"
@@ -54,10 +52,16 @@ class NewUserView : public views::View,
 
     // User started typing so clear all error messages.
     virtual void ClearErrors() = 0;
+
+    // User tries to navigate away from NewUserView pod.
+    virtual void NavigateAway() = 0;
   };
 
   // If |need_border| is true, RoundedRect border and background are required.
-  NewUserView(Delegate* delegate, bool need_border);
+  NewUserView(Delegate* delegate,
+              bool need_border,
+              bool need_browse_without_signin);
+
   virtual ~NewUserView();
 
   // Initialize view layout.
@@ -69,11 +73,17 @@ class NewUserView : public views::View,
   // Resets password text and sets the enabled state of the password.
   void ClearAndEnablePassword();
 
+  // Resets password and username text and focuses on username.
+  void ClearAndEnableFields();
+
   // Stops throbber shown during login.
   void StopThrobber();
 
   // Returns bounds of password field in screen coordinates.
   gfx::Rect GetPasswordBounds() const;
+
+  // Returns bounds of username field in screen coordinates.
+  gfx::Rect GetUsernameBounds() const;
 
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize();
@@ -109,7 +119,7 @@ class NewUserView : public views::View,
   virtual void NativeViewHierarchyChanged(bool attached,
                                           gfx::NativeView native_view,
                                           views::RootView* root_view);
-  virtual void LocaleChanged();
+  virtual void OnLocaleChanged();
 
  private:
   // Enables/disables input controls (textfields, buttons).
@@ -131,7 +141,6 @@ class NewUserView : public views::View,
   views::Label* title_label_;
   views::NativeButton* sign_in_button_;
   views::Link* create_account_link_;
-  views::Link* cant_access_account_link_;
   views::Link* browse_without_signin_link_;
   views::MenuButton* languages_menubutton_;
   views::Throbber* throbber_;
@@ -155,6 +164,9 @@ class NewUserView : public views::View,
 
   // If true, this view needs RoundedRect border and background.
   bool need_border_;
+
+  // Whether browse without signin is needed.
+  bool need_browse_without_signin_;
 
   FRIEND_TEST_ALL_PREFIXES(LoginScreenTest, IncognitoLogin);
   friend class LoginScreenTest;

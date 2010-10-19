@@ -17,7 +17,7 @@
 #include "base/i18n/time_formatting.h"
 #include "base/nss_util.h"
 #include "base/scoped_ptr.h"
-#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/gtk/certificate_dialogs.h"
@@ -70,7 +70,7 @@ std::string HashCert(CERTCertificate* cert, HASH_HashType algorithm, int len) {
   DCHECK(rv == SECSuccess);
   fingerprint_item.data = fingerprint;
   fingerprint_item.len = len;
-  return Stringize(CERT_Hexify(&fingerprint_item, TRUE));
+  return psm::ProcessRawBytes(&fingerprint_item);
 }
 
 std::string ProcessSecAlgorithm(SECAlgorithmID* algorithm_id) {
@@ -337,11 +337,11 @@ void CertificateViewer::InitGeneralPage() {
   AddTitle(table, row++,
            l10n_util::GetStringUTF8(IDS_CERT_INFO_FINGERPRINTS_GROUP));
   AddKeyValue(table, row++,
+              l10n_util::GetStringUTF8(IDS_CERT_INFO_SHA256_FINGERPRINT_LABEL),
+              HashCert(cert, HASH_AlgSHA256, SHA256_LENGTH));
+  AddKeyValue(table, row++,
               l10n_util::GetStringUTF8(IDS_CERT_INFO_SHA1_FINGERPRINT_LABEL),
               HashCert(cert, HASH_AlgSHA1, SHA1_LENGTH));
-  AddKeyValue(table, row++,
-              l10n_util::GetStringUTF8(IDS_CERT_INFO_MD5_FINGERPRINT_LABEL),
-              HashCert(cert, HASH_AlgMD5, MD5_LENGTH));
 
   DCHECK_EQ(row, num_rows);
 }
@@ -394,7 +394,7 @@ void CertificateViewer::FillTreeStoreWithCertFields(GtkTreeStore* store,
   if (SEC_ASN1DecodeInteger(&cert->version, &version) == SECSuccess &&
       version != ULONG_MAX)
     version_str = l10n_util::GetStringFUTF8(IDS_CERT_DETAILS_VERSION_FORMAT,
-                                            UintToString16(version + 1));
+                                            base::UintToString16(version + 1));
   GtkTreeIter iter;
   gtk_tree_store_append(store, &iter, &cert_iter);
   gtk_tree_store_set(

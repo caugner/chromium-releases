@@ -21,16 +21,19 @@
 #include "base/histogram.h"
 #include "base/path_service.h"
 #include "base/sys_info.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/nacl_types.h"
+#include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message_utils.h"
 #include "media/base/media.h"
 #include "media/base/media_switches.h"
 #include "native_client/src/trusted/plugin/nacl_entry_points.h"
+#include "skia/ext/platform_canvas.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/plugin_lib.h"
 #include "webkit/glue/webkit_glue.h"
@@ -50,17 +53,45 @@ bool LaunchNaClProcess(const char* url,
                        int* nacl_process_id) {
   // TODO(gregoryd): nacl::FileDescriptor will be soon merged with
   // base::FileDescriptor
-  nacl::FileDescriptor imc_descriptor;
+  std::vector<nacl::FileDescriptor> sockets;
   base::ProcessHandle nacl_process;
   if (!RenderThread::current()->Send(
-    new ViewHostMsg_LaunchNaCl(ASCIIToWide(url),
-        imc_fd,
-        &imc_descriptor,
+    new ViewHostMsg_LaunchNaCl(
+        ASCIIToWide(url),
+        /* socket_count= */ 1,
+        &sockets,
         &nacl_process,
         reinterpret_cast<base::ProcessId*>(nacl_process_id)))) {
     return false;
   }
-  *imc_handle = nacl::ToNativeHandle(imc_descriptor);
+  CHECK(static_cast<int>(sockets.size()) == 1);
+  *imc_handle = nacl::ToNativeHandle(sockets[0]);
+  *nacl_process_handle = nacl_process;
+  return true;
+}
+
+bool LaunchNaClProcessMultiFD(const char* alleged_url,
+                              int socket_count,
+                              nacl::Handle* imc_handles,
+                              nacl::Handle* nacl_process_handle,
+                              int* nacl_process_id) {
+  // TODO(gregoryd): nacl::FileDescriptor will be soon merged with
+  // base::FileDescriptor
+  std::vector<nacl::FileDescriptor> sockets;
+  base::ProcessHandle nacl_process;
+  if (!RenderThread::current()->Send(
+    new ViewHostMsg_LaunchNaCl(
+        ASCIIToWide(alleged_url),
+        socket_count,
+        &sockets,
+        &nacl_process,
+        reinterpret_cast<base::ProcessId*>(nacl_process_id)))) {
+    return false;
+  }
+  CHECK(static_cast<int>(sockets.size()) == socket_count);
+  for (int i = 0; i < socket_count; i++) {
+    imc_handles[i] = nacl::ToNativeHandle(sockets[i]);
+  }
   *nacl_process_handle = nacl_process;
   return true;
 }
@@ -135,14 +166,14 @@ RenderProcessImpl::RenderProcessImpl()
 
   // Out of process dev tools rely upon auto break behavior.
   webkit_glue::SetJavaScriptFlags(
-      L"--debugger-auto-break"
+      "--debugger-auto-break"
       // Enable lazy in-memory profiling.
-      L" --prof --prof-lazy --logfile=* --compress-log");
+      " --prof --prof-lazy --logfile=* --compress-log");
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kJavaScriptFlags)) {
     webkit_glue::SetJavaScriptFlags(
-      command_line.GetSwitchValue(switches::kJavaScriptFlags));
+        command_line.GetSwitchValueASCII(switches::kJavaScriptFlags));
   }
 
   if (command_line.HasSwitch(switches::kEnableWatchdog)) {
@@ -154,8 +185,14 @@ RenderProcessImpl::RenderProcessImpl()
   }
 
 #ifndef DISABLE_NACL
-  if (command_line.HasSwitch(switches::kInternalNaCl))
-    RegisterInternalNaClPlugin(LaunchNaClProcess);
+  if (command_line.HasSwitch(switches::kInternalNaCl)) {
+    std::map<std::string, uintptr_t> funcs;
+    funcs["launch_nacl_process"] =
+        reinterpret_cast<uintptr_t>(LaunchNaClProcess);
+    funcs["launch_nacl_process_multi_fd"] =
+        reinterpret_cast<uintptr_t>(LaunchNaClProcessMultiFD);
+    RegisterInternalNaClPlugin(funcs);
+  }
 #endif
 
   if (!command_line.HasSwitch(switches::kDisableByteRangeSupport)) {

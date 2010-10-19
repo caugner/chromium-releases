@@ -11,6 +11,7 @@
 #include "chrome/renderer/command_buffer_proxy.h"
 #include "chrome/renderer/ggl/ggl.h"
 #include "chrome/renderer/gpu_channel_host.h"
+#include "chrome/renderer/gpu_video_service_host.h"
 #include "chrome/renderer/render_widget.h"
 #include "ipc/ipc_channel_handle.h"
 
@@ -59,16 +60,32 @@ class Context : public base::SupportsWeakPtr<Context> {
 
   // Initialize a GGL context that can be used in association with a a GPU
   // channel acquired from a RenderWidget or RenderView.
-  bool Initialize(gfx::NativeViewId view, const gfx::Size& size);
+  bool Initialize(gfx::NativeViewId view,
+                  int render_view_id,
+                  const gfx::Size& size);
+
+#if defined(OS_MACOSX)
+  // Asynchronously resizes an onscreen frame buffer.
+  void ResizeOnscreen(const gfx::Size& size);
+#endif
 
   // Asynchronously resizes an offscreen frame buffer.
   void ResizeOffscreen(const gfx::Size& size);
+
+  // Provides a callback that will be invoked when SwapBuffers has completed
+  // service side.
+  void SetSwapBuffersCallback(Callback1<Context*>::Type* callback) {
+    swap_buffers_callback_.reset(callback);
+  }
 
   // For an offscreen frame buffer context, return the frame buffer ID with
   // respect to the parent.
   uint32 parent_texture_id() const {
     return parent_texture_id_;
   }
+
+  uint32 CreateParentTexture(const gfx::Size& size) const;
+  void DeleteParentTexture(uint32 texture) const;
 
   // Destroy all resources associated with the GGL context.
   void Destroy();
@@ -81,6 +98,9 @@ class Context : public base::SupportsWeakPtr<Context> {
   // not useful at this point.
   bool SwapBuffers();
 
+  // Create a hardware accelerated video decoder associated with this context.
+  GpuVideoDecoderHost* CreateVideoDecoder();
+
   // Get the current error code.
   Error GetError();
 
@@ -88,8 +108,11 @@ class Context : public base::SupportsWeakPtr<Context> {
   void DisableShaderTranslation();
 
  private:
+  void OnSwapBuffers();
+
   scoped_refptr<GpuChannelHost> channel_;
   base::WeakPtr<Context> parent_;
+  scoped_ptr<Callback1<Context*>::Type> swap_buffers_callback_;
   uint32 parent_texture_id_;
   CommandBufferProxy* command_buffer_;
   gpu::gles2::GLES2CmdHelper* gles2_helper_;
@@ -114,7 +137,9 @@ Context::~Context() {
   Destroy();
 }
 
-bool Context::Initialize(gfx::NativeViewId view, const gfx::Size& size) {
+bool Context::Initialize(gfx::NativeViewId view,
+                         int render_view_id,
+                         const gfx::Size& size) {
   DCHECK(size.width() >= 0 && size.height() >= 0);
 
   if (channel_->state() != GpuChannelHost::CONNECTED)
@@ -134,7 +159,8 @@ bool Context::Initialize(gfx::NativeViewId view, const gfx::Size& size) {
 
   // Create a proxy to a command buffer in the GPU process.
   if (view) {
-    command_buffer_ = channel_->CreateViewCommandBuffer(view);
+    command_buffer_ =
+        channel_->CreateViewCommandBuffer(view, render_view_id);
   } else {
     CommandBufferProxy* parent_command_buffer =
         parent_.get() ? parent_->command_buffer_ : NULL;
@@ -153,6 +179,9 @@ bool Context::Initialize(gfx::NativeViewId view, const gfx::Size& size) {
     Destroy();
     return false;
   }
+
+  command_buffer_->SetSwapBuffersCallback(NewCallback(this,
+                                                      &Context::OnSwapBuffers));
 
   // Create the GLES2 helper, which writes the command buffer protocol.
   gles2_helper_ = new gpu::gles2::GLES2CmdHelper(command_buffer_);
@@ -189,9 +218,58 @@ bool Context::Initialize(gfx::NativeViewId view, const gfx::Size& size) {
   return true;
 }
 
+#if defined(OS_MACOSX)
+void Context::ResizeOnscreen(const gfx::Size& size) {
+  DCHECK(size.width() > 0 && size.height() > 0);
+  command_buffer_->SetWindowSize(size);
+}
+#endif
+
 void Context::ResizeOffscreen(const gfx::Size& size) {
   DCHECK(size.width() > 0 && size.height() > 0);
   command_buffer_->ResizeOffscreenFrameBuffer(size);
+}
+
+uint32 Context::CreateParentTexture(const gfx::Size& size) const {
+  // Allocate a texture ID with respect to the parent.
+  if (parent_.get()) {
+    if (!MakeCurrent(parent_.get()))
+      return 0;
+    uint32 texture_id = parent_->gles2_implementation_->MakeTextureId();
+    parent_->gles2_implementation_->BindTexture(GL_TEXTURE_2D, texture_id);
+    parent_->gles2_implementation_->TexParameteri(
+        GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    parent_->gles2_implementation_->TexParameteri(
+        GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    parent_->gles2_implementation_->TexParameteri(
+        GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    parent_->gles2_implementation_->TexParameteri(
+        GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    parent_->gles2_implementation_->TexImage2D(GL_TEXTURE_2D,
+        0,  // mip level
+        GL_RGBA,
+        size.width(),
+        size.height(),
+        0,  // border
+        GL_RGBA,
+        GL_UNSIGNED_BYTE,
+        NULL);
+    // Make sure that the parent texture's storage is allocated before we let
+    // the caller attempt to use it.
+    int32 token = parent_->gles2_helper_->InsertToken();
+    parent_->gles2_helper_->WaitForToken(token);
+    return texture_id;
+  }
+  return 0;
+}
+
+void Context::DeleteParentTexture(uint32 texture) const {
+  if (parent_.get()) {
+    if (!MakeCurrent(parent_.get()))
+      return;
+    parent_->gles2_implementation_->DeleteTextures(1, &texture);
+  }
 }
 
 void Context::Destroy() {
@@ -246,6 +324,11 @@ bool Context::SwapBuffers() {
   return true;
 }
 
+GpuVideoDecoderHost* Context::CreateVideoDecoder() {
+  return GpuVideoServiceHost::get()->CreateVideoDecoder(
+      command_buffer_->route_id());
+}
+
 Error Context::GetError() {
   gpu::CommandBuffer::State state = command_buffer_->GetState();
   if (state.error == gpu::error::kNoError) {
@@ -262,12 +345,19 @@ void Context::DisableShaderTranslation() {
   gles2_implementation_->CommandBufferEnable(PEPPER3D_SKIP_GLSL_TRANSLATION);
 }
 
+void Context::OnSwapBuffers() {
+  if (swap_buffers_callback_.get())
+    swap_buffers_callback_->Run(this);
+}
+
 #endif  // ENABLE_GPU
 
-Context* CreateViewContext(GpuChannelHost* channel, gfx::NativeViewId view) {
+Context* CreateViewContext(GpuChannelHost* channel,
+                           gfx::NativeViewId view,
+                           int render_view_id) {
 #if defined(ENABLE_GPU)
   scoped_ptr<Context> context(new Context(channel, NULL));
-  if (!context->Initialize(view, gfx::Size()))
+  if (!context->Initialize(view, render_view_id, gfx::Size()))
     return NULL;
 
   return context.release();
@@ -276,12 +366,20 @@ Context* CreateViewContext(GpuChannelHost* channel, gfx::NativeViewId view) {
 #endif
 }
 
+#if defined(OS_MACOSX)
+void ResizeOnscreenContext(Context* context, const gfx::Size& size) {
+#if defined(ENABLE_GPU)
+  context->ResizeOnscreen(size);
+#endif
+}
+#endif
+
 Context* CreateOffscreenContext(GpuChannelHost* channel,
                                 Context* parent,
                                 const gfx::Size& size) {
 #if defined(ENABLE_GPU)
   scoped_ptr<Context> context(new Context(channel, parent));
-  if (!context->Initialize(0, size))
+  if (!context->Initialize(0, 0, size))
     return NULL;
 
   return context.release();
@@ -301,6 +399,27 @@ uint32 GetParentTextureId(Context* context) {
   return context->parent_texture_id();
 #else
   return 0;
+#endif
+}
+
+uint32 CreateParentTexture(Context* context, const gfx::Size& size) {
+#if defined(ENABLE_GPU)
+  return context->CreateParentTexture(size);
+#else
+  return 0;
+#endif
+}
+
+void DeleteParentTexture(Context* context, uint32 texture) {
+#if defined(ENABLE_GPU)
+  context->DeleteParentTexture(texture);
+#endif
+}
+
+void SetSwapBuffersCallback(Context* context,
+                            Callback1<Context*>::Type* callback) {
+#if defined(ENABLE_GPU)
+  context->SetSwapBuffersCallback(callback);
 #endif
 }
 
@@ -344,6 +463,10 @@ bool DestroyContext(Context* context) {
 #else
   return false;
 #endif
+}
+
+GpuVideoDecoderHost* CreateVideoDecoder(Context* context) {
+  return context->CreateVideoDecoder();
 }
 
 Error GetError() {

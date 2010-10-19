@@ -3,11 +3,13 @@
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/program_manager.h"
+
 #include <algorithm>
+
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
-#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 
 namespace gpu {
@@ -202,7 +204,8 @@ const ProgramManager::ProgramInfo::UniformInfo*
   UniformInfo& info = uniform_infos_.back();
   info.element_locations.resize(size);
   info.element_locations[0] = location;
-  size_t num_texture_units = info.IsSampler() ? size : 0u;
+  DCHECK_GE(size, 0);
+  size_t num_texture_units = info.IsSampler() ? static_cast<size_t>(size) : 0u;
   info.texture_units.clear();
   info.texture_units.resize(num_texture_units, 0);
 
@@ -227,7 +230,7 @@ const ProgramManager::ProgramInfo::UniformInfo*
       }
     }
     for (GLsizei ii = 1; ii < info.size; ++ii) {
-      std::string element_name(base_name + "[" + IntToString(ii) + "]");
+      std::string element_name(base_name + "[" + base::IntToString(ii) + "]");
       info.element_locations[ii] =
           glGetUniformLocation(service_id_, element_name.c_str());
     }
@@ -293,10 +296,14 @@ void ProgramManager::ProgramInfo::GetProgramiv(GLenum pname, GLint* params) {
   }
 }
 
-void ProgramManager::ProgramInfo::AttachShader(
+bool ProgramManager::ProgramInfo::AttachShader(
     ShaderManager::ShaderInfo* info) {
-  attached_shaders_[ShaderTypeToIndex(info->shader_type())] =
-      ShaderManager::ShaderInfo::Ref(info);
+  int index = ShaderTypeToIndex(info->shader_type());
+  if (attached_shaders_[index] != NULL) {
+    return false;
+  }
+  attached_shaders_[index] = ShaderManager::ShaderInfo::Ref(info);
+  return true;
 }
 
 void ProgramManager::ProgramInfo::DetachShader(

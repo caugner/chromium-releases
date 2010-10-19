@@ -2,8 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/string_util.h"
 #include "chrome/browser/extensions/extension_prefs.h"
+
+#include "base/string_util.h"
+#include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 
@@ -15,63 +18,68 @@ namespace {
 
 // A preference that keeps track of per-extension settings. This is a dictionary
 // object read from the Preferences file, keyed off of extension id's.
-const wchar_t kExtensionsPref[] = L"extensions.settings";
+const char kExtensionsPref[] = "extensions.settings";
 
 // Where an extension was installed from. (see Extension::Location)
-const wchar_t kPrefLocation[] = L"location";
+const char kPrefLocation[] = "location";
 
 // Enabled, disabled, killed, etc. (see Extension::State)
-const wchar_t kPrefState[] = L"state";
+const char kPrefState[] = "state";
 
 // The path to the current version's manifest file.
-const wchar_t kPrefPath[] = L"path";
+const char kPrefPath[] = "path";
 
 // The dictionary containing the extension's manifest.
-const wchar_t kPrefManifest[] = L"manifest";
+const char kPrefManifest[] = "manifest";
 
 // The version number.
-const wchar_t kPrefVersion[] = L"manifest.version";
+const char kPrefVersion[] = "manifest.version";
 
 // Indicates if an extension is blacklisted:
-const wchar_t kPrefBlacklist[] = L"blacklist";
-
-// Indicates whether the toolbar should be shown on app tabs.
-const wchar_t kPrefAppTabToolbars[] = L"app_tab_toolbars";
+const char kPrefBlacklist[] = "blacklist";
 
 // Indicates whether to show an install warning when the user enables.
-const wchar_t kExtensionDidEscalatePermissions[] = L"install_warning_on_enable";
+const char kExtensionDidEscalatePermissions[] = "install_warning_on_enable";
 
-// A preference that tracks extension shelf configuration.  This is a list
-// object read from the Preferences file, containing a list of toolstrip URLs.
-const wchar_t kExtensionShelf[] = L"extensions.shelf";
+// A preference that tracks admin policy regarding which extensions the user
+// can and can not install. This preference is a list object, containing
+// strings that list extension ids. Denylist can contain "*" meaning all
+// extensions.
+const char kExtensionInstallAllowList[] = "extensions.install.allowlist";
+const char kExtensionInstallDenyList[] = "extensions.install.denylist";
 
 // A preference that tracks browser action toolbar configuration. This is a list
 // object stored in the Preferences file. The extensions are stored by ID.
-const wchar_t kExtensionToolbar[] = L"extensions.toolbar";
+const char kExtensionToolbar[] = "extensions.toolbar";
 
 // The key for a serialized Time value indicating the start of the day (from the
 // server's perspective) an extension last included a "ping" parameter during
 // its update check.
-const wchar_t kLastPingDay[] = L"lastpingday";
+const char kLastPingDay[] = "lastpingday";
 
 // Path for settings specific to blacklist update.
-const wchar_t kExtensionsBlacklistUpdate[] = L"extensions.blacklistupdate";
+const char kExtensionsBlacklistUpdate[] = "extensions.blacklistupdate";
 
 // Path and sub-keys for the idle install info dictionary preference.
-const wchar_t kIdleInstallInfo[] = L"idle_install_info";
-const wchar_t kIdleInstallInfoCrxPath[] = L"crx_path";
-const wchar_t kIdleInstallInfoVersion[] = L"version";
-const wchar_t kIdleInstallInfoFetchTime[] = L"fetch_time";
+const char kIdleInstallInfo[] = "idle_install_info";
+const char kIdleInstallInfoCrxPath[] = "crx_path";
+const char kIdleInstallInfoVersion[] = "version";
+const char kIdleInstallInfoFetchTime[] = "fetch_time";
 
 
 // A preference that, if true, will allow this extension to run in incognito
 // mode.
-const wchar_t kPrefIncognitoEnabled[] = L"incognito";
+const char kPrefIncognitoEnabled[] = "incognito";
 
 // A preference to control whether an extension is allowed to inject script in
 // pages with file URLs.
-const wchar_t kPrefAllowFileAccess[] = L"allowFileAccess";
-}
+const char kPrefAllowFileAccess[] = "allowFileAccess";
+
+// A preference set by the web store to indicate login information for
+// purchased apps.
+const char kWebStoreLogin[] = "extensions.webstore_login";
+
+}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -83,16 +91,16 @@ namespace {
 // and http://crbug.com/39745 for more details).
 static void CleanupBadExtensionKeys(PrefService* prefs) {
   DictionaryValue* dictionary = prefs->GetMutableDictionary(kExtensionsPref);
-  std::set<std::wstring> bad_keys;
+  std::set<std::string> bad_keys;
   for (DictionaryValue::key_iterator i = dictionary->begin_keys();
        i != dictionary->end_keys(); ++i) {
-    const std::wstring key_name = *i;
-    if (!Extension::IdIsValid(WideToASCII(key_name))) {
+    const std::string& key_name(*i);
+    if (!Extension::IdIsValid(key_name)) {
       bad_keys.insert(key_name);
     }
   }
   bool dirty = false;
-  for (std::set<std::wstring>::iterator i = bad_keys.begin();
+  for (std::set<std::string>::iterator i = bad_keys.begin();
        i != bad_keys.end(); ++i) {
     dirty = true;
     dictionary->Remove(*i, NULL);
@@ -200,7 +208,7 @@ DictionaryValue* ExtensionPrefs::CopyCurrentExtensions() {
 }
 
 bool ExtensionPrefs::ReadBooleanFromPref(
-    DictionaryValue* ext, const std::wstring& pref_key) {
+    DictionaryValue* ext, const std::string& pref_key) {
   if (!ext->HasKey(pref_key)) return false;
   bool bool_value = false;
   if (!ext->GetBoolean(pref_key, &bool_value)) {
@@ -212,13 +220,13 @@ bool ExtensionPrefs::ReadBooleanFromPref(
 }
 
 bool ExtensionPrefs::ReadExtensionPrefBoolean(
-    const std::string& extension_id, const std::wstring& pref_key) {
+    const std::string& extension_id, const std::string& pref_key) {
   const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
   if (!extensions)
     return false;
 
   DictionaryValue* ext = NULL;
-  if (!extensions->GetDictionary(ASCIIToWide(extension_id), &ext)) {
+  if (!extensions->GetDictionary(extension_id, &ext)) {
     // No such extension yet.
     return false;
   }
@@ -231,6 +239,44 @@ bool ExtensionPrefs::IsBlacklistBitSet(DictionaryValue* ext) {
 
 bool ExtensionPrefs::IsExtensionBlacklisted(const std::string& extension_id) {
   return ReadExtensionPrefBoolean(extension_id, kPrefBlacklist);
+}
+
+bool ExtensionPrefs::IsExtensionAllowedByPolicy(
+    const std::string& extension_id) {
+  std::string string_value;
+
+  const ListValue* blacklist = prefs_->GetList(kExtensionInstallDenyList);
+  if (!blacklist || blacklist->empty())
+    return true;
+
+  // Check the whitelist first.
+  const ListValue* whitelist = prefs_->GetList(kExtensionInstallAllowList);
+  if (whitelist) {
+    for (ListValue::const_iterator it = whitelist->begin();
+         it != whitelist->end(); ++it) {
+      if (!(*it)->GetAsString(&string_value))
+        LOG(WARNING) << "Failed to read whitelist string.";
+      else if (string_value == extension_id)
+        return true;
+    }
+  }
+
+  // Then check the blacklist (the admin blacklist, not the Google blacklist).
+  if (blacklist) {
+    for (ListValue::const_iterator it = blacklist->begin();
+         it != blacklist->end(); ++it) {
+      if (!(*it)->GetAsString(&string_value)) {
+        LOG(WARNING) << "Failed to read blacklist string.";
+      } else {
+        if (string_value == "*")
+          return false;  // Only whitelisted extensions are allowed.
+        if (string_value == extension_id)
+          return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 bool ExtensionPrefs::DidExtensionEscalatePermissions(
@@ -247,7 +293,7 @@ void ExtensionPrefs::SetDidExtensionEscalatePermissions(
 }
 
 void ExtensionPrefs::UpdateBlacklist(
-  const std::set<std::string>& blacklist_set) {
+    const std::set<std::string>& blacklist_set) {
   std::vector<std::string> remove_pref_ids;
   std::set<std::string> used_id_set;
   const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
@@ -260,7 +306,7 @@ void ExtensionPrefs::UpdateBlacklist(
         NOTREACHED() << "Invalid pref for extension " << *extension_id;
         continue;
       }
-      std::string id = WideToASCII(*extension_id);
+      const std::string& id(*extension_id);
       if (blacklist_set.find(id) == blacklist_set.end()) {
         if (!IsBlacklistBitSet(ext)) {
           // This extension is not in blacklist. And it was not blacklisted
@@ -307,7 +353,7 @@ Time ExtensionPrefs::LastPingDayImpl(const DictionaryValue* dictionary) const {
     std::string string_value;
     int64 value;
     dictionary->GetString(kLastPingDay, &string_value);
-    if (StringToInt64(string_value, &value)) {
+    if (base::StringToInt64(string_value, &value)) {
       return Time::FromInternalValue(value);
     }
   }
@@ -320,7 +366,7 @@ void ExtensionPrefs::SetLastPingDayImpl(const Time& time,
     NOTREACHED();
     return;
   }
-  std::string value = Int64ToString(time.ToInternalValue());
+  std::string value = base::Int64ToString(time.ToInternalValue());
   dictionary->SetString(kLastPingDay, value);
   prefs_->ScheduleSavePersistentPrefs();
 }
@@ -374,10 +420,9 @@ void ExtensionPrefs::GetKilledExtensionIds(std::set<std::string>* killed_ids) {
 
   for (DictionaryValue::key_iterator i = dict->begin_keys();
        i != dict->end_keys(); ++i) {
-    std::wstring key_name = *i;
-    if (!Extension::IdIsValid(WideToASCII(key_name))) {
-      LOG(WARNING) << "Invalid external extension ID encountered: "
-                   << WideToASCII(key_name);
+    const std::string& key_name(*i);
+    if (!Extension::IdIsValid(key_name)) {
+      LOG(WARNING) << "Invalid external extension ID encountered: " << key_name;
       continue;
     }
 
@@ -391,33 +436,9 @@ void ExtensionPrefs::GetKilledExtensionIds(std::set<std::string>* killed_ids) {
     int state;
     if (extension->GetInteger(kPrefState, &state) &&
         state == static_cast<int>(Extension::KILLBIT)) {
-      StringToLowerASCII(&key_name);
-      killed_ids->insert(WideToASCII(key_name));
+      killed_ids->insert(StringToLowerASCII(key_name));
     }
   }
-}
-
-ExtensionPrefs::URLList ExtensionPrefs::GetShelfToolstripOrder() {
-  URLList urls;
-  const ListValue* toolstrip_urls = prefs_->GetList(kExtensionShelf);
-  if (toolstrip_urls) {
-    for (size_t i = 0; i < toolstrip_urls->GetSize(); ++i) {
-      std::string url;
-      if (toolstrip_urls->GetString(i, &url))
-        urls.push_back(GURL(url));
-    }
-  }
-  return urls;
-}
-
-void ExtensionPrefs::SetShelfToolstripOrder(const URLList& urls) {
-  ListValue* toolstrip_urls = prefs_->GetMutableList(kExtensionShelf);
-  toolstrip_urls->Clear();
-  for (size_t i = 0; i < urls.size(); ++i) {
-    GURL url = urls[i];
-    toolstrip_urls->Append(new StringValue(url.spec()));
-  }
-  prefs_->ScheduleSavePersistentPrefs();
 }
 
 std::vector<std::string> ExtensionPrefs::GetToolbarOrder() {
@@ -534,15 +555,15 @@ FilePath ExtensionPrefs::GetExtensionPath(const std::string& extension_id) {
   if (!dict || dict->empty())
     return FilePath();
 
-  std::wstring path;
-  if (!dict->GetString(ASCIIToWide(extension_id) + L"." + kPrefPath, &path))
+  std::string path;
+  if (!dict->GetString(extension_id + "." + kPrefPath, &path))
     return FilePath();
 
-  return install_directory_.Append(FilePath::FromWStringHack(path));
+  return install_directory_.Append(FilePath::FromWStringHack(UTF8ToWide(path)));
 }
 
 void ExtensionPrefs::UpdateExtensionPref(const std::string& extension_id,
-                                         const std::wstring& key,
+                                         const std::string& key,
                                          Value* data_value) {
   if (!Extension::IdIsValid(extension_id)) {
     NOTREACHED() << "Invalid extension_id " << extension_id;
@@ -553,10 +574,9 @@ void ExtensionPrefs::UpdateExtensionPref(const std::string& extension_id,
 }
 
 void ExtensionPrefs::DeleteExtensionPrefs(const std::string& extension_id) {
-  std::wstring id = ASCIIToWide(extension_id);
   DictionaryValue* dict = prefs_->GetMutableDictionary(kExtensionsPref);
-  if (dict->HasKey(id)) {
-    dict->Remove(id, NULL);
+  if (dict->HasKey(extension_id)) {
+    dict->Remove(extension_id, NULL);
     prefs_->ScheduleSavePersistentPrefs();
   }
 }
@@ -566,11 +586,10 @@ DictionaryValue* ExtensionPrefs::GetOrCreateExtensionPref(
   DCHECK(Extension::IdIsValid(extension_id));
   DictionaryValue* dict = prefs_->GetMutableDictionary(kExtensionsPref);
   DictionaryValue* extension = NULL;
-  std::wstring id = ASCIIToWide(extension_id);
-  if (!dict->GetDictionary(id, &extension)) {
+  if (!dict->GetDictionary(extension_id, &extension)) {
     // Extension pref does not exist, create it.
     extension = new DictionaryValue();
-    dict->Set(id, extension);
+    dict->Set(extension_id, extension);
   }
   return extension;
 }
@@ -581,8 +600,7 @@ DictionaryValue* ExtensionPrefs::GetExtensionPref(
   if (!dict)
     return NULL;
   DictionaryValue* extension = NULL;
-  std::wstring id = ASCIIToWide(extension_id);
-  dict->GetDictionary(id, &extension);
+  dict->GetDictionary(extension_id, &extension);
   return extension;
 }
 
@@ -644,8 +662,7 @@ static ExtensionInfo* GetInstalledExtensionInfoImpl(
     // Just a warning for now.
   }
 
-  return new ExtensionInfo(manifest, WideToASCII(*extension_id),
-                           FilePath(path), location);
+  return new ExtensionInfo(manifest, *extension_id, FilePath(path), location);
 }
 
 ExtensionPrefs::ExtensionsInfo* ExtensionPrefs::GetInstalledExtensionsInfo() {
@@ -656,7 +673,7 @@ ExtensionPrefs::ExtensionsInfo* ExtensionPrefs::GetInstalledExtensionsInfo() {
   for (DictionaryValue::key_iterator extension_id(
            extension_data->begin_keys());
        extension_id != extension_data->end_keys(); ++extension_id) {
-    if (!Extension::IdIsValid(WideToASCII(*extension_id)))
+    if (!Extension::IdIsValid(*extension_id))
       continue;
 
     ExtensionInfo* info = GetInstalledExtensionInfoImpl(extension_data.get(),
@@ -675,7 +692,7 @@ ExtensionInfo* ExtensionPrefs::GetInstalledExtensionInfo(
   for (DictionaryValue::key_iterator extension_iter(
            extension_data->begin_keys());
        extension_iter != extension_data->end_keys(); ++extension_iter) {
-    if (WideToASCII(*extension_iter) == extension_id) {
+    if (*extension_iter == extension_id) {
       return GetInstalledExtensionInfoImpl(extension_data.get(),
                                            extension_iter);
     }
@@ -698,7 +715,7 @@ void ExtensionPrefs::SetIdleInstallInfo(const std::string& extension_id,
   info->SetString(kIdleInstallInfoCrxPath, crx_path.value());
   info->SetString(kIdleInstallInfoVersion, version);
   info->SetString(kIdleInstallInfoFetchTime,
-                  Int64ToString(fetch_time.ToInternalValue()));
+                  base::Int64ToString(fetch_time.ToInternalValue()));
   extension_prefs->Set(kIdleInstallInfo, info);
   prefs_->ScheduleSavePersistentPrefs();
 }
@@ -739,7 +756,7 @@ bool ExtensionPrefs::GetIdleInstallInfo(const std::string& extension_id,
     return false;
 
   int64 fetch_time_value;
-  if (!StringToInt64(fetch_time_string, &fetch_time_value))
+  if (!base::StringToInt64(fetch_time_string, &fetch_time_value))
     return false;
 
   if (crx_path)
@@ -763,7 +780,7 @@ std::set<std::string> ExtensionPrefs::GetIdleInstallInfoIds() {
 
   for (DictionaryValue::key_iterator iter = extensions->begin_keys();
        iter != extensions->end_keys(); ++iter) {
-    std::string id = WideToASCII(*iter);
+    const std::string& id(*iter);
     if (!Extension::IdIsValid(id)) {
       NOTREACHED();
       continue;
@@ -780,38 +797,26 @@ std::set<std::string> ExtensionPrefs::GetIdleInstallInfoIds() {
   return result;
 }
 
-bool ExtensionPrefs::AreAppTabToolbarsVisible(
-    const std::string& extension_id) {
-  // Default to hiding toolbars.
-  bool show_toolbars = false;
-  DictionaryValue* pref = GetExtensionPref(extension_id);
-  if (!pref)
-    return show_toolbars;
-
-  pref->GetBoolean(
-      ASCIIToWide(extension_id) + L"." + kPrefAppTabToolbars, &show_toolbars);
-  return show_toolbars;
+bool ExtensionPrefs::GetWebStoreLogin(std::string* result) {
+  if (prefs_->HasPrefPath(kWebStoreLogin)) {
+    *result = prefs_->GetString(kWebStoreLogin);
+    return true;
+  }
+  return false;
 }
 
-void ExtensionPrefs::SetAppTabToolbarVisibility(
-    const std::string& extension_id, bool value) {
-  DictionaryValue* pref = GetOrCreateExtensionPref(extension_id);
-  std::wstring key = ASCIIToWide(extension_id) + L"." + kPrefAppTabToolbars;
-
-  if (value)
-    pref->SetBoolean(key, true);
-  else
-    pref->Remove(key, NULL);  // False is the default value.
-
+void ExtensionPrefs::SetWebStoreLogin(const std::string& login) {
+  prefs_->SetString(kWebStoreLogin, login);
   prefs_->ScheduleSavePersistentPrefs();
 }
-
 
 // static
 void ExtensionPrefs::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterDictionaryPref(kExtensionsPref);
-  prefs->RegisterListPref(kExtensionShelf);
   prefs->RegisterListPref(kExtensionToolbar);
   prefs->RegisterIntegerPref(prefs::kExtensionToolbarSize, -1);
   prefs->RegisterDictionaryPref(kExtensionsBlacklistUpdate);
+  prefs->RegisterListPref(kExtensionInstallAllowList);
+  prefs->RegisterListPref(kExtensionInstallDenyList);
+  prefs->RegisterStringPref(kWebStoreLogin, std::string() /* default_value */);
 }

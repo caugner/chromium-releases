@@ -7,6 +7,7 @@
 
 #ifndef CHROME_COMMON_WORKER_MESSAGES_H_
 #define CHROME_COMMON_WORKER_MESSAGES_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -66,20 +67,20 @@ struct ParamTraits<WorkerHostMsg_PostConsoleMessageToWorkerObject_Params> {
       ReadParam(m, iter, &p->line_number) &&
       ReadParam(m, iter, &p->source_url);
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(L"(");
+  static void Log(const param_type& p, std::string* l) {
+    l->append("(");
     LogParam(p.source_identifier, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.message_type, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.message_level, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.message, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.line_number, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.source_url, l);
-    l->append(L")");
+    l->append(")");
   }
 };
 
@@ -106,22 +107,22 @@ struct ParamTraits<WorkerProcessMsg_CreateWorker_Params> {
       ReadParam(m, iter, &p->creator_appcache_host_id) &&
       ReadParam(m, iter, &p->shared_worker_appcache_id);
   }
-  static void Log(const param_type& p, std::wstring* l) {
-    l->append(L"(");
+  static void Log(const param_type& p, std::string* l) {
+    l->append("(");
     LogParam(p.url, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.is_shared, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.name, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.route_id, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.creator_process_id, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.creator_appcache_host_id, l);
-    l->append(L", ");
+    l->append(", ");
     LogParam(p.shared_worker_appcache_id, l);
-    l->append(L")");
+    l->append(")");
   }
 };
 

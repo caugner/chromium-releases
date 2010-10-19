@@ -4,11 +4,13 @@
 
 #include "build/build_config.h"
 
+#if defined(OS_WIN)
+#include <objbase.h>
+#include <windows.h>
+#endif
+
 #include "app/hi_res_timer_manager.h"
 #include "app/system_monitor.h"
-#if defined(OS_WIN)
-#include "app/win_util.h"
-#endif
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -43,6 +45,27 @@ void InitializeChromeApplication();
 #elif defined(OS_LINUX)
 // Work around an unimplemented instruction in 64-bit Flash.
 void WorkaroundFlashLAHF();
+#endif
+
+#if defined(OS_WIN)
+// This function is provided so that the built-in flash can lock down the
+// sandbox by calling DelayedLowerToken(0).
+extern "C" DWORD __declspec(dllexport) __stdcall DelayedLowerToken(void* ts) {
+  // s_ts is only set the first time the function is called, which happens
+  // in PluginMain.
+  static sandbox::TargetServices* s_ts =
+      reinterpret_cast<sandbox::TargetServices*>(ts);
+  if (ts)
+    return 0;
+  s_ts->LowerToken();
+  return 1;
+};
+
+// Returns true if the plugin to be loaded is the internal flash.
+bool IsPluginBuiltInFlash(const CommandLine& cmd_line) {
+  FilePath path =  cmd_line.GetSwitchValuePath(switches::kPluginPath);
+  return (path.BaseName() == FilePath(L"gcswf32.dll"));
+}
 #endif
 
 // main() routine for running as the plugin process.
@@ -92,7 +115,7 @@ int PluginMain(const MainFunctionParams& parameters) {
     // The command line might specify a test plugin to load.
     if (parsed_command_line.HasSwitch(switches::kTestSandbox)) {
       std::wstring test_plugin_name =
-          parsed_command_line.GetSwitchValue(switches::kTestSandbox);
+          parsed_command_line.GetSwitchValueNative(switches::kTestSandbox);
       sandbox_test_module = LoadLibrary(test_plugin_name.c_str());
       DCHECK(sandbox_test_module);
     }
@@ -106,9 +129,17 @@ int PluginMain(const MainFunctionParams& parameters) {
     ChildProcess plugin_process;
     plugin_process.set_main_thread(new PluginThread());
 #if defined(OS_WIN)
-    if (!no_sandbox && target_services)
-      target_services->LowerToken();
-
+    if (!no_sandbox && target_services) {
+      // We are sandboxing the plugin. If it is a generic plug-in, we lock down
+      // the sandbox right away, but if it is the built-in flash we let flash
+      // start elevated and it will call DelayedLowerToken(0) when it's ready.
+      if (IsPluginBuiltInFlash(parsed_command_line)) {
+        DLOG(INFO) << "Sandboxing flash";
+        DelayedLowerToken(target_services);
+      } else {
+        target_services->LowerToken();
+      }
+    }
     if (sandbox_test_module) {
       RunRendererTests run_security_tests =
           reinterpret_cast<RunPluginTests>(GetProcAddress(sandbox_test_module,

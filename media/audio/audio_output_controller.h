@@ -8,10 +8,12 @@
 #include "base/lock.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "base/thread.h"
 #include "base/time.h"
 #include "media/audio/audio_io.h"
+#include "media/audio/audio_manager.h"
 #include "media/audio/simple_sources.h"
+
+class MessageLoop;
 
 // An AudioOutputController controls an AudioOutputStream and provides data
 // to this output stream. It has an important function that it executes
@@ -104,10 +106,7 @@ class AudioOutputController
   // event handler will receive a OnCreated() call.
   static scoped_refptr<AudioOutputController> Create(
       EventHandler* event_handler,
-      AudioManager::Format format,    // Format of the stream.
-      int channels,                   // Number of channels.
-      int sample_rate,                // Sampling frequency/rate.
-      int bits_per_sample,            // Number of bits per sample.
+      AudioParameters params,
       uint32 hardware_buffer_size,    // Size of the hardware buffer.
 
       // Soft limit for buffer capacity in this controller. This parameter
@@ -117,10 +116,7 @@ class AudioOutputController
   // Factory method for creating a low latency audio stream.
   static scoped_refptr<AudioOutputController> CreateLowLatency(
       EventHandler* event_handler,
-      AudioManager::Format format,    // Format of the stream.
-      int channels,                   // Number of channels.
-      int sample_rate,                // Sampling frequency/rate.
-      int bits_per_sample,            // Number of bits per sample.
+      AudioParameters params,
       uint32 hardware_buffer_size,    // Size of the hardware buffer.
 
       // External synchronous reader for audio controller.
@@ -138,9 +134,9 @@ class AudioOutputController
   // has effect when the stream is paused.
   void Flush();
 
-  // Closes the audio output stream and shutdown the audio controller thread.
-  // This method returns only after all operations are completed. This
-  // controller cannot be used after this method is called.
+  // Closes the audio output stream. It changes state to kClosed and returns
+  // right away. The physical resources are freed on the audio thread if
+  // neccessary.
   //
   // It is safe to call this method more than once. Calls after the first one
   // will have no effect.
@@ -168,9 +164,7 @@ class AudioOutputController
                         uint32 capacity, SyncReader* sync_reader);
 
   // The following methods are executed on the audio controller thread.
-  void DoCreate(AudioManager::Format format, int channels,
-                int sample_rate, int bits_per_sample,
-                uint32 hardware_buffer_size);
+  void DoCreate(AudioParameters params, uint32 hardware_buffer_size);
   void DoPlay();
   void DoPause();
   void DoFlush();
@@ -203,8 +197,8 @@ class AudioOutputController
   // SyncReader is used only in low latency mode for synchronous reading.
   SyncReader* sync_reader_;
 
-  // The audio controller thread that this object runs on.
-  base::Thread thread_;
+  // The message loop of audio thread that this object runs on.
+  MessageLoop* message_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioOutputController);
 };

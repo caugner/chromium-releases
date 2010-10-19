@@ -53,21 +53,20 @@ PP_Resource Create(PP_Module module_id) {
     return 0;
 
   URLRequestInfo* request = new URLRequestInfo(module);
-  request->AddRef();  // AddRef for the caller.
 
-  return request->GetResource();
+  return request->GetReference();
 }
 
 bool IsURLRequestInfo(PP_Resource resource) {
-  return !!Resource::GetAs<URLRequestInfo>(resource).get();
+  return !!Resource::GetAs<URLRequestInfo>(resource);
 }
 
 bool SetProperty(PP_Resource request_id,
-                 PP_URLRequestProperty property,
+                 PP_URLRequestProperty_Dev property,
                  PP_Var var) {
   scoped_refptr<URLRequestInfo> request(
       Resource::GetAs<URLRequestInfo>(request_id));
-  if (!request.get())
+  if (!request)
     return false;
 
   if (var.type == PP_VARTYPE_BOOL)
@@ -82,7 +81,7 @@ bool SetProperty(PP_Resource request_id,
 bool AppendDataToBody(PP_Resource request_id, PP_Var var) {
   scoped_refptr<URLRequestInfo> request(
       Resource::GetAs<URLRequestInfo>(request_id));
-  if (!request.get())
+  if (!request)
     return false;
 
   String* data = GetString(var);
@@ -99,11 +98,11 @@ bool AppendFileToBody(PP_Resource request_id,
                       PP_Time expected_last_modified_time) {
   scoped_refptr<URLRequestInfo> request(
       Resource::GetAs<URLRequestInfo>(request_id));
-  if (!request.get())
+  if (!request)
     return false;
 
   scoped_refptr<FileRef> file_ref(Resource::GetAs<FileRef>(file_ref_id));
-  if (!file_ref.get())
+  if (!file_ref)
     return false;
 
   return request->AppendFileToBody(file_ref,
@@ -112,7 +111,7 @@ bool AppendFileToBody(PP_Resource request_id,
                                    expected_last_modified_time);
 }
 
-const PPB_URLRequestInfo ppb_urlrequestinfo = {
+const PPB_URLRequestInfo_Dev ppb_urlrequestinfo = {
   &Create,
   &IsURLRequestInfo,
   &SetProperty,
@@ -123,24 +122,31 @@ const PPB_URLRequestInfo ppb_urlrequestinfo = {
 }  // namespace
 
 URLRequestInfo::URLRequestInfo(PluginModule* module)
-    : Resource(module) {
+    : Resource(module),
+      stream_to_file_(false) {
 }
 
 URLRequestInfo::~URLRequestInfo() {
 }
 
 // static
-const PPB_URLRequestInfo* URLRequestInfo::GetInterface() {
+const PPB_URLRequestInfo_Dev* URLRequestInfo::GetInterface() {
   return &ppb_urlrequestinfo;
 }
 
-bool URLRequestInfo::SetBooleanProperty(PP_URLRequestProperty property,
+bool URLRequestInfo::SetBooleanProperty(PP_URLRequestProperty_Dev property,
                                         bool value) {
-  NOTIMPLEMENTED();  // TODO(darin): Implement me!
-  return false;
+  switch (property) {
+    case PP_URLREQUESTPROPERTY_STREAMTOFILE:
+      stream_to_file_ = value;
+      return true;
+    default:
+      NOTIMPLEMENTED();  // TODO(darin): Implement me!
+      return false;
+  }
 }
 
-bool URLRequestInfo::SetStringProperty(PP_URLRequestProperty property,
+bool URLRequestInfo::SetStringProperty(PP_URLRequestProperty_Dev property,
                                        const std::string& value) {
   // TODO(darin): Validate input.  Perhaps at a different layer?
   switch (property) {
@@ -159,7 +165,8 @@ bool URLRequestInfo::SetStringProperty(PP_URLRequestProperty property,
 }
 
 bool URLRequestInfo::AppendDataToBody(const std::string& data) {
-  body_.push_back(BodyItem(data));
+  if (!data.empty())
+    body_.push_back(BodyItem(data));
   return true;
 }
 
@@ -167,6 +174,14 @@ bool URLRequestInfo::AppendFileToBody(FileRef* file_ref,
                                       int64_t start_offset,
                                       int64_t number_of_bytes,
                                       PP_Time expected_last_modified_time) {
+  // Ignore a call to append nothing.
+  if (number_of_bytes == 0)
+    return true;
+
+  // Check for bad values.  (-1 means read until end of file.)
+  if (start_offset < 0 || number_of_bytes < -1)
+    return false;
+
   body_.push_back(BodyItem(file_ref,
                            start_offset,
                            number_of_bytes,
@@ -178,6 +193,7 @@ WebURLRequest URLRequestInfo::ToWebURLRequest(WebFrame* frame) const {
   WebURLRequest web_request;
   web_request.initialize();
   web_request.setURL(frame->document().completeURL(WebString::fromUTF8(url_)));
+  web_request.setDownloadToFile(stream_to_file_);
 
   if (!method_.empty())
     web_request.setHTTPMethod(WebString::fromUTF8(method_));

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_WIZARD_CONTROLLER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_WIZARD_CONTROLLER_H_
+#pragma once
 
 #include <string>
 
@@ -12,6 +13,7 @@
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "chrome/browser/chromeos/login/view_screen.h"
 #include "chrome/browser/chromeos/login/wizard_screen.h"
+#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 class PrefService;
@@ -22,6 +24,8 @@ namespace chromeos {
 class AccountScreen;
 class BackgroundView;
 class EulaScreen;
+class ExistingUserController;
+class HTMLPageScreen;
 class LoginScreen;
 class NetworkScreen;
 class RegistrationScreen;
@@ -52,6 +56,18 @@ class WizardController : public chromeos::ScreenObserver,
     return default_controller_;
   }
 
+  // Returns OOBE completion status.
+  static bool IsOobeCompleted();
+
+  // Marks OOBE process as completed.
+  static void MarkOobeCompleted();
+
+  // Returns device registration completion status, i.e. second part of OOBE.
+  static bool IsDeviceRegistered();
+
+  // Marks device registered. i.e. second part of OOBE is completed.
+  static void MarkDeviceRegistered();
+
   // Shows the first screen defined by |first_screen_name| or by default
   // if the parameter is empty. |screen_bounds| are used to calculate position
   // of the wizard screen.
@@ -79,15 +95,20 @@ class WizardController : public chromeos::ScreenObserver,
   chromeos::UserImageScreen* GetUserImageScreen();
   chromeos::EulaScreen* GetEulaScreen();
   chromeos::RegistrationScreen* GetRegistrationScreen();
+  chromeos::HTMLPageScreen* GetHTMLPageScreen();
 
   // Show specific screen.
   void ShowNetworkScreen();
-  void ShowLoginScreen();
   void ShowAccountScreen();
   void ShowUpdateScreen();
   void ShowUserImageScreen();
   void ShowEulaScreen();
   void ShowRegistrationScreen();
+  void ShowHTMLPageScreen();
+  // Shows the default login screen and returns NULL or shows images login
+  // screen and returns the corresponding controller instance for optional
+  // tweaking.
+  chromeos::ExistingUserController* ShowLoginScreen();
 
   // Returns a pointer to the current screen or NULL if there's no such
   // screen.
@@ -96,10 +117,16 @@ class WizardController : public chromeos::ScreenObserver,
   // Overrides observer for testing.
   void set_observer(ScreenObserver* observer) { observer_ = observer; }
 
+  // Set URL to open on browser launch.
+  void set_start_url(const GURL& start_url) { start_url_ = start_url; }
+
   // Sets partner startup customization. WizardController takes ownership
   // of the document object.
   void SetCustomization(
       const chromeos::StartupCustomizationDocument* customization);
+
+  // Returns partner startup customization document owned by WizardController.
+  const chromeos::StartupCustomizationDocument* GetCustomization() const;
 
   // Registers OOBE preferences.
   static void RegisterPrefs(PrefService* local_state);
@@ -113,6 +140,7 @@ class WizardController : public chromeos::ScreenObserver,
   static const char kOutOfBoxScreenName[];
   static const char kTestNoScreenName[];
   static const char kEulaScreenName[];
+  static const char kHTMLPageScreenName[];
 
  private:
   // Exit handlers:
@@ -132,6 +160,7 @@ class WizardController : public chromeos::ScreenObserver,
   void OnUserImageSkipped();
   void OnRegistrationSuccess();
   void OnRegistrationSkipped();
+  void OnOOBECompleted();
 
   // Switches from one screen to another.
   void SetCurrentScreen(WizardScreen* screen);
@@ -152,8 +181,8 @@ class WizardController : public chromeos::ScreenObserver,
   // sets it as the current one.
   void ShowFirstScreen(const std::string& first_screen_name);
 
-  // Marks OOBE process as completed.
-  void MarkOobeCompleted();
+  // Logs in the specified user via default login screen.
+  void Login(const std::string& username, const std::string& password);
 
   // Widget we're showing in.
   views::Widget* widget_;
@@ -173,12 +202,16 @@ class WizardController : public chromeos::ScreenObserver,
   scoped_ptr<chromeos::UserImageScreen> user_image_screen_;
   scoped_ptr<chromeos::EulaScreen> eula_screen_;
   scoped_ptr<chromeos::RegistrationScreen> registration_screen_;
+  scoped_ptr<chromeos::HTMLPageScreen> html_page_screen_;
 
   // Screen that's currently active.
   WizardScreen* current_screen_;
 
   std::string username_;
   std::string password_;
+
+  // True if running official BUILD.
+  bool is_official_build_;
 
   // True if full OOBE flow should be shown.
   bool is_out_of_box_;
@@ -195,6 +228,9 @@ class WizardController : public chromeos::ScreenObserver,
 
   // Partner startup customizations.
   scoped_ptr<const chromeos::StartupCustomizationDocument> customization_;
+
+  // URL to open on browser launch.
+  GURL start_url_;
 
   FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, ControlFlowErrorNetwork);
   FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, ControlFlowErrorUpdate);

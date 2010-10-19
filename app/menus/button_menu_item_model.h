@@ -4,6 +4,7 @@
 
 #ifndef APP_MENUS_BUTTON_MENU_ITEM_MODEL_H_
 #define APP_MENUS_BUTTON_MENU_ITEM_MODEL_H_
+#pragma once
 
 #include <vector>
 
@@ -30,6 +31,10 @@ class ButtonMenuItemModel {
 
     // Performs the action associated with the specified command id.
     virtual void ExecuteCommand(int command_id) = 0;
+    virtual bool IsCommandIdEnabled(int command_id) const { return true; }
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   ButtonMenuItemModel(int string_id, ButtonMenuItemModel::Delegate* delegate);
@@ -75,6 +80,12 @@ class ButtonMenuItemModel {
 
   // Called from implementations.
   void ActivatedCommand(int command_id);
+
+  // Returns the enabled state of the button at |index|.
+  bool IsEnabledAt(int index) const;
+
+  // Returns the enabled state of the command specified by |command_id|.
+  bool IsCommandIdEnabled(int command_id) const;
 
   const string16& label() const { return item_label_; }
 

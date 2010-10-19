@@ -19,6 +19,7 @@
 #include "base/singleton.h"
 #include "base/string_util.h"
 #include "base/trace_event.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -409,8 +410,9 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
 
     // Probe to see whether the host implements the privileged service.
     ScopedComPtr<IChromeFramePrivileged> service;
-    HRESULT service_hr = DoQueryService(SID_ChromeFramePrivileged, client_site,
-                                service.Receive());
+    HRESULT service_hr = DoQueryService(SID_ChromeFramePrivileged,
+                                        m_spClientSite,
+                                        service.Receive());
     if (SUCCEEDED(service_hr) && service) {
       // Does the host want privileged mode?
       boolean wants_privileged = false;
@@ -419,7 +421,7 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
       if (SUCCEEDED(service_hr) && wants_privileged)
         is_privileged_ = true;
 
-      url_fetcher_.set_privileged_mode(is_privileged_);
+      url_fetcher_->set_privileged_mode(is_privileged_);
     }
 
     std::wstring chrome_extra_arguments;
@@ -457,11 +459,12 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
       WideToUTF8(url_, url_.Length(), &utf8_url);
     }
 
-    url_fetcher_.set_frame_busting(!is_privileged_);
-    automation_client_->SetUrlFetcher(&url_fetcher_);
+    url_fetcher_->set_frame_busting(!is_privileged_);
+    automation_client_->SetUrlFetcher(url_fetcher_.get());
     if (!InitializeAutomation(profile_name, chrome_extra_arguments,
                               IsIEInPrivate(), true, GURL(utf8_url),
                               GURL())) {
+      DLOG(ERROR) << "Failed to navigate to url:" << utf8_url;
       return E_FAIL;
     }
   }

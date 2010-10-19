@@ -3,9 +3,12 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/io_thread.h"
+
 #include "base/command_line.h"
 #include "base/leak_tracker.h"
 #include "base/logging.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/gpu_process_host.h"
@@ -21,11 +24,13 @@
 #include "net/base/net_util.h"
 #include "net/http/http_auth_filter.h"
 #include "net/http/http_auth_handler_factory.h"
-#include "net/http/http_auth_handler_negotiate.h"
+#if defined(USE_NSS)
+#include "net/ocsp/nss_ocsp.h"
+#endif  // defined(USE_NSS)
 
 namespace {
 
-net::HostResolver* CreateGlobalHostResolver() {
+net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
   size_t parallelism = net::HostResolver::kDefaultParallelism;
@@ -37,7 +42,7 @@ net::HostResolver* CreateGlobalHostResolver() {
 
     // Parse the switch (it should be a positive integer formatted as decimal).
     int n;
-    if (StringToInt(s, &n) && n > 0) {
+    if (base::StringToInt(s, &n) && n > 0) {
       parallelism = static_cast<size_t>(n);
     } else {
       LOG(ERROR) << "Invalid switch for host resolver parallelism: " << s;
@@ -45,7 +50,7 @@ net::HostResolver* CreateGlobalHostResolver() {
   }
 
   net::HostResolver* global_host_resolver =
-      net::CreateSystemHostResolver(parallelism);
+      net::CreateSystemHostResolver(parallelism, net_log);
 
   // Determine if we should disable IPv6 support.
   if (!command_line.HasSwitch(switches::kEnableIPv6)) {
@@ -66,9 +71,9 @@ net::HostResolver* CreateGlobalHostResolver() {
         const FieldTrial::Probability kDivisor = 100;
         const FieldTrial::Probability kProbability = 50;  // 50% probability.
         FieldTrial* trial = new FieldTrial("IPv6_Probe", kDivisor);
-        int skip_group = trial->AppendGroup("_IPv6_probe_skipped",
+        int skip_group = trial->AppendGroup("IPv6_probe_skipped",
                                             kProbability);
-        trial->AppendGroup("_IPv6_probe_done",
+        trial->AppendGroup("IPv6_probe_done",
                            FieldTrial::kAllRemainingProbability);
         use_ipv6_probe = (trial->group() != skip_group);
 #endif
@@ -108,17 +113,9 @@ class LoggingNetworkChangeObserver
   virtual void OnIPAddressChanged() {
     LOG(INFO) << "Observed a change to the network IP addresses";
 
-    net::NetLog::Source global_source;
-
-    // TODO(eroman): We shouldn't need to assign an ID to this source, since
-    //               conceptually it is the "global event stream". However
-    //               currently the javascript does a grouping on source id, so
-    //               the display will look weird if we don't give it one.
-    global_source.id = net_log_->NextID();
-
-    net_log_->AddEntry(net::NetLog::TYPE_NETWORK_IP_ADDRESSSES_CHANGED,
+    net_log_->AddEntry(net::NetLog::TYPE_NETWORK_IP_ADDRESSES_CHANGED,
                        base::TimeTicks::Now(),
-                       global_source,
+                       net::NetLog::Source(),
                        net::NetLog::PHASE_NONE,
                        NULL);
   }
@@ -138,7 +135,6 @@ IOThread::IOThread()
     : BrowserProcessSubThread(ChromeThread::IO),
       globals_(NULL),
       speculative_interceptor_(NULL),
-      prefetch_observer_(NULL),
       predictor_(NULL) {}
 
 IOThread::~IOThread() {
@@ -182,6 +178,12 @@ void IOThread::ChangedToOnTheRecord() {
 void IOThread::Init() {
   BrowserProcessSubThread::Init();
 
+  DCHECK_EQ(MessageLoop::TYPE_IO, message_loop()->type());
+
+#if defined(USE_NSS)
+  net::SetMessageLoopForOCSP();
+#endif // defined(USE_NSS)
+
   DCHECK(!globals_);
   globals_ = new Globals;
 
@@ -193,7 +195,7 @@ void IOThread::Init() {
   network_change_observer_.reset(
       new LoggingNetworkChangeObserver(globals_->net_log.get()));
 
-  globals_->host_resolver = CreateGlobalHostResolver();
+  globals_->host_resolver = CreateGlobalHostResolver(globals_->net_log.get());
   globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory(
       globals_->host_resolver));
 }
@@ -221,13 +223,6 @@ void IOThread::CleanUp() {
   // Deletion will unregister this interceptor.
   delete speculative_interceptor_;
   speculative_interceptor_ = NULL;
-
-  // Not initialized in Init().  May not be initialized.
-  if (prefetch_observer_) {
-    globals_->host_resolver->RemoveObserver(prefetch_observer_);
-    delete prefetch_observer_;
-    prefetch_observer_ = NULL;
-  }
 
   // TODO(eroman): hack for http://crbug.com/15513
   if (globals_->host_resolver->GetAsHostResolverImpl()) {
@@ -258,63 +253,39 @@ void IOThread::CleanUpAfterMessageLoopDestruction() {
 
 net::HttpAuthHandlerFactory* IOThread::CreateDefaultAuthHandlerFactory(
     net::HostResolver* resolver) {
-  net::HttpAuthFilterWhitelist* auth_filter = NULL;
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
   // Get the whitelist information from the command line, create an
   // HttpAuthFilterWhitelist, and attach it to the HttpAuthHandlerFactory.
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-
+  net::HttpAuthFilterWhitelist* auth_filter_default_credentials = NULL;
   if (command_line.HasSwitch(switches::kAuthServerWhitelist)) {
-    std::string auth_server_whitelist =
-        command_line.GetSwitchValueASCII(switches::kAuthServerWhitelist);
-
-    // Create a whitelist filter.
-    auth_filter = new net::HttpAuthFilterWhitelist();
-    auth_filter->SetWhitelist(auth_server_whitelist);
+    auth_filter_default_credentials = new net::HttpAuthFilterWhitelist(
+        command_line.GetSwitchValueASCII(switches::kAuthServerWhitelist));
   }
-
-  // Set the flag that enables or disables the Negotiate auth handler.
-  static const bool kNegotiateAuthEnabledDefault = true;
-
-  bool negotiate_auth_enabled = kNegotiateAuthEnabledDefault;
-  if (command_line.HasSwitch(switches::kExperimentalEnableNegotiateAuth)) {
-    std::string enable_negotiate_auth = command_line.GetSwitchValueASCII(
-        switches::kExperimentalEnableNegotiateAuth);
-    // Enabled if no value, or value is 'true'.  Disabled otherwise.
-    negotiate_auth_enabled =
-        enable_negotiate_auth.empty() ||
-        (StringToLowerASCII(enable_negotiate_auth) == "true");
+  net::HttpAuthFilterWhitelist* auth_filter_delegate = NULL;
+  if (command_line.HasSwitch(switches::kAuthNegotiateDelegateWhitelist)) {
+    auth_filter_delegate = new net::HttpAuthFilterWhitelist(
+        command_line.GetSwitchValueASCII(
+            switches::kAuthNegotiateDelegateWhitelist));
   }
-
-  net::HttpAuthHandlerRegistryFactory* registry_factory =
-      net::HttpAuthHandlerFactory::CreateDefault();
-
   globals_->url_security_manager.reset(
-      net::URLSecurityManager::Create(auth_filter));
+      net::URLSecurityManager::Create(auth_filter_default_credentials,
+                                      auth_filter_delegate));
 
-  // Add the security manager to the auth factories that need it.
-  registry_factory->SetURLSecurityManager("ntlm",
-                                          globals_->url_security_manager.get());
-  registry_factory->SetURLSecurityManager("negotiate",
-                                          globals_->url_security_manager.get());
-  if (negotiate_auth_enabled) {
-    // Configure the Negotiate settings for the Kerberos SPN.
-    // TODO(cbentzel): Read the related IE registry settings on Windows builds.
-    // TODO(cbentzel): Ugly use of static_cast here.
-    net::HttpAuthHandlerNegotiate::Factory* negotiate_factory =
-        static_cast<net::HttpAuthHandlerNegotiate::Factory*>(
-            registry_factory->GetSchemeFactory("negotiate"));
-    DCHECK(negotiate_factory);
-    negotiate_factory->set_host_resolver(resolver);
-    if (command_line.HasSwitch(switches::kDisableAuthNegotiateCnameLookup))
-      negotiate_factory->set_disable_cname_lookup(true);
-    if (command_line.HasSwitch(switches::kEnableAuthNegotiatePort))
-      negotiate_factory->set_use_port(true);
-  } else {
-    // Disable the Negotiate authentication handler.
-    registry_factory->RegisterSchemeFactory("negotiate", NULL);
-  }
-  return registry_factory;
+  // Determine which schemes are supported.
+  std::string csv_auth_schemes = "basic,digest,ntlm,negotiate";
+  if (command_line.HasSwitch(switches::kAuthSchemes))
+    csv_auth_schemes = StringToLowerASCII(
+        command_line.GetSwitchValueASCII(switches::kAuthSchemes));
+  std::vector<std::string> supported_schemes;
+  SplitString(csv_auth_schemes, ',', &supported_schemes);
+
+  return net::HttpAuthHandlerRegistryFactory::Create(
+      supported_schemes,
+      globals_->url_security_manager.get(),
+      resolver,
+      command_line.HasSwitch(switches::kDisableAuthNegotiateCnameLookup),
+      command_line.HasSwitch(switches::kEnableAuthNegotiatePort));
 }
 
 void IOThread::InitNetworkPredictorOnIOThread(
@@ -336,20 +307,11 @@ void IOThread::InitNetworkPredictorOnIOThread(
       preconnect_enabled);
   predictor_->AddRef();
 
-  // TODO(jar): Until connection notification and DNS observation handling are
-  // properly combined into a learning model, we'll only use one observation
-  // mechanism or the other.
-  if (preconnect_enabled) {
-    DCHECK(!speculative_interceptor_);
-    speculative_interceptor_ = new chrome_browser_net::ConnectInterceptor;
-  } else {
-    DCHECK(!prefetch_observer_);
-    prefetch_observer_ = chrome_browser_net::CreateResolverObserver();
-    globals_->host_resolver->AddObserver(prefetch_observer_);
-  }
+  // Speculative_interceptor_ is used to predict subresource usage.
+  DCHECK(!speculative_interceptor_);
+  speculative_interceptor_ = new chrome_browser_net::ConnectInterceptor;
 
-  FinalizePredictorInitialization(
-      predictor_, prefetch_observer_, startup_urls, referral_list);
+  FinalizePredictorInitialization(predictor_, startup_urls, referral_list);
 }
 
 void IOThread::ChangedToOnTheRecordOnIOThread() {

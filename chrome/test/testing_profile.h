@@ -4,42 +4,43 @@
 
 #ifndef CHROME_TEST_TESTING_PROFILE_H_
 #define CHROME_TEST_TESTING_PROFILE_H_
+#pragma once
 
-#include "base/base_paths.h"
-#include "base/file_util.h"
-#include "base/path_service.h"
-#include "chrome/browser/autocomplete/autocomplete_classifier.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/browser_prefs.h"
-#include "chrome/browser/browser_theme_provider.h"
-#include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/favicon_service.h"
-#include "chrome/browser/find_bar_state.h"
-#include "chrome/browser/geolocation/geolocation_content_settings_map.h"
-#include "chrome/browser/geolocation/geolocation_permission_context.h"
-#include "chrome/browser/host_content_settings_map.h"
-#include "chrome/browser/history/history.h"
-#include "chrome/browser/in_process_webkit/webkit_context.h"
-#include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/pref_service.h"
-#include "chrome/browser/pref_value_store.h"
+#include "base/ref_counted.h"
+#include "base/scoped_ptr.h"
+#include "base/scoped_temp_dir.h"
+#include "base/timer.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/common/json_pref_store.h"
-#include "chrome/common/net/url_request_context_getter.h"
-#include "net/base/cookie_monster.h"
 
+namespace history {
+class TopSites;
+}
+
+namespace net {
+class CookieMonster;
+}
+
+class AutocompleteClassifier;
+class BookmarkModel;
+class BrowserThemeProvider;
+class DesktopNotificationService;
+class FaviconService;
+class FindBarState;
+class GeolocationContentSettingsMap;
+class GeolocationPermissionContext;
+class HistoryService;
+class HostContentSettingsMap;
+class PrefService;
 class ProfileSyncService;
 class SessionService;
+class TemplateURLModel;
+class TestingPrefService;
+class URLRequestContextGetter;
+class WebKitContext;
 
 class TestingProfile : public Profile {
  public:
   TestingProfile();
-
-  // Creates a new profile by adding |count| to the end of the path. Use this
-  // when you need to have more than one TestingProfile running at the same
-  // time.
-  explicit TestingProfile(int count);
 
   virtual ~TestingProfile();
 
@@ -85,13 +86,14 @@ class TestingProfile : public Profile {
   // ownership of |theme_provider|.
   void UseThemeProvider(BrowserThemeProvider* theme_provider);
 
+  TestingPrefService* GetTestingPrefService();
+
   virtual ProfileId GetRuntimeId() {
     return reinterpret_cast<ProfileId>(this);
   }
 
-  virtual FilePath GetPath() {
-    return path_;
-  }
+  virtual FilePath GetPath();
+
   // Sets whether we're off the record. Default is false.
   void set_off_the_record(bool off_the_record) {
     off_the_record_ = off_the_record;
@@ -104,6 +106,7 @@ class TestingProfile : public Profile {
   virtual bool HasOffTheRecordProfile() { return false; }
 
   virtual Profile* GetOriginalProfile() { return this; }
+  virtual ChromeAppCacheService* GetAppCacheService() { return NULL; }
   virtual webkit_database::DatabaseTracker* GetDatabaseTracker();
   virtual VisitedLinkMaster* GetVisitedLinkMaster() { return NULL; }
   virtual ExtensionsService* GetExtensionsService() { return NULL; }
@@ -132,11 +135,7 @@ class TestingProfile : public Profile {
   // The CookieMonster will only be returned if a Context has been created. Do
   // this by calling CreateRequestContext(). See the note at GetRequestContext
   // for more information.
-  net::CookieMonster* GetCookieMonster() {
-    if (!GetRequestContext())
-      return NULL;
-    return GetRequestContext()->GetCookieStore()->GetCookieMonster();
-  }
+  net::CookieMonster* GetCookieMonster();
   virtual AutocompleteClassifier* GetAutocompleteClassifier() {
     return autocomplete_classifier_.get();
   }
@@ -149,24 +148,15 @@ class TestingProfile : public Profile {
   virtual PasswordStore* GetPasswordStore(ServiceAccessType access) {
     return NULL;
   }
-  virtual PrefService* GetPrefs() {
-    if (!prefs_.get()) {
-      FilePath prefs_filename =
-          path_.Append(FILE_PATH_LITERAL("TestPreferences"));
-
-      prefs_.reset(PrefService::CreateUserPrefService(prefs_filename));
-      Profile::RegisterUserPrefs(prefs_.get());
-      browser::RegisterAllPrefs(prefs_.get(), prefs_.get());
-    }
-    return prefs_.get();
-  }
+  virtual PrefService* GetPrefs();
   virtual TemplateURLModel* GetTemplateURLModel() {
     return template_url_model_.get();
   }
   virtual TemplateURLFetcher* GetTemplateURLFetcher() { return NULL; }
-  virtual history::TopSites* GetTopSites() { return NULL; }
+  virtual history::TopSites* GetTopSites();
   virtual DownloadManager* GetDownloadManager() { return NULL; }
   virtual PersonalDataManager* GetPersonalDataManager() { return NULL; }
+  virtual FileSystemHostContext* GetFileSystemHostContext() { return NULL; }
   virtual bool HasCreatedDownloadManager() const { return false; }
   virtual void InitThemes();
   virtual void SetTheme(Extension* extension) {}
@@ -194,30 +184,10 @@ class TestingProfile : public Profile {
 
   virtual net::SSLConfigService* GetSSLConfigService() { return NULL; }
   virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher() { return NULL; }
-  virtual FindBarState* GetFindBarState() {
-    if (!find_bar_state_.get())
-      find_bar_state_.reset(new FindBarState());
-    return find_bar_state_.get();
-  }
-  virtual HostContentSettingsMap* GetHostContentSettingsMap() {
-    if (!host_content_settings_map_.get())
-      host_content_settings_map_ = new HostContentSettingsMap(this);
-    return host_content_settings_map_.get();
-  }
-  virtual GeolocationContentSettingsMap* GetGeolocationContentSettingsMap() {
-    if (!geolocation_content_settings_map_.get()) {
-      geolocation_content_settings_map_ =
-          new GeolocationContentSettingsMap(this);
-    }
-    return geolocation_content_settings_map_.get();
-  }
-  virtual GeolocationPermissionContext* GetGeolocationPermissionContext() {
-    if (!geolocation_permission_context_.get()) {
-      geolocation_permission_context_ =
-          new GeolocationPermissionContext(this);
-    }
-    return geolocation_permission_context_.get();
-  }
+  virtual FindBarState* GetFindBarState();
+  virtual HostContentSettingsMap* GetHostContentSettingsMap();
+  virtual GeolocationContentSettingsMap* GetGeolocationContentSettingsMap();
+  virtual GeolocationPermissionContext* GetGeolocationPermissionContext();
   virtual HostZoomMap* GetHostZoomMap() { return NULL; }
   void set_session_service(SessionService* session_service);
   virtual SessionService* GetSessionService() { return session_service_.get(); }
@@ -248,25 +218,17 @@ class TestingProfile : public Profile {
   virtual void ResetTabRestoreService() {}
   virtual SpellCheckHost* GetSpellCheckHost() { return NULL; }
   virtual void ReinitializeSpellCheckHost(bool force) { }
-  virtual WebKitContext* GetWebKitContext() {
-    if (webkit_context_ == NULL)
-      webkit_context_ = new WebKitContext(this);
-    return webkit_context_;
-  }
+  virtual WebKitContext* GetWebKitContext();
   virtual WebKitContext* GetOffTheRecordWebKitContext() { return NULL; }
   virtual void MarkAsCleanShutdown() {}
   virtual void InitExtensions() {}
   virtual void InitWebResources() {}
   virtual NTPResourceCache* GetNTPResourceCache();
-  virtual DesktopNotificationService* GetDesktopNotificationService() {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
-    if (!desktop_notification_service_.get()) {
-       desktop_notification_service_.reset(new DesktopNotificationService(
-           this, NULL));
-    }
-    return desktop_notification_service_.get();
-  }
+  virtual DesktopNotificationService* GetDesktopNotificationService();
   virtual BackgroundContentsService* GetBackgroundContentsService() {
+    return NULL;
+  }
+  virtual StatusTray* GetStatusTray() {
     return NULL;
   }
   virtual FilePath last_selected_directory() {
@@ -275,7 +237,12 @@ class TestingProfile : public Profile {
   virtual void set_last_selected_directory(const FilePath& path) {
     last_selected_directory_ = path;
   }
-
+#if defined(OS_CHROMEOS)
+  virtual chromeos::ProxyConfigServiceImpl*
+      GetChromeOSProxyConfigServiceImpl() {
+    return NULL;
+  }
+#endif  // defined(OS_CHROMEOS)
 
   // Schedules a task on the history backend and runs a nested loop until the
   // task is processed.  This has the effect of blocking the caller until the
@@ -287,12 +254,13 @@ class TestingProfile : public Profile {
   virtual ProfileSyncService* GetProfileSyncService();
   virtual CloudPrintProxyService* GetCloudPrintProxyService() { return NULL; }
 
+  virtual ChromeBlobStorageContext* GetBlobStorageContext() {
+    return NULL;
+  }
+
  protected:
-  // The path of the profile; the various database and other files are relative
-  // to this.
-  FilePath path_;
   base::Time start_time_;
-  scoped_ptr<PrefService> prefs_;
+  scoped_ptr<TestingPrefService> prefs_;
 
  private:
   // Destroys favicon service if it has been created.
@@ -373,6 +341,10 @@ class TestingProfile : public Profile {
   scoped_ptr<FindBarState> find_bar_state_;
 
   FilePath last_selected_directory_;
+  scoped_refptr<history::TopSites> top_sites_;  // For history and thumbnails.
+
+  // We use a temporary directory to store testing profile data.
+  ScopedTempDir temp_dir_;
 };
 
 // A profile that derives from another profile.  This does not actually

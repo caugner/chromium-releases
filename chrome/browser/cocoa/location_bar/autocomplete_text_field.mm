@@ -10,6 +10,7 @@
 #import "chrome/browser/cocoa/location_bar/autocomplete_text_field_editor.h"
 #import "chrome/browser/cocoa/toolbar_controller.h"
 #import "chrome/browser/cocoa/url_drop_target.h"
+#import "chrome/browser/cocoa/view_id_util.h"
 
 @implementation AutocompleteTextField
 
@@ -26,6 +27,8 @@
 
 - (void)awakeFromNib {
   DCHECK([[self cell] isKindOfClass:[AutocompleteTextFieldCell class]]);
+  [[self cell] setTruncatesLastVisibleLine:YES];
+  [[self cell] setLineBreakMode:NSLineBreakByTruncatingTail];
   currentToolTips_.reset([[NSMutableArray alloc] init]);
 }
 
@@ -386,6 +389,10 @@
 - (NSMenu*)decorationMenuForEvent:(NSEvent*)event {
   AutocompleteTextFieldCell* cell = [self cell];
   return [cell decorationMenuForEvent:event inRect:[self bounds] ofView:self];
+}
+
+- (ViewID)viewID {
+  return VIEW_ID_LOCATION_BAR;
 }
 
 @end

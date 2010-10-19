@@ -5,23 +5,21 @@
 #include "chrome/browser/dom_ui/net_internals_ui.h"
 
 #include <algorithm>
-#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/file_version_info.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/singleton.h"
+#include "base/string_number_conversions.h"
 #include "base/string_piece.h"
-#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
@@ -33,6 +31,7 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
@@ -44,14 +43,20 @@
 #include "net/base/sys_addrinfo.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
+#include "net/http/http_network_layer.h"
+#include "net/http/http_network_session.h"
+#include "net/http/http_proxy_client_socket_pool.h"
 #include "net/proxy/proxy_service.h"
+#include "net/socket/socks_client_socket_pool.h"
+#include "net/socket/ssl_client_socket_pool.h"
+#include "net/socket/tcp_client_socket_pool.h"
 #include "net/url_request/url_request_context.h"
 
 namespace {
 
 // Formats |t| as a decimal number, in milliseconds.
 std::string TickCountToString(const base::TimeTicks& t) {
-  return Int64ToString((t - base::TimeTicks()).InMilliseconds());
+  return base::Int64ToString((t - base::TimeTicks()).InMilliseconds());
 }
 
 // Returns the HostCache for |context|'s primary HostResolver, or NULL if
@@ -78,49 +83,27 @@ disk_cache::Backend* GetDiskCacheBackend(URLRequestContext* context) {
   return http_cache->GetCurrentBackend();
 }
 
-// Serializes the specified event to a DictionaryValue.
-Value* EntryToDictionaryValue(net::NetLog::EventType type,
-                              const base::TimeTicks& time,
-                              const net::NetLog::Source& source,
-                              net::NetLog::EventPhase phase,
-                              net::NetLog::EventParameters* params) {
-  DictionaryValue* entry_dict = new DictionaryValue();
+// Returns the http network session for |context| if there is one.
+// Otherwise, returns NULL.
+net::HttpNetworkSession* GetHttpNetworkSession(URLRequestContext* context) {
+  if (!context->http_transaction_factory())
+    return NULL;
 
-  // Set the entry time. (Note that we send it as a string since integers
-  // might overflow).
-  entry_dict->SetString(L"time", TickCountToString(time));
-
-  // Set the entry source.
-  DictionaryValue* source_dict = new DictionaryValue();
-  source_dict->SetInteger(L"id", source.id);
-  source_dict->SetInteger(L"type", static_cast<int>(source.type));
-  entry_dict->Set(L"source", source_dict);
-
-  // Set the event info.
-  entry_dict->SetInteger(L"type", static_cast<int>(type));
-  entry_dict->SetInteger(L"phase", static_cast<int>(phase));
-
-  // Set the event-specific parameters.
-  if (params)
-    entry_dict->Set(L"params", params->ToValue());
-
-  return entry_dict;
+  return context->http_transaction_factory()->GetSession();
 }
 
 Value* ExperimentToValue(const ConnectionTester::Experiment& experiment) {
   DictionaryValue* dict = new DictionaryValue();
 
   if (experiment.url.is_valid())
-    dict->SetString(L"url", experiment.url.spec());
+    dict->SetString("url", experiment.url.spec());
 
-  dict->SetStringFromUTF16(
-      L"proxy_settings_experiment",
-      ConnectionTester::ProxySettingsExperimentDescription(
-          experiment.proxy_settings_experiment));
-  dict->SetStringFromUTF16(
-      L"host_resolver_experiment",
-      ConnectionTester::HostResolverExperimentDescription(
-          experiment.host_resolver_experiment));
+  dict->SetString("proxy_settings_experiment",
+                  ConnectionTester::ProxySettingsExperimentDescription(
+                      experiment.proxy_settings_experiment));
+  dict->SetString("host_resolver_experiment",
+                  ConnectionTester::HostResolverExperimentDescription(
+                      experiment.host_resolver_experiment));
   return dict;
 }
 
@@ -185,7 +168,7 @@ class NetInternalsMessageHandler::IOThreadImpl
       public ConnectionTester::Delegate {
  public:
   // Type for methods that can be used as MessageHandler callbacks.
-  typedef void (IOThreadImpl::*MessageHandler)(const Value*);
+  typedef void (IOThreadImpl::*MessageHandler)(const ListValue*);
 
   // Creates a proxy for |handler| that will live on the IO thread.
   // |handler| is a weak pointer, since it is possible for the DOMMessageHandler
@@ -215,17 +198,18 @@ class NetInternalsMessageHandler::IOThreadImpl
 
   // This message is called after the webpage's onloaded handler has fired.
   // it indicates that the renderer is ready to start receiving captured data.
-  void OnRendererReady(const Value* value);
+  void OnRendererReady(const ListValue* list);
 
-  void OnGetProxySettings(const Value* value);
-  void OnReloadProxySettings(const Value* value);
-  void OnGetBadProxies(const Value* value);
-  void OnClearBadProxies(const Value* value);
-  void OnGetHostResolverCache(const Value* value);
-  void OnClearHostResolverCache(const Value* value);
-  void OnGetPassiveLogEntries(const Value* value);
-  void OnStartConnectionTests(const Value* value);
-  void OnGetHttpCacheInfo(const Value* value);
+  void OnGetProxySettings(const ListValue* list);
+  void OnReloadProxySettings(const ListValue* list);
+  void OnGetBadProxies(const ListValue* list);
+  void OnClearBadProxies(const ListValue* list);
+  void OnGetHostResolverCache(const ListValue* list);
+  void OnClearHostResolverCache(const ListValue* list);
+  void OnGetPassiveLogEntries(const ListValue* list);
+  void OnStartConnectionTests(const ListValue* list);
+  void OnGetHttpCacheInfo(const ListValue* list);
+  void OnGetSocketPoolInfo(const ListValue* list);
 
   // ChromeNetLog::Observer implementation:
   virtual void OnAddEntry(net::NetLog::EventType type,
@@ -247,7 +231,7 @@ class NetInternalsMessageHandler::IOThreadImpl
   class CallbackHelper;
 
   // Helper that runs |method| with |arg|, and deletes |arg| on completion.
-  void DispatchToMessageHandler(Value* arg, MessageHandler method);
+  void DispatchToMessageHandler(ListValue* arg, MessageHandler method);
 
   // Helper that executes |function_name| in the attached renderer.
   // The function takes ownership of |arg|.
@@ -282,20 +266,21 @@ class NetInternalsMessageHandler::IOThreadImpl::CallbackHelper
     DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   }
 
-  virtual void RunWithParams(const Tuple1<const Value*>& params) {
+  virtual void RunWithParams(const Tuple1<const ListValue*>& params) {
     DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
 
     // We need to make a copy of the value in order to pass it over to the IO
     // thread. We will delete this in IOThreadImpl::DispatchMessageHandler().
-    Value* value_copy = params.a ? params.a->DeepCopy() : NULL;
+    ListValue* list_copy = static_cast<ListValue*>(
+        params.a ? params.a->DeepCopy() : NULL);
 
     if (!ChromeThread::PostTask(
             ChromeThread::IO, FROM_HERE,
             NewRunnableMethod(instance_.get(),
                               &IOThreadImpl::DispatchToMessageHandler,
-                              value_copy, method_))) {
-      // Failed posting the task, avoid leaking |value_copy|.
-      delete value_copy;
+                              list_copy, method_))) {
+      // Failed posting the task, avoid leaking |list_copy|.
+      delete list_copy;
     }
   }
 
@@ -405,6 +390,9 @@ void NetInternalsMessageHandler::RegisterMessages() {
   dom_ui_->RegisterMessageCallback(
       "getHttpCacheInfo",
       proxy_->CreateCallback(&IOThreadImpl::OnGetHttpCacheInfo));
+  dom_ui_->RegisterMessageCallback(
+      "getSocketPoolInfo",
+      proxy_->CreateCallback(&IOThreadImpl::OnGetSocketPoolInfo));
 }
 
 void NetInternalsMessageHandler::CallJavascriptFunction(
@@ -428,7 +416,8 @@ NetInternalsMessageHandler::IOThreadImpl::IOThreadImpl(
     const base::WeakPtr<NetInternalsMessageHandler>& handler,
     IOThread* io_thread,
     URLRequestContextGetter* context_getter)
-    : handler_(handler),
+    : Observer(net::NetLog::LOG_ALL),
+      handler_(handler),
       io_thread_(io_thread),
       context_getter_(context_getter),
       is_observing_log_(false) {
@@ -457,7 +446,7 @@ void NetInternalsMessageHandler::IOThreadImpl::Detach() {
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
-    const Value* value) {
+    const ListValue* list) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   DCHECK(!is_observing_log_) << "notifyReady called twice";
 
@@ -475,8 +464,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
 
     for (size_t i = 0; i < event_types.size(); ++i) {
       const char* name = net::NetLog::EventTypeToString(event_types[i]);
-      dict->SetInteger(ASCIIToWide(name),
-                       static_cast<int>(event_types[i]));
+      dict->SetInteger(name, static_cast<int>(event_types[i]));
     }
 
     CallJavascriptFunction(L"g_browser.receivedLogEventTypeConstants", dict);
@@ -487,28 +475,23 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
   {
     DictionaryValue* dict = new DictionaryValue();
 
-    scoped_ptr<FileVersionInfo> version_info(
-        chrome_app::GetChromeVersionInfo());
+    chrome::VersionInfo version_info;
 
-    if (version_info == NULL) {
-      DLOG(ERROR) << "Unable to create FileVersionInfo object";
-
+    if (!version_info.is_valid()) {
+      DLOG(ERROR) << "Unable to create chrome::VersionInfo";
     } else {
       // We have everything we need to send the right values.
-      dict->SetString(L"version", version_info->file_version());
-      dict->SetString(L"cl", version_info->last_change());
-      dict->SetStringFromUTF16(L"version_mod",
-          platform_util::GetVersionStringModifier());
+      dict->SetString("version", version_info.Version());
+      dict->SetString("cl", version_info.LastChange());
+      dict->SetString("version_mod",
+                      platform_util::GetVersionStringModifier());
+      dict->SetString("official",
+          l10n_util::GetStringUTF16(
+              version_info.IsOfficialBuild() ?
+                IDS_ABOUT_VERSION_OFFICIAL
+              : IDS_ABOUT_VERSION_UNOFFICIAL));
 
-      if (version_info->is_official_build()) {
-        dict->SetString(L"official",
-            l10n_util::GetString(IDS_ABOUT_VERSION_OFFICIAL));
-      } else {
-        dict->SetString(L"official",
-            l10n_util::GetString(IDS_ABOUT_VERSION_UNOFFICIAL));
-      }
-
-      dict->SetString(L"command_line",
+      dict->SetString("command_line",
           CommandLine::ForCurrentProcess()->command_line_string());
     }
 
@@ -522,7 +505,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
     DictionaryValue* dict = new DictionaryValue();
 
 #define LOAD_FLAG(label, value) \
-    dict->SetInteger(ASCIIToWide(# label), static_cast<int>(value));
+    dict->SetInteger(# label, static_cast<int>(value));
 #include "net/base/load_flags_list.h"
 #undef LOAD_FLAG
 
@@ -535,7 +518,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
     DictionaryValue* dict = new DictionaryValue();
 
 #define NET_ERROR(label, value) \
-    dict->SetInteger(ASCIIToWide(# label), static_cast<int>(value));
+    dict->SetInteger(# label, static_cast<int>(value));
 #include "net/base/net_error_list.h"
 #undef NET_ERROR
 
@@ -547,9 +530,9 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
   {
     DictionaryValue* dict = new DictionaryValue();
 
-    dict->SetInteger(L"PHASE_BEGIN", net::NetLog::PHASE_BEGIN);
-    dict->SetInteger(L"PHASE_END", net::NetLog::PHASE_END);
-    dict->SetInteger(L"PHASE_NONE", net::NetLog::PHASE_NONE);
+    dict->SetInteger("PHASE_BEGIN", net::NetLog::PHASE_BEGIN);
+    dict->SetInteger("PHASE_END", net::NetLog::PHASE_END);
+    dict->SetInteger("PHASE_NONE", net::NetLog::PHASE_NONE);
 
     CallJavascriptFunction(L"g_browser.receivedLogEventPhaseConstants", dict);
   }
@@ -559,7 +542,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
   {
     DictionaryValue* dict = new DictionaryValue();
 
-#define SOURCE_TYPE(label, value) dict->SetInteger(ASCIIToWide(# label), value);
+#define SOURCE_TYPE(label, value) dict->SetInteger(# label, value);
 #include "net/base/net_log_source_type_list.h"
 #undef SOURCE_TYPE
 
@@ -588,7 +571,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
     // Pass it as a string, since it may be too large to fit in an integer.
     CallJavascriptFunction(L"g_browser.receivedTimeTickOffset",
                            Value::CreateStringValue(
-                               Int64ToString(tick_to_unix_time_ms)));
+                               base::Int64ToString(tick_to_unix_time_ms)));
   }
 
   OnGetPassiveLogEntries(NULL);
@@ -596,30 +579,25 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
   OnGetBadProxies(NULL);
   OnGetHostResolverCache(NULL);
   OnGetHttpCacheInfo(NULL);
+  OnGetSocketPoolInfo(NULL);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetProxySettings(
-    const Value* value) {
+    const ListValue* list) {
   URLRequestContext* context = context_getter_->GetURLRequestContext();
   net::ProxyService* proxy_service = context->proxy_service();
 
-  // TODO(eroman): send a dictionary rather than a flat string, so client can do
-  //               its own presentation.
-  std::string settings_string;
+  DictionaryValue* dict = new DictionaryValue();
+  if (proxy_service->fetched_config().is_valid())
+    dict->Set("original", proxy_service->fetched_config().ToValue());
+  if (proxy_service->config().is_valid())
+    dict->Set("effective", proxy_service->config().ToValue());
 
-  if (proxy_service->config_has_been_initialized()) {
-    // net::ProxyConfig defines an operator<<.
-    std::ostringstream stream;
-    stream << proxy_service->config();
-    settings_string = stream.str();
-  }
-
-  CallJavascriptFunction(L"g_browser.receivedProxySettings",
-                         Value::CreateStringValue(settings_string));
+  CallJavascriptFunction(L"g_browser.receivedProxySettings", dict);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnReloadProxySettings(
-    const Value* value) {
+    const ListValue* list) {
   URLRequestContext* context = context_getter_->GetURLRequestContext();
   context->proxy_service()->ForceReloadProxyConfig();
 
@@ -628,13 +606,13 @@ void NetInternalsMessageHandler::IOThreadImpl::OnReloadProxySettings(
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetBadProxies(
-    const Value* value) {
+    const ListValue* list) {
   URLRequestContext* context = context_getter_->GetURLRequestContext();
 
   const net::ProxyRetryInfoMap& bad_proxies_map =
       context->proxy_service()->proxy_retry_info();
 
-  ListValue* list = new ListValue();
+  ListValue* dict_list = new ListValue();
 
   for (net::ProxyRetryInfoMap::const_iterator it = bad_proxies_map.begin();
        it != bad_proxies_map.end(); ++it) {
@@ -642,17 +620,17 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetBadProxies(
     const net::ProxyRetryInfo& retry_info = it->second;
 
     DictionaryValue* dict = new DictionaryValue();
-    dict->SetString(L"proxy_uri", proxy_uri);
-    dict->SetString(L"bad_until", TickCountToString(retry_info.bad_until));
+    dict->SetString("proxy_uri", proxy_uri);
+    dict->SetString("bad_until", TickCountToString(retry_info.bad_until));
 
-    list->Append(dict);
+    dict_list->Append(dict);
   }
 
-  CallJavascriptFunction(L"g_browser.receivedBadProxies", list);
+  CallJavascriptFunction(L"g_browser.receivedBadProxies", dict_list);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnClearBadProxies(
-    const Value* value) {
+    const ListValue* list) {
   URLRequestContext* context = context_getter_->GetURLRequestContext();
   context->proxy_service()->ClearBadProxiesCache();
 
@@ -661,7 +639,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnClearBadProxies(
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverCache(
-    const Value* value) {
+    const ListValue* list) {
 
   net::HostCache* cache =
       GetHostResolverCache(context_getter_->GetURLRequestContext());
@@ -673,12 +651,12 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverCache(
 
   DictionaryValue* dict = new DictionaryValue();
 
-  dict->SetInteger(L"capacity", static_cast<int>(cache->max_entries()));
+  dict->SetInteger("capacity", static_cast<int>(cache->max_entries()));
   dict->SetInteger(
-      L"ttl_success_ms",
+      "ttl_success_ms",
       static_cast<int>(cache->success_entry_ttl().InMilliseconds()));
   dict->SetInteger(
-      L"ttl_failure_ms",
+      "ttl_failure_ms",
       static_cast<int>(cache->failure_entry_ttl().InMilliseconds()));
 
   ListValue* entry_list = new ListValue();
@@ -692,13 +670,13 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverCache(
 
     DictionaryValue* entry_dict = new DictionaryValue();
 
-    entry_dict->SetString(L"hostname", key.hostname);
-    entry_dict->SetInteger(L"address_family",
+    entry_dict->SetString("hostname", key.hostname);
+    entry_dict->SetInteger("address_family",
         static_cast<int>(key.address_family));
-    entry_dict->SetString(L"expiration", TickCountToString(entry->expiration));
+    entry_dict->SetString("expiration", TickCountToString(entry->expiration));
 
     if (entry->error != net::OK) {
-      entry_dict->SetInteger(L"error", entry->error);
+      entry_dict->SetInteger("error", entry->error);
     } else {
       // Append all of the resolved addresses.
       ListValue* address_list = new ListValue();
@@ -708,19 +686,19 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverCache(
             net::NetAddressToStringWithPort(current_address)));
         current_address = current_address->ai_next;
       }
-      entry_dict->Set(L"addresses", address_list);
+      entry_dict->Set("addresses", address_list);
     }
 
     entry_list->Append(entry_dict);
   }
 
-  dict->Set(L"entries", entry_list);
+  dict->Set("entries", entry_list);
 
   CallJavascriptFunction(L"g_browser.receivedHostResolverCache", dict);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnClearHostResolverCache(
-    const Value* value) {
+    const ListValue* list) {
   net::HostCache* cache =
       GetHostResolverCache(context_getter_->GetURLRequestContext());
 
@@ -732,33 +710,31 @@ void NetInternalsMessageHandler::IOThreadImpl::OnClearHostResolverCache(
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetPassiveLogEntries(
-    const Value* value) {
+    const ListValue* list) {
   ChromeNetLog* net_log = io_thread_->globals()->net_log.get();
 
   PassiveLogCollector::EntryList passive_entries;
   net_log->passive_collector()->GetAllCapturedEvents(&passive_entries);
 
-  ListValue* list = new ListValue();
+  ListValue* dict_list = new ListValue();
   for (size_t i = 0; i < passive_entries.size(); ++i) {
     const PassiveLogCollector::Entry& e = passive_entries[i];
-    list->Append(EntryToDictionaryValue(e.type,
-                                        e.time,
-                                        e.source,
-                                        e.phase,
-                                        e.params));
+    dict_list->Append(net::NetLog::EntryToDictionaryValue(e.type,
+                                                          e.time,
+                                                          e.source,
+                                                          e.phase,
+                                                          e.params,
+                                                          false));
   }
 
-  CallJavascriptFunction(L"g_browser.receivedPassiveLogEntries", list);
+  CallJavascriptFunction(L"g_browser.receivedPassiveLogEntries", dict_list);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTests(
-    const Value* value) {
+    const ListValue* list) {
   // |value| should be: [<URL to test>].
   string16 url_str;
-  if (value && value->GetType() == Value::TYPE_LIST) {
-    const ListValue* list = static_cast<const ListValue*>(value);
-    list->GetStringAsUTF16(0, &url_str);
-  }
+  CHECK(list->GetString(0, &url_str));
 
   // Try to fix-up the user provided URL into something valid.
   // For example, turn "www.google.com" into "http://www.google.com".
@@ -769,7 +745,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTests(
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetHttpCacheInfo(
-    const Value* value) {
+    const ListValue* list) {
   DictionaryValue* info_dict = new DictionaryValue();
   DictionaryValue* stats_dict = new DictionaryValue();
 
@@ -781,14 +757,26 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHttpCacheInfo(
     std::vector<std::pair<std::string, std::string> > stats;
     disk_cache->GetStats(&stats);
     for (size_t i = 0; i < stats.size(); ++i) {
-      stats_dict->Set(ASCIIToWide(stats[i].first),
+      stats_dict->Set(stats[i].first,
                       Value::CreateStringValue(stats[i].second));
     }
   }
 
-  info_dict->Set(L"stats", stats_dict);
+  info_dict->Set("stats", stats_dict);
 
   CallJavascriptFunction(L"g_browser.receivedHttpCacheInfo", info_dict);
+}
+
+void NetInternalsMessageHandler::IOThreadImpl::OnGetSocketPoolInfo(
+    const ListValue* list) {
+  net::HttpNetworkSession *http_network_session =
+      GetHttpNetworkSession(context_getter_->GetURLRequestContext());
+
+  Value *socket_pool_info = NULL;
+  if (http_network_session)
+    socket_pool_info = http_network_session->SocketPoolInfoToValue();
+
+  CallJavascriptFunction(L"g_browser.receivedSocketPoolInfo", socket_pool_info);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnAddEntry(
@@ -801,7 +789,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnAddEntry(
 
   CallJavascriptFunction(
       L"g_browser.receivedLogEntry",
-      EntryToDictionaryValue(type, time, source, phase, params));
+      net::NetLog::EntryToDictionaryValue(type, time, source, phase, params,
+                                          false));
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTestSuite() {
@@ -821,8 +810,8 @@ NetInternalsMessageHandler::IOThreadImpl::OnCompletedConnectionTestExperiment(
     int result) {
   DictionaryValue* dict = new DictionaryValue();
 
-  dict->Set(L"experiment", ExperimentToValue(experiment));
-  dict->SetInteger(L"result", result);
+  dict->Set("experiment", ExperimentToValue(experiment));
+  dict->SetInteger("result", result);
 
   CallJavascriptFunction(
       L"g_browser.receivedCompletedConnectionTestExperiment",
@@ -837,7 +826,7 @@ NetInternalsMessageHandler::IOThreadImpl::OnCompletedConnectionTestSuite() {
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::DispatchToMessageHandler(
-    Value* arg, MessageHandler method) {
+    ListValue* arg, MessageHandler method) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   (this->*method)(arg);
   delete arg;

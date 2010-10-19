@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_AUTOFILL_AUTOFILL_PROFILE_H_
 #define CHROME_BROWSER_AUTOFILL_AUTOFILL_PROFILE_H_
+#pragma once
 
 #include <map>
 #include <vector>
@@ -80,6 +81,10 @@ class AutoFillProfile : public FormGroup {
       std::vector<string16>* created_labels,
       size_t minimal_fields_shown,
       AutoFillFieldType exclude_field);
+
+  // Returns true if there are no values (field types) set.
+  bool IsEmpty() const;
+
   // For use in STL containers.
   void operator=(const AutoFillProfile&);
 

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_VIEWS_FRAME_BROWSER_VIEW_LAYOUT_H_
 #define CHROME_BROWSER_VIEWS_FRAME_BROWSER_VIEW_LAYOUT_H_
+#pragma once
 
 #include "chrome/browser/views/frame/browser_view.h"
 #include "views/layout_manager.h"
@@ -42,13 +43,13 @@ class BrowserViewLayout : public views::LayoutManager {
   Browser* browser() {
     return browser_view_->browser();
   }
+  const Browser* browser() const {
+    return browser_view_->browser();
+  }
 
   // Layout the TabStrip, returns the coordinate of the bottom of the TabStrip,
   // for laying out subsequent controls.
   virtual int LayoutTabStrip();
-
-  // Layout the big icon and title in the top left of extension app windows.
-  void LayoutExtensionAppIconAndTitle();
 
   // Layout the following controls, starting at |top|, returns the coordinate
   // of the bottom of the control, for laying out the next control.
@@ -60,15 +61,13 @@ class BrowserViewLayout : public views::LayoutManager {
   // Layout the TabContents container, between the coordinates |top| and
   // |bottom|.
   void LayoutTabContents(int top, int bottom);
-  int LayoutExtensionAndDownloadShelves();
 
   // Layout the Download Shelf, returns the coordinate of the top of the
   // control, for laying out the previous control.
   int LayoutDownloadShelf(int bottom);
 
-  // Layout the Extension Shelf, returns the coordinate of the top of the
-  // control, for laying out the previous control.
-  int LayoutExtensionShelf(int bottom);
+  // Returns true if an infobar is showing.
+  bool InfobarVisible() const;
 
   // See description above vertical_layout_rect_ for details.
   void set_vertical_layout_rect(const gfx::Rect& bounds) {
@@ -79,15 +78,12 @@ class BrowserViewLayout : public views::LayoutManager {
   }
 
   // Child views that the layout manager manages.
-  views::ImageView* extension_app_icon_;
-  views::Label* extension_app_title_;
   BaseTabStrip* tabstrip_;
   ToolbarView* toolbar_;
   views::View* contents_split_;
   views::View* contents_container_;
   views::View* infobar_container_;
   DownloadShelfView* download_shelf_;
-  ExtensionShelf* extension_shelf_;
   BookmarkBarView* active_bookmark_bar_;
 
   BrowserView* browser_view_;

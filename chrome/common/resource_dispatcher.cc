@@ -14,9 +14,12 @@
 #include "base/string_util.h"
 #include "chrome/common/extensions/extension_localization_peer.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/security_filter_peer.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
+#include "net/base/upload_data.h"
+#include "net/http/http_response_headers.h"
 #include "webkit/glue/resource_type.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -57,6 +60,7 @@ class IPCResourceLoaderBridge : public ResourceLoaderBridge {
       uint64 offset,
       uint64 length,
       const base::Time& expected_modification_time);
+  virtual void AppendBlobToUpload(const GURL& blob_url);
   virtual void SetUploadIdentifier(int64 identifier);
   virtual bool Start(Peer* peer);
   virtual void Cancel();
@@ -123,11 +127,12 @@ IPCResourceLoaderBridge::IPCResourceLoaderBridge(
   request_.resource_type = request_info.request_type;
   request_.request_context = request_info.request_context;
   request_.appcache_host_id = request_info.appcache_host_id;
+  request_.download_to_file = request_info.download_to_file;
   request_.host_renderer_id = host_renderer_id_;
   request_.host_render_view_id = host_render_view_id_;
 
 #ifdef LOG_RESOURCE_REQUESTS
-  url_ = url.possibly_invalid_spec();
+  url_ = request_.url.possibly_invalid_spec();
 #endif
 }
 
@@ -163,6 +168,14 @@ void IPCResourceLoaderBridge::AppendFileRangeToUpload(
     request_.upload_data = new net::UploadData();
   request_.upload_data->AppendFileRange(path, offset, length,
                                         expected_modification_time);
+}
+
+void IPCResourceLoaderBridge::AppendBlobToUpload(const GURL& blob_url) {
+  DCHECK(request_id_ == -1) << "request already started";
+
+  if (!request_.upload_data)
+    request_.upload_data = new net::UploadData();
+  request_.upload_data->AppendBlob(blob_url);
 }
 
 void IPCResourceLoaderBridge::SetUploadIdentifier(int64 identifier) {

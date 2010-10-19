@@ -7,10 +7,11 @@
 #include <wininet.h>
 #include <urlmon.h>
 
-#include "base/scoped_ptr.h"
-#include "base/string_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/scoped_ptr.h"
+#include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome_frame/bind_context_info.h"
 #include "chrome_frame/chrome_frame_activex_base.h"
 #include "chrome_frame/extra_system_apis.h"
@@ -183,7 +184,7 @@ void UrlmonUrlRequest::TerminateBind(TerminateBindCallback* callback) {
 
 size_t UrlmonUrlRequest::SendDataToDelegate(size_t bytes_to_read) {
   DCHECK_EQ(thread_, PlatformThread::CurrentId());
-  DCHECK(id() != -1);
+  DCHECK_NE(id(), -1);
   DCHECK_GT(bytes_to_read, 0U);
   size_t bytes_copied = 0;
   if (delegate_) {
@@ -219,8 +220,10 @@ size_t UrlmonUrlRequest::SendDataToDelegate(size_t bytes_to_read) {
 
     if (bytes_copied) {
       ++calling_delegate_;
-      DCHECK(id() != -1);
-      delegate_->OnReadComplete(id(), read_data);
+      DCHECK_NE(id(), -1);
+      // The delegate can go away in the middle of ReadStream
+      if (delegate_)
+        delegate_->OnReadComplete(id(), read_data);
       --calling_delegate_;
     }
   } else {
@@ -374,7 +377,7 @@ STDMETHODIMP UrlmonUrlRequest::OnStopBinding(HRESULT result, LPCWSTR error) {
     //     TRUE   |TRUE    => Something went wrong!!
 
     if (pending_data_) {
-      DCHECK(pending_read_size_ == 0);
+      DCHECK_EQ(pending_read_size_, 0UL);
       ReleaseBindings();
       return S_OK;
     }
@@ -450,7 +453,7 @@ STDMETHODIMP UrlmonUrlRequest::GetBindInfo(DWORD* bind_flags,
     if (get_upload_data(&bind_info->stgmedData.pstm) == S_OK) {
       bind_info->stgmedData.tymed = TYMED_ISTREAM;
       DLOG(INFO) << __FUNCTION__ << me() << method()
-                 << " request with " << Int64ToString(post_data_len())
+                 << " request with " << base::Int64ToString(post_data_len())
                  << " bytes. url=" << url();
     } else {
       DLOG(INFO) << __FUNCTION__ << me() << "POST request with no data!";
@@ -543,7 +546,7 @@ STDMETHODIMP UrlmonUrlRequest::BeginningTransaction(const wchar_t* url,
     // Tack on the Content-Length header since when using an IStream type
     // STGMEDIUM, it looks like it doesn't get set for us :(
     new_headers = StringPrintf("Content-Length: %s\r\n",
-                               Int64ToString(post_data_len()).c_str());
+                               base::Int64ToString(post_data_len()).c_str());
   }
 
   if (!extra_headers().empty()) {
@@ -557,7 +560,12 @@ STDMETHODIMP UrlmonUrlRequest::BeginningTransaction(const wchar_t* url,
   }
 
   // In the rare case if "User-Agent" string is already in |current_headers|.
-  new_headers += AppendCFUserAgentString(current_headers, NULL);
+  if (IsGcfDefaultRenderer()) {
+    new_headers += ReplaceOrAddUserAgent(current_headers,
+                                         http_utils::GetChromeUserAgent());
+  } else {
+    new_headers += AppendCFUserAgentString(current_headers, NULL);
+  }
 
   if (!new_headers.empty()) {
     *additional_headers = reinterpret_cast<wchar_t*>(
@@ -618,7 +626,7 @@ STDMETHODIMP UrlmonUrlRequest::OnResponse(DWORD dwResponseCode,
 
   // Inform the delegate.
   headers_received_ = true;
-  DCHECK(id() != -1);
+  DCHECK_NE(id(), -1);
   delegate_->OnResponseStarted(id(),
                     "",                   // mime_type
                     raw_headers.c_str(),  // headers
@@ -907,8 +915,10 @@ void UrlmonUrlRequestManager::StartRequest(int request_id,
   DLOG(INFO) << __FUNCTION__ << " id: " << request_id;
   DCHECK_EQ(0, calling_delegate_);
 
-  if (stopping_)
+  if (stopping_) {
+    DLOG(WARNING) << __FUNCTION__ << " request not started (stopping)";
     return;
+  }
 
   DCHECK(request_map_.find(request_id) == request_map_.end());
   DCHECK(GURL(request_info.url).is_valid());

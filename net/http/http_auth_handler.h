@@ -4,9 +4,11 @@
 
 #ifndef NET_HTTP_HTTP_AUTH_HANDLER_H_
 #define NET_HTTP_HTTP_AUTH_HANDLER_H_
+#pragma once
 
 #include <string>
 
+#include "base/string16.h"
 #include "base/time.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_log.h"
@@ -16,8 +18,6 @@ class Histogram;
 
 namespace net {
 
-class HostResolver;
-class ProxyInfo;
 struct HttpRequestInfo;
 
 // HttpAuthHandler is the interface for the authentication schemes
@@ -56,8 +56,8 @@ class HttpAuthHandler {
   // call.
   // Otherwise, there was a problem generating a token synchronously, and the
   // value of |*auth_token| is unspecified.
-  int GenerateAuthToken(const std::wstring* username,
-                        const std::wstring* password,
+  int GenerateAuthToken(const string16* username,
+                        const string16* password,
                         const HttpRequestInfo* request,
                         CompletionCallback* callback,
                         std::string* auth_token);
@@ -136,8 +136,8 @@ class HttpAuthHandler {
   // |GenerateAuthTokenImpl()} is the auth-scheme specific implementation
   // of generating the next auth token. Callers sohuld use |GenerateAuthToken()|
   // which will in turn call |GenerateAuthTokenImpl()|
-  virtual int GenerateAuthTokenImpl(const std::wstring* username,
-                                    const std::wstring* password,
+  virtual int GenerateAuthTokenImpl(const string16* username,
+                                    const string16* password,
                                     const HttpRequestInfo* request,
                                     CompletionCallback* callback,
                                     std::string* auth_token) = 0;

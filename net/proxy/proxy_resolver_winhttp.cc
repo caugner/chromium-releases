@@ -9,6 +9,7 @@
 
 #include "base/histogram.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/proxy/proxy_info.h"
@@ -140,10 +141,14 @@ void ProxyResolverWinHttp::CancelRequest(RequestHandle request) {
   NOTREACHED();
 }
 
-int ProxyResolverWinHttp::SetPacScript(const GURL& pac_url,
-                                       const string16& /*pac_script*/,
-                                       CompletionCallback* /*callback*/) {
-  pac_url_ = pac_url.is_valid() ? pac_url : GURL("http://wpad/wpad.dat");
+int ProxyResolverWinHttp::SetPacScript(
+    const scoped_refptr<ProxyResolverScriptData>& script_data,
+    CompletionCallback* /*callback*/) {
+  if (script_data->type() == ProxyResolverScriptData::TYPE_AUTO_DETECT) {
+    pac_url_ = GURL("http://wpad/wpad.dat");
+  } else {
+    pac_url_ = script_data->url();
+  }
   return OK;
 }
 

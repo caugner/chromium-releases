@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/process_util.h"
+#include "base/string_number_conversions.h"
 #include "base/test/test_suite.h"
 #include "chrome/test/test_launcher/test_runner.h"
 #include "chrome/test/unit/chrome_test_suite.h"
@@ -14,6 +15,7 @@
 #if defined(OS_WIN)
 #include "base/base_switches.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/sandbox_policy.h"
 #include "sandbox/src/dep.h"
 #include "sandbox/src/sandbox_factory.h"
@@ -27,9 +29,10 @@ typedef int (*DLL_MAIN)(HINSTANCE, sandbox::SandboxInterfaceInfo*, wchar_t*);
 
 namespace {
 
+const char kGTestHelpFlag[]   = "gtest_help";
 const char kGTestListTestsFlag[] = "gtest_list_tests";
 const char kGTestOutputFlag[] = "gtest_output";
-const char kGTestHelpFlag[]   = "gtest_help";
+const char kGTestRepeatFlag[] = "gtest_repeat";
 const char kSingleProcessTestsFlag[]   = "single_process";
 const char kSingleProcessTestsAndChromeFlag[]   = "single-process";
 const char kTestTerminateTimeoutFlag[] = "test-terminate-timeout";
@@ -57,27 +60,33 @@ class OutOfProcTestRunner : public tests::TestRunner {
   // Returns true if the test succeeded, false if it failed.
   bool RunTest(const std::string& test_name) {
     const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
-    // Construct the new command line.  Strip out gtest_output flag if
-    // it has been given because otherwise each test outputs the same file
-    // over and over overriding the previous one every time.
-    // We will generate the final output file later in RunTests().
     CommandLine new_cmd_line(cmd_line->GetProgram());
     CommandLine::SwitchMap switches = cmd_line->GetSwitches();
+
+    // Strip out gtest_output flag because otherwise we would overwrite results
+    // of the previous test. We will generate the final output file later
+    // in RunTests().
     switches.erase(kGTestOutputFlag);
+
+    // Strip out gtest_repeat flag because we can only run one test in the child
+    // process (restarting the browser in the same process is illegal after it
+    // has been shut down and will actually crash).
+    switches.erase(kGTestRepeatFlag);
+
     for (CommandLine::SwitchMap::const_iterator iter = switches.begin();
          iter != switches.end(); ++iter) {
-      new_cmd_line.AppendSwitchWithValue((*iter).first, (*iter).second);
+      new_cmd_line.AppendSwitchNative((*iter).first, (*iter).second);
     }
 
     // Always enable disabled tests.  This method is not called with disabled
     // tests unless this flag was specified to the browser test executable.
     new_cmd_line.AppendSwitch("gtest_also_run_disabled_tests");
-    new_cmd_line.AppendSwitchWithValue("gtest_filter", test_name);
+    new_cmd_line.AppendSwitchASCII("gtest_filter", test_name);
     new_cmd_line.AppendSwitch(kChildProcessFlag);
 
     // Do not let the child ignore failures.  We need to propagate the
     // failure status back to the parent.
-    new_cmd_line.AppendSwitch(kStrictFailureHandling);
+    new_cmd_line.AppendSwitch(base::TestSuite::kStrictFailureHandling);
 
     base::ProcessHandle process_handle;
     if (!base::LaunchApp(new_cmd_line, false, false, &process_handle))
@@ -85,9 +94,10 @@ class OutOfProcTestRunner : public tests::TestRunner {
 
     int test_terminate_timeout_ms = kDefaultTestTimeoutMs;
     if (cmd_line->HasSwitch(kTestTerminateTimeoutFlag)) {
-      std::wstring timeout_str(
-          cmd_line->GetSwitchValue(kTestTerminateTimeoutFlag));
-      int timeout = StringToInt(WideToUTF16Hack(timeout_str));
+      std::string timeout_str =
+          cmd_line->GetSwitchValueASCII(kTestTerminateTimeoutFlag);
+      int timeout;
+      base::StringToInt(timeout_str, &timeout);
       test_terminate_timeout_ms = std::max(test_terminate_timeout_ms, timeout);
     }
 
@@ -161,7 +171,8 @@ int main(int argc, char** argv) {
       command_line->HasSwitch(kGTestHelpFlag)) {
 
 #if defined(OS_WIN)
-    if (command_line->HasSwitch(kChildProcessFlag)) {
+    if (command_line->HasSwitch(kChildProcessFlag) ||
+        command_line->HasSwitch(kSingleProcessTestsFlag)) {
       // This is the browser process, so setup the sandbox broker.
       sandbox::BrokerServices* broker_services =
           sandbox::SandboxFactory::GetBrokerServices();
@@ -205,5 +216,23 @@ int main(int argc, char** argv) {
       "--single-process (to do the above, and also run Chrome in single-\n"
       "process mode).\n");
   OutOfProcTestRunnerFactory test_runner_factory;
-  return tests::RunTests(test_runner_factory) ? 0 : 1;
+
+  int cycles = 1;
+  if (command_line->HasSwitch(kGTestRepeatFlag)) {
+    base::StringToInt(command_line->GetSwitchValueASCII(kGTestRepeatFlag),
+                      &cycles);
+  }
+
+  int exit_code = 0;
+  while (cycles != 0) {
+    if (!tests::RunTests(test_runner_factory)) {
+      exit_code = 1;
+      break;
+    }
+
+    // Special value "-1" means "repeat indefinitely".
+    if (cycles != -1)
+      cycles--;
+  }
+  return exit_code;
 }

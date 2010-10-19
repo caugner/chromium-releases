@@ -4,10 +4,13 @@
 
 #include "base/logging.h"
 #include "base/process_util.h"
+#include "base/shared_memory.h"
+#include "base/task.h"
 #include "chrome/common/gpu_messages.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/renderer/command_buffer_proxy.h"
 #include "chrome/renderer/plugin_channel_host.h"
+#include "gfx/size.h"
 #include "gpu/command_buffer/common/cmd_buffer_common.h"
 
 using gpu::Buffer;
@@ -34,6 +37,7 @@ CommandBufferProxy::~CommandBufferProxy() {
 void CommandBufferProxy::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(CommandBufferProxy, message)
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_UpdateState, OnUpdateState);
+    IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_SwapBuffers, OnSwapBuffers);
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_NotifyRepaint,
                         OnNotifyRepaint);
     IPC_MESSAGE_UNHANDLED_ERROR()
@@ -183,6 +187,15 @@ void CommandBufferProxy::SetParseError(
   NOTREACHED();
 }
 
+void CommandBufferProxy::OnSwapBuffers() {
+  if (swap_buffers_callback_.get())
+    swap_buffers_callback_->Run();
+}
+
+void CommandBufferProxy::SetSwapBuffersCallback(Callback0::Type* callback) {
+  swap_buffers_callback_.reset(callback);
+}
+
 void CommandBufferProxy::ResizeOffscreenFrameBuffer(const gfx::Size& size) {
   IPC::Message* message =
       new GpuCommandBufferMsg_ResizeOffscreenFrameBuffer(route_id_, size);
@@ -199,6 +212,10 @@ void CommandBufferProxy::ResizeOffscreenFrameBuffer(const gfx::Size& size) {
   // not correctly resized.
   message->set_unblock(true);
   Send(message);
+}
+
+void CommandBufferProxy::SetNotifyRepaintTask(Task* task) {
+  notify_repaint_task_.reset(task);
 }
 
 #if defined(OS_MACOSX)

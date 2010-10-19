@@ -4,6 +4,7 @@
 
 #ifndef NET_HTTP_HTTP_RESPONSE_HEADERS_H_
 #define NET_HTTP_HTTP_RESPONSE_HEADERS_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -250,8 +251,8 @@ class HttpResponseHeaders
 
   typedef base::hash_set<std::string> HeaderSet;
 
-  HttpResponseHeaders() {}
-  ~HttpResponseHeaders() {}
+  HttpResponseHeaders();
+  ~HttpResponseHeaders();
 
   // Initializes from the given raw headers.
   void Parse(const std::string& raw_input);

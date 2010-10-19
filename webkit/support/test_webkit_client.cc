@@ -7,13 +7,15 @@
 #include "base/scoped_temp_dir.h"
 #include "base/stats_counters.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/cookie_monster.h"
 #include "net/http/http_cache.h"
-#include "net/socket/ssl_test_util.h"
+#include "net/test/test_server.h"
 #include "media/base/media.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebData.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDatabase.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebGraphicsContext3D.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebIDBFactory.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
@@ -28,7 +30,6 @@
 #include "webkit/database/vfs_backend.h"
 #include "webkit/extensions/v8/gc_extension.h"
 #include "webkit/extensions/v8/gears_extension.h"
-#include "webkit/extensions/v8/interval_extension.h"
 #include "webkit/glue/simple_webmimeregistry_impl.h"
 #include "webkit/glue/webclipboard_impl.h"
 #include "webkit/glue/webkit_glue.h"
@@ -41,6 +42,7 @@
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/simple_webcookiejar_impl.h"
 #include "webkit/tools/test_shell/test_shell_request_context.h"
+#include "webkit/tools/test_shell/test_shell_webblobregistry_impl.h"
 #include "v8/include/v8.h"
 
 #if defined(OS_WIN)
@@ -65,8 +67,6 @@ TestWebKitClient::TestWebKitClient(bool unit_test_mode)
   WebScriptController::enableV8SingleThreadMode();
   WebScriptController::registerExtension(
       extensions_v8::GearsExtension::Get());
-  WebScriptController::registerExtension(
-      extensions_v8::IntervalExtension::Get());
   WebKit::WebRuntimeFeatures::enableSockets(true);
   WebKit::WebRuntimeFeatures::enableApplicationCache(true);
   WebKit::WebRuntimeFeatures::enableDatabase(true);
@@ -106,7 +106,9 @@ TestWebKitClient::TestWebKitClient(bool unit_test_mode)
 
   WebKit::WebDatabase::setObserver(&database_system_);
 
-  file_system_.set_sandbox_enabled(false);
+  blob_registry_ = new TestShellWebBlobRegistryImpl();
+
+  file_utilities_.set_sandbox_enabled(false);
 
 #if defined(OS_WIN)
   // Ensure we pick up the default theme engine.
@@ -121,7 +123,7 @@ TestWebKitClient::TestWebKitClient(bool unit_test_mode)
   SimpleResourceLoaderBridge::Init(FilePath(), cache_mode, true);
 
   // Test shell always exposes the GC.
-  webkit_glue::SetJavaScriptFlags(L" --expose-gc");
+  webkit_glue::SetJavaScriptFlags(" --expose-gc");
   // Expose GCController to JavaScript.
   WebScriptController::registerExtension(extensions_v8::GCExtension::Get());
 }
@@ -140,8 +142,8 @@ WebKit::WebClipboard* TestWebKitClient::clipboard() {
   return &mock_clipboard_;
 }
 
-WebKit::WebFileSystem* TestWebKitClient::fileSystem() {
-  return &file_system_;
+WebKit::WebFileUtilities* TestWebKitClient::fileUtilities() {
+  return &file_utilities_;
 }
 
 WebKit::WebSandboxSupport* TestWebKitClient::sandboxSupport() {
@@ -150,6 +152,10 @@ WebKit::WebSandboxSupport* TestWebKitClient::sandboxSupport() {
 
 WebKit::WebCookieJar* TestWebKitClient::cookieJar() {
   return &cookie_jar_;
+}
+
+WebKit::WebBlobRegistry* TestWebKitClient::blobRegistry() {
+  return blob_registry_.get();
 }
 
 bool TestWebKitClient::sandboxEnabled() {
@@ -235,6 +241,10 @@ void TestWebKitClient::dispatchStorageEvent(const WebKit::WebString& key,
     const WebKit::WebString& origin, const WebKit::WebURL& url,
     bool is_local_storage) {
   // The event is dispatched by the proxy.
+}
+
+WebKit::WebIDBFactory* TestWebKitClient::idbFactory() {
+  return WebKit::WebIDBFactory::create();
 }
 
 #if defined(OS_WIN)

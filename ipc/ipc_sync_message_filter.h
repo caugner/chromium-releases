@@ -4,14 +4,18 @@
 
 #ifndef IPC_IPC_SYNC_MESSAGE_FILTER_H_
 #define IPC_IPC_SYNC_MESSAGE_FILTER_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
-#include "base/waitable_event.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_sync_message.h"
 #include <set>
+
+namespace base {
+class WaitableEvent;
+}
 
 class MessageLoop;
 

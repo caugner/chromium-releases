@@ -11,7 +11,7 @@
 
 namespace remoting {
 
-class ClientConfig;
+struct ClientConfig;
 
 class HostConnection {
  public:
@@ -39,9 +39,12 @@ class HostConnection {
   virtual ~HostConnection() {}
 
   // TODO(ajwong): We need to generalize this API.
-  virtual void Connect(ClientConfig* config,
+  virtual void Connect(const ClientConfig& config,
                        HostEventCallback* event_callback) = 0;
   virtual void Disconnect() = 0;
+
+  // Send an input event to the host.
+  virtual void SendEvent(const ChromotingClientMessage& msg) = 0;
 
  protected:
   HostConnection() {}

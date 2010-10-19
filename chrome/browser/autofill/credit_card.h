@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_AUTOFILL_CREDIT_CARD_H_
 #define CHROME_BROWSER_AUTOFILL_CREDIT_CARD_H_
+#pragma once
 
 #include <vector>
 
@@ -38,6 +39,7 @@ class CreditCard : public FormGroup {
   // The last four digits of the credit card number.
   string16 LastFourDigits() const;
 
+  const string16& type() const { return type_; }
   const string16& billing_address() const { return billing_address_; }
   int unique_id() const { return unique_id_; }
 
@@ -59,6 +61,9 @@ class CreditCard : public FormGroup {
   // validate the number.
   static bool IsCreditCardNumber(const string16& text);
 
+  // Returns true if there are no values (field types) set.
+  bool IsEmpty() const;
+
  private:
   // The month and year are zero if not present.
   int Expiration4DigitYear() const { return expiration_year_; }
@@ -75,7 +80,6 @@ class CreditCard : public FormGroup {
 
   const string16& number() const { return number_; }
   const string16& name_on_card() const { return name_on_card_; }
-  const string16& type() const { return type_; }
   const string16& last_four_digits() const { return last_four_digits_; }
   int expiration_month() const { return expiration_month_; }
   int expiration_year() const { return expiration_year_; }
@@ -114,10 +118,6 @@ class CreditCard : public FormGroup {
   // Returns true if the integer value of |text| matches the 4-digit expiration
   // year.
   bool Is4DigitExpirationYear(const string16& text) const;
-
-  // Returns true if |text| matches the type of the card.  The comparison is
-  // case-insensitive.
-  bool IsCardType(const string16& text) const;
 
   // Converts |date| to an integer form.  Returns true if the conversion
   // succeeded.

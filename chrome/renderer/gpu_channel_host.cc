@@ -7,6 +7,7 @@
 #include "chrome/common/child_process.h"
 #include "chrome/common/gpu_messages.h"
 #include "chrome/renderer/command_buffer_proxy.h"
+#include "chrome/renderer/gpu_video_service_host.h"
 
 GpuChannelHost::GpuChannelHost() : state_(UNCONNECTED) {
 }
@@ -35,6 +36,9 @@ void GpuChannelHost::OnMessageReceived(const IPC::Message& message) {
 }
 
 void GpuChannelHost::OnChannelConnected(int32 peer_pid) {
+  GpuVideoServiceHost::get()->OnGpuChannelConnected(this,
+                                                    &router_,
+                                                    channel_.get());
 }
 
 void GpuChannelHost::OnChannelError() {
@@ -68,14 +72,16 @@ bool GpuChannelHost::Send(IPC::Message* message) {
 }
 
 CommandBufferProxy* GpuChannelHost::CreateViewCommandBuffer(
-    gfx::NativeViewId view) {
+    gfx::NativeViewId view, int render_view_id) {
 #if defined(ENABLE_GPU)
   // An error occurred. Need to get the host again to reinitialize it.
   if (!channel_.get())
     return NULL;
 
   int32 route_id;
-  if (!Send(new GpuChannelMsg_CreateViewCommandBuffer(view, &route_id)) &&
+  if (!Send(new GpuChannelMsg_CreateViewCommandBuffer(view,
+                                                      render_view_id,
+                                                      &route_id)) &&
       route_id != MSG_ROUTING_NONE) {
     return NULL;
   }

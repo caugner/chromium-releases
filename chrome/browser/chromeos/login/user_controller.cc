@@ -9,19 +9,22 @@
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/chromeos/login/existing_user_view.h"
 #include "chrome/browser/chromeos/login/helper.h"
+#include "chrome/browser/chromeos/login/rounded_rect_painter.h"
 #include "chrome/browser/chromeos/login/user_view.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
+#include "cros/chromeos_wm_ipc_enums.h"
 #include "gfx/canvas.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "third_party/cros/chromeos_wm_ipc_enums.h"
 #include "views/background.h"
-#include "views/controls/label.h"
 #include "views/controls/button/native_button.h"
+#include "views/controls/label.h"
 #include "views/grid_layout.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_gtk.h"
@@ -38,7 +41,7 @@ namespace {
 const int kUserNameGap = 4;
 
 // Approximate height of controls window, this constant is used in new user
-// case to make border window size close to exsisting users.
+// case to make border window size close to existing users.
 const int kControlsHeight = 26;
 
 // Widget that notifies window manager about clicking on itself.
@@ -77,67 +80,10 @@ std::string GetNameTooltip(const UserManager::User& user) {
   size_t domain_start = at_pos + 1;
   std::string domain = email.substr(domain_start,
                                     email.length() - domain_start);
-  return StringPrintf("%s (%s)",
-                      user.GetDisplayName().c_str(),
-                      domain.c_str());
+  return base::StringPrintf("%s (%s)",
+                            user.GetDisplayName().c_str(),
+                            domain.c_str());
 }
-
-// NativeButton that will always return focus to password field.
-class UserEntryNativeButton : public views::NativeButton {
- public:
-  UserEntryNativeButton(UserController* controller,
-                        views::ButtonListener* listener,
-                        const std::wstring& label)
-      : NativeButton(listener, label),
-        controller_(controller) {}
-
-  // Overridden from View:
-  virtual void DidGainFocus() {
-    controller_->FocusPasswordField();
-  }
-
- private:
-  UserController* controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(UserEntryNativeButton);
-};
-
-// Textfield with custom processing for Tab/Shift+Tab to select entries.
-class UserEntryTextfield : public views::Textfield {
- public:
-  explicit UserEntryTextfield(UserController* controller)
-      : Textfield(),
-        controller_(controller) {}
-
-  UserEntryTextfield(UserController* controller,
-                     views::Textfield::StyleFlags style)
-      : Textfield(style),
-        controller_(controller) {}
-
-  // Overridden from View:
-  virtual bool OnKeyPressed(const views::KeyEvent& e) {
-    if (e.GetKeyCode() == base::VKEY_TAB) {
-      int index = controller_->user_index() + (e.IsShiftDown() ? -1 : 1);
-      controller_->SelectUser(index);
-      return true;
-    } else {
-      return false;
-    }
-  }
-
-  // Overridden from views::Textfield:
-  virtual bool SkipDefaultKeyEventProcessing(const views::KeyEvent& e) {
-    if (e.GetKeyCode() == base::VKEY_TAB)
-      return true;
-    else
-      return views::Textfield::SkipDefaultKeyEventProcessing(e);
-  }
-
- private:
-  UserController* controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(UserEntryTextfield);
-};
 
 }  // namespace
 
@@ -158,8 +104,6 @@ UserController::UserController(Delegate* delegate)
       is_guest_(true),
       show_name_tooltip_(false),
       delegate_(delegate),
-      password_field_(NULL),
-      submit_button_(NULL),
       controls_window_(NULL),
       image_window_(NULL),
       border_window_(NULL),
@@ -167,6 +111,7 @@ UserController::UserController(Delegate* delegate)
       unselected_label_window_(NULL),
       user_view_(NULL),
       new_user_view_(NULL),
+      existing_user_view_(NULL),
       label_view_(NULL),
       unselected_label_view_(NULL) {
   registrar_.Add(
@@ -183,8 +128,6 @@ UserController::UserController(Delegate* delegate,
       show_name_tooltip_(false),
       user_(user),
       delegate_(delegate),
-      password_field_(NULL),
-      submit_button_(NULL),
       controls_window_(NULL),
       image_window_(NULL),
       border_window_(NULL),
@@ -192,6 +135,7 @@ UserController::UserController(Delegate* delegate,
       unselected_label_window_(NULL),
       user_view_(NULL),
       new_user_view_(NULL),
+      existing_user_view_(NULL),
       label_view_(NULL),
       unselected_label_view_(NULL) {
   registrar_.Add(
@@ -208,9 +152,12 @@ UserController::~UserController() {
   unselected_label_window_->Close();
 }
 
-void UserController::Init(int index, int total_user_count) {
+void UserController::Init(int index,
+                          int total_user_count,
+                          bool need_browse_without_signin) {
   int controls_height = 0;
-  controls_window_ = CreateControlsWindow(index, &controls_height);
+  controls_window_ =
+      CreateControlsWindow(index, &controls_height, need_browse_without_signin);
   image_window_ = CreateImageWindow(index);
   CreateBorderWindow(index, total_user_count, controls_height);
   label_window_ = CreateLabelWindow(index, WM_IPC_WINDOW_LOGIN_LABEL);
@@ -220,8 +167,8 @@ void UserController::Init(int index, int total_user_count) {
 
 void UserController::SetPasswordEnabled(bool enable) {
   DCHECK(!is_guest_);
-  password_field_->SetEnabled(enable);
-  submit_button_->SetEnabled(enable);
+  existing_user_view_->password_field()->SetEnabled(enable);
+  existing_user_view_->submit_button()->SetEnabled(enable);
   enable ? user_view_->StopThrobber() : user_view_->StartThrobber();
 }
 
@@ -229,9 +176,17 @@ void UserController::ClearAndEnablePassword() {
   if (is_guest_) {
     new_user_view_->ClearAndEnablePassword();
   } else {
-    password_field_->SetText(string16());
+    existing_user_view_->password_field()->SetText(string16());
     SetPasswordEnabled(true);
     FocusPasswordField();
+  }
+}
+
+void UserController::ClearAndEnableFields() {
+  if (is_guest_) {
+    new_user_view_->ClearAndEnableFields();
+  } else {
+    ClearAndEnablePassword();
   }
 }
 
@@ -259,13 +214,13 @@ void UserController::ButtonPressed(views::Button* sender,
 bool UserController::HandleKeystroke(
     views::Textfield* sender,
     const views::Textfield::Keystroke& keystroke) {
-  if (keystroke.GetKeyboardCode() == base::VKEY_RETURN) {
+  if (keystroke.GetKeyboardCode() == app::VKEY_RETURN) {
     Login();
     return true;
-  } else if (keystroke.GetKeyboardCode() == base::VKEY_LEFT) {
+  } else if (keystroke.GetKeyboardCode() == app::VKEY_LEFT) {
     SelectUser(user_index() - 1);
     return true;
-  } else if (keystroke.GetKeyboardCode() == base::VKEY_RIGHT) {
+  } else if (keystroke.GetKeyboardCode() == app::VKEY_RIGHT) {
     SelectUser(user_index() + 1);
     return true;
   }
@@ -293,7 +248,7 @@ void UserController::Login() {
   // Delegate will reenable as necessary.
   SetPasswordEnabled(false);
 
-  delegate_->Login(this, password_field_->text());
+  delegate_->Login(this, existing_user_view_->password_field()->text());
 }
 
 void UserController::IsActiveChanged(bool active) {
@@ -330,34 +285,20 @@ void UserController::ConfigureLoginWindow(WidgetGtk* window,
   window->Show();
 }
 
-WidgetGtk* UserController::CreateControlsWindow(int index, int* height) {
+WidgetGtk* UserController::CreateControlsWindow(
+    int index,
+    int* height,
+    bool need_browse_without_signin) {
   views::View* control_view;
   if (is_guest_) {
-    new_user_view_ = new NewUserView(this, false);
+    new_user_view_ =
+        new NewUserView(this, false, need_browse_without_signin);
     new_user_view_->Init();
     control_view = new_user_view_;
   } else {
-    password_field_ = new UserEntryTextfield(this,
-                                             views::Textfield::STYLE_PASSWORD);
-    password_field_->set_text_to_display_when_empty(
-        l10n_util::GetStringUTF16(IDS_LOGIN_EMPTY_PASSWORD_TEXT));
-    password_field_->SetController(this);
-    submit_button_ = new UserEntryNativeButton(
-        this, this, l10n_util::GetString(IDS_LOGIN_BUTTON));
-    submit_button_->SetFocusable(false);
-    control_view = new views::View();
-    GridLayout* layout = new GridLayout(control_view);
-    control_view->SetLayoutManager(layout);
-    views::ColumnSet* column_set = layout->AddColumnSet(0);
-    column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
-                          GridLayout::USE_PREF, 0, 0);
-    column_set->AddPaddingColumn(0, kBorderSize);
-    column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 0,
-                          GridLayout::USE_PREF, 0, 0);
-
-    layout->StartRow(0, 0);
-    layout->AddView(password_field_);
-    layout->AddView(submit_button_);
+    existing_user_view_ = new ExistingUserView(this);
+    existing_user_view_->RecreateFields();
+    control_view = existing_user_view_;
   }
 
   *height = kControlsHeight;
@@ -395,16 +336,19 @@ WidgetGtk* UserController::CreateImageWindow(int index) {
 void UserController::CreateBorderWindow(int index,
                                         int total_user_count,
                                         int controls_height) {
-  // Guest login controls window is much higher than exsisting user's controls
+  // Guest login controls window is much higher than existing user's controls
   // window so window manager will place the control instead of image window.
-  int width = kUserImageSize + kBorderSize * 2;
+  int width = kBorderSize * 2 + kUserImageSize;
   int height = kBorderSize * 2 + controls_height;
   if (!is_guest_)
     height += kBorderSize + kUserImageSize;
   border_window_ = new WidgetGtk(WidgetGtk::TYPE_WINDOW);
+  border_window_->MakeTransparent();
   border_window_->Init(NULL, gfx::Rect(0, 0, width, height));
+  views::Painter* painter = CreateWizardPainter(
+      &BorderDefinition::kUserBorder);
   border_window_->GetRootView()->set_background(
-      views::Background::CreateSolidBackground(kBackgroundColor));
+      views::Background::CreateBackgroundPainter(true, painter));
   UpdateUserCount(index, total_user_count);
 
   GdkWindow* gdk_window = border_window_->GetNativeView()->window;
@@ -434,6 +378,13 @@ WidgetGtk* UserController::CreateLabelWindow(int index,
       rb.GetFont(ResourceBundle::BaseFont).DeriveFont(0, gfx::Font::BOLD);
   std::wstring text = is_guest_ ? l10n_util::GetString(IDS_GUEST) :
       UTF8ToWide(user_.GetDisplayName());
+  if (index == 0 && is_guest_) {
+    // This is single guest login without any existing users around because
+    // non-single guest login is rightmost in current screen arrangement and
+    // hence indexed above zero.
+    // Such a single guest login should not be labelled.
+    text = std::wstring();
+  }
   views::Label* label = new views::Label(text);
   label->SetColor(kTextColor);
   label->SetFont(font);
@@ -455,15 +406,10 @@ WidgetGtk* UserController::CreateLabelWindow(int index,
 }
 
 gfx::Rect UserController::GetScreenBounds() const {
-  if (is_guest_) {
-    return new_user_view_->GetPasswordBounds();
-  } else {
-    gfx::Rect screen_bounds(password_field_->bounds());
-    gfx::Point origin(screen_bounds.origin());
-    views::View::ConvertPointToScreen(password_field_->GetParent(), &origin);
-    screen_bounds.set_origin(origin);
-    return screen_bounds;
-  }
+  if (is_guest_)
+    return new_user_view_->GetUsernameBounds();
+  else
+    return existing_user_view_->password_field()->GetScreenBounds();
 }
 
 void UserController::OnLogin(const std::string& username,
@@ -484,6 +430,10 @@ void UserController::ClearErrors() {
   delegate_->ClearErrors();
 }
 
+void UserController::NavigateAway() {
+  SelectUser(user_index() - 1);
+}
+
 void UserController::OnRemoveUser() {
   delegate_->RemoveUser(this);
 }
@@ -497,7 +447,7 @@ void UserController::SelectUser(int index) {
 }
 
 void UserController::FocusPasswordField() {
-  password_field_->RequestFocus();
+  existing_user_view_->password_field()->RequestFocus();
 }
 
 }  // namespace chromeos

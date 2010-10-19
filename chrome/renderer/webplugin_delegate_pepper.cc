@@ -13,8 +13,9 @@
 #include <unistd.h>
 #endif
 
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/keyboard_codes.h"
+#include "base/histogram.h"
 #if defined(OS_MACOSX)
 #include "base/mac_util.h"
 #endif
@@ -27,12 +28,17 @@
 #endif
 #include "base/scoped_ptr.h"
 #include "base/stats_counters.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/task.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/renderer/pepper_widget.h"
 #include "chrome/renderer/render_thread.h"
+#include "chrome/renderer/render_view.h"
 #if defined(OS_LINUX)
 #include "chrome/renderer/renderer_sandbox_support_linux.h"
 #endif
@@ -55,13 +61,17 @@
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/plugins/plugin_host.h"
 #include "webkit/glue/plugins/plugin_stream_url.h"
+#include "webkit/glue/webcursor.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(ENABLE_GPU)
 #include "webkit/glue/plugins/plugin_constants_win.h"
 #endif
 
+#if defined(ENABLE_GPU)
 using gpu::Buffer;
+#endif
+
 using webkit_glue::WebPlugin;
 using webkit_glue::WebPluginDelegate;
 using webkit_glue::WebPluginResourceClient;
@@ -79,7 +89,9 @@ struct Device2DImpl {
 };
 
 struct Device3DImpl {
+#if defined(ENABLE_GPU)
   gpu::CommandBuffer* command_buffer;
+#endif
   bool dynamically_created;
 };
 
@@ -345,12 +357,8 @@ void WebPluginDelegatePepper::NumberOfFindResultsChanged(int total,
                                                          bool final_result) {
   DCHECK(find_identifier_ != -1);
 
-  if (total == 0) {
-    render_view_->ReportNoFindInPageResults(find_identifier_);
-  } else {
-    render_view_->reportFindInPageMatchCount(
-        find_identifier_, total, final_result);
-  }
+  render_view_->reportFindInPageMatchCount(
+      find_identifier_, total, final_result);
 }
 
 void WebPluginDelegatePepper::SelectedFindResultChanged(int index) {
@@ -605,7 +613,9 @@ NPError WebPluginDelegatePepper::Device2DGetStateContext(
     std::string hex_md5 = MD5DigestToBase16(md5_result);
     // Return the least significant 8 characters (i.e. 4 bytes)
     // of the 32 character hexadecimal result as an int.
-    *value = HexStringToInt(hex_md5.substr(24));
+    int int_val;
+    base::HexStringToInt(hex_md5.substr(24), &int_val);
+    *value = int_val;
     return NPERR_NO_ERROR;
   }
   return NPERR_GENERIC_ERROR;
@@ -1379,9 +1389,9 @@ WebPluginDelegatePepper::WebPluginDelegatePepper(
 #endif  // (OS_LINUX)
 #if defined(ENABLE_GPU)
       command_buffer_(NULL),
+      method_factory3d_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
 #endif
       find_identifier_(-1),
-      method_factory3d_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       current_choose_file_callback_(NULL),
       current_choose_file_user_data_(NULL) {
   // For now we keep a window struct, although it isn't used.

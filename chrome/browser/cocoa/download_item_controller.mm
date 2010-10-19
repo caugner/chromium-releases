@@ -9,9 +9,9 @@
 #include "app/text_elider.h"
 #include "base/histogram.h"
 #include "base/mac_util.h"
+#include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
-#import "chrome/browser/browser_theme_provider.h"
 #import "chrome/browser/cocoa/download_item_button.h"
 #import "chrome/browser/cocoa/download_item_cell.h"
 #include "chrome/browser/cocoa/download_item_mac.h"
@@ -22,6 +22,7 @@
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/download/download_util.h"
+#import "chrome/browser/themes/browser_theme_provider.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
@@ -244,10 +245,7 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
 
 - (IBAction)handleButtonClick:(id)sender {
   DownloadItem* download = bridge_->download_model()->download();
-  if (download->state() == DownloadItem::IN_PROGRESS)
-    download->set_open_when_complete(!download->open_when_complete());
-  else if (download->state() == DownloadItem::COMPLETE)
-    download_util::OpenDownload(download);
+  download->OpenDownload();
 }
 
 - (NSSize)preferredSize {
@@ -318,8 +316,7 @@ class DownloadShelfContextMenuMac : public DownloadShelfContextMenu {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.save_download",
                            base::Time::Now() - creationTime_);
   // This will change the state and notify us.
-  bridge_->download_model()->download()->manager()->DangerousDownloadValidated(
-      bridge_->download_model()->download());
+  bridge_->download_model()->download()->DangerousDownloadValidated();
 }
 
 - (IBAction)discardDownload:(id)sender {

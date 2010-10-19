@@ -18,6 +18,8 @@
 #include "base/platform_file.h"
 #include "base/singleton.h"
 #include "base/stats_counters.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/trace_event.h"
@@ -165,6 +167,9 @@ WebKitClientImpl::WebKitClientImpl()
       shared_timer_suspended_(0) {
 }
 
+WebKitClientImpl::~WebKitClientImpl() {
+}
+
 WebThemeEngine* WebKitClientImpl::themeEngine() {
 #if defined(OS_WIN)
   return &theme_engine_;
@@ -250,6 +255,17 @@ WebData WebKitClientImpl::loadResource(const char* name) {
     { "searchMagnifierResults", IDR_SEARCH_MAGNIFIER_RESULTS },
     { "textAreaResizeCorner", IDR_TEXTAREA_RESIZER },
     { "tickmarkDash", IDR_TICKMARK_DASH },
+    { "inputSpeech", IDR_INPUT_SPEECH },
+    { "inputSpeechRecording", IDR_INPUT_SPEECH_RECORDING },
+    { "inputSpeechWaiting", IDR_INPUT_SPEECH_WAITING },
+    { "americanExpressCC", IDR_AUTOFILL_CC_AMEX },
+    { "dinersCC", IDR_AUTOFILL_CC_DINERS },
+    { "discoverCC", IDR_AUTOFILL_CC_DISCOVER },
+    { "genericCC", IDR_AUTOFILL_CC_GENERIC },
+    { "jcbCC", IDR_AUTOFILL_CC_JCB },
+    { "masterCardCC", IDR_AUTOFILL_CC_MASTERCARD },
+    { "soloCC", IDR_AUTOFILL_CC_SOLO },
+    { "visaCC", IDR_AUTOFILL_CC_VISA },
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     // TODO(port): rename these to "skia" instead of "Linux".
     { "linuxCheckboxDisabledIndeterminate",
@@ -275,7 +291,9 @@ WebData WebKitClientImpl::loadResource(const char* name) {
       return WebData(resource.data(), resource.size());
     }
   }
-  NOTREACHED() << "Unknown image resource " << name;
+  // TODO(jhawkins): Restore this NOTREACHED once WK stops sending in empty
+  // strings. http://crbug.com/50675.
+  //NOTREACHED() << "Unknown image resource " << name;
   return WebData();
 }
 
@@ -293,7 +311,7 @@ WebString WebKitClientImpl::queryLocalizedString(
   if (message_id < 0)
     return WebString();
   return ReplaceStringPlaceholders(GetLocalizedString(message_id),
-                                   IntToString16(numeric_value),
+                                   base::IntToString16(numeric_value),
                                    NULL);
 }
 

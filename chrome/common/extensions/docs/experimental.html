@@ -79,8 +79,23 @@
               </div>
             </dl>
           </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd>
+            <div></div>
+          </dd>
+
         </div> <!-- /VALUE -->
 
+        <div id="functionParametersTemplate">
+          <h5>Parameters</h5>
+          <dl>
+            <div>
+              <div>
+              </div>
+            </div>
+          </dl>         
+        </div>
       </div> <!-- /SUBTEMPLATES -->
 
   <a id="top"></a>
@@ -142,6 +157,7 @@
         <ul>
           <li><a href="getstarted.html">Getting Started</a></li>
           <li><a href="overview.html">Overview</a></li>
+          <li><a href="whats_new.html">What's New?</a></li>
           <li><h2><a href="devguide.html">Developer's Guide</a></h2>
             <ul>
               <li>Browser UI
@@ -266,6 +282,11 @@
         </div>
         <!-- /TABLE OF CONTENTS -->
 
+        <!-- Standard content lead-in for experimental API pages -->
+        <p id="classSummary" style="display: none; ">
+          For information on how to use experimental APIs, see the <a href="experimental.html">chrome.experimental.* APIs</a> page.
+        </p>
+
         <!-- STATIC CONTENT PLACEHOLDER -->
         <div id="static"><div id="pageData-name" class="pageData">chrome.experimental.* APIs</div>
 
@@ -278,8 +299,13 @@ on the following experimental APIs:
   <li>
   <a href="experimental.clipboard.html">experimental.clipboard</a></li><li>
   <a href="experimental.infobars.html">experimental.infobars</a></li><li>
+  <a href="experimental.management.html">experimental.management</a></li><li>
   <a href="experimental.omnibox.html">experimental.omnibox</a></li><li>
-  <a href="experimental.processes.html">experimental.processes</a></li>
+  <a href="experimental.processes.html">experimental.processes</a></li><li>
+  <a href="experimental.proxy.html">experimental.proxy</a></li><li>
+  <a href="experimental.sidebar.html">experimental.sidebar</a></li><li>
+  <a href="experimental.webNavigation.html">experimental.webNavigation</a></li><li>
+  <a href="experimental.webRequest.html">experimental.webRequest</a></li>
 </ul>
 
 <p class="caution">
@@ -420,7 +446,7 @@ For information on the standard APIs that extensions can use, see
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>);</pre>
+                  <pre>function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>

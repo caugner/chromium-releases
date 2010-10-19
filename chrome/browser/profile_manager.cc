@@ -6,7 +6,6 @@
 
 #include "chrome/browser/profile_manager.h"
 
-#include "app/l10n_util.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
@@ -16,7 +15,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -39,6 +38,8 @@
 // static
 void ProfileManager::ShutdownSessionServices() {
   ProfileManager* pm = g_browser_process->profile_manager();
+  if (!pm) // Is NULL when running unit tests.
+    return;
   for (ProfileManager::const_iterator i = pm->begin(); i != pm->end(); ++i)
     (*i)->ShutdownSessionService();
 }
@@ -70,12 +71,6 @@ ProfileManager::~ProfileManager() {
   for (const_iterator i(begin()); i != end(); ++i)
     delete *i;
   profiles_.clear();
-
-  // Get rid of available profile list
-  for (AvailableProfileVector::const_iterator i(available_profiles_.begin());
-       i != available_profiles_.end(); ++i)
-    delete *i;
-  available_profiles_.clear();
 }
 
 FilePath ProfileManager::GetDefaultProfileDir(
@@ -100,12 +95,8 @@ FilePath ProfileManager::GetCurrentProfileDir() {
   if (logged_in_) {
     FilePath profile_dir;
     // If the user has logged in, pick up the new profile.
-    // TODO(davemoore) Delete this once chromium os has started using
-    // "--login-profile" instead of "--profile".
     if (command_line.HasSwitch(switches::kLoginProfile)) {
       profile_dir = command_line.GetSwitchValuePath(switches::kLoginProfile);
-    } else if (command_line.HasSwitch(switches::kProfile)) {
-      profile_dir = command_line.GetSwitchValuePath(switches::kProfile);
     } else {
       // We should never be logged in with no profile dir.
       NOTREACHED();
@@ -189,9 +180,6 @@ bool ProfileManager::AddProfile(Profile* profile, bool init_extensions) {
   profiles_.insert(profiles_.end(), profile);
   if (init_extensions)
     profile->InitExtensions();
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (!command_line.HasSwitch(switches::kDisableWebResources))
-    profile->InitWebResources();
   return true;
 }
 

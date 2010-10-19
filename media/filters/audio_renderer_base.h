@@ -57,7 +57,7 @@ class AudioRendererBase : public AudioRenderer {
 
   // Called when a AudioDecoder completes decoding and decrements
   // |pending_reads_|.
-  virtual void OnFillBufferDone(scoped_refptr<Buffer> buffer_in);
+  virtual void ConsumeAudioSamples(scoped_refptr<Buffer> buffer_in);
 
   // Fills the given buffer with audio data by delegating to its |algorithm_|.
   // FillBuffer() also takes care of updating the clock. Returns the number of
@@ -134,6 +134,8 @@ class AudioRendererBase : public AudioRenderer {
   // Filter callbacks.
   scoped_ptr<FilterCallback> pause_callback_;
   scoped_ptr<FilterCallback> seek_callback_;
+
+  base::TimeDelta seek_timestamp_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererBase);
 };

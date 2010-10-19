@@ -8,9 +8,21 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #import "chrome/browser/cocoa/bookmark_button_cell.h"
 #import "chrome/browser/cocoa/browser_window_controller.h"
+#import "chrome/browser/cocoa/view_id_util.h"
+#include "chrome/browser/metrics/user_metrics.h"
 
 // The opacity of the bookmark button drag image.
 static const CGFloat kDragImageOpacity = 0.7;
+
+
+namespace bookmark_button {
+
+NSString* const kPulseBookmarkButtonNotification =
+    @"PulseBookmarkButtonNotification";
+NSString* const kBookmarkKey = @"BookmarkKey";
+NSString* const kBookmarkPulseFlagKey = @"BookmarkPulseFlagKey";
+
+};
 
 @interface BookmarkButton(Private)
 
@@ -24,6 +36,22 @@ static const CGFloat kDragImageOpacity = 0.7;
 
 @synthesize delegate = delegate_;
 
+- (id)initWithFrame:(NSRect)frameRect {
+  // BookmarkButton's ViewID may be changed to VIEW_ID_OTHER_BOOKMARKS in
+  // BookmarkBarController, so we can't just override -viewID method to return
+  // it.
+  if ((self = [super initWithFrame:frameRect]))
+    view_id_util::SetID(self, VIEW_ID_BOOKMARK_BAR_ELEMENT);
+  return self;
+}
+
+- (void)dealloc {
+  if ([[self cell] respondsToSelector:@selector(safelyStopPulsing)])
+    [[self cell] safelyStopPulsing];
+  view_id_util::UnsetID(self);
+  [super dealloc];
+}
+
 - (const BookmarkNode*)bookmarkNode {
   return [[self cell] bookmarkNode];
 }
@@ -35,6 +63,14 @@ static const CGFloat kDragImageOpacity = 0.7;
 
 - (BOOL)isEmpty {
   return [self bookmarkNode] ? NO : YES;
+}
+
+- (void)setIsContinuousPulsing:(BOOL)flag {
+  [[self cell] setIsContinuousPulsing:flag];
+}
+
+- (BOOL)isContinuousPulsing {
+  return [[self cell] isContinuousPulsing];
 }
 
 // By default, NSButton ignores middle-clicks.
@@ -71,6 +107,12 @@ static const CGFloat kDragImageOpacity = 0.7;
                                        withAnimation:NO
                                                delay:NO];
     }
+    const BookmarkNode* node = [self bookmarkNode];
+    const BookmarkNode* parent = node ? node->GetParent() : NULL;
+    BOOL isWithinFolder = parent && parent->type() == BookmarkNode::FOLDER;
+    UserMetrics::RecordAction(UserMetricsAction(
+        isWithinFolder ? "BookmarkBarFolder_DragStart" :
+            "BookmarkBar_DragStart"));
 
     CGFloat yAt = [self bounds].size.height;
     NSSize dragOffset = NSMakeSize(0.0, 0.0);

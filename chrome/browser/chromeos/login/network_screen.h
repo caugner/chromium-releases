@@ -4,11 +4,11 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_NETWORK_SCREEN_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_NETWORK_SCREEN_H_
-
-#include <string>
+#pragma once
 
 #include "base/task.h"
 #include "base/timer.h"
+#include "base/string16.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/login/network_screen_delegate.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
@@ -36,7 +36,7 @@ class NetworkScreen : public ViewScreen<NetworkSelectionView>,
 
   // ComboboxModel implementation:
   virtual int GetItemCount();
-  virtual std::wstring GetItemAt(int index);
+  virtual string16 GetItemAt(int index);
 
   // views::Combobox::Listener implementation:
   virtual void ItemChanged(views::Combobox* sender,
@@ -48,7 +48,6 @@ class NetworkScreen : public ViewScreen<NetworkSelectionView>,
 
   // NetworkLibrary::Observer implementation:
   virtual void NetworkChanged(NetworkLibrary* network_lib);
-  virtual void NetworkTraffic(NetworkLibrary* cros, int traffic_type) {}
 
   // NetworkConfigView::Delegate implementation:
   virtual void OnDialogAccepted();

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/utf_string_conversions.h"
 #include "chrome/test/live_sync/live_autofill_sync_test.h"
 
 IN_PROC_BROWSER_TEST_F(TwoClientLiveAutofillSyncTest, Client1HasData) {
@@ -16,10 +17,20 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveAutofillSyncTest, Client1HasData) {
   AddFormFieldsToWebData(GetWebDataService(0), keys);
 
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(ProfileSyncServiceTestHarness::AwaitQuiescence(clients()));
 
   AutofillKeys wd1_keys;
   GetAllAutofillKeys(GetWebDataService(1), &wd1_keys);
-  EXPECT_EQ(keys, wd1_keys);
+
+  // Note: In this test, name0-value0 and name0-value1 were both added in the
+  // same transaction on Client0. However, only the first entry with name0 is
+  // added, due to changes made in r55781. See crbug.com/51727.
+  AutofillKeys expected_keys;
+  expected_keys.insert(AutofillKey("name0", "value0"));
+  expected_keys.insert(AutofillKey("name1", "value2"));
+  expected_keys.insert(AutofillKey(WideToUTF16(L"Sigur R\u00F3s"),
+                                   WideToUTF16(L"\u00C1g\u00E6tis byrjun")));
+  EXPECT_EQ(expected_keys, wd1_keys);
 }
 
 IN_PROC_BROWSER_TEST_F(TwoClientLiveAutofillSyncTest, BothHaveData) {
@@ -27,21 +38,21 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveAutofillSyncTest, BothHaveData) {
 
   AutofillKeys keys1;
   keys1.insert(AutofillKey("name0", "value0"));
-  keys1.insert(AutofillKey("name0", "value1"));
   keys1.insert(AutofillKey("name1", "value2"));
   AddFormFieldsToWebData(GetWebDataService(0), keys1);
 
   AutofillKeys keys2;
   keys2.insert(AutofillKey("name0", "value1"));
-  keys2.insert(AutofillKey("name1", "value2"));
   keys2.insert(AutofillKey("name2", "value3"));
   keys2.insert(AutofillKey("name3", "value3"));
   AddFormFieldsToWebData(GetWebDataService(1), keys2);
 
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-  // Wait for client1 to get the new keys from client2.
-  EXPECT_TRUE(GetClient(0)->AwaitSyncCycleCompletion("sync cycle"));
+  EXPECT_TRUE(ProfileSyncServiceTestHarness::AwaitQuiescence(clients()));
 
+  // Note: In this test, name0-value0 and name0-value1 were added in separate
+  // transactions -- one on Client0 and the other on Client1. Therefore, we
+  // expect to see both pairs once sync completes and the lists are merged.
   AutofillKeys expected_keys;
   expected_keys.insert(AutofillKey("name0", "value0"));
   expected_keys.insert(AutofillKey("name0", "value1"));
@@ -142,6 +153,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveAutofillSyncTest, ProfileClient1HasData) {
   AddProfile(GetPersonalDataManager(0), *expected_profiles[1]);
 
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(ProfileSyncServiceTestHarness::AwaitQuiescence(clients()));
 
   EXPECT_TRUE(CompareAutoFillProfiles(expected_profiles,
       GetAllAutoFillProfiles(GetPersonalDataManager(0))));
@@ -167,6 +179,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveAutofillSyncTest,
   AddProfile(GetPersonalDataManager(1), *profiles2[0]);
 
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(ProfileSyncServiceTestHarness::AwaitQuiescence(clients()));
 
   // Since client1 associates first, client2's "Shipping" profile will
   // be overwritten by the one stored in the cloud by profile1.
@@ -192,6 +205,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveAutofillSyncTest,
   AddProfile(GetPersonalDataManager(0), *expected_profiles[1]);
 
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(ProfileSyncServiceTestHarness::AwaitQuiescence(clients()));
 
   // One of the duplicate profiles will have its label renamed to
   // "Shipping2".

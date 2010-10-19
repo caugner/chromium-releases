@@ -4,8 +4,9 @@
 
 #ifndef NET_TOOLS_FLIP_SERVER_CREATE_LISTENER_H__
 #define NET_TOOLS_FLIP_SERVER_CREATE_LISTENER_H__
+#pragma once
 
-#include <iostream>
+#include <iosfwd>
 #include <string>
 
 namespace net {

@@ -7,14 +7,13 @@
 #include <string>
 
 #include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/gtk/accessible_widget_helper_gtk.h"
 #include "chrome/browser/gtk/browser_window_gtk.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/gtk/gtk_util.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"

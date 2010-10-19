@@ -17,7 +17,7 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/chrome_process_util.h"
-#include "chrome/test/ui/ui_test.h"
+#include "chrome/test/ui/ui_perf_test.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -27,7 +27,7 @@ namespace {
 static const FilePath::CharType kTempDirName[] =
     FILE_PATH_LITERAL("memory_test_profile");
 
-class MemoryTest : public UITest {
+class MemoryTest : public UIPerfTest {
  public:
   MemoryTest() : cleanup_temp_dir_on_exit_(false) {}
 
@@ -116,8 +116,7 @@ class MemoryTest : public UITest {
       browser_directory_ = browser_dir;
     }
 
-    launch_arguments_.AppendSwitchWithValue(switches::kUserDataDir,
-                                            user_data_dir_.ToWStringHack());
+    launch_arguments_.AppendSwitchPath(switches::kUserDataDir, user_data_dir_);
     UITest::SetUp();
   }
 
@@ -138,8 +137,10 @@ class MemoryTest : public UITest {
 
     // Cycle through the URLs.
     scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
+    ASSERT_TRUE(window.get());
     int active_window = 0;  // The index of the window we are currently using.
     scoped_refptr<TabProxy> tab(window->GetActiveTab());
+    ASSERT_TRUE(tab.get());
     int expected_tab_count = 1;
     for (unsigned counter = 0; counter < urls_length; ++counter) {
       std::string url = urls[counter];
@@ -161,12 +162,13 @@ class MemoryTest : public UITest {
           expected_tab_count++;
           WaitUntilTabCount(expected_tab_count);
           tab = window->GetActiveTab();
-          EXPECT_NE(tab, static_cast<TabProxy*>(NULL));
+          ASSERT_TRUE(tab.get());
           continue;
         }
 
         int tab_index = counter % num_target_tabs;  // A pseudo-random tab.
         tab = window->GetTab(tab_index);
+        ASSERT_TRUE(tab.get());
       }
 
       if (url == "<NEXTTAB>") {  // Special command to select the next tab.
@@ -175,7 +177,7 @@ class MemoryTest : public UITest {
         EXPECT_TRUE(window->GetTabCount(&tab_count));
         tab_index = (tab_index + 1) % tab_count;
         tab = window->GetTab(tab_index);
-        EXPECT_NE(tab, static_cast<TabProxy*>(NULL));
+        ASSERT_TRUE(tab.get());
         continue;
       }
 
@@ -199,8 +201,9 @@ class MemoryTest : public UITest {
 
         active_window = window_count - 1;
         window = automation()->GetBrowserWindow(active_window);
+        ASSERT_TRUE(window.get());
         tab = window->GetActiveTab();
-        EXPECT_NE(tab, static_cast<TabProxy*>(NULL));
+        ASSERT_TRUE(tab.get());
         continue;
       }
 
@@ -209,8 +212,9 @@ class MemoryTest : public UITest {
         EXPECT_TRUE(automation()->GetBrowserWindowCount(&window_count));
         active_window = (active_window + 1) % window_count;
         window = automation()->GetBrowserWindow(active_window);
+        ASSERT_TRUE(window.get());
         tab = window->GetActiveTab();
-        EXPECT_NE(tab, static_cast<TabProxy*>(NULL));
+        ASSERT_TRUE(tab.get());
         continue;
       }
 

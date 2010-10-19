@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_WM_IPC_H_
 #define CHROME_BROWSER_CHROMEOS_WM_IPC_H_
+#pragma once
 
 #include <gtk/gtk.h>
 #include <map>
@@ -12,7 +13,7 @@
 
 #include "base/logging.h"
 #include "base/singleton.h"
-#include "third_party/cros/chromeos_wm_ipc_enums.h"
+#include "cros/chromeos_wm_ipc_enums.h"
 
 typedef unsigned long Atom;
 typedef unsigned long XID;

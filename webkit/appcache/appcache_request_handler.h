@@ -53,7 +53,7 @@ class AppCacheRequestHandler : public URLRequest::UserData,
   // Helpers to instruct a waiting job with what response to
   // deliver for the request we're handling.
   void DeliverAppCachedResponse(const AppCacheEntry& entry, int64 cache_id,
-                                const GURL& manifest_url);
+                                const GURL& manifest_url, bool is_fallback);
   void DeliverNetworkResponse();
   void DeliverErrorResponse();
 
@@ -103,6 +103,12 @@ class AppCacheRequestHandler : public URLRequest::UserData,
   int64 found_cache_id_;
   GURL found_manifest_url_;
   bool found_network_namespace_;
+
+  // True if a cache entry this handler attempted to return was
+  // not found in the disk cache. Once set, the handler will take
+  // no action on all subsequent intercept opportunities, so the
+  // request and any redirects will be handled by the network library.
+  bool cache_entry_not_found_;
 
   // The job we use to deliver a response.
   scoped_refptr<AppCacheURLRequestJob> job_;

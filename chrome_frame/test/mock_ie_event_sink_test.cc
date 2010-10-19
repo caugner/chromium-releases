@@ -6,6 +6,7 @@
 
 #include <sstream>
 
+#include "base/scoped_variant_win.h"
 #include "base/utf_string_conversions.h"
 #include "chrome_frame/test/mock_ie_event_sink_actions.h"
 
@@ -23,6 +24,20 @@ using testing::StrCaseEq;
 namespace chrome_frame_test {
 
 // MockIEEventSink methods
+void MockIEEventSink::OnDocumentComplete(IDispatch* dispatch, VARIANT* url) {
+  if (!event_sink_->IsCFRendering()) {
+    HWND renderer_window = event_sink_->GetRendererWindowSafe();
+    if (renderer_window) {
+      ::NotifyWinEvent(IA2_EVENT_DOCUMENT_LOAD_COMPLETE,
+                       renderer_window,
+                       OBJID_CLIENT, 0L);
+    } else {
+      DLOG(INFO) << "Browser does not have renderer window";
+    }
+    OnLoad(IN_IE, V_BSTR(url));
+  }
+}
+
 ExpectationSet MockIEEventSink::ExpectNavigationCardinality(
     const std::wstring& url, Cardinality before_cardinality,
     Cardinality complete_cardinality) {
@@ -85,12 +100,10 @@ void MockIEEventSink::ExpectNavigation(bool is_cf, const std::wstring& url) {
   }
 }
 
-void MockIEEventSink::ExpectInPageNavigation(bool is_cf,
-                                             const std::wstring& url) {
+void MockIEEventSink::ExpectNavigationOptionalBefore(bool is_cf,
+                                                     const std::wstring& url) {
   InSequence expect_in_sequence_for_scope;
   if (is_cf && GetInstalledIEVersion() == IE_6) {
-    // OnBeforeNavigation events are not sent for navigation between different
-    // anchors in a CF page in IE6.
     ExpectNavigationCardinality(url, testing::AtMost(1),
                                 testing::Between(1, 2));
   } else {
@@ -100,14 +113,11 @@ void MockIEEventSink::ExpectInPageNavigation(bool is_cf,
 
 void MockIEEventSink::ExpectJavascriptWindowOpenNavigation(
     bool parent_cf, bool new_window_cf, const std::wstring& url) {
-  DCHECK(!(parent_cf && !new_window_cf)) << "Cannot expect popup to be loaded"
-      " in Internet Explorer if parent window is loaded in Chrome Frame.";
-
   if (parent_cf) {
     InSequence expect_in_sequence_for_scope;
     ExpectNavigation(IN_CF, L"");
     ExpectNavigationCardinality(L"", testing::AtMost(1),
-                                                 testing::Between(1, 2));
+                                testing::Between(1, 2));
   } else {
     if (new_window_cf) {
       ExpectNavigationCardinality(url, testing::AtMost(1), testing::AtMost(1));
@@ -140,6 +150,27 @@ void MockIEEventSink::ExpectAnyNavigations() {
       .Times(testing::AnyNumber());
 }
 
+void MockIEEventSink::ExpectDocumentReadystate(int ready_state) {
+  ScopedComPtr<IWebBrowser2> browser(event_sink_->web_browser2());
+  EXPECT_TRUE(browser != NULL);
+  if (browser) {
+    ScopedComPtr<IDispatch> document;
+    browser->get_Document(document.Receive());
+    EXPECT_TRUE(document != NULL);
+    if (document) {
+      DISPPARAMS params = { 0 };
+      ScopedVariant result;
+      EXPECT_HRESULT_SUCCEEDED(document->Invoke(DISPID_READYSTATE, IID_NULL,
+          LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET, &params,
+          result.Receive(), NULL, NULL));
+      EXPECT_EQ(VT_I4, result.type());
+      if (result.type() == VT_I4) {
+        EXPECT_EQ(ready_state, static_cast<int>(V_I4(&result)));
+      }
+    }
+  }
+}
+
 // MockIEEventSinkTest methods
 MockIEEventSinkTest::MockIEEventSinkTest() : server_mock_(1337, L"127.0.0.1",
                                                           GetTestDataFolder()) {
@@ -164,9 +195,15 @@ void MockIEEventSinkTest::LaunchIENavigateAndLoop(const std::wstring& url,
   loop_.RunFor(timeout);
 }
 
+FilePath MockIEEventSinkTest::GetTestFilePath(
+    const std::wstring& relative_path) {
+  return server_mock_.root_dir().Append(relative_path);
+}
+
 std::wstring MockIEEventSinkTest::GetTestUrl(
     const std::wstring& relative_path) {
   return server_mock_.Resolve(relative_path.c_str());
 }
 
 }  // namespace chrome_frame_test
+

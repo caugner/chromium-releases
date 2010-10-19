@@ -4,9 +4,13 @@
 
 #ifndef CHROME_RENDERER_NAVIGATION_STATE_H_
 #define CHROME_RENDERER_NAVIGATION_STATE_H_
+#pragma once
+
+#include <string>
 
 #include "base/scoped_ptr.h"
 #include "base/time.h"
+#include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/renderer/user_script_idle_scheduler.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDataSource.h"
@@ -30,6 +34,9 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     LINK_LOAD_CACHE_ONLY,      // Allow stale data (avoid doing a re-post)
     kLoadTypeMax               // Bounding value for this enum.
   };
+
+  virtual ~NavigationState() {
+  }
 
   static NavigationState* CreateBrowserInitiated(
       int32 pending_page_id,
@@ -83,6 +90,7 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     return request_time_;
   }
   void set_request_time(const base::Time& value) {
+    DCHECK(start_load_time_.is_null());
     request_time_ = value;
   }
 
@@ -91,6 +99,9 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     return start_load_time_;
   }
   void set_start_load_time(const base::Time& value) {
+    // TODO(jar): This should not be set twice.
+    // DCHECK(!start_load_time_.is_null());
+    DCHECK(finish_document_load_time_.is_null());
     start_load_time_ = value;
   }
 
@@ -107,21 +118,28 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     return finish_document_load_time_;
   }
   void set_finish_document_load_time(const base::Time& value) {
+    // TODO(jar): Some unittests break the following DCHECK, and don't have
+    // DCHECK(!start_load_time_.is_null());
+    DCHECK(!value.is_null());
+    // TODO(jar): Double setting does happen, but probably shouldn't.
+    // DCHECK(finish_document_load_time_.is_null());
+    // TODO(jar): We should guarantee this order :-(.
+    // DCHECK(finish_load_time_.is_null());
     finish_document_load_time_ = value;
   }
 
   // The time that the document and all subresources finished loading.
-  const base::Time& finish_load_time() const {
-    return finish_load_time_;
-  }
+  const base::Time& finish_load_time() const { return finish_load_time_; }
   void set_finish_load_time(const base::Time& value) {
+    DCHECK(!value.is_null());
+    DCHECK(finish_load_time_.is_null());
+    // The following is not already set in all cases :-(
+    // DCHECK(!finish_document_load_time_.is_null());
     finish_load_time_ = value;
   }
 
   // The time that painting first happened after a new navigation.
-  const base::Time& first_paint_time() const {
-    return first_paint_time_;
-  }
+  const base::Time& first_paint_time() const { return first_paint_time_; }
   void set_first_paint_time(const base::Time& value) {
     first_paint_time_ = value;
   }
@@ -134,10 +152,14 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     first_paint_after_load_time_ = value;
   }
 
-  // True iff the histograms for the associated frame have been dumped.
-  bool load_histograms_recorded() const {
-    return load_histograms_recorded_;
+  // Info about the URL used as the target of this navigation.
+  URLPattern::SchemeMasks scheme_type() const { return scheme_type_; }
+  void set_scheme_type(URLPattern::SchemeMasks scheme_type) {
+    scheme_type_ = scheme_type;
   }
+
+  // True iff the histograms for the associated frame have been dumped.
+  bool load_histograms_recorded() const { return load_histograms_recorded_; }
   void set_load_histograms_recorded(bool value) {
     load_histograms_recorded_ = value;
   }
@@ -173,28 +195,20 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
     alt_error_page_fetcher_.reset(f);
   }
 
-  const std::string& security_info() const {
-    return security_info_;
-  }
+  const std::string& security_info() const { return security_info_; }
   void set_security_info(const std::string& security_info) {
     security_info_ = security_info;
   }
 
-  bool postpone_loading_data() const {
-    return postpone_loading_data_;
-  }
+  bool postpone_loading_data() const { return postpone_loading_data_; }
   void set_postpone_loading_data(bool postpone_loading_data) {
     postpone_loading_data_ = postpone_loading_data;
   }
 
-  void clear_postponed_data() {
-    postponed_data_.clear();
-  }
+  const std::string& postponed_data() const { return postponed_data_; }
+  void clear_postponed_data() { postponed_data_.clear(); }
   void append_postponed_data(const char* data, size_t data_len) {
     postponed_data_.append(data, data_len);
-  }
-  const std::string& postponed_data() const {
-    return postponed_data_;
   }
 
   // Sets the cache policy. The cache policy is only used if explicitly set and
@@ -239,6 +253,20 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
   void set_was_translated(bool value) { was_translated_ = value; }
   bool was_translated() const { return was_translated_; }
 
+  // True iff the frame's navigation was within the same page.
+  void set_was_within_same_page(bool value) { was_within_same_page_ = value; }
+  bool was_within_same_page() const { return was_within_same_page_; }
+
+  void set_was_prefetcher(bool value) { was_prefetcher_ = value; }
+  bool was_prefetcher() const { return was_prefetcher_; }
+
+  void set_was_referred_by_prefetcher(bool value) {
+    was_referred_by_prefetcher_ = value;
+  }
+  bool was_referred_by_prefetcher() const {
+    return was_referred_by_prefetcher_;
+  }
+
  private:
   NavigationState(PageTransition::Type transition_type,
                   const base::Time& request_time,
@@ -248,6 +276,7 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
       : transition_type_(transition_type),
         load_type_(UNDEFINED_LOAD),
         request_time_(request_time),
+        scheme_type_(static_cast<URLPattern::SchemeMasks>(0)),
         load_histograms_recorded_(false),
         request_committed_(false),
         is_content_initiated_(is_content_initiated),
@@ -261,7 +290,10 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
         was_npn_negotiated_(false),
         was_alternate_protocol_available_(false),
         was_fetched_via_proxy_(false),
-        was_translated_(false) {
+        was_translated_(false),
+        was_within_same_page_(false),
+        was_prefetcher_(false),
+        was_referred_by_prefetcher_(false) {
   }
 
   PageTransition::Type transition_type_;
@@ -273,6 +305,7 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
   base::Time finish_load_time_;
   base::Time first_paint_time_;
   base::Time first_paint_after_load_time_;
+  URLPattern::SchemeMasks scheme_type_;
   bool load_histograms_recorded_;
   bool request_committed_;
   bool is_content_initiated_;
@@ -296,6 +329,11 @@ class NavigationState : public WebKit::WebDataSource::ExtraData {
   bool was_alternate_protocol_available_;
   bool was_fetched_via_proxy_;
   bool was_translated_;
+  bool was_within_same_page_;
+
+  // A prefetcher is a page that contains link rel=prefetch elements.
+  bool was_prefetcher_;
+  bool was_referred_by_prefetcher_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationState);
 };

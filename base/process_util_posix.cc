@@ -16,6 +16,7 @@
 #include <limits>
 #include <set>
 
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/debug_util.h"
 #include "base/dir_reader_posix.h"
@@ -23,8 +24,8 @@
 #include "base/logging.h"
 #include "base/platform_thread.h"
 #include "base/process_util.h"
-#include "base/rand_util.h"
 #include "base/scoped_ptr.h"
+#include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/waitable_event.h"
 
@@ -32,6 +33,7 @@
 #include <crt_externs.h>
 #define environ (*_NSGetEnviron())
 #include "base/mach_ipc_mac.h"
+#include "base/rand_util.h"
 #else
 extern char** environ;
 #endif
@@ -107,6 +109,15 @@ void StackDumpSignalHandler(int signal) {
   _exit(1);
 }
 
+void ResetChildSignalHandlersToDefaults() {
+  // The previous signal handlers are likely to be meaningless in the child's
+  // context so we reset them to the defaults for now. http://crbug.com/44953
+  // These signal handlers are setup in browser_main.cc:BrowserMain
+  signal(SIGTERM, SIG_DFL);
+  signal(SIGHUP, SIG_DFL);
+  signal(SIGINT, SIG_DFL);
+}
+
 }  // anonymous namespace
 
 ProcessId GetCurrentProcId() {
@@ -146,6 +157,8 @@ bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
   DCHECK_GT(process_id, 1) << " tried to kill invalid process_id";
   if (process_id <= 1)
     return false;
+  static unsigned kMaxSleepMs = 1000;
+  unsigned sleep_ms = 4;
 
   bool result = kill(process_id, SIGTERM) == 0;
 
@@ -169,7 +182,9 @@ bool KillProcess(ProcessHandle process_id, int exit_code, bool wait) {
         DPLOG(ERROR) << "Error waiting for process " << process_id;
       }
 
-      sleep(1);
+      usleep(sleep_ms * 1000);
+      if (sleep_ms < kMaxSleepMs)
+        sleep_ms *= 2;
     }
 
     if (!exited)
@@ -302,6 +317,10 @@ static pid_t fork_and_get_task(task_t* child_task) {
   std::string mach_connection_name = StringPrintf(
       "com.google.Chrome.samplingfork.%p.%d",
       child_task, base::RandInt(0, std::numeric_limits<int>::max()));
+
+  // Create the mach receive port before forking to ensure that it exists when
+  // the child tries to connect.  Mach ports are not duped into the child, so
+  // this is safe to set up here.
   ReceivePort parent_recv_port(mach_connection_name.c_str());
 
   // Error handling philosophy: If Mach IPC fails, don't touch |child_task| but
@@ -313,6 +332,9 @@ static pid_t fork_and_get_task(task_t* child_task) {
     case -1:
       return pid;
     case 0: {  // child
+      // Must reset signal handlers before doing any mach IPC, as the mach IPC
+      // calls can potentially hang forever.
+      ResetChildSignalHandlersToDefaults();
       MachSendMessage child_message(/* id= */0);
       if (!child_message.AddDescriptor(mach_task_self())) {
         LOG(ERROR) << "child AddDescriptor(mach_task_self()) failed.";
@@ -519,12 +541,10 @@ bool LaunchApp(
     RestoreDefaultExceptionHandler();
 #endif
 
-    // The previous signal handlers are likely to be meaningless in the child's
-    // context so we reset them to the defaults for now. http://crbug.com/44953
-    // These signal handlers are setup in browser_main.cc:BrowserMain
-    signal(SIGTERM, SIG_DFL);
-    signal(SIGHUP, SIG_DFL);
-    signal(SIGINT, SIG_DFL);
+    // On mac, the signal handlers are reset in |fork_and_get_task()|.
+#if !defined(OS_MACOSX)
+    ResetChildSignalHandlersToDefaults();
+#endif
 
 #if 0
     // When debugging it can be helpful to check that we really aren't making

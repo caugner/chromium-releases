@@ -10,11 +10,11 @@
 #include <algorithm>
 #include <vector>
 
+#include "app/keyboard_codes.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
@@ -23,7 +23,6 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
-#include "chrome/browser/google_util.h"
 #include "grit/generated_resources.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/label.h"
@@ -47,9 +46,6 @@ const int kLanguagesMenuWidth = 200;
 const int kLanguagesMenuHeight = 30;
 const SkColor kErrorColor = 0xFF8F384F;
 const char kDefaultDomain[] = "@gmail.com";
-
-const char kAccountRecoveryHelpUrl[] =
-    "http://www.google.com/support/accounts/bin/answer.py?answer=48598";
 
 // Textfield that adds domain to the entered username if focus is lost and
 // username doesn't have full domain.
@@ -76,23 +72,25 @@ class UsernameField : public views::Textfield {
 
 namespace chromeos {
 
-NewUserView::NewUserView(Delegate* delegate, bool need_border)
+NewUserView::NewUserView(Delegate* delegate,
+                         bool need_border,
+                         bool need_browse_without_signin)
     : username_field_(NULL),
       password_field_(NULL),
       title_label_(NULL),
       sign_in_button_(NULL),
       create_account_link_(NULL),
-      cant_access_account_link_(NULL),
       browse_without_signin_link_(NULL),
       languages_menubutton_(NULL),
       throbber_(NULL),
-      accel_focus_user_(views::Accelerator(base::VKEY_U, false, false, true)),
-      accel_focus_pass_(views::Accelerator(base::VKEY_P, false, false, true)),
+      accel_focus_user_(views::Accelerator(app::VKEY_U, false, false, true)),
+      accel_focus_pass_(views::Accelerator(app::VKEY_P, false, false, true)),
       delegate_(delegate),
       ALLOW_THIS_IN_INITIALIZER_LIST(focus_grabber_factory_(this)),
       focus_delayed_(false),
       login_in_process_(false),
-      need_border_(need_border) {
+      need_border_(need_border),
+      need_browse_without_signin_(need_browse_without_signin) {
 }
 
 NewUserView::~NewUserView() {
@@ -105,9 +103,6 @@ void NewUserView::Init() {
     views::Painter* painter = CreateWizardPainter(
         &BorderDefinition::kScreenBorder);
     set_background(views::Background::CreateBackgroundPainter(true, painter));
-  } else {
-    set_background(views::Background::CreateSolidBackground(
-        BorderDefinition::kScreenBorder.top_color));
   }
 
   // Set up fonts.
@@ -130,8 +125,9 @@ void NewUserView::Init() {
   AddChildView(throbber_);
 
   InitLink(&create_account_link_);
-  InitLink(&cant_access_account_link_);
-  InitLink(&browse_without_signin_link_);
+  if (need_browse_without_signin_) {
+    InitLink(&browse_without_signin_link_);
+  }
 
   language_switch_menu_.InitLanguageMenu();
   languages_menubutton_ = new views::MenuButton(
@@ -190,15 +186,15 @@ void NewUserView::UpdateLocalizedStrings() {
   sign_in_button_->SetLabel(l10n_util::GetString(IDS_LOGIN_BUTTON));
   create_account_link_->SetText(
       l10n_util::GetString(IDS_CREATE_ACCOUNT_BUTTON));
-  cant_access_account_link_->SetText(
-      l10n_util::GetString(IDS_CANT_ACCESS_ACCOUNT_BUTTON));
-  browse_without_signin_link_->SetText(
-      l10n_util::GetString(IDS_BROWSE_WITHOUT_SIGNING_IN_BUTTON));
+  if (need_browse_without_signin_) {
+    browse_without_signin_link_->SetText(
+        l10n_util::GetString(IDS_BROWSE_WITHOUT_SIGNING_IN_BUTTON));
+  }
   delegate_->ClearErrors();
   languages_menubutton_->SetText(language_switch_menu_.GetCurrentLocaleName());
 }
 
-void NewUserView::LocaleChanged() {
+void NewUserView::OnLocaleChanged() {
   UpdateLocalizedStrings();
   Layout();
   SchedulePaint();
@@ -278,13 +274,15 @@ void NewUserView::Layout() {
   int max_width = this->width() - x - insets.right();
   title_label_->SizeToFit(max_width);
 
+  int browse_without_signin_link_height = need_browse_without_signin_ ?
+      browse_without_signin_link_->GetPreferredSize().height() : 0;
+
   height = title_label_->GetPreferredSize().height() +
            username_field_->GetPreferredSize().height() +
            password_field_->GetPreferredSize().height() +
            sign_in_button_->GetPreferredSize().height() +
            create_account_link_->GetPreferredSize().height() +
-           cant_access_account_link_->GetPreferredSize().height() +
-           browse_without_signin_link_->GetPreferredSize().height() +
+           browse_without_signin_link_height +
            4 * kRowPad;
   y = (this->height() - height) / 2;
 
@@ -300,9 +298,10 @@ void NewUserView::Layout() {
                 width,
                 false);
   y += setViewBounds(create_account_link_, x, y, max_width, false);
-  y += setViewBounds(cant_access_account_link_, x, y, max_width, false);
-  y += setViewBounds(browse_without_signin_link_, x, y, max_width, false);
 
+  if (need_browse_without_signin_) {
+    y += setViewBounds(browse_without_signin_link_, x, y, max_width, false);
+  }
   SchedulePaint();
 }
 
@@ -349,12 +348,6 @@ void NewUserView::LinkActivated(views::Link* source, int event_flags) {
     delegate_->OnCreateAccount();
   } else if (source == browse_without_signin_link_) {
     delegate_->OnLoginOffTheRecord();
-  } else if (source == cant_access_account_link_) {
-    // TODO(nkostylev): Display offline help when network is not connected.
-    // http://crosbug.com/3874
-    delegate_->AddStartUrl(
-        google_util::AppendGoogleLocaleParam(GURL(kAccountRecoveryHelpUrl)));
-    delegate_->OnLoginOffTheRecord();
   }
 }
 
@@ -366,12 +359,21 @@ void NewUserView::ClearAndEnablePassword() {
   throbber_->Stop();
 }
 
+void NewUserView::ClearAndEnableFields() {
+  login_in_process_ = false;
+  EnableInputControls(true);
+  SetUsername(std::string());
+  SetPassword(std::string());
+  username_field_->RequestFocus();
+  throbber_->Stop();
+}
+
 gfx::Rect NewUserView::GetPasswordBounds() const {
-  gfx::Rect screen_bounds(password_field_->bounds());
-  gfx::Point origin(screen_bounds.origin());
-  views::View::ConvertPointToScreen(password_field_->GetParent(), &origin);
-  screen_bounds.set_origin(origin);
-  return screen_bounds;
+  return password_field_->GetScreenBounds();
+}
+
+gfx::Rect NewUserView::GetUsernameBounds() const {
+  return username_field_->GetScreenBounds();
 }
 
 void NewUserView::StopThrobber() {
@@ -383,14 +385,19 @@ bool NewUserView::HandleKeystroke(views::Textfield* s,
   if (!CrosLibrary::Get()->EnsureLoaded() || login_in_process_)
     return false;
 
-  if (keystroke.GetKeyboardCode() == base::VKEY_RETURN) {
+  if (keystroke.GetKeyboardCode() == app::VKEY_RETURN) {
     Login();
     // Return true so that processing ends
     return true;
-  } else {
-    delegate_->ClearErrors();
-    return false;
+  } else if (keystroke.GetKeyboardCode() == app::VKEY_LEFT) {
+    if (s == username_field_ &&
+        username_field_->text().empty() &&
+        password_field_->text().empty()) {
+      delegate_->NavigateAway();
+      return true;
+    }
   }
+  delegate_->ClearErrors();
   // Return false so that processing does not end
   return false;
 }
@@ -401,8 +408,9 @@ void NewUserView::EnableInputControls(bool enabled) {
   password_field_->SetEnabled(enabled);
   sign_in_button_->SetEnabled(enabled);
   create_account_link_->SetEnabled(enabled);
-  cant_access_account_link_->SetEnabled(enabled);
-  browse_without_signin_link_->SetEnabled(enabled);
+  if (need_browse_without_signin_) {
+    browse_without_signin_link_->SetEnabled(enabled);
+  }
 }
 
 void NewUserView::InitLink(views::Link** link) {

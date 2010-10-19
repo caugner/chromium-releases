@@ -14,20 +14,21 @@
 #include "app/resource_bundle.h"
 #include "base/at_exit.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/observer_list.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/scoped_ptr.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library_loader.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "gfx/canvas.h"
 #include "gfx/font.h"
-#include "third_party/cros/chromeos_cros_api.h"
-#include "third_party/cros/chromeos_input_method_ui.h"
+#include "cros/chromeos_cros_api.h"
+#include "cros/chromeos_input_method_ui.h"
 #include "views/controls/label.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/event.h"
@@ -308,7 +309,7 @@ class CandidateWindowController : public CandidateWindowView::Observer {
  public:
   CandidateWindowController();
   virtual ~CandidateWindowController();
-  void Init();
+  bool Init();
 
   // Returns the work area of the monitor nearest the candidate window.
   gfx::Rect GetMonitorWorkAreaNearestWindow();
@@ -478,9 +479,9 @@ void CandidateView::SetShortcutTextFromInt(int index) {
     shortcut_character = kShortcutCharacters[index];
   }
   if (orientation_ == InputMethodLookupTable::kVertical) {
-    shortcut_label_->SetText(StringPrintf(L"%lc", shortcut_character));
+    shortcut_label_->SetText(base::StringPrintf(L"%lc", shortcut_character));
   } else {
-    shortcut_label_->SetText(StringPrintf(L"%lc.", shortcut_character));
+    shortcut_label_->SetText(base::StringPrintf(L"%lc.", shortcut_character));
   }
 }
 
@@ -858,7 +859,7 @@ int CandidateWindowView::GetHorizontalOffset() {
 }
 
 
-void CandidateWindowController::Init() {
+bool CandidateWindowController::Init() {
   // Initialize the input method UI status connection.
   InputMethodUiStatusMonitorFunctions functions;
   functions.hide_auxiliary_text =
@@ -872,11 +873,15 @@ void CandidateWindowController::Init() {
   functions.update_lookup_table =
       &CandidateWindowController::OnUpdateLookupTable;
   ui_status_connection_ = MonitorInputMethodUiStatus(functions, this);
-  CHECK(ui_status_connection_)
-      << "MonitorInputMethodUiStatus() failed.";
+  if (!ui_status_connection_) {
+    LOG(ERROR) << "MonitorInputMethodUiStatus() failed.";
+    return false;
+  }
 
   // Create the candidate window view.
   CreateView();
+
+  return true;
 }
 
 void CandidateWindowController::CreateView() {
@@ -1052,7 +1057,7 @@ int main(int argc, char** argv) {
   // ResourceBundle code now ignores the --Lang flag.
   // In order to support the --Lang flag here the preference
   // prefs::kApplicationLocale must be read and passed instead of L"en-US".
-  ResourceBundle::InitSharedInstance(L"en-US");
+  ResourceBundle::InitSharedInstance("en-US");
 
   // Write logs to a file for debugging, if --logtofile=FILE_NAME is given.
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -1083,7 +1088,9 @@ int main(int argc, char** argv) {
 
   // Create the candidate window controller.
   chromeos::CandidateWindowController controller;
-  controller.Init();
+  if (!controller.Init()) {
+    return 1;
+  }
 
   // Start the main loop.
   views::AcceleratorHandler accelerator_handler;

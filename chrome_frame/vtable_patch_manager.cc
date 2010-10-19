@@ -4,8 +4,9 @@
 
 #include "chrome_frame/vtable_patch_manager.h"
 
-#include <algorithm>
 #include <atlcomcli.h>
+
+#include <algorithm>
 
 #include "base/atomicops.h"
 #include "base/lock.h"
@@ -13,6 +14,7 @@
 #include "base/scoped_ptr.h"
 
 #include "chrome_frame/function_stub.h"
+#include "chrome_frame/utils.h"
 
 namespace vtable_patch {
 
@@ -90,7 +92,7 @@ HRESULT PatchInterfaceMethods(void* unknown, MethodPatchInfo* patches) {
     FunctionStub* stub = NULL;
 
 #ifndef NDEBUG
-    FunctionStub::FromCode(original_fn);
+    stub = FunctionStub::FromCode(original_fn);
     if (stub != NULL) {
       DLOG(ERROR) << "attempt to patch a function that's already patched";
       DCHECK(stub->destination_function() ==
@@ -143,6 +145,7 @@ HRESULT PatchInterfaceMethods(void* unknown, MethodPatchInfo* patches) {
     } else {
       // Success, save the stub we created.
       it->stub_ = stub;
+      PinModule();
     }
   }
 

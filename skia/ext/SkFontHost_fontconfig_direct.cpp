@@ -22,7 +22,7 @@
 
 #include <fontconfig/fontconfig.h>
 
-#include "third_party/icu/public/common/unicode/utf16.h"
+#include "unicode/utf16.h"
 
 namespace {
 
@@ -57,15 +57,20 @@ FontEquivClass GetFontEquivClass(const char* fontname)
     // much larger than Liberation. Note that Ascender Sans Mono
     // is metrically compatible with Courier New, but the former
     // is sans-serif while ther latter is serif.
+    // Arimo, Tinos and Cousine are the names of new fonts derived from and
+    // expanded upon Ascender Sans, Ascender Serif and Ascender Sans Mono.
     if (strcasecmp(fontname, "Arial") == 0 ||
         strcasecmp(fontname, "Liberation Sans") == 0 ||
+        strcasecmp(fontname, "Arimo") == 0 ||
         strcasecmp(fontname, "Ascender Sans") == 0) {
         return SANS;
     } else if (strcasecmp(fontname, "Times New Roman") == 0 ||
                strcasecmp(fontname, "Liberation Serif") == 0 ||
+               strcasecmp(fontname, "Tinos") == 0 ||
                strcasecmp(fontname, "Ascender Serif") == 0) {
         return SERIF;
     } else if (strcasecmp(fontname, "Courier New") == 0 ||
+               strcasecmp(fontname, "Cousine") == 0 ||
                strcasecmp(fontname, "Ascender Sans Mono") == 0) {
         return MONO;
     }
@@ -81,6 +86,17 @@ bool IsMetricCompatibleReplacement(const char* font_a, const char* font_b)
     FontEquivClass class_b = GetFontEquivClass(font_b);
 
     return class_a != OTHER && class_a == class_b;
+}
+
+inline unsigned FileFaceIdToFileId(unsigned filefaceid)
+{
+  return filefaceid >> 4;
+}
+
+inline unsigned FileIdAndFaceIndexToFileFaceId(unsigned fileid, int face_index)
+{
+  SkASSERT((face_index & 0xfu) == face_index);
+  return (fileid << 4) | face_index;
 }
 
 }  // anonymous namespace
@@ -106,8 +122,8 @@ static bool IsFallbackFontAllowed(const std::string& family)
 }
 
 bool FontConfigDirect::Match(std::string* result_family,
-                             unsigned* result_fileid,
-                             bool fileid_valid, unsigned fileid,
+                             unsigned* result_filefaceid,
+                             bool filefaceid_valid, unsigned filefaceid,
                              const std::string& family,
                              const void* data, size_t characters_bytes,
                              bool* is_bold, bool* is_italic) {
@@ -117,15 +133,21 @@ bool FontConfigDirect::Match(std::string* result_family,
     SkAutoMutexAcquire ac(mutex_);
     FcPattern* pattern = FcPatternCreate();
 
-    if (fileid_valid) {
+    if (filefaceid_valid) {
         const std::map<unsigned, std::string>::const_iterator
-            i = fileid_to_filename_.find(fileid);
+            i = fileid_to_filename_.find(FileFaceIdToFileId(filefaceid));
         if (i == fileid_to_filename_.end()) {
             FcPatternDestroy(pattern);
             return false;
         }
-
-        FcPatternAddString(pattern, FC_FILE, (FcChar8*) i->second.c_str());
+        int face_index = filefaceid & 0xfu;
+        FcPatternAddString(pattern, FC_FILE,
+            reinterpret_cast<const FcChar8*>(i->second.c_str()));
+        // face_index is added only when family is empty because it is not
+        // necessary to uniquiely identify a font if both file and
+        // family are given.
+        if (family.empty())
+            FcPatternAddInteger(pattern, FC_INDEX, face_index);
     }
     if (!family.empty()) {
         FcPatternAddString(pattern, FC_FAMILY, (FcChar8*) family.c_str());
@@ -267,12 +289,18 @@ bool FontConfigDirect::Match(std::string* result_family,
         FcFontSetDestroy(font_set);
         return false;
     }
-    const std::string filename((char *) c_filename);
+    int face_index;
+    if (FcPatternGetInteger(match, FC_INDEX, 0, &face_index) != FcResultMatch) {
+        FcFontSetDestroy(font_set);
+        return false;
+    }
+    const std::string filename(reinterpret_cast<char*>(c_filename));
 
-    unsigned out_fileid;
-    if (fileid_valid) {
-        out_fileid = fileid;
+    unsigned out_filefaceid;
+    if (filefaceid_valid) {
+        out_filefaceid = filefaceid;
     } else {
+        unsigned out_fileid;
         const std::map<std::string, unsigned>::const_iterator
             i = filename_to_fileid_.find(filename);
         if (i == filename_to_fileid_.end()) {
@@ -282,10 +310,14 @@ bool FontConfigDirect::Match(std::string* result_family,
         } else {
             out_fileid = i->second;
         }
+        // fileid stored in filename_to_fileid_ and fileid_to_filename_ is
+        // unique only up to the font file. We have to encode face_index for
+        // the out param.
+        out_filefaceid = FileIdAndFaceIndexToFileFaceId(out_fileid, face_index);
     }
 
-    if (result_fileid)
-        *result_fileid = out_fileid;
+    if (result_filefaceid)
+        *result_filefaceid = out_filefaceid;
 
     FcChar8* c_family;
     if (FcPatternGetString(match, FC_FAMILY, 0, &c_family)) {
@@ -327,10 +359,10 @@ bool FontConfigDirect::Match(std::string* result_family,
     return true;
 }
 
-int FontConfigDirect::Open(unsigned fileid) {
+int FontConfigDirect::Open(unsigned filefaceid) {
     SkAutoMutexAcquire ac(mutex_);
     const std::map<unsigned, std::string>::const_iterator
-        i = fileid_to_filename_.find(fileid);
+        i = fileid_to_filename_.find(FileFaceIdToFileId(filefaceid));
     if (i == fileid_to_filename_.end())
         return -1;
 

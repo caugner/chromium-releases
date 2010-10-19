@@ -7,6 +7,7 @@
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
+#include "gpu/GLES2/gles2_command_buffer.h"
 
 namespace gpu {
 namespace gles2 {
@@ -74,6 +75,15 @@ void TextureManager::Destroy(bool have_context) {
     }
     texture_infos_.erase(texture_infos_.begin());
   }
+  if (have_context) {
+    GLuint ids[] = {
+      black_2d_texture_id_,
+      black_cube_texture_id_,
+      default_texture_2d_->service_id(),
+      default_texture_cube_map_->service_id(),
+    };
+    glDeleteTextures(arraysize(ids), ids);
+  }
 }
 
 bool TextureManager::TextureInfo::CanRender(
@@ -114,7 +124,8 @@ bool TextureManager::TextureInfo::MarkMipmapsGenerated(
       width = std::max(1, width >> 1);
       height = std::max(1, height >> 1);
       depth = std::max(1, depth >> 1);
-      SetLevelInfo(target_ == GL_TEXTURE_2D ? GL_TEXTURE_2D :
+      SetLevelInfo(manager,
+                   target_ == GL_TEXTURE_2D ? GL_TEXTURE_2D :
                                               FaceIndexToGLTarget(ii),
                    level,
                    info1.internal_format,
@@ -152,9 +163,10 @@ bool TextureManager::TextureInfo::CanGenerateMipmaps(
 }
 
 void TextureManager::TextureInfo::SetLevelInfo(
+    const TextureManager* manager,
     GLenum target,
     GLint level,
-    GLint internal_format,
+    GLenum internal_format,
     GLsizei width,
     GLsizei height,
     GLsizei depth,
@@ -180,11 +192,40 @@ void TextureManager::TextureInfo::SetLevelInfo(
   info.format = format;
   info.type = type;
   max_level_set_ = std::max(max_level_set_, level);
-  Update();
+  Update(manager);
+}
+
+bool TextureManager::TextureInfo::ValidForTexture(
+    GLint face,
+    GLint level,
+    GLint xoffset,
+    GLint yoffset,
+    GLsizei width,
+    GLsizei height,
+    GLenum format,
+    GLenum type) const {
+  size_t face_index = GLTargetToFaceIndex(face);
+  if (!IsDeleted() && level >= 0 && face_index < level_infos_.size() &&
+      static_cast<size_t>(level) < level_infos_[face_index].size()) {
+    const LevelInfo& info = level_infos_[GLTargetToFaceIndex(face)][level];
+    GLint right;
+    GLint top;
+    return SafeAdd(xoffset, width, &right) &&
+           SafeAdd(yoffset, height, &top) &&
+           xoffset >= 0 &&
+           yoffset >= 0 &&
+           right <= info.width &&
+           top <= info.height &&
+           format == info.internal_format &&
+           type == info.type;
+  }
+  return false;
 }
 
 bool TextureManager::TextureInfo::GetLevelSize(
     GLint face, GLint level, GLsizei* width, GLsizei* height) const {
+  DCHECK(width);
+  DCHECK(height);
   size_t face_index = GLTargetToFaceIndex(face);
   if (!IsDeleted() && level >= 0 && face_index < level_infos_.size() &&
       static_cast<size_t>(level) < level_infos_[face_index].size()) {
@@ -196,7 +237,24 @@ bool TextureManager::TextureInfo::GetLevelSize(
   return false;
 }
 
-void TextureManager::TextureInfo::SetParameter(GLenum pname, GLint param) {
+bool TextureManager::TextureInfo::GetLevelType(
+    GLint face, GLint level, GLenum* type, GLenum* internal_format) const {
+  DCHECK(type);
+  DCHECK(internal_format);
+  size_t face_index = GLTargetToFaceIndex(face);
+  if (!IsDeleted() && level >= 0 && face_index < level_infos_.size() &&
+      static_cast<size_t>(level) < level_infos_[face_index].size()) {
+    const LevelInfo& info = level_infos_[GLTargetToFaceIndex(face)][level];
+    *type = info.type;
+    *internal_format = info.internal_format;
+    return true;
+  }
+  return false;
+}
+
+void TextureManager::TextureInfo::SetParameter(
+    const TextureManager* manager, GLenum pname, GLint param) {
+  DCHECK(manager);
   switch (pname) {
     case GL_TEXTURE_MIN_FILTER:
       min_filter_ = param;
@@ -210,13 +268,17 @@ void TextureManager::TextureInfo::SetParameter(GLenum pname, GLint param) {
     case GL_TEXTURE_WRAP_T:
       wrap_t_ = param;
       break;
+    case GL_TEXTURE_MAX_ANISOTROPY_EXT:
+      // Nothing to do for this case at the moment.
+      break;
     default:
       NOTREACHED();
       break;
   }
+  Update(manager);
 }
 
-void TextureManager::TextureInfo::Update() {
+void TextureManager::TextureInfo::Update(const TextureManager* manager) {
   // Update npot status.
   npot_ = false;
   for (size_t ii = 0; ii < level_infos_.size(); ++ii) {
@@ -238,6 +300,16 @@ void TextureManager::TextureInfo::Update() {
       max_level_set_ >= 0;
   cube_complete_ = (level_infos_.size() == 6) &&
                    (first_face.width == first_face.height);
+  if (first_face.type == GL_FLOAT && !manager->enable_float_linear() &&
+      (min_filter_ != GL_NEAREST_MIPMAP_NEAREST ||
+       mag_filter_ != GL_NEAREST)) {
+    texture_complete_ = false;
+  } else if (first_face.type == GL_HALF_FLOAT_OES &&
+             !manager->enable_half_float_linear() &&
+             (min_filter_ != GL_NEAREST_MIPMAP_NEAREST ||
+              mag_filter_ != GL_NEAREST)) {
+    texture_complete_ = false;
+  }
   for (size_t ii = 0;
        ii < level_infos_.size() && (cube_complete_ || texture_complete_);
        ++ii) {
@@ -277,9 +349,13 @@ void TextureManager::TextureInfo::Update() {
 
 TextureManager::TextureManager(
     bool npot_ok,
+    bool enable_float_linear,
+    bool enable_half_float_linear,
     GLint max_texture_size,
     GLint max_cube_map_texture_size)
     : npot_ok_(npot_ok),
+      enable_float_linear_(enable_float_linear),
+      enable_half_float_linear_(enable_half_float_linear),
       max_texture_size_(max_texture_size),
       max_cube_map_texture_size_(max_cube_map_texture_size),
       max_levels_(ComputeMipMapCount(max_texture_size,
@@ -288,18 +364,50 @@ TextureManager::TextureManager(
       max_cube_map_levels_(ComputeMipMapCount(max_cube_map_texture_size,
                                               max_cube_map_texture_size,
                                               max_cube_map_texture_size)),
-      num_unrenderable_textures_(0) {
-  default_texture_2d_ = TextureInfo::Ref(new TextureInfo(0));
+      num_unrenderable_textures_(0),
+      black_2d_texture_id_(0),
+      black_cube_texture_id_(0) {
+}
+
+bool TextureManager::Initialize() {
+  // TODO(gman): The default textures have to be real textures, not the 0
+  // texture because we simulate non shared resources on top of shared
+  // resources and all contexts that share resource share the same default
+  // texture.
+
+  // Make default textures and texture for replacing non-renderable textures.
+  GLuint ids[4];
+  glGenTextures(arraysize(ids), ids);
+  static uint8 black[] = {0, 0, 0, 255};
+  for (int ii = 0; ii < 2; ++ii) {
+    glBindTexture(GL_TEXTURE_2D, ids[ii]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, black);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, ids[2 + ii]);
+    for (int ii = 0; ii < GLES2Util::kNumFaces; ++ii) {
+      glTexImage2D(GLES2Util::IndexToGLFaceTarget(ii), 0, GL_RGBA, 1, 1, 0,
+                   GL_RGBA, GL_UNSIGNED_BYTE, black);
+    }
+  }
+  glBindTexture(GL_TEXTURE_2D, 0);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+
+  default_texture_2d_ = TextureInfo::Ref(new TextureInfo(ids[1]));
   SetInfoTarget(default_texture_2d_, GL_TEXTURE_2D);
   default_texture_2d_->SetLevelInfo(
-    GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
-  default_texture_cube_map_ = TextureInfo::Ref(new TextureInfo(0));
+    this, GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
+  default_texture_cube_map_ = TextureInfo::Ref(new TextureInfo(ids[3]));
   SetInfoTarget(default_texture_cube_map_, GL_TEXTURE_CUBE_MAP);
   for (int ii = 0; ii < GLES2Util::kNumFaces; ++ii) {
     default_texture_cube_map_->SetLevelInfo(
-      GLES2Util::IndexToGLFaceTarget(ii),
+      this, GLES2Util::IndexToGLFaceTarget(ii),
       0, GL_RGBA, 1, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   }
+
+  black_2d_texture_id_ = ids[0];
+  black_cube_texture_id_ = ids[2];
+
+  return true;
 }
 
 bool TextureManager::ValidForTarget(
@@ -314,7 +422,7 @@ bool TextureManager::ValidForTarget(
          width <= max_size &&
          height <= max_size &&
          depth <= max_size &&
-         (level == 0 ||
+         (level == 0 || npot_ok() ||
           (!GLES2Util::IsNPOT(width) &&
            !GLES2Util::IsNPOT(height) &&
            !GLES2Util::IsNPOT(depth))) &&
@@ -326,7 +434,7 @@ void TextureManager::SetLevelInfo(
     TextureManager::TextureInfo* info,
     GLenum target,
     GLint level,
-    GLint internal_format,
+    GLenum internal_format,
     GLsizei width,
     GLsizei height,
     GLsizei depth,
@@ -339,7 +447,7 @@ void TextureManager::SetLevelInfo(
     --num_unrenderable_textures_;
   }
   info->SetLevelInfo(
-      target, level, internal_format, width, height, depth,
+      this, target, level, internal_format, width, height, depth,
       border, format, type);
   if (!info->CanRender(this)) {
     ++num_unrenderable_textures_;
@@ -353,7 +461,7 @@ void TextureManager::SetParameter(
   if (!info->CanRender(this)) {
     --num_unrenderable_textures_;
   }
-  info->SetParameter(pname, param);
+  info->SetParameter(this, pname, param);
   if (!info->CanRender(this)) {
     ++num_unrenderable_textures_;
   }

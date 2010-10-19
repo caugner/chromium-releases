@@ -4,6 +4,7 @@
 
 #ifndef NET_HTTP_HTTP_AUTH_CONTROLLER_H_
 #define NET_HTTP_HTTP_AUTH_CONTROLLER_H_
+#pragma once
 
 #include <set>
 #include <string>
@@ -11,6 +12,7 @@
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "base/string16.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_log.h"
@@ -19,7 +21,6 @@
 namespace net {
 
 class AuthChallengeInfo;
-class HostResolver;
 class HttpAuthHandler;
 class HttpNetworkSession;
 class HttpRequestHeaders;
@@ -54,8 +55,8 @@ class HttpAuthController : public base::RefCounted<HttpAuthController> {
                                   const BoundNetLog& net_log);
 
   // Store the supplied credentials and prepare to restart the auth.
-  virtual void ResetAuth(const std::wstring& username,
-                         const std::wstring& password);
+  virtual void ResetAuth(const string16& username,
+                         const string16& password);
 
   virtual bool HaveAuthHandler() const {
     return handler_.get() != NULL;
@@ -65,9 +66,7 @@ class HttpAuthController : public base::RefCounted<HttpAuthController> {
     return handler_.get() && !identity_.invalid;
   }
 
-  virtual scoped_refptr<AuthChallengeInfo> auth_info() {
-    return auth_info_;
-  }
+  virtual scoped_refptr<AuthChallengeInfo> auth_info();
 
   virtual bool IsAuthSchemeDisabled(const std::string& scheme) const;
   virtual void DisableAuthScheme(const std::string& scheme);

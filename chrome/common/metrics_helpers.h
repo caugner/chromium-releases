@@ -7,10 +7,10 @@
 
 #ifndef CHROME_COMMON_METRICS_HELPERS_H_
 #define CHROME_COMMON_METRICS_HELPERS_H_
+#pragma once
 
 #include <map>
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "base/histogram.h"
@@ -219,6 +219,8 @@ class MetricsServiceBase {
   // For histograms, record what we've already logged (as a sample for each
   // histogram) so that we can send only the delta with the next log.
   LoggedSampleMap logged_samples_;
+
+  DISALLOW_COPY_AND_ASSIGN(MetricsServiceBase);
 };
 
 #endif  // CHROME_COMMON_METRICS_HELPERS_H_

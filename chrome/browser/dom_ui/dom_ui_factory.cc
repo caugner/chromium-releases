@@ -7,21 +7,23 @@
 #include "base/command_line.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/bookmarks_ui.h"
+#include "chrome/browser/dom_ui/bug_report_ui.h"
 #include "chrome/browser/dom_ui/downloads_ui.h"
 #include "chrome/browser/dom_ui/devtools_ui.h"
 #include "chrome/browser/dom_ui/history_ui.h"
 #include "chrome/browser/dom_ui/history2_ui.h"
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
+#include "chrome/browser/dom_ui/labs_ui.h"
 #include "chrome/browser/dom_ui/net_internals_ui.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/dom_ui/options_ui.h"
 #include "chrome/browser/dom_ui/remoting_ui.h"
 #include "chrome/browser/dom_ui/plugins_ui.h"
-#include "chrome/browser/dom_ui/register_page_ui.h"
 #include "chrome/browser/dom_ui/slideshow_ui.h"
 #include "chrome/browser/extensions/extension_dom_ui.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/extensions_ui.h"
+#include "chrome/browser/labs.h"
 #include "chrome/browser/printing/print_dialog_cloud.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -31,8 +33,10 @@
 #include "googleurl/src/gurl.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/dom_ui/imageburner_ui.h"
 #include "chrome/browser/dom_ui/filebrowse_ui.h"
 #include "chrome/browser/dom_ui/mediaplayer_ui.h"
+#include "chrome/browser/dom_ui/register_page_ui.h"
 #endif
 
 const DOMUITypeID DOMUIFactory::kNoDOMUI = NULL;
@@ -51,14 +55,13 @@ DOMUI* NewDOMUI(TabContents* contents, const GURL& url) {
 // Special case for extensions.
 template<>
 DOMUI* NewDOMUI<ExtensionDOMUI>(TabContents* contents, const GURL& url) {
-  // Don't use a DOMUI for non-existent extensions or for incognito tabs. The
-  // latter restriction is because we require extensions to run within a single
-  // process.
+  // Don't use a DOMUI for incognito tabs because we require extensions to run
+  // within a single process.
   ExtensionsService* service = contents->profile()->GetExtensionsService();
-  bool valid_extension =
-      (service && service->GetExtensionById(url.host(), false));
-  if (valid_extension && !contents->profile()->IsOffTheRecord())
-    return new ExtensionDOMUI(contents);
+  if (service &&
+      service->ExtensionBindingsAllowed(url)) {
+    return new ExtensionDOMUI(contents, url);
+  }
   return NULL;
 }
 
@@ -66,12 +69,14 @@ DOMUI* NewDOMUI<ExtensionDOMUI>(TabContents* contents, const GURL& url) {
 // tab, based on its URL. Returns NULL if the URL doesn't have DOMUI associated
 // with it. Even if the factory function is valid, it may yield a NULL DOMUI
 // when invoked for a particular tab - see NewDOMUI<ExtensionDOMUI>.
-static DOMUIFactoryFunction GetDOMUIFactoryFunction(const GURL& url) {
+static DOMUIFactoryFunction GetDOMUIFactoryFunction(Profile* profile,
+    const GURL& url) {
   // Currently, any gears: URL means an HTML dialog.
   if (url.SchemeIs(chrome::kGearsScheme))
     return &NewDOMUI<HtmlDialogUI>;
 
-  if (url.SchemeIs(chrome::kExtensionScheme))
+  ExtensionsService* service = profile->GetExtensionsService();
+  if (service && service->ExtensionBindingsAllowed(url))
     return &NewDOMUI<ExtensionDOMUI>;
 
   // All platform builds of Chrome will need to have a cloud printing
@@ -86,7 +91,8 @@ static DOMUIFactoryFunction GetDOMUIFactoryFunction(const GURL& url) {
       !url.SchemeIs(chrome::kChromeUIScheme))
     return NULL;
 
-  if (url.host() == chrome::kChromeUISyncResourcesHost)
+  if (url.host() == chrome::kChromeUISyncResourcesHost ||
+      url.host() == chrome::kChromeUIRemotingResourcesHost)
     return &NewDOMUI<HtmlDialogUI>;
 
   // Special case the new tab page. In older versions of Chrome, the new tab
@@ -101,6 +107,8 @@ static DOMUIFactoryFunction GetDOMUIFactoryFunction(const GURL& url) {
   // after the host name.
   if (url.host() == chrome::kChromeUIBookmarksHost)
     return &NewDOMUI<BookmarksUI>;
+  if (url.host() == chrome::kChromeUIBugReportHost)
+    return &NewDOMUI<BugReportUI>;
   if (url.host() == chrome::kChromeUIDevToolsHost)
     return &NewDOMUI<DevToolsUI>;
   if (url.host() == chrome::kChromeUIDownloadsHost)
@@ -111,6 +119,8 @@ static DOMUIFactoryFunction GetDOMUIFactoryFunction(const GURL& url) {
     return &NewDOMUI<HistoryUI>;
   if (url.host() == chrome::kChromeUIHistory2Host)
     return &NewDOMUI<HistoryUI2>;
+  if (about_labs::IsEnabled() && url.host() == chrome::kChromeUILabsHost)
+    return &NewDOMUI<LabsUI>;
   if (url.host() == chrome::kChromeUINetInternalsHost)
     return &NewDOMUI<NetInternalsUI>;
   if (url.host() == chrome::kChromeUIPluginsHost)
@@ -118,7 +128,7 @@ static DOMUIFactoryFunction GetDOMUIFactoryFunction(const GURL& url) {
 #if defined(ENABLE_REMOTING)
   if (url.host() == chrome::kChromeUIRemotingHost) {
     if (CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kEnableChromoting)) {
+        switches::kEnableRemoting)) {
       return &NewDOMUI<RemotingUI>;
     }
   }
@@ -129,6 +139,8 @@ static DOMUIFactoryFunction GetDOMUIFactoryFunction(const GURL& url) {
     return &NewDOMUI<FileBrowseUI>;
   if (url.host() == chrome::kChromeUIMediaplayerHost)
     return &NewDOMUI<MediaplayerUI>;
+  if (url.host() == chrome::kChromeUIImageBurnerHost)
+    return &NewDOMUI<ImageBurnUI>;
   if (url.host() == chrome::kChromeUIRegisterPageHost)
     return &NewDOMUI<RegisterPageUI>;
   if (url.host() == chrome::kChromeUISlideshowHost)
@@ -148,8 +160,8 @@ static DOMUIFactoryFunction GetDOMUIFactoryFunction(const GURL& url) {
 }
 
 // static
-DOMUITypeID DOMUIFactory::GetDOMUIType(const GURL& url) {
-  DOMUIFactoryFunction function = GetDOMUIFactoryFunction(url);
+DOMUITypeID DOMUIFactory::GetDOMUIType(Profile* profile, const GURL& url) {
+  DOMUIFactoryFunction function = GetDOMUIFactoryFunction(profile, url);
   return function ? reinterpret_cast<DOMUITypeID>(function) : kNoDOMUI;
 }
 
@@ -161,14 +173,15 @@ bool DOMUIFactory::HasDOMUIScheme(const GURL& url) {
 }
 
 // static
-bool DOMUIFactory::UseDOMUIForURL(const GURL& url) {
-  return GetDOMUIFactoryFunction(url) != NULL;
+bool DOMUIFactory::UseDOMUIForURL(Profile* profile, const GURL& url) {
+  return GetDOMUIFactoryFunction(profile, url) != NULL;
 }
 
 // static
 DOMUI* DOMUIFactory::CreateDOMUIForURL(TabContents* tab_contents,
                                        const GURL& url) {
-  DOMUIFactoryFunction function = GetDOMUIFactoryFunction(url);
+  DOMUIFactoryFunction function = GetDOMUIFactoryFunction(
+      tab_contents->profile(), url);
   if (!function)
     return NULL;
   return (*function)(tab_contents, url);
@@ -221,6 +234,9 @@ RefCountedMemory* DOMUIFactory::GetFaviconResourceBytes(Profile* profile,
 
   if (page_url.host() == chrome::kChromeUIHistory2Host)
     return HistoryUI2::GetFaviconResourceBytes();
+
+  if (about_labs::IsEnabled() && page_url.host() == chrome::kChromeUILabsHost)
+    return LabsUI::GetFaviconResourceBytes();
 
   if (page_url.host() == chrome::kChromeUIOptionsHost)
     return OptionsUI::GetFaviconResourceBytes();

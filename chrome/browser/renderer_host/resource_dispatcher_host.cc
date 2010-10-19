@@ -8,6 +8,7 @@
 
 #include <vector>
 
+#include "base/logging.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
@@ -16,6 +17,7 @@
 #include "base/time.h"
 #include "chrome/browser/cert_store.h"
 #include "chrome/browser/child_process_security_policy.h"
+#include "chrome/browser/chrome_blob_storage_context.h"
 #include "chrome/browser/cross_site_request_manager.h"
 #include "chrome/browser/download/download_file_manager.h"
 #include "chrome/browser/download/download_manager.h"
@@ -34,6 +36,7 @@
 #include "chrome/browser/renderer_host/cross_site_resource_handler.h"
 #include "chrome/browser/renderer_host/download_resource_handler.h"
 #include "chrome/browser/renderer_host/global_request_id.h"
+#include "chrome/browser/renderer_host/redirect_to_file_resource_handler.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/renderer_host/render_view_host_notification_task.h"
@@ -51,6 +54,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
 #include "net/base/auth.h"
 #include "net/base/cert_status_flags.h"
@@ -59,10 +63,13 @@
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
 #include "net/base/ssl_cert_request_info.h"
+#include "net/base/upload_data.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "webkit/appcache/appcache_interceptor.h"
 #include "webkit/appcache/appcache_interfaces.h"
+#include "webkit/blob/blob_storage_controller.h"
 
 // TODO(oshima): Enable this for other platforms.
 #if defined(OS_CHROMEOS)
@@ -123,6 +130,10 @@ bool ShouldServiceRequest(ChildProcessInfo::ProcessType process_type,
                           const ViewHostMsg_Resource_Request& request_data)  {
   if (process_type == ChildProcessInfo::PLUGIN_PROCESS)
     return true;
+
+  if (request_data.resource_type == ResourceType::PREFETCH &&
+      !ResourceDispatcherHost::is_prefetch_enabled())
+    return false;
 
   ChildProcessSecurityPolicy* policy =
       ChildProcessSecurityPolicy::GetInstance();
@@ -189,6 +200,14 @@ std::vector<int> GetAllNetErrorCodes() {
 }
 
 }  // namespace
+
+ResourceDispatcherHost::Receiver::Receiver(ChildProcessInfo::ProcessType type,
+                                           int child_id)
+    : ChildProcessInfo(type, child_id) {
+}
+
+ResourceDispatcherHost::Receiver::~Receiver() {
+}
 
 ResourceDispatcherHost::ResourceDispatcherHost()
     : ALLOW_THIS_IN_INITIALIZER_LIST(
@@ -354,6 +373,12 @@ void ResourceDispatcherHost::BeginRequest(
     }
   }
 
+  // Might need to resolve the blob references in the upload data.
+  if (request_data.upload_data) {
+    context->blob_storage_context()->controller()->
+        ResolveBlobReferencesInUploadData(request_data.upload_data.get());
+  }
+
   if (is_shutdown_ ||
       !ShouldServiceRequest(process_type, child_id, request_data)) {
     URLRequestStatus status(URLRequestStatus::FAILED, net::ERR_ABORTED);
@@ -393,6 +418,9 @@ void ResourceDispatcherHost::BeginRequest(
                                        this);
   }
 
+  if (request_data.download_to_file)
+    handler = new RedirectToFileResourceHandler(handler, child_id, this);
+
   if (HandleExternalProtocol(request_id, child_id, route_id,
                              request_data.url, request_data.resource_type,
                              handler)) {
@@ -413,8 +441,11 @@ void ResourceDispatcherHost::BeginRequest(
   // EV certificate verification could be expensive.  We don't want to spend
   // time performing EV certificate verification on all resources because
   // EV status is irrelevant to sub-frames and sub-resources.
-  if (request_data.resource_type == ResourceType::MAIN_FRAME)
-    load_flags |= net::LOAD_VERIFY_EV_CERT;
+  if (request_data.resource_type == ResourceType::MAIN_FRAME) {
+    load_flags |= net::LOAD_VERIFY_EV_CERT | net::LOAD_MAIN_FRAME;
+  } else if (request_data.resource_type == ResourceType::SUB_FRAME) {
+    load_flags |= net::LOAD_SUB_FRAME;
+  }
   request->set_load_flags(load_flags);
   request->set_context(context);
   request->set_priority(DetermineRequestPriority(request_data.resource_type));
@@ -514,6 +545,11 @@ void ResourceDispatcherHost::DataReceivedACK(int child_id,
     // Resume the request.
     PauseRequest(child_id, request_id, false);
   }
+}
+
+bool ResourceDispatcherHost::Send(IPC::Message* message) {
+  delete message;
+  return false;
 }
 
 void ResourceDispatcherHost::OnUploadProgressACK(int request_id) {
@@ -1817,11 +1853,16 @@ net::RequestPriority ResourceDispatcherHost::DetermineRequestPriority(
     case ResourceType::SHARED_WORKER:
       return net::LOW;
 
-    // Images are the lowest priority because they typically do not block
+    // Images are the "lowest" priority because they typically do not block
     // downloads or rendering and most pages have some useful content without
     // them.
     case ResourceType::IMAGE:
       return net::LOWEST;
+
+    // Prefetches are at a lower priority than even LOWEST, since they
+    // are not even required for rendering of the current page.
+    case ResourceType::PREFETCH:
+      return net::IDLE;
 
     default:
       // When new resource types are added, their priority must be considered.
@@ -1829,3 +1870,16 @@ net::RequestPriority ResourceDispatcherHost::DetermineRequestPriority(
       return net::LOW;
   }
 }
+
+// static
+bool ResourceDispatcherHost::is_prefetch_enabled() {
+  return is_prefetch_enabled_;
+}
+
+// static
+void ResourceDispatcherHost::set_is_prefetch_enabled(bool value) {
+  is_prefetch_enabled_ = value;
+}
+
+// static
+bool ResourceDispatcherHost::is_prefetch_enabled_ = false;

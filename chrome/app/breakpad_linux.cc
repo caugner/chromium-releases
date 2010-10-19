@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#define SYS_SEGMENTNAME "syscalls"  // For linux_syscall_support.h
+
 #include "chrome/app/breakpad_linux.h"
 
 #include <fcntl.h>
@@ -20,20 +22,26 @@
 #include "base/eintr_wrapper.h"
 #include "base/file_path.h"
 #include "base/global_descriptors_posix.h"
+#include "base/linux_util.h"
 #include "base/path_service.h"
-#include "base/rand_util.h"
 #include "base/string_util.h"
 #include "breakpad/src/client/linux/handler/exception_handler.h"
 #include "breakpad/src/client/linux/minidump_writer/directory_reader.h"
 #include "breakpad/src/common/linux/linux_libc_support.h"
 #include "breakpad/src/common/linux/linux_syscall_support.h"
 #include "breakpad/src/common/linux/memory.h"
-#include "chrome/app/chrome_version_info_posix.h"
+#include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_descriptors.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info_posix.h"
 #include "chrome/common/env_vars.h"
-#include "chrome/installer/util/google_update_settings.h"
+
+// Some versions of gcc are prone to warn about unused return values. In cases
+// where we either a) know the call cannot fail, or b) there is nothing we
+// can do when a call fails, we mark the return code as ignored. This avoids
+// spurious compiler warnings.
+#define IGNORE_RET(x) do { if (x); } while (0)
 
 static const char kUploadURL[] =
     "https://clients2.google.com/cr/report";
@@ -108,7 +116,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   if (sys_fstat(dumpfd, &st) != 0) {
     static const char msg[] = "Cannot upload crash dump: stat failed\n";
     sys_write(2, msg, sizeof(msg));
-    sys_close(dumpfd);
+    IGNORE_RET(sys_close(dumpfd));
     return -1;
   }
 
@@ -118,12 +126,12 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   if (!dump_data) {
     static const char msg[] = "Cannot upload crash dump: cannot alloc\n";
     sys_write(2, msg, sizeof(msg));
-    sys_close(dumpfd);
+    IGNORE_RET(sys_close(dumpfd));
     return -1;
   }
 
   sys_read(dumpfd, dump_data, st.st_size);
-  sys_close(dumpfd);
+  IGNORE_RET(sys_close(dumpfd));
 
   // We need to build a MIME block for uploading to the server. Since we are
   // going to fork and run wget, it needs to be written to a temp file.
@@ -157,7 +165,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
       static const char msg[] = "Failed to create temporary file in /tmp: "
           "cannot upload crash dump\n";
       sys_write(2, msg, sizeof(msg) - 1);
-      sys_close(ufd);
+      IGNORE_RET(sys_close(ufd));
       return -1;
     }
   } else {
@@ -165,7 +173,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
     if (fd < 0) {
       static const char msg[] = "Failed to save crash dump: failed to open\n";
       sys_write(2, msg, sizeof(msg) - 1);
-      sys_close(ufd);
+      IGNORE_RET(sys_close(ufd));
       return -1;
     }
   }
@@ -177,15 +185,9 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   sys_read(ufd, &boundary_rand, sizeof(boundary_rand));
   write_uint64_hex(mime_boundary + 28, boundary_rand);
   mime_boundary[28 + 16] = 0;
-  sys_close(ufd);
+  IGNORE_RET(sys_close(ufd));
 
-  // The define for the product version is a wide string, so we need to
-  // downconvert it.
-  static const wchar_t version[] = PRODUCT_VERSION;
-  static const unsigned version_len = sizeof(version) / sizeof(wchar_t);
-  char version_msg[version_len];
-  for (unsigned i = 0; i < version_len; ++i)
-    version_msg[i] = static_cast<char>(version[i]);
+  static const char version_msg[] = PRODUCT_VERSION;
 
   // The MIME block looks like this:
   //   BOUNDARY \r\n (0, 1)
@@ -313,7 +315,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   iov[28].iov_base = const_cast<char*>(rn);
   iov[28].iov_len = sizeof(rn);
 
-  sys_writev(fd, iov, 29);
+  IGNORE_RET(sys_writev(fd, iov, 29));
 
   if (uptime >= 0) {
     struct kernel_timeval tv;
@@ -345,7 +347,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
         iov[8].iov_base = const_cast<char*>(rn);
         iov[8].iov_len = sizeof(rn);
 
-        sys_writev(fd, iov, 9);
+        IGNORE_RET(sys_writev(fd, iov, 9));
       }
     }
   }
@@ -371,7 +373,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
     iov[8].iov_base = const_cast<char*>(rn);
     iov[8].iov_len = sizeof(rn);
 
-    sys_writev(fd, iov, 9);
+    IGNORE_RET(sys_writev(fd, iov, 9));
   }
 
   if (info.distro_length) {
@@ -395,7 +397,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
     iov[8].iov_base = const_cast<char*>(rn);
     iov[8].iov_len = sizeof(rn);
 
-    sys_writev(fd, iov, 9);
+    IGNORE_RET(sys_writev(fd, iov, 9));
   }
 
   // For rendererers and plugins.
@@ -435,7 +437,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
       iov[9].iov_base = const_cast<char*>(rn);
       iov[9].iov_len = sizeof(rn);
 
-      sys_writev(fd, iov, 10);
+      IGNORE_RET(sys_writev(fd, iov, 10));
 
       done += len;
       crash_url_length -= len;
@@ -468,9 +470,9 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   iov[10].iov_base = const_cast<char*>(rn);
   iov[10].iov_len = sizeof(rn);
 
-  sys_writev(fd, iov, 11);
+  IGNORE_RET(sys_writev(fd, iov, 11));
 
-  sys_close(fd);
+  IGNORE_RET(sys_close(fd));
 
   if (!info.upload)
     return 0;
@@ -509,30 +511,30 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
     const int fd = sys_open("/proc/self/fd", O_DIRECTORY | O_RDONLY, 0);
     if (fd < 0) {
       for (unsigned i = 3; i < 8192; ++i)
-        sys_close(i);
+        IGNORE_RET(sys_close(i));
     } else {
       google_breakpad::DirectoryReader reader(fd);
       const char* name;
       while (reader.GetNextEntry(&name)) {
         int i;
         if (my_strtoui(&i, name) && i > 2 && i != fd)
-          sys_close(fd);
+          IGNORE_RET(sys_close(fd));
         reader.PopEntry();
       }
 
-      sys_close(fd);
+      IGNORE_RET(sys_close(fd));
     }
 
-    sys_setsid();
+    IGNORE_RET(sys_setsid());
 
     // Leave one end of a pipe in the wget process and watch for it getting
     // closed by the wget process exiting.
     int fds[2];
-    sys_pipe(fds);
+    IGNORE_RET(sys_pipe(fds));
 
     const pid_t child = sys_fork();
     if (child) {
-      sys_close(fds[1]);
+      IGNORE_RET(sys_close(fds[1]));
       char id_buf[17];
       const int len = HANDLE_EINTR(sys_read(fds[0], id_buf,
                                    sizeof(id_buf) - 1));
@@ -543,19 +545,21 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
         sys_write(2, id_buf, my_strlen(id_buf));
         sys_write(2, "\n", 1);
       }
-      sys_unlink(info.filename);
-      sys_unlink(temp_file);
+      IGNORE_RET(sys_unlink(info.filename));
+      IGNORE_RET(sys_unlink(temp_file));
       sys__exit(0);
     }
 
-    sys_close(fds[0]);
-    sys_dup2(fds[1], 3);
+    IGNORE_RET(sys_close(fds[0]));
+    IGNORE_RET(sys_dup2(fds[1], 3));
     static const char* const kWgetBinary = "/usr/bin/wget";
     const char* args[] = {
       kWgetBinary,
       header,
       post_file,
       kUploadURL,
+      "--timeout=10",  // Set a timeout so we don't hang forever.
+      "--tries=1",     // Don't retry if the upload fails.
       "-O",  // output reply to fd 3
       "/dev/fd/3",
       NULL,
@@ -570,19 +574,6 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
 
   HANDLE_EINTR(sys_waitpid(child, NULL, 0));
   return child;
-}
-
-// This is defined in chrome/browser/google_update_settings_posix.cc, it's the
-// static string containing the user's unique GUID. We send this in the crash
-// report.
-namespace google_update {
-extern std::string posix_guid;
-}
-
-// This is defined in base/linux_util.cc, it's the static string containing the
-// user's distro info. We send this in the crash report.
-namespace base {
-extern std::string linux_distro;
 }
 
 static bool CrashDone(const char* dump_path,
@@ -612,10 +603,10 @@ static bool CrashDone(const char* dump_path,
   info.process_type_length = 7;
   info.crash_url = NULL;
   info.crash_url_length = 0;
-  info.guid = google_update::posix_guid.data();
-  info.guid_length = google_update::posix_guid.length();
-  info.distro = base::linux_distro.data();
-  info.distro_length = base::linux_distro.length();
+  info.guid = child_process_logging::g_client_id;
+  info.guid_length = my_strlen(child_process_logging::g_client_id);
+  info.distro = base::g_linux_distro;
+  info.distro_length = my_strlen(base::g_linux_distro);
   info.upload = upload;
   HandleCrashDump(info);
 
@@ -652,32 +643,30 @@ void EnableCrashDumping(const bool unattended) {
   }
 }
 
-// This is defined in chrome/common/child_process_logging_linux.cc, it's the
-// static string containing the current active URL. We send this in the crash
-// report.
-namespace child_process_logging {
-extern std::string active_url;
-}
-
 // Currently Non-Browser = Renderer and Plugins
 static bool
 NonBrowserCrashHandler(const void* crash_context, size_t crash_context_size,
                        void* context) {
   const int fd = reinterpret_cast<intptr_t>(context);
-  int fds[2];
-  sys_socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+  int fds[2] = { -1, -1 };
+  if (sys_socketpair(AF_UNIX, SOCK_STREAM, 0, fds) < 0) {
+    static const char msg[] = "Failed to create socket for crash dumping.\n";
+    sys_write(2, msg, sizeof(msg)-1);
+    return false;
+  }
   char guid[kGuidSize + 1] = {0};
   char crash_url[kMaxActiveURLSize + 1] = {0};
   char distro[kDistroSize + 1] = {0};
-  const size_t guid_len = std::min(google_update::posix_guid.size(),
-                                   kGuidSize);
+  const size_t guid_len =
+      std::min(my_strlen(child_process_logging::g_client_id), kGuidSize);
   const size_t crash_url_len =
-      std::min(child_process_logging::active_url.size(), kMaxActiveURLSize);
+      std::min(my_strlen(child_process_logging::g_active_url),
+               kMaxActiveURLSize);
   const size_t distro_len =
-      std::min(base::linux_distro.size(), kDistroSize);
-  memcpy(guid, google_update::posix_guid.data(), guid_len);
-  memcpy(crash_url, child_process_logging::active_url.data(), crash_url_len);
-  memcpy(distro, base::linux_distro.data(), distro_len);
+      std::min(my_strlen(base::g_linux_distro), kDistroSize);
+  memcpy(guid, child_process_logging::g_client_id, guid_len);
+  memcpy(crash_url, child_process_logging::g_active_url, crash_url_len);
+  memcpy(distro, base::g_linux_distro, distro_len);
 
   char b;  // Dummy variable for sys_read below.
   const char* b_addr = &b;  // Get the address of |b| so we can create the
@@ -685,7 +674,7 @@ NonBrowserCrashHandler(const void* crash_context, size_t crash_context_size,
                             // browser to convert namespace tids.
 
   // The length of the control message:
-  static const unsigned kControlMsgSize = CMSG_SPACE(sizeof(int));
+  static const unsigned kControlMsgSize = CMSG_SPACE(2*sizeof(int));
 
   struct kernel_msghdr msg;
   my_memset(&msg, 0, sizeof(struct kernel_msghdr));
@@ -713,13 +702,22 @@ NonBrowserCrashHandler(const void* crash_context, size_t crash_context_size,
   struct cmsghdr *hdr = CMSG_FIRSTHDR(&msg);
   hdr->cmsg_level = SOL_SOCKET;
   hdr->cmsg_type = SCM_RIGHTS;
-  hdr->cmsg_len = CMSG_LEN(sizeof(int));
-  *((int*) CMSG_DATA(hdr)) = fds[1];
+  hdr->cmsg_len = CMSG_LEN(2*sizeof(int));
+  ((int*) CMSG_DATA(hdr))[0] = fds[0];
+  ((int*) CMSG_DATA(hdr))[1] = fds[1];
 
-  HANDLE_EINTR(sys_sendmsg(fd, &msg, 0));
-  sys_close(fds[1]);
+  if (HANDLE_EINTR(sys_sendmsg(fd, &msg, 0)) < 0) {
+    static const char msg[] = "Failed to tell parent about crash.\n";
+    sys_write(2, msg, sizeof(msg)-1);
+    IGNORE_RET(sys_close(fds[1]));
+    return false;
+  }
+  IGNORE_RET(sys_close(fds[1]));
 
-  HANDLE_EINTR(sys_read(fds[0], &b, 1));
+  if (HANDLE_EINTR(sys_read(fds[0], &b, 1)) != 1) {
+    static const char msg[] = "Parent failed to complete crash dump.\n";
+    sys_write(2, msg, sizeof(msg)-1);
+  }
 
   return true;
 }
@@ -739,11 +737,8 @@ void InitCrashReporter() {
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   const std::string process_type =
       parsed_command_line.GetSwitchValueASCII(switches::kProcessType);
-  const bool unattended = (getenv(env_vars::kHeadless) != NULL);
   if (process_type.empty()) {
-    if (!(unattended || GoogleUpdateSettings::GetCollectStatsConsent()))
-      return;
-    EnableCrashDumping(unattended);
+    EnableCrashDumping(getenv(env_vars::kHeadless) != NULL);
   } else if (process_type == switches::kRendererProcess ||
              process_type == switches::kPluginProcess ||
              process_type == switches::kZygoteProcess) {
@@ -755,14 +750,14 @@ void InitCrashReporter() {
     if (!parsed_command_line.HasSwitch(switches::kEnableCrashReporter))
       return;
     // Get the guid and linux distro from the command line switch.
-    std::string switch_value = WideToASCII(
-        parsed_command_line.GetSwitchValue(switches::kEnableCrashReporter));
+    std::string switch_value =
+        parsed_command_line.GetSwitchValueASCII(switches::kEnableCrashReporter);
     size_t separator = switch_value.find(",");
     if (separator != std::string::npos) {
-      google_update::posix_guid = switch_value.substr(0, separator);
-      base::linux_distro = switch_value.substr(separator + 1);
+      child_process_logging::SetClientId(switch_value.substr(0, separator));
+      base::SetLinuxDistro(switch_value.substr(separator + 1));
     } else {
-      google_update::posix_guid = switch_value;
+      child_process_logging::SetClientId(switch_value);
     }
     EnableNonBrowserCrashDumping();
   }

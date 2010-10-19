@@ -12,7 +12,7 @@
 #include <gtk/gtk.h>
 #endif
 
-#include "base/keyboard_codes.h"
+#include "app/keyboard_codes.h"
 #include "base/logging.h"
 #include "views/accelerator.h"
 #include "views/focus/focus_search.h"
@@ -81,9 +81,13 @@ FocusManager::~FocusManager() {
 }
 
 bool FocusManager::OnKeyEvent(const KeyEvent& event) {
+#if defined(OS_WIN)
   // If the focused view wants to process the key event as is, let it be.
+  // On Linux we always dispatch key events to the focused view first, so
+  // we should not do this check here. See also WidgetGtk::OnKeyEvent().
   if (focused_view_ && focused_view_->SkipDefaultKeyEventProcessing(event))
     return true;
+#endif
 
   // Intercept Tab related messages for focus traversal.
   // Note that we don't do focus traversal if the root window is not part of the
@@ -105,11 +109,11 @@ bool FocusManager::OnKeyEvent(const KeyEvent& event) {
 #endif
 
   // Intercept arrow key messages to switch between grouped views.
-  base::KeyboardCode key_code = event.GetKeyCode();
+  app::KeyboardCode key_code = event.GetKeyCode();
   if (focused_view_ && focused_view_->GetGroup() != -1 &&
-      (key_code == base::VKEY_UP || key_code == base::VKEY_DOWN ||
-       key_code == base::VKEY_LEFT || key_code == base::VKEY_RIGHT)) {
-    bool next = (key_code == base::VKEY_RIGHT || key_code == base::VKEY_DOWN);
+      (key_code == app::VKEY_UP || key_code == app::VKEY_DOWN ||
+       key_code == app::VKEY_LEFT || key_code == app::VKEY_RIGHT)) {
+    bool next = (key_code == app::VKEY_RIGHT || key_code == app::VKEY_DOWN);
     std::vector<View*> views;
     focused_view_->GetParent()->GetViewsWithGroup(focused_view_->GetGroup(),
                                                   &views);
@@ -361,9 +365,22 @@ void FocusManager::RestoreFocusedView() {
 
   View* view = view_storage->RetrieveView(stored_focused_view_storage_id_);
   if (view) {
-    if (ContainsView(view) && (view->IsFocusableInRootView() ||
-                               view->IsAccessibilityFocusableInRootView())) {
-      SetFocusedViewWithReason(view, kReasonFocusRestore);
+    if (ContainsView(view)) {
+      if (!view->IsFocusableInRootView() &&
+          view->IsAccessibilityFocusableInRootView()) {
+        // RequestFocus would fail, but we want to restore focus to controls
+        // that had focus in accessibility mode.
+        SetFocusedViewWithReason(view, kReasonFocusRestore);
+      } else {
+        // This usually just sets the focus if this view is focusable, but
+        // let the view override RequestFocus if necessary.
+        view->RequestFocus();
+
+        // If it succeeded, the reason would be incorrect; set it to
+        // focus restore.
+        if (focused_view_ == view)
+          focus_change_reason_ = kReasonFocusRestore;
+      }
     }
   } else {
     // Clearing the focus will focus the root window, so we still get key
@@ -477,7 +494,7 @@ AcceleratorTarget* FocusManager::GetCurrentTargetForAccelerator(
 
 // static
 bool FocusManager::IsTabTraversalKeyEvent(const KeyEvent& key_event) {
-  return key_event.GetKeyCode() == base::VKEY_TAB &&
+  return key_event.GetKeyCode() == app::VKEY_TAB &&
          !key_event.IsControlDown();
 }
 

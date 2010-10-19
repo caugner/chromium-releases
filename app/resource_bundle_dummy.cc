@@ -8,8 +8,8 @@
 
 #include "base/lock.h"
 #include "base/logging.h"
-#include "base/win_util.h"
 #include "gfx/font.h"
+#include "gfx/platform_font_win.h"
 
 ResourceBundle* ResourceBundle::g_shared_instance_ = NULL;
 
@@ -17,15 +17,18 @@ ResourceBundle* ResourceBundle::g_shared_instance_ = NULL;
 // files. The font members of ResourceBundle are never initialized in our code
 // so this destructor is never called.
 namespace gfx {
-  Font::HFontRef::~HFontRef() {
-    NOTREACHED();
-  }
+Font::~Font() {
+  NOTREACHED();
+}
+PlatformFontWin::HFontRef::~HFontRef() {
+  NOTREACHED();
+}
 }
 
 
 /* static */
 std::string ResourceBundle::InitSharedInstance(
-    const std::wstring& pref_locale) {
+    const std::string& pref_locale) {
   DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
   g_shared_instance_ = new ResourceBundle();
   return std::string();

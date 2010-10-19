@@ -4,7 +4,13 @@
 
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 
+#include "gfx/rect.h"
+
 void TabContentsDelegate::DetachContents(TabContents* source) {
+}
+
+bool TabContentsDelegate::IsPopup(const TabContents* source) const {
+  return false;
 }
 
 TabContents* TabContentsDelegate::GetConstrainingContents(TabContents* source) {
@@ -79,7 +85,8 @@ bool TabContentsDelegate::CanDownload(int request_id) {
   return true;
 }
 
-void TabContentsDelegate::OnStartDownload(DownloadItem* download) {
+void TabContentsDelegate::OnStartDownload(DownloadItem* download,
+                                          TabContents* tab) {
 }
 
 bool TabContentsDelegate::HandleContextMenu(const ContextMenuParams& params) {
@@ -127,16 +134,14 @@ bool TabContentsDelegate::OnGoToEntryOffset(int offset) {
   return true;
 }
 
-bool TabContentsDelegate::ShouldAddNavigationsToHistory() const {
+bool TabContentsDelegate::ShouldAddNavigationToHistory(
+    const history::HistoryAddPageArgs& add_page_args,
+    NavigationType::Type navigation_type) {
   return true;
 }
 
 void TabContentsDelegate::OnDidGetApplicationInfo(TabContents* tab_contents,
                                                   int32 page_id) {
-}
-
-Browser* TabContentsDelegate::GetBrowser() {
-  return NULL;
 }
 
 gfx::NativeWindow TabContentsDelegate::GetFrameNativeWindow() {
@@ -155,6 +160,12 @@ bool TabContentsDelegate::ShouldEnablePreferredSizeNotifications() {
 }
 
 void TabContentsDelegate::UpdatePreferredSize(const gfx::Size& pref_size) {
+}
+
+void TabContentsDelegate::ContentTypeChanged(TabContents* source) {
+}
+
+void TabContentsDelegate::CommitMatchPreview(TabContents* source) {
 }
 
 TabContentsDelegate::~TabContentsDelegate() {

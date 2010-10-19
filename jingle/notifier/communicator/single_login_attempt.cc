@@ -11,6 +11,7 @@
 
 #include "base/logging.h"
 #include "jingle/notifier/base/chrome_async_socket.h"
+#include "jingle/notifier/base/xmpp_client_socket_factory.h"
 #include "jingle/notifier/communicator/connection_options.h"
 #include "jingle/notifier/communicator/connection_settings.h"
 #include "jingle/notifier/communicator/const_communicator.h"
@@ -81,6 +82,7 @@ SingleLoginAttempt::SingleLoginAttempt(talk_base::TaskParent* parent,
                                   this,
                                   login_settings_->host_resolver(),
                                   &login_settings_->connection_options(),
+                                  login_settings_->try_ssltcp_first(),
                                   login_settings_->proxy_only(),
                                   login_settings_->server_list(),
                                   login_settings_->server_count()));
@@ -97,10 +99,6 @@ SingleLoginAttempt::~SingleLoginAttempt() {
   // If this assertion goes off, it means that "Stop()" didn't get called like
   // it should have been.
   DCHECK(!client_);
-}
-
-bool SingleLoginAttempt::auto_reconnect() const {
-  return login_settings_->connection_options().auto_reconnect();
 }
 
 const talk_base::ProxyInfo& SingleLoginAttempt::proxy() const {
@@ -157,7 +155,7 @@ void SingleLoginAttempt::OnAttemptedAllConnections(
   LOG(INFO) << "Connection failed with error " << code_;
 
   // We were connected and we had a problem.
-  if (successful_connection_ && auto_reconnect()) {
+  if (successful_connection_) {
     SignalNeedAutoReconnect();
     // Expect to be deleted at this point.
     return;
@@ -181,6 +179,13 @@ void SingleLoginAttempt::UseCurrentConnection() {
 void SingleLoginAttempt::DoLogin(
     const ConnectionSettings& connection_settings) {
   if (client_) {
+    return;
+  }
+  // TODO(akalin): Resolve any unresolved IPs, possibly through a
+  // proxy, instead of skipping them.
+  if (connection_settings.server().IsUnresolvedIP()) {
+    // Handler should attempt reconnect.
+    SignalUnexpectedDisconnect();
     return;
   }
 
@@ -221,8 +226,12 @@ void SingleLoginAttempt::OnCertificateExpired() {
 buzz::AsyncSocket* SingleLoginAttempt::CreateSocket(
     const buzz::XmppClientSettings& xcs) {
   if (use_chrome_async_socket_) {
+    bool use_fake_ssl_client_socket =
+        (xcs.protocol() == cricket::PROTO_SSLTCP);
     net::ClientSocketFactory* const client_socket_factory =
-        net::ClientSocketFactory::GetDefaultFactory();
+        new XmppClientSocketFactory(
+            net::ClientSocketFactory::GetDefaultFactory(),
+            use_fake_ssl_client_socket);
     // The default SSLConfig is good enough for us for now.
     const net::SSLConfig ssl_config;
     // A read buffer of 64k ought to be sufficient.

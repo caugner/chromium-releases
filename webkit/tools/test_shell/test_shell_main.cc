@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/app_switches.h"
+#include "app/gfx/gl/gl_implementation.h"
 #include "base/at_exit.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/env_var.h"
+#include "base/environment.h"
 #include "base/event_recorder.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -16,6 +18,7 @@
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/stats_table.h"
+#include "base/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/trace_event.h"
 #include "base/utf_string_conversions.h"
@@ -23,7 +26,7 @@
 #include "net/base/net_module.h"
 #include "net/base/net_util.h"
 #include "net/http/http_cache.h"
-#include "net/socket/ssl_test_util.h"
+#include "net/test/test_server.h"
 #include "net/url_request/url_request_context.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
@@ -91,16 +94,23 @@ int main(int argc, char* argv[]) {
   // directly, its constructor sets up some necessary state.
   MessageLoopForUI main_message_loop;
 
-  scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
+  scoped_ptr<base::Environment> env(base::Environment::Create());
   bool suppress_error_dialogs = (
-       env->HasEnv("CHROME_HEADLESS") ||
+       env->HasVar("CHROME_HEADLESS") ||
        parsed_command_line.HasSwitch(test_shell::kNoErrorDialogs) ||
        parsed_command_line.HasSwitch(test_shell::kLayoutTests));
   bool layout_test_mode =
       parsed_command_line.HasSwitch(test_shell::kLayoutTests);
   bool ux_theme = parsed_command_line.HasSwitch(test_shell::kUxTheme);
+#if defined(OS_MACOSX)
+  // The "classic theme" flag is meaningless on OS X.  But there is a bunch
+  // of code that sets up the environment for running pixel tests that only
+  // runs if it's set to true.
+  bool classic_theme = true;
+#else
   bool classic_theme =
       parsed_command_line.HasSwitch(test_shell::kClassicTheme);
+#endif  // !OS_MACOSX
 #if defined(OS_WIN)
   bool generic_theme = (layout_test_mode && !ux_theme && !classic_theme) ||
       parsed_command_line.HasSwitch(test_shell::kGenericTheme);
@@ -112,10 +122,10 @@ int main(int argc, char* argv[]) {
   bool enable_gp_fault_error_box = false;
   enable_gp_fault_error_box =
       parsed_command_line.HasSwitch(test_shell::kGPFaultErrorBox);
-  
-  bool allow_external_pages = 
+
+  bool allow_external_pages =
       parsed_command_line.HasSwitch(test_shell::kAllowExternalPages);
-  
+
   TestShell::InitLogging(suppress_error_dialogs,
                          layout_test_mode,
                          enable_gp_fault_error_box);
@@ -174,15 +184,7 @@ int main(int argc, char* argv[]) {
   // Config the network module so it has access to a limited set of resources.
   net::NetModule::SetResourceProvider(TestShell::NetResourceProvider);
 
-  // On Linux and Mac, load the test root certificate.
-  net::TestServerLauncher ssl_util;
-  ssl_util.LoadTestRootCert();
-
   platform.InitializeGUI();
-
-  if (parsed_command_line.HasSwitch(test_shell::kEnableLegacyParser)) {
-    TestShell::disable_html5_parser();
-  }
 
   TestShell::InitializeTestShell(layout_test_mode, allow_external_pages);
 
@@ -201,15 +203,19 @@ int main(int argc, char* argv[]) {
 #endif
 
   if (parsed_command_line.HasSwitch(test_shell::kTestShellTimeOut)) {
-    const std::wstring timeout_str = parsed_command_line.GetSwitchValue(
+    const std::string timeout_str = parsed_command_line.GetSwitchValueASCII(
         test_shell::kTestShellTimeOut);
-    int timeout_ms =
-        static_cast<int>(StringToInt64(WideToUTF16Hack(timeout_str.c_str())));
+    int timeout_ms;
+    base::StringToInt(timeout_str, &timeout_ms);
     if (timeout_ms > 0)
       TestShell::SetFileTestTimeout(timeout_ms);
   }
 
-  // Treat the first loose value as the initial URL to open.
+  // Unless specifically requested otherwise, default to OSMesa for GL.
+  if (!parsed_command_line.HasSwitch(switches::kUseGL))
+    gfx::InitializeGLBindings(gfx::kGLImplementationOSMesaGL);
+
+  // Treat the first argument as the initial URL to open.
   GURL starting_url;
 
   // Default to a homepage if we're interactive.
@@ -223,23 +229,23 @@ int main(int argc, char* argv[]) {
     starting_url = net::FilePathToFileURL(path);
   }
 
-  std::vector<std::wstring> loose_values = parsed_command_line.GetLooseValues();
-  if (loose_values.size() > 0) {
-    GURL url(WideToUTF16Hack(loose_values[0]));
+  const std::vector<CommandLine::StringType>& args = parsed_command_line.args();
+  if (args.size() > 0) {
+    GURL url(args[0]);
     if (url.is_valid()) {
       starting_url = url;
     } else {
       // Treat as a relative file path.
-      FilePath path = FilePath::FromWStringHack(loose_values[0]);
+      FilePath path = FilePath(args[0]);
       file_util::AbsolutePath(&path);
       starting_url = net::FilePathToFileURL(path);
     }
   }
 
-  std::wstring js_flags =
-    parsed_command_line.GetSwitchValue(test_shell::kJavaScriptFlags);
+  std::string js_flags =
+      parsed_command_line.GetSwitchValueASCII(test_shell::kJavaScriptFlags);
   // Test shell always exposes the GC.
-  js_flags += L" --expose-gc";
+  js_flags += " --expose-gc";
   webkit_glue::SetJavaScriptFlags(js_flags);
   // Expose GCController to JavaScript.
   WebScriptController::registerExtension(extensions_v8::GCExtension::Get());
@@ -259,8 +265,8 @@ int main(int argc, char* argv[]) {
 
   // truncate the random # to 32 bits for the benefit of Mac OS X, to
   // avoid tripping over its maximum shared memory segment name length
-  std::string stats_filename =
-      kStatsFilePrefix + Uint64ToString(base::RandUint64() & 0xFFFFFFFFL);
+  std::string stats_filename = kStatsFilePrefix +
+      base::Uint64ToString(base::RandUint64() & 0xFFFFFFFFL);
   RemoveSharedMemoryFile(stats_filename);
   StatsTable *table = new StatsTable(stats_filename,
       kStatsFileThreads,
@@ -358,7 +364,7 @@ int main(int argc, char* argv[]) {
       } else {
         // TODO(ojan): Provide a way for run-singly tests to pass
         // in a hash and then set params.pixel_hash here.
-        params.test_url = WideToUTF8(loose_values[0]);
+        params.test_url = starting_url.spec();
         TestShell::RunFileTest(params);
       }
 

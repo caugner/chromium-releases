@@ -10,10 +10,10 @@
 
 #include "base/compiler_specific.h"
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "net/base/completion_callback.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "webkit/appcache/appcache_working_set.h"
 
 class GURL;
@@ -48,7 +48,8 @@ class AppCacheStorage {
 
     // If successfully stored 'success' will be true.
     virtual void OnGroupAndNewestCacheStored(
-        AppCacheGroup* group, AppCache* newest_cache, bool success) {}
+        AppCacheGroup* group, AppCache* newest_cache, bool success,
+        bool would_exceed_quota) {}
 
     // If the operation fails, success will be false.
     virtual void OnGroupMadeObsolete(AppCacheGroup* group, bool success) {}
@@ -165,6 +166,11 @@ class AppCacheStorage {
       const GURL& manifest_url, const std::vector<int64>& response_ids) = 0;
 
   virtual void PurgeMemory() = 0;
+
+  // Maintain a collection of quota overrides in memory.
+  void SetOriginQuotaInMemory(const GURL& origin, int64 quota);
+  void ResetOriginQuotaInMemory(const GURL& origin);
+  int64 GetOriginQuotaInMemory(const GURL& origin);
 
   // Generates unique storage ids for different object types.
   int64 NewCacheId() {
@@ -283,6 +289,11 @@ class AppCacheStorage {
     return ++last_response_id_;
   }
 
+  // Store quotas for extensions in memory, in order to prevent writing a row
+  // to quota_table_ every time an extention is loaded.
+  typedef std::map<GURL, int64> QuotaMap;
+  QuotaMap in_memory_quotas_;
+
   // The last storage id used for different object types.
   int64 last_cache_id_;
   int64 last_group_id_;
@@ -296,7 +307,8 @@ class AppCacheStorage {
   // The set of last ids must be retrieved from storage prior to being used.
   static const int64 kUnitializedId;
 
-  FRIEND_TEST(AppCacheStorageTest, DelegateReferences);
+  FRIEND_TEST_ALL_PREFIXES(AppCacheStorageTest, DelegateReferences);
+
   DISALLOW_COPY_AND_ASSIGN(AppCacheStorage);
 };
 

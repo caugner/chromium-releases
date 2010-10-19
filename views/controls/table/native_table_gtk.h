@@ -1,9 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef VIEWS_CONTROLS_TABLE_NATIVE_TABLE_GTK_H_
 #define VIEWS_CONTROLS_TABLE_NATIVE_TABLE_GTK_H_
+#pragma once
 
 #include "app/gtk_signal.h"
 #include "app/table_model.h"
@@ -15,7 +16,8 @@ namespace views {
 class TableView2;
 
 // A View that hosts a native GTK table.
-// Note that the implementation is still incomplete. What remains to be done:
+// TODO: Note that the implementation is still incomplete. What remains to be
+// done:
 // - support resizable columns
 // - support autosize columns
 // - implement focus row methods.

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_COCOA_BROWSER_WINDOW_CONTROLLER_H_
 #define CHROME_BROWSER_COCOA_BROWSER_WINDOW_CONTROLLER_H_
+#pragma once
 
 // A class acting as the Objective-C controller for the Browser
 // object. Handles interactions between Cocoa and the cross-platform
@@ -27,7 +28,6 @@
 class Browser;
 class BrowserWindow;
 class BrowserWindowCocoa;
-@class ChromeBrowserWindow;
 class ConstrainedWindowMac;
 @class DownloadShelfController;
 @class FindBarCocoaController;
@@ -235,6 +235,10 @@ class TabStripModelObserverBridge;
 // Shows or hides the docked web inspector depending on |contents|'s state.
 - (void)updateDevToolsForContents:(TabContents*)contents;
 
+// Displays the active sidebar linked to the |contents| or hides sidebar UI,
+// if there's no such sidebar.
+- (void)updateSidebarForContents:(TabContents*)contents;
+
 // Gets the current theme provider.
 - (ThemeProvider*)themeProvider;
 
@@ -335,6 +339,9 @@ class TabStripModelObserverBridge;
 
 // Returns YES if any of the views in the floating bar currently has focus.
 - (BOOL)floatingBarHasFocus;
+
+// Opens the tabpose window.
+- (void)openTabpose;
 
 @end  // @interface BrowserWindowController(Fullscreen)
 

@@ -15,8 +15,10 @@
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
+#include "chrome/browser/browser_list.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/extensions/extension_omnibox_api.h"
+#include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/url_fixer_upper.h"
@@ -127,6 +129,13 @@ void AutocompleteEditModel::RestoreState(const State& state) {
   }
 }
 
+GURL AutocompleteEditModel::CurrentURL(PageTransition::Type* transition_type) {
+  AutocompleteMatch match;
+  GetInfoForCurrentText(&match, NULL);
+  *transition_type = match.transition;
+  return match.destination_url;
+}
+
 bool AutocompleteEditModel::UpdatePermanentText(
     const std::wstring& new_permanent_text) {
   // When there's a new URL, and the user is not editing anything or the edit
@@ -154,14 +163,28 @@ void AutocompleteEditModel::GetDataForURLExport(GURL* url,
   AutocompleteMatch match;
   GetInfoForCurrentText(&match, NULL);
   *url = match.destination_url;
-  if (UTF8ToWide(url->possibly_invalid_spec()) == permanent_text_) {
+  if (*url == URLFixerUpper::FixupURL(WideToUTF8(permanent_text_),
+                                      std::string())) {
     *title = controller_->GetTitle();
     *favicon = controller_->GetFavIcon();
   }
 }
 
 std::wstring AutocompleteEditModel::GetDesiredTLD() const {
-  return (control_key_state_ == DOWN_WITHOUT_CHANGE) ?
+  // Tricky corner case: The user has typed "foo" and currently sees an inline
+  // autocomplete suggestion of "foo.net".  He now presses ctrl-a (e.g. to
+  // select all, on Windows).  If we treat the ctrl press as potentially for the
+  // sake of ctrl-enter, then we risk "www.foo.com" being promoted as the best
+  // match.  This would make the autocompleted text disappear, leaving our user
+  // feeling very confused when the wrong text gets highlighted.
+  //
+  // Thus, we only treat the user as pressing ctrl-enter when the user presses
+  // ctrl without any fragile state built up in the omnibox:
+  // * the contents of the omnibox have not changed since the keypress,
+  // * there is no autocompleted text visible, and
+  // * the user is not typing a keyword query.
+  return (control_key_state_ == DOWN_WITHOUT_CHANGE &&
+          inline_autocomplete_text_.empty() && !KeywordIsSelected())?
     std::wstring(L"com") : std::wstring();
 }
 
@@ -259,9 +282,11 @@ void AutocompleteEditModel::Revert() {
 }
 
 void AutocompleteEditModel::StartAutocomplete(
+    bool has_selected_text,
     bool prevent_inline_autocomplete) const {
   popup_->StartAutocomplete(user_text_, GetDesiredTLD(),
       prevent_inline_autocomplete || just_deleted_text_ ||
+      (has_selected_text && inline_autocomplete_text_.empty()) ||
       (paste_state_ != NONE), keyword_ui_state_ == KEYWORD);
 }
 
@@ -297,7 +322,8 @@ void AutocompleteEditModel::AcceptInput(WindowOpenDisposition disposition,
   if (!match.destination_url.is_valid())
     return;
 
-  if (UTF8ToWide(match.destination_url.spec()) == permanent_text_) {
+  if (match.destination_url ==
+      URLFixerUpper::FixupURL(WideToUTF8(permanent_text_), std::string())) {
     // When the user hit enter on the existing permanent URL, treat it like a
     // reload for scoring purposes.  We could detect this by just checking
     // user_input_in_progress_, but it seems better to treat "edits" that end
@@ -312,6 +338,15 @@ void AutocompleteEditModel::AcceptInput(WindowOpenDisposition disposition,
     match.transition = PageTransition::LINK;
   }
 
+  if (match.type == AutocompleteMatch::SEARCH_WHAT_YOU_TYPED ||
+      match.type == AutocompleteMatch::SEARCH_HISTORY ||
+      match.type == AutocompleteMatch::SEARCH_SUGGEST) {
+    const TemplateURL* default_provider =
+        profile_->GetTemplateURLModel()->GetDefaultSearchProvider();
+    if (default_provider && default_provider->url() &&
+        default_provider->url()->HasGoogleBaseURLs())
+      GoogleURLTracker::GoogleURLSearchCommitted();
+  }
   view_->OpenURL(match.destination_url, disposition, match.transition,
                  alternate_nav_url, AutocompletePopupModel::kNoMatch,
                  is_keyword_hint_ ? std::wstring() : keyword_);
@@ -369,6 +404,9 @@ void AutocompleteEditModel::OpenURL(const GURL& url,
     // search engine, if applicable; see comments in template_url.h.
   }
 
+#if defined(TOOLKIT_VIEWS)
+  controller_->OnAutocompleteWillAccept();
+#endif
   if (disposition != NEW_BACKGROUND_TAB)
     view_->RevertAll();  // Revert the box to its unedited state
   controller_->OnAutocompleteAccept(url, disposition, transition,
@@ -465,6 +503,8 @@ void AutocompleteEditModel::OnControlKeyChanged(bool pressed) {
       // the input text.
       InternalSetUserText(UserTextFromDisplayText(view_->GetText()));
       has_temporary_text_ = false;
+      if (KeywordIsSelected())
+        AcceptKeyword();
     }
     if ((old_state != DOWN_WITH_CHANGE) && popup_->IsOpen()) {
       // Autocomplete history provider results may change, so refresh the
@@ -594,8 +634,7 @@ bool AutocompleteEditModel::OnAfterPossibleChange(const std::wstring& new_text,
     return false;
   }
 
-  const bool had_keyword = (keyword_ui_state_ != NO_KEYWORD) &&
-      !is_keyword_hint_ && !keyword_.empty();
+  const bool had_keyword = KeywordIsSelected();
 
   // Modifying the selection counts as accepting the autocompleted text.
   InternalSetUserText(UserTextFromDisplayText(new_text));
@@ -666,8 +705,8 @@ void AutocompleteEditModel::Observe(NotificationType type,
 
     if (!match->destination_url.SchemeIs(chrome::kExtensionScheme)) {
       // Warm up DNS Prefetch cache, or preconnect to a search service.
-      chrome_browser_net::AnticipateUrl(match->destination_url,
-                                        IsPreconnectable(match->type));
+      chrome_browser_net::AnticipateOmniboxUrl(match->destination_url,
+                                               IsPreconnectable(match->type));
     }
 
     // We could prefetch the alternate nav URL, if any, but because there
@@ -686,18 +725,20 @@ void AutocompleteEditModel::InternalSetUserText(const std::wstring& text) {
   inline_autocomplete_text_.clear();
 }
 
+bool AutocompleteEditModel::KeywordIsSelected() const {
+  return ((keyword_ui_state_ != NO_KEYWORD) && !is_keyword_hint_ &&
+          !keyword_.empty());
+}
+
 std::wstring AutocompleteEditModel::DisplayTextFromUserText(
     const std::wstring& text) const {
-  return ((keyword_ui_state_ == NO_KEYWORD) || is_keyword_hint_ ||
-          keyword_.empty()) ?
-      text : KeywordProvider::SplitReplacementStringFromInput(text);
+  return KeywordIsSelected() ?
+      KeywordProvider::SplitReplacementStringFromInput(text) : text;
 }
 
 std::wstring AutocompleteEditModel::UserTextFromDisplayText(
     const std::wstring& text) const {
-  return ((keyword_ui_state_ == NO_KEYWORD) || is_keyword_hint_ ||
-          keyword_.empty()) ?
-      text : (keyword_ + L" " + text);
+  return KeywordIsSelected() ? (keyword_ + L" " + text) : text;
 }
 
 void AutocompleteEditModel::GetInfoForCurrentText(

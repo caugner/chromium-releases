@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/time.h"
-#include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/third_party/nspr/prtime.h"
 
@@ -103,6 +102,22 @@ bool Time::FromString(const wchar_t* time_string, Time* parsed_time) {
   result_time += kTimeTToMicrosecondsOffset;
   *parsed_time = Time(result_time);
   return true;
+}
+
+// Time::Exploded -------------------------------------------------------------
+
+inline bool is_in_range(int value, int lo, int hi) {
+  return lo <= value && value <= hi;
+}
+
+bool Time::Exploded::HasValidValues() const {
+  return is_in_range(month, 1, 12) &&
+         is_in_range(day_of_week, 0, 6) &&
+         is_in_range(day_of_month, 1, 31) &&
+         is_in_range(hour, 0, 23) &&
+         is_in_range(minute, 0, 59) &&
+         is_in_range(second, 0, 60) &&
+         is_in_range(millisecond, 0, 999);
 }
 
 }  // namespace base

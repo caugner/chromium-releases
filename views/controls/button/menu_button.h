@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_CONTROLS_BUTTON_MENU_BUTTON_H_
 #define VIEWS_CONTROLS_BUTTON_MENU_BUTTON_H_
+#pragma once
 
 #include <string>
 
@@ -65,9 +66,21 @@ class MenuButton : public TextButton {
   // Returns views/MenuButton.
   virtual std::string GetClassName() const;
 
+  // Accessors for menu_offset_.
+  const gfx::Point& menu_offset() const {
+    return menu_offset_;
+  }
+
+  void set_menu_offset(int x, int y) {
+    menu_offset_.SetPoint(x, y);
+  }
+
  protected:
   // True if the menu is currently visible.
   bool menu_visible_;
+
+  // Offset of the associated menu position.
+  gfx::Point menu_offset_;
 
  private:
   friend class TextButtonBackground;

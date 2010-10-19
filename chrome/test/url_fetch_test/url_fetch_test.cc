@@ -7,6 +7,7 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
@@ -49,7 +50,7 @@ class UrlFetchTest : public UITest {
   }
 
   void RunTest(const GURL& url, const char* wait_cookie_name,
-               const char* wait_cookie_value, const wchar_t* var_to_fetch,
+               const char* wait_cookie_value, const char* var_to_fetch,
                UrlFetchTestResult* result) {
     scoped_refptr<TabProxy> tab(GetActiveTab());
     ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(url));
@@ -67,11 +68,12 @@ class UrlFetchTest : public UITest {
       }
     }
     if (var_to_fetch) {
-      std::wstring script = StringPrintf(
-          L"window.domAutomationController.send(%ls);", var_to_fetch);
+      std::string script = StringPrintf(
+          "window.domAutomationController.send(%s);", var_to_fetch);
 
       std::wstring value;
-      bool success = tab->ExecuteAndExtractString(L"", script, &value);
+      bool success = tab->ExecuteAndExtractString(L"", ASCIIToWide(script),
+                                                  &value);
       ASSERT_TRUE(success);
       result->javascript_variable = WideToUTF8(value);
     }
@@ -121,10 +123,10 @@ TEST_F(UrlFetchTest, UrlFetch) {
   std::string cookie_value =
       cmd_line->GetSwitchValueASCII("wait_cookie_value");
 
-  std::wstring jsvar = cmd_line->GetSwitchValue("jsvar");
+  std::string jsvar = cmd_line->GetSwitchValueASCII("jsvar");
 
   UrlFetchTestResult result;
-  RunTest(GURL(WideToASCII(cmd_line->GetSwitchValue("url"))),
+  RunTest(GURL(cmd_line->GetSwitchValueASCII("url")),
           cookie_name.length() > 0 ? cookie_name.c_str() : NULL,
           cookie_value.length() > 0 ? cookie_value.c_str() : NULL,
           jsvar.length() > 0 ? jsvar.c_str() : NULL,

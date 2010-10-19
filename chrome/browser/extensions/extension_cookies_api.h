@@ -7,6 +7,7 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_COOKIES_API_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_COOKIES_API_H_
+#pragma once
 
 #include <string>
 
@@ -15,10 +16,12 @@
 #include "base/time.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
+#include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/cookie_monster.h"
 
+class DictionaryValue;
 class URLRequestContextGetter;
 
 // Observes CookieMonster notifications and routes them as events to the

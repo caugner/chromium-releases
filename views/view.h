@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_VIEW_H_
 #define VIEWS_VIEW_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -557,8 +558,13 @@ class View : public AcceleratorTarget {
   // TODO(klink): Move all this out to a AccessibleInfo wrapper class.
 
   // Notify the platform specific accessibility client of changes in the user
-  // interface.
+  // interface.  This will always raise native notifications.
   virtual void NotifyAccessibilityEvent(AccessibilityTypes::Event event_type);
+
+  // Raise an accessibility notification with an option to also raise a native
+  // notification.
+  virtual void NotifyAccessibilityEvent(AccessibilityTypes::Event event_type,
+      bool send_native_event);
 
   // Returns the MSAA default action of the current view. The string returned
   // describes the default action that will occur when executing
@@ -637,6 +643,9 @@ class View : public AcceleratorTarget {
   // Convert a point from the coordinate system of a View to that of the
   // screen. This is useful for example when placing popup windows.
   static void ConvertPointToScreen(const View* src, gfx::Point* point);
+
+  // Return the bounds of the View in screen coordinate system.
+  gfx::Rect GetScreenBounds() const;
 
   // Event Handlers
 
@@ -975,15 +984,15 @@ class View : public AcceleratorTarget {
 
   // Called when the UI theme has changed, overriding allows individual Views to
   // do special cleanup and processing (such as dropping resource caches).
-  // Subclasses that override this method must call the base class
-  // implementation to ensure child views are processed.
-  // Can only be called by subclasses. To dispatch a theme changed notification,
-  // call this method on the RootView.
-  virtual void ThemeChanged();
+  // To dispatch a theme changed notification, call
+  // RootView::NotifyThemeChanged().
+  virtual void OnThemeChanged() { }
 
   // Called when the locale has changed, overriding allows individual Views to
   // update locale-dependent strings.
-  virtual void LocaleChanged() { }
+  // To dispatch a locale changed notification, call
+  // RootView::NotifyLocaleChanged().
+  virtual void OnLocaleChanged() { }
 
 #ifndef NDEBUG
   // Returns true if the View is currently processing a paint.
@@ -1137,9 +1146,13 @@ class View : public AcceleratorTarget {
     gfx::Point start_pt;
   };
 
-  // Propagates locale changed notification from the root view downside.
-  // Invokes LocaleChanged() for every view in the hierarchy.
-  virtual void NotifyLocaleChanged();
+  // Used to propagate theme changed notifications from the root view to all
+  // views in the hierarchy.
+  virtual void PropagateThemeChanged();
+
+  // Used to propagate locale changed notifications from the root view to all
+  // views in the hierarchy.
+  virtual void PropagateLocaleChanged();
 
   // RootView invokes these. These in turn invoke the appropriate OnMouseXXX
   // method. If a drag is detected, DoDrag is invoked.

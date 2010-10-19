@@ -4,6 +4,7 @@
 
 #ifndef APP_ANIMATION_CONTAINER_H_
 #define APP_ANIMATION_CONTAINER_H_
+#pragma once
 
 #include <set>
 
@@ -32,6 +33,9 @@ class AnimationContainer : public base::RefCounted<AnimationContainer> {
 
     // Invoked when no more animations are being managed by this container.
     virtual void AnimationContainerEmpty(AnimationContainer* container) = 0;
+
+   protected:
+    virtual ~Observer() {}
   };
 
   // Interface for the elements the AnimationContainer contains. This is

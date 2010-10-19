@@ -4,12 +4,12 @@
 
 #ifndef CHROME_INSTALLER_UTIL_LOGGING_INSTALLER_H_
 #define CHROME_INSTALLER_UTIL_LOGGING_INSTALLER_H_
-
-#include <string>
+#pragma once
 
 #include "base/logging.h"
 
 class CommandLine;
+class FilePath;
 
 namespace installer {
 
@@ -20,7 +20,7 @@ void InitInstallerLogging(const CommandLine& command_line);
 void EndInstallerLogging();
 
 // Returns the full path of the log file.
-std::wstring GetLogFilePath(const CommandLine& command_line);
+FilePath GetLogFilePath(const CommandLine& command_line);
 
 } // namespace installer
 

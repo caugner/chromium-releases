@@ -677,7 +677,8 @@ HttpAuthGSSAPI::HttpAuthGSSAPI(GSSAPILibrary* library,
     : scheme_(scheme),
       gss_oid_(gss_oid),
       library_(library),
-      scoped_sec_context_(library) {
+      scoped_sec_context_(library),
+      can_delegate_(false) {
   DCHECK(library_);
 }
 
@@ -696,6 +697,10 @@ bool HttpAuthGSSAPI::NeedsIdentity() const {
 
 bool HttpAuthGSSAPI::IsFinalRound() const {
   return !NeedsIdentity();
+}
+
+void HttpAuthGSSAPI::Delegate() {
+  can_delegate_ = true;
 }
 
 bool HttpAuthGSSAPI::ParseChallenge(HttpAuth::ChallengeTokenizer* tok) {
@@ -721,8 +726,8 @@ bool HttpAuthGSSAPI::ParseChallenge(HttpAuth::ChallengeTokenizer* tok) {
   return true;
 }
 
-int HttpAuthGSSAPI::GenerateAuthToken(const std::wstring* username,
-                                      const std::wstring* password,
+int HttpAuthGSSAPI::GenerateAuthToken(const string16* username,
+                                      const string16* password,
                                       const std::wstring& spn,
                                       std::string* auth_token) {
   DCHECK(auth_token);
@@ -757,8 +762,8 @@ int HttpAuthGSSAPI::GenerateAuthToken(const std::wstring* username,
   return OK;
 }
 
-int HttpAuthGSSAPI::OnFirstRound(const std::wstring* username,
-                                 const std::wstring* password) {
+int HttpAuthGSSAPI::OnFirstRound(const string16* username,
+                                 const string16* password) {
   // TODO(cbentzel): Acquire credentials?
   DCHECK((username == NULL) == (password == NULL));
   username_.clear();
@@ -799,6 +804,8 @@ int HttpAuthGSSAPI::GetNextSecurityToken(const std::wstring& spn,
 
   // Continue creating a security context.
   OM_uint32 req_flags = 0;
+  if (can_delegate_)
+    req_flags |= GSS_C_DELEG_FLAG;
   major_status = library_->init_sec_context(
       &minor_status,
       GSS_C_NO_CREDENTIAL,

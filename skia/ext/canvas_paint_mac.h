@@ -5,6 +5,7 @@
 
 #ifndef SKIA_EXT_CANVAS_PAINT_MAC_H_
 #define SKIA_EXT_CANVAS_PAINT_MAC_H_
+#pragma once
 
 #include "skia/ext/platform_canvas.h"
 
@@ -84,7 +85,7 @@ class CanvasPaintT : public T {
     if (!T::initialize(rectangle_.size.width, rectangle_.size.height,
                        opaque, NULL)) {
       // Cause a deliberate crash;
-      *(char*) 0 = 0;
+      *(volatile char*) 0 = 0;
     }
 
     // Need to translate so that the dirty region appears at the origin of the

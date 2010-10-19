@@ -4,12 +4,15 @@
 
 #import "chrome/browser/cocoa/content_exceptions_window_controller.h"
 
+#include "app/l10n_util.h"
 #include "app/l10n_util_mac.h"
 #include "app/table_model_observer.h"
+#include "base/command_line.h"
 #import "base/mac_util.h"
 #import "base/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/content_exceptions_table_model.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "grit/generated_resources.h"
@@ -132,6 +135,13 @@ const ContentSetting kSessionSettings[] = { CONTENT_SETTING_ALLOW,
                                             CONTENT_SETTING_SESSION_ONLY,
                                             CONTENT_SETTING_BLOCK };
 
+// The settings shown in the combobox if show_session_ is true, and we still
+// offer the cookie prompt mode.
+const ContentSetting kSessionAskSettings[] = { CONTENT_SETTING_ALLOW,
+                                               CONTENT_SETTING_ASK,
+                                               CONTENT_SETTING_SESSION_ONLY,
+                                               CONTENT_SETTING_BLOCK };
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -168,6 +178,8 @@ static ContentExceptionsWindowController*
     model_.reset(new ContentExceptionsTableModel(
         settingsMap_, otrSettingsMap_, settingsType_));
     showSession_ = settingsType_ == CONTENT_SETTINGS_TYPE_COOKIES;
+    disableCookiePrompt_ = !CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableCookiePrompt);
     otrAllowed_ = otrSettingsMap != NULL;
     tableObserver_.reset(new UpdatingContentSettingsObserver(self));
     updatesEnabled_ = YES;
@@ -493,8 +505,12 @@ static ContentExceptionsWindowController*
 }
 
 - (size_t)menuItemCount {
-  return showSession_ ?
-      arraysize(kSessionSettings) : arraysize(kNoSessionSettings);
+  if (showSession_) {
+    return disableCookiePrompt_ ?
+        arraysize(kSessionSettings) : arraysize(kSessionAskSettings);
+  } else {
+    return arraysize(kNoSessionSettings);
+  }
 }
 
 - (NSString*)titleForIndex:(size_t)index {
@@ -503,6 +519,8 @@ static ContentExceptionsWindowController*
       return l10n_util::GetNSStringWithFixup(IDS_EXCEPTIONS_ALLOW_BUTTON);
     case CONTENT_SETTING_BLOCK:
       return l10n_util::GetNSStringWithFixup(IDS_EXCEPTIONS_BLOCK_BUTTON);
+    case CONTENT_SETTING_ASK:
+      return l10n_util::GetNSStringWithFixup(IDS_EXCEPTIONS_ASK_BUTTON);
     case CONTENT_SETTING_SESSION_ONLY:
       return l10n_util::GetNSStringWithFixup(
           IDS_EXCEPTIONS_SESSION_ONLY_BUTTON);
@@ -513,7 +531,12 @@ static ContentExceptionsWindowController*
 }
 
 - (ContentSetting)settingForIndex:(size_t)index {
-  return showSession_ ? kSessionSettings[index] : kNoSessionSettings[index];
+  if (showSession_) {
+    return disableCookiePrompt_ ?
+        kSessionSettings[index] : kSessionAskSettings[index];
+  } else {
+    return kNoSessionSettings[index];
+  }
 }
 
 - (size_t)indexForSetting:(ContentSetting)setting {

@@ -14,21 +14,23 @@
 #include "base/values.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/dom_ui/dom_ui.h"
 #include "chrome/browser/dom_ui/dom_ui_util.h"
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
-#include "chrome/browser/debugger/devtools_manager.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/pref_service.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_source.h"
-#include "chrome/common/render_messages.h"
+#include "chrome/common/notification_type.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
+#include "webkit/glue/webpreferences.h"
 
 #include "grit/generated_resources.h"
 
@@ -137,7 +139,7 @@ GURL CloudPrintService::GetCloudPrintServiceDialogURL() {
 }
 
 bool GetRealOrInt(const DictionaryValue& dictionary,
-                  const std::wstring& path,
+                  const std::string& path,
                   double* out_value) {
   if (!dictionary.GetReal(path, out_value)) {
     int int_value = 0;
@@ -161,10 +163,10 @@ bool GetPageSetupParameters(const std::string& json,
 
   bool result = true;
   DictionaryValue* params = static_cast<DictionaryValue*>(parsed_value.get());
-  result &= GetRealOrInt(*params, L"dpi", &parameters.dpi);
-  result &= GetRealOrInt(*params, L"min_shrink", &parameters.min_shrink);
-  result &= GetRealOrInt(*params, L"max_shrink", &parameters.max_shrink);
-  result &= params->GetBoolean(L"selection_only", &parameters.selection_only);
+  result &= GetRealOrInt(*params, "dpi", &parameters.dpi);
+  result &= GetRealOrInt(*params, "min_shrink", &parameters.min_shrink);
+  result &= GetRealOrInt(*params, "max_shrink", &parameters.max_shrink);
+  result &= params->GetBoolean("selection_only", &parameters.selection_only);
   return result;
 }
 
@@ -323,7 +325,7 @@ void CloudPrintFlowHandler::Observe(NotificationType type,
   }
 }
 
-void CloudPrintFlowHandler::HandleShowDebugger(const Value* value) {
+void CloudPrintFlowHandler::HandleShowDebugger(const ListValue* args) {
   ShowDebugger();
 }
 
@@ -342,7 +344,7 @@ CloudPrintFlowHandler::CreateCloudPrintDataSender() {
   return new CloudPrintDataSender(print_data_helper_.get(), print_job_title_);
 }
 
-void CloudPrintFlowHandler::HandleSendPrintData(const Value* value) {
+void CloudPrintFlowHandler::HandleSendPrintData(const ListValue* args) {
   DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   // This will cancel any ReadPrintDataFile() or SendPrintDataFile()
   // requests in flight (this is anticipation of when setting page
@@ -359,8 +361,8 @@ void CloudPrintFlowHandler::HandleSendPrintData(const Value* value) {
   }
 }
 
-void CloudPrintFlowHandler::HandleSetPageParameters(const Value* value) {
-  std::string json(dom_ui_util::GetJsonResponseFromFirstArgumentInList(value));
+void CloudPrintFlowHandler::HandleSetPageParameters(const ListValue* args) {
+  std::string json(dom_ui_util::GetJsonResponseFromFirstArgumentInList(args));
   if (json.empty())
     return;
 

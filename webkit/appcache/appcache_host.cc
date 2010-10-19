@@ -12,6 +12,24 @@
 
 namespace appcache {
 
+namespace {
+
+void FillCacheInfo(
+    const AppCache* cache, Status status, AppCacheInfo* info) {
+  DCHECK(cache);
+  info->cache_id = cache->cache_id();
+  info->status = status;
+  info->is_complete = cache->is_complete();
+  if (info->is_complete) {
+    info->manifest_url = cache->owning_group()->manifest_url();
+    info->last_update_time = cache->update_time();
+    info->creation_time = cache->owning_group()->creation_time();
+    info->size = cache->cache_size();
+  }
+}
+
+}  // Anonymous namespace
+
 AppCacheHost::AppCacheHost(int host_id, AppCacheFrontend* frontend,
                            AppCacheService* service)
     : host_id_(host_id), parent_host_id_(kNoHostId), parent_process_id_(0),
@@ -20,7 +38,7 @@ AppCacheHost::AppCacheHost(int host_id, AppCacheFrontend* frontend,
       frontend_(frontend), service_(service),
       pending_get_status_callback_(NULL), pending_start_update_callback_(NULL),
       pending_swap_cache_callback_(NULL), pending_callback_param_(NULL),
-      main_resource_blocked_(false) {
+      main_resource_blocked_(false), associated_cache_info_pending_(false) {
 }
 
 AppCacheHost::~AppCacheHost() {
@@ -252,6 +270,25 @@ AppCacheRequestHandler* AppCacheHost::CreateRequestHandler(
   return NULL;
 }
 
+void AppCacheHost::GetResourceList(
+    std::vector<AppCacheResourceInfo>* resource_infos) {
+  if (associated_cache_.get() && associated_cache_->is_complete()) {
+    for (AppCache::EntryMap::const_iterator it =
+         associated_cache_->entries().begin();
+         it != associated_cache_->entries().end(); ++it) {
+      AppCacheResourceInfo info;
+      info.url = it->first;
+      info.is_master = it->second.IsMaster();
+      info.is_manifest = it->second.IsManifest();
+      info.is_fallback = it->second.IsFallback();
+      info.is_foreign = it->second.IsForeign();
+      info.is_explicit = it->second.IsExplicit();
+      info.size = it->second.response_size();
+      resource_infos->push_back(info);
+    }
+  }
+}
+
 Status AppCacheHost::GetStatus() {
   // 6.9.8 Application cache API
   AppCache* cache = associated_cache();
@@ -377,6 +414,14 @@ void AppCacheHost::OnUpdateComplete(AppCacheGroup* group) {
 
   group_being_updated_ = NULL;
   newest_cache_of_group_being_updated_ = NULL;
+
+  if (associated_cache_info_pending_ && associated_cache_.get() &&
+      associated_cache_->is_complete()) {
+    AppCacheInfo info;
+    FillCacheInfo(associated_cache_.get(), GetStatus(), &info);
+    associated_cache_info_pending_ = false;
+    frontend_->OnCacheSelected(host_id_, info);
+  }
 }
 
 void AppCacheHost::OnContentBlocked(AppCacheGroup* group) {
@@ -417,13 +462,13 @@ void AppCacheHost::AssociateCache(AppCache* cache) {
 
   associated_cache_ = cache;
   SetSwappableCache(cache ? cache->owning_group() : NULL);
-
+  associated_cache_info_pending_ = cache && !cache->is_complete();
+  AppCacheInfo info;
   if (cache) {
     cache->AssociateHost(this);
-    frontend_->OnCacheSelected(host_id_, cache->cache_id(), GetStatus());
-  } else {
-    frontend_->OnCacheSelected(host_id_, kNoCacheId, UNCACHED);
+    FillCacheInfo(cache, GetStatus(), &info);
   }
+  frontend_->OnCacheSelected(host_id_, info);
 }
 
 }  // namespace appcache

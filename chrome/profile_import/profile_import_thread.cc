@@ -24,7 +24,11 @@ const int kNumHistoryRowsToSend = 100;
 const int kNumFavIconsToSend = 100;
 }
 
-ProfileImportThread::ProfileImportThread() {
+ProfileImportThread::ProfileImportThread()
+    : bridge_(NULL),
+      browser_type_(0),
+      items_to_import_(0),
+      importer_(NULL) {
   ChildProcess::current()->AddRefProcess();  // Balanced in Cleanup().
 }
 
@@ -101,7 +105,8 @@ void ProfileImportThread::NotifyEnded() {
 }
 
 void ProfileImportThread::NotifyHistoryImportReady(
-    const std::vector<history::URLRow> &rows) {
+    const std::vector<history::URLRow> &rows,
+    history::VisitSource visit_source) {
   Send(new ProfileImportProcessHostMsg_NotifyHistoryImportStart(rows.size()));
 
   std::vector<history::URLRow>::const_iterator it;
@@ -113,7 +118,8 @@ void ProfileImportThread::NotifyHistoryImportReady(
         it + kNumHistoryRowsToSend : rows.end();
     row_group.assign(it, end_group);
 
-    Send(new ProfileImportProcessHostMsg_NotifyHistoryImportGroup(row_group));
+    Send(new ProfileImportProcessHostMsg_NotifyHistoryImportGroup(row_group,
+         visit_source));
   }
 }
 

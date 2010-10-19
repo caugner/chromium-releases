@@ -10,10 +10,13 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/gpu_process_host_ui_shim.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/gpu_messages.h"
 #include "chrome/common/render_messages.h"
+#include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_switches.h"
 
 #if defined(OS_LINUX)
@@ -76,33 +79,27 @@ bool GpuProcessHost::Init() {
     return false;
 
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
-  std::wstring gpu_launcher =
-      browser_command_line.GetSwitchValue(switches::kGpuLauncher);
+  CommandLine::StringType gpu_launcher =
+      browser_command_line.GetSwitchValueNative(switches::kGpuLauncher);
 
   FilePath exe_path = ChildProcessHost::GetChildPath(gpu_launcher.empty());
   if (exe_path.empty())
     return false;
 
   CommandLine* cmd_line = new CommandLine(exe_path);
-  cmd_line->AppendSwitchWithValue(switches::kProcessType,
-                                  switches::kGpuProcess);
-  cmd_line->AppendSwitchWithValue(switches::kProcessChannelID,
-                                  ASCIIToWide(channel_id()));
+  cmd_line->AppendSwitchASCII(switches::kProcessType, switches::kGpuProcess);
+  cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id());
 
   // Propagate relevant command line switches.
-  static const char* const switch_names[] = {
+  static const char* const kSwitchNames[] = {
     switches::kUseGL,
+    switches::kDisableLogging,
+    switches::kEnableLogging,
+    switches::kGpuStartupDialog,
+    switches::kLoggingLevel,
   };
-
-  for (size_t i = 0; i < arraysize(switch_names); ++i) {
-    if (browser_command_line.HasSwitch(switch_names[i])) {
-      cmd_line->AppendSwitchWithValue(switch_names[i],
-          browser_command_line.GetSwitchValueASCII(switch_names[i]));
-    }
-  }
-
-  const CommandLine& browser_cmd_line = *CommandLine::ForCurrentProcess();
-  PropagateBrowserCommandLineToGpu(browser_cmd_line, cmd_line);
+  cmd_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
+                             arraysize(kSwitchNames));
 
   // If specified, prepend a launcher program to the command line.
   if (!gpu_launcher.empty())
@@ -171,6 +168,11 @@ void GpuProcessHost::OnControlMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(GpuHostMsg_SynchronizeReply, OnSynchronizeReply)
 #if defined(OS_LINUX)
     IPC_MESSAGE_HANDLER(GpuHostMsg_GetViewXID, OnGetViewXID)
+#elif defined(OS_MACOSX)
+    IPC_MESSAGE_HANDLER(GpuHostMsg_AcceleratedSurfaceSetIOSurface,
+                        OnAcceleratedSurfaceSetIOSurface)
+    IPC_MESSAGE_HANDLER(GpuHostMsg_AcceleratedSurfaceBuffersSwapped,
+                        OnAcceleratedSurfaceBuffersSwapped)
 #endif
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
@@ -201,6 +203,87 @@ void GpuProcessHost::OnGetViewXID(gfx::NativeViewId id, unsigned long* xid) {
     *xid = 0;
   }
 }
+
+#elif defined(OS_MACOSX)
+
+namespace {
+
+class SetIOSurfaceDispatcher : public Task {
+ public:
+  SetIOSurfaceDispatcher(
+      const GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params& params)
+      : params_(params) {
+  }
+
+  void Run() {
+    RenderViewHost* host = RenderViewHost::FromID(params_.renderer_id,
+                                                  params_.render_view_id);
+    if (!host)
+      return;
+    RenderWidgetHostView* view = host->view();
+    if (!view)
+      return;
+    view->AcceleratedSurfaceSetIOSurface(params_.window,
+                                         params_.width,
+                                         params_.height,
+                                         params_.identifier);
+  }
+
+ private:
+  GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params params_;
+
+  DISALLOW_COPY_AND_ASSIGN(SetIOSurfaceDispatcher);
+};
+
+}  // namespace
+
+void GpuProcessHost::OnAcceleratedSurfaceSetIOSurface(
+    const GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params& params) {
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      new SetIOSurfaceDispatcher(params));
+}
+
+namespace {
+
+class BuffersSwappedDispatcher : public Task {
+ public:
+  BuffersSwappedDispatcher(
+      int32 renderer_id, int32 render_view_id, gfx::PluginWindowHandle window)
+      : renderer_id_(renderer_id),
+        render_view_id_(render_view_id),
+        window_(window) {
+  }
+
+  void Run() {
+    RenderViewHost* host = RenderViewHost::FromID(renderer_id_,
+                                                  render_view_id_);
+    if (!host)
+      return;
+    RenderWidgetHostView* view = host->view();
+    if (!view)
+      return;
+    view->AcceleratedSurfaceBuffersSwapped(window_);
+  }
+
+ private:
+  int32 renderer_id_;
+  int32 render_view_id_;
+  gfx::PluginWindowHandle window_;
+
+  DISALLOW_COPY_AND_ASSIGN(BuffersSwappedDispatcher);
+};
+
+}  // namespace
+
+void GpuProcessHost::OnAcceleratedSurfaceBuffersSwapped(
+    int32 renderer_id,
+    int32 render_view_id,
+    gfx::PluginWindowHandle window) {
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      new BuffersSwappedDispatcher(renderer_id, render_view_id, window));
+}
 #endif
 
 void GpuProcessHost::ReplyToRenderer(
@@ -213,26 +296,6 @@ void GpuProcessHost::ReplyToRenderer(
   // the synchronous ViewHostMsg_SynchronizeGpu message.
   message->set_unblock(true);
   filter->Send(message);
-}
-
-void GpuProcessHost::PropagateBrowserCommandLineToGpu(
-    const CommandLine& browser_cmd,
-    CommandLine* gpu_cmd) const {
-  // Propagate the following switches to the GPU process command line (along
-  // with any associated values) if present in the browser command line.
-  static const char* const switch_names[] = {
-    switches::kDisableLogging,
-    switches::kEnableLogging,
-    switches::kGpuStartupDialog,
-    switches::kLoggingLevel,
-  };
-
-  for (size_t i = 0; i < arraysize(switch_names); ++i) {
-    if (browser_cmd.HasSwitch(switch_names[i])) {
-      gpu_cmd->AppendSwitchWithValue(switch_names[i],
-          browser_cmd.GetSwitchValueASCII(switch_names[i]));
-    }
-  }
 }
 
 URLRequestContext* GpuProcessHost::GetRequestContext(

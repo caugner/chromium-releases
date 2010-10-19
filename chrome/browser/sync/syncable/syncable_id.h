@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_SYNC_SYNCABLE_SYNCABLE_ID_H_
 #define CHROME_BROWSER_SYNC_SYNCABLE_SYNCABLE_ID_H_
+#pragma once
 
 #include <iosfwd>
 #include <limits>
@@ -12,7 +13,6 @@
 
 #include "base/hash_tables.h"
 #include "chrome/browser/sync/util/fast_dump.h"
-#include "chrome/browser/sync/util/sync_types.h"
 
 extern "C" {
 struct sqlite3;

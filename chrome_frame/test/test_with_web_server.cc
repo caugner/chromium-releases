@@ -4,7 +4,9 @@
 
 #include "chrome_frame/test/test_with_web_server.h"
 
+#include "base/base_paths.h"
 #include "base/file_version_info.h"
+#include "base/path_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/win_util.h"
 #include "chrome/common/chrome_switches.h"
@@ -20,8 +22,8 @@ using testing::_;
 using testing::StrCaseEq;
 
 const wchar_t kDocRoot[] = L"chrome_frame\\test\\data";
-const int kLongWaitTimeout = 60 * 1000;
-const int kShortWaitTimeout = 25 * 1000;
+const int kLongWaitTimeout = 15 * 1000;
+const int kShortWaitTimeout = 5 * 1000;
 
 namespace {
 
@@ -75,7 +77,7 @@ void ChromeFrameTestWithWebServer::SetUp() {
   CloseAllBrowsers();
 
   // Make sure that we are not accidently enabling gcf protocol.
-  SetConfigBool(kEnableGCFProtocol, false);
+  SetConfigBool(kAllowUnsafeURLs, false);
 
   PathService::Get(base::DIR_SOURCE_ROOT, &test_file_path_);
   test_file_path_ = test_file_path_.Append(FILE_PATH_LITERAL("chrome_frame"))
@@ -83,11 +85,7 @@ void ChromeFrameTestWithWebServer::SetUp() {
       .Append(FILE_PATH_LITERAL("data"));
 
   server_.SetUp();
-  EXPECT_TRUE(server_.server() != NULL);
-  if (server_.server()) {
-    results_dir_ = server_.GetDataDir();
-    results_dir_ = results_dir_.AppendASCII("dump");
-  }
+  results_dir_ = server_.test_server()->document_root().AppendASCII("dump");
 }
 
 void ChromeFrameTestWithWebServer::TearDown() {
@@ -98,7 +96,6 @@ void ChromeFrameTestWithWebServer::TearDown() {
 
 bool ChromeFrameTestWithWebServer::LaunchBrowser(BrowserKind browser,
                                                  const wchar_t* page) {
-  EXPECT_TRUE(server_.server() != NULL);
   std::wstring url = page;
   if (url.find(L"files/") != std::wstring::npos)
     url = UTF8ToWide(server_.Resolve(page).spec());
@@ -161,7 +158,6 @@ bool ChromeFrameTestWithWebServer::BringBrowserToTop() {
 }
 
 bool ChromeFrameTestWithWebServer::WaitForTestToComplete(int milliseconds) {
-  EXPECT_TRUE(server_.server() != NULL);
   return server_.WaitToFinish(milliseconds);
 }
 
@@ -207,7 +203,7 @@ bool ChromeFrameTestWithWebServer::CheckResultFile(
 void ChromeFrameTestWithWebServer::SimpleBrowserTest(BrowserKind browser,
     const wchar_t* page, const wchar_t* result_file_to_check) {
   ASSERT_TRUE(LaunchBrowser(browser, page));
-  ASSERT_TRUE(WaitForTestToComplete(kLongWaitTimeout));
+  WaitForTestToComplete(kLongWaitTimeout);
   ASSERT_TRUE(CheckResultFile(result_file_to_check, "OK"));
 }
 
@@ -217,7 +213,7 @@ void ChromeFrameTestWithWebServer::OptionalBrowserTest(BrowserKind browser,
   if (!LaunchBrowser(browser, page)) {
     LOG(ERROR) << "Failed to launch browser " << ToString(browser);
   } else {
-    ASSERT_TRUE(WaitForTestToComplete(kLongWaitTimeout));
+    WaitForTestToComplete(kLongWaitTimeout);
     ASSERT_TRUE(CheckResultFile(result_file_to_check, "OK"));
   }
 }
@@ -257,7 +253,7 @@ void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
   EXPECT_TRUE(version_info);
   EXPECT_FALSE(version.empty());
   EXPECT_TRUE(LaunchBrowser(browser, page));
-  ASSERT_TRUE(WaitForTestToComplete(kLongWaitTimeout));
+  WaitForTestToComplete(kLongWaitTimeout);
   ASSERT_TRUE(CheckResultFile(result_file_to_check, WideToUTF8(version)));
 }
 
@@ -764,22 +760,21 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_MetaTag) {
 const wchar_t kCFProtocolPage[] = L"files/cf_protocol.html";
 TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_CFProtocol) {
   // Temporarily enable  gcf: protocol for this test.
-  SetConfigBool(kEnableGCFProtocol, true);
+  SetConfigBool(kAllowUnsafeURLs, true);
   SimpleBrowserTest(IE, kCFProtocolPage, L"chrome_frame_protocol");
-  SetConfigBool(kEnableGCFProtocol, false);
+  SetConfigBool(kAllowUnsafeURLs, false);
 }
 
 const wchar_t kPersistentCookieTest[] =
     L"files/persistent_cookie_test_page.html";
 TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_PersistentCookieTest) {
-  // Temporarily enable  gcf: protocol for this test.
-  SetConfigBool(kEnableGCFProtocol, true);
   SimpleBrowserTest(IE, kPersistentCookieTest, L"PersistentCookieTest");
-  SetConfigBool(kEnableGCFProtocol, false);
 }
 
+// This test has been disabled because we need a better way to navigate out
+// of chrome frame and detect it.
 const wchar_t kNavigateOutPage[] = L"files/navigate_out.html";
-TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_NavigateOut) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_FullTabModeIE_NavigateOut) {
   SimpleBrowserTest(IE, kNavigateOutPage, L"navigate_out");
 }
 

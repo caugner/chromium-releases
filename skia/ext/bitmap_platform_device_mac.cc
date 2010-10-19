@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/mac_util.h"
 #include "base/ref_counted.h"
+#include "skia/ext/bitmap_platform_device_data.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkRegion.h"
@@ -17,33 +18,6 @@
 namespace skia {
 
 namespace {
-
-// Constrains position and size to fit within available_size. If |size| is -1,
-// all the |available_size| is used. Returns false if the position is out of
-// |available_size|.
-bool Constrain(int available_size, int* position, int *size) {
-  if (*size < -2)
-    return false;
-
-  if (*position < 0) {
-    if (*size != -1)
-      *size += *position;
-    *position = 0;
-  }
-  if (*size == 0 || *position >= available_size)
-    return false;
-
-  if (*size > 0) {
-    int overflow = (*position + *size) - available_size;
-    if (overflow > 0) {
-      *size -= overflow;
-    }
-  } else {
-    // Fill up available size.
-    *size = available_size - *position;
-  }
-  return true;
-}
 
 static CGContextRef CGContextForData(void* data, int width, int height) {
 #define HAS_ARGB_SHIFTS(a, r, g, b) \
@@ -75,59 +49,6 @@ static CGContextRef CGContextForData(void* data, int width, int height) {
 
 }  // namespace
 
-class BitmapPlatformDevice::BitmapPlatformDeviceData : public SkRefCnt {
- public:
-  explicit BitmapPlatformDeviceData(CGContextRef bitmap);
-
-  // Create/destroy CoreGraphics context for our bitmap data.
-  CGContextRef GetBitmapContext() {
-    LoadConfig();
-    return bitmap_context_;
-  }
-
-  void ReleaseBitmapContext() {
-    SkASSERT(bitmap_context_);
-    CGContextRelease(bitmap_context_);
-    bitmap_context_ = NULL;
-  }
-
-  // Sets the transform and clip operations. This will not update the CGContext,
-  // but will mark the config as dirty. The next call of LoadConfig will
-  // pick up these changes.
-  void SetMatrixClip(const SkMatrix& transform, const SkRegion& region);
-
-  // Loads the current transform and clip into the DC. Can be called even when
-  // |bitmap_context_| is NULL (will be a NOP).
-  void LoadConfig();
-
-  // Lazily-created graphics context used to draw into the bitmap.
-  CGContextRef bitmap_context_;
-
-  // True when there is a transform or clip that has not been set to the
-  // CGContext.  The CGContext is retrieved for every text operation, and the
-  // transform and clip do not change as much. We can save time by not loading
-  // the clip and transform for every one.
-  bool config_dirty_;
-
-  // Translation assigned to the CGContext: we need to keep track of this
-  // separately so it can be updated even if the CGContext isn't created yet.
-  SkMatrix transform_;
-
-  // The current clipping
-  SkRegion clip_region_;
-
- private:
-  friend class base::RefCounted<BitmapPlatformDeviceData>;
-  ~BitmapPlatformDeviceData() {
-    if (bitmap_context_)
-      CGContextRelease(bitmap_context_);
-  }
-
-  // Disallow copy & assign.
-  BitmapPlatformDeviceData(const BitmapPlatformDeviceData&);
-  BitmapPlatformDeviceData& operator=(const BitmapPlatformDeviceData&);
-};
-
 BitmapPlatformDevice::BitmapPlatformDeviceData::BitmapPlatformDeviceData(
     CGContextRef bitmap)
     : bitmap_context_(bitmap),
@@ -145,6 +66,11 @@ BitmapPlatformDevice::BitmapPlatformDeviceData::BitmapPlatformDeviceData(
   // We must save the state once so that we can use the restore/save trick
   // in LoadConfig().
   CGContextSaveGState(bitmap_context_);
+}
+
+BitmapPlatformDevice::BitmapPlatformDeviceData::~BitmapPlatformDeviceData() {
+  if (bitmap_context_)
+    CGContextRelease(bitmap_context_);
 }
 
 void BitmapPlatformDevice::BitmapPlatformDeviceData::SetMatrixClip(
@@ -274,7 +200,8 @@ BitmapPlatformDevice& BitmapPlatformDevice::operator=(
 }
 
 CGContextRef BitmapPlatformDevice::GetBitmapContext() {
-  return data_->GetBitmapContext();
+  data_->LoadConfig();
+  return data_->bitmap_context();
 }
 
 void BitmapPlatformDevice::setMatrixClip(const SkMatrix& transform,
@@ -285,14 +212,14 @@ void BitmapPlatformDevice::setMatrixClip(const SkMatrix& transform,
 void BitmapPlatformDevice::DrawToContext(CGContextRef context, int x, int y,
                                          const CGRect* src_rect) {
   bool created_dc = false;
-  if (!data_->bitmap_context_) {
+  if (!data_->bitmap_context()) {
     created_dc = true;
     GetBitmapContext();
   }
 
   // this should not make a copy of the bits, since we're not doing
   // anything to trigger copy on write
-  CGImageRef image = CGBitmapContextCreateImage(data_->bitmap_context_);
+  CGImageRef image = CGBitmapContextCreateImage(data_->bitmap_context());
   CGRect bounds;
   bounds.origin.x = x;
   bounds.origin.y = y;
@@ -323,28 +250,6 @@ SkColor BitmapPlatformDevice::getColorAt(int x, int y) {
 
 void BitmapPlatformDevice::onAccessBitmap(SkBitmap*) {
   // Not needed in CoreGraphics
-}
-
-void BitmapPlatformDevice::processPixels(int x, int y,
-                                         int width, int height,
-                                         adjustAlpha adjustor) {
-  const SkBitmap& bitmap = accessBitmap(true);
-  SkMatrix& matrix = data_->transform_;
-  int bitmap_start_x = SkScalarRound(matrix.getTranslateX()) + x;
-  int bitmap_start_y = SkScalarRound(matrix.getTranslateY()) + y;
-
-  SkAutoLockPixels lock(bitmap);
-  if (Constrain(bitmap.width(), &bitmap_start_x, &width) &&
-      Constrain(bitmap.height(), &bitmap_start_y, &height)) {
-    uint32_t* data = bitmap.getAddr32(0, 0);
-    size_t row_words = bitmap.rowBytes() / 4;
-    for (int i = 0; i < height; i++) {
-      size_t offset = (i + bitmap_start_y) * row_words + bitmap_start_x;
-      for (int j = 0; j < width; j++) {
-        adjustor(data + offset + j);
-      }
-    }
-  }
 }
 
 }  // namespace skia

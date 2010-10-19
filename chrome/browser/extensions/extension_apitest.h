@@ -4,6 +4,10 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_APITEST_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_APITEST_H_
+#pragma once
+
+#include <deque>
+#include <string>
 
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/common/notification_service.h"
@@ -29,10 +33,13 @@ class ExtensionApiTest : public ExtensionBrowserTest {
   class ResultCatcher : public NotificationObserver {
    public:
     ResultCatcher();
+    ~ResultCatcher();
 
     // Pumps the UI loop until a notification is received that an API test
     // succeeded or failed. Returns true if the test succeeded, false otherwise.
     bool GetNextResult();
+
+    void RestrictToProfile(Profile* profile) { profile_restriction_ = profile; }
 
     const std::string& message() { return message_; }
 
@@ -49,11 +56,24 @@ class ExtensionApiTest : public ExtensionBrowserTest {
     // If it failed, what was the error message?
     std::deque<std::string> messages_;
     std::string message_;
+
+    // If non-NULL, we will listen to events from this profile only.
+    Profile* profile_restriction_;
+
+    // True if we're in a nested message loop waiting for results from
+    // the extension.
+    bool waiting_;
   };
 
   // Load |extension_name| and wait for pass / fail notification.
   // |extension_name| is a directory in "test/data/extensions/api_test".
   bool RunExtensionTest(const char* extension_name);
+
+  // Load |extension_name|, load page at path |subtest_page| under the
+  // extension, and wait for pass / fail notification.  |extension_name|
+  // is a directory in "test/data/extensions/api_test".
+  bool RunExtensionSubtest(const char* extension_name,
+                           const std::string& subtest_page);
 
   // Test that exactly one extension loaded.  If so, return a pointer to
   // the extension.  If not, return NULL and set message_.
@@ -64,6 +84,10 @@ class ExtensionApiTest : public ExtensionBrowserTest {
 
   // If it failed, what was the error message?
   std::string message_;
+
+ private:
+  bool RunExtensionTestImpl(const char* extension_name,
+                            const std::string& test_page);
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_APITEST_H_

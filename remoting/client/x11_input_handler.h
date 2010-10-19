@@ -14,7 +14,9 @@ class ChromotingView;
 
 class X11InputHandler : public InputHandler {
  public:
-  X11InputHandler(ClientContext* context, ChromotingView* view);
+  X11InputHandler(ClientContext* context,
+                  HostConnection* connection,
+                  ChromotingView* view);
   virtual ~X11InputHandler();
 
   void Initialize();
@@ -25,8 +27,8 @@ class X11InputHandler : public InputHandler {
 
   void ScheduleX11EventHandler();
 
-  ClientContext* context_;
-  ChromotingView* view_;
+  void HandleMouseMoveEvent(int x, int y);
+  void HandleMouseButtonEvent(bool button_down, int xbutton_id);
 
   DISALLOW_COPY_AND_ASSIGN(X11InputHandler);
 };

@@ -10,7 +10,6 @@
 
 #include <algorithm>
 
-#include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
@@ -19,6 +18,7 @@
 #include "base/ref_counted.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/plugin_messages.h"
@@ -27,6 +27,7 @@
 #include "chrome/plugin/npobject_stub.h"
 #include "chrome/plugin/npobject_util.h"
 #include "chrome/renderer/command_buffer_proxy.h"
+#include "chrome/renderer/plugin_channel_host.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
 #include "gfx/blit.h"
@@ -35,8 +36,10 @@
 #include "gfx/size.h"
 #include "grit/generated_resources.h"
 #include "grit/renderer_resources.h"
+#include "ipc/ipc_channel_handle.h"
 #include "net/base/mime_util.h"
 #include "printing/native_metafile.h"
+#include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDragData.h"
@@ -202,7 +205,8 @@ void WebPluginDelegateProxy::PluginDestroyed() {
     WillDestroyWindow();
 
 #if defined(OS_MACOSX)
-  render_view_->UnregisterPluginDelegate(this);
+  if (render_view_)
+    render_view_->UnregisterPluginDelegate(this);
 #endif
 
   if (channel_host_) {
@@ -347,11 +351,11 @@ bool WebPluginDelegateProxy::Initialize(const GURL& url,
       // Older versions of Flash don't support CA (and they assume QuickDraw
       // support, so we can't rely on negotiation to do the right thing).
       force_opaque_mode = true;
-    } else if (!CommandLine::ForCurrentProcess()->HasSwitch(
-                   switches::kEnableFlashCoreAnimation)) {
-      // Temporary switch for testing; once we are confident that there are no
-      // regressions from CoreGraphics mode to CoreAnimation mode, this switch
-      // (and the chrome_switches.h and command_line.h includes) can be removed.
+    } else if (CommandLine::ForCurrentProcess()->HasSwitch(
+                  switches::kDisableFlashCoreAnimation)) {
+      // Temporary switch for testing; once any Flash + Core Animation issues
+      // have been shaken out, this switch (and the chrome_switches.h and
+      // command_line.h includes) can be removed.
       force_opaque_mode = true;
     } else {
       // Current betas of Flash 10.1 don't respect QuickDraw negotiation either,
@@ -370,18 +374,6 @@ bool WebPluginDelegateProxy::Initialize(const GURL& url,
       params.arg_names.push_back("wmode");
       params.arg_values.push_back("opaque");
     }
-  }
-
-  params.containing_window_frame = render_view_->rootWindowRect();
-  // If the renderer isn't currently visible, don't bother asking for anything
-  // else; the plugin will get real data when its renderer becomes visible.
-  if (params.containing_window_frame.IsEmpty()) {
-    params.containing_content_frame = gfx::Rect();
-    params.containing_window_has_focus = false;
-  } else {
-    params.containing_content_frame = render_view_->windowRect();
-    WebKit::WebView* webview = render_view_->webview();
-    params.containing_window_has_focus = webview && webview->isActive();
   }
 #endif
   params.load_manually = load_manually;
@@ -1397,7 +1389,7 @@ void WebPluginDelegateProxy::OnBindFakePluginWindowHandle(bool opaque) {
 bool WebPluginDelegateProxy::BindFakePluginWindowHandle(bool opaque) {
   gfx::PluginWindowHandle fake_window = NULL;
   if (render_view_)
-    fake_window = render_view_->AllocateFakePluginWindowHandle(opaque);
+    fake_window = render_view_->AllocateFakePluginWindowHandle(opaque, false);
   // If we aren't running on 10.6, this allocation will fail.
   if (!fake_window)
     return false;

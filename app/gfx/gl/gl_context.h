@@ -4,8 +4,8 @@
 
 #ifndef APP_GFX_GL_GL_CONTEXT_H_
 #define APP_GFX_GL_GL_CONTEXT_H_
+#pragma once
 
-#include "base/logging.h"
 #include "build/build_config.h"
 #include "gfx/native_widget_types.h"
 #include "gfx/size.h"
@@ -39,6 +39,10 @@ class GLContext {
 
   // Get the underlying platform specific GL context "handle".
   virtual void* GetHandle() = 0;
+
+  // Returns whether the current context supports the named extension. The
+  // context must be current.
+  virtual bool HasExtension(const char* name);
 
   static bool InitializeOneOff();
 

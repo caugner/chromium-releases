@@ -7,7 +7,6 @@
 #include <cstdlib>
 
 #include "app/app_paths.h"
-#include "app/app_switches.h"
 #include "app/l10n_util_collator.h"
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
@@ -17,9 +16,9 @@
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
-#include "base/string_piece.h"
-#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "gfx/canvas.h"
 #include "unicode/rbbi.h"
@@ -367,9 +366,8 @@ void SplitAndNormalizeLanguageList(const std::string& env_language,
 
 namespace l10n_util {
 
-std::string GetApplicationLocale(const std::wstring& pref_locale) {
+std::string GetApplicationLocale(const std::string& pref_locale) {
 #if !defined(OS_MACOSX)
-
   FilePath locale_path;
   PathService::Get(app::DIR_LOCALES, &locale_path);
   std::string resolved_locale;
@@ -383,7 +381,7 @@ std::string GetApplicationLocale(const std::wstring& pref_locale) {
 #if defined(OS_WIN)
   // First, try the preference value.
   if (!pref_locale.empty())
-    candidates.push_back(WideToASCII(pref_locale));
+    candidates.push_back(pref_locale);
 
   // Next, try the system locale.
   candidates.push_back(system_locale);
@@ -391,7 +389,7 @@ std::string GetApplicationLocale(const std::wstring& pref_locale) {
 #elif defined(OS_CHROMEOS)
   // On ChromeOS, use the application locale preference.
   if (!pref_locale.empty())
-    candidates.push_back(WideToASCII(pref_locale));
+    candidates.push_back(pref_locale);
 
 #elif defined(OS_POSIX)
   // On POSIX, we also check LANGUAGE environment variable, which is supported
@@ -433,9 +431,8 @@ std::string GetApplicationLocale(const std::wstring& pref_locale) {
   // Use any override (Cocoa for the browser), otherwise use the preference
   // passed to the function.
   std::string app_locale = l10n_util::GetLocaleOverride();
-  if (app_locale.empty()) {
-    app_locale = WideToASCII(pref_locale);
-  }
+  if (app_locale.empty())
+    app_locale = pref_locale;
 
   // The above should handle all of the cases Chrome normally hits, but for some
   // unit tests, we need something to fall back too.
@@ -649,11 +646,11 @@ string16 GetStringFUTF16(int message_id,
 }
 
 std::wstring GetStringF(int message_id, int a) {
-  return GetStringF(message_id, IntToWString(a));
+  return GetStringF(message_id, UTF8ToWide(base::IntToString(a)));
 }
 
 std::wstring GetStringF(int message_id, int64 a) {
-  return GetStringF(message_id, Int64ToWString(a));
+  return GetStringF(message_id, UTF8ToWide(base::Int64ToString(a)));
 }
 
 std::wstring TruncateString(const std::wstring& string, size_t length) {
@@ -720,12 +717,6 @@ std::wstring TruncateString(const std::wstring& string, size_t length) {
   }
   return string.substr(0, index) + kElideString;
 }
-
-#if defined(WCHAR_T_IS_UTF32)
-std::wstring ToLower(const std::wstring& string) {
-  return UTF16ToWide(ToLower(WideToUTF16(string)));
-}
-#endif  // defined(WCHAR_T_IS_UTF32)
 
 string16 ToLower(const string16& string) {
   icu::UnicodeString lower_u_str(

@@ -7,7 +7,7 @@
 #include "base/logging.h"
 #include "third_party/ppapi/c/pp_completion_callback.h"
 #include "third_party/ppapi/c/pp_errors.h"
-#include "third_party/ppapi/c/ppb_url_loader.h"
+#include "third_party/ppapi/c/dev/ppb_url_loader_dev.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
@@ -15,6 +15,7 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebKitClient.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPluginContainer.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
 #include "webkit/glue/plugins/pepper_plugin_instance.h"
 #include "webkit/glue/plugins/pepper_url_request_info.h"
 #include "webkit/glue/plugins/pepper_url_response_info.h"
@@ -42,25 +43,24 @@ PP_Resource Create(PP_Instance instance_id) {
     return 0;
 
   URLLoader* loader = new URLLoader(instance);
-  loader->AddRef();  // AddRef for the caller.
 
-  return loader->GetResource();
+  return loader->GetReference();
 }
 
 bool IsURLLoader(PP_Resource resource) {
-  return !!Resource::GetAs<URLLoader>(resource).get();
+  return !!Resource::GetAs<URLLoader>(resource);
 }
 
 int32_t Open(PP_Resource loader_id,
              PP_Resource request_id,
              PP_CompletionCallback callback) {
   scoped_refptr<URLLoader> loader(Resource::GetAs<URLLoader>(loader_id));
-  if (!loader.get())
+  if (!loader)
     return PP_ERROR_BADRESOURCE;
 
   scoped_refptr<URLRequestInfo> request(
       Resource::GetAs<URLRequestInfo>(request_id));
-  if (!request.get())
+  if (!request)
     return PP_ERROR_BADRESOURCE;
 
   return loader->Open(request, callback);
@@ -69,7 +69,7 @@ int32_t Open(PP_Resource loader_id,
 int32_t FollowRedirect(PP_Resource loader_id,
                        PP_CompletionCallback callback) {
   scoped_refptr<URLLoader> loader(Resource::GetAs<URLLoader>(loader_id));
-  if (!loader.get())
+  if (!loader)
     return PP_ERROR_BADRESOURCE;
 
   return loader->FollowRedirect(callback);
@@ -79,7 +79,7 @@ bool GetUploadProgress(PP_Resource loader_id,
                        int64_t* bytes_sent,
                        int64_t* total_bytes_to_be_sent) {
   scoped_refptr<URLLoader> loader(Resource::GetAs<URLLoader>(loader_id));
-  if (!loader.get())
+  if (!loader)
     return false;
 
   *bytes_sent = loader->bytes_sent();
@@ -91,7 +91,7 @@ bool GetDownloadProgress(PP_Resource loader_id,
                          int64_t* bytes_received,
                          int64_t* total_bytes_to_be_received) {
   scoped_refptr<URLLoader> loader(Resource::GetAs<URLLoader>(loader_id));
-  if (!loader.get())
+  if (!loader)
     return false;
 
   *bytes_received = loader->bytes_received();
@@ -101,15 +101,14 @@ bool GetDownloadProgress(PP_Resource loader_id,
 
 PP_Resource GetResponseInfo(PP_Resource loader_id) {
   scoped_refptr<URLLoader> loader(Resource::GetAs<URLLoader>(loader_id));
-  if (!loader.get())
+  if (!loader)
     return 0;
 
   URLResponseInfo* response_info = loader->response_info();
   if (!response_info)
     return 0;
-  response_info->AddRef();  // AddRef for the caller.
 
-  return response_info->GetResource();
+  return response_info->GetReference();
 }
 
 int32_t ReadResponseBody(PP_Resource loader_id,
@@ -117,21 +116,30 @@ int32_t ReadResponseBody(PP_Resource loader_id,
                          int32_t bytes_to_read,
                          PP_CompletionCallback callback) {
   scoped_refptr<URLLoader> loader(Resource::GetAs<URLLoader>(loader_id));
-  if (!loader.get())
+  if (!loader)
     return PP_ERROR_BADRESOURCE;
 
   return loader->ReadResponseBody(buffer, bytes_to_read, callback);
 }
 
+int32_t FinishStreamingToFile(PP_Resource loader_id,
+                              PP_CompletionCallback callback) {
+  scoped_refptr<URLLoader> loader(Resource::GetAs<URLLoader>(loader_id));
+  if (!loader)
+    return PP_ERROR_BADRESOURCE;
+
+  return loader->FinishStreamingToFile(callback);
+}
+
 void Close(PP_Resource loader_id) {
   scoped_refptr<URLLoader> loader(Resource::GetAs<URLLoader>(loader_id));
-  if (!loader.get())
+  if (!loader)
     return;
 
   loader->Close();
 }
 
-const PPB_URLLoader ppb_urlloader = {
+const PPB_URLLoader_Dev ppb_urlloader = {
   &Create,
   &IsURLLoader,
   &Open,
@@ -140,6 +148,7 @@ const PPB_URLLoader ppb_urlloader = {
   &GetDownloadProgress,
   &GetResponseInfo,
   &ReadResponseBody,
+  &FinishStreamingToFile,
   &Close
 };
 
@@ -150,19 +159,19 @@ URLLoader::URLLoader(PluginInstance* instance)
       instance_(instance),
       pending_callback_(),
       bytes_sent_(0),
-      total_bytes_to_be_sent_(0),
+      total_bytes_to_be_sent_(-1),
       bytes_received_(0),
-      total_bytes_to_be_received_(0),
+      total_bytes_to_be_received_(-1),
       user_buffer_(NULL),
       user_buffer_size_(0),
-      done_(false) {
+      done_status_(PP_ERROR_WOULDBLOCK) {
 }
 
 URLLoader::~URLLoader() {
 }
 
 // static
-const PPB_URLLoader* URLLoader::GetInterface() {
+const PPB_URLLoader_Dev* URLLoader::GetInterface() {
   return &ppb_urlloader;
 }
 
@@ -201,6 +210,8 @@ int32_t URLLoader::FollowRedirect(PP_CompletionCallback callback) {
 
 int32_t URLLoader::ReadResponseBody(char* buffer, int32_t bytes_to_read,
                                     PP_CompletionCallback callback) {
+  if (!response_info_ || response_info_->body())
+    return PP_ERROR_FAILED;
   if (bytes_to_read <= 0 || !buffer)
     return PP_ERROR_BADARGUMENT;
   if (pending_callback_.func)
@@ -216,12 +227,28 @@ int32_t URLLoader::ReadResponseBody(char* buffer, int32_t bytes_to_read,
   if (!buffer_.empty())
     return FillUserBuffer();
 
-  if (done_) {
+  // We may have already reached EOF.
+  if (done_status_ != PP_ERROR_WOULDBLOCK) {
     user_buffer_ = NULL;
     user_buffer_size_ = 0;
-    return 0;
+    return done_status_;
   }
 
+  pending_callback_ = callback;
+  return PP_ERROR_WOULDBLOCK;
+}
+
+int32_t URLLoader::FinishStreamingToFile(PP_CompletionCallback callback) {
+  if (!response_info_ || !response_info_->body())
+    return PP_ERROR_FAILED;
+  if (pending_callback_.func)
+    return PP_ERROR_INPROGRESS;
+
+  // We may have already reached EOF.
+  if (done_status_ != PP_ERROR_WOULDBLOCK)
+    return done_status_;
+
+  // Wait for didFinishLoading / didFail.
   pending_callback_ = callback;
   return PP_ERROR_WOULDBLOCK;
 }
@@ -250,12 +277,22 @@ void URLLoader::didReceiveResponse(WebURLLoader* loader,
   if (response_info->Initialize(response))
     response_info_ = response_info;
 
+  // Sets -1 if the content length is unknown.
+  total_bytes_to_be_received_ = response.expectedContentLength();
+
   RunCallback(PP_OK);
+}
+
+void URLLoader::didDownloadData(WebURLLoader* loader,
+                                int data_length) {
+  bytes_received_ += data_length;
 }
 
 void URLLoader::didReceiveData(WebURLLoader* loader,
                                const char* data,
                                int data_length) {
+  bytes_received_ += data_length;
+
   buffer_.insert(buffer_.end(), data, data + data_length);
   if (user_buffer_) {
     RunCallback(FillUserBuffer());
@@ -265,14 +302,14 @@ void URLLoader::didReceiveData(WebURLLoader* loader,
 }
 
 void URLLoader::didFinishLoading(WebURLLoader* loader) {
-  done_ = true;
-  RunCallback(PP_OK);
+  done_status_ = PP_OK;
+  RunCallback(done_status_);
 }
 
 void URLLoader::didFail(WebURLLoader* loader, const WebURLError& error) {
-  done_ = true;
   // TODO(darin): Provide more detailed error information.
-  RunCallback(PP_ERROR_FAILED);
+  done_status_ = PP_ERROR_FAILED;
+  RunCallback(done_status_);
 }
 
 void URLLoader::RunCallback(int32_t result) {

@@ -9,13 +9,16 @@
 #include <map>
 #include <string>
 
+#include "unicode/normlzr.h"
+#include "unicode/schriter.h"
+#include "unicode/uscript.h"
+#include "unicode/ulocdata.h"
+
 #include "base/basictypes.h"
+#include "base/logging.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/renderer/spellchecker/spellcheck.h"
-#include "third_party/icu/public/common/unicode/normlzr.h"
-#include "third_party/icu/public/common/unicode/schriter.h"
-#include "third_party/icu/public/common/unicode/uscript.h"
-#include "third_party/icu/public/i18n/unicode/ulocdata.h"
 
 // SpellcheckCharAttribute implementation:
 
@@ -58,16 +61,19 @@ void SpellcheckCharAttribute::CreateRuleSets(const std::string& language) {
       "$Extend       = [\\p{Word_Break = Extend}];"
       "$Format       = [\\p{Word_Break = Format}];"
       "$Katakana     = [\\p{Word_Break = Katakana}];"
+      // Not all the characters in a given script are ALetter.
+      // For instance, U+05F4 is MidLetter. So, this may be
+      // better, but it leads to an empty set error in Thai.
+      // "$ALetter   = [[\\p{script=%s}] & [\\p{Word_Break = ALetter}]];"
       "$ALetter      = [\\p{script=%s}];"
       "$MidNumLet    = [\\p{Word_Break = MidNumLet}];"
-      "$MidLetter    = [\\p{Word_Break = MidLetter}];"
+      "$MidLetter    = [\\p{Word_Break = MidLetter}%s];"
       "$MidNum       = [\\p{Word_Break = MidNum}];"
       "$Numeric      = [\\p{Word_Break = Numeric}];"
       "$ExtendNumLet = [\\p{Word_Break = ExtendNumLet}];"
 
-      "$dictionary   = [:LineBreak = Complex_Context:];"
       "$Control        = [\\p{Grapheme_Cluster_Break = Control}]; "
-      "$ALetterPlus  = %s;"
+      "%s"  // ALetterPlus
 
       "$KatakanaEx     = $Katakana     ($Extend |  $Format)*;"
       "$ALetterEx      = $ALetterPlus  ($Extend |  $Format)*;"
@@ -87,7 +93,7 @@ void SpellcheckCharAttribute::CreateRuleSets(const std::string& language) {
       "[^$CR $LF $Newline]? ($Extend |  $Format)+;"
       "$ALetterEx {200};"
       "$ALetterEx $ALetterEx {200};"
-      "%s"
+      "%s"  // (Allow|Disallow) Contraction
 
       "!!reverse;"
       "$BackALetterEx     = ($Format | $Extend)* $ALetterPlus;"
@@ -115,13 +121,11 @@ void SpellcheckCharAttribute::CreateRuleSets(const std::string& language) {
       "($Extend | $Format)+ .?;"
       "($MidLetter | $MidNumLet) $BackALetterEx;"
       "($MidNum | $MidNumLet) $BackNumericEx;"
-      "$dictionary $dictionary;"
 
       "!!safe_forward;"
       "($Extend | $Format)+ .?;"
       "($MidLetterEx | $MidNumLetEx) $ALetterEx;"
-      "($MidNumEx | $MidNumLetEx) $NumericEx;"
-      "$dictionary $dictionary;";
+      "($MidNumEx | $MidNumLetEx) $NumericEx;";
 
   // Retrieve the script codes used by the given language from ICU. When the
   // given language consists of two or more scripts, we just use the first
@@ -143,11 +147,20 @@ void SpellcheckCharAttribute::CreateRuleSets(const std::string& language) {
   if (!aletter)
     aletter = "Latin";
 
-  const char kWithDictionary[] = "[$ALetter [$dictionary-$Extend-$Control]]";
-  const char kWithoutDictionary[] = "$ALetter";
+  const char kWithDictionary[] =
+      "$dictionary   = [:LineBreak = Complex_Context:];"
+      "$ALetterPlus  = [$ALetter [$dictionary-$Extend-$Control]];";
+  const char kWithoutDictionary[] = "$ALetterPlus  = $ALetter;";
   const char* aletter_plus = kWithoutDictionary;
   if (script_code_ == USCRIPT_HANGUL || script_code_ == USCRIPT_THAI)
     aletter_plus = kWithDictionary;
+
+  const char kMidLetterExtra[] = "";
+  // For Hebrew, treat single/double quoation marks as MidLetter.
+  const char kMidLetterExtraHebrew[] = "\"'";
+  const char* midletter_extra = kMidLetterExtra;
+  if (script_code_ == USCRIPT_HEBREW)
+    midletter_extra = kMidLetterExtraHebrew;
 
   // Create two custom rule-sets: one allows contraction and the other does not.
   // We save these strings in UTF-16 so we can use it without conversions. (ICU
@@ -156,10 +169,10 @@ void SpellcheckCharAttribute::CreateRuleSets(const std::string& language) {
       "$ALetterEx ($MidLetterEx | $MidNumLetEx) $ALetterEx {200};";
   const char kDisallowContraction[] = "";
 
-  ruleset_allow_contraction_ = UTF8ToUTF16(StringPrintf(kRuleTemplate,
-      aletter, aletter_plus, kAllowContraction));
-  ruleset_disallow_contraction_ = UTF8ToUTF16(StringPrintf(kRuleTemplate,
-      aletter, aletter_plus, kDisallowContraction));
+  ruleset_allow_contraction_ = ASCIIToUTF16(StringPrintf(kRuleTemplate,
+      aletter, midletter_extra, aletter_plus, kAllowContraction));
+  ruleset_disallow_contraction_ = ASCIIToUTF16(StringPrintf(kRuleTemplate,
+      aletter, midletter_extra, aletter_plus, kDisallowContraction));
 }
 
 bool SpellcheckCharAttribute::OutputChar(UChar c, string16* output) const {
@@ -244,7 +257,10 @@ bool SpellcheckCharAttribute::OutputHebrew(UChar c, string16* output) const {
   // niqquds as misspelled. (Same as Arabic vowel marks, we need to check
   // niqquds manually and filter them out since their script codes are
   // USCRIPT_HEBREW.)
-  if (0x05D0 <= c && c <= 0x05EA)
+  // Pass through ASCII single/double quotation marks and Hebrew Geresh and
+  // Gershayim.
+  if ((0x05D0 <= c && c <= 0x05EA) || c == 0x22 || c == 0x27 ||
+      c == 0x05F4 || c == 0x05F3)
     output->push_back(c);
   return true;
 }
@@ -365,4 +381,3 @@ bool SpellcheckWordIterator::Normalize(int input_start,
 
   return !output_string->empty();
 }
-

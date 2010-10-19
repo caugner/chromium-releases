@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/file_path.h"
+#include "base/file_util.h"
+#include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser.h"
@@ -105,7 +107,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveViewSourceHTMLOnly) {
       full_file_name));
 }
 
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveCompleteHTML) {
+// See http://crbug.com/52292
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, FLAKY_SaveCompleteHTML) {
   FilePath file_name(FILE_PATH_LITERAL("b.htm"));
   GURL url = URLRequestMockHTTPJob::GetMockUrl(
       FilePath(kTestDir).Append(file_name));
@@ -143,7 +146,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, NoSave) {
   EXPECT_FALSE(browser()->command_updater()->IsCommandEnabled(IDC_SAVE_PAGE));
 }
 
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, FileNameFromPageTitle) {
+// See http://crbug.com/52292
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, FLAKY_FileNameFromPageTitle) {
   FilePath file_name(FILE_PATH_LITERAL("b.htm"));
 
   GURL url = URLRequestMockHTTPJob::GetMockUrl(

@@ -8,45 +8,71 @@
 #include "base/file_path.h"
 #include "base/platform_file.h"
 #include "base/shared_memory.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/database_util.h"
+#include "chrome/common/file_system/webfilesystem_impl.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/webblobregistry_impl.h"
 #include "chrome/common/webmessageportchannel_impl.h"
 #include "chrome/plugin/npobject_util.h"
 #include "chrome/renderer/net/renderer_net_predictor.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
-#include "chrome/renderer/renderer_webindexeddatabase_impl.h"
+#include "chrome/renderer/renderer_webidbfactory_impl.h"
 #include "chrome/renderer/renderer_webstoragenamespace_impl.h"
 #include "chrome/renderer/visitedlink_slave.h"
 #include "chrome/renderer/webgles2context_impl.h"
 #include "chrome/renderer/webgraphicscontext3d_command_buffer_impl.h"
+#include "chrome/renderer/websharedworkerrepository_impl.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_sync_message_filter.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebBlobRegistry.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebGraphicsContext3D.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIndexedDatabase.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebIDBFactory.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebIDBKey.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebIDBKeyPath.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSerializedScriptValue.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebStorageEventDispatcher.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
+#include "webkit/glue/simple_webmimeregistry_impl.h"
+#include "webkit/glue/webclipboard_impl.h"
+#include "webkit/glue/webfileutilities_impl.h"
 #include "webkit/glue/webkit_glue.h"
+
+#if defined(OS_WIN)
+#include "third_party/WebKit/WebKit/chromium/public/win/WebSandboxSupport.h"
+#endif
 
 #if defined(OS_MACOSX)
 #include "chrome/common/font_descriptor_mac.h"
 #include "chrome/common/font_loader_mac.h"
+#include "third_party/WebKit/WebKit/chromium/public/mac/WebSandboxSupport.h"
 #endif
 
 #if defined(OS_LINUX)
+#include <string>
+#include <map>
+
+#include "base/lock.h"
 #include "chrome/renderer/renderer_sandbox_support_linux.h"
+#include "third_party/WebKit/WebKit/chromium/public/linux/WebSandboxSupport.h"
 #endif
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
 #endif
 
+using WebKit::WebBlobRegistry;
+using WebKit::WebFileSystem;
 using WebKit::WebFrame;
-using WebKit::WebIndexedDatabase;
+using WebKit::WebIDBFactory;
+using WebKit::WebIDBKey;
+using WebKit::WebIDBKeyPath;
 using WebKit::WebKitClient;
+using WebKit::WebSerializedScriptValue;
 using WebKit::WebStorageArea;
 using WebKit::WebStorageEventDispatcher;
 using WebKit::WebStorageNamespace;
@@ -54,8 +80,60 @@ using WebKit::WebString;
 using WebKit::WebURL;
 using WebKit::WebVector;
 
+//------------------------------------------------------------------------------
+
+class RendererWebKitClientImpl::MimeRegistry
+    : public webkit_glue::SimpleWebMimeRegistryImpl {
+ public:
+  virtual WebKit::WebString mimeTypeForExtension(const WebKit::WebString&);
+  virtual WebKit::WebString mimeTypeFromFile(const WebKit::WebString&);
+  virtual WebKit::WebString preferredExtensionForMIMEType(
+      const WebKit::WebString&);
+};
+
+class RendererWebKitClientImpl::FileUtilities
+    : public webkit_glue::WebFileUtilitiesImpl {
+ public:
+  virtual bool getFileSize(const WebKit::WebString& path, long long& result);
+  virtual bool getFileModificationTime(const WebKit::WebString& path,
+                                       double& result);
+  virtual base::PlatformFile openFile(const WebKit::WebString& path,
+                                      int mode);
+};
+
+class RendererWebKitClientImpl::SandboxSupport
+    : public WebKit::WebSandboxSupport {
+ public:
+#if defined(OS_WIN)
+  virtual bool ensureFontLoaded(HFONT);
+#elif defined(OS_MACOSX)
+  virtual bool loadFont(NSFont* srcFont, ATSFontContainerRef* out);
+#elif defined(OS_LINUX)
+  virtual WebKit::WebString getFontFamilyForCharacters(
+      const WebKit::WebUChar* characters, size_t numCharacters);
+  virtual void getRenderStyleForStrike(
+      const char* family, int sizeAndStyle, WebKit::WebFontRenderStyle* out);
+
+ private:
+  // WebKit likes to ask us for the correct font family to use for a set of
+  // unicode code points. It needs this information frequently so we cache it
+  // here. The key in this map is an array of 16-bit UTF16 values from WebKit.
+  // The value is a string containing the correct font family.
+  Lock unicode_font_families_mutex_;
+  std::map<std::string, std::string> unicode_font_families_;
+#endif
+};
+
+//------------------------------------------------------------------------------
+
 RendererWebKitClientImpl::RendererWebKitClientImpl()
-    : sudden_termination_disables_(0) {
+    : clipboard_(new webkit_glue::WebClipboardImpl),
+      file_utilities_(new RendererWebKitClientImpl::FileUtilities),
+      mime_registry_(new RendererWebKitClientImpl::MimeRegistry),
+      sandbox_support_(new RendererWebKitClientImpl::SandboxSupport),
+      sudden_termination_disables_(0),
+      shared_worker_repository_(new WebSharedWorkerRepositoryImpl) {
+  file_utilities_->set_sandbox_enabled(sandboxEnabled());
 }
 
 RendererWebKitClientImpl::~RendererWebKitClientImpl() {
@@ -64,19 +142,19 @@ RendererWebKitClientImpl::~RendererWebKitClientImpl() {
 //------------------------------------------------------------------------------
 
 WebKit::WebClipboard* RendererWebKitClientImpl::clipboard() {
-  return &clipboard_;
+  return clipboard_.get();
 }
 
 WebKit::WebMimeRegistry* RendererWebKitClientImpl::mimeRegistry() {
-  return &mime_registry_;
+  return mime_registry_.get();
 }
 
-WebKit::WebFileSystem* RendererWebKitClientImpl::fileSystem() {
-  return &file_system_;
+WebKit::WebFileUtilities* RendererWebKitClientImpl::fileUtilities() {
+  return file_utilities_.get();
 }
 
 WebKit::WebSandboxSupport* RendererWebKitClientImpl::sandboxSupport() {
-  return &sandbox_support_;
+  return sandbox_support_.get();
 }
 
 WebKit::WebCookieJar* RendererWebKitClientImpl::cookieJar() {
@@ -159,7 +237,7 @@ void RendererWebKitClientImpl::cacheMetadata(
 
 WebString RendererWebKitClientImpl::defaultLocale() {
   // TODO(darin): Eliminate this webkit_glue call.
-  return WideToUTF16(webkit_glue::GetWebKitLocale());
+  return ASCIIToUTF16(webkit_glue::GetWebKitLocale());
 }
 
 void RendererWebKitClientImpl::suddenTerminationChanged(bool enabled) {
@@ -203,14 +281,35 @@ void RendererWebKitClientImpl::dispatchStorageEvent(
 
 //------------------------------------------------------------------------------
 
-WebIndexedDatabase* RendererWebKitClientImpl::indexedDatabase() {
-  if (!web_indexed_database_.get()) {
+WebIDBFactory* RendererWebKitClientImpl::idbFactory() {
+  if (!web_idb_factory_.get()) {
     if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
-      web_indexed_database_.reset(WebIndexedDatabase::create());
+      web_idb_factory_.reset(WebIDBFactory::create());
     else
-      web_indexed_database_.reset(new RendererWebIndexedDatabaseImpl());
+      web_idb_factory_.reset(new RendererWebIDBFactoryImpl());
   }
-  return web_indexed_database_.get();
+  return web_idb_factory_.get();
+}
+
+void RendererWebKitClientImpl::createIDBKeysFromSerializedValuesAndKeyPath(
+    const WebVector<WebSerializedScriptValue>& values,
+    const WebString& keyPath,
+    WebVector<WebIDBKey>& keys_out) {
+  DCHECK(CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess));
+  WebVector<WebIDBKey> keys(values.size());
+  for (size_t i = 0; i < values.size(); ++i) {
+    keys[i] = WebIDBKey::createFromValueAndKeyPath(
+        values[i], WebIDBKeyPath::create(keyPath));
+  }
+  keys_out.swap(keys);
+}
+
+//------------------------------------------------------------------------------
+
+WebFileSystem* RendererWebKitClientImpl::fileSystem() {
+  if (!web_file_system_.get())
+    web_file_system_.reset(new WebFileSystemImpl());
+  return web_file_system_.get();
 }
 
 //------------------------------------------------------------------------------
@@ -260,7 +359,7 @@ WebString RendererWebKitClientImpl::MimeRegistry::preferredExtensionForMIMEType(
 
 //------------------------------------------------------------------------------
 
-bool RendererWebKitClientImpl::FileSystem::getFileSize(const WebString& path,
+bool RendererWebKitClientImpl::FileUtilities::getFileSize(const WebString& path,
                                                        long long& result) {
   if (SendSyncMessageFromAnyThread(new ViewHostMsg_GetFileSize(
           webkit_glue::WebStringToFilePath(path),
@@ -272,7 +371,7 @@ bool RendererWebKitClientImpl::FileSystem::getFileSize(const WebString& path,
   return false;
 }
 
-bool RendererWebKitClientImpl::FileSystem::getFileModificationTime(
+bool RendererWebKitClientImpl::FileUtilities::getFileModificationTime(
     const WebString& path,
     double& result) {
   base::Time time;
@@ -286,7 +385,7 @@ bool RendererWebKitClientImpl::FileSystem::getFileModificationTime(
   return false;
 }
 
-base::PlatformFile RendererWebKitClientImpl::FileSystem::openFile(
+base::PlatformFile RendererWebKitClientImpl::FileUtilities::openFile(
     const WebString& path,
     int mode) {
   IPC::PlatformFileForTransit handle = IPC::InvalidPlatformFileForTransit();
@@ -385,7 +484,7 @@ WebKit::WebSharedWorkerRepository*
 RendererWebKitClientImpl::sharedWorkerRepository() {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableSharedWorkers)) {
-    return &shared_worker_repository_;
+    return shared_worker_repository_.get();
   } else {
     return NULL;
   }
@@ -428,4 +527,12 @@ WebKit::WebString RendererWebKitClientImpl::signedPublicKeyAndChallengeString(
       GURL(url),
       &signed_public_key));
   return WebString::fromUTF8(signed_public_key);
+}
+
+//------------------------------------------------------------------------------
+
+WebBlobRegistry* RendererWebKitClientImpl::blobRegistry() {
+  if (!blob_registry_.get())
+    blob_registry_.reset(new WebBlobRegistryImpl(RenderThread::current()));
+  return blob_registry_.get();
 }

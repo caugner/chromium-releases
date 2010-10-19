@@ -429,7 +429,7 @@ o3d.Curve.prototype.__defineSetter__("sampleRate", function(rate) {
         "attempt to set sample rate to " + rate +
         " which is lower than the minimum of " + o3d.Curve.kMinimumSampleRate);
   } else if (rate != this.sample_rate_) {
-    this.sample_rate_ = new_sample_rate;
+    this.sample_rate_ = rate;
     this.invalidateCache_();
   }
 });
@@ -526,7 +526,7 @@ o3d.Curve.prototype.addLinearKeys = function(values) {
     return;
   }
   for (var i = 0; i < values.length; i += kNumLinearKeyValues) {
-    var newKey = this.createKey("LinearKey");
+    var newKey = this.createKey("LinearCurveKey");
     newKey.input = values[i];
     newKey.output = values[i+1];
   }
@@ -555,7 +555,7 @@ o3d.Curve.prototype.addStepKeys = function(values) {
     return;
   }
   for (var i = 0; i < values.length; i += kNumStepKeyValues) {
-    var newKey = this.createKey("StepKey");
+    var newKey = this.createKey("StepCurveKey");
     newKey.input = values[i];
     newKey.output = values[i+1];
   }
@@ -584,8 +584,8 @@ o3d.Curve.prototype.addBezierKeys = function(values) {
         "addBezierKeys: expected multiple of 6 values got "+values.size());
     return;
   }
-  for (var ii = 0; ii < values.length; ii += kNumBezierKeyValues) {
-    var newKey = this.createKey("BezierKey");
+  for (var i = 0; i < values.length; i += kNumBezierKeyValues) {
+    var newKey = this.createKey("BezierCurveKey");
     newKey.input = values[i];
     newKey.output = values[i+1];
     newKey.inTangent[0] = values[i+2];
@@ -616,6 +616,16 @@ o3d.Curve.prototype.isDiscontinuous = function() {
 };
 
 /**
+ * Comparator to allow sorting by keys by their input value.
+ * @param {o3d.CurveKey} a First input to compare.
+ * @param {o3d.CurveKey} b Second input to compare.
+ * @return {number} positive, zero, or negative (see Array.sort)
+ */
+o3d.Curve.compareInputs_ = function(a, b) {
+  return a.input - b.input;
+};
+
+/**
  * Sorts keys (if sorted_ is false) and updates discontinuous_
  * (if check_discontinuity_ is true).
  * Called automatically when necessary in evaluate and isDiscontinuous.
@@ -624,7 +634,7 @@ o3d.Curve.prototype.isDiscontinuous = function() {
 o3d.Curve.prototype.updateCurveInfo_ = function() {
   if (!this.sorted_) {
     // resort keys
-    this.keys.sort();
+    this.keys.sort(o3d.Curve.compareInputs_);
     this.sorted_ = true;
     this.invalidateCache_();
   }
@@ -725,7 +735,7 @@ o3d.Curve.prototype.getOutputInSpan_ = function(input, context) {
 
     // Find the current the keys that cover our input.
     while (start <= end) {
-      var mid = (start + end) / 2;
+      var mid = Math.floor((start + end)/2);
       if (input > keys[mid].input) {
         start = mid + 1;
       } else {

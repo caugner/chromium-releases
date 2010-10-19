@@ -7,9 +7,9 @@
 #include <gtk/gtk.h>
 
 #include "app/l10n_util.h"
-#include "base/env_var.h"
+#include "base/environment.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "base/xdg_util.h"
 
 namespace gtk_util {
@@ -22,11 +22,11 @@ void GetWidgetSizeFromResources(
 
   double chars = 0;
   if (width)
-    StringToDouble(l10n_util::GetStringUTF8(width_chars), &chars);
+    base::StringToDouble(l10n_util::GetStringUTF8(width_chars), &chars);
 
   double lines = 0;
   if (height)
-    StringToDouble(l10n_util::GetStringUTF8(height_lines), &lines);
+    base::StringToDouble(l10n_util::GetStringUTF8(height_lines), &lines);
 
   GetWidgetSizeFromCharacters(widget, chars, lines, width, height);
 }
@@ -77,7 +77,7 @@ void GetWidgetSizeFromCharacters(
 void ApplyMessageDialogQuirks(GtkWidget* dialog) {
   if (gtk_window_get_modal(GTK_WINDOW(dialog))) {
     // Work around a KDE 3 window manager bug.
-    scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
+    scoped_ptr<base::Environment> env(base::Environment::Create());
     if (base::DESKTOP_ENVIRONMENT_KDE3 == GetDesktopEnvironment(env.get()))
       gtk_window_set_skip_taskbar_hint(GTK_WINDOW(dialog), FALSE);
   }

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 
 #include <string>
 #include "base/message_loop_proxy.h"
-#include "base/file_path.h"
 #include "net/http/http_cache.h"
 
+class FilePath;
 class GURL;
 class TestShellRequestContext;
 
@@ -37,8 +37,11 @@ class SimpleResourceLoaderBridge {
   static bool EnsureIOThread();
   static void SetAcceptAllCookies(bool accept_all_cookies);
 
-  // This method should only be called after Init(), and before Shutdown().
+  // These methods should only be called after Init(), and before
+  // Shutdown(). The MessageLoops get replaced upon each call to
+  // Init(), and destroyed upon a call to ShutDown().
   static scoped_refptr<base::MessageLoopProxy> GetCacheThread();
+  static scoped_refptr<base::MessageLoopProxy> GetIoThread();
 };
 
 #endif  // WEBKIT_TOOLS_TEST_SHELL_SIMPLE_RESOURCE_LOADER_BRIDGE_H__

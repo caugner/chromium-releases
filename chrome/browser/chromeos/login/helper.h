@@ -6,8 +6,16 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_HELPER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_HELPER_H_
+#pragma once
 
 #include "third_party/skia/include/core/SkColor.h"
+
+class GURL;
+
+namespace gfx {
+class Rect;
+class Size;
+}  // namespace gfx
 
 namespace views {
 class Painter;
@@ -30,6 +38,9 @@ views::Painter* CreateBackgroundPainter();
 // |size| is not empty. Otherwise the whole monitor is occupied.
 gfx::Rect CalculateScreenBounds(const gfx::Size& size);
 
+// Returns URL used for account recovery.
+GURL GetAccountRecoveryHelpUrl();
+
 // Define the constants in |login| namespace to avoid potential
 // conflict with other chromeos components.
 namespace login {
@@ -41,7 +52,7 @@ enum Command {
 };
 
 // Gap between edge and image view, and image view and controls.
-const int kBorderSize = 4;
+const int kBorderSize = 6;
 
 // The size of user image.
 const int kUserImageSize = 256;

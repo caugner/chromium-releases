@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_CHROME_THREAD_H_
 #define CHROME_BROWSER_CHROME_THREAD_H_
+#pragma once
 
 #include "base/lock.h"
 #include "base/task.h"
@@ -164,7 +165,7 @@ class ChromeThread : public base::Thread {
   //
   // ...
   //  private:
-  //   friend class ChromeThread;
+  //   friend struct ChromeThread::DeleteOnThread<ChromeThread::IO>;
   //   friend class DeleteTask<Foo>;
   //
   //   ~Foo();

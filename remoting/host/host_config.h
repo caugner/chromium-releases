@@ -16,16 +16,16 @@ namespace remoting {
 // Following constants define names for configuration parameters.
 
 // Login used to authenticate in XMPP network.
-extern const std::wstring kXmppLoginConfigPath;
+extern const char kXmppLoginConfigPath[];
 // Auth token used to authenticate in XMPP network.
-extern const std::wstring kXmppAuthTokenConfigPath;
+extern const char kXmppAuthTokenConfigPath[];
 // Unique identifier of the host used to register the host in directory.
 // Normally a random UUID.
-extern const std::wstring kHostIdConfigPath;
+extern const char kHostIdConfigPath[];
 // Readable host name.
-extern const std::wstring kHostNameConfigPath;
+extern const char kHostNameConfigPath[];
 // Private keys used for host authentication.
-extern const std::wstring kPrivateKeyConfigPath;
+extern const char kPrivateKeyConfigPath[];
 
 // HostConfig interace provides read-only access to host configuration.
 class HostConfig : public base::RefCountedThreadSafe<HostConfig> {
@@ -33,15 +33,14 @@ class HostConfig : public base::RefCountedThreadSafe<HostConfig> {
   HostConfig() { };
   virtual ~HostConfig() { }
 
-  virtual bool GetString(const std::wstring& path,
-                         std::wstring* out_value) = 0;
-  virtual bool GetString(const std::wstring& path,
-                         std::string* out_value) = 0;
+  virtual bool GetString(const std::string& path, std::string* out_value) = 0;
 
   DISALLOW_COPY_AND_ASSIGN(HostConfig);
 };
 
 // MutableHostConfig extends HostConfig for mutability.
+//
+// TODO(sergeyu): Simplify this interface.
 class MutableHostConfig : public HostConfig {
  public:
   MutableHostConfig() { };
@@ -53,9 +52,7 @@ class MutableHostConfig : public HostConfig {
 
   // SetString() updates specified config value. This methods must only
   // be called from task specified in Update().
-  virtual void SetString(const std::wstring& path,
-                         const std::wstring& in_value) = 0;
-  virtual void SetString(const std::wstring& path,
+  virtual void SetString(const std::string& path,
                          const std::string& in_value) = 0;
 
   DISALLOW_COPY_AND_ASSIGN(MutableHostConfig);

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@ const wchar_t kCreateAllShortcuts[] = L"create-all-shortcuts";
 
 // Delete user profile data. This param is useful only when specified with
 // kUninstall, otherwise it is silently ignored.
-const wchar_t kDeleteProfile[] = L"1";
+const wchar_t kDeleteProfile[] = L"delete-profile";
 
 // Disable logging
 const wchar_t kDisableLogging[] = L"disable-logging";
@@ -48,10 +48,10 @@ const wchar_t kEnableLogging[] = L"enable-logging";
 const wchar_t kForceUninstall[] = L"force-uninstall";
 
 // Specify the file path of Chrome archive for install.
-const wchar_t kInstallArchive[] = L"install-archive";
+const char kInstallArchive[] = "install-archive";
 
 // Specify the file path of Chrome master preference file.
-const wchar_t kInstallerData[] = L"installerdata";
+const char kInstallerData[] = "installerdata";
 
 // If present, specify file path to write logging info.
 const wchar_t kLogFile[] = L"log-file";
@@ -67,15 +67,15 @@ const wchar_t kMsi[] = L"msi";
 
 // Useful only when used with --update-setup-exe, otherwise ignored. It
 // specifies the full path where updated setup.exe will be stored.
-const wchar_t kNewSetupExe[] = L"new-setup-exe";
+const char kNewSetupExe[] = "new-setup-exe";
 
 // Register Chrome as a valid browser on the current sytem. This option
 // requires that setup.exe is running as admin. If this option is specified,
 // options kInstallArchive and kUninstall are ignored.
-const wchar_t kRegisterChromeBrowser[] = L"register-chrome-browser";
+const char kRegisterChromeBrowser[] = "register-chrome-browser";
 
-const wchar_t kRegisterChromeBrowserSuffix[] =
-    L"register-chrome-browser-suffix";
+const char kRegisterChromeBrowserSuffix[] =
+    "register-chrome-browser-suffix";
 
 // Renames chrome.exe to old_chrome.exe and renames new_chrome.exe to chrome.exe
 // to support in-use updates. Also deletes opv key.
@@ -97,22 +97,26 @@ const wchar_t kUninstall[] = L"uninstall";
 // Also see --new-setup-exe. This command line option specifies a diff patch
 // that setup.exe will apply to itself and store the resulting binary in the
 // path given by --new-setup-exe.
-const wchar_t kUpdateSetupExe[] = L"update-setup-exe";
+const char kUpdateSetupExe[] = "update-setup-exe";
 
 // Enable verbose logging (info level).
 const wchar_t kVerboseLogging[] = L"verbose-logging";
 
 // Show the embedded EULA dialog.
-const wchar_t kShowEula[] = L"show-eula";
+const char kShowEula[] = "show-eula";
 
 // Use the alternate desktop shortcut name.
 const wchar_t kAltDesktopShortcut[] = L"alt-desktop-shortcut";
 
 // Perform the inactive user toast experiment.
-const wchar_t kInactiveUserToast[] = L"inactive-user-toast";
+const char kInactiveUserToast[] = "inactive-user-toast";
 
 // User toast experiment switch from system context to user context.
 const wchar_t kSystemLevelToast[] = L"system-level-toast";
+
+// A handle value of the key to write the results of the toast experiment
+// to. See DuplicateGoogleUpdateSystemClientKey for details.
+const wchar_t kToastResultsKey[] = L"toast-results-key";
 
 }  // namespace switches
 
@@ -134,6 +138,6 @@ const wchar_t kSxSSuffix[] = L" SxS";
 const wchar_t kUninstallStringField[] = L"UninstallString";
 const wchar_t kUninstallArgumentsField[] = L"UninstallArguments";
 const wchar_t kUninstallDisplayNameField[] = L"DisplayName";
-const wchar_t kUninstallMetricsName[] = L"uninstall_metrics";
+const char kUninstallMetricsName[] = "uninstall_metrics";
 const wchar_t kUninstallInstallationDate[] = L"installation_date";
 }  // namespace installer_util

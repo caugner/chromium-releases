@@ -5,6 +5,9 @@
 #include "chrome/browser/content_setting_combo_model.h"
 
 #include "app/l10n_util.h"
+#include "base/command_line.h"
+#include "base/string16.h"
+#include "chrome/common/chrome_switches.h"
 #include "grit/generated_resources.h"
 
 namespace {
@@ -18,36 +21,56 @@ const ContentSetting kSessionSettings[] = { CONTENT_SETTING_ALLOW,
                                             CONTENT_SETTING_SESSION_ONLY,
                                             CONTENT_SETTING_BLOCK };
 
+// The settings shown in the combobox if show_session_ is true, and we still
+// offer the cookie prompt mode.
+const ContentSetting kSessionAskSettings[] = { CONTENT_SETTING_ALLOW,
+                                               CONTENT_SETTING_ASK,
+                                               CONTENT_SETTING_SESSION_ONLY,
+                                               CONTENT_SETTING_BLOCK };
+
 }  // namespace
 
 ContentSettingComboModel::ContentSettingComboModel(bool show_session)
-    : show_session_(show_session) {
+    : show_session_(show_session),
+      disable_cookie_prompt_(!CommandLine::ForCurrentProcess()->HasSwitch(
+                             switches::kEnableCookiePrompt)) {
 }
 
 ContentSettingComboModel::~ContentSettingComboModel() {
 }
 
 int ContentSettingComboModel::GetItemCount() {
-  return show_session_ ?
-      arraysize(kSessionSettings) : arraysize(kNoSessionSettings);
+  if (show_session_) {
+    return disable_cookie_prompt_ ?
+        arraysize(kSessionSettings) : arraysize(kSessionAskSettings);
+  } else {
+    return arraysize(kNoSessionSettings);
+  }
 }
 
-std::wstring ContentSettingComboModel::GetItemAt(int index) {
+string16 ContentSettingComboModel::GetItemAt(int index) {
   switch (SettingForIndex(index)) {
     case CONTENT_SETTING_ALLOW:
-      return l10n_util::GetString(IDS_EXCEPTIONS_ALLOW_BUTTON);
+      return l10n_util::GetStringUTF16(IDS_EXCEPTIONS_ALLOW_BUTTON);
     case CONTENT_SETTING_BLOCK:
-      return l10n_util::GetString(IDS_EXCEPTIONS_BLOCK_BUTTON);
+      return l10n_util::GetStringUTF16(IDS_EXCEPTIONS_BLOCK_BUTTON);
+    case CONTENT_SETTING_ASK:
+      return l10n_util::GetStringUTF16(IDS_EXCEPTIONS_ASK_BUTTON);
     case CONTENT_SETTING_SESSION_ONLY:
-      return l10n_util::GetString(IDS_EXCEPTIONS_SESSION_ONLY_BUTTON);
+      return l10n_util::GetStringUTF16(IDS_EXCEPTIONS_SESSION_ONLY_BUTTON);
     default:
       NOTREACHED();
   }
-  return std::wstring();
+  return string16();
 }
 
 ContentSetting ContentSettingComboModel::SettingForIndex(int index) {
-  return show_session_ ? kSessionSettings[index] : kNoSessionSettings[index];
+  if (show_session_) {
+    return disable_cookie_prompt_ ?
+        kSessionSettings[index] : kSessionAskSettings[index];
+  } else {
+    return kNoSessionSettings[index];
+  }
 }
 
 int ContentSettingComboModel::IndexForSetting(ContentSetting setting) {

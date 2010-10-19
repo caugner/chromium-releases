@@ -8,6 +8,7 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/thread.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
@@ -93,12 +94,15 @@ class InterstitialPage::InterstitialPageRVHViewDelegate
       const string16& frame_name);
   virtual void CreateNewWidget(int route_id,
                                WebKit::WebPopupType popup_type);
+  virtual void CreateNewFullscreenWidget(int route_id,
+                                         WebKit::WebPopupType popup_type);
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_pos,
                                  bool user_gesture);
   virtual void ShowCreatedWidget(int route_id,
                                  const gfx::Rect& initial_pos);
+  virtual void ShowCreatedFullscreenWidget(int route_id);
   virtual void ShowContextMenu(const ContextMenuParams& params);
   virtual void StartDragging(const WebDropData& drop_data,
                              WebDragOperationsMask operations_allowed,
@@ -107,10 +111,13 @@ class InterstitialPage::InterstitialPageRVHViewDelegate
   virtual void UpdateDragCursor(WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
+  virtual void Activate();
+  virtual void Deactivate();
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
-  virtual void HandleMouseEvent();
+  virtual void HandleMouseMove();
+  virtual void HandleMouseDown();
   virtual void HandleMouseLeave();
   virtual void OnFindReply(int request_id,
                            int number_of_matches,
@@ -136,6 +143,7 @@ InterstitialPage::InterstitialPage(TabContents* tab,
       url_(url),
       new_navigation_(new_navigation),
       should_discard_pending_nav_entry_(new_navigation),
+      reload_on_dont_proceed_(false),
       enabled_(true),
       action_taken_(NO_ACTION),
       render_view_host_(NULL),
@@ -404,12 +412,7 @@ TabContentsView* InterstitialPage::CreateTabContentsView() {
   render_view_host_->set_view(view);
   render_view_host_->AllowBindings(BindingsPolicy::DOM_AUTOMATION);
 
-  scoped_refptr<URLRequestContextGetter> request_context =
-      tab()->request_context();
-  if (!request_context.get())
-    request_context = tab()->profile()->GetRequestContext();
-
-  render_view_host_->CreateRenderView(request_context.get(), string16());
+  render_view_host_->CreateRenderView(string16());
   view->SetSize(tab_contents_view->GetContainerSize());
   // Don't show the interstitial until we have navigated to it.
   view->Hide();
@@ -468,6 +471,9 @@ void InterstitialPage::DontProceed() {
     tab_->controller().DiscardNonCommittedEntries();
   }
 
+  if (reload_on_dont_proceed_)
+    tab_->controller().Reload(true);
+
   Hide();
   // WARNING: we are now deleted!
 }
@@ -487,7 +493,7 @@ void InterstitialPage::CancelForNavigation() {
 }
 
 void InterstitialPage::SetSize(const gfx::Size& size) {
-#if defined(OS_WIN) || defined(OS_LINUX)
+#if !defined(OS_MACOSX)
   // When a tab is closed, we might be resized after our view was NULLed
   // (typically if there was an info-bar).
   if (render_view_host_->view())
@@ -572,6 +578,13 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::CreateNewWidget(
   NOTREACHED() << "InterstitialPage does not support showing drop-downs yet.";
 }
 
+void
+InterstitialPage::InterstitialPageRVHViewDelegate::CreateNewFullscreenWidget(
+    int route_id, WebKit::WebPopupType popup_type) {
+  NOTREACHED()
+      << "InterstitialPage does not support showing full screen popups.";
+}
+
 void InterstitialPage::InterstitialPageRVHViewDelegate::ShowCreatedWindow(
     int route_id, WindowOpenDisposition disposition,
     const gfx::Rect& initial_pos, bool user_gesture) {
@@ -581,6 +594,13 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::ShowCreatedWindow(
 void InterstitialPage::InterstitialPageRVHViewDelegate::ShowCreatedWidget(
     int route_id, const gfx::Rect& initial_pos) {
   NOTREACHED() << "InterstitialPage does not support showing drop-downs yet.";
+}
+
+void
+InterstitialPage::InterstitialPageRVHViewDelegate::ShowCreatedFullscreenWidget(
+    int route_id) {
+  NOTREACHED()
+      << "InterstitialPage does not support showing full screen popups.";
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::ShowContextMenu(
@@ -613,6 +633,16 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::TakeFocus(
     interstitial_page_->tab()->GetViewDelegate()->TakeFocus(reverse);
 }
 
+void InterstitialPage::InterstitialPageRVHViewDelegate::Activate() {
+  if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
+    interstitial_page_->tab()->GetViewDelegate()->Activate();
+}
+
+void InterstitialPage::InterstitialPageRVHViewDelegate::Deactivate() {
+  if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
+    interstitial_page_->tab()->GetViewDelegate()->Deactivate();
+}
+
 bool InterstitialPage::InterstitialPageRVHViewDelegate::PreHandleKeyboardEvent(
     const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
   if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
@@ -627,9 +657,14 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::HandleKeyboardEvent(
     interstitial_page_->tab()->GetViewDelegate()->HandleKeyboardEvent(event);
 }
 
-void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseEvent() {
+void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseMove() {
   if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
-    interstitial_page_->tab()->GetViewDelegate()->HandleMouseEvent();
+    interstitial_page_->tab()->GetViewDelegate()->HandleMouseMove();
+}
+
+void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseDown() {
+  if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
+    interstitial_page_->tab()->GetViewDelegate()->HandleMouseDown();
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseLeave() {

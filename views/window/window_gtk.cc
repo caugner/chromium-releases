@@ -4,7 +4,6 @@
 
 #include "views/window/window_gtk.h"
 
-#include "app/l10n_util.h"
 #include "gfx/rect.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
@@ -129,6 +128,10 @@ void WindowGtk::HideWindow() {
 
 void WindowGtk::Activate() {
   gtk_window_present(GTK_WINDOW(GetNativeView()));
+}
+
+void WindowGtk::Deactivate() {
+  gdk_window_lower(GTK_WIDGET(GetNativeView())->window);
 }
 
 void WindowGtk::Close() {

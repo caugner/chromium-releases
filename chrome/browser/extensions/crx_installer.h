@@ -4,16 +4,17 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_CRX_INSTALLER_H_
 #define CHROME_BROWSER_EXTENSIONS_CRX_INSTALLER_H_
+#pragma once
 
 #include <string>
 
 #include "base/file_path.h"
 #include "base/ref_counted.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
-#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/sandboxed_extension_unpacker.h"
 #include "chrome/common/extensions/extension.h"
 
+class ExtensionsService;
 class SkBitmap;
 
 // This class installs a crx file into a profile.

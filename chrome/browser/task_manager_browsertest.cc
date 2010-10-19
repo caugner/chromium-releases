@@ -101,8 +101,11 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeTabContentsChanges) {
   // Open a new tab and make sure we notice that.
   GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
                                      FilePath(kTitle1File)));
+  Browser* browser_used = NULL;
   browser()->AddTabWithURL(url, GURL(), PageTransition::TYPED, 0,
-                           TabStripModel::ADD_SELECTED, NULL, std::string());
+                           TabStripModel::ADD_SELECTED, NULL, std::string(),
+                           &browser_used);
+  EXPECT_EQ(browser(), browser_used);
   WaitForResourceChange(3);
 
   // Close the tab and verify that we notice.
@@ -117,7 +120,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeTabContentsChanges) {
 #define NoticeExtensionChanges DISABLED_NoticeExtensionChanges
 #endif
 
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeExtensionChanges) {
+// Flaky test bug filed in http://crbug.com/51701
+IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, FLAKY_NoticeExtensionChanges) {
   EXPECT_EQ(0, model()->ResourceCount());
 
   // Show the task manager. This populates the model, and helps with debugging
@@ -127,16 +131,11 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeExtensionChanges) {
   // Browser and the New Tab Page.
   EXPECT_EQ(2, model()->ResourceCount());
 
-  // Loading an extension should result in a new resource being
-  // created for it.
-  ASSERT_TRUE(LoadExtension(
-      test_data_dir_.AppendASCII("common").AppendASCII("one_in_shelf")));
-  WaitForResourceChange(3);
-
-  // Make sure we also recognize extensions with just background pages.
+  // Loading an extension with a background page should result in a new
+  // resource being created for it.
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("common").AppendASCII("background_page")));
-  WaitForResourceChange(4);
+  WaitForResourceChange(3);
 }
 
 // Times out on Vista; disabled to keep tests fast. http://crbug.com/44991
@@ -251,14 +250,15 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
   GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
                                      FilePath(kTitle1File)));
   browser()->AddTabWithURL(url, GURL(), PageTransition::TYPED, 0,
-                           TabStripModel::ADD_SELECTED, NULL, std::string());
+                           TabStripModel::ADD_SELECTED, NULL, std::string(),
+                           NULL);
   WaitForResourceChange(3);
 
   // Check that we get some value for the cache columns.
   DCHECK_NE(model()->GetResourceWebCoreImageCacheSize(2),
-            l10n_util::GetString(IDS_TASK_MANAGER_NA_CELL_TEXT));
+            l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NA_CELL_TEXT));
   DCHECK_NE(model()->GetResourceWebCoreScriptsCacheSize(2),
-            l10n_util::GetString(IDS_TASK_MANAGER_NA_CELL_TEXT));
+            l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NA_CELL_TEXT));
   DCHECK_NE(model()->GetResourceWebCoreCSSCacheSize(2),
-            l10n_util::GetString(IDS_TASK_MANAGER_NA_CELL_TEXT));
+            l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NA_CELL_TEXT));
 }

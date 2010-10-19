@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_dom_ui.h"
 #include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/url_constants.h"
@@ -22,7 +22,7 @@ class ExtensionOverrideTest : public ExtensionApiTest {
             ExtensionDOMUI::kExtensionURLOverrides);
 
     ListValue* values = NULL;
-    if (!overrides->GetList(L"history", &values))
+    if (!overrides->GetList("history", &values))
       return false;
 
     std::set<std::string> seen_overrides;
@@ -120,7 +120,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, ShouldCleanUpDuplicateEntries) {
     list->Append(Value::CreateStringValue("http://www.google.com/"));
 
   browser()->profile()->GetPrefs()->GetMutableDictionary(
-      ExtensionDOMUI::kExtensionURLOverrides)->Set(L"history", list);
+      ExtensionDOMUI::kExtensionURLOverrides)->Set("history", list);
 
   ASSERT_FALSE(CheckHistoryOverridesContainsNoDupes());
 

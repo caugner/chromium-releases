@@ -29,8 +29,11 @@
     'codesign',
     'content',
     'cookies',
+    'crash_reporter',
     'downloads',
     'history',
+    'imports',
+    'infobars',
     'navigation',
     'omnibox',
     'passwords',
@@ -39,23 +42,43 @@
     'special_tabs',
     'test_basic.SimpleTest.testCanOpenGoogle',
     'themes',
+    'translate',
+    # This test fails due to crbug.com/35485
+    '-translate.TranslateTest.testBarNotVisibleOnSSLErrorPage',
+    # This test fails due to crbug.com/50706
+    '-translate.TranslateTest.testToggleTranslateOption'
   ],
 
   'win': [
     # testBookmarkBarVisible fails on windows. crbug.com/42823
     '-bookmark_bar.BookmarkBarTest.testBookmarkBarVisible',
+    # Some download test fails on win official builder, only thru buildbot when
+    # downloading the small zip file.
+    # crbug.com/50481, crbug.com/54942
+    '-downloads.DownloadsTest.testZip',
+    '-downloads.DownloadsTest.testRemoveDownload',
+    '-prefs.PrefsTest.testDownloadDirPref',
   ],
 
   'mac': [
-    # Keychain popups make password tests difficult. crbug.com/49378
+    # Keychain popups make password & autofill tests difficult. crbug.com/49378
     '-passwords',
+    '-autofill',
+    # codesign tests should run *after* signing. crbug.com/50481
+    '-codesign',
+    '-content.ContentTest.testThreeWindows',  # crbug.com/47457
   ],
 
-  'linux': [
+  'linux': [  # linux != chromeos
     '-omnibox',  # http://crbug.com/44203
     '-browser.BrowserTest.testWindowResize',  # crbug.com/44963
     '-content.ContentTest.testThreeWindows',  # crbug.com/47457
   ],
 
-  # TODO(nirnimesh): Add a ChromeOS section
+  # ChromeOS is linux, but note that this section does not include the
+  # entries in the linux section above.
+  'chromeos': [
+    # you cannot resize browser window on chromeos
+    '-browser.BrowserTest.testWindowResize',
+  ],
 }

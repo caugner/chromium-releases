@@ -10,7 +10,7 @@
 
 #include <string>
 
-#include "base/keyboard_codes.h"
+#include "app/keyboard_codes.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "gfx/insets.h"
@@ -19,7 +19,7 @@
 #include "views/widget/widget.h"
 
 #if defined(OS_LINUX)
-#include "base/keyboard_code_conversion_gtk.h"
+#include "app/keyboard_code_conversion_gtk.h"
 #elif defined(OS_WIN)
 #include "app/win_util.h"
 #include "base/win_util.h"
@@ -225,7 +225,7 @@ gfx::Size Textfield::GetPreferredSize() {
     insets = native_wrapper_->CalculateInsets();
   return gfx::Size(font_.GetExpectedTextWidth(default_width_in_chars_) +
                        insets.width(),
-                   num_lines_ * font_.height() + insets.height());
+                   num_lines_ * font_.GetHeight() + insets.height());
 }
 
 bool Textfield::IsFocusable() const {
@@ -239,14 +239,14 @@ void Textfield::AboutToRequestFocusFromTabTraversal(bool reverse) {
 bool Textfield::SkipDefaultKeyEventProcessing(const KeyEvent& e) {
   // TODO(hamaji): Figure out which keyboard combinations we need to add here,
   //               similar to LocationBarView::SkipDefaultKeyEventProcessing.
-  base::KeyboardCode key = e.GetKeyCode();
-  if (key == base::VKEY_BACK)
+  app::KeyboardCode key = e.GetKeyCode();
+  if (key == app::VKEY_BACK)
     return true;  // We'll handle BackSpace ourselves.
 
 #if defined(OS_WIN)
   // We don't translate accelerators for ALT + NumPad digit on Windows, they are
   // used for entering special characters.  We do translate alt-home.
-  if (e.IsAltDown() && (key != base::VKEY_HOME) &&
+  if (e.IsAltDown() && (key != app::VKEY_HOME) &&
       win_util::IsNumPadDigit(key, e.IsExtendedKey()))
     return true;
 #endif
@@ -332,12 +332,12 @@ std::string Textfield::GetClassName() const {
   return kViewClassName;
 }
 
-base::KeyboardCode Textfield::Keystroke::GetKeyboardCode() const {
+app::KeyboardCode Textfield::Keystroke::GetKeyboardCode() const {
 #if defined(OS_WIN)
-  return static_cast<base::KeyboardCode>(key_);
+  return static_cast<app::KeyboardCode>(key_);
 #else
-  return static_cast<base::KeyboardCode>(
-      base::WindowsKeyCodeForGdkKeyCode(event_.keyval));
+  return static_cast<app::KeyboardCode>(
+      app::WindowsKeyCodeForGdkKeyCode(event_.keyval));
 #endif
 }
 

@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/rand_util.h"
+#include "base/string16.h"
+#include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/test/live_sync/live_bookmarks_sync_test.h"
-#include "base/rand_util.h"
 
 using std::string;
 using std::wstring;
@@ -17,6 +20,12 @@ using std::wstring;
 // Test case Naming Convention:
 // SC/MC - SingleClient / MultiClient.
 // Suffix Number - Indicates test scribe testcase ID.
+
+// TODO(brettw) this file should be converted to string16 and use
+// IntToString16 instead.
+static std::wstring IntToWStringHack(int val) {
+  return UTF8ToWide(base::IntToString(val));
+}
 
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest, Sanity) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -86,13 +95,11 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest, Sanity) {
     // Do something crazy and modify the same item from both clients!!
     const BookmarkNode* google_one = GetByUniqueURL(bm0, google_url);
     const BookmarkNode* google_two = GetByUniqueURL(bm1, google_url);
-    bm0->SetTitle(google_one, L"Google++");
-    bm1->SetTitle(google_two, L"Google--");
+    bm0->SetTitle(google_one, ASCIIToUTF16("Google++"));
+    bm1->SetTitle(google_two, ASCIIToUTF16("Google--"));
   }
 
-  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  // Make sure that client2 has pushed all of it's changes as well.
-  ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
+  ASSERT_TRUE(ProfileSyncServiceTestHarness::AwaitQuiescence(clients()));
 
   BookmarkModelVerifier::ExpectModelsMatch(bm0, bm1);
 }
@@ -117,10 +124,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   GURL initial_url("http://www.google.com");
   GURL second_url("http://www.google.com/abc");
   GURL third_url("http://www.google.com/def");
-  wstring title = L"Google";
+  string16 title = ASCIIToUTF16("Google");
   {
-    const BookmarkNode* google = v->AddURL(bm0, bm_bar0, 0,
-        title, initial_url);
+    const BookmarkNode* google =
+        v->AddURL(bm0, bm_bar0, 0, UTF16ToWideHack(title), initial_url);
     ASSERT_TRUE(google != NULL);
   }
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
@@ -134,14 +141,12 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
         BookmarkEditor::EditDetails(google_two), title, third_url);
   }
 
-  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  // Make sure that client2 has pushed all of it's changes as well.
-  ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
+  ASSERT_TRUE(ProfileSyncServiceTestHarness::AwaitQuiescence(clients()));
   BookmarkModelVerifier::ExpectModelsMatch(bm0, bm1);
 
   {
     const BookmarkNode* google_one = bm_bar0->GetChild(0);
-    bm0->SetTitle(google_one, L"Google1");
+    bm0->SetTitle(google_one, ASCIIToUTF16("Google1"));
   }
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   BookmarkModelVerifier::ExpectModelsMatch(bm0, bm1);
@@ -160,7 +165,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   v->ExpectMatch(bm1);
 
   {
-    // Let's add first bookmark folder to client1
+    // Let's add first bookmark folder to client0
     const BookmarkNode* new_folder_one =
         v->AddGroup(bm0, bm_bar0, 0, L"TestFolder");
     ASSERT_TRUE(new_folder_one != NULL);
@@ -261,9 +266,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add some GetBookmarkModel(without favicon)
   for (int index = 0; index < 20; index++) {
     wstring title(L"TestBookmark");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm =
         v->AddURL(bm0, bm_bar0, index, title, GURL(url));
@@ -271,9 +276,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   }
   for (int index = 0; index < 10; index++) {
     wstring title(L"TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm =
         v->AddURL(bm0, bm_other0, index, title, GURL(url));
@@ -286,7 +291,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
 // Test Scribe ID - 370563.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_SC_AddSeveralBMsAndFolders) {
+    SC_AddSeveralBMsAndFolders) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
@@ -302,9 +307,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // To create randomness in order, 40% of time add bookmarks
     if (random_int > 60) {
         wstring title(L"BB - TestBookmark");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         string url("http://www.nofaviconurl");
-        url.append(IntToString(index));
+        url.append(base::IntToString(index));
         url.append(".com");
         const BookmarkNode* nofavicon_bm =
             v->AddURL(bm0, bm_bar0, index, title, GURL(url));
@@ -312,7 +317,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     } else {
         // Remaining % of time - Add Bookmark folders
         wstring title(L"BB - TestBMFolder");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         const BookmarkNode* bm_folder = v->AddGroup(bm0, bm_bar0,
             index, title);
         int random_int2 = base::RandInt(1, 100);
@@ -321,9 +326,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
             for (int index = 0; index < 20; index++) {
               wstring child_title(title);
               child_title.append(L" - ChildTestBM");
-              child_title.append(IntToWString(index));
+              child_title.append(IntToWStringHack(index));
               string url("http://www.nofaviconurl");
-              url.append(IntToString(index));
+              url.append(base::IntToString(index));
               url.append(".com");
               const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
                     bm_folder, index, child_title, GURL(url));
@@ -335,9 +340,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   LOG(INFO) << "Adding several bookmarks under other bookmarks";
   for (int index = 0; index < 10; index++) {
     wstring title(L"Other - TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl-other");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm =
         v->AddURL(bm0, bm_other0, index, title, GURL(url));
@@ -376,7 +381,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
 // Test Scribe ID - 371817.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_SC_RenameBMName) {
+    SC_RenameBMName) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
@@ -488,7 +493,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
 // Test Scribe ID - 371826.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_SC_RenameBMFolderWithLongHierarchy) {
+    SC_RenameBMFolderWithLongHierarchy) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
@@ -508,9 +513,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // To create randomness in order, 85% of time add bookmarks
     if (random_int > 15) {
         wstring title(L"Test BMFolder - ChildTestBookmark");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         string url("http://www.nofaviconurl");
-        url.append(IntToString(index));
+        url.append(base::IntToString(index));
         url.append(".com");
         const BookmarkNode* nofavicon_bm =
             v->AddURL(bm0, test_bm_folder, index,
@@ -519,7 +524,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     } else {
         // Remaining % of time - Add Bookmark folders
         wstring title(L"Test BMFolder - ChildTestBMFolder");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         const BookmarkNode* bm_folder =
             v->AddGroup(bm0, test_bm_folder, index, title);
         ASSERT_TRUE(bm_folder != NULL);
@@ -556,9 +561,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add few bookmarks under bookmark_bar.
   for (int index = 1; index < 15; index++) {
     wstring title(L"TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm =
         v->AddURL(bm0, bm_bar0, index, title, GURL(url));
@@ -574,9 +579,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // To create randomness in order, 85% of time add bookmarks
     if (random_int > 15) {
         wstring title(L"Test BMFolder - ChildTestBookmark");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         string url("http://www.nofaviconurl");
-        url.append(IntToString(index));
+        url.append(base::IntToString(index));
         url.append(".com");
         const BookmarkNode* nofavicon_bm =
             v->AddURL(bm0, test_bm_folder, index,
@@ -585,7 +590,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     } else {
         // Remaining % of time - Add Bookmark folders
         wstring title(L"Test BMFolder - ChildTestBMFolder");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         const BookmarkNode* bm_folder =
             v->AddGroup(bm0, test_bm_folder, index, title);
         ASSERT_TRUE(bm_folder != NULL);
@@ -682,9 +687,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add some GetBookmarkModel(without favicon)
   for (int index = 0; index < 20; index++) {
     wstring title(L"TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm = v->AddURL(
         bm0, bm_bar0, index,
@@ -722,9 +727,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add some GetBookmarkModel(without favicon) to this folder
   for (int index = 0; index < 10; index++) {
     wstring title(L"TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm =
         v->AddURL(bm0, bm_folder_one, index, title, GURL(url));
@@ -761,9 +766,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add some GetBookmarkModel(without favicon) to this folder
   for (int index = 0; index < 10; index++) {
     wstring title(L"TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm = v->AddURL(
         bm0, bm_folder_one,
@@ -802,9 +807,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add some GetBookmarkModel(without favicon) to this folder
   for (int index = 0; index < 10; index++) {
     wstring title(L"TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm =
         v->AddURL(bm0, bm_folder_one, index, title, GURL(url));
@@ -826,7 +831,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
 // Test Scribe ID - 371857.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_SC_DelBMsUnderBMFoldEmptyFolderAfterwards) {
+    SC_DelBMsUnderBMFoldEmptyFolderAfterwards) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
@@ -841,9 +846,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add some GetBookmarkModel(without favicon) to this folder
   for (int index = 0; index < 10; index++) {
     wstring title(L"TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm =
         v->AddURL(bm0, bm_folder_one, index, title, GURL(url));
@@ -915,9 +920,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // To create randomness in order, 40% of time add bookmarks
     if (random_int > 60) {
       wstring title(L"BB - TestBookmark");
-      title.append(IntToWString(index));
+      title.append(IntToWStringHack(index));
       string url("http://www.nofaviconurl");
-      url.append(IntToString(index));
+      url.append(base::IntToString(index));
       url.append(".com");
       const BookmarkNode* nofavicon_bm = v->AddURL(bm0, bm_bar0,
           index, title, GURL(url));
@@ -925,7 +930,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     } else {
       // Remaining % of time - Add Bookmark folders
       wstring title(L"BB - TestBMFolder");
-      title.append(IntToWString(index));
+      title.append(IntToWStringHack(index));
       const BookmarkNode* bm_folder = v->AddGroup(bm0, bm_bar0,
           index, title);
       ASSERT_TRUE(bm_folder != NULL);
@@ -945,7 +950,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
 // Test Scribe ID - 371879.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_SC_DelBMFoldWithBMsNonEmptyAccountAfterwards) {
+    SC_DelBMFoldWithBMsNonEmptyAccountAfterwards) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
@@ -970,9 +975,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // To create randomness in order, 40% of time add bookmarks
     if (random_int > 60) {
         wstring title(L"BB - TestBookmark");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         string url("http://www.nofaviconurl");
-        url.append(IntToString(index));
+        url.append(base::IntToString(index));
         url.append(".com");
         const BookmarkNode* nofavicon_bm = v->AddURL(bm0, bm_bar0,
             index, title, GURL(url));
@@ -980,7 +985,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     } else {
         // Remaining % of time - Add Bookmark folders
         wstring title(L"BB - TestBMFolder");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         const BookmarkNode* bm_folder = v->AddGroup(bm0, bm_bar0,
             index, title);
         ASSERT_TRUE(bm_folder != NULL);
@@ -990,30 +995,27 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add some bookmarks(without favicon) to bm_folder_one ('TestFolder')
   for (int index = 0; index < 15; index++) {
     wstring title(L"Level2 - TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
         bm_folder_one, index, title, GURL(url));
     ASSERT_TRUE(nofavicon_bm != NULL);
   }
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  v->ExpectMatch(bm0);
-  v->ExpectMatch(bm1);
+  BookmarkModelVerifier::ExpectModelsMatch(bm0, bm1);
 
   // Let's delete the bookmark folder (bm_folder_one)
   v->Remove(bm0, bm_bar0, 1);
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  v->ExpectMatch(bm0);
-  v->ExpectMatch(bm1);
+  BookmarkModelVerifier::ExpectModelsMatch(bm0, bm1);
 }
-
 
 // Test Scribe ID - 371880.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_SC_DelBMFoldWithBMsAndBMFoldsNonEmptyACAfterwards) {
+    SC_DelBMFoldWithBMsAndBMFoldsNonEmptyACAfterwards) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
@@ -1037,9 +1039,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // To create randomness in order, 40% of time add bookmarks
     if (random_int > 60) {
         wstring title(L"BB - TestBookmark");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         string url("http://www.nofaviconurl");
-        url.append(IntToString(index));
+        url.append(base::IntToString(index));
         url.append(".com");
         const BookmarkNode* nofavicon_bm = v->AddURL(bm0, bm_bar0,
             index, title, GURL(url));
@@ -1047,7 +1049,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     } else {
         // Remaining % of time - Add Bookmark folders
         wstring title(L"BB - TestBMFolder");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         const BookmarkNode* bm_folder = v->AddGroup(bm0, bm_bar0,
             index, title);
         ASSERT_TRUE(bm_folder != NULL);
@@ -1061,9 +1063,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // To create randomness in order, 40% of time add bookmarks
     if (random_int > 60) {
       wstring title(L"Level2 - TestBookmark");
-      title.append(IntToWString(index));
+      title.append(IntToWStringHack(index));
       string url("http://www.nofaviconurl");
-      url.append(IntToString(index));
+      url.append(base::IntToString(index));
       url.append(".com");
       const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
           bm_folder_one, index, title, GURL(url));
@@ -1071,7 +1073,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     } else {
         // Remaining % of time - Add Bookmark folders
         wstring title(L"Level2 - TestBMFolder");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         const BookmarkNode* l2_bm_folder = v->AddGroup(bm0,
             bm_folder_one, index, title);
         int random_int2 = base::RandInt(1, 100);
@@ -1083,9 +1085,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
             // To create randomness in order, 40% of time add bookmarks
             if (random_int3 > 60) {
               wstring title(L"Level3 - TestBookmark");
-              title.append(IntToWString(index));
+              title.append(IntToWStringHack(index));
               string url("http://www.nofaviconurl");
-              url.append(IntToString(index));
+              url.append(base::IntToString(index));
               url.append(".com");
               const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
                   l2_bm_folder, index2, title, GURL(url));
@@ -1093,7 +1095,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
             } else {
                 // Remaining % of time - Add Bookmark folders
                 wstring title(L"Level3 - TestBMFolder");
-                title.append(IntToWString(index));
+                title.append(IntToWStringHack(index));
                 const BookmarkNode* l3_bm_folder =
                     v->AddGroup(bm0, l2_bm_folder, index2, title);
                 ASSERT_TRUE(l3_bm_folder != NULL);
@@ -1103,21 +1105,18 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
      }
     }
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  v->ExpectMatch(bm0);
-  v->ExpectMatch(bm1);
+  BookmarkModelVerifier::ExpectModelsMatch(bm0, bm1);
 
   // Let's delete the bookmark folder (bm_folder_one)
   v->Remove(bm0, bm_bar0, 1);
 
-
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  v->ExpectMatch(bm0);
-  v->ExpectMatch(bm1);
+  BookmarkModelVerifier::ExpectModelsMatch(bm0, bm1);
 }
 
 // Test Scribe ID - 371882.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_SC_DelBMFoldWithParentAndChildrenBMsAndBMFolds) {
+    SC_DelBMFoldWithParentAndChildrenBMsAndBMFolds) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
@@ -1134,9 +1133,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add few bookmarks under bookmark_bar.
   for (int index = 1; index < 11; index++) {
     wstring title(L"TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm =
         v->AddURL(bm0, bm_bar0, index, title, GURL(url));
@@ -1152,9 +1151,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // To create randomness in order, 80% of time add bookmarks
     if (random_int > 20) {
         wstring title(L"Test BMFolder - ChildTestBookmark");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         string url("http://www.nofaviconurl");
-        url.append(IntToString(index));
+        url.append(base::IntToString(index));
         url.append(".com");
         const BookmarkNode* nofavicon_bm =
             v->AddURL(bm0, test_bm_folder, index, title,
@@ -1163,7 +1162,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     } else {
         // Remaining % of time - Add Bookmark folders
         wstring title(L"Test BMFolder - ChildTestBMFolder");
-        title.append(IntToWString(index));
+        title.append(IntToWStringHack(index));
         const BookmarkNode* bm_folder =
             v->AddGroup(bm0, test_bm_folder, index, title);
         ASSERT_TRUE(bm_folder != NULL);
@@ -1171,16 +1170,14 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   }
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  v->ExpectMatch(bm0);
-  v->ExpectMatch(bm1);
+  BookmarkModelVerifier::ExpectModelsMatch(bm0, bm1);
 
   // Let's delete test_bm_folder
   v->Remove(bm0, parent_bm_folder, 0);
-  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  v->ExpectMatch(bm0);
-  v->ExpectMatch(bm1);
-}
 
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  BookmarkModelVerifier::ExpectModelsMatch(bm0, bm1);
+}
 
 // Test Scribe ID - 371931.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
@@ -1229,9 +1226,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add 10 bookmarks like 0123456789
   for (int index = 0; index < 10; index++) {
     wstring title(L"BM-");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl-");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
         bm_bar0, index, title, GURL(url));
@@ -1272,9 +1269,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add some GetBookmarkModel(without favicon) to bookmark bar
   for (int index = 2; index < 10; index++) {
     wstring title(L"BB - TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm = v->AddURL(bm0, bm_bar0,
         index, title, GURL(url));
@@ -1297,7 +1294,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
 // Test Scribe ID - 371957.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_SC_MovingBMsFromBMFoldToBMBar) {
+    SC_MovingBMsFromBMFoldToBMBar) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
@@ -1317,9 +1314,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add some GetBookmarkModel(without favicon) to bm_folder_one
   for (int index = 0; index < 10; index++) {
     wstring title(L"BB - TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
         bm_folder_one, index, title, GURL(url));
@@ -1370,9 +1367,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add few bookmarks under child_folder.
   for (int index = 0; index < 10; index++) {
     wstring title(L"TestBookmark");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm =
         v->AddURL(bm0, child_folder, index, title, GURL(url));
@@ -1463,7 +1460,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
 // Test Scribe ID - 371967.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_SC_HoistBMs10LevelUp) {
+    SC_HoistBMs10LevelUp) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
@@ -1479,18 +1476,18 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // Let's add some GetBookmarkModel(without favicon) to bm_folder.
     int child_count = base::RandInt(0, 10);
     for (int index = 0; index < child_count; index++) {
-      wstring title(bm_folder->GetTitle());
+      wstring title(UTF16ToWideHack(bm_folder->GetTitle()));
       title.append(L"-BM");
       string url("http://www.nofaviconurl-");
-      title.append(IntToWString(index));
-      url.append(IntToString(index));
+      title.append(IntToWStringHack(index));
+      url.append(base::IntToString(index));
       url.append(".com");
       const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
           bm_folder, index, title, GURL(url));
       ASSERT_TRUE(nofavicon_bm != NULL);
     }
     wstring title(L"Test BMFolder-");
-    title.append(IntToWString(level));
+    title.append(IntToWStringHack(level));
 
     bm_folder = v->AddGroup(bm0,
         bm_folder, bm_folder->GetChildCount(), title);
@@ -1547,18 +1544,18 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // Let's add some GetBookmarkModel(without favicon) to bm_folder.
     int child_count = base::RandInt(0, 10);
     for (int index = 0; index < child_count; index++) {
-      wstring title(bm_folder->GetTitle());
+      wstring title(UTF16ToWideHack(bm_folder->GetTitle()));
       title.append(L"-BM");
       string url("http://www.nofaviconurl-");
-      title.append(IntToWString(index));
-      url.append(IntToString(index));
+      title.append(IntToWStringHack(index));
+      url.append(base::IntToString(index));
       url.append(".com");
       const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
           bm_folder, index, title, GURL(url));
       ASSERT_TRUE(nofavicon_bm != NULL);
     }
     wstring title(L"Test BMFolder-");
-    title.append(IntToWString(level));
+    title.append(IntToWStringHack(level));
 
     bm_folder = v->AddGroup(bm0,
         bm_folder, bm_folder->GetChildCount(), title);
@@ -1602,7 +1599,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
 // Test Scribe ID - 371980.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_SC_SinkEmptyBMFold5LevelsDown) {
+    SC_SinkEmptyBMFold5LevelsDown) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
@@ -1618,18 +1615,18 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // Let's add some GetBookmarkModel(without favicon) to bm_folder.
     int child_count = base::RandInt(0, 10);
     for (int index = 0; index < child_count; index++) {
-      wstring title(bm_folder->GetTitle());
+      wstring title(UTF16ToWideHack(bm_folder->GetTitle()));
       title.append(L"-BM");
       string url("http://www.nofaviconurl-");
-      title.append(IntToWString(index));
-      url.append(IntToString(index));
+      title.append(IntToWStringHack(index));
+      url.append(base::IntToString(index));
       url.append(".com");
       const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
           bm_folder, index, title, GURL(url));
       ASSERT_TRUE(nofavicon_bm != NULL);
     }
     wstring title(L"Test BMFolder-");
-    title.append(IntToWString(level));
+    title.append(IntToWStringHack(level));
 
     bm_folder = v->AddGroup(bm0,
         bm_folder, bm_folder->GetChildCount(), title);
@@ -1657,7 +1654,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
 // Test Scribe ID - 371997.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_SC_SinkNonEmptyBMFold5LevelsDown) {
+    SC_SinkNonEmptyBMFold5LevelsDown) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
@@ -1673,18 +1670,18 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // Let's add some bookmarks (without favicon) to bm_folder.
     int child_count = base::RandInt(0, 10);
     for (int index = 0; index < child_count; index++) {
-      wstring title(bm_folder->GetTitle());
+      wstring title(UTF16ToWideHack(bm_folder->GetTitle()));
       title.append(L"-BM");
       string url("http://www.nofaviconurl-");
-      title.append(IntToWString(index));
-      url.append(IntToString(index));
+      title.append(IntToWStringHack(index));
+      url.append(base::IntToString(index));
       url.append(".com");
       const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
           bm_folder, index, title, GURL(url));
       ASSERT_TRUE(nofavicon_bm != NULL);
     }
     wstring title(L"Test BMFolder-");
-    title.append(IntToWString(level));
+    title.append(IntToWStringHack(level));
 
     bm_folder = v->AddGroup(bm0,
         bm_folder, bm_folder->GetChildCount(), title);
@@ -1697,11 +1694,11 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
       bm_bar0, bm_bar0->GetChildCount(), L"MyTest BMFolder");
   // Let's add few bookmarks to my_bm_folder.
   for (int index = 0; index < 10; index++) {
-    wstring title(bm_folder->GetTitle());
+    wstring title(UTF16ToWideHack(bm_folder->GetTitle()));
     title.append(L"-BM");
     string url("http://www.nofaviconurl-");
-    title.append(IntToWString(index));
-    url.append(IntToString(index));
+    title.append(IntToWStringHack(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
         my_bm_folder, index, title, GURL(url));
@@ -1740,18 +1737,18 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
     // Let's add some GetBookmarkModel(without favicon) to bm_folder.
     int child_count = base::RandInt(0, 10);
     for (int index = 0; index < child_count; index++) {
-      wstring title(bm_folder->GetTitle());
+      wstring title(UTF16ToWideHack(bm_folder->GetTitle()));
       title.append(L"-BM");
       string url("http://www.nofaviconurl-");
-      title.append(IntToWString(index));
-      url.append(IntToString(index));
+      title.append(IntToWStringHack(index));
+      url.append(base::IntToString(index));
       url.append(".com");
       const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
           bm_folder, index, title, GURL(url));
       ASSERT_TRUE(nofavicon_bm != NULL);
     }
     wstring title(L"Test BMFolder-");
-    title.append(IntToWString(level));
+    title.append(IntToWStringHack(level));
 
     bm_folder = v->AddGroup(bm0,
         bm_folder, bm_folder->GetChildCount(), title);
@@ -1764,11 +1761,11 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
       bm_folder_L5, bm_folder_L5->GetChildCount(), L"MyTest BMFolder");
   // Let's add few bookmarks to my_bm_folder.
   for (int index = 0; index < 10; index++) {
-    wstring title(bm_folder->GetTitle());
+    wstring title(UTF16ToWideHack(bm_folder->GetTitle()));
     title.append(L"-BM");
     string url("http://www.nofaviconurl-");
-    title.append(IntToWString(index));
-    url.append(IntToString(index));
+    title.append(IntToWStringHack(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm = v->AddURL(bm0,
         my_bm_folder, index, title, GURL(url));
@@ -1823,7 +1820,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
 // Test Scribe ID - 372028.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_SC_ReverseTheOrderOfTenBMFolders) {
+    SC_ReverseTheOrderOfTenBMFolders) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
@@ -1835,7 +1832,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add 10 non-empty bookmark folders like 0123456789
   for (int index = 0; index < 10; index++) {
     wstring title(L"BM Folder");
-    title.append(IntToWString(index));
+    title.append(IntToWStringHack(index));
     const BookmarkNode* child_bm_folder = v->AddNonEmptyGroup(
         bm0, bm_bar0, index, title, 10);
     ASSERT_TRUE(child_bm_folder != NULL);
@@ -1867,45 +1864,39 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   // Let's add 2 bookmarks (without favicon) on each client.
   {
     const BookmarkNode* bm_foo1 = bm0->AddURL(
-        bm_bar0, 0, L"Foo1", GURL("http://www.foo1.com"));
+        bm_bar0, 0, ASCIIToUTF16("Foo1"), GURL("http://www.foo1.com"));
     ASSERT_TRUE(bm_foo1 != NULL);
     const BookmarkNode* bm_foo3 = bm1->AddURL(
-        bm_bar1, 0, L"Foo3", GURL("http://www.foo3.com"));
+        bm_bar1, 0, ASCIIToUTF16("Foo3"), GURL("http://www.foo3.com"));
     ASSERT_TRUE(bm_foo3 != NULL);
 
     const BookmarkNode* bm_foo2 = bm0->AddURL(
-        bm_bar0, 1, L"Foo2", GURL("http://www.foo2.com"));
+        bm_bar0, 1, ASCIIToUTF16("Foo2"), GURL("http://www.foo2.com"));
     ASSERT_TRUE(bm_foo2 != NULL);
     const BookmarkNode* bm_foo4 = bm1->AddURL(
-        bm_bar1, 1, L"Foo4", GURL("http://www.foo4.com"));
+        bm_bar1, 1, ASCIIToUTF16("Foo4"), GURL("http://www.foo4.com"));
     ASSERT_TRUE(bm_foo4 != NULL);
   }
 
-
-  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  // Make sure that client2 has pushed all of it's changes as well.
-  ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
+  ASSERT_TRUE(ProfileSyncServiceTestHarness::AwaitQuiescence(clients()));
   BookmarkModelVerifier::ExpectModelsMatch(bm0, bm1);
 }
 
 // Test Scribe ID - 373506.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_MC_BootStrapEmptyStateEverywhere) {
+    MC_BootStrapEmptyStateEverywhere) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   BookmarkModelVerifier* v = verifier_helper();
   BookmarkModel* bm0 = GetBookmarkModel(0);
   BookmarkModel* bm1 = GetBookmarkModel(1);
-
-  // Wait for changes to propagate.
-  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  // Let's compare and make sure both bookmark models are same after sync.
+  ASSERT_TRUE(ProfileSyncServiceTestHarness::AwaitQuiescence(clients()));
   v->ExpectMatch(bm0);
   v->ExpectMatch(bm1);
 }
 
 // Test Scribe ID - 373508.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_MC_SimpleMergeOfDifferentBMModels) {
+    MC_SimpleMergeOfDifferentBMModels) {
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
   BookmarkModel* bm0 = GetBookmarkModel(0);
   BookmarkModel* bm1 = GetBookmarkModel(1);
@@ -1915,10 +1906,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
   // Let's add same bookmarks (without favicon) to both clients.
   for (int index = 0; index < 3; index++) {
-    wstring title(L"TestBookmark");
-    title.append(IntToWString(index));
+    string16 title(ASCIIToUTF16("TestBookmark"));
+    title.append(base::IntToString16(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm_client0 =
         bm0->AddURL(bm_bar0, index, title, GURL(url));
@@ -1930,10 +1921,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
   // Let's add some different bookmarks (without favicon) to client1.
   for (int index = 3; index < 11 ; index++) {
-    wstring title(L"Client1-TestBookmark");
-    title.append(IntToWString(index));
+    string16 title(ASCIIToUTF16("Client1-TestBookmark"));
+    title.append(base::IntToString16(index));
     string url("http://www.client1-nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm_client0 =
         bm0->AddURL(bm_bar0, index, title, GURL(url));
@@ -1942,10 +1933,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
    // Let's add some different bookmarks (without favicon) to client2.
   for (int index = 3; index < 11 ; index++) {
-    wstring title(L"Client2-TestBookmark");
-    title.append(IntToWString(index));
+    string16 title(ASCIIToUTF16("Client2-TestBookmark"));
+    title.append(base::IntToString16(index));
     string url("http://www.Client2-nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm_client1 =
         bm1->AddURL(bm_bar1, index, title, GURL(url));
@@ -1956,7 +1947,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   // Wait for changes to propagate.
-  ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
+  ASSERT_TRUE(ProfileSyncServiceTestHarness::AwaitQuiescence(clients()));
   // Let's make sure there aren't any duplicates after sync.
   BookmarkModelVerifier::VerifyNoDuplicates(bm0);
   // Let's compare and make sure both bookmark models are same after sync.
@@ -1966,7 +1957,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
 // Test Scribe ID - 386586.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_MC_MergeSimpleBMHierarchyUnderBMBar) {
+    MC_MergeSimpleBMHierarchyUnderBMBar) {
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
   BookmarkModel* bm0 = GetBookmarkModel(0);
   BookmarkModel* bm1 = GetBookmarkModel(1);
@@ -1977,10 +1968,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
   // Let's add same bookmarks (without favicon) to both clients.
   for (int index = 0; index < 3 ; index++) {
-    wstring title(L"TestBookmark");
-    title.append(IntToWString(index));
+    string16 title(ASCIIToUTF16("TestBookmark"));
+    title.append(base::IntToString16(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm_client0 =
         bm0->AddURL(bm_bar0, index, title, GURL(url));
@@ -1992,10 +1983,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
   // Let's add some different bookmarks (without favicon) to client2.
   for (int index = 3; index < 5 ; index++) {
-    wstring title(L"Client2-TestBookmark");
-    title.append(IntToWString(index));
+    string16 title(ASCIIToUTF16("Client2-TestBookmark"));
+    title.append(base::IntToString16(index));
     string url("http://www.client2-nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm_client1 =
         bm1->AddURL(bm_bar1, index, title, GURL(url));
@@ -2006,7 +1997,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   // Wait for changes to propagate.
-  ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
+  ASSERT_TRUE(ProfileSyncServiceTestHarness::AwaitQuiescence(clients()));
   // Let's make sure there aren't any duplicates after sync.
   BookmarkModelVerifier::VerifyNoDuplicates(bm0);
   // Let's compare and make sure both bookmark models are same after sync.
@@ -2016,7 +2007,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
 // Test Scribe ID - 386589.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
-    FAILS_MC_MergeSimpleBMHierarchyEqualSetsUnderBMBar) {
+    MC_MergeSimpleBMHierarchyEqualSetsUnderBMBar) {
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
   BookmarkModel* bm0 = GetBookmarkModel(0);
   BookmarkModel* bm1 = GetBookmarkModel(1);
@@ -2027,10 +2018,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
 
   // Let's add same bookmarks (without favicon) to both clients.
   for (int index = 0; index < 3 ; index++) {
-    wstring title(L"TestBookmark");
-    title.append(IntToWString(index));
+    string16 title(ASCIIToUTF16("TestBookmark"));
+    title.append(base::IntToString16(index));
     string url("http://www.nofaviconurl");
-    url.append(IntToString(index));
+    url.append(base::IntToString(index));
     url.append(".com");
     const BookmarkNode* nofavicon_bm_client0 =
         bm0->AddURL(bm_bar0, index, title, GURL(url));
@@ -2044,7 +2035,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveBookmarksSyncTest,
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   // Wait for changes to propagate.
-  ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
+  ASSERT_TRUE(ProfileSyncServiceTestHarness::AwaitQuiescence(clients()));
   // Let's make sure there aren't any duplicates after sync.
   BookmarkModelVerifier::VerifyNoDuplicates(bm0);
   // Let's compare and make sure both bookmark models are same after sync.

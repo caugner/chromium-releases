@@ -4,6 +4,8 @@
 
 #include "net/base/x509_cert_types.h"
 
+#include <ostream>
+
 #include "net/base/x509_certificate.h"
 #include "base/logging.h"
 
@@ -45,6 +47,17 @@ bool CertPrincipal::Matches(const CertPrincipal& against) const {
       match(organization_names, against.organization_names) &&
       match(organization_unit_names, against.organization_unit_names) &&
       match(domain_components, against.domain_components);
+}
+
+std::string CertPrincipal::GetDisplayName() const {
+  if (!common_name.empty())
+    return common_name;
+  if (!organization_names.empty())
+    return organization_names[0];
+  if (!organization_unit_names.empty())
+    return organization_unit_names[0];
+
+  return std::string();
 }
 
 std::ostream& operator<<(std::ostream& s, const CertPrincipal& p) {

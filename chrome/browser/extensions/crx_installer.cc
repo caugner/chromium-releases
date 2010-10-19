@@ -11,9 +11,11 @@
 #include "base/scoped_temp_dir.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
+#include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/convert_user_script.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/shell_integration.h"
@@ -23,9 +25,9 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
-#include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace {
@@ -143,7 +145,7 @@ void CrxInstaller::OnUnpackSuccess(const FilePath& temp_dir,
     return;
   }
 
-  // The unpack dir we don't have to delete explicity since it is a child of
+  // We don't have to delete the unpack dir explicity since it is a child of
   // the temp dir.
   unpacked_extension_root_ = extension_dir;
 
@@ -197,6 +199,12 @@ void CrxInstaller::ConfirmInstall() {
     LOG(INFO) << "This extension: " << extension_->id()
       << " is blacklisted. Install failed.";
     ReportFailureFromUIThread("This extension is blacklisted.");
+    return;
+  }
+
+  if (!frontend_->extension_prefs()->IsExtensionAllowedByPolicy(
+      extension_->id())) {
+    ReportFailureFromUIThread("This extension is blacklisted by admin policy.");
     return;
   }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@ typedef HANDLE MutexHandle;
 
 #if defined(OS_POSIX)
 #include <errno.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -49,7 +50,6 @@ typedef pthread_mutex_t* MutexHandle;
 #endif
 #include "base/process_util.h"
 #include "base/string_piece.h"
-#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 
 namespace logging {
@@ -82,10 +82,8 @@ const int kAlwaysPrintErrorLevel = LOG_ERROR;
 // will be lazily initialized to the default value when it is
 // first needed.
 #if defined(OS_WIN)
-typedef wchar_t PathChar;
 typedef std::wstring PathString;
 #else
-typedef char PathChar;
 typedef std::string PathString;
 #endif
 PathString* log_file_name = NULL;
@@ -98,6 +96,9 @@ bool log_process_id = false;
 bool log_thread_id = false;
 bool log_timestamp = true;
 bool log_tickcount = false;
+
+// Should we pop up fatal debug messages in a dialog?
+bool show_error_dialogs = false;
 
 // An assert handler override specified by the client to be called instead of
 // the debug message dialog and process termination.
@@ -245,8 +246,10 @@ void InitLogMutex() {
 #endif
 }
 
-void InitLogging(const PathChar* new_log_file, LoggingDestination logging_dest,
-                 LogLockingState lock_log, OldFileDeletionState delete_old) {
+void BaseInitLoggingImpl(const PathChar* new_log_file,
+                         LoggingDestination logging_dest,
+                         LogLockingState lock_log,
+                         OldFileDeletionState delete_old) {
   g_enable_dcheck =
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableDCHECK);
 
@@ -306,6 +309,10 @@ void SetLogItems(bool enable_process_id, bool enable_thread_id,
   log_tickcount = enable_tickcount;
 }
 
+void SetShowErrorDialogs(bool enable_dialogs) {
+  show_error_dialogs = enable_dialogs;
+}
+
 void SetLogAssertHandler(LogAssertHandlerFunction handler) {
   log_assert_handler = handler;
 }
@@ -323,6 +330,9 @@ void SetLogMessageHandler(LogMessageHandlerFunction handler) {
 // Used for fatal messages, where we close the app simultaneously.
 void DisplayDebugMessageInDialog(const std::string& str) {
   if (str.empty())
+    return;
+
+  if (!show_error_dialogs)
     return;
 
 #if defined(OS_WIN)
@@ -358,7 +368,7 @@ void DisplayDebugMessageInDialog(const std::string& str) {
     MessageBoxW(NULL, &cmdline[0], L"Fatal error",
                 MB_OK | MB_ICONHAND | MB_TOPMOST);
   }
-#elif defined(USE_X11)
+#elif defined(USE_X11) && !defined(OS_CHROMEOS)
   // Shell out to xmessage, which behaves like debug_message.exe, but is
   // way more retro.  We could use zenity/kdialog but then we're starting
   // to get into needing to check the desktop env and this dialog should

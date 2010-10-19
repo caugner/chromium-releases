@@ -4,6 +4,7 @@
 
 #ifndef CHROME_TEST_UI_UI_TEST_H_
 #define CHROME_TEST_UI_UI_TEST_H_
+#pragma once
 
 // This file provides a common base for running UI unit tests, which operate
 // the entire browser application in a separate process for holistic
@@ -36,6 +37,7 @@ class BrowserProxy;
 class DictionaryValue;
 class FilePath;
 class GURL;
+class ScopedTempDir;
 class TabProxy;
 
 // Base class for UI Tests. This implements the core of the functions.
@@ -232,56 +234,6 @@ class UITestBase {
   // after the browser process has terminated.
   bool CloseBrowser(BrowserProxy* browser, bool* application_closed) const;
 
-  // Prints numerical information to stdout in a controlled format, for
-  // post-processing. |measurement| is a description of the quantity being
-  // measured, e.g. "vm_peak"; |modifier| is provided as a convenience and
-  // will be appended directly to the name of the |measurement|, e.g.
-  // "_browser"; |trace| is a description of the particular data point, e.g.
-  // "reference"; |value| is the measured value; and |units| is a description
-  // of the units of measure, e.g. "bytes". If |important| is true, the output
-  // line will be specially marked, to notify the post-processor. The strings
-  // may be empty.  They should not contain any colons (:) or equals signs (=).
-  // A typical post-processing step would be to produce graphs of the data
-  // produced for various builds, using the combined |measurement| + |modifier|
-  // string to specify a particular graph and the |trace| to identify a trace
-  // (i.e., data series) on that graph.
-  void PrintResult(const std::string& measurement,
-                   const std::string& modifier,
-                   const std::string& trace,
-                   size_t value,
-                   const std::string& units,
-                   bool important);
-
-  // Like the above version of PrintResult(), but takes a std::string value
-  // instead of a size_t.
-  void PrintResult(const std::string& measurement,
-                   const std::string& modifier,
-                   const std::string& trace,
-                   const std::string& value,
-                   const std::string& units,
-                   bool important);
-
-  // Like PrintResult(), but prints a (mean, standard deviation) result pair.
-  // The |<values>| should be two comma-seaprated numbers, the mean and
-  // standard deviation (or other error metric) of the measurement.
-  void PrintResultMeanAndError(const std::string& measurement,
-                               const std::string& modifier,
-                               const std::string& trace,
-                               const std::string& mean_and_error,
-                               const std::string& units,
-                               bool important);
-
-  // Like PrintResult(), but prints an entire list of results. The |values|
-  // will generally be a list of comma-separated numbers. A typical
-  // post-processing step might produce plots of their mean and standard
-  // deviation.
-  void PrintResultList(const std::string& measurement,
-                       const std::string& modifier,
-                       const std::string& trace,
-                       const std::string& values,
-                       const std::string& units,
-                       bool important);
-
   // Gets the directory for the currently active profile in the browser.
   FilePath GetDownloadDirectory();
 
@@ -360,13 +312,13 @@ class UITestBase {
     timeout_ms_ = value;
   }
 
-  static std::wstring js_flags() { return js_flags_; }
-  static void set_js_flags(const std::wstring& value) {
+  static const std::string& js_flags() { return js_flags_; }
+  static void set_js_flags(const std::string& value) {
     js_flags_ = value;
   }
 
-  static std::wstring log_level() { return log_level_; }
-  static void set_log_level(const std::wstring& value) {
+  static const std::string& log_level() { return log_level_; }
+  static void set_log_level(const std::string& value) {
     log_level_ = value;
   }
 
@@ -398,14 +350,16 @@ class UITestBase {
 
   // Return the user data directory being used by the browser instance in
   // UITest::SetUp().
-  FilePath user_data_dir() const { return user_data_dir_; }
+  FilePath user_data_dir() const;
 
   // Return the process id of the browser process (-1 on error).
   base::ProcessId browser_process_id() const { return process_id_; }
 
   // Timeout accessors.
-  void set_command_execution_timeout_ms(int timeout) {
-    command_execution_timeout_ms_ = timeout;
+  void set_command_execution_timeout_ms(int timeout);
+
+  int command_execution_timeout_ms() const {
+    return command_execution_timeout_ms_;
   }
 
   int action_timeout_ms() const { return action_timeout_ms_; }
@@ -418,9 +372,7 @@ class UITestBase {
 
   int sleep_timeout_ms() const { return sleep_timeout_ms_; }
 
-  std::wstring ui_test_name() const { return ui_test_name_; }
-
-  void set_ui_test_name(const std::wstring& name) {
+  void set_ui_test_name(const std::string& name) {
     ui_test_name_ = name;
   }
 
@@ -437,7 +389,7 @@ class UITestBase {
 
   // Sets homepage_. Should be called before launching browser to have
   // any effect.
-  void set_homepage(const std::wstring& homepage) {
+  void set_homepage(const std::string& homepage) {
     homepage_ = homepage;
   }
 
@@ -485,23 +437,9 @@ class UITestBase {
   void StartHttpServer(const FilePath& root_directory);
 
   // Launches local http server on the specified port.
-  void StartHttpServerWithPort(const FilePath& root_directory,
-                               const std::wstring& port);
+  void StartHttpServerWithPort(const FilePath& root_directory, int port);
+
   void StopHttpServer();
-
-  // Prints IO performance data for use by perf graphs.
-  void PrintIOPerfInfo(const char* test_name);
-
-  // Prints memory usage data for use by perf graphs.
-  void PrintMemoryUsageInfo(const char* test_name);
-
-  // Prints memory commit charge stats for use by perf graphs.
-  void PrintSystemCommitCharge(const char* test_name,
-                               size_t charge,
-                               bool important);
-
-  // Configures the test to use the reference build.
-  void UseReferenceBuild();
 
   // Use Chromium binaries from the given directory.
   void SetBrowserDirectory(const FilePath& dir);
@@ -510,16 +448,6 @@ class UITestBase {
   // Check that no processes related to Chrome exist, displaying
   // the given message if any do.
   void AssertAppNotRunning(const std::wstring& error_message);
-
-  // Common functionality for the public PrintResults methods.
-  void PrintResultsImpl(const std::string& measurement,
-                        const std::string& modifier,
-                        const std::string& trace,
-                        const std::string& values,
-                        const std::string& prefix,
-                        const std::string& suffix,
-                        const std::string& units,
-                        bool important);
 
  protected:
   AutomationProxy* automation() {
@@ -555,7 +483,7 @@ class UITestBase {
                                         // the run (generally 0).
   int expected_crashes_;                // The number of crashes expected during
                                         // the run (generally 0).
-  std::wstring homepage_;               // Homepage used for testing.
+  std::string homepage_;                // Homepage used for testing.
   bool wait_for_initial_loads_;         // Wait for initial loads to complete
                                         // in SetUp() before running test body.
   base::TimeTicks browser_launch_time_; // Time when the browser was run.
@@ -565,7 +493,6 @@ class UITestBase {
   FilePath template_user_data_;         // See set_template_user_data().
   base::ProcessHandle process_;         // Handle to the first Chrome process.
   base::ProcessId process_id_;          // PID of |process_| (for debugging).
-  FilePath user_data_dir_;              // User data directory used for the test
   static bool in_process_renderer_;     // true if we're in single process mode
   bool show_window_;                    // Determines if the window is shown or
                                         // hidden. Defaults to hidden.
@@ -606,8 +533,8 @@ class UITestBase {
   static bool disable_breakpad_;        // Disable breakpad on the browser.
   static int timeout_ms_;               // Timeout in milliseconds to wait
                                         // for an test to finish.
-  static std::wstring js_flags_;        // Flags passed to the JS engine.
-  static std::wstring log_level_;       // Logging level.
+  static std::string js_flags_;         // Flags passed to the JS engine.
+  static std::string log_level_;        // Logging level.
 
   scoped_ptr<AutomationProxy> server_;
 
@@ -617,7 +544,11 @@ class UITestBase {
   int sleep_timeout_ms_;
   int terminate_timeout_ms_;
 
-  std::wstring ui_test_name_;
+  std::string ui_test_name_;
+
+  // We use a temporary directory for profile to avoid issues with being
+  // unable to delete some files because they're in use, etc.
+  scoped_ptr<ScopedTempDir> temp_profile_dir_;
 };
 
 class UITest : public UITestBase, public PlatformTest {
@@ -628,6 +559,8 @@ class UITest : public UITestBase, public PlatformTest {
   }
   virtual void SetUp();
   virtual void TearDown();
+
+  virtual AutomationProxy* CreateAutomationProxy(int execution_timeout);
 
  private:
   MessageLoop message_loop_;  // Enables PostTask to main thread.

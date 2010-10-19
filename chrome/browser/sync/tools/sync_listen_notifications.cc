@@ -20,6 +20,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "jingle/notifier/base/chrome_async_socket.h"
 #include "jingle/notifier/base/task_pump.h"
+#include "jingle/notifier/base/xmpp_client_socket_factory.h"
 #include "jingle/notifier/communicator/xmpp_socket_adapter.h"
 #include "jingle/notifier/listener/listen_task.h"
 #include "jingle/notifier/listener/notification_constants.h"
@@ -97,11 +98,15 @@ class XmppNotificationClient : public sigslot::has_slots<> {
         this, &XmppNotificationClient::OnXmppClientStateChange);
 
     net::SSLConfig ssl_config;
+    bool use_fake_ssl_client_socket =
+        (xmpp_client_settings.protocol() == cricket::PROTO_SSLTCP);
     buzz::AsyncSocket* buzz_async_socket =
         use_chrome_async_socket ?
         static_cast<buzz::AsyncSocket*>(
             new notifier::ChromeAsyncSocket(
-                net::ClientSocketFactory::GetDefaultFactory(),
+                new notifier::XmppClientSocketFactory(
+                    net::ClientSocketFactory::GetDefaultFactory(),
+                    use_fake_ssl_client_socket),
                 ssl_config, 4096, 64 * 1024, NULL)) :
         static_cast<buzz::AsyncSocket*>(
             new notifier::XmppSocketAdapter(xmpp_client_settings_, false));
@@ -209,7 +214,15 @@ class ChromeInvalidationListener
   ChromeInvalidationListener() {}
 
   virtual void OnInvalidate(syncable::ModelType model_type) {
-    LOG(INFO) << "Invalidate: " << syncable::ModelTypeToString(model_type);
+    // TODO(akalin): This is a hack to make new sync data types work
+    // with server-issued notifications.  Remove this when it's not
+    // needed anymore.
+    if (model_type == syncable::UNSPECIFIED) {
+      LOG(INFO) << "OnInvalidate: UNKNOWN";
+    } else {
+      LOG(INFO) << "OnInvalidate: "
+                << syncable::ModelTypeToString(model_type);
+    }
     // A real implementation would respond to the invalidation.
   }
 

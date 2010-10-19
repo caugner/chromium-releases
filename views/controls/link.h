@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_CONTROLS_LINK_H_
 #define VIEWS_CONTROLS_LINK_H_
+#pragma once
 
 #include <string>
 
@@ -22,6 +23,9 @@ class Link;
 class LinkController {
  public:
   virtual void LinkActivated(Link* source, int event_flags) = 0;
+
+ protected:
+  virtual ~LinkController() {}
 };
 
 ////////////////////////////////////////////////////////////////////////////////

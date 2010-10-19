@@ -4,6 +4,7 @@
 
 #ifndef CHROME_RENDERER_WEBGRAPHICSCONTEXT3D_COMMAND_BUFFER_IMPL_H_
 #define CHROME_RENDERER_WEBGRAPHICSCONTEXT3D_COMMAND_BUFFER_IMPL_H_
+#pragma once
 
 #if defined(ENABLE_GPU)
 
@@ -50,6 +51,9 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual int sizeInBytes(int type);
 
   virtual bool isGLES2Compliant();
+  virtual bool isGLES2ParameterStrict();
+  virtual bool isGLES2NPOTStrict();
+  virtual bool isErrorGeneratedOnOutOfBoundsAccesses();
 
   virtual void reshape(int width, int height);
 
@@ -335,6 +339,12 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual void deleteTexture(unsigned);
 
   virtual void synthesizeGLError(unsigned long error);
+  virtual bool supportsBGRA();
+
+  virtual unsigned createCompositorTexture(unsigned width, unsigned height);
+  virtual void deleteCompositorTexture(unsigned parent_texture);
+  virtual void copyTextureToCompositor(unsigned texture,
+                                       unsigned parent_texture);
 
  private:
   // The GGL context we use for OpenGL rendering.

@@ -40,6 +40,7 @@
         '<(DEPTH)/third_party/WebKit/WebKit/chromium/WebKit.gyp:inspector_resources',
         '<(DEPTH)/third_party/WebKit/WebKit/chromium/WebKit.gyp:webkit',
         '<(DEPTH)/webkit/support/webkit_support.gyp:appcache',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:blob',
         '<(DEPTH)/webkit/support/webkit_support.gyp:database',
         '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
@@ -124,7 +125,7 @@
         # http://code.google.com/p/chromium/issues/detail?id=18337
         ['target_arch!="x64" and target_arch!="arm"', {
           'dependencies': [
-            'npapi_test_plugin',
+            'copy_npapi_test_plugin',
           ],
         }],
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
@@ -213,6 +214,7 @@
         'test_shell_common',
         '<(DEPTH)/net/net.gyp:net_test_support',
         '<(DEPTH)/skia/skia.gyp:skia',
+        '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
         '<(DEPTH)/tools/imagediff/image_diff.gyp:image_diff',
         '<(DEPTH)/webkit/support/webkit_support.gyp:copy_npapi_layout_test_plugin',
       ],
@@ -317,6 +319,13 @@
                 '<(PRODUCT_DIR)/libffmpegsumo.dylib',
               ],
             },
+            {
+              # TODO(tony): We should have TestShell.app load plugins from
+              # <(PRODUCT_DIR)/plugins so we don't have this extra copy of
+              # the plugin.
+              'destination': '<(PRODUCT_DIR)/TestShell.app/Contents/PlugIns/',
+              'files': ['<(PRODUCT_DIR)/TestNetscapePlugIn.plugin/'],
+            },
           ],
         }, { # OS != "mac"
           'dependencies': [
@@ -359,6 +368,8 @@
         '../../appcache/appcache_url_request_job_unittest.cc',
         '../../appcache/mock_appcache_service.h',
         '../../appcache/mock_appcache_storage_unittest.cc',
+        '../../blob/blob_storage_controller_unittest.cc',
+        '../../blob/blob_url_request_job_unittest.cc',
         '../../database/databases_table_unittest.cc',
         '../../database/database_tracker_unittest.cc',
         '../../database/database_util_unittest.cc',
@@ -576,6 +587,39 @@
           ],
         },
         {
+          'target_name': 'copy_npapi_test_plugin',
+          'type': 'none',
+          'dependencies': [
+            'npapi_test_plugin',
+          ],
+          'conditions': [
+            ['OS=="win"', {
+              'copies': [
+                {
+                  'destination': '<(PRODUCT_DIR)/plugins',
+                  'files': ['<(PRODUCT_DIR)/npapi_test_plugin.dll'],
+                },
+              ],
+            }],
+            ['OS=="mac"', {
+              'copies': [
+                {
+                  'destination': '<(PRODUCT_DIR)/plugins/',
+                  'files': ['<(PRODUCT_DIR)/npapi_test_plugin.plugin'],
+                },
+              ]
+            }],
+            ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
+              'copies': [
+                {
+                  'destination': '<(PRODUCT_DIR)/plugins',
+                  'files': ['<(PRODUCT_DIR)/libnpapi_test_plugin.so'],
+                },
+              ],
+            }],
+          ],
+        },
+        {
           'target_name': 'npapi_pepper_test_plugin',
           'type': 'loadable_module',
           'mac_bundle': 1,
@@ -608,6 +652,39 @@
           'xcode_settings': {
             'INFOPLIST_FILE': '<(DEPTH)/webkit/tools/npapi_pepper_test_plugin/Info.plist',
           },
+        },
+        {
+          'target_name': 'copy_npapi_pepper_test_plugin',
+          'type': 'none',
+          'dependencies': [
+            'npapi_pepper_test_plugin',
+          ],
+          'conditions': [
+            ['OS=="win"', {
+              'copies': [
+                {
+                  'destination': '<(PRODUCT_DIR)/plugins',
+                  'files': ['<(PRODUCT_DIR)/npapi_pepper_test_plugin.dll'],
+                },
+              ],
+            }],
+            ['OS=="mac"', {
+              'copies': [
+                {
+                  'destination': '<(PRODUCT_DIR)/plugins/',
+                  'files': ['<(PRODUCT_DIR)/npapi_pepper_test_plugin.plugin/'],
+                },
+              ]
+            }],
+            ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
+              'copies': [
+                {
+                  'destination': '<(PRODUCT_DIR)/plugins',
+                  'files': ['<(PRODUCT_DIR)/libnpapi_pepper_test_plugin.so'],
+                },
+              ],
+            }],
+          ],
         },
       ],
     }],

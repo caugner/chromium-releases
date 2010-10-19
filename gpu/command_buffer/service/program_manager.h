@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 #include "base/basictypes.h"
-#include "base/logging.h"
 #include "base/ref_counted.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/shader_manager.h"
@@ -138,7 +137,7 @@ class ProgramManager {
       return valid_;
     }
 
-    void AttachShader(ShaderManager::ShaderInfo* info);
+    bool AttachShader(ShaderManager::ShaderInfo* info);
     void DetachShader(ShaderManager::ShaderInfo* info);
 
     bool CanLink() const;
@@ -230,4 +229,3 @@ class ProgramManager {
 }  // namespace gpu
 
 #endif  // GPU_COMMAND_BUFFER_SERVICE_PROGRAM_MANAGER_H_
-

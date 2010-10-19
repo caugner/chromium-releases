@@ -4,17 +4,18 @@
 
 #include "chrome/browser/upgrade_detector.h"
 
+#include <string>
+
 #include "base/command_line.h"
-#include "base/file_version_info.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "base/task.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "base/version.h"
-#include "chrome/app/chrome_version_info.h"
 #include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
@@ -29,16 +30,12 @@
 #include "chrome/installer/util/version.h"
 #endif
 
-// TODO(finnur): For the stable channel we want to check daily and notify
-// the user if more than 2 weeks have passed since the upgrade happened
-// (without a reboot). For the dev channel however, I want quicker feedback
-// on how the feature works so I'm checking every hour and notifying the
-// user immediately.
-
 namespace {
 
 // How often to check for an upgrade.
-const int kCheckForUpgradeEveryMs = 60 * 60 * 1000;  // 1 hour.
+// TODO(finnur): Once we have a good way of determining which branch the user
+// is on at runtime we should check more frequently for the dev branch.
+const int kCheckForUpgradeEveryMs = 24 * 60 * 60 * 1000;  // Check daily.
 
 // How long to wait before notifying the user about the upgrade.
 const int kNotifyUserAfterMs = 0;
@@ -104,14 +101,13 @@ class DetectUpgradeTask : public Task {
 #endif
 
     // Get the version of the currently *running* instance of Chrome.
-    scoped_ptr<FileVersionInfo> version(chrome_app::GetChromeVersionInfo());
-    if (version.get() == NULL) {
+    chrome::VersionInfo version_info;
+    if (!version_info.is_valid()) {
       NOTREACHED() << "Failed to get current file version";
       return;
     }
-
     scoped_ptr<Version> running_version(
-        Version::GetVersionFromString(WideToUTF16(version->file_version())));
+        Version::GetVersionFromString(ASCIIToUTF16(version_info.Version())));
     if (running_version.get() == NULL) {
       NOTREACHED() << "Failed to parse version info";
       return;

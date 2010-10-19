@@ -1,15 +1,18 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_COMMON_NOTIFICATION_REGISTRAR_H_
 #define CHROME_COMMON_NOTIFICATION_REGISTRAR_H_
+#pragma once
 
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/platform_thread.h"
-#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_type.h"
+
+class NotificationObserver;
+class NotificationSource;
 
 // Aids in registering for notifications and ensures that all registered
 // notifications are unregistered when the class is destroyed.
@@ -40,8 +43,6 @@ class NotificationRegistrar {
   bool IsEmpty() const;
 
  private:
-  static void CheckCalledOnValidThread(PlatformThreadId thread_id);
-
   struct Record;
 
   // We keep registered notifications in a simple vector. This means we'll do

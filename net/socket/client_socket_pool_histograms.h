@@ -4,6 +4,7 @@
 
 #ifndef NET_SOCKET_CLIENT_SOCKET_POOL_HISTOGRAMS_H_
 #define NET_SOCKET_CLIENT_SOCKET_POOL_HISTOGRAMS_H_
+#pragma once
 
 #include <string>
 
@@ -30,6 +31,9 @@ class ClientSocketPoolHistograms
   scoped_refptr<Histogram> request_time_;
   scoped_refptr<Histogram> unused_idle_time_;
   scoped_refptr<Histogram> reused_idle_time_;
+
+  bool is_http_proxy_connection_;
+  bool is_socks_connection_;
 };
 
 }  // namespace net

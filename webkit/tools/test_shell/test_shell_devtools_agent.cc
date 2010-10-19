@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,14 +51,8 @@ void TestShellDevToolsAgent::DispatchMessageLoop() {
   current->SetNestableTasksAllowed(old_state);
 }
 
-// Warning at call_method_factory_(this) treated as error is switched off.
-
-#if defined(OS_WIN)
-#pragma warning(disable : 4355)
-#endif // defined(OS_WIN)
-
 TestShellDevToolsAgent::TestShellDevToolsAgent()
-    : call_method_factory_(this),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(call_method_factory_(this)),
       dev_tools_client_(NULL) {
   static int dev_tools_agent_counter;
   routing_id_ = ++dev_tools_agent_counter;
@@ -67,34 +61,23 @@ TestShellDevToolsAgent::TestShellDevToolsAgent()
         &TestShellDevToolsAgent::DispatchMessageLoop);
 }
 
+TestShellDevToolsAgent::~TestShellDevToolsAgent() {
+}
+
 void TestShellDevToolsAgent::SetWebView(WebKit::WebView* web_view) {
   web_view_ = web_view;
 }
 
-void TestShellDevToolsAgent::sendMessageToFrontend(
-       const WebDevToolsMessageData& data) {
+void TestShellDevToolsAgent::sendMessageToInspectorFrontend(
+       const WebString& data) {
   if (dev_tools_client_)
     dev_tools_client_->AsyncCall(TestShellDevToolsCallArgs(data));
 }
 
-void TestShellDevToolsAgent::forceRepaint() {
-}
-
-void TestShellDevToolsAgent::runtimeFeatureStateChanged(
-    const WebKit::WebString& feature, bool enabled) {
-  // TODO(loislo): implement this.
-}
-
-WebCString TestShellDevToolsAgent::injectedScriptSource() {
-  base::StringPiece injectjsWebkit =
-      webkit_glue::GetDataResource(IDR_DEVTOOLS_INJECT_WEBKIT_JS);
-  return WebCString(injectjsWebkit.data(), injectjsWebkit.length());
-}
-
-WebCString TestShellDevToolsAgent::injectedScriptDispatcherSource() {
-  base::StringPiece injectDispatchjs =
-      webkit_glue::GetDataResource(IDR_DEVTOOLS_INJECT_DISPATCH_JS);
-  return WebCString(injectDispatchjs.data(), injectDispatchjs.length());
+void TestShellDevToolsAgent::runtimePropertyChanged(
+    const WebKit::WebString& name,
+    const WebKit::WebString& value) {
+  // TODO: Implement.
 }
 
 WebCString TestShellDevToolsAgent::debuggerScriptSource() {
@@ -119,9 +102,15 @@ void TestShellDevToolsAgent::AsyncCall(const TestShellDevToolsCallArgs &args) {
 void TestShellDevToolsAgent::Call(const TestShellDevToolsCallArgs &args) {
   WebDevToolsAgent* web_agent = GetWebAgent();
   if (web_agent)
-    web_agent->dispatchMessageFromFrontend(args.data_);
+    web_agent->dispatchOnInspectorBackend(args.data_);
   if (TestShellDevToolsCallArgs::calls_count() == 1 && dev_tools_client_)
     dev_tools_client_->all_messages_processed();
+}
+
+void TestShellDevToolsAgent::DelayedFrontendLoaded() {
+  WebDevToolsAgent *web_agent = GetWebAgent();
+  if (web_agent)
+    web_agent->frontendLoaded();
 }
 
 WebDevToolsAgent* TestShellDevToolsAgent::GetWebAgent() {
@@ -138,12 +127,20 @@ void TestShellDevToolsAgent::attach(TestShellDevToolsClient* client) {
     web_agent->attach();
 }
 
-void TestShellDevToolsAgent::detach(TestShellDevToolsClient* client) {
+void TestShellDevToolsAgent::detach() {
   DCHECK(dev_tools_client_);
   WebDevToolsAgent* web_agent = GetWebAgent();
   if (web_agent)
     web_agent->detach();
   dev_tools_client_ = NULL;
+}
+
+void TestShellDevToolsAgent::frontendLoaded() {
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      call_method_factory_.NewRunnableMethod(
+          &TestShellDevToolsAgent::DelayedFrontendLoaded),
+      0);
 }
 
 bool TestShellDevToolsAgent::setTimelineProfilingEnabled(bool enabled) {

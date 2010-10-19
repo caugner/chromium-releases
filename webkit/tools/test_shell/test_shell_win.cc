@@ -18,6 +18,7 @@
 #include "base/resource_util.h"
 #include "base/stack_container.h"
 #include "base/string_piece.h"
+#include "base/string_util.h"
 #include "base/trace_event.h"
 #include "base/utf_string_conversions.h"
 #include "base/win_util.h"
@@ -178,7 +179,7 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(test_shell::kCrashDumps)) {
     std::wstring dir(
-        parsed_command_line.GetSwitchValue(test_shell::kCrashDumps));
+        parsed_command_line.GetSwitchValueNative(test_shell::kCrashDumps));
     new google_breakpad::ExceptionHandler(dir, 0, &MinidumpCallback, 0, true);
   }
 }
@@ -256,11 +257,11 @@ bool TestShell::RunFileTest(const TestParams& params) {
   shell = static_cast<TestShell*>(win_util::GetWindowUserData(hwnd));
   DCHECK(shell);
 
-  if (strstr(params.test_url.c_str(), "/inspector/") ||
-      strstr(params.test_url.c_str(), "\\inspector\\"))
-    inspector_test_mode_ = true;
+  // Whether DevTools should be open before loading the page.
+  bool inspector_test_mode = strstr(params.test_url.c_str(), "/inspector/") ||
+                             strstr(params.test_url.c_str(), "\\inspector\\");
 
-  developer_extras_enabled_ = inspector_test_mode_ ||
+  developer_extras_enabled_ = inspector_test_mode ||
       strstr(params.test_url.c_str(), "/inspector-enabled/") ||
       strstr(params.test_url.c_str(), "\\inspector-enabled\\");
 
@@ -278,7 +279,7 @@ bool TestShell::RunFileTest(const TestParams& params) {
       strstr(params.test_url.c_str(), "loading\\"))
     shell->layout_test_controller()->SetShouldDumpFrameLoadCallbacks(true);
 
-  if (inspector_test_mode_)
+  if (inspector_test_mode)
     shell->ShowDevTools();
 
   GURL url(params.test_url);
@@ -788,9 +789,10 @@ base::StringPiece GetDataResource(int resource_id) {
   case IDR_MEDIA_SOUND_DISABLED:
   case IDR_MEDIA_SLIDER_THUMB:
   case IDR_MEDIA_VOLUME_SLIDER_THUMB:
-  case IDR_DEVTOOLS_INJECT_WEBKIT_JS:
-  case IDR_DEVTOOLS_INJECT_DISPATCH_JS:
   case IDR_DEVTOOLS_DEBUGGER_SCRIPT_JS:
+  case IDR_INPUT_SPEECH:
+  case IDR_INPUT_SPEECH_RECORDING:
+  case IDR_INPUT_SPEECH_WAITING:
     return NetResourceProvider(resource_id);
 
   default:

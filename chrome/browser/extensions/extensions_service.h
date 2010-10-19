@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSIONS_SERVICE_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSIONS_SERVICE_H_
+#pragma once
 
 #include <map>
 #include <set>
@@ -18,7 +19,6 @@
 #include "base/task.h"
 #include "base/time.h"
 #include "base/tuple.h"
-#include "base/values.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/extension_icon_manager.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
@@ -32,15 +32,12 @@
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/extensions/extension.h"
 
-class Browser;
 class ExtensionsServiceBackend;
 class ExtensionToolbarModel;
 class ExtensionUpdater;
 class GURL;
 class PrefService;
 class Profile;
-class ResourceDispatcherHost;
-class SiteInstance;
 class Version;
 
 // A pending extension is an extension that hasn't been installed yet
@@ -48,8 +45,18 @@ class Version;
 // update URL of a pending extension may be blank, in which case a
 // default one is assumed.
 struct PendingExtensionInfo {
+  // TODO(skerner): Consider merging ExpectedCrxType with
+  // browser_sync::ExtensionType.
+  enum ExpectedCrxType {
+    UNKNOWN,  // Sometimes we don't know the type of a pending item.  An
+              // update URL from external_extensions.json is one such case.
+    THEME,
+    EXTENSION
+  };
+
   PendingExtensionInfo(const GURL& update_url,
-                       bool is_theme,
+                       ExpectedCrxType expected_crx_type,
+                       bool is_from_sync,
                        bool install_silently,
                        bool enable_on_install,
                        bool enable_incognito_on_install);
@@ -57,7 +64,8 @@ struct PendingExtensionInfo {
   PendingExtensionInfo();
 
   GURL update_url;
-  bool is_theme;
+  ExpectedCrxType expected_crx_type;
+  bool is_from_sync;  // This update check was initiated from sync.
   bool install_silently;
   bool enable_on_install;
   bool enable_incognito_on_install;
@@ -80,6 +88,7 @@ class ExtensionUpdateService {
                                       bool include_disabled) = 0;
   virtual void UpdateExtensionBlacklist(
     const std::vector<std::string>& blacklist) = 0;
+  virtual void CheckAdminBlacklist() = 0;
   virtual bool HasInstalledExtensions() = 0;
 
   virtual ExtensionPrefs* extension_prefs() = 0;
@@ -117,9 +126,6 @@ class ExtensionsService
 
   // The name of the file that the current active version number is stored in.
   static const char* kCurrentVersionFileName;
-
-  // Determine if the given url is an instance of a gallery download url.
-  static bool IsGalleryDownloadURL(const GURL& download_url);
 
   // Determine if a given extension download should be treated as if it came
   // from the gallery. Note that this is different from IsGalleryDownloadURL
@@ -211,10 +217,16 @@ class ExtensionsService
   //
   // TODO(akalin): Replace |install_silently| with a list of
   // pre-enabled permissions.
-  void AddPendingExtension(
+  void AddPendingExtensionFromSync(
       const std::string& id, const GURL& update_url,
-      bool is_theme, bool install_silently,
-      bool enable_on_install, bool enable_incognito_on_install);
+      const PendingExtensionInfo::ExpectedCrxType expected_crx_type,
+      bool install_silently, bool enable_on_install,
+      bool enable_incognito_on_install);
+
+  // Given an extension id and an update URL, schedule the extension
+  // to be fetched, installed, and activated.
+  void AddPendingExtensionFromExternalUpdateUrl(const std::string& id,
+                                                const GURL& update_url);
 
   // Reloads the specified extension.
   void ReloadExtension(const std::string& extension_id);
@@ -276,6 +288,11 @@ class ExtensionsService
   // extent, if one exists.
   Extension* GetExtensionByOverlappingWebExtent(const ExtensionExtent& extent);
 
+  // Returns true if |url| should get extension api bindings and be permitted
+  // to make api calls. Note that this is independent of what extension
+  // permissions the given extension has been granted.
+  bool ExtensionBindingsAllowed(const GURL& url);
+
   // Returns the icon to display in the omnibox for the given extension.
   const SkBitmap& GetOmniboxIcon(const std::string& extension_id);
 
@@ -299,15 +316,20 @@ class ExtensionsService
                             bool allow_privilege_increase);
 
   // Called by the backend when an external extension is found.
-  void OnExternalExtensionFound(const std::string& id,
-                                const std::string& version,
-                                const FilePath& path,
-                                Extension::Location location);
+  void OnExternalExtensionFileFound(const std::string& id,
+                                    const std::string& version,
+                                    const FilePath& path,
+                                    Extension::Location location);
 
   // Go through each extensions in pref, unload blacklisted extensions
   // and update the blacklist state in pref.
   virtual void UpdateExtensionBlacklist(
     const std::vector<std::string>& blacklist);
+
+  // Go through each extension and unload those that the network admin has
+  // put on the blacklist (not to be confused with the Google managed blacklist
+  // set of extensions.
+  virtual void CheckAdminBlacklist();
 
   void set_extensions_enabled(bool enabled) { extensions_enabled_ = enabled; }
   bool extensions_enabled() { return extensions_enabled_; }
@@ -322,8 +344,9 @@ class ExtensionsService
 
   Profile* profile() { return profile_; }
 
-  // Profile calls this when it is destroyed so that we know not to call it.
-  void ProfileDestroyed() { profile_ = NULL; }
+  // Profile calls this when it is being destroyed so that we know not to call
+  // it.
+  void DestroyingProfile();
 
   ExtensionPrefs* extension_prefs() { return extension_prefs_.get(); }
 
@@ -338,6 +361,10 @@ class ExtensionsService
   ExtensionsQuotaService* quota_service() { return &quota_service_; }
 
   ExtensionMenuManager* menu_manager() { return &menu_manager_; }
+
+  const std::map<GURL, int>& protected_storage_map() const {
+    return protected_storage_map_;
+  }
 
   // Notify the frontend that there was an error loading an extension.
   // This method is public because ExtensionsServiceBackend can post to here.
@@ -372,7 +399,8 @@ class ExtensionsService
   // id is not already installed.
   void AddPendingExtensionInternal(
       const std::string& id, const GURL& update_url,
-      bool is_theme, bool install_silently,
+      PendingExtensionInfo::ExpectedCrxType crx_type,
+      bool is_from_sync, bool install_silently,
       bool enable_on_install, bool enable_incognito_on_install);
 
   // Handles sending notification that |extension| was loaded.
@@ -385,7 +413,13 @@ class ExtensionsService
   void UpdateActiveExtensionsInCrashReporter();
 
   // Helper method. Loads extension from prefs.
-  void LoadInstalledExtension(const ExtensionInfo& info, bool relocalize);
+  void LoadInstalledExtension(const ExtensionInfo& info, bool write_to_prefs);
+
+  // Helper methods to configure the storage services accordingly.
+  void GrantProtectedStorage(Extension* extension);
+  void RevokeProtectedStorage(Extension* extension);
+  void GrantUnlimitedStorage(Extension* extension);
+  void RevokeUnlimitedStorage(Extension* extension);
 
   // The profile this ExtensionsService is part of.
   Profile* profile_;
@@ -432,6 +466,12 @@ class ExtensionsService
   typedef std::map<std::string, FilePath> UnloadedExtensionPathMap;
   UnloadedExtensionPathMap unloaded_extension_paths_;
 
+  // Map disabled extensions' ids to their paths. When a temporarily loaded
+  // extension is disabled before it is reloaded, keep track of the path so that
+  // it can be re-enabled upon a successful load.
+  typedef std::map<std::string, FilePath> DisabledExtensionPathMap;
+  DisabledExtensionPathMap disabled_extension_paths_;
+
   // Map of inspector cookies that are detached, waiting for an extension to be
   // reloaded.
   typedef std::map<std::string, int> OrphanedDevTools;
@@ -449,9 +489,24 @@ class ExtensionsService
   typedef std::vector<ComponentExtensionInfo> RegisteredComponentExtensions;
   RegisteredComponentExtensions component_extension_manifests_;
 
+  // Collection of origins we've granted unlimited storage to. This is a
+  // map from origin to the number of extensions requiring unlimited
+  // storage within that origin.
+  typedef std::map<GURL, int> UnlimitedStorageMap;
+  UnlimitedStorageMap unlimited_storage_map_;
+
+  // Collection of origins whose storage is protected by "Clear browsing data."
+  // A map from origin to the number of Apps currently installed and therefore
+  // intrinsically protected.
+  typedef std::map<GURL, int> ProtectedStorageMap;
+  ProtectedStorageMap protected_storage_map_;
+
   FRIEND_TEST_ALL_PREFIXES(ExtensionsServiceTest,
                            UpdatePendingExtensionAlreadyInstalled);
-
+  FRIEND_TEST_ALL_PREFIXES(ExtensionsServiceTest,
+                           InstallAppsWithUnlimtedStorage);
+  FRIEND_TEST_ALL_PREFIXES(ExtensionsServiceTest,
+                           InstallAppsAndCheckStorageProtection);
   DISALLOW_COPY_AND_ASSIGN(ExtensionsService);
 };
 
@@ -496,10 +551,13 @@ class ExtensionsServiceBackend
                              ExternalExtensionProvider* test_provider);
 
   // ExternalExtensionProvider::Visitor implementation.
-  virtual void OnExternalExtensionFound(const std::string& id,
-                                        const Version* version,
-                                        const FilePath& path,
-                                        Extension::Location location);
+  virtual void OnExternalExtensionFileFound(const std::string& id,
+                                            const Version* version,
+                                            const FilePath& path,
+                                            Extension::Location location);
+
+  virtual void OnExternalExtensionUpdateUrlFound(const std::string& id,
+                                                 const GURL& update_url);
 
   // Reloads the given extensions from their manifests on disk (instead of what
   // we have cached in the prefs).
@@ -554,6 +612,11 @@ class ExtensionsServiceBackend
   typedef std::map<Extension::Location,
                    linked_ptr<ExternalExtensionProvider> > ProviderMap;
   ProviderMap external_extension_providers_;
+
+  // Set to true by OnExternalExtensionUpdateUrlFound() when an external
+  // extension URL is found.  Used in CheckForExternalUpdates() to see
+  // if an update check is needed to install pending extensions.
+  bool external_extension_added_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionsServiceBackend);
 };

@@ -4,11 +4,13 @@
 
 #include "chrome/browser/chromeos/status/network_menu_button.h"
 
+#include <algorithm>
 #include <limits>
 
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/status/status_area_host.h"
@@ -221,144 +223,6 @@ void NetworkMenuButton::DrawIcon(gfx::Canvas* canvas) {
   canvas->DrawBitmapInt(IconForDisplay(icon(), badge()), 0, 0);
 }
 
-// Override the DrawIcon method to draw the wifi icon.
-// The wifi icon is composed of 1 or more alpha-blended icons to show the
-// network strength. We also draw an animation for when there's upload/download
-// traffic.
-/* TODO(chocobo): Add this code back in when UI is finalized.
-void NetworkMenuButton::DrawIcon(gfx::Canvas* canvas) {
-
-  // First draw the base icon.
-  canvas->DrawBitmapInt(icon(), 0, 0);
-
-  // If wifi, we draw the wifi signal bars.
-  NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
-  if (cros->wifi_connecting() ||
-      (!cros->ethernet_connected() && cros->wifi_connected())) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    // We want a value between 0-1.
-    // 0 reperesents no signal and 1 represents full signal strength.
-    double value = cros->wifi_connecting() ?
-        animation_connecting_.GetCurrentValue() :
-        cros->wifi_strength() / 100.0;
-    if (value < 0)
-      value = 0;
-    else if (value > 1)
-      value = 1;
-
-    // If we are animating network traffic and not connecting, then we need to
-    // figure out if we are to also draw the extra image.
-    int downloading_index = -1;
-    int uploading_index = -1;
-    if (!animation_connecting_.is_animating()) {
-      // For network animation, we only show animation in one direction.
-      // So when we are hiding, we just use 1 minus the value.
-      // We have kNumWifiImages + 1 number of states. For the first state, where
-      // we are not adding any images, we set the index to -1.
-      if (animation_downloading_.is_animating()) {
-        double value_downloading = animation_downloading_.IsShowing() ?
-            animation_downloading_.GetCurrentValue() :
-            1.0 - animation_downloading_.GetCurrentValue();
-        downloading_index = static_cast<int>(value_downloading *
-              nextafter(static_cast<float>(kNumWifiImages + 1), 0)) - 1;
-      }
-      if (animation_uploading_.is_animating()) {
-        double value_uploading = animation_uploading_.IsShowing() ?
-            animation_uploading_.GetCurrentValue() :
-            1.0 - animation_uploading_.GetCurrentValue();
-        uploading_index = static_cast<int>(value_uploading *
-              nextafter(static_cast<float>(kNumWifiImages + 1), 0)) - 1;
-      }
-    }
-
-    // We need to determine opacity for each of the kNumWifiImages images.
-    // We split the range (0-1) into equal ranges per kNumWifiImages images.
-    // For example if kNumWifiImages is 3, then [0-0.33) is the first image and
-    // [0.33-0.66) is the second image and [0.66-1] is the last image.
-    // For each of the image:
-    //   If value < the range of this image, draw at kMinOpacity opacity.
-    //   If value > the range of this image, draw at kMaxOpacity-1 opacity.
-    //   If value within the range of this image, draw at an opacity value
-    //     between kMinOpacity and kMaxOpacity-1 relative to where in the range
-    //     value is at.
-    // NOTE: Use an array rather than just calculating a resource number to
-    // avoid creating implicit ordering dependencies on the resource values.
-    static const int kWifiUpImages[kNumWifiImages] = {
-      IDR_STATUSBAR_WIFI_UP1,
-      IDR_STATUSBAR_WIFI_UP2,
-      IDR_STATUSBAR_WIFI_UP3,
-      IDR_STATUSBAR_WIFI_UP4,
-      IDR_STATUSBAR_WIFI_UP5,
-      IDR_STATUSBAR_WIFI_UP6,
-      IDR_STATUSBAR_WIFI_UP7,
-      IDR_STATUSBAR_WIFI_UP8,
-      IDR_STATUSBAR_WIFI_UP9,
-    };
-    static const int kWifiUpPImages[kNumWifiImages] = {
-      IDR_STATUSBAR_WIFI_UP1P,
-      IDR_STATUSBAR_WIFI_UP2P,
-      IDR_STATUSBAR_WIFI_UP3P,
-      IDR_STATUSBAR_WIFI_UP4P,
-      IDR_STATUSBAR_WIFI_UP5P,
-      IDR_STATUSBAR_WIFI_UP6P,
-      IDR_STATUSBAR_WIFI_UP7P,
-      IDR_STATUSBAR_WIFI_UP8P,
-      IDR_STATUSBAR_WIFI_UP9P,
-    };
-    static const int kWifiDownImages[kNumWifiImages] = {
-      IDR_STATUSBAR_WIFI_DOWN1,
-      IDR_STATUSBAR_WIFI_DOWN2,
-      IDR_STATUSBAR_WIFI_DOWN3,
-      IDR_STATUSBAR_WIFI_DOWN4,
-      IDR_STATUSBAR_WIFI_DOWN5,
-      IDR_STATUSBAR_WIFI_DOWN6,
-      IDR_STATUSBAR_WIFI_DOWN7,
-      IDR_STATUSBAR_WIFI_DOWN8,
-      IDR_STATUSBAR_WIFI_DOWN9,
-    };
-    static const int kWifiDownPImages[kNumWifiImages] = {
-      IDR_STATUSBAR_WIFI_DOWN1P,
-      IDR_STATUSBAR_WIFI_DOWN2P,
-      IDR_STATUSBAR_WIFI_DOWN3P,
-      IDR_STATUSBAR_WIFI_DOWN4P,
-      IDR_STATUSBAR_WIFI_DOWN5P,
-      IDR_STATUSBAR_WIFI_DOWN6P,
-      IDR_STATUSBAR_WIFI_DOWN7P,
-      IDR_STATUSBAR_WIFI_DOWN8P,
-      IDR_STATUSBAR_WIFI_DOWN9P,
-    };
-
-    double value_per_image = 1.0 / kNumWifiImages;
-    SkPaint paint;
-    for (int i = 0; i < kNumWifiImages; i++) {
-      if (value > value_per_image) {
-        paint.setAlpha(kMaxOpacity - 1);
-        value -= value_per_image;
-      } else {
-        // Map value between 0 and value_per_image to [kMinOpacity,kMaxOpacity).
-        paint.setAlpha(kMinOpacity + static_cast<int>(value / value_per_image *
-            nextafter(static_cast<float>(kMaxOpacity - kMinOpacity), 0)));
-        // For following iterations, we want to draw at kMinOpacity.
-        // So we set value to 0 here.
-        value = 0;
-      }
-      canvas->DrawBitmapInt(*rb.GetBitmapNamed(kWifiUpImages[i]), 0, 0, paint);
-      canvas->DrawBitmapInt(*rb.GetBitmapNamed(kWifiDownImages[i]), 0, 0,
-                            paint);
-
-      // Draw network traffic downloading/uploading image if necessary.
-      if (i == downloading_index) {
-        canvas->DrawBitmapInt(*rb.GetBitmapNamed(kWifiDownPImages[i]), 0, 0,
-                              paint);
-      }
-      if (i == uploading_index) {
-        canvas->DrawBitmapInt(*rb.GetBitmapNamed(kWifiUpPImages[i]), 0, 0,
-                              paint);
-      }
-    }
-  }
-}
-*/
 ////////////////////////////////////////////////////////////////////////////////
 // NetworkMenuButton, NetworkLibrary::Observer implementation:
 
@@ -372,19 +236,37 @@ void NetworkMenuButton::NetworkChanged(NetworkLibrary* cros) {
         animation_connecting_.StartThrobbing(std::numeric_limits<int>::max());
         SetIcon(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_BARS1));
       }
+      std::string network_name = cros->wifi_connecting() ?
+          cros->wifi_name() : cros->cellular_name();
+      SetTooltipText(
+          l10n_util::GetStringF(IDS_STATUSBAR_NETWORK_CONNECTING_TOOLTIP,
+                                UTF8ToWide(network_name)));
     } else {
       // Stop connecting animation since we are not connecting.
       animation_connecting_.Stop();
 
       // Always show the higher priority connection first. Ethernet then wifi.
-      if (cros->ethernet_connected())
+      if (cros->ethernet_connected()) {
         SetIcon(*rb.GetBitmapNamed(IDR_STATUSBAR_WIRED));
-      else if (cros->wifi_connected())
+        SetTooltipText(
+            l10n_util::GetStringF(
+                IDS_STATUSBAR_NETWORK_CONNECTED_TOOLTIP,
+                l10n_util::GetString(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET)));
+      } else if (cros->wifi_connected()) {
         SetIcon(IconForNetworkStrength(cros->wifi_strength(), false));
-      else if (cros->cellular_connected())
+        SetTooltipText(l10n_util::GetStringF(
+            IDS_STATUSBAR_NETWORK_CONNECTED_TOOLTIP,
+            UTF8ToWide(cros->wifi_name())));
+      } else if (cros->cellular_connected()) {
         SetIcon(IconForNetworkStrength(cros->cellular_strength(), false));
-      else
+        SetTooltipText(l10n_util::GetStringF(
+            IDS_STATUSBAR_NETWORK_CONNECTED_TOOLTIP,
+            UTF8ToWide(cros->cellular_name())));
+      } else {
         SetIcon(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_BARS0));
+        SetTooltipText(l10n_util::GetString(
+            IDS_STATUSBAR_NETWORK_NO_NETWORK_TOOLTIP));
+      }
     }
 
     if (!cros->Connected() && !cros->Connecting()) {
@@ -400,24 +282,11 @@ void NetworkMenuButton::NetworkChanged(NetworkLibrary* cros) {
   } else {
     SetIcon(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_BARS0));
     SetBadge(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_WARNING));
+    SetTooltipText(l10n_util::GetString(
+        IDS_STATUSBAR_NETWORK_NO_NETWORK_TOOLTIP));
   }
 
   SchedulePaint();
-}
-
-void NetworkMenuButton::NetworkTraffic(NetworkLibrary* cros, int traffic_type) {
-/* TODO(chocobo): Add this code back in when network traffic UI is finalized.
-  if (!cros->ethernet_connected() && cros->wifi_connected() &&
-      !cros->wifi_connecting()) {
-    // For downloading/uploading animation, we want to force at least one cycle
-    // so that it looks smooth. And if we keep downloading/uploading, we will
-    // keep calling StartThrobbing which will update the cycle count back to 2.
-    if (traffic_type & TRAFFIC_DOWNLOAD)
-      animation_downloading_.StartThrobbing(2);
-    if (traffic_type & TRAFFIC_UPLOAD)
-      animation_uploading_.StartThrobbing(2);
-  }
-  */
 }
 
 void NetworkMenuButton::SetBadge(const SkBitmap& badge) {
@@ -483,7 +352,9 @@ SkBitmap NetworkMenuButton::IconForDisplay(SkBitmap icon, SkBitmap badge) {
 
 void NetworkMenuButton::RunMenu(views::View* source, const gfx::Point& pt) {
   refreshing_menu_ = true;
-  CrosLibrary::Get()->GetNetworkLibrary()->RequestWifiScan();
+  NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
+  cros->RequestWifiScan();
+  cros->UpdateSystemInfo();
   InitMenuItems();
   network_menu_.Rebuild();
   network_menu_.UpdateStates();
@@ -497,26 +368,28 @@ void NetworkMenuButton::InitMenuItems() {
   NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
-  // Ethernet
-  string16 label = l10n_util::GetStringUTF16(
-                       IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET);
-  SkBitmap icon = *rb.GetBitmapNamed(IDR_STATUSBAR_WIRED_BLACK);
-  SkBitmap badge = cros->ethernet_connecting() || cros->ethernet_connected() ?
-      SkBitmap() : *rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_DISCONNECTED);
-  int flag = (cros->ethernet_connecting() || cros->ethernet_connected()) ?
-      FLAG_ETHERNET | FLAG_ASSOCIATED : FLAG_ETHERNET;
-  menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
-      IconForDisplay(icon, badge), std::string(), flag));
+  // Ethernet (if enabled, which means it's available))
+  if (cros->ethernet_enabled()) {
+    string16 label = l10n_util::GetStringUTF16(
+        IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET);
+    SkBitmap icon = *rb.GetBitmapNamed(IDR_STATUSBAR_WIRED_BLACK);
+    SkBitmap badge = cros->ethernet_connecting() || cros->ethernet_connected() ?
+        SkBitmap() : *rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_DISCONNECTED);
+    int flag = (cros->ethernet_connecting() || cros->ethernet_connected()) ?
+        FLAG_ETHERNET | FLAG_ASSOCIATED : FLAG_ETHERNET;
+    menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
+        IconForDisplay(icon, badge), std::string(), flag));
+  }
 
   // Wifi
   const WifiNetworkVector& wifi_networks = cros->wifi_networks();
   // Wifi networks ssids.
   for (size_t i = 0; i < wifi_networks.size(); ++i) {
-    label = ASCIIToUTF16(wifi_networks[i].name());
+    string16 label = ASCIIToUTF16(wifi_networks[i].name());
     SkBitmap icon = IconForNetworkStrength(wifi_networks[i].strength(), true);
     SkBitmap badge = wifi_networks[i].encrypted() ?
         *rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_SECURE) : SkBitmap();
-    flag = (wifi_networks[i].name() == cros->wifi_name()) ?
+    int flag = (wifi_networks[i].name() == cros->wifi_name()) ?
         FLAG_WIFI | FLAG_ASSOCIATED : FLAG_WIFI;
     menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
         IconForDisplay(icon, badge), wifi_networks[i].service_path(), flag));
@@ -526,12 +399,12 @@ void NetworkMenuButton::InitMenuItems() {
   const CellularNetworkVector& cell_networks = cros->cellular_networks();
   // Cellular networks ssids.
   for (size_t i = 0; i < cell_networks.size(); ++i) {
-    label = ASCIIToUTF16(cell_networks[i].name());
+    string16 label = ASCIIToUTF16(cell_networks[i].name());
     SkBitmap icon = IconForNetworkStrength(cell_networks[i].strength(), true);
     // TODO(chocobo): Check cellular network 3g/edge.
     SkBitmap badge = *rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_3G);
 //    SkBitmap badge = *rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_EDGE);
-    flag = (cell_networks[i].name() == cros->cellular_name()) ?
+    int flag = (cell_networks[i].name() == cros->cellular_name()) ?
         FLAG_CELLULAR | FLAG_ASSOCIATED : FLAG_CELLULAR;
     menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
         IconForDisplay(icon, badge), cell_networks[i].service_path(), flag));
@@ -539,18 +412,21 @@ void NetworkMenuButton::InitMenuItems() {
 
   // No networks available message.
   if (wifi_networks.empty() && cell_networks.empty()) {
-    label = l10n_util::GetStringFUTF16(IDS_STATUSBAR_NETWORK_MENU_ITEM_INDENT,
-                l10n_util::GetStringUTF16(IDS_STATUSBAR_NO_NETWORKS_MESSAGE));
+    string16 label = l10n_util::GetStringFUTF16(
+        IDS_STATUSBAR_NETWORK_MENU_ITEM_INDENT,
+        l10n_util::GetStringUTF16(IDS_STATUSBAR_NO_NETWORKS_MESSAGE));
     menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
         SkBitmap(), std::string(), FLAG_DISABLED));
   }
 
-  // Other networks
-  menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND,
-      l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_OTHER_NETWORKS),
-      IconForDisplay(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_BARS0),
-                     SkBitmap()),
-      std::string(), FLAG_OTHER_NETWORK));
+  // Add "Other..." if wifi is enabled.
+  if (cros->wifi_enabled()) {
+    menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND,
+        l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_OTHER_NETWORKS),
+        IconForDisplay(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_BARS0),
+                       SkBitmap()),
+        std::string(), FLAG_OTHER_NETWORK));
+  }
 
   if (cros->wifi_available() || cros->cellular_available()) {
     // Separator.
@@ -560,7 +436,7 @@ void NetworkMenuButton::InitMenuItems() {
     if (cros->wifi_available()) {
       int id = cros->wifi_enabled() ? IDS_STATUSBAR_NETWORK_DEVICE_DISABLE :
                                       IDS_STATUSBAR_NETWORK_DEVICE_ENABLE;
-      label = l10n_util::GetStringFUTF16(id,
+      string16 label = l10n_util::GetStringFUTF16(id,
           l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_WIFI));
       menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
           SkBitmap(), std::string(), FLAG_TOGGLE_WIFI));
@@ -570,7 +446,7 @@ void NetworkMenuButton::InitMenuItems() {
     if (cros->cellular_available()) {
       int id = cros->cellular_enabled() ? IDS_STATUSBAR_NETWORK_DEVICE_DISABLE :
                                       IDS_STATUSBAR_NETWORK_DEVICE_ENABLE;
-      label = l10n_util::GetStringFUTF16(id,
+      string16 label = l10n_util::GetStringFUTF16(id,
           l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_CELLULAR));
       menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
           SkBitmap(), std::string(), FLAG_TOGGLE_CELLULAR));
@@ -597,7 +473,7 @@ void NetworkMenuButton::InitMenuItems() {
 
     // Network settings.
     if (host_->ShouldOpenButtonOptions(this)) {
-      label =
+      string16 label =
           l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_OPEN_OPTIONS_DIALOG);
       menu_items_.push_back(MenuItem(menus::MenuModel::TYPE_COMMAND, label,
           SkBitmap(), std::string(), FLAG_OPTIONS));

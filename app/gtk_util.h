@@ -4,9 +4,9 @@
 
 #ifndef APP_GTK_UTIL_H_
 #define APP_GTK_UTIL_H_
+#pragma once
 
 #include <stdint.h>
-#include <string>
 
 typedef struct _GtkWidget GtkWidget;
 

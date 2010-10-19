@@ -8,12 +8,14 @@
 #include "chrome_frame/protocol_sink_wrap.h"
 
 #include "base/logging.h"
-#include "base/registry.h"
 #include "base/scoped_bstr_win.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 
+#include "chrome_frame/bho.h"
 #include "chrome_frame/bind_context_info.h"
+#include "chrome_frame/exception_barrier.h"
 #include "chrome_frame/function_stub.h"
 #include "chrome_frame/utils.h"
 
@@ -30,6 +32,8 @@ const wchar_t kUrlMonDllName[] = L"urlmon.dll";
 static const int kInternetProtocolStartIndex = 3;
 static const int kInternetProtocolReadIndex = 9;
 static const int kInternetProtocolStartExIndex = 13;
+static const int kInternetProtocolLockRequestIndex = 11;
+static const int kInternetProtocolUnlockRequestIndex = 12;
 
 
 // IInternetProtocol/Ex patches.
@@ -55,10 +59,18 @@ STDMETHODIMP Hook_Read(InternetProtocol_Read_Fn orig_read,
                        ULONG size,
                        ULONG* size_read);
 
+STDMETHODIMP Hook_LockRequest(InternetProtocol_LockRequest_Fn orig_req,
+                              IInternetProtocol* protocol, DWORD dwOptions);
+
+STDMETHODIMP Hook_UnlockRequest(InternetProtocol_UnlockRequest_Fn orig_req,
+                                IInternetProtocol* protocol);
+
 /////////////////////////////////////////////////////////////////////////////
 BEGIN_VTABLE_PATCHES(CTransaction)
   VTABLE_PATCH_ENTRY(kInternetProtocolStartIndex, Hook_Start)
   VTABLE_PATCH_ENTRY(kInternetProtocolReadIndex, Hook_Read)
+  VTABLE_PATCH_ENTRY(kInternetProtocolLockRequestIndex, Hook_LockRequest)
+  VTABLE_PATCH_ENTRY(kInternetProtocolUnlockRequestIndex, Hook_UnlockRequest)
 END_VTABLE_PATCHES()
 
 BEGIN_VTABLE_PATCHES(CTransaction2)
@@ -165,6 +177,7 @@ STDMETHODIMP ProtocolSinkWrap::ReportResult(HRESULT result, DWORD error,
     LPCWSTR result_text) {
   DLOG(INFO) << "ProtocolSinkWrap::ReportResult: result: " << result <<
       " error: " << error << " Text: " << (result_text ? result_text : L"");
+  ExceptionBarrier barrier;
   HRESULT hr = prot_data_->ReportResult(delegate_, result, error, result_text);
   return hr;
 }
@@ -178,7 +191,9 @@ ScopedComPtr<IBindCtx> BindCtxFromIBindInfo(IInternetBindInfo* bind_info) {
   bind_info->GetBindString(BINDSTRING_PTR_BIND_CONTEXT, &bind_ctx_string, 1,
                            &count);
   if (bind_ctx_string) {
-    IBindCtx* pbc = reinterpret_cast<IBindCtx*>(StringToInt(bind_ctx_string));
+    int bind_ctx_int;
+    base::StringToInt(bind_ctx_string, &bind_ctx_int);
+    IBindCtx* pbc = reinterpret_cast<IBindCtx*>(bind_ctx_int);
     bind_ctx.Attach(pbc);
     CoTaskMemFree(bind_ctx_string);
   }
@@ -213,26 +228,52 @@ bool IsCFRequest(IBindCtx* pbc) {
   return false;
 }
 
+bool HasProtData(IBindCtx* pbc) {
+  ScopedComPtr<BindContextInfo> info;
+  BindContextInfo::FromBindContext(pbc, info.Receive());
+  bool result = false;
+  if (info)
+    result = info->has_prot_data();
+  return result;
+}
+
 void PutProtData(IBindCtx* pbc, ProtData* data) {
+  // AddRef and Release to avoid a potential leak of a ProtData instance if
+  // FromBindContext fails.
+  data->AddRef();
   ScopedComPtr<BindContextInfo> info;
   BindContextInfo::FromBindContext(pbc, info.Receive());
   if (info)
     info->set_prot_data(data);
+  data->Release();
 }
 
 bool IsTextHtml(const wchar_t* status_text) {
-  if (!status_text)
-    return false;
-  size_t status_text_length = lstrlenW(status_text);
-  const wchar_t* status_text_end = status_text +
-      std::min(status_text_length, arraysize(kTextHtmlMimeType) - 1);
-  bool is_text_html = LowerCaseEqualsASCII(status_text, status_text_end,
-                                           kTextHtmlMimeType);
+  const std::wstring str = status_text;
+  bool is_text_html = LowerCaseEqualsASCII(str, kTextHtmlMimeType);
   return is_text_html;
 }
 
+bool IsAdditionallySupportedContentType(const wchar_t* status_text) {
+  const std::wstring str = status_text;
+  if (LowerCaseEqualsASCII(str, "application/xhtml+xml"))
+    return true;
+  if (LowerCaseEqualsASCII(str, "image/svg"))
+    return true;
+  if (LowerCaseEqualsASCII(str, "image/svg+xml"))
+    return true;
+  if (LowerCaseEqualsASCII(str, "video/ogg"))
+    return true;
+  if (LowerCaseEqualsASCII(str, "video/webm"))
+    return true;
+  if (LowerCaseEqualsASCII(str, "video/mp4"))
+    return true;
+
+  return false;
+}
+
 // Returns:
-// CHROME: if suggested mime type is "text/html" and at least one of the
+// CHROME: if suggested mime type is a supported one and at least one of the
 //         following is true: 1) X-UA-Compatible tag is in HTTP headers.
 //                            2) Url is listed in OptInURLs registry key.
 // OTHER: if suggested mime type is not text/html.
@@ -241,9 +282,13 @@ RendererType DetermineRendererTypeFromMetaData(
     const wchar_t* suggested_mime_type,
     const std::wstring& url,
     IWinInetHttpInfo* info) {
-  if (!IsTextHtml(suggested_mime_type)) {
+
+  bool is_text_html = IsTextHtml(suggested_mime_type);
+  bool is_supported_content_type = is_text_html ||
+      IsAdditionallySupportedContentType(suggested_mime_type);
+
+  if (!is_supported_content_type)
     return OTHER;
-  }
 
   if (!url.empty() && IsOptInUrl(url.c_str())) {
     return CHROME;
@@ -260,7 +305,14 @@ RendererType DetermineRendererTypeFromMetaData(
       }
     }
   }
-  return UNDETERMINED;
+
+  // We can (and want) to sniff the content.
+  if (is_text_html) {
+    return UNDETERMINED;
+  }
+
+  // We cannot sniff the content.
+  return OTHER;
 }
 
 RendererType DetermineRendererType(void* buffer, DWORD size, bool last_chance) {
@@ -302,11 +354,7 @@ ProtData::ProtData(IInternetProtocol* protocol,
 
 ProtData::~ProtData() {
   DLOG(INFO) << __FUNCTION__ << " " << this;
-
-  // Remove from map.
-  AutoLock lock(datamap_lock_);
-  DCHECK(datamap_.end() != datamap_.find(protocol_));
-  datamap_.erase(protocol_);
+  Invalidate();
 }
 
 HRESULT ProtData::Read(void* buffer, ULONG size, ULONG* size_read) {
@@ -339,6 +387,20 @@ HRESULT ProtData::Read(void* buffer, ULONG size, ULONG* size_read) {
   return read_fun_(protocol_, buffer, size, size_read);
 }
 
+// Attempt to detect ChromeFrame from HTTP headers when
+// BINDSTATUS_MIMETYPEAVAILABLE is received.
+// There are three possible outcomes: CHROME/OTHER/UNDETERMINED.
+// If UNDETERMINED we are going to sniff the content later in ReportData().
+//
+// With not-so-well-written software (mime filters/protocols/protocol patchers)
+// BINDSTATUS_MIMETYPEAVAILABLE might be fired multiple times with different
+// values for the same client.
+// If the renderer_type_ member is:
+// CHROME - 2nd (and any subsequent) BINDSTATUS_MIMETYPEAVAILABLE is ignored.
+// OTHER  - 2nd (and any subsequent) BINDSTATUS_MIMETYPEAVAILABLE is
+//          passed through.
+// UNDETERMINED - Try to detect ChromeFrame from HTTP headers (acts as if this
+//                is the first time BINDSTATUS_MIMETYPEAVAILABLE is received).
 HRESULT ProtData::ReportProgress(IInternetProtocolSink* delegate,
                                  ULONG status_code, LPCWSTR status_text) {
   switch (status_code) {
@@ -360,12 +422,12 @@ HRESULT ProtData::ReportProgress(IInternetProtocolSink* delegate,
     // TODO(stoyan): BINDSTATUS_RAWMIMETYPE
     case BINDSTATUS_MIMETYPEAVAILABLE:
     case BINDSTATUS_VERIFIEDMIMETYPEAVAILABLE:
+      SaveSuggestedMimeType(status_text);
       // When Transaction is attached i.e. when existing BTS it terminated
       // and "converted" to BTO, events will be re-fired for the new sink,
       // but we may skip the renderer_type_ determination since it's already
       // done.
       if (renderer_type_ == UNDETERMINED) {
-        SaveSuggestedMimeType(status_text);
         // This may seem awkward. CBinding's implementation of IWinInetHttpInfo
         // will forward to CTransaction that will forward to the real protocol.
         // We may ask CTransaction (our protocol_ member) for IWinInetHttpInfo.
@@ -385,7 +447,7 @@ HRESULT ProtData::ReportProgress(IInternetProtocolSink* delegate,
       } else if (renderer_type_ == OTHER) {
         // Suggested mime type is not "text/html" - we are not interested in
         // this request anymore.
-        FireSugestedMimeType(delegate);
+        FireSuggestedMimeType(delegate);
       } else {
         // Suggested mime type is "text/html"; We will try to sniff the
         // HTML content in ReportData.
@@ -394,12 +456,16 @@ HRESULT ProtData::ReportProgress(IInternetProtocolSink* delegate,
       return S_OK;
   }
 
+  // We are just pass through at this point, avoid false positive crash reports.
+  ExceptionBarrierReportOnlyModule barrier;
   return delegate->ReportProgress(status_code, status_text);
 }
 
 HRESULT ProtData::ReportData(IInternetProtocolSink* delegate,
                               DWORD flags, ULONG progress, ULONG max_progress) {
   if (renderer_type_ != UNDETERMINED) {
+    // We are just pass through now, avoid false positive crash reports.
+    ExceptionBarrierReportOnlyModule barrier;
     return delegate->ReportData(flags, progress, max_progress);
   }
 
@@ -425,7 +491,7 @@ HRESULT ProtData::ReportData(IInternetProtocolSink* delegate,
   }
 
   if (renderer_type_ == OTHER) {
-    FireSugestedMimeType(delegate);
+    FireSuggestedMimeType(delegate);
   }
 
   // This is the first data notification we forward, since up to now we hold
@@ -446,7 +512,7 @@ HRESULT ProtData::ReportResult(IInternetProtocolSink* delegate, HRESULT result,
   if (renderer_type_ == UNDETERMINED) {
     DLOG(INFO) << "ReportResult received but renderer type is yet unknown.";
     renderer_type_ = OTHER;
-    FireSugestedMimeType(delegate);
+    FireSuggestedMimeType(delegate);
   }
 
   HRESULT hr = S_OK;
@@ -482,7 +548,7 @@ void ProtData::SaveSuggestedMimeType(LPCWSTR status_text) {
   suggested_mime_type_.Allocate(status_text);
 }
 
-void ProtData::FireSugestedMimeType(IInternetProtocolSink* delegate) {
+void ProtData::FireSuggestedMimeType(IInternetProtocolSink* delegate) {
   if (has_server_mime_type_) {
     DLOG(INFO) << "Forwarding BINDSTATUS_SERVER_MIMETYPEAVAILABLE "
         << suggested_mime_type_;
@@ -502,7 +568,6 @@ void ProtData::SaveReferrer(IInternetProtocolSink* delegate) {
   DCHECK_EQ(CHROME, renderer_type_);
   ScopedComPtr<IWinInetHttpInfo> info;
   info.QueryFrom(delegate);
-  DCHECK(info);
   if (info) {
     char buffer[4096] = {0};
     DWORD len = sizeof(buffer);
@@ -512,6 +577,8 @@ void ProtData::SaveReferrer(IInternetProtocolSink* delegate) {
         buffer, &len, &flags, 0);
     if (hr == S_OK && len > 0)
       referrer_.assign(buffer);
+  } else {
+    DLOG(WARNING) << "Failed to QI for IWinInetHttpInfo";
   }
 }
 
@@ -523,6 +590,63 @@ scoped_refptr<ProtData> ProtData::DataFromProtocol(
   if (datamap_.end() != it)
     instance = it->second;
   return instance;
+}
+
+void ProtData::Invalidate() {
+  if (protocol_) {
+    // Remove from map.
+    AutoLock lock(datamap_lock_);
+    DCHECK(datamap_.end() != datamap_.find(protocol_));
+    datamap_.erase(protocol_);
+    protocol_ = NULL;
+  }
+}
+
+// This function looks for the url pattern indicating that this request needs
+// to be forced into chrome frame.
+// This hack is required because window.open requests from Chrome don't have
+// the URL up front. The URL comes in much later when the renderer initiates a
+// top level navigation for the url passed into window.open.
+// The new page must be rendered in ChromeFrame to preserve the opener
+// relationship with its parent even if the new page does not have the chrome
+// meta tag.
+bool HandleAttachToExistingExternalTab(LPCWSTR url,
+                                       IInternetProtocol* protocol,
+                                       IInternetProtocolSink* prot_sink,
+                                       IBindCtx* bind_ctx) {
+  ChromeFrameUrl cf_url;
+  if (cf_url.Parse(url) && cf_url.attach_to_external_tab()) {
+    scoped_refptr<ProtData> prot_data = ProtData::DataFromProtocol(protocol);
+    if (!prot_data) {
+      // Pass NULL as the read function which indicates that always return EOF
+      // without calling the underlying protocol.
+      prot_data = new ProtData(protocol, NULL, url);
+      PutProtData(bind_ctx, prot_data);
+    }
+
+    prot_sink->ReportProgress(BINDSTATUS_MIMETYPEAVAILABLE, kChromeMimeType);
+
+    int data_flags = BSCF_FIRSTDATANOTIFICATION | BSCF_LASTDATANOTIFICATION;
+    prot_sink->ReportData(data_flags, 0, 0);
+
+    prot_sink->ReportResult(S_OK, 0, NULL);
+    return true;
+  }
+  return false;
+}
+
+HRESULT ForwardHookStart(InternetProtocol_Start_Fn orig_start,
+    IInternetProtocol* protocol, LPCWSTR url, IInternetProtocolSink* prot_sink,
+    IInternetBindInfo* bind_info, DWORD flags, HANDLE_PTR reserved) {
+  ExceptionBarrierReportOnlyModule barrier;
+  return orig_start(protocol, url, prot_sink, bind_info, flags, reserved);
+}
+
+HRESULT ForwardWrappedHookStart(InternetProtocol_Start_Fn orig_start,
+    IInternetProtocol* protocol, LPCWSTR url, IInternetProtocolSink* prot_sink,
+    IInternetBindInfo* bind_info, DWORD flags, HANDLE_PTR reserved) {
+  ExceptionBarrier barrier;
+  return orig_start(protocol, url, prot_sink, bind_info, flags, reserved);
 }
 
 // IInternetProtocol/Ex hooks.
@@ -539,24 +663,37 @@ STDMETHODIMP Hook_Start(InternetProtocol_Start_Fn orig_start,
     // MSHTML sometimes takes a short path, skips the creation of
     // moniker and binding, by directly grabbing protocol from InternetSession
     DLOG(INFO) << "DirectBind for " << url;
-    return orig_start(protocol, url, prot_sink, bind_info, flags, reserved);
-  }
-
-  if (IsCFRequest(bind_ctx)) {
-    return orig_start(protocol, url, prot_sink, bind_info, flags, reserved);
+    return ForwardHookStart(orig_start, protocol, url, prot_sink, bind_info,
+                            flags, reserved);
   }
 
   scoped_refptr<ProtData> prot_data = ProtData::DataFromProtocol(protocol);
+  if (prot_data && !HasProtData(bind_ctx)) {
+    prot_data->Invalidate();
+    prot_data = NULL;
+  }
+
+  if (HandleAttachToExistingExternalTab(url, protocol, prot_sink, bind_ctx)) {
+    return S_OK;
+  }
+
+  if (IsCFRequest(bind_ctx)) {
+    return ForwardHookStart(orig_start, protocol, url, prot_sink, bind_info,
+                            flags, reserved);
+  }
+
   if (prot_data) {
     DLOG(INFO) << "Found existing ProtData!";
     prot_data->UpdateUrl(url);
     ScopedComPtr<IInternetProtocolSink> new_sink =
         ProtocolSinkWrap::CreateNewSink(prot_sink, prot_data);
-    return orig_start(protocol, url, new_sink, bind_info, flags, reserved);
+    return ForwardWrappedHookStart(orig_start, protocol, url, new_sink,
+                                   bind_info, flags, reserved);
   }
 
   if (!ShouldWrapSink(prot_sink, url)) {
-    return orig_start(protocol, url, prot_sink, bind_info, flags, reserved);
+    return ForwardHookStart(orig_start, protocol, url, prot_sink, bind_info,
+                            flags, reserved);
   }
 
   // Fresh request.
@@ -567,7 +704,22 @@ STDMETHODIMP Hook_Start(InternetProtocol_Start_Fn orig_start,
 
   ScopedComPtr<IInternetProtocolSink> new_sink =
       ProtocolSinkWrap::CreateNewSink(prot_sink, prot_data);
-  return orig_start(protocol, url, new_sink, bind_info, flags, reserved);
+  return ForwardWrappedHookStart(orig_start, protocol, url, new_sink, bind_info,
+                                 flags, reserved);
+}
+
+HRESULT ForwardHookStartEx(InternetProtocol_StartEx_Fn orig_start_ex,
+    IInternetProtocolEx* protocol, IUri* uri, IInternetProtocolSink* prot_sink,
+    IInternetBindInfo* bind_info, DWORD flags, HANDLE_PTR reserved) {
+  ExceptionBarrierReportOnlyModule barrier;
+  return orig_start_ex(protocol, uri, prot_sink, bind_info, flags, reserved);
+}
+
+HRESULT ForwardWrappedHookStartEx(InternetProtocol_StartEx_Fn orig_start_ex,
+    IInternetProtocolEx* protocol, IUri* uri, IInternetProtocolSink* prot_sink,
+    IInternetBindInfo* bind_info, DWORD flags, HANDLE_PTR reserved) {
+  ExceptionBarrier barrier;
+  return orig_start_ex(protocol, uri, prot_sink, bind_info, flags, reserved);
 }
 
 STDMETHODIMP Hook_StartEx(InternetProtocol_StartEx_Fn orig_start_ex,
@@ -586,24 +738,37 @@ STDMETHODIMP Hook_StartEx(InternetProtocol_StartEx_Fn orig_start_ex,
     // MSHTML sometimes takes a short path, skips the creation of
     // moniker and binding, by directly grabbing protocol from InternetSession.
     DLOG(INFO) << "DirectBind for " << url;
-    return orig_start_ex(protocol, uri, prot_sink, bind_info, flags, reserved);
-  }
-
-  if (IsCFRequest(bind_ctx)) {
-    return orig_start_ex(protocol, uri, prot_sink, bind_info, flags, reserved);
+    return ForwardHookStartEx(orig_start_ex, protocol, uri, prot_sink,
+                              bind_info, flags, reserved);
   }
 
   scoped_refptr<ProtData> prot_data = ProtData::DataFromProtocol(protocol);
+  if (prot_data && !HasProtData(bind_ctx)) {
+    prot_data->Invalidate();
+    prot_data = NULL;
+  }
+
+  if (HandleAttachToExistingExternalTab(url, protocol, prot_sink, bind_ctx)) {
+    return S_OK;
+  }
+
+  if (IsCFRequest(bind_ctx)) {
+    return ForwardHookStartEx(orig_start_ex, protocol, uri, prot_sink,
+                              bind_info, flags, reserved);
+  }
+
   if (prot_data) {
     DLOG(INFO) << "Found existing ProtData!";
     prot_data->UpdateUrl(url);
     ScopedComPtr<IInternetProtocolSink> new_sink =
         ProtocolSinkWrap::CreateNewSink(prot_sink, prot_data);
-    return orig_start_ex(protocol, uri, new_sink, bind_info, flags, reserved);
+    return ForwardWrappedHookStartEx(orig_start_ex, protocol, uri, new_sink,
+                                     bind_info, flags, reserved);
   }
 
   if (!ShouldWrapSink(prot_sink, url)) {
-    return orig_start_ex(protocol, uri, prot_sink, bind_info, flags, reserved);
+    return ForwardHookStartEx(orig_start_ex, protocol, uri, prot_sink,
+                              bind_info, flags, reserved);
   }
 
   // Fresh request.
@@ -614,19 +779,58 @@ STDMETHODIMP Hook_StartEx(InternetProtocol_StartEx_Fn orig_start_ex,
 
   ScopedComPtr<IInternetProtocolSink> new_sink =
       ProtocolSinkWrap::CreateNewSink(prot_sink, prot_data);
-  return orig_start_ex(protocol, uri, new_sink, bind_info, flags, reserved);
+  return ForwardWrappedHookStartEx(orig_start_ex, protocol, uri, new_sink,
+                                   bind_info, flags, reserved);
 }
 
 STDMETHODIMP Hook_Read(InternetProtocol_Read_Fn orig_read,
     IInternetProtocol* protocol, void* buffer, ULONG size, ULONG* size_read) {
   DCHECK(orig_read);
+  HRESULT hr = E_FAIL;
+
   scoped_refptr<ProtData> prot_data = ProtData::DataFromProtocol(protocol);
   if (!prot_data) {
-    return orig_read(protocol, buffer, size, size_read);
+    // We are not wrapping this request, avoid false positive crash reports.
+    ExceptionBarrierReportOnlyModule barrier;
+    hr = orig_read(protocol, buffer, size, size_read);
+    return hr;
   }
 
-  HRESULT hr = prot_data->Read(buffer, size, size_read);
+  if (prot_data->is_attach_external_tab_request()) {
+    // return EOF always.
+    if (size_read)
+      *size_read = 0;
+    return S_FALSE;
+  }
+
+  hr = prot_data->Read(buffer, size, size_read);
   return hr;
+}
+
+STDMETHODIMP Hook_LockRequest(InternetProtocol_LockRequest_Fn orig_req,
+                              IInternetProtocol* protocol, DWORD options) {
+  DCHECK(orig_req);
+
+  scoped_refptr<ProtData> prot_data = ProtData::DataFromProtocol(protocol);
+  if (prot_data && prot_data->is_attach_external_tab_request()) {
+    prot_data->AddRef();
+    return S_OK;
+  }
+
+  return orig_req(protocol, options);
+}
+
+STDMETHODIMP Hook_UnlockRequest(InternetProtocol_UnlockRequest_Fn orig_req,
+                                IInternetProtocol* protocol) {
+  DCHECK(orig_req);
+
+  scoped_refptr<ProtData> prot_data = ProtData::DataFromProtocol(protocol);
+  if (prot_data && prot_data->is_attach_external_tab_request()) {
+    prot_data->Release();
+    return S_OK;
+  }
+
+  return orig_req(protocol);
 }
 
 // Patching / Hooking code.

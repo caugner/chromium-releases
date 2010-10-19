@@ -32,7 +32,7 @@ GtkWidget* NewComboboxFromModel(ComboboxModel* model) {
   int count = model->GetItemCount();
   for (int i = 0; i < count; ++i)
     gtk_combo_box_append_text(GTK_COMBO_BOX(combobox),
-                              WideToUTF8(model->GetItemAt(i)).c_str());
+                              UTF16ToUTF8(model->GetItemAt(i)).c_str());
   return combobox;
 }
 
@@ -42,6 +42,8 @@ GtkWidget* NewComboboxFromModel(ComboboxModel* model) {
 class AddLanguageDialog {
  public:
   AddLanguageDialog(Profile* profile, LanguagesPageGtk* delegate);
+  virtual ~AddLanguageDialog() {}
+
  private:
   // Callback for dialog buttons.
   CHROMEGTK_CALLBACK_1(AddLanguageDialog, void, OnResponse, int);
@@ -311,7 +313,7 @@ int LanguagesPageGtk::FirstSelectedRowNum() {
   return row_num;
 }
 
-void LanguagesPageGtk::NotifyPrefChanged(const std::wstring* pref_name) {
+void LanguagesPageGtk::NotifyPrefChanged(const std::string* pref_name) {
   initializing_ = true;
   if (!pref_name || *pref_name == prefs::kAcceptLanguages) {
     language_order_table_model_->SetAcceptLanguagesString(

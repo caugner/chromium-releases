@@ -4,12 +4,12 @@
 
 #ifndef CHROME_TEST_AUTOMATION_JAVASCRIPT_MESSAGE_UTILS_H_
 #define CHROME_TEST_AUTOMATION_JAVASCRIPT_MESSAGE_UTILS_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/json/json_writer.h"
-#include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/values.h"
@@ -72,8 +72,8 @@ struct ValueConversionTraits<DOMElementProxy::By> {
         NOTREACHED();
         break;
     }
-    value->SetString(L"type", by_type);
-    value->SetString(L"queryString", t.query());
+    value->SetString("type", by_type);
+    value->SetString("queryString", t.query());
     return value;
   }
 };

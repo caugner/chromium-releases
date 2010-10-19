@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/stl_util-inl.h"
 
 using base::Time;
+using base::TimeDelta;
 
 namespace history {
 
@@ -235,6 +236,33 @@ void QueryResults::AdjustResultMap(size_t begin, size_t end, ptrdiff_t delta) {
         i->second[match] += delta;
     }
   }
+}
+
+HistoryAddPageArgs::HistoryAddPageArgs(
+    const GURL& arg_url,
+    base::Time arg_time,
+    const void* arg_id_scope,
+    int32 arg_page_id,
+    const GURL& arg_referrer,
+    const history::RedirectList& arg_redirects,
+    PageTransition::Type arg_transition,
+    VisitSource arg_source,
+    bool arg_did_replace_entry)
+      : url(arg_url),
+        time(arg_time),
+        id_scope(arg_id_scope),
+        page_id(arg_page_id),
+        referrer(arg_referrer),
+        redirects(arg_redirects),
+        transition(arg_transition),
+        visit_source(arg_source),
+        did_replace_entry(arg_did_replace_entry) {
+}
+
+HistoryAddPageArgs* HistoryAddPageArgs::Clone() const {
+  return new HistoryAddPageArgs(
+      url, time, id_scope, page_id, referrer, redirects, transition,
+      visit_source, did_replace_entry);
 }
 
 }  // namespace history

@@ -770,6 +770,35 @@ void Viewport(GLint x, GLint y, GLsizei width, GLsizei height) {
   helper_->Viewport(x, y, width, height);
 }
 
+void BlitFramebufferEXT(
+    GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0,
+    GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) {
+  helper_->BlitFramebufferEXT(
+      srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter);
+}
+
+void RenderbufferStorageMultisampleEXT(
+    GLenum target, GLsizei samples, GLenum internalformat, GLsizei width,
+    GLsizei height) {
+  if (samples < 0) {
+    SetGLError(
+        GL_INVALID_VALUE, "glRenderbufferStorageMultisampleEXT: samples < 0");
+    return;
+  }
+  if (width < 0) {
+    SetGLError(
+        GL_INVALID_VALUE, "glRenderbufferStorageMultisampleEXT: width < 0");
+    return;
+  }
+  if (height < 0) {
+    SetGLError(
+        GL_INVALID_VALUE, "glRenderbufferStorageMultisampleEXT: height < 0");
+    return;
+  }
+  helper_->RenderbufferStorageMultisampleEXT(
+      target, samples, internalformat, width, height);
+}
+
 void SwapBuffers();
 
 GLuint GetMaxValueInBuffer(
@@ -802,6 +831,11 @@ void* MapTexSubImage2D(
     GLsizei height, GLenum format, GLenum type, GLenum access);
 
 void UnmapTexSubImage2D(const void* mem);
+
+void CopyTextureToParentTexture(
+    GLuint client_child_id, GLuint client_parent_id) {
+  helper_->CopyTextureToParentTexture(client_child_id, client_parent_id);
+}
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_IMPLEMENTATION_AUTOGEN_H_
 

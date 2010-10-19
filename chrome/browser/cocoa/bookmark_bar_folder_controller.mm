@@ -3,30 +3,31 @@
 // found in the LICENSE file.
 
 #import "chrome/browser/cocoa/bookmark_bar_folder_controller.h"
+
 #include "base/mac_util.h"
 #include "base/nsimage_cache_mac.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#import "chrome/browser/browser_theme_provider.h"
 #import "chrome/browser/cocoa/bookmark_bar_constants.h"  // namespace bookmarks
 #import "chrome/browser/cocoa/bookmark_bar_controller.h" // namespace bookmarks
-#import "chrome/browser/cocoa/bookmark_bar_folder_view.h"
 #import "chrome/browser/cocoa/bookmark_bar_folder_button_cell.h"
 #import "chrome/browser/cocoa/bookmark_bar_folder_hover_state.h"
+#import "chrome/browser/cocoa/bookmark_bar_folder_view.h"
 #import "chrome/browser/cocoa/bookmark_folder_target.h"
 #import "chrome/browser/cocoa/browser_window_controller.h"
 #import "chrome/browser/cocoa/event_utils.h"
+#import "chrome/browser/themes/browser_theme_provider.h"
 
 namespace {
 
 // Frequency of the scrolling timer in seconds.
-const NSTimeInterval kBookmarkBarFolderScrollInterval = 0.2;
+const NSTimeInterval kBookmarkBarFolderScrollInterval = 0.1;
 
 // Amount to scroll by per timer fire.  We scroll rather slowly; to
-// accomodate we do 2 at a time.
+// accomodate we do several at a time.
 const CGFloat kBookmarkBarFolderScrollAmount =
-    2 * (bookmarks::kBookmarkButtonHeight +
+    3 * (bookmarks::kBookmarkButtonHeight +
          bookmarks::kBookmarkVerticalPadding);
 
 // Amount to scroll for each scroll wheel delta.
@@ -145,6 +146,14 @@ const CGFloat kScrollWindowVerticalMargin = 0.0;
   [self removeScrollTracking];
   [self endScroll];
   [hoverState_ draggingExited];
+
+  // Delegate pattern does not retain; make sure pointers to us are removed.
+  for (BookmarkButton* button in buttons_.get()) {
+    [button setDelegate:nil];
+    [button setTarget:nil];
+    [button setAction:nil];
+  }
+
   // Note: we don't need to
   //   [NSObject cancelPreviousPerformRequestsWithTarget:self];
   // Because all of our performSelector: calls use withDelay: which
@@ -173,8 +182,11 @@ const CGFloat kScrollWindowVerticalMargin = 0.0;
 }
 
 - (void)reconfigureMenu {
-  for (BookmarkButton* button in buttons_.get())
+  [NSObject cancelPreviousPerformRequestsWithTarget:self];
+  for (BookmarkButton* button in buttons_.get()) {
+    [button setDelegate:nil];
     [button removeFromSuperview];
+  }
   [buttons_ removeAllObjects];
   [self configureWindow];
 }
@@ -249,7 +261,7 @@ const CGFloat kScrollWindowVerticalMargin = 0.0;
       [button setTarget:self];
       [button setAction:@selector(openBookmark:)];
       // Add a tooltip.
-      NSString* title = base::SysWideToNSString(node->GetTitle());
+      NSString* title = base::SysUTF16ToNSString(node->GetTitle());
       std::string urlString = node->GetURL().possibly_invalid_spec();
       NSString* tooltip = [NSString stringWithFormat:@"%@\n%s", title,
                                     urlString.c_str()];
@@ -376,36 +388,60 @@ const CGFloat kScrollWindowVerticalMargin = 0.0;
       [self adjustButtonWidths] + (2 * bookmarks::kBookmarkVerticalPadding) +
       bookmarks::kScrollViewContentWidthMargin;
   NSPoint newWindowTopLeft = [self windowTopLeftForWidth:windowWidth];
+  NSSize windowSize = NSMakeSize(windowWidth, windowHeight);
+  windowSize = [scrollView_ convertSize:windowSize toView:nil];
+  NSWindow* window = [self window];
+  // If the window is already visible then make sure its top remains stable.
+  BOOL windowAlreadyShowing = [window isVisible];
+  CGFloat deltaY = windowHeight - NSHeight([mainView_ frame]);
+  if (windowAlreadyShowing) {
+    NSRect oldFrame = [window frame];
+    newWindowTopLeft.y = oldFrame.origin.y + NSHeight(oldFrame);
+  }
   NSRect windowFrame = NSMakeRect(newWindowTopLeft.x,
-                                  newWindowTopLeft.y - windowHeight,
-                                  windowWidth,
-                                  windowHeight);
-
+      newWindowTopLeft.y - windowHeight, windowSize.width, windowHeight);
   // Make the scrolled content be the right size (full size).
-  NSRect mainViewFrame = NSMakeRect(0, 0,
-                                    NSWidth(windowFrame) -
-                                    bookmarks::kScrollViewContentWidthMargin,
-                                    NSHeight(windowFrame));
+  NSRect mainViewFrame = NSMakeRect(0, 0, NSWidth(windowFrame) -
+      bookmarks::kScrollViewContentWidthMargin, NSHeight(windowFrame));
   [mainView_ setFrame:mainViewFrame];
-
   // Make sure the window fits on the screen.  If not, constrain.
   // We'll scroll to allow the user to see all the content.
   NSRect screenFrame = [[[self window] screen] frame];
   screenFrame = NSInsetRect(screenFrame, 0, kScrollWindowVerticalMargin);
+  BOOL wasScrollable = scrollable_;
   if (!NSContainsRect(screenFrame, windowFrame)) {
     scrollable_ = YES;
     windowFrame = NSIntersectionRect(screenFrame, windowFrame);
   } else {
     scrollable_ = NO;
   }
-  [[self window] setFrame:windowFrame display:YES];
-  // If scrollable then offset the view and show the arrows.
-  if (scrollable_) {
-    [mainView_ scrollPoint:NSMakePoint(0, (NSHeight(mainViewFrame) -
-                                           NSHeight(windowFrame)))];
+  [window setFrame:windowFrame display:NO];
+  if (wasScrollable != scrollable_) {
+    // If scrollability changed then rework visibility of the scroll arrows
+    // and the scroll offset of the menu view.
+    NSSize windowLocalSize =
+        [scrollView_ convertSize:windowFrame.size fromView:nil];
+    CGFloat scrollPointY = NSHeight(mainViewFrame) - windowLocalSize.height +
+        bookmarks::kBookmarkVerticalPadding;
+    [mainView_ scrollPoint:NSMakePoint(0, scrollPointY)];
     [self showOrHideScrollArrows];
     [self addOrUpdateScrollTracking];
+  } else if (scrollable_ && windowAlreadyShowing) {
+    // If the window was already showing and is still scrollable then make
+    // sure the main view moves upward, not downward so that the content
+    // at the bottom of the menu, not the top, appears to move.
+    // The edge case is when the menu is scrolled all the way to top (hence
+    // the test of scrollDownArrowShown_) - don't scroll then.
+    NSView* superView = [mainView_ superview];
+    DCHECK([superView isKindOfClass:[NSClipView class]]);
+    NSClipView* clipView = static_cast<NSClipView*>(superView);
+    CGFloat scrollPointY = [clipView bounds].origin.y +
+        bookmarks::kBookmarkVerticalPadding;
+    if (scrollDownArrowShown_ || deltaY > 0.0)
+      scrollPointY += deltaY;
+    [mainView_ scrollPoint:NSMakePoint(0, scrollPointY)];
   }
+  [window display];
 }
 
 // Determine window size and position.
@@ -420,7 +456,8 @@ const CGFloat kScrollWindowVerticalMargin = 0.0;
   int buttons = std::max(node->GetChildCount() - startingIndex, 1);
 
   // Prelim height of the window.  We'll trim later as needed.
-  int height = buttons * bookmarks::kBookmarkButtonHeight;
+  int height = buttons * bookmarks::kBookmarkButtonHeight +
+      bookmarks::kBookmarkVerticalPadding;
   // We'll need this soon...
   [self window];
 
@@ -1186,41 +1223,38 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 
 - (void)addButtonForNode:(const BookmarkNode*)node
                  atIndex:(NSInteger)buttonIndex {
-  NSRect buttonFrame = NSMakeRect(bookmarks::kBookmarkHorizontalPadding,
-      bookmarks::kBookmarkVerticalPadding,
-      NSWidth([mainView_ frame]) - 2 * bookmarks::kBookmarkHorizontalPadding -
-              bookmarks::kScrollViewContentWidthMargin,
-              bookmarks::kBookmarkBarHeight - 2 *
-                  bookmarks::kBookmarkVerticalPadding);
+  // Propose the frame for the new button.
+  NSRect newButtonFrame = NSMakeRect(0, 0, 500, 500);  // Placeholder values.
   // When adding a button to an empty folder we must remove the 'empty'
   // placeholder button. This can be detected by checking for a parent
   // child count of 1.
   const BookmarkNode* parentNode = node->GetParent();
   if (parentNode->GetChildCount() == 1) {
     BookmarkButton* emptyButton = [buttons_ lastObject];
+    newButtonFrame = [emptyButton frame];
+    [emptyButton setDelegate:nil];
     [emptyButton removeFromSuperview];
     [buttons_ removeLastObject];
-  } else {
-    // Set us up to remember the last moved button's frame.
-    buttonFrame.origin.y += NSHeight([mainView_ frame]) +
-        bookmarks::kBookmarkBarHeight;
   }
 
   if (buttonIndex == -1)
     buttonIndex = [buttons_ count];
 
+  // Offset upward by one button height all buttons above insertion location.
   BookmarkButton* button = nil;  // Remember so it can be de-highlighted.
   for (NSInteger i = 0; i < buttonIndex; ++i) {
     button = [buttons_ objectAtIndex:i];
-    buttonFrame = [button frame];
-    buttonFrame.origin.y += bookmarks::kBookmarkBarHeight;
+    // Remember this location in case it's the last button being moved
+    // which is where the new button will be located.
+    newButtonFrame = [button frame];
+    NSRect buttonFrame = [button frame];
+    buttonFrame.origin.y += bookmarks::kBookmarkBarHeight +
+        bookmarks::kBookmarkVerticalPadding;
     [button setFrame:buttonFrame];
   }
   [[button cell] mouseExited:nil];  // De-highlight.
-  if (parentNode->GetChildCount() > 1)
-    buttonFrame.origin.y -= bookmarks::kBookmarkBarHeight;
   BookmarkButton* newButton = [self makeButtonForNode:node
-                                                frame:buttonFrame];
+                                                frame:newButtonFrame];
   [buttons_ insertObject:newButton atIndex:buttonIndex];
   [mainView_ addSubview:newButton];
 
@@ -1228,7 +1262,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   [self closeBookmarkFolder:self];
 
   // Prelim height of the window.  We'll trim later as needed.
-  int height = [buttons_ count] * bookmarks::kBookmarkButtonHeight;
+  int height = [buttons_ count] * bookmarks::kBookmarkButtonHeight +
+      bookmarks::kBookmarkVerticalPadding;
   [self adjustWindowForHeight:height];
 }
 
@@ -1266,7 +1301,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     if (gurl.is_valid()) {
       bookmarkModel->AddURL(destParent,
                             destIndex++,
-                            base::SysNSStringToWide([titles objectAtIndex:i]),
+                            base::SysNSStringToUTF16([titles objectAtIndex:i]),
                             gurl);
       nodesWereAdded = YES;
     }
@@ -1289,7 +1324,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
       for (NSInteger i = fromIndex; i < toIndex; ++i) {
         BookmarkButton* button = [buttons_ objectAtIndex:i];
         NSRect frame = [button frame];
-        frame.origin.y += bookmarks::kBookmarkBarHeight;
+        frame.origin.y += bookmarks::kBookmarkBarHeight +
+            bookmarks::kBookmarkVerticalPadding;
         [button setFrameOrigin:frame.origin];
       }
     } else {
@@ -1298,7 +1334,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
       for (NSInteger i = fromIndex - 1; i >= toIndex; --i) {
         BookmarkButton* button = [buttons_ objectAtIndex:i];
         NSRect buttonFrame = [button frame];
-        buttonFrame.origin.y -= bookmarks::kBookmarkBarHeight;
+        buttonFrame.origin.y -= bookmarks::kBookmarkBarHeight +
+            bookmarks::kBookmarkVerticalPadding;
         [button setFrameOrigin:buttonFrame.origin];
       }
     }
@@ -1318,9 +1355,12 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   poofPoint = [[oldButton window] convertBaseToScreen:poofPoint];
 
   // If a hover-open is pending, cancel it.
-  if (oldButton == buttonThatMouseIsIn_)
+  if (oldButton == buttonThatMouseIsIn_) {
     [NSObject cancelPreviousPerformRequestsWithTarget:self];
+    buttonThatMouseIsIn_ = nil;
+  }
 
+  [oldButton setDelegate:nil];
   [oldButton removeFromSuperview];
   if (animate && !ignoreAnimations_)
     NSShowAnimationEffect(NSAnimationEffectDisappearingItemDefault, poofPoint,
@@ -1329,7 +1369,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   for (NSInteger i = 0; i < buttonIndex; ++i) {
     BookmarkButton* button = [buttons_ objectAtIndex:i];
     NSRect buttonFrame = [button frame];
-    buttonFrame.origin.y -= bookmarks::kBookmarkBarHeight;
+    buttonFrame.origin.y -= bookmarks::kBookmarkBarHeight +
+      bookmarks::kBookmarkVerticalPadding;
     [button setFrame:buttonFrame];
   }
   // Search for and adjust submenus, if necessary.
@@ -1361,7 +1402,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   }
 
   // Propose a height for the window.  We'll trim later as needed.
-  int height = buttonCount * bookmarks::kBookmarkButtonHeight;
+  int height = buttonCount * bookmarks::kBookmarkButtonHeight +
+      bookmarks::kBookmarkVerticalPadding;
   [self adjustWindowForHeight:height];
 }
 
@@ -1378,6 +1420,10 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 
 - (void)setIgnoreAnimations:(BOOL)ignore {
   ignoreAnimations_ = ignore;
+}
+
+- (BookmarkButton*)buttonThatMouseIsIn {
+  return buttonThatMouseIsIn_;
 }
 
 @end  // BookmarkBarFolderController

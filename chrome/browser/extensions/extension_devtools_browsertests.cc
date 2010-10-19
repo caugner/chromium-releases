@@ -45,7 +45,8 @@ static ExtensionHost* FindHostWithPath(ExtensionProcessManager* manager,
 }
 
 // Tests for the experimental timeline extensions API.
-IN_PROC_BROWSER_TEST_F(ExtensionDevToolsBrowserTest, TimelineApi) {
+// TODO(johnnyg): crbug.com/52544 Test was broken by webkit r65510.
+IN_PROC_BROWSER_TEST_F(ExtensionDevToolsBrowserTest, FLAKY_TimelineApi) {
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("devtools").AppendASCII("timeline_api")));
 
@@ -80,11 +81,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionDevToolsBrowserTest, TimelineApi) {
   // Test onPageEvent event.
   result = false;
 
-  DevToolsMessageData message_data;
-  message_data.class_name = "ApuAgentDelegate";
-  message_data.method_name = "dispatchToApu";
-  message_data.arguments.push_back("");
-  DevToolsClientMsg_RpcMessage pageEventMessage(message_data);
+  DevToolsClientMsg_DispatchToAPU pageEventMessage("");
   devtools_client_host->SendMessageToClient(pageEventMessage);
   ui_test_utils::ExecuteJavaScriptAndExtractBool(
       host->render_view_host(), L"", L"testReceivePageEvent()", &result);

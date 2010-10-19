@@ -5,26 +5,23 @@
 #include "remoting/client/plugin/pepper_view.h"
 
 #include "base/message_loop.h"
-#include "remoting/client/decoder_verbatim.h"
-#include "remoting/client/plugin/chromoting_plugin.h"
+#include "remoting/client/plugin/chromoting_instance.h"
 #include "remoting/client/plugin/pepper_util.h"
-#include "third_party/ppapi/cpp/device_context_2d.h"
+#include "third_party/ppapi/cpp/graphics_2d.h"
 #include "third_party/ppapi/cpp/image_data.h"
 #include "third_party/ppapi/cpp/point.h"
 #include "third_party/ppapi/cpp/size.h"
 
 namespace remoting {
 
-PepperView::PepperView(ChromotingPlugin* plugin)
-  : plugin_(plugin),
-    backing_store_width_(0),
-    backing_store_height_(0),
-    viewport_x_(0),
-    viewport_y_(0),
-    viewport_width_(0),
-    viewport_height_(0),
-    is_static_fill_(false),
-    static_fill_color_(0) {
+PepperView::PepperView(ChromotingInstance* instance)
+    : instance_(instance),
+      viewport_x_(0),
+      viewport_y_(0),
+      viewport_width_(0),
+      viewport_height_(0),
+      is_static_fill_(false),
+      static_fill_color_(0) {
 }
 
 PepperView::~PepperView() {
@@ -38,17 +35,19 @@ void PepperView::TearDown() {
 }
 
 void PepperView::Paint() {
-  if (!plugin_->CurrentlyOnPluginThread()) {
+  if (!instance_->CurrentlyOnPluginThread()) {
     RunTaskOnPluginThread(NewRunnableMethod(this, &PepperView::Paint));
     return;
   }
 
-  // TODO(ajwong): We shouldn't assume the image data format.
-  pp::ImageData image(PP_IMAGEDATAFORMAT_BGRA_PREMUL,
+  // TODO(ajwong): We're assuming the native format is BGRA_PREMUL below. This
+  // is wrong.
+  pp::ImageData image(pp::ImageData::GetNativeImageDataFormat(),
                       pp::Size(viewport_width_, viewport_height_),
                       false);
   if (image.is_null()) {
-    LOG(ERROR) << "Unable to allocate image.";
+    LOG(ERROR) << "Unable to allocate image of size: "
+               << viewport_width_ << "x" << viewport_height_;
     return;
   }
 
@@ -61,13 +60,13 @@ void PepperView::Paint() {
   } else if (frame_) {
     uint32_t* frame_data =
         reinterpret_cast<uint32_t*>(frame_->data(media::VideoFrame::kRGBPlane));
-    int max_height = std::min(backing_store_height_, image.size().height());
-    int max_width = std::min(backing_store_width_, image.size().width());
+    int max_height = std::min(frame_height_, image.size().height());
+    int max_width = std::min(frame_width_, image.size().width());
     for (int y = 0; y < max_height; y++) {
       for (int x = 0; x < max_width; x++) {
         // Force alpha to be set to 255.
         *image.GetAddr32(pp::Point(x, y)) =
-            frame_data[y*backing_store_width_ + x] | 0xFF000000;
+            frame_data[y*frame_width_ + x] | 0xFF000000;
       }
     }
   } else {
@@ -82,7 +81,7 @@ void PepperView::Paint() {
 }
 
 void PepperView::SetSolidFill(uint32 color) {
-  if (!plugin_->CurrentlyOnPluginThread()) {
+  if (!instance_->CurrentlyOnPluginThread()) {
     RunTaskOnPluginThread(
         NewRunnableMethod(this, &PepperView::SetSolidFill, color));
     return;
@@ -93,7 +92,7 @@ void PepperView::SetSolidFill(uint32 color) {
 }
 
 void PepperView::UnsetSolidFill() {
-  if (!plugin_->CurrentlyOnPluginThread()) {
+  if (!instance_->CurrentlyOnPluginThread()) {
     RunTaskOnPluginThread(
         NewRunnableMethod(this, &PepperView::UnsetSolidFill));
     return;
@@ -103,7 +102,7 @@ void PepperView::UnsetSolidFill() {
 }
 
 void PepperView::SetViewport(int x, int y, int width, int height) {
-  if (!plugin_->CurrentlyOnPluginThread()) {
+  if (!instance_->CurrentlyOnPluginThread()) {
     RunTaskOnPluginThread(NewRunnableMethod(this, &PepperView::SetViewport,
                                           x, y, width, height));
     return;
@@ -118,76 +117,76 @@ void PepperView::SetViewport(int x, int y, int width, int height) {
   viewport_height_ = height;
 
   device_context_ =
-      pp::DeviceContext2D(pp::Size(viewport_width_, viewport_height_), false);
-  if (!plugin_->BindGraphicsDeviceContext(device_context_)) {
+      pp::Graphics2D(pp::Size(viewport_width_, viewport_height_), false);
+  if (!instance_->BindGraphics(device_context_)) {
     LOG(ERROR) << "Couldn't bind the device context.";
     return;
   }
 }
 
 void PepperView::SetHostScreenSize(int width, int height) {
-  if (!plugin_->CurrentlyOnPluginThread()) {
+  if (!instance_->CurrentlyOnPluginThread()) {
     RunTaskOnPluginThread(NewRunnableMethod(this,
                                             &PepperView::SetHostScreenSize,
                                             width, height));
     return;
   }
 
-  backing_store_width_ = width;
-  backing_store_height_ = height;
+  frame_width_ = width;
+  frame_height_ = height;
+
+  // Reset |frame_| - it will be recreated by the next update stream.
+  frame_ = NULL;
 }
 
-void PepperView::HandleBeginUpdateStream(HostMessage* msg) {
-  if (!plugin_->CurrentlyOnPluginThread()) {
+void PepperView::HandleBeginUpdateStream(ChromotingHostMessage* msg) {
+  if (!instance_->CurrentlyOnPluginThread()) {
     RunTaskOnPluginThread(
         NewRunnableMethod(this, &PepperView::HandleBeginUpdateStream,
                           msg));
     return;
   }
 
-  scoped_ptr<HostMessage> deleter(msg);
+  scoped_ptr<ChromotingHostMessage> deleter(msg);
 
-  // TODO(hclam): Use the information from the message to create the decoder.
-  // We lazily construct the decoder.
-  if (!decoder_.get()) {
-    decoder_.reset(new DecoderVerbatim());
-  }
-
+  // Make sure the |frame_| is initialized.
   if (!frame_) {
     media::VideoFrame::CreateFrame(media::VideoFrame::RGB32,
-                                   backing_store_width_,
-                                   backing_store_height_,
+                                   frame_width_, frame_height_,
                                    base::TimeDelta(), base::TimeDelta(),
                                    &frame_);
+    CHECK(frame_);
   }
-
-  // Tell the decoder to do start decoding.
-  decoder_->BeginDecode(frame_, &update_rects_,
-      NewRunnableMethod(this, &PepperView::OnPartialDecodeDone),
-      NewRunnableMethod(this, &PepperView::OnDecodeDone));
 }
 
-void PepperView::HandleUpdateStreamPacket(HostMessage* msg) {
-  if (!plugin_->CurrentlyOnPluginThread()) {
+void PepperView::HandleUpdateStreamPacket(ChromotingHostMessage* msg) {
+  if (!instance_->CurrentlyOnPluginThread()) {
     RunTaskOnPluginThread(
         NewRunnableMethod(this, &PepperView::HandleUpdateStreamPacket,
                           msg));
     return;
   }
 
-  decoder_->PartialDecode(msg);
+  // Lazily initialize the decoder.
+  SetupDecoder(msg->update_stream_packet().begin_rect().encoding());
+  if (!decoder_->IsStarted()) {
+    BeginDecoding(NewRunnableMethod(this, &PepperView::OnPartialDecodeDone),
+                  NewRunnableMethod(this, &PepperView::OnDecodeDone));
+  }
+
+  Decode(msg);
 }
 
-void PepperView::HandleEndUpdateStream(HostMessage* msg) {
-  if (!plugin_->CurrentlyOnPluginThread()) {
+void PepperView::HandleEndUpdateStream(ChromotingHostMessage* msg) {
+  if (!instance_->CurrentlyOnPluginThread()) {
     RunTaskOnPluginThread(
         NewRunnableMethod(this, &PepperView::HandleEndUpdateStream,
                           msg));
     return;
   }
 
-  scoped_ptr<HostMessage> deleter(msg);
-  decoder_->EndDecode();
+  scoped_ptr<ChromotingHostMessage> deleter(msg);
+  EndDecoding();
 }
 
 void PepperView::OnPaintDone() {

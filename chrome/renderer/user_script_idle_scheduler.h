@@ -4,6 +4,7 @@
 
 #ifndef CHROME_RENDERER_USER_SCRIPT_IDLE_SCHEDULER_H_
 #define CHROME_RENDERER_USER_SCRIPT_IDLE_SCHEDULER_H_
+#pragma once
 
 #include "base/task.h"
 
@@ -26,6 +27,7 @@ class WebFrame;
 class UserScriptIdleScheduler {
  public:
   UserScriptIdleScheduler(RenderView* view, WebKit::WebFrame* frame);
+  ~UserScriptIdleScheduler();
 
   bool has_run() { return has_run_; }
 

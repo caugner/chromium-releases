@@ -4,8 +4,8 @@
 
 #ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_DRAG_DATA_H_
 #define CHROME_BROWSER_BOOKMARKS_BOOKMARK_DRAG_DATA_H_
+#pragma once
 
-#include <string>
 #include <vector>
 
 #include "base/file_path.h"
@@ -16,9 +16,7 @@
 #include "app/os_exchange_data.h"
 #endif
 
-class BookmarkModel;
 class BookmarkNode;
-class OSExchangeData;
 class Pickle;
 class Profile;
 
@@ -96,7 +94,8 @@ struct BookmarkDragData {
   void WriteToClipboard(Profile* profile) const;
 
   // Reads bookmarks from the general copy/paste clipboard. Prefers data
-  // written via WriteToClipboard but will also attempt to read a plain bookmark.
+  // written via WriteToClipboard but will also attempt to read a plain
+  // bookmark.
   bool ReadFromClipboard();
 #if defined(OS_MACOSX)
   // Reads bookmarks that are being dragged from the drag and drop

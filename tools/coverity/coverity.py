@@ -88,10 +88,10 @@ def _RunCommand(cmd, dry_run, shell=False, echo_cmd=True):
   """Runs the command if dry_run is false, otherwise just prints the command."""
   if echo_cmd:
     print cmd
-  # TODO(wtc): Check the return value of subprocess.call, which is the return
-  # value of the command.
   if not dry_run:
-    subprocess.call(cmd, shell=shell)
+    return subprocess.call(cmd, shell=shell)
+  else:
+    return 0
 
 def _ReleaseLock(lock_file, lock_filename):
   """Removes the lockfile. Function-ized so we can bail from anywhere"""
@@ -126,7 +126,12 @@ def main(options, args):
   coverity_password = _ReadPassword(options.coverity_password_file)
 
   cmd = 'gclient sync'
-  _RunCommand(cmd, options.dry_run, shell=True)
+  gclient_exit = _RunCommand(cmd, options.dry_run, shell=True)
+  if gclient_exit != 0:
+    print 'gclient aborted with status %s' % gclient_exit
+    _ReleaseLock(lock_file, lock_filename)
+    sys.exit(1)
+
   print 'Elapsed time: %ds' % (time.time() - start_time)
 
   # Do a clean build.  Remove the build output directory first.
@@ -138,7 +143,7 @@ def main(options, args):
   elif sys.platform == 'darwin':
     rm_path = os.path.join(options.source_dir,'src','xcodebuild')
   else:
-    print 'Platform "%s" unrecognized, don\'t know how to proceed'
+    print 'Platform "%s" unrecognized, aborting' % sys.platform
     _ReleaseLock(lock_file, lock_filename)
     sys.exit(1)
 
@@ -147,6 +152,16 @@ def main(options, args):
   else:
     shutil.rmtree(rm_path,True)
 
+  if options.preserve_intermediate_dir:
+      print 'Preserving intermediate directory.'
+  else:
+    if options.dry_run:
+      print 'shutil.rmtree(%s)' % repr(options.coverity_intermediate_dir)
+      print 'os.mkdir(%s)' % repr(options.coverity_intermediate_dir)
+    else:
+      shutil.rmtree(options.coverity_intermediate_dir,True)
+      os.mkdir(options.coverity_intermediate_dir)
+
   print 'Elapsed time: %ds' % (time.time() - start_time)
 
   use_shell_during_make = False
@@ -154,19 +169,20 @@ def main(options, args):
     use_shell_during_make = True
     os.chdir('src')
     _RunCommand('pwd', options.dry_run, shell=True)
-    cmd = '%s/cov-build --dir %s make BUILDTYPE=%s' % (
+    cmd = '%s/cov-build --dir %s make BUILDTYPE=%s chrome' % (
       options.coverity_bin_dir, options.coverity_intermediate_dir,
       options.target)
   elif sys.platform == 'win32':
-    cmd = '%s\\cov-build.exe --dir %s devenv.com %s\\%s /build %s' % (
+    cmd = ('%s\\cov-build.exe --dir %s devenv.com %s\\%s /build %s '
+           '/project chrome.vcproj') % (
       options.coverity_bin_dir, options.coverity_intermediate_dir,
       options.source_dir, options.solution_file, options.target)
   elif sys.platform == 'darwin':
     use_shell_during_make = True
-    os.chdir('src/build')
+    os.chdir('src/chrome')
     _RunCommand('pwd', options.dry_run, shell=True)
-    cmd = ('%s/cov-build --dir %s xcodebuild -project all.xcodeproj '
-           '-configuration %s -target All') % (
+    cmd = ('%s/cov-build --dir %s xcodebuild -project chrome.xcodeproj '
+           '-configuration %s -target chrome') % (
       options.coverity_bin_dir, options.coverity_intermediate_dir,
       options.target)
 
@@ -272,6 +288,12 @@ if '__main__' == __name__:
                            dest='coverity_password_file',
                            help='file containing the coverity password',
                            default='coverity-password')
+
+  helpmsg = ('By default, the intermediate dir is emptied before analysis. '
+             'This switch disables that behavior.')
+  option_parser.add_option('', '--preserve-intermediate-dir',
+                           action='store_true', help=helpmsg,
+                           default=False)
 
   options, args = option_parser.parse_args()
 

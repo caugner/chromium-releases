@@ -49,17 +49,53 @@ void GLES2DecoderTestBase::SpecializedSetup<CheckFramebufferStatus, 0>(
 };
 
 template <>
+void GLES2DecoderTestBase::SpecializedSetup<CopyTexImage2D, 0>(
+    bool valid) {
+  if (valid) {
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
+        .WillOnce(Return(GL_NO_ERROR))
+        .RetiresOnSaturation();
+  }
+};
+
+template <>
+void GLES2DecoderTestBase::SpecializedSetup<CopyTexSubImage2D, 0>(
+    bool valid) {
+  if (valid) {
+    DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+    DoTexImage2D(
+        GL_TEXTURE_2D, 2, GL_RGBA, 16, 16, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+        0, 0);
+  }
+};
+
+template <>
 void GLES2DecoderTestBase::SpecializedSetup<FramebufferRenderbuffer, 0>(
-    bool /* valid */) {
+    bool valid) {
   DoBindFramebuffer(GL_FRAMEBUFFER, client_framebuffer_id_,
                     kServiceFramebufferId);
+  if (valid) {
+    // Return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT so the code
+    // doesn't try to clear the buffer. That is tested else where.
+    EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
+        .WillOnce(Return(GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT))
+        .RetiresOnSaturation();
+  }
 };
 
 template <>
 void GLES2DecoderTestBase::SpecializedSetup<FramebufferTexture2D, 0>(
-    bool /* valid */) {
+    bool valid) {
   DoBindFramebuffer(GL_FRAMEBUFFER, client_framebuffer_id_,
                     kServiceFramebufferId);
+  if (valid) {
+    // Return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT so the code
+    // doesn't try to clear the buffer. That is tested else where.
+    EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
+        .WillOnce(Return(GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT))
+        .RetiresOnSaturation();
+  }
 };
 
 template <>

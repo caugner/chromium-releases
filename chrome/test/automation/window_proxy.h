@@ -1,9 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_AUTOMATION_WINDOW_PROXY_H__
 #define CHROME_TEST_AUTOMATION_WINDOW_PROXY_H__
+#pragma once
 
 #include "build/build_config.h"
 
@@ -11,9 +12,7 @@
 #include <windows.h>
 #endif
 
-#include <string>
-
-#include "base/keyboard_codes.h"
+#include "app/keyboard_codes.h"
 #include "base/string16.h"
 #include "base/thread.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
@@ -55,7 +54,7 @@ class WindowProxy : public AutomationResourceProxy {
   // key pressed and |flags| specifies which modifiers keys are also pressed (as
   // defined in chrome/views/event.h).  Note that this actually sends the event
   // to the window that has focus.
-  bool SimulateOSKeyPress(base::KeyboardCode key, int flags);
+  bool SimulateOSKeyPress(app::KeyboardCode key, int flags);
 
   // Shows/hides the window and as a result makes it active/inactive.
   // Returns true if the call was successful.

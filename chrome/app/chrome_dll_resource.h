@@ -103,6 +103,7 @@
 #define IDC_MOVE_TAB_PREVIOUS           34033
 #define IDC_TOGGLE_VERTICAL_TABS        34034
 #define IDC_SEARCH                      34035
+#define IDC_TABPOSE                     34036
 
 // Page-related commands
 #define IDC_BOOKMARK_PAGE               35000
@@ -204,10 +205,10 @@
 #define IDC_ABOUT                       40018
 #define IDC_HELP_PAGE                   40019
 #define IDC_SHOW_APP_MENU               40020
-#define IDC_SHOW_EXTENSION_SHELF        40021
 #define IDC_MANAGE_EXTENSIONS           40022
 #define IDC_AUTOFILL_DEFAULT            40023
 #define IDC_DEV_TOOLS_INSPECT           40025
+#define IDC_UPGRADE_DIALOG              40026
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -233,6 +234,9 @@
 #define IDC_WRITING_DIRECTION_LTR        41122     // OSX only
 #define IDC_WRITING_DIRECTION_RTL        41123     // OSX only
 
+// Remoting
+#define IDC_REMOTING_SETUP               41140
+
 // Translate
 #define IDC_TRANSLATE_OPTIONS_ALWAYS                42000
 #define IDC_TRANSLATE_OPTIONS_NEVER_TRANSLATE_LANG  42001
@@ -247,6 +251,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
+#pragma once
 #define _APS_NEXT_RESOURCE_VALUE        3001
 #define _APS_NEXT_COMMAND_VALUE         43000
 #define _APS_NEXT_CONTROL_VALUE         4017
@@ -260,6 +265,7 @@
 #define IDC_VIEW_MENU                   44000     // OSX only
 #define IDC_SYSTEM_OPTIONS              45000     // ChromeOS only
 #define IDC_INTERNET_OPTIONS            45100     // ChromeOS only
+#define IDC_LANGUAGE_OPTIONS            45200     // ChromeOS only
 #define IDC_HISTORY_MENU                46000     // OSX only
 #define IDC_INPUT_METHODS_MENU          46300     // Linux only
 
@@ -306,6 +312,7 @@
 #define IDC_CONTENT_CONTEXT_INSPECTELEMENT 50151
 #define IDC_CONTENT_CONTEXT_VIEWPAGEINFO 50152
 #define IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS 50153
+#define IDC_CONTENT_CONTEXT_LOOK_UP_IN_DICTIONARY 50154
 // Frame items.
 #define IDC_CONTENT_CONTEXT_RELOADFRAME 50160
 #define IDC_CONTENT_CONTEXT_OPENFRAMENEWTAB 50161

@@ -1,11 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_RENDERER_DEVTOOLS_AGENT_FILTER_H_
 #define CHROME_RENDERER_DEVTOOLS_AGENT_FILTER_H_
+#pragma once
 
-#include <set>
 #include <string>
 
 #include "ipc/ipc_channel_proxy.h"
@@ -37,10 +37,10 @@ class DevToolsAgentFilter : public IPC::ChannelProxy::MessageFilter {
   // OnDebuggerCommand will be executed in the IO thread so that we can
   // handle debug messages even when v8 is stopped.
   void OnDebuggerCommand(const std::string& command);
-  void OnDebuggerPauseScript();
-  void OnRpcMessage(const DevToolsMessageData& data);
+  void OnDispatchOnInspectorBackend(const std::string& message);
 
   bool message_handled_;
+  MessageLoop* render_thread_loop_;
 
   // Made static to allow DevToolsAgent to use it for replying directly
   // from IO thread.

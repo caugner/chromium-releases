@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_SHELL_INTEGRATION_H_
 #define CHROME_BROWSER_SHELL_INTEGRATION_H_
+#pragma once
 
 #include <string>
 
@@ -17,7 +18,7 @@ class FilePath;
 
 #if defined(USE_X11)
 namespace base {
-class EnvVarGetter;
+class Environment;
 }
 #endif
 
@@ -77,7 +78,7 @@ class ShellIntegration {
       const string16& extension_app_id);
 
 #if defined(USE_X11)
-  static bool GetDesktopShortcutTemplate(base::EnvVarGetter* env_getter,
+  static bool GetDesktopShortcutTemplate(base::Environment* env,
                                          std::string* output);
 
   // Returns filename for .desktop file based on |url|, sanitized for security.

@@ -6,10 +6,10 @@
 
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/string_util.h"
+#include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -41,6 +41,13 @@ void NotifySectionDisabled(int new_mode, int old_mode, Profile *profile) {
 
 }  // namespace
 
+// static
+int ShownSectionsHandler::GetShownSections(PrefService* prefs) {
+  int sections = prefs->GetInteger(prefs::kNTPShownSections);
+  sections &= ~RECENT;
+  return sections;
+}
+
 ShownSectionsHandler::ShownSectionsHandler(PrefService* pref_service)
     : pref_service_(pref_service) {
   pref_service_->AddPrefObserver(prefs::kNTPShownSections, this);
@@ -61,7 +68,7 @@ void ShownSectionsHandler::Observe(NotificationType type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
   DCHECK(NotificationType::PREF_CHANGED == type);
-  std::wstring* pref_name = Details<std::wstring>(details).ptr();
+  std::string* pref_name = Details<std::string>(details).ptr();
   DCHECK(*pref_name == prefs::kNTPShownSections);
 
   int sections = pref_service_->GetInteger(prefs::kNTPShownSections);
@@ -69,30 +76,15 @@ void ShownSectionsHandler::Observe(NotificationType type,
   dom_ui_->CallJavascriptFunction(L"setShownSections", sections_value);
 }
 
-void ShownSectionsHandler::HandleGetShownSections(const Value* value) {
-  int sections = pref_service_->GetInteger(prefs::kNTPShownSections);
+void ShownSectionsHandler::HandleGetShownSections(const ListValue* args) {
+  int sections = GetShownSections(pref_service_);
   FundamentalValue sections_value(sections);
   dom_ui_->CallJavascriptFunction(L"onShownSections", sections_value);
 }
 
-void ShownSectionsHandler::HandleSetShownSections(const Value* value) {
-  if (!value->IsType(Value::TYPE_LIST)) {
-    NOTREACHED();
-    return;
-  }
-
-  const ListValue* list = static_cast<const ListValue*>(value);
-  std::string mode_string;
-
-  if (list->GetSize() < 1) {
-    NOTREACHED() << "setShownSections called with too few arguments";
-    return;
-  }
-
-  bool r = list->GetString(0, &mode_string);
-  DCHECK(r) << "Missing value in setShownSections from the NTP Most Visited.";
-
-  int mode = StringToInt(mode_string);
+void ShownSectionsHandler::HandleSetShownSections(const ListValue* args) {
+  int mode;
+  CHECK(ExtractIntegerValue(args, &mode));
   int old_mode = pref_service_->GetInteger(prefs::kNTPShownSections);
 
   if (old_mode != mode) {
@@ -104,7 +96,7 @@ void ShownSectionsHandler::HandleSetShownSections(const Value* value) {
 // static
 void ShownSectionsHandler::RegisterUserPrefs(PrefService* pref_service) {
   pref_service->RegisterIntegerPref(prefs::kNTPShownSections,
-                                    THUMB | RECENT | TIPS | SYNC);
+                                    THUMB | RECENT | TIPS | SYNC | APPS);
 }
 
 // static

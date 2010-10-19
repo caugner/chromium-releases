@@ -72,7 +72,7 @@ AppLaunchedAnimationWin::AppLaunchedAnimationWin(Extension* extension,
   DCHECK(extension);
   app_icon_loader_.LoadImage(
       extension,
-      extension->GetIconPath(Extension::EXTENSION_ICON_LARGE),
+      extension->GetIconResource(Extension::EXTENSION_ICON_LARGE),
       rect_.size(),
       ImageLoadingTracker::DONT_CACHE);
 }
@@ -120,8 +120,6 @@ void AppLaunchedAnimationWin::OnImageLoaded(SkBitmap* image,
     animation_->SetTweenType(Tween::LINEAR);
     animation_->Reset(1.0);
     animation_->Hide();
-  } else {
-    popup_->Close();
   }
 }
 

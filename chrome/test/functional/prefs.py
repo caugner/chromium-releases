@@ -104,7 +104,7 @@ class PrefsTest(pyauto.PyUITest):
     self.DownloadAndWaitForStart(file_url)
     self.WaitForAllDownloadsToComplete()
     self.assertTrue(os.path.exists(downloaded_pkg))
-    shutil.rmtree(new_dl_dir)  # cleanup
+    shutil.rmtree(new_dl_dir, ignore_errors=True)  # cleanup
 
   def testToolbarButtonsPref(self):
     """Verify toolbar buttons prefs.."""
@@ -113,6 +113,14 @@ class PrefsTest(pyauto.PyUITest):
     self.SetPrefs(pyauto.kShowHomeButton, True)
     self.RestartBrowser(clear_profile=False)
     self.assertTrue(self.GetPrefsInfo().Prefs(pyauto.kShowHomeButton))
+
+  def testDnsPrefectchingEnabledPref(self):
+    """Verify DNS prefetching pref."""
+    # Assert default
+    self.assertTrue(self.GetPrefsInfo().Prefs(pyauto.kDnsPrefetchingEnabled))
+    self.SetPrefs(pyauto.kDnsPrefetchingEnabled, False)
+    self.RestartBrowser(clear_profile=False)
+    self.assertFalse(self.GetPrefsInfo().Prefs(pyauto.kDnsPrefetchingEnabled))
 
   def testHomepagePrefs(self):
     """Verify homepage prefs."""
@@ -131,6 +139,26 @@ class PrefsTest(pyauto.PyUITest):
     self.assertFalse(self.GetPrefsInfo().Prefs(pyauto.kHomePageIsNewTabPage))
     # TODO(nirnimesh): Actually verify that homepage loads.
     # This requires telling pyauto *not* to set about:blank as homepage.
+
+  def testGeolocationPref(self):
+    """Verify geolocation pref.
+
+    Checks for the geolocation infobar.
+    """
+    url = self.GetFileURLForPath(os.path.join(  # triggers geolocation
+        self.DataDir(), 'geolocation', 'geolocation_on_load.html'))
+    self.assertEqual(3,  # default state
+        self.GetPrefsInfo().Prefs(pyauto.kGeolocationDefaultContentSetting))
+    self.NavigateToURL(url)
+    self.assertTrue(self.WaitForInfobarCount(1))
+    self.assertTrue(self.GetBrowserInfo()['windows'][0]['tabs'][0]['infobars'])
+    # Disable geolocation
+    self.SetPrefs(pyauto.kGeolocationDefaultContentSetting, 2)
+    self.assertEqual(2,
+        self.GetPrefsInfo().Prefs(pyauto.kGeolocationDefaultContentSetting))
+    self.GetBrowserWindow(0).GetTab(0).Reload()
+    self.assertTrue(self.WaitForInfobarCount(0))
+    self.assertFalse(self.GetBrowserInfo()['windows'][0]['tabs'][0]['infobars'])
 
 
 if __name__ == '__main__':

@@ -4,9 +4,11 @@
 
 #include "chrome/renderer/renderer_webcookiejar_impl.h"
 
+#include "base/utf_string_conversions.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/render_thread.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCookie.h"
+#include "webkit/glue/webcookie.h"
 
 using WebKit::WebCookie;
 using WebKit::WebString;
@@ -65,12 +67,4 @@ void RendererWebCookieJarImpl::deleteCookie(
   std::string cookie_name_utf8;
   UTF16ToUTF8(cookie_name.data(), cookie_name.length(), &cookie_name_utf8);
   sender_->Send(new ViewHostMsg_DeleteCookie(url, cookie_name_utf8));
-}
-
-bool RendererWebCookieJarImpl::cookiesEnabled(
-    const WebURL& url, const WebURL& first_party_for_cookies) {
-  bool enabled;
-  sender_->Send(new ViewHostMsg_GetCookiesEnabled(
-      url, first_party_for_cookies, &enabled));
-  return enabled;
 }

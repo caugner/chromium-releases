@@ -6,6 +6,7 @@
 #include "base/file_path.h"
 #include "base/platform_thread.h"
 #include "base/string_util.h"
+#include "chrome/test/ui/ui_layout_test.h"
 #include "chrome/test/ui/ui_test.h"
 #include "net/base/net_util.h"
 
@@ -53,4 +54,53 @@ TEST_F(MediaTest, VideoBearTheora) {
 
 TEST_F(MediaTest, VideoBearSilentTheora) {
   PlayVideo("bear_silent.ogv");
+}
+
+TEST_F(MediaTest, VideoBearWebm) {
+  PlayVideo("bear.webm");
+}
+
+TEST_F(MediaTest, VideoBearSilentWebm) {
+  PlayVideo("bear_silent.webm");
+}
+
+#if defined(GOOGLE_CHROME_BUILD) || defined(USE_PROPRIETARY_CODECS)
+TEST_F(MediaTest, VideoBearMp4) {
+  PlayVideo("bear.mp4");
+}
+
+TEST_F(MediaTest, VideoBearSilentMp4) {
+  PlayVideo("bear_silent.mp4");
+}
+#endif
+
+TEST_F(UILayoutTest, MediaUILayoutTest) {
+  static const char* kResources[] = {
+    "content",
+    "media-file.js",
+    "media-fullscreen.js",
+    "video-paint-test.js",
+    "video-played.js",
+    "video-test.js",
+  };
+
+  static const char* kMediaTests[] = {
+    "video-autoplay.html",
+    // "video-loop.html", disabled due to 52887.
+    "video-no-autoplay.html",
+    // TODO(sergeyu): Add more tests here.
+  };
+
+  FilePath test_dir;
+  FilePath media_test_dir;
+  media_test_dir = media_test_dir.AppendASCII("media");
+  InitializeForLayoutTest(test_dir, media_test_dir, kNoHttpPort);
+
+  // Copy resources first.
+  for (size_t i = 0; i < arraysize(kResources); ++i)
+    AddResourceForLayoutTest(
+        test_dir, media_test_dir.AppendASCII(kResources[i]));
+
+  for (size_t i = 0; i < arraysize(kMediaTests); ++i)
+    RunLayoutTest(kMediaTests[i], kNoHttpPort);
 }

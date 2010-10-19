@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/ref_counted.h"
+#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/test/automation/dom_element_proxy.h"
 #include "chrome/test/automation/javascript_execution_controller.h"
@@ -31,7 +32,7 @@ class DOMAutomationTest : public InProcessBrowserTest {
 typedef DOMElementProxy::By By;
 
 IN_PROC_BROWSER_TEST_F(DOMAutomationTest, FindByXPath) {
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(),
                                GetTestURL("find_elements/test.html"));
   DOMElementProxyRef main_doc = ui_test_utils::GetActiveDOMDocument(browser());
@@ -45,8 +46,10 @@ IN_PROC_BROWSER_TEST_F(DOMAutomationTest, FindByXPath) {
   std::vector<DOMElementProxyRef> elements;
   ASSERT_TRUE(main_doc->FindElements(By::XPath("//div"), &elements));
   ASSERT_EQ(2u, elements.size());
-  for (size_t i = 0; i < elements.size(); i++)
-    ASSERT_NO_FATAL_FAILURE(elements[i]->EnsureNameMatches(UintToString(i)));
+  for (size_t i = 0; i < elements.size(); i++) {
+    ASSERT_NO_FATAL_FAILURE(elements[i]->EnsureNameMatches(
+        base::UintToString(i)));
+  }
 
   // Find 0 elements.
   ASSERT_FALSE(main_doc->FindElement(By::XPath("//nosuchtag")));
@@ -75,7 +78,7 @@ IN_PROC_BROWSER_TEST_F(DOMAutomationTest, FindByXPath) {
 }
 
 IN_PROC_BROWSER_TEST_F(DOMAutomationTest, FindBySelectors) {
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(),
                                GetTestURL("find_elements/test.html"));
   DOMElementProxyRef main_doc = ui_test_utils::GetActiveDOMDocument(browser());
@@ -90,8 +93,10 @@ IN_PROC_BROWSER_TEST_F(DOMAutomationTest, FindBySelectors) {
   std::vector<DOMElementProxyRef> elements;
   ASSERT_TRUE(main_doc->FindElements(By::Selectors(".myclass"), &elements));
   ASSERT_EQ(2u, elements.size());
-  for (size_t i = 0; i < elements.size(); i++)
-    ASSERT_NO_FATAL_FAILURE(elements[i]->EnsureNameMatches(UintToString(i)));
+  for (size_t i = 0; i < elements.size(); i++) {
+    ASSERT_NO_FATAL_FAILURE(elements[i]->EnsureNameMatches(
+        base::UintToString(i)));
+  }
 
   // Find 0 elements.
   ASSERT_FALSE(main_doc->FindElement(By::Selectors("#nosuchid")));
@@ -117,7 +122,7 @@ IN_PROC_BROWSER_TEST_F(DOMAutomationTest, FindBySelectors) {
 }
 
 IN_PROC_BROWSER_TEST_F(DOMAutomationTest, FindByText) {
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(),
                                GetTestURL("find_elements/test.html"));
   DOMElementProxyRef main_doc = ui_test_utils::GetActiveDOMDocument(browser());
@@ -131,8 +136,10 @@ IN_PROC_BROWSER_TEST_F(DOMAutomationTest, FindByText) {
   std::vector<DOMElementProxyRef> elements;
   ASSERT_TRUE(main_doc->FindElements(By::Text("div_text"), &elements));
   ASSERT_EQ(2u, elements.size());
-  for (size_t i = 0; i < elements.size(); i++)
-    ASSERT_NO_FATAL_FAILURE(elements[i]->EnsureNameMatches(UintToString(i)));
+  for (size_t i = 0; i < elements.size(); i++) {
+    ASSERT_NO_FATAL_FAILURE(elements[i]->EnsureNameMatches(
+        base::UintToString(i)));
+  }
 
   // Find 0 elements.
   ASSERT_FALSE(main_doc->FindElement(By::Text("nosuchtext")));
@@ -163,7 +170,7 @@ IN_PROC_BROWSER_TEST_F(DOMAutomationTest, FindByText) {
 }
 
 IN_PROC_BROWSER_TEST_F(DOMAutomationTest, WaitFor1VisibleElement) {
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(), GetTestURL("wait/test.html"));
   DOMElementProxyRef main_doc = ui_test_utils::GetActiveDOMDocument(browser());
 
@@ -174,7 +181,7 @@ IN_PROC_BROWSER_TEST_F(DOMAutomationTest, WaitFor1VisibleElement) {
 }
 
 IN_PROC_BROWSER_TEST_F(DOMAutomationTest, WaitForElementsToDisappear) {
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(), GetTestURL("wait/test.html"));
   DOMElementProxyRef main_doc = ui_test_utils::GetActiveDOMDocument(browser());
 
@@ -185,7 +192,7 @@ IN_PROC_BROWSER_TEST_F(DOMAutomationTest, WaitForElementsToDisappear) {
 }
 
 IN_PROC_BROWSER_TEST_F(DOMAutomationTest, EnsureAttributeEventuallyMatches) {
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(), GetTestURL("wait/test.html"));
   DOMElementProxyRef main_doc = ui_test_utils::GetActiveDOMDocument(browser());
 
@@ -196,7 +203,7 @@ IN_PROC_BROWSER_TEST_F(DOMAutomationTest, EnsureAttributeEventuallyMatches) {
 }
 
 IN_PROC_BROWSER_TEST_F(DOMAutomationTest, Frames) {
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(), GetTestURL("frames/test.html"));
   DOMElementProxyRef main_doc = ui_test_utils::GetActiveDOMDocument(browser());
 
@@ -236,7 +243,7 @@ IN_PROC_BROWSER_TEST_F(DOMAutomationTest, Frames) {
 }
 
 IN_PROC_BROWSER_TEST_F(DOMAutomationTest, Events) {
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(), GetTestURL("events/test.html"));
   DOMElementProxyRef main_doc = ui_test_utils::GetActiveDOMDocument(browser());
 
@@ -264,7 +271,7 @@ IN_PROC_BROWSER_TEST_F(DOMAutomationTest, Events) {
 }
 
 IN_PROC_BROWSER_TEST_F(DOMAutomationTest, StringEscape) {
-  ASSERT_TRUE(StartHTTPServer());
+  ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(),
                                GetTestURL("string_escape/test.html"));
   DOMElementProxyRef main_doc = ui_test_utils::GetActiveDOMDocument(browser());

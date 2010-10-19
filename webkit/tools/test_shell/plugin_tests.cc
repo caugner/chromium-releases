@@ -54,6 +54,9 @@ class PluginTest : public TestShellTest {
   }
 
   void CopyTestPlugin() {
+    // On Linux, we need to delete before copying because if the plugin is a
+    // hard link, the copy will fail.
+    DeleteTestPlugin();
     ASSERT_TRUE(file_util::CopyDirectory(plugin_src_, plugin_file_path_, true));
   }
 
@@ -64,11 +67,6 @@ class PluginTest : public TestShellTest {
   virtual void SetUp() {
     CopyTestPlugin();
     TestShellTest::SetUp();
-  }
-
-  virtual void TearDown() {
-    DeleteTestPlugin();
-    TestShellTest::TearDown();
   }
 
   FilePath plugin_src_;

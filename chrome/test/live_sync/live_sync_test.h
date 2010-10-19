@@ -4,6 +4,7 @@
 
 #ifndef CHROME_TEST_LIVE_SYNC_LIVE_SYNC_TEST_H_
 #define CHROME_TEST_LIVE_SYNC_LIVE_SYNC_TEST_H_
+#pragma once
 
 #include "chrome/test/in_process_browser_test.h"
 
@@ -13,15 +14,17 @@
 #include "base/scoped_vector.h"
 #include "chrome/test/live_sync/profile_sync_service_test_harness.h"
 #include "net/base/mock_host_resolver.h"
-#include "net/socket/ssl_test_util.h"
+#include "net/test/test_server.h"
 
 #include <string>
 #include <vector>
 
 class CommandLine;
 class Profile;
+class URLRequestContextGetter;
 
 namespace net {
+class ProxyConfig;
 class ScopedDefaultHostResolverProc;
 }
 
@@ -57,6 +60,7 @@ class LiveSyncTest : public InProcessBrowserTest {
   explicit LiveSyncTest(TestType test_type)
       : test_type_(test_type),
         num_clients_(-1),
+        test_server_(net::TestServer::TYPE_HTTP, FilePath()),
         started_local_test_server_(false) {
     InProcessBrowserTest::set_show_window(true);
     InProcessBrowserTest::SetInitialTimeoutInMS(kTestTimeoutInMS);
@@ -119,6 +123,15 @@ class LiveSyncTest : public InProcessBrowserTest {
   // Initializes sync clients and profiles if required and syncs each of them.
   virtual bool SetupSync();
 
+  // Disable outgoing network connections for the given profile.
+  virtual void DisableNetwork(Profile* profile);
+
+  // Enable outgoing network connections for the given profile.
+  virtual void EnableNetwork(Profile* profile);
+
+  // Configure mock server with test's options.
+  virtual bool EnsureSyncServerConfiguration();
+
  protected:
   // InProcessBrowserTest override. Destroys all the sync clients and sync
   // profiles created by a test.
@@ -152,6 +165,14 @@ class LiveSyncTest : public InProcessBrowserTest {
   // created.
   virtual void TearDownLocalTestServer();
 
+  // Used to disable and enable network connectivity by providing and
+  // clearing an invalid proxy configuration.
+  void SetProxyConfig(URLRequestContextGetter* context,
+                      const net::ProxyConfig& proxy_config);
+
+  // Sends configuration options to the mock sync server.
+  bool ConfigureSyncServer(const std::string& name, const std::string& value);
+
   // Used to differentiate between single-client, two-client, multi-client and
   // many-client tests.
   TestType test_type_;
@@ -175,7 +196,7 @@ class LiveSyncTest : public InProcessBrowserTest {
   scoped_ptr<Profile> verifier_;
 
   // Local instance of python sync server.
-  net::TestServerLauncher server_;
+  net::TestServer test_server_;
 
   // Keeps track of whether a local python sync server was used for a test.
   bool started_local_test_server_;

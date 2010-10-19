@@ -5,13 +5,14 @@
 #include "chrome/browser/options_util.h"
 
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/profile.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
 #include "chrome/browser/host_content_settings_map.h"
 #include "chrome/browser/host_zoom_map.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profile.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/google_update_settings.h"
 
@@ -21,9 +22,10 @@ void OptionsUtil::ResetToDefaults(Profile* profile) {
   // changes to any of the options pages doesn't require updating this list
   // manually.
   PrefService* prefs = profile->GetPrefs();
-  const wchar_t* kUserPrefs[] = {
+  const char* kUserPrefs[] = {
     prefs::kAcceptLanguages,
     prefs::kAlternateErrorPagesEnabled,
+    prefs::kBackgroundModeEnabled,
     prefs::kClearSiteDataOnExit,
     prefs::kCookieBehavior,
     prefs::kDefaultCharset,
@@ -45,6 +47,7 @@ void OptionsUtil::ResetToDefaults(Profile* profile) {
     prefs::kEnableSpellCheck,
     prefs::kEnableTranslate,
     prefs::kAutoFillEnabled,
+    prefs::kAutoFillAuxiliaryProfilesEnabled,
     prefs::kHomePage,
     prefs::kHomePageIsNewTabPage,
     prefs::kPromptForDownload,
@@ -66,7 +69,7 @@ void OptionsUtil::ResetToDefaults(Profile* profile) {
     prefs::kWebKitSerifFontFamily,
     prefs::kWebkitTabsToLinks,
   };
-  profile->GetDownloadManager()->ResetAutoOpenFiles();
+  profile->GetDownloadManager()->download_prefs()->ResetToDefaults();
   profile->GetHostContentSettingsMap()->ResetToDefaults();
   profile->GetGeolocationContentSettingsMap()->ResetToDefault();
   profile->GetHostZoomMap()->ResetToDefaults();
@@ -81,7 +84,7 @@ void OptionsUtil::ResetToDefaults(Profile* profile) {
   // settings they'll either inadvertedly enable this logging or disable it.
   // One is undesirable for them, one is undesirable for us. For now, we just
   // don't reset it.
-  const wchar_t* kLocalStatePrefs[] = {
+  const char* kLocalStatePrefs[] = {
     prefs::kApplicationLocale,
   };
   for (size_t i = 0; i < arraysize(kLocalStatePrefs); ++i)

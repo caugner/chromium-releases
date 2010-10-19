@@ -4,6 +4,7 @@ include_rules = [
   "+grit",  # For generated headers
   "+media/audio",
   "+media/base",
+  "+media/ffmpeg",
   "+media/filters",
   "+sandbox/src",
   "+skia/include",
@@ -13,7 +14,7 @@ include_rules = [
   "+v8/include",
   "+third_party/cld/encodings/compact_lang_det/win",
   "+third_party/npapi/bindings",
-  "+third_party/sqlite/preprocessed",
+  "+third_party/sqlite",
   "+third_party/tcmalloc",
 ]
 

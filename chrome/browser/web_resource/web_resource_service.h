@@ -1,13 +1,15 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_WEB_RESOURCE_WEB_RESOURCE_SERVICE_H_
 #define CHROME_BROWSER_WEB_RESOURCE_WEB_RESOURCE_SERVICE_H_
+#pragma once
 
 #include <string>
 
-#include "chrome/browser/pref_service.h"
+#include "base/file_path.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/utility_process_host.h"
 #include "chrome/common/web_resource/web_resource_unpacker.h"
 
@@ -26,9 +28,8 @@ class WebResourceService
   // the process that will parse the JSON, and then update the cache.
   void UpdateResourceCache(const std::string& json_data);
 
-  static const wchar_t* kTipDictionaryPrefName;
-  static const wchar_t* kCurrentTipPrefName;
-  static const wchar_t* kTipCachePrefName;
+  static const char* kCurrentTipPrefName;
+  static const char* kTipCachePrefName;
 
   // Default server from which to gather resources.
   static const char* kDefaultResourceServer;
@@ -88,4 +89,3 @@ class WebResourceService
 };
 
 #endif  // CHROME_BROWSER_WEB_RESOURCE_WEB_RESOURCE_SERVICE_H_
-

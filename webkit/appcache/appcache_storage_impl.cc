@@ -221,11 +221,15 @@ void AppCacheStorageImpl::GetAllInfoTask::Run() {
          group != groups.end(); ++group) {
       AppCacheDatabase::CacheRecord cache_record;
       database_->FindCacheForGroup(group->group_id, &cache_record);
-      infos.push_back(
-          AppCacheInfo(
-              group->manifest_url, cache_record.cache_size,
-              group->creation_time, group->last_access_time,
-              cache_record.update_time));
+      AppCacheInfo info;
+      info.manifest_url = group->manifest_url;
+      info.creation_time = group->creation_time;
+      info.size = cache_record.cache_size;
+      info.last_access_time = group->last_access_time;
+      info.last_update_time = cache_record.update_time;
+      info.cache_id = cache_record.cache_id;
+      info.is_complete = true;
+      infos.push_back(info);
     }
   }
 }
@@ -282,6 +286,7 @@ void AppCacheStorageImpl::StoreOrLoadTask::CreateCacheAndGroupFromRecords(
     (*group) = new AppCacheGroup(
         storage_->service_, group_record_.manifest_url,
         group_record_.group_id);
+    group->get()->set_creation_time(group_record_.creation_time);
     group->get()->AddCache(cache->get());
   }
   DCHECK(group->get()->newest_complete_cache() == cache->get());
@@ -376,8 +381,7 @@ void AppCacheStorageImpl::GroupLoadTask::RunCompleted() {
       CreateCacheAndGroupFromRecords(&cache, &group);
     } else {
       group = new AppCacheGroup(
-          storage_->service_, manifest_url_,
-          storage_->NewGroupId());
+          storage_->service_, manifest_url_, storage_->NewGroupId());
     }
   }
   FOR_EACH_DELEGATE(delegates_, OnGroupLoaded(group, manifest_url_));
@@ -397,13 +401,17 @@ class AppCacheStorageImpl::StoreGroupAndCacheTask : public StoreOrLoadTask {
   scoped_refptr<AppCacheGroup> group_;
   scoped_refptr<AppCache> cache_;
   bool success_;
+  bool would_exceed_quota_;
+  int64 quota_override_;
   std::vector<int64> newly_deletable_response_ids_;
 };
 
 AppCacheStorageImpl::StoreGroupAndCacheTask::StoreGroupAndCacheTask(
     AppCacheStorageImpl* storage, AppCacheGroup* group, AppCache* newest_cache)
     : StoreOrLoadTask(storage), group_(group), cache_(newest_cache),
-      success_(false) {
+      success_(false), would_exceed_quota_(false),
+      quota_override_(
+          storage->GetOriginQuotaInMemory(group->manifest_url().GetOrigin())) {
   group_record_.group_id = group->group_id();
   group_record_.manifest_url = group->manifest_url();
   group_record_.origin = group_record_.manifest_url.GetOrigin();
@@ -475,14 +483,27 @@ void AppCacheStorageImpl::StoreGroupAndCacheTask::Run() {
       database_->InsertCache(&cache_record_) &&
       database_->InsertEntryRecords(entry_records_) &&
       database_->InsertFallbackNameSpaceRecords(fallback_namespace_records_)&&
-      database_->InsertOnlineWhiteListRecords(online_whitelist_records_) &&
-      (database_->GetOriginUsage(group_record_.origin) <=
-       database_->GetOriginQuota(group_record_.origin)) &&
-      transaction.Commit();
+      database_->InsertOnlineWhiteListRecords(online_whitelist_records_);
+
+  if (!success_)
+    return;
+
+  int64 quota = (quota_override_ >= 0) ?
+      quota_override_ :
+      database_->GetOriginQuota(group_record_.origin);
+
+  if (database_->GetOriginUsage(group_record_.origin) > quota) {
+    would_exceed_quota_ = true;
+    success_ = false;
+    return;
+  }
+
+  success_ = transaction.Commit();
 }
 
 void AppCacheStorageImpl::StoreGroupAndCacheTask::RunCompleted() {
   if (success_) {
+    // TODO(kkanetkar): Add to creation time when that's enabled.
     storage_->origins_with_groups_.insert(group_->manifest_url().GetOrigin());
     if (cache_ != group_->newest_complete_cache()) {
       cache_->set_complete(true);
@@ -491,7 +512,8 @@ void AppCacheStorageImpl::StoreGroupAndCacheTask::RunCompleted() {
     group_->AddNewlyDeletableResponseIds(&newly_deletable_response_ids_);
   }
   FOR_EACH_DELEGATE(delegates_,
-                    OnGroupAndNewestCacheStored(group_, cache_, success_));
+                    OnGroupAndNewestCacheStored(group_, cache_, success_,
+                                                would_exceed_quota_));
   group_ = NULL;
   cache_ = NULL;
 }
@@ -536,13 +558,11 @@ class AppCacheStorageImpl::FindMainResponseTask : public DatabaseTask {
 };
 
 namespace {
-
 bool SortByLength(
     const AppCacheDatabase::FallbackNameSpaceRecord& lhs,
     const AppCacheDatabase::FallbackNameSpaceRecord& rhs) {
   return lhs.namespace_url.spec().length() > rhs.namespace_url.spec().length();
 }
-
 }
 
 void AppCacheStorageImpl::FindMainResponseTask::Run() {

@@ -4,12 +4,14 @@
 
 #ifndef CHROME_GPU_GPU_BACKING_STORE_GLX_H_
 #define CHROME_GPU_GPU_BACKING_STORE_GLX_H_
+#pragma once
 
 #include "app/surface/transport_dib.h"
-#include "app/x11_util.h"
 #include "base/basictypes.h"
 #include "base/process.h"
+#include "gfx/size.h"
 #include "ipc/ipc_channel.h"
+#include "gfx/size.h"
 
 class GpuViewX;
 class GpuThread;

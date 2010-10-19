@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
 #include "base/stl_util-inl.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -22,9 +23,9 @@
 
 namespace errors = extension_manifest_errors;
 
-const wchar_t* ExtensionMessageBundle::kContentKey = L"content";
-const wchar_t* ExtensionMessageBundle::kMessageKey = L"message";
-const wchar_t* ExtensionMessageBundle::kPlaceholdersKey = L"placeholders";
+const char* ExtensionMessageBundle::kContentKey = "content";
+const char* ExtensionMessageBundle::kMessageKey = "message";
+const char* ExtensionMessageBundle::kPlaceholdersKey = "placeholders";
 
 const char* ExtensionMessageBundle::kPlaceholderBegin = "$";
 const char* ExtensionMessageBundle::kPlaceholderEnd = "$";
@@ -73,7 +74,7 @@ bool ExtensionMessageBundle::Init(const CatalogVector& locale_catalogs,
     DictionaryValue* catalog = (*it).get();
     for (DictionaryValue::key_iterator key_it = catalog->begin_keys();
          key_it != catalog->end_keys(); ++key_it) {
-      std::string key(StringToLowerASCII(WideToUTF8(*key_it)));
+      std::string key(StringToLowerASCII(*key_it));
       if (!IsValidName(*key_it))
         return BadKeyMessage(key, error);
       std::string value;
@@ -126,21 +127,19 @@ bool ExtensionMessageBundle::AppendReservedMessagesForLocale(
   return true;
 }
 
-bool ExtensionMessageBundle::GetMessageValue(const std::wstring& wkey,
+bool ExtensionMessageBundle::GetMessageValue(const std::string& key,
                                              const DictionaryValue& catalog,
                                              std::string* value,
                                              std::string* error) const {
-  std::string key(WideToUTF8(wkey));
   // Get the top level tree for given key (name part).
   DictionaryValue* name_tree;
-  if (!catalog.GetDictionaryWithoutPathExpansion(wkey, &name_tree)) {
+  if (!catalog.GetDictionaryWithoutPathExpansion(key, &name_tree)) {
     *error = StringPrintf("Not a valid tree for key %s.", key.c_str());
     return false;
   }
   // Extract message from it.
   if (!name_tree->GetString(kMessageKey, value)) {
-    *error = StringPrintf("There is no \"%s\" element for key %s.",
-                          WideToUTF8(kMessageKey).c_str(),
+    *error = StringPrintf("There is no \"%s\" element for key %s.", kMessageKey,
                           key.c_str());
     return false;
   }
@@ -168,18 +167,17 @@ bool ExtensionMessageBundle::GetPlaceholders(const DictionaryValue& name_tree,
   DictionaryValue* placeholders_tree;
   if (!name_tree.GetDictionary(kPlaceholdersKey, &placeholders_tree)) {
     *error = StringPrintf("Not a valid \"%s\" element for key %s.",
-                          WideToUTF8(kPlaceholdersKey).c_str(),
-                          name_key.c_str());
+                          kPlaceholdersKey, name_key.c_str());
     return false;
   }
 
   for (DictionaryValue::key_iterator key_it = placeholders_tree->begin_keys();
        key_it != placeholders_tree->end_keys(); ++key_it) {
     DictionaryValue* placeholder;
-    std::string content_key = WideToUTF8(*key_it);
-    if (!IsValidName(*key_it))
+    const std::string& content_key(*key_it);
+    if (!IsValidName(content_key))
       return BadKeyMessage(content_key, error);
-    if (!placeholders_tree->GetDictionaryWithoutPathExpansion(*key_it,
+    if (!placeholders_tree->GetDictionaryWithoutPathExpansion(content_key,
                                                               &placeholder)) {
       *error = StringPrintf("Invalid placeholder %s for key %s",
                             content_key.c_str(),
@@ -189,8 +187,7 @@ bool ExtensionMessageBundle::GetPlaceholders(const DictionaryValue& name_tree,
     std::string content;
     if (!placeholder->GetString(kContentKey, &content)) {
       *error = StringPrintf("Invalid \"%s\" element for key %s.",
-                            WideToUTF8(kContentKey).c_str(),
-                            name_key.c_str());
+                            kContentKey, name_key.c_str());
       return false;
     }
     (*placeholders)[StringToLowerASCII(content_key)] = content;
@@ -213,6 +210,9 @@ bool ExtensionMessageBundle::ReplacePlaceholders(
 bool ExtensionMessageBundle::ReplaceMessages(std::string* text,
                                              std::string* error) const {
   return ReplaceMessagesWithExternalDictionary(dictionary_, text, error);
+}
+
+ExtensionMessageBundle::~ExtensionMessageBundle() {
 }
 
 // static
@@ -269,6 +269,21 @@ bool ExtensionMessageBundle::ReplaceVariables(
 
     // And position pointer to after the replacement.
     beg_index += value.size() - var_begin_delimiter_size;
+  }
+
+  return true;
+}
+
+// static
+bool ExtensionMessageBundle::IsValidName(const std::string& name) {
+  if (name.empty())
+    return false;
+
+  std::string::const_iterator it = name.begin();
+  for (; it != name.end(); ++it) {
+    // Allow only ascii 0-9, a-z, A-Z, and _ in the name.
+    if (!IsAsciiAlpha(*it) && !IsAsciiDigit(*it) && *it != '_' && *it != '@')
+      return false;
   }
 
   return true;

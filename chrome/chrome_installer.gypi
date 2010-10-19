@@ -66,6 +66,7 @@
             'installer_util_strings',
             '<(DEPTH)/base/base.gyp:base',
             '<(DEPTH)/base/base.gyp:base_i18n',
+            '<(DEPTH)/base/base.gyp:test_support_base',
             '<(DEPTH)/build/temp_gyp/googleurl.gyp:googleurl',
             '<(DEPTH)/testing/gtest.gyp:gtest',
           ],
@@ -144,6 +145,7 @@
             'installer_util',
             '<(DEPTH)/base/base.gyp:base',
             '<(DEPTH)/base/base.gyp:base_i18n',
+            '<(DEPTH)/base/base.gyp:test_support_base',
             '<(DEPTH)/testing/gtest.gyp:gtest',
           ],
           'include_dirs': [
@@ -293,6 +295,7 @@
             'installer_util',
             '<(DEPTH)/base/base.gyp:base',
             '<(DEPTH)/base/base.gyp:base_i18n',
+            '<(DEPTH)/base/base.gyp:test_support_base',
             '<(DEPTH)/build/temp_gyp/googleurl.gyp:googleurl',
             '<(DEPTH)/testing/gtest.gyp:gtest',
           ],
@@ -349,6 +352,7 @@
           '<(PRODUCT_DIR)/chrome.pak',
           '<(PRODUCT_DIR)/chrome_sandbox',
           '<(PRODUCT_DIR)/libffmpegsumo.so',
+          '<(PRODUCT_DIR)/xdg-mime',
           '<(PRODUCT_DIR)/xdg-settings',
           '<(PRODUCT_DIR)/locales/en-US.pak',
         ],
@@ -388,13 +392,6 @@
           # "hermetic" for packaging. This is only for branding="Chrome" since
           # we only create packages for official builds.
           'copies': [
-            # Copy tools for generating packages from the build archive.
-            {
-              'destination': '<(PRODUCT_DIR)/installer/',
-              'files': [
-                'installer/linux/internal/build_from_archive.sh',
-              ]
-            },
             {
               'destination': '<(PRODUCT_DIR)/installer/debian/',
               'files': [

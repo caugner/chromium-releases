@@ -6,6 +6,7 @@
 
 #include "base/nsimage_cache_mac.h"
 #include "chrome/app/chrome_dll_resource.h"
+#import "chrome/browser/cocoa/view_id_util.h"
 
 namespace {
 
@@ -57,15 +58,18 @@ NSString* const kStopImageName = @"stop_Template.pdf";
 
   // Can always transition to stop mode.  Only transition to reload
   // mode if forced or if the mouse isn't hovering.  Otherwise, note
-  // that reload mode is desired and make no change.
+  // that reload mode is desired and disable the button.
   if (isLoading) {
     [self setImage:nsimage_cache::ImageNamed(kStopImageName)];
     [self setTag:IDC_STOP];
+    [self setEnabled:YES];
   } else if (force || ![self isMouseInside]) {
     [self setImage:nsimage_cache::ImageNamed(kReloadImageName)];
     [self setTag:IDC_RELOAD];
+    [self setEnabled:YES];
   } else if ([self tag] == IDC_STOP) {
     pendingReloadMode_ = YES;
+    [self setEnabled:NO];
   }
 }
 
@@ -103,6 +107,10 @@ NSString* const kStopImageName = @"stop_Template.pdf";
 
 - (BOOL)isMouseInside {
   return trackingArea_ && isMouseInside_;
+}
+
+- (ViewID)viewID {
+  return VIEW_ID_RELOAD_BUTTON;
 }
 
 @end  // ReloadButton

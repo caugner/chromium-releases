@@ -4,10 +4,10 @@
 
 #ifndef CHROME_SERVICE_CLOUD_PRINT_JOB_STATUS_UPDATER_H_
 #define CHROME_SERVICE_CLOUD_PRINT_JOB_STATUS_UPDATER_H_
+#pragma once
 
 #include <string>
 
-#include "base/file_path.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/thread.h"
@@ -26,6 +26,9 @@ class JobStatusUpdater : public base::RefCountedThreadSafe<JobStatusUpdater>,
   class Delegate {
    public:
     virtual bool OnJobCompleted(JobStatusUpdater* updater) = 0;
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   JobStatusUpdater(const std::string& printer_name,
@@ -35,6 +38,7 @@ class JobStatusUpdater : public base::RefCountedThreadSafe<JobStatusUpdater>,
                    const GURL& cloud_print_server_url,
                    cloud_print::PrintSystem* print_system,
                    Delegate* delegate);
+  virtual ~JobStatusUpdater() {}
   // Checks the status of the local print job and sends an update.
   void UpdateStatus();
   void Stop();
@@ -44,6 +48,7 @@ class JobStatusUpdater : public base::RefCountedThreadSafe<JobStatusUpdater>,
                                   int response_code,
                                   const ResponseCookies& cookies,
                                   const std::string& data);
+
  private:
   std::string printer_name_;
   std::string job_id_;
@@ -67,4 +72,3 @@ class JobStatusUpdater : public base::RefCountedThreadSafe<JobStatusUpdater>,
 typedef JobStatusUpdater::Delegate JobStatusUpdaterDelegate;
 
 #endif  // CHROME_SERVICE_CLOUD_PRINT_JOB_STATUS_UPDATER_H_
-

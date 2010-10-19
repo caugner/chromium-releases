@@ -77,6 +77,8 @@ EditSearchEngineDialog::EditSearchEngineDialog(
   Init(parent_window, profile);
 }
 
+EditSearchEngineDialog::~EditSearchEngineDialog() {}
+
 void EditSearchEngineDialog::Init(GtkWindow* parent_window, Profile* profile) {
   std::string dialog_name = l10n_util::GetStringUTF8(
       controller_->template_url() ?
@@ -227,12 +229,12 @@ void EditSearchEngineDialog::Init(GtkWindow* parent_window, Profile* profile) {
   g_signal_connect(dialog_, "destroy", G_CALLBACK(OnWindowDestroyThunk), this);
 }
 
-std::wstring EditSearchEngineDialog::GetTitleInput() const {
-  return UTF8ToWide(gtk_entry_get_text(GTK_ENTRY(title_entry_)));
+string16 EditSearchEngineDialog::GetTitleInput() const {
+  return UTF8ToUTF16(gtk_entry_get_text(GTK_ENTRY(title_entry_)));
 }
 
-std::wstring EditSearchEngineDialog::GetKeywordInput() const {
-  return UTF8ToWide(gtk_entry_get_text(GTK_ENTRY(keyword_entry_)));
+string16 EditSearchEngineDialog::GetKeywordInput() const {
+  return UTF8ToUTF16(gtk_entry_get_text(GTK_ENTRY(keyword_entry_)));
 }
 
 std::string EditSearchEngineDialog::GetURLInput() const {

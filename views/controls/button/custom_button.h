@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_CONTROLS_BUTTON_CUSTOM_BUTTON_H_
 #define VIEWS_CONTROLS_BUTTON_CUSTOM_BUTTON_H_
+#pragma once
 
 #include "app/animation.h"
 #include "views/controls/button/button.h"
@@ -62,6 +63,11 @@ class CustomButton : public Button,
   }
   bool request_focus_on_press() const { return request_focus_on_press_; }
 
+  // Returns true if the mouse pointer is over this control.  Note that this
+  // isn't the same as IsHotTracked() because the mouse may be over the control
+  // when it's disabled.
+  bool IsMouseHovered() const;
+
  protected:
   // Construct the Button with a Listener. See comment for Button's ctor.
   explicit CustomButton(ButtonListener* listener);
@@ -102,13 +108,6 @@ class CustomButton : public Button,
   scoped_ptr<ThrobAnimation> hover_animation_;
 
  private:
-  // Set / test whether the button is highlighted (in the hover state).
-  void SetHighlighted(bool highlighted);
-  bool IsHighlighted() const;
-
-  // Returns whether the button is pushed.
-  bool IsPushed() const;
-
   // Should we animate when the state changes? Defaults to true, but false while
   // throbbing.
   bool animate_on_state_change_;

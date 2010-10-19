@@ -2,15 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/env_var.h"
+#include "base/environment.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/scoped_ptr.h"
 #include "base/sync_socket.h"
-#include "base/waitable_event.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/renderer_host/audio_renderer_host.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "ipc/ipc_message_utils.h"
 #include "media/audio/fake_audio_output_stream.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -29,8 +29,8 @@ static const int kRouteId = 200;
 static const int kStreamId = 50;
 
 static bool IsRunningHeadless() {
-  scoped_ptr<base::EnvVarGetter> env(base::EnvVarGetter::Create());
-  if (env->HasEnv("CHROME_HEADLESS"))
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+  if (env->HasVar("CHROME_HEADLESS"))
     return true;
   return false;
 }
@@ -212,12 +212,12 @@ class AudioRendererHostTest : public testing::Test {
 
     ViewHostMsg_Audio_CreateStream_Params params;
     if (mock_stream_)
-      params.format = AudioManager::AUDIO_MOCK;
+      params.params.format = AudioParameters::AUDIO_MOCK;
     else
-      params.format = AudioManager::AUDIO_PCM_LINEAR;
-    params.channels = 2;
-    params.sample_rate = AudioManager::kAudioCDSampleRate;
-    params.bits_per_sample = 16;
+      params.params.format = AudioParameters::AUDIO_PCM_LINEAR;
+    params.params.channels = 2;
+    params.params.sample_rate = AudioParameters::kAudioCDSampleRate;
+    params.params.bits_per_sample = 16;
     params.packet_size = 0;
 
     // Send a create stream message to the audio output stream and wait until
@@ -238,12 +238,12 @@ class AudioRendererHostTest : public testing::Test {
 
     ViewHostMsg_Audio_CreateStream_Params params;
     if (mock_stream_)
-      params.format = AudioManager::AUDIO_MOCK;
+      params.params.format = AudioParameters::AUDIO_MOCK;
     else
-      params.format = AudioManager::AUDIO_PCM_LINEAR;
-    params.channels = 2;
-    params.sample_rate = AudioManager::kAudioCDSampleRate;
-    params.bits_per_sample = 16;
+      params.params.format = AudioParameters::AUDIO_PCM_LINEAR;
+    params.params.channels = 2;
+    params.params.sample_rate = AudioParameters::kAudioCDSampleRate;
+    params.params.bits_per_sample = 16;
     params.packet_size = 0;
 
     // Send a create stream message to the audio output stream and wait until

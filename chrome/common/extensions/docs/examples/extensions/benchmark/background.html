@@ -32,7 +32,7 @@ function formatNumber(str) {
 window.iterations = 10;
 window.clearConnections = true;
 window.clearCache = true;
-window.useNewTabs = true;
+window.enableSpdy = false;
 window.results = {};
 window.results.data = new Array();
 window.testUrl = "";
@@ -93,9 +93,9 @@ function nextBenchmark() {
 
 function show_options() {
   chrome.tabs.getSelected(null, function(tab) {
-    if (window.testUrl == "") {
-      window.testUrl = tab.url;
-    }
+  if (window.testUrl == "") {
+    window.testUrl = tab.url;
+  }
     var tabs = chrome.extension.getExtensionTabs();
     if (tabs && tabs.length) {
       tabs[0].setUrl(testUrl);
@@ -144,6 +144,7 @@ function Benchmark() {
 
     current_ = {};
     current_.url = url;
+    current_.viaSpdy = false;
     current_.startLoadResults = new Array();  // times to start
     current_.commitLoadResults = new Array();  // times to commit
     current_.docLoadResults = new Array();  // times to docload
@@ -173,12 +174,10 @@ function Benchmark() {
     // Push the result.
     window.results.data.push(current_);
 
-
     // If we're the last benchmark, close the window.
     if (benchmarks.length == 0) {
       chrome.tabs.remove(benchmarkWindow.id);
       benchmarkWindow = 0;
-
       show_options();
     }
   }
@@ -199,7 +198,7 @@ function Benchmark() {
       chrome.browserAction.setBadgeBackgroundColor({"color": [0, 255, 0, 255]});
       var tabs = chrome.extension.getExtensionTabs();
       if (tabs && tabs.length) {
-        tabs[0].location.reload();
+        tabs[0].location.reload(true);
       }
     }
   }
@@ -213,8 +212,19 @@ function Benchmark() {
     initialSpdySessionCount_ = chrome.benchmarking.counter(kSpdySessionCount);
   }
 
-  // Run a single page in the benchmark
-  this.runPage = function() {
+  this.openNextPage = function() {
+    var benchmark = nextBenchmark();
+    benchmark.pageStart();
+    chrome.tabs.create({"url": benchmark.url() },
+                       function(tab) { benchmarkWindow = tab; });
+  }
+
+  this.prepareToOpenPage = function() {
+    // After the previous page is closed, this function will apply
+    // any settings needed to prepare for opening a new page.
+    // Note: the previous page must be closed, otherwie, the cache
+    // clearing and connection clearing may not be thorough.
+
     if (window.clearCache) {
       chrome.benchmarking.clearCache();
     }
@@ -223,40 +233,47 @@ function Benchmark() {
       chrome.benchmarking.closeConnections();
     }
 
-    if (benchmarkWindow) {
-      var benchmark = nextBenchmark();
-      benchmark.pageStart();
-
-      if (window.useNewTabs) {
-        chrome.tabs.remove(benchmarkWindow.id);
-        chrome.tabs.create({"url": benchmark.url() },
-                           function(tab) { benchmarkWindow = tab; });
-      } else {
-        chrome.tabs.update(benchmarkWindow.id, {"url": benchmark.url() });
-      }
+    if (window.enableSpdy) {
+      chrome.benchmarking.enableSpdy(true);
     } else {
-      this.pageStart();
-      chrome.tabs.create({"url": current_.url },
-                         function(tab) { benchmarkWindow = tab; });
+      chrome.benchmarking.enableSpdy(false);
+    }
+
+    // Go back to the browser so that tasks can run.
+    setTimeout(me_.openNextPage, 250);
+  }
+
+  this.closePage = function() {
+    chrome.tabs.remove(benchmarkWindow.id, function() {
+      me_.prepareToOpenPage();
+    });
+  }
+
+  // Run a single page in the benchmark
+  this.runPage = function() {
+    if (benchmarkWindow) {
+      me_.closePage();
+    } else {
+      me_.prepareToOpenPage();
     }
   }
 
   // Called when a page finishes loading.
-  this.pageFinished = function(csi) {
-    var requested = csi.requestTime;
-    var started = csi.startLoadTime;
+  this.pageFinished = function(load_times) {
+    var requested = load_times.requestTime;
+    var started = load_times.startLoadTime;
     var startLoadTime =
-        Math.round((csi.startLoadTime - requested) * 1000.0);
+        Math.round((load_times.startLoadTime - requested) * 1000.0);
     var commitLoadTime =
-        Math.round((csi.commitLoadTime - started) * 1000.0);
+        Math.round((load_times.commitLoadTime - started) * 1000.0);
     var docLoadTime =
-        Math.round((csi.finishDocumentLoadTime - started) * 1000.0);
+        Math.round((load_times.finishDocumentLoadTime - started) * 1000.0);
     var paintTime =
-        Math.round((csi.firstPaintTime - started) * 1000.0);
+        Math.round((load_times.firstPaintTime - started) * 1000.0);
     var totalTime =
-        Math.round((csi.finishLoadTime - started) * 1000.0);
-    var firstPaintAfterLoadTime = 
-        Math.round((csi.firstPaintAfterLoadTime - started) * 1000.0);
+        Math.round((load_times.finishLoadTime - started) * 1000.0);
+    var firstPaintAfterLoadTime =
+        Math.round((load_times.firstPaintAfterLoadTime - started) * 1000.0);
 
     if (paintTime < 0) {
       // If the user navigates away from the test while it is running,
@@ -272,7 +289,24 @@ function Benchmark() {
     totalTime_ += totalTime;
     count_++;
 
+    // Make sure the content can be fetched via spdy if it is enabled.
+    if (window.enableSpdy && !load_times.wasFetchedViaSpdy) {
+      alert("Can not fetch current url via spdy.\n" +
+            "Ending current test.");
+      runCount_ = 1;
+    }
+
+    // If last fetch was via spdy, current fetch should use spdy too. Same
+    // for vise versa.
+    if (current_.iterations > 0 &&
+        current_.viaSpdy != load_times.wasFetchedViaSpdy) {
+      alert("Error: viaSpdy for current fetch is different from last fetch!\n" +
+            "Ending current test.");
+      runCount_ = 1;
+    }
+
     // Record the result
+    current_.viaSpdy = load_times.wasFetchedViaSpdy;
     current_.iterations++;
     current_.startLoadResults.push(startLoadTime);
     current_.commitLoadResults.push(commitLoadTime);
@@ -313,6 +347,9 @@ function Benchmark() {
 chrome.extension.onConnect.addListener(function(port) {
   port.onMessage.addListener(function(data) {
     if (data.message == "load") {
+      if (data.url == "about:blank") {
+        alert("blank page loaded!");
+      }
       var benchmark = findBenchmark(data.url);
       if (benchmark != undefined && benchmark.isRunning()) {
         benchmark.pageFinished(data.values);
@@ -325,14 +362,11 @@ function run() {
   if (window.clearCache) {
     // Show a warning if we will try to clear the cache between runs
     // but will also be reusing the same WebKit instance (i.e. Chrome
-    // is in single-process mode, or 'Use New Tabs' is turned off)
-    // because the WebKit cache might not get completely cleared between runs.
+    // is in single-process mode) because the WebKit cache might not get
+    // completely cleared between runs.
     if (chrome.benchmarking.isSingleProcess()) {
       alert("Warning: the WebKit cache may not be cleared correctly " +
             "between runs because Chrome is running in single-process mode.");
-    } else if (!window.useNewTabs) {
-      alert("Warning: the WebKit cache may not be cleared correctly " +
-            "between runs because 'Use New Tabs Per Page' is turned off.");
     }
   }
 

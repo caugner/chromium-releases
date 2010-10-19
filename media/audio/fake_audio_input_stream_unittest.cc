@@ -5,6 +5,7 @@
 #include "base/basictypes.h"
 #include "base/platform_thread.h"
 #include "media/audio/audio_io.h"
+#include "media/audio/audio_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -40,7 +41,7 @@ TEST(FakeAudioInputTest, BasicCallbacks) {
   ASSERT_TRUE(NULL != audio_man);
   // Ask for one recorded packet every 50ms.
   AudioInputStream* stream = audio_man->MakeAudioInputStream(
-      AudioManager::AUDIO_MOCK, 2, 8000, 8, 400);
+      AudioParameters(AudioParameters::AUDIO_MOCK, 2, 8000, 8), 400);
   ASSERT_TRUE(NULL != stream);
   EXPECT_TRUE(stream->Open());
   stream->Start(&callback);
@@ -48,4 +49,3 @@ TEST(FakeAudioInputTest, BasicCallbacks) {
   stream->Stop();
   stream->Close();
 }
-

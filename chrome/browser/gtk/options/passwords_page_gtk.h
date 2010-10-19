@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_GTK_OPTIONS_PASSWORDS_PAGE_GTK_H_
 #define CHROME_BROWSER_GTK_OPTIONS_PASSWORDS_PAGE_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -16,7 +17,7 @@
 class PasswordsPageGtk {
  public:
   explicit PasswordsPageGtk(Profile* profile);
-  ~PasswordsPageGtk();
+  virtual ~PasswordsPageGtk();
 
   GtkWidget* get_page_widget() const { return page_; }
 
@@ -35,6 +36,7 @@ class PasswordsPageGtk {
   CHROMEGTK_CALLBACK_0(PasswordsPageGtk, void, OnRemoveAllButtonClicked);
   CHROMEGTK_CALLBACK_1(PasswordsPageGtk, void, OnRemoveAllConfirmResponse, int);
   CHROMEGTK_CALLBACK_0(PasswordsPageGtk, void, OnShowPasswordButtonClicked);
+  CHROMEGTK_CALLBACK_0(PasswordsPageGtk, void, OnShowPasswordButtonRealized);
 
   CHROMEG_CALLBACK_0(PasswordsPageGtk, void, OnPasswordSelectionChanged,
                      GtkTreeSelection*);

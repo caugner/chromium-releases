@@ -10,17 +10,24 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/i18n/icu_util.h"
+#include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_piece.h"
+#include "base/string_util.h"
 #include "base/sys_string_conversions.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/weak_ptr.h"
 #include "grit/webkit_chromium_resources.h"
+#include "net/base/escape.h"
+#include "net/base/net_errors.h"
 #include "net/base/net_util.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPluginParams.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLError.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/glue/media/buffered_data_source.h"
 #include "webkit/glue/media/media_resource_loader_bridge_factory.h"
@@ -40,6 +47,7 @@
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 
 using WebKit::WebCString;
+using WebKit::WebDevToolsAgentClient;
 using WebKit::WebFrame;
 using WebKit::WebMediaPlayerClient;
 using WebKit::WebPlugin;
@@ -49,11 +57,54 @@ using WebKit::WebURL;
 
 namespace {
 
+// All fatal log messages (e.g. DCHECK failures) imply unit test failures
+void UnitTestAssertHandler(const std::string& str) {
+  FAIL() << str;
+}
+
+void InitLogging(bool enable_gp_fault_error_box) {
+  logging::SetLogAssertHandler(UnitTestAssertHandler);
+
+#if defined(OS_WIN)
+  if (!::IsDebuggerPresent()) {
+    UINT new_flags = SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX;
+    if (!enable_gp_fault_error_box)
+      new_flags |= SEM_NOGPFAULTERRORBOX;
+
+    // Preserve existing error mode, as discussed at
+    // http://blogs.msdn.com/oldnewthing/archive/2004/07/27/198410.aspx
+    UINT existing_flags = SetErrorMode(new_flags);
+    SetErrorMode(existing_flags | new_flags);
+  }
+#endif
+
+  FilePath log_filename;
+  PathService::Get(base::DIR_EXE, &log_filename);
+  log_filename = log_filename.AppendASCII("DumpRenderTree.log");
+  logging::InitLogging(
+      log_filename.value().c_str(),
+      // Only log to a file. This prevents debugging output from disrupting
+      // whether or not we pass.
+      logging::LOG_ONLY_TO_FILE,
+      // We might have multiple DumpRenderTree processes going at once.
+      logging::LOCK_LOG_FILE,
+      logging::DELETE_OLD_LOG_FILE);
+
+  // We want process and thread IDs because we may have multiple processes.
+  const bool kProcessId = true;
+  const bool kThreadId = true;
+  const bool kTimestamp = true;
+  const bool kTickcount = true;
+  logging::SetLogItems(kProcessId, kThreadId, !kTimestamp, kTickcount);
+}
+
 class TestEnvironment {
  public:
   explicit TestEnvironment(bool unit_test_mode) {
-    if (!unit_test_mode)
+    if (!unit_test_mode) {
       at_exit_manager_.reset(new base::AtExitManager);
+      InitLogging(false);
+    }
     main_message_loop_.reset(new MessageLoopForUI);
     // TestWebKitClient must be instantiated after the MessageLoopForUI.
     webkit_client_.reset(new TestWebKitClient(unit_test_mode));
@@ -63,7 +114,7 @@ class TestEnvironment {
     SimpleResourceLoaderBridge::Shutdown();
   }
 
-  TestWebKitClient* webkit_client() { return webkit_client_.get(); }
+  TestWebKitClient* webkit_client() const { return webkit_client_.get(); }
 
 #if defined(OS_WIN)
   void set_theme_engine(WebKit::WebThemeEngine* engine) {
@@ -71,7 +122,7 @@ class TestEnvironment {
     webkit_client_->SetThemeEngine(engine);
   }
 
-  WebKit::WebThemeEngine* theme_engine() {
+  WebKit::WebThemeEngine* theme_engine() const {
     return webkit_client_->themeEngine();
   }
 #endif
@@ -110,6 +161,26 @@ FilePath GetWebKitRootDirFilePath() {
   }
 }
 
+class WebKitClientMessageLoopImpl
+    : public WebDevToolsAgentClient::WebKitClientMessageLoop {
+ public:
+  WebKitClientMessageLoopImpl() : message_loop_(MessageLoop::current()) {}
+  virtual ~WebKitClientMessageLoopImpl() {
+    message_loop_ = NULL;
+  }
+  virtual void run() {
+    bool old_state = message_loop_->NestableTasksAllowed();
+    message_loop_->SetNestableTasksAllowed(true);
+    message_loop_->Run();
+    message_loop_->SetNestableTasksAllowed(old_state);
+  }
+  virtual void quitNow() {
+    message_loop_->QuitNow();
+  }
+ private:
+  MessageLoop* message_loop_;
+};
+
 }  // namespace
 
 namespace webkit_support {
@@ -117,6 +188,7 @@ namespace webkit_support {
 static TestEnvironment* test_environment;
 
 static void SetUpTestEnvironmentImpl(bool unit_test_mode) {
+  base::EnableInProcessStackDumping();
   base::EnableTerminationOnHeapCorruption();
 
   // Initialize the singleton CommandLine with fixed values.  Some code refer to
@@ -130,9 +202,9 @@ static void SetUpTestEnvironmentImpl(bool unit_test_mode) {
   const char* kFixedArguments[] = {"DumpRenderTree"};
   CommandLine::Init(arraysize(kFixedArguments), kFixedArguments);
 
-  webkit_support::BeforeInitialize();
+  webkit_support::BeforeInitialize(unit_test_mode);
   webkit_support::test_environment = new TestEnvironment(unit_test_mode);
-  webkit_support::AfterInitialize();
+  webkit_support::AfterInitialize(unit_test_mode);
   if (!unit_test_mode) {
     // Load ICU data tables.  This has to run after TestEnvironment is created
     // because on Linux, we need base::AtExitManager.
@@ -162,6 +234,7 @@ void TearDownTestEnvironment() {
   delete test_environment;
   test_environment = NULL;
   AfterShutdown();
+  logging::CloseLogFile();
 }
 
 WebKit::WebKitClient* GetWebKitClient() {
@@ -277,12 +350,21 @@ void DispatchMessageLoop() {
   current->SetNestableTasksAllowed(old_state);
 }
 
+WebDevToolsAgentClient::WebKitClientMessageLoop* CreateDevToolsMessageLoop() {
+  return new WebKitClientMessageLoopImpl();
+}
+
 void PostTaskFromHere(Task* task) {
   MessageLoop::current()->PostTask(FROM_HERE, task);
 }
 
 void PostDelayedTaskFromHere(Task* task, int64 delay_ms) {
   MessageLoop::current()->PostDelayedTask(FROM_HERE, task, delay_ms);
+}
+
+void PostDelayedTask(void (*func)(void*), void* context, int64 delay_ms) {
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE, NewRunnableFunction(func, context), delay_ms);
 }
 
 // Wrappers for FilePath and file_util
@@ -342,6 +424,51 @@ bool SetCurrentDirectoryForFileURL(const WebKit::WebURL& fileUrl) {
       && file_util::SetCurrentDirectory(localPath.DirName());
 }
 
+int64 GetCurrentTimeInMillisecond() {
+  return base::TimeTicks::Now().ToInternalValue()
+      / base::Time::kMicrosecondsPerMillisecond;
+}
+
+std::string EscapePath(const std::string& path) {
+  return ::EscapePath(path);
+}
+
+std::string MakeURLErrorDescription(const WebKit::WebURLError& error) {
+  std::string domain = error.domain.utf8();
+  int code = error.reason;
+
+  if (domain == net::kErrorDomain) {
+    domain = "NSURLErrorDomain";
+    switch (error.reason) {
+    case net::ERR_ABORTED:
+      code = -999;
+      break;
+    case net::ERR_UNSAFE_PORT:
+      // Our unsafe port checking happens at the network stack level, but we
+      // make this translation here to match the behavior of stock WebKit.
+      domain = "WebKitErrorDomain";
+      code = 103;
+      break;
+    case net::ERR_ADDRESS_INVALID:
+    case net::ERR_ADDRESS_UNREACHABLE:
+      code = -1004;
+      break;
+    }
+  } else
+    DLOG(WARNING) << "Unknown error domain";
+
+  return StringPrintf("<NSError domain %s, code %d, failing URL \"%s\">",
+      domain.c_str(), code, error.unreachableURL.spec().data());
+}
+
+WebKit::WebURLError CreateCancelledError(const WebKit::WebURLRequest& request) {
+  WebKit::WebURLError error;
+  error.domain = WebKit::WebString::fromUTF8(net::kErrorDomain);
+  error.reason = net::ERR_ABORTED;
+  error.unreachableURL = request.url();
+  return error;
+}
+
 // Bridge for SimpleDatabaseSystem
 
 void SetDatabaseQuota(int quota) {
@@ -374,18 +501,6 @@ WebKit::WebThemeEngine* GetThemeEngine() {
 #endif
 
 // DevTools
-WebCString GetDevToolsInjectedScriptSource() {
-  base::StringPiece injectJSWebkit = webkit_glue::GetDataResource(
-      IDR_DEVTOOLS_INJECT_WEBKIT_JS);
-  return WebCString(injectJSWebkit.as_string().c_str());
-}
-
-WebCString GetDevToolsInjectedScriptDispatcherSource() {
-  base::StringPiece injectDispatchJS = webkit_glue::GetDataResource(
-      IDR_DEVTOOLS_INJECT_DISPATCH_JS);
-  return WebCString(injectDispatchJS.as_string().c_str());
-}
-
 WebCString GetDevToolsDebuggerScriptSource() {
   base::StringPiece debuggerScriptJS = webkit_glue::GetDataResource(
       IDR_DEVTOOLS_DEBUGGER_SCRIPT_JS);
@@ -398,7 +513,8 @@ WebURL GetDevToolsPathAsURL() {
       DCHECK(false);
       return WebURL();
   }
-  FilePath devToolsPath = dirExe.AppendASCII("resources/inspector/devtools.html");
+  FilePath devToolsPath = dirExe.AppendASCII(
+      "resources/inspector/devtools.html");
   return net::FilePathToFileURL(devToolsPath);
 }
 

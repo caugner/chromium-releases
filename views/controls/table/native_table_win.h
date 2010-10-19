@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_CONTROLS_TABLE_NATIVE_TABLE_WIN_H_
 #define VIEWS_CONTROLS_TABLE_NATIVE_TABLE_WIN_H_
+#pragma once
 
 #include <windows.h>
 
@@ -73,7 +74,7 @@ class NativeTableWin : public NativeControlWin, public NativeTableWrapper {
   virtual void OnMiddleClick();
 
   // Overridden from NativeControl. Notifies the observer.
-  virtual bool OnKeyDown(base::KeyboardCode virtual_keycode);
+  virtual bool OnKeyDown(app::KeyboardCode virtual_keycode);
 
   // Custom drawing of our icons.
   LRESULT OnCustomDraw(NMLVCUSTOMDRAW* draw_info);

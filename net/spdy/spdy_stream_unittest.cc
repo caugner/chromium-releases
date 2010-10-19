@@ -4,22 +4,7 @@
 
 #include "net/spdy/spdy_stream.h"
 #include "base/ref_counted.h"
-#include "base/time.h"
-#include "net/base/mock_host_resolver.h"
-#include "net/base/net_errors.h"
-#include "net/base/net_log.h"
-#include "net/base/ssl_config_service.h"
-#include "net/base/ssl_config_service_defaults.h"
-#include "net/base/test_completion_callback.h"
-#include "net/http/http_auth_handler_factory.h"
-#include "net/http/http_network_session.h"
-#include "net/http/http_request_info.h"
-#include "net/http/http_response_info.h"
-#include "net/proxy/proxy_service.h"
-#include "net/socket/socket_test_util.h"
-#include "net/spdy/spdy_framer.h"
 #include "net/spdy/spdy_session.h"
-#include "net/spdy/spdy_session_pool.h"
 #include "net/spdy/spdy_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -48,45 +33,6 @@ ProxyService* CreateNullProxyService() {
   return ProxyService::CreateNull();
 }
 
-// Helper to manage the lifetimes of the dependencies for a
-// SpdyNetworkTransaction.
-class SessionDependencies {
- public:
-  // Default set of dependencies -- "null" proxy service.
-  SessionDependencies()
-      : host_resolver(new MockHostResolver),
-        proxy_service(CreateNullProxyService()),
-        ssl_config_service(new SSLConfigServiceDefaults),
-        http_auth_handler_factory(HttpAuthHandlerFactory::CreateDefault()),
-        spdy_session_pool(new SpdySessionPool()) {}
-
-  // Custom proxy service dependency.
-  explicit SessionDependencies(ProxyService* proxy_service)
-      : host_resolver(new MockHostResolver),
-        proxy_service(proxy_service),
-        ssl_config_service(new SSLConfigServiceDefaults),
-        http_auth_handler_factory(HttpAuthHandlerFactory::CreateDefault()),
-        spdy_session_pool(new SpdySessionPool()) {}
-
-  scoped_refptr<MockHostResolverBase> host_resolver;
-  scoped_refptr<ProxyService> proxy_service;
-  scoped_refptr<SSLConfigService> ssl_config_service;
-  MockClientSocketFactory socket_factory;
-  scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory;
-  scoped_refptr<SpdySessionPool> spdy_session_pool;
-};
-
-HttpNetworkSession* CreateSession(SessionDependencies* session_deps) {
-  return new HttpNetworkSession(session_deps->host_resolver,
-                                session_deps->proxy_service,
-                                &session_deps->socket_factory,
-                                session_deps->ssl_config_service,
-                                session_deps->spdy_session_pool,
-                                session_deps->http_auth_handler_factory.get(),
-                                NULL,
-                                NULL);
-}
-
 class TestSpdyStreamDelegate : public SpdyStream::Delegate {
  public:
   TestSpdyStreamDelegate(SpdyStream* stream,
@@ -113,6 +59,7 @@ class TestSpdyStreamDelegate : public SpdyStream::Delegate {
     ADD_FAILURE() << "OnSendBodyComplete should not be called";
     return true;
   }
+
   virtual int OnResponseReceived(const spdy::SpdyHeaderBlock& response,
                                  base::Time response_time,
                                  int status) {
@@ -172,9 +119,9 @@ class SpdyStreamTest : public testing::Test {
   scoped_refptr<SpdySession> CreateSpdySession() {
     spdy::SpdyFramer::set_enable_compression_default(false);
     HostPortPair host_port_pair("www.google.com", 80);
+    HostPortProxyPair pair(host_port_pair, ProxyServer::Direct());
     scoped_refptr<SpdySession> session(
-        session_->spdy_session_pool()->Get(
-            host_port_pair, session_, BoundNetLog()));
+        session_->spdy_session_pool()->Get(pair, session_, BoundNetLog()));
     return session;
   }
 
@@ -186,16 +133,16 @@ class SpdyStreamTest : public testing::Test {
 };
 
 TEST_F(SpdyStreamTest, SendDataAfterOpen) {
-  SessionDependencies session_deps;
+  SpdySessionDependencies session_deps;
 
-  session_ = CreateSession(&session_deps);
+  session_ = SpdySessionDependencies::SpdyCreateSession(&session_deps);
   SpdySessionPoolPeer pool_peer_(session_->spdy_session_pool());
 
   const SpdyHeaderInfo kSynStartHeader = {
     spdy::SYN_STREAM,
     1,
     0,
-    SPDY_PRIORITY_LOWEST,
+    net::ConvertRequestPriorityToSpdyPriority(LOWEST),
     spdy::CONTROL_FLAG_NONE,
     false,
     spdy::INVALID,
@@ -238,8 +185,10 @@ TEST_F(SpdyStreamTest, SendDataAfterOpen) {
   scoped_refptr<OrderedSocketData> data(
       new OrderedSocketData(reads, arraysize(reads),
                             writes, arraysize(writes)));
+  MockConnect connect_data(false, OK);
+  data->set_connect_data(connect_data);
 
-  session_deps.socket_factory.AddSocketDataProvider(data.get());
+  session_deps.socket_factory->AddSocketDataProvider(data.get());
   SpdySession::SetSSLMode(false);
 
   scoped_refptr<SpdySession> session(CreateSpdySession());
@@ -254,7 +203,7 @@ TEST_F(SpdyStreamTest, SendDataAfterOpen) {
   scoped_refptr<SpdyStream> stream;
   ASSERT_EQ(
       OK,
-      session->CreateStream(url, LOWEST, &stream, BoundNetLog(), NULL, NULL));
+      session->CreateStream(url, LOWEST, &stream, BoundNetLog(), NULL));
   scoped_refptr<IOBufferWithSize> buf(new IOBufferWithSize(8));
   memcpy(buf->data(), "\0hello!\xff", 8);
   TestCompletionCallback callback;
@@ -269,7 +218,7 @@ TEST_F(SpdyStreamTest, SendDataAfterOpen) {
   (*headers)["version"] = "HTTP/1.1";
   stream->set_spdy_headers(headers);
 
-  EXPECT_EQ(ERR_IO_PENDING, stream->DoSendRequest(true));
+  EXPECT_EQ(ERR_IO_PENDING, stream->SendRequest(true));
 
   EXPECT_EQ(OK, callback.WaitForResult());
 

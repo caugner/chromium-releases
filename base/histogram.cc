@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,14 @@
 #include "base/histogram.h"
 
 #include <math.h>
+
+#include <algorithm>
 #include <string>
 
 #include "base/lock.h"
 #include "base/logging.h"
 #include "base/pickle.h"
-#include "base/string_util.h"
+#include "base/stringprintf.h"
 
 using base::TimeDelta;
 
@@ -84,6 +86,10 @@ Histogram::~Histogram() {
   DCHECK(ValidateBucketRanges());
 }
 
+bool Histogram::PrintEmptyBucket(size_t index) const {
+  return true;
+}
+
 void Histogram::Add(int value) {
   if (value >= kSampleType_MAX)
     value = kSampleType_MAX - 1;
@@ -95,8 +101,16 @@ void Histogram::Add(int value) {
   Accumulate(value, 1, index);
 }
 
+void Histogram::AddBoolean(bool value) {
+  DCHECK(false);
+}
+
 void Histogram::AddSampleSet(const SampleSet& sample) {
   sample_.Add(sample);
+}
+
+void Histogram::SetRangeDescriptions(const DescriptionPair descriptions[]) {
+  DCHECK(false);
 }
 
 // The following methods provide a graphical histogram display.
@@ -290,6 +304,20 @@ void Histogram::SnapshotSample(SampleSet* sample) const {
   *sample = sample_;
 }
 
+bool Histogram::HasConstructorArguments(Sample minimum, Sample maximum,
+                                        size_t bucket_count) {
+  return ((minimum == declared_min_) && (maximum == declared_max_) &&
+          (bucket_count == bucket_count_));
+}
+
+bool Histogram::HasConstructorTimeDeltaArguments(base::TimeDelta minimum,
+                                                 base::TimeDelta maximum,
+                                                 size_t bucket_count) {
+  return ((minimum.InMilliseconds() == declared_min_) &&
+          (maximum.InMilliseconds() == declared_max_) &&
+          (bucket_count == bucket_count_));
+}
+
 //------------------------------------------------------------------------------
 // Accessor methods
 
@@ -314,10 +342,10 @@ double Histogram::GetPeakBucketSize(const SampleSet& snapshot) const {
 void Histogram::WriteAsciiHeader(const SampleSet& snapshot,
                                  Count sample_count,
                                  std::string* output) const {
-  StringAppendF(output,
-                "Histogram: %s recorded %d samples",
-                histogram_name().c_str(),
-                sample_count);
+  base::StringAppendF(output,
+                      "Histogram: %s recorded %d samples",
+                      histogram_name().c_str(),
+                      sample_count);
   if (0 == sample_count) {
     DCHECK_EQ(snapshot.sum(), 0);
   } else {
@@ -326,12 +354,13 @@ void Histogram::WriteAsciiHeader(const SampleSet& snapshot,
                       - average * average;
     double standard_deviation = sqrt(variance);
 
-    StringAppendF(output,
-                  ", average = %.1f, standard deviation = %.1f",
-                  average, standard_deviation);
+    base::StringAppendF(output,
+                        ", average = %.1f, standard deviation = %.1f",
+                        average, standard_deviation);
   }
   if (flags_ & ~kHexRangePrintingFlag )
-    StringAppendF(output, " (flags = 0x%x)", flags_ & ~kHexRangePrintingFlag);
+    base::StringAppendF(output, " (flags = 0x%x)",
+                        flags_ & ~kHexRangePrintingFlag);
 }
 
 void Histogram::WriteAsciiBucketContext(const int64 past,
@@ -343,22 +372,22 @@ void Histogram::WriteAsciiBucketContext(const int64 past,
   WriteAsciiBucketValue(current, scaled_sum, output);
   if (0 < i) {
     double percentage = past / scaled_sum;
-    StringAppendF(output, " {%3.1f%%}", percentage);
+    base::StringAppendF(output, " {%3.1f%%}", percentage);
   }
 }
 
 const std::string Histogram::GetAsciiBucketRange(size_t i) const {
   std::string result;
   if (kHexRangePrintingFlag & flags_)
-    StringAppendF(&result, "%#x", ranges(i));
+    base::StringAppendF(&result, "%#x", ranges(i));
   else
-    StringAppendF(&result, "%d", ranges(i));
+    base::StringAppendF(&result, "%d", ranges(i));
   return result;
 }
 
 void Histogram::WriteAsciiBucketValue(Count current, double scaled_sum,
                                       std::string* output) const {
-  StringAppendF(output, " (%d = %3.1f%%)", current, current/scaled_sum);
+  base::StringAppendF(output, " (%d = %3.1f%%)", current, current/scaled_sum);
 }
 
 void Histogram::WriteAsciiBucketGraph(double current_size, double max_size,
@@ -613,6 +642,10 @@ LinearHistogram::LinearHistogram(const std::string& name,
   DCHECK(ValidateBucketRanges());
 }
 
+Histogram::ClassType LinearHistogram::histogram_type() const {
+  return LINEAR_HISTOGRAM;
+}
+
 void LinearHistogram::SetRangeDescriptions(
     const DescriptionPair descriptions[]) {
   for (int i =0; descriptions[i].description; ++i) {
@@ -671,6 +704,17 @@ scoped_refptr<Histogram> BooleanHistogram::FactoryGet(const std::string& name,
   return histogram;
 }
 
+Histogram::ClassType BooleanHistogram::histogram_type() const {
+  return BOOLEAN_HISTOGRAM;
+}
+
+void BooleanHistogram::AddBoolean(bool value) {
+  Add(value ? 1 : 0);
+}
+
+BooleanHistogram::BooleanHistogram(const std::string& name)
+    : LinearHistogram(name, 1, 2, 3) {
+}
 
 //------------------------------------------------------------------------------
 // CustomHistogram:
@@ -704,6 +748,10 @@ scoped_refptr<Histogram> CustomHistogram::FactoryGet(
                                             ranges.size()));
   histogram->SetFlags(flags);
   return histogram;
+}
+
+Histogram::ClassType CustomHistogram::histogram_type() const {
+  return CUSTOM_HISTOGRAM;
 }
 
 CustomHistogram::CustomHistogram(const std::string& name,
@@ -774,10 +822,9 @@ void StatisticsRecorder::Register(Histogram* histogram) {
     return;
   const std::string name = histogram->histogram_name();
   AutoLock auto_lock(*lock_);
-  DCHECK(histograms_->end() == histograms_->find(name));
-
-  (*histograms_)[name] = histogram;
-  return;
+  // Avoid overwriting a previous registration.
+  if (histograms_->end() == histograms_->find(name))
+    (*histograms_)[name] = histogram;
 }
 
 // static
@@ -809,10 +856,12 @@ void StatisticsRecorder::WriteGraph(const std::string& query,
                                     std::string* output) {
   if (!histograms_)
     return;
-  if (query.length())
-    StringAppendF(output, "Collections of histograms for %s\n", query.c_str());
-  else
+  if (query.length()) {
+    base::StringAppendF(output, "Collections of histograms for %s\n",
+                        query.c_str());
+  } else {
     output->append("Collections of all histograms\n");
+  }
 
   Histograms snapshot;
   GetSnapshot(query, &snapshot);

@@ -9,7 +9,9 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/registry.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/win_util.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/common/chrome_constants.h"
@@ -26,7 +28,7 @@
 #include "chrome/installer/util/version.h"
 
 // Build-time generated include file.
-#include "registered_dlls.h"
+#include "registered_dlls.h"  // NOLINT
 
 namespace {
 
@@ -38,7 +40,7 @@ namespace {
 void CloseAllChromeProcesses() {
   for (int j = 0; j < 4; ++j) {
     std::wstring wnd_class(L"Chrome_WidgetWin_");
-    wnd_class.append(IntToWString(j));
+    wnd_class.append(base::IntToString16(j));
     HWND window = FindWindowEx(NULL, NULL, wnd_class.c_str(), NULL);
     while (window) {
       HWND tmpWnd = window;
@@ -71,7 +73,7 @@ bool CurrentUserHasDefaultBrowser(bool system_uninstall) {
   std::wstring reg_key(ShellUtil::kRegStartMenuInternet);
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   reg_key.append(L"\\" + dist->GetApplicationName() + ShellUtil::kRegShellOpen);
-  RegKey key(HKEY_LOCAL_MACHINE, reg_key.c_str());
+  RegKey key(HKEY_LOCAL_MACHINE, reg_key.c_str(), KEY_READ);
   std::wstring reg_exe;
   if (key.ReadValue(L"", &reg_exe) && reg_exe.length() > 2) {
     std::wstring chrome_exe = installer::GetChromeInstallPath(system_uninstall);
@@ -422,7 +424,7 @@ const wchar_t kChromeExtProgId[] = L"ChromiumExt";
 
     // Delete Software\Classes\.crx,
     std::wstring ext_association(ShellUtil::kRegClasses);
-    ext_association.append(L"\\.");
+    ext_association.append(L"\\");
     ext_association.append(chrome::kExtensionFileExtension);
     InstallUtil::DeleteRegistryKey(key, ext_association);
   }
@@ -468,7 +470,8 @@ installer_util::InstallStatus installer_setup::UninstallChrome(
       params.append(installer_util::switches::kRemoveChromeRegistration);
       if (!suffix.empty()) {
         params.append(L" --");
-        params.append(installer_util::switches::kRegisterChromeBrowserSuffix);
+        params.append(ASCIIToWide(
+            installer_util::switches::kRegisterChromeBrowserSuffix));
         params.append(L"=\"" + suffix + L"\"");
       }
       DWORD exit_code = installer_util::UNKNOWN_STATUS;
@@ -539,6 +542,7 @@ installer_util::InstallStatus installer_setup::UninstallChrome(
       scoped_ptr<WorkItemList> dll_list(WorkItem::CreateWorkItemList());
       if (InstallUtil::BuildDLLRegistrationList(dll_path, kDllsToRegister,
                                                 kNumDllsToRegister, false,
+                                                !system_uninstall,
                                                 dll_list.get())) {
         dll_list->Do();
       }

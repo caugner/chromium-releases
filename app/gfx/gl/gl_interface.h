@@ -8,6 +8,7 @@
 
 #ifndef APP_GFX_GL_GL_INTERFACE_H_
 #define APP_GFX_GL_GL_INTERFACE_H_
+#pragma once
 
 #include "app/gfx/gl/gl_bindings.h"
 
@@ -48,6 +49,11 @@ class GLInterface {
 
   virtual void BlendFuncSeparate(
       GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha) = 0;
+
+  virtual void BlitFramebufferEXT(
+      GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
+      GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
+      GLbitfield mask, GLenum filter) = 0;
 
   virtual void BufferData(
       GLenum target, GLsizeiptr size, const void* data, GLenum usage) = 0;
@@ -234,11 +240,11 @@ class GLInterface {
 
   virtual GLboolean IsEnabled(GLenum cap) = 0;
 
-  virtual GLboolean IsFramebuffer(GLuint framebuffer) = 0;
+  virtual GLboolean IsFramebufferEXT(GLuint framebuffer) = 0;
 
   virtual GLboolean IsProgram(GLuint program) = 0;
 
-  virtual GLboolean IsRenderbuffer(GLuint renderbuffer) = 0;
+  virtual GLboolean IsRenderbufferEXT(GLuint renderbuffer) = 0;
 
   virtual GLboolean IsShader(GLuint shader) = 0;
 
@@ -260,6 +266,10 @@ class GLInterface {
 
   virtual void RenderbufferStorageEXT(
       GLenum target, GLenum internalformat, GLsizei width, GLsizei height) = 0;
+
+  virtual void RenderbufferStorageMultisampleEXT(
+      GLenum target, GLsizei samples, GLenum internalformat,
+      GLsizei width, GLsizei height) = 0;
 
   virtual void SampleCoverage(GLclampf value, GLboolean invert) = 0;
 

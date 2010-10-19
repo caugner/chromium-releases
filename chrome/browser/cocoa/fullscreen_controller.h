@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_COCOA_FULLSCREEN_CONTROLLER_H_
 #define CHROME_BROWSER_COCOA_FULLSCREEN_CONTROLLER_H_
+#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -113,5 +114,9 @@
 - (void)changeFloatingBarShownFraction:(CGFloat)fraction;
 
 @end
+
+// Notification posted when we're about to enter or leave fullscreen.
+extern NSString* const kWillEnterFullscreenNotification;
+extern NSString* const kWillLeaveFullscreenNotification;
 
 #endif  // CHROME_BROWSER_COCOA_FULLSCREEN_CONTROLLER_H_

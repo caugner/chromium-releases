@@ -7,9 +7,11 @@
 #include <algorithm>
 #include <vector>
 
+#include "base/logging.h"
 #include "base/md5.h"
 #include "base/rand_util.h"
 #include "base/ref_counted.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
@@ -68,7 +70,7 @@ std::string WebSocketHandshake::CreateClientHandshakeMessage() {
   fields.push_back("Sec-WebSocket-Key1: " + parameter_->GetSecWebSocketKey1());
   fields.push_back("Sec-WebSocket-Key2: " + parameter_->GetSecWebSocketKey2());
 
-  std::random_shuffle(fields.begin(), fields.end());
+  std::random_shuffle(fields.begin(), fields.end(), base::RandGenerator);
 
   for (size_t i = 0; i < fields.size(); i++) {
     msg += fields[i] + "\r\n";
@@ -134,7 +136,7 @@ std::string WebSocketHandshake::GetHostFieldValue() const {
         (secure &&
          port != kSecureWebSocketPort && port != url_parse::PORT_UNSPECIFIED)) {
       host += ":";
-      host += IntToString(port);
+      host += base::IntToString(port);
     }
   }
   return host;

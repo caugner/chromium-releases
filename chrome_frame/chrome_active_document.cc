@@ -11,6 +11,7 @@
 #include <mshtmcid.h>
 #include <shdeprecated.h>
 #include <shlguid.h>
+#include <shlobj.h>
 #include <shobjidl.h>
 #include <tlogstg.h>
 #include <urlmon.h>
@@ -18,38 +19,35 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/file_version_info.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/registry.h"
 #include "base/scoped_variant_win.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/thread_local.h"
 #include "base/trace_event.h"
-
+#include "base/utf_string_conversions.h"
 #include "grit/generated_resources.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/navigation_types.h"
+#include "chrome/common/page_zoom.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome_frame/bho.h"
 #include "chrome_frame/bind_context_info.h"
+#include "chrome_frame/buggy_bho_handling.h"
 #include "chrome_frame/crash_reporting/crash_metrics.h"
 #include "chrome_frame/utils.h"
-
-const wchar_t kChromeAttachExternalTabPrefix[] = L"attach_external_tab";
 
 static const wchar_t kUseChromeNetworking[] = L"UseChromeNetworking";
 static const wchar_t kHandleTopLevelRequests[] = L"HandleTopLevelRequests";
 
 DEFINE_GUID(CGID_DocHostCmdPriv, 0x000214D4L, 0, 0, 0xC0, 0, 0, 0, 0, 0, 0,
             0x46);
-
 
 base::ThreadLocalPointer<ChromeActiveDocument> g_active_doc_cache;
 
@@ -66,11 +64,10 @@ ChromeActiveDocument::ChromeActiveDocument()
     : first_navigation_(true),
       is_automation_client_reused_(false),
       popup_allowed_(false),
-      accelerator_table_(NULL),
-      is_new_navigation_(false) {
+      accelerator_table_(NULL) {
   TRACE_EVENT_BEGIN("chromeframe.createactivedocument", this, "");
 
-  url_fetcher_.set_frame_busting(false);
+  url_fetcher_->set_frame_busting(false);
   memset(&navigation_info_, 0, sizeof(navigation_info_));
 }
 
@@ -85,8 +82,9 @@ HRESULT ChromeActiveDocument::FinalConstruct() {
     DLOG(INFO) << "Reusing automation client instance from "
                << cached_document;
     DCHECK(automation_client_.get() != NULL);
-    automation_client_->Reinitialize(this, &url_fetcher_);
+    automation_client_->Reinitialize(this, url_fetcher_.get());
     is_automation_client_reused_ = true;
+    OnAutomationServerReady();
   } else {
     // The FinalConstruct implementation in the ChromeFrameActivexBase class
     // i.e. Base creates an instance of the ChromeFrameAutomationClient class
@@ -105,13 +103,21 @@ HRESULT ChromeActiveDocument::FinalConstruct() {
 
   find_dialog_.Init(automation_client_.get());
 
-  enabled_commands_map_[OLECMDID_PRINT] = true;
-  enabled_commands_map_[OLECMDID_FIND] = true;
-  enabled_commands_map_[OLECMDID_CUT] = true;
-  enabled_commands_map_[OLECMDID_COPY] = true;
-  enabled_commands_map_[OLECMDID_PASTE] = true;
-  enabled_commands_map_[OLECMDID_SELECTALL] = true;
-  enabled_commands_map_[OLECMDID_SAVEAS] = true;
+  OLECMDF flags = static_cast<OLECMDF>(OLECMDF_ENABLED | OLECMDF_SUPPORTED);
+
+  null_group_commands_map_[OLECMDID_PRINT] = flags;
+  null_group_commands_map_[OLECMDID_FIND] = flags;
+  null_group_commands_map_[OLECMDID_CUT] = flags;
+  null_group_commands_map_[OLECMDID_COPY] = flags;
+  null_group_commands_map_[OLECMDID_PASTE] = flags;
+  null_group_commands_map_[OLECMDID_SELECTALL] = flags;
+  null_group_commands_map_[OLECMDID_SAVEAS] = flags;
+
+  mshtml_group_commands_map_[IDM_BASELINEFONT1] = flags;
+  mshtml_group_commands_map_[IDM_BASELINEFONT2] = flags;
+  mshtml_group_commands_map_[IDM_BASELINEFONT3] = flags;
+  mshtml_group_commands_map_[IDM_BASELINEFONT4] = flags;
+  mshtml_group_commands_map_[IDM_BASELINEFONT5] = flags;
 
   HMODULE this_module = reinterpret_cast<HMODULE>(&__ImageBase);
   accelerator_table_ =
@@ -253,19 +259,14 @@ STDMETHODIMP ChromeActiveDocument::Load(BOOL fully_avalable,
                                   mgr ? mgr->url(): std::wstring());
   }
 
-  // The is_new_navigation variable indicates if this a navigation initiated
-  // by typing in a URL for e.g. in the IE address bar, or from Chrome by
-  // a window.open call from javascript, in which case the current IE tab
-  // will attach to an existing ExternalTabContainer instance.
-  bool is_new_navigation = true;
-  bool is_chrome_protocol = false;
-
-  if (!ParseUrl(url, &is_new_navigation, &is_chrome_protocol, &url)) {
+  ChromeFrameUrl cf_url;
+  if (!cf_url.Parse(url)) {
     DLOG(WARNING) << __FUNCTION__ << " Failed to parse url:" << url;
     return E_INVALIDARG;
   }
 
-  std::string referrer = mgr ? mgr->referrer() : EmptyString();
+  std::string referrer(mgr ? mgr->referrer() : EmptyString());
+
   // With CTransaction patch we have more robust way to grab the referrer for
   // each top-level-switch-to-CF request by peeking at our sniffing data
   // object that lives inside the bind context.
@@ -275,16 +276,27 @@ STDMETHODIMP ChromeActiveDocument::Load(BOOL fully_avalable,
       referrer = prot_data->referrer();
   }
 
-  if (!LaunchUrl(url, referrer, is_new_navigation)) {
-    NOTREACHED() << __FUNCTION__ << " Failed to launch url:" << url;
+  // For gcf: URLs allow only about and view-source schemes to pass through for
+  // further inspection.
+  bool is_safe_scheme = cf_url.gurl().SchemeIs(chrome::kAboutScheme) ||
+      cf_url.gurl().SchemeIs(chrome::kViewSourceScheme);
+  if (cf_url.is_chrome_protocol() && !is_safe_scheme &&
+      !GetConfigBool(false, kAllowUnsafeURLs)) {
+    DLOG(ERROR) << __FUNCTION__ << " gcf: not allowed:" << url;
     return E_INVALIDARG;
   }
 
-  if (!is_chrome_protocol)
-    url_fetcher_.SetInfoForUrl(url, moniker_name, bind_context);
+  if (!LaunchUrl(cf_url, referrer)) {
+    DLOG(ERROR) << __FUNCTION__ << " Failed to launch url:" << url;
+    return E_INVALIDARG;
+  }
+
+  if (!cf_url.is_chrome_protocol() && !cf_url.attach_to_external_tab())
+    url_fetcher_->SetInfoForUrl(url.c_str(), moniker_name, bind_context);
 
   THREAD_SAFE_UMA_HISTOGRAM_CUSTOM_COUNTS("ChromeFrame.FullTabLaunchType",
-                                          is_chrome_protocol, 0, 1, 2);
+                                          cf_url.is_chrome_protocol(),
+                                          0, 1, 2);
   return S_OK;
 }
 
@@ -315,17 +327,24 @@ STDMETHODIMP ChromeActiveDocument::QueryStatus(const GUID* cmd_group_guid,
                                                OLECMD commands[],
                                                OLECMDTEXT* command_text) {
   DLOG(INFO) << __FUNCTION__;
-  const GUID* supported_groups[] = {
-    &GUID_NULL,
-    &CGID_MSHTML,
-    &CGID_Explorer,
-  };
 
-  bool supported = (cmd_group_guid == NULL);
-  for (int i = 0; !supported && i < arraysize(supported_groups); ++i)
-    supported = (IsEqualGUID(*cmd_group_guid, *supported_groups[i]) != FALSE);
+  CommandStatusMap* command_map = NULL;
 
-  if (!supported) {
+  if (cmd_group_guid) {
+    if (IsEqualGUID(*cmd_group_guid, GUID_NULL)) {
+      command_map = &null_group_commands_map_;
+    } else if (IsEqualGUID(*cmd_group_guid, CGID_MSHTML)) {
+      command_map = &mshtml_group_commands_map_;
+    } else if (IsEqualGUID(*cmd_group_guid, CGID_Explorer)) {
+      command_map = &explorer_group_commands_map_;
+    } else if (IsEqualGUID(*cmd_group_guid, CGID_ShellDocView)) {
+      command_map = &shdoc_view_group_commands_map_;
+    }
+  } else {
+    command_map = &null_group_commands_map_;
+  }
+
+  if (!command_map) {
     DLOG(INFO) << "unsupported command group: "
         << GuidToString(*cmd_group_guid);
     return OLECMDERR_E_NOTSUPPORTED;
@@ -334,9 +353,10 @@ STDMETHODIMP ChromeActiveDocument::QueryStatus(const GUID* cmd_group_guid,
   for (ULONG command_index = 0; command_index < number_of_commands;
        command_index++) {
     DLOG(INFO) << "Command id = " << commands[command_index].cmdID;
-    if (enabled_commands_map_.find(commands[command_index].cmdID) !=
-        enabled_commands_map_.end())
-      commands[command_index].cmdf = OLECMDF_ENABLED;
+    CommandStatusMap::iterator index =
+        command_map->find(commands[command_index].cmdID);
+    if (index != command_map->end())
+      commands[command_index].cmdf = index->second;
   }
   return S_OK;
 }
@@ -351,7 +371,12 @@ STDMETHODIMP ChromeActiveDocument::Exec(const GUID* cmd_group_guid,
   if (automation_client_.get() && automation_client_->tab()) {
     return ProcessExecCommand(cmd_group_guid, command_id, cmd_exec_opt,
                               in_args, out_args);
+  } else if (command_id == OLECMDID_REFRESH && cmd_group_guid == NULL) {
+    // If the automation server has crashed and the user is refreshing the
+    // page, let OnRefreshPage attempt to recover.
+    OnRefreshPage(cmd_group_guid, command_id, cmd_exec_opt, in_args, out_args);
   }
+
   return OLECMDERR_E_NOTSUPPORTED;
 }
 
@@ -372,16 +397,14 @@ STDMETHODIMP ChromeActiveDocument::LoadHistory(IStream* stream,
   stream->Read(url_bstr.AllocateBytes(url_size), url_size, &bytes_read);
   std::wstring url(url_bstr);
 
-  bool is_new_navigation = true;
-  bool is_chrome_protocol = false;
-
-  if (!ParseUrl(url, &is_new_navigation, &is_chrome_protocol, &url)) {
+  ChromeFrameUrl cf_url;
+  if (!cf_url.Parse(url)) {
     DLOG(WARNING) << __FUNCTION__ << " Failed to parse url:" << url;
     return E_INVALIDARG;
   }
 
   const std::string& referrer = EmptyString();
-  if (!LaunchUrl(url, referrer, is_new_navigation)) {
+  if (!LaunchUrl(cf_url, referrer)) {
     NOTREACHED() << __FUNCTION__ << " Failed to launch url:" << url;
     return E_INVALIDARG;
   }
@@ -474,6 +497,18 @@ STDMETHODIMP ChromeActiveDocument::Next(BSTR* url, BSTR* policy,
   return S_OK;
 }
 
+HRESULT ChromeActiveDocument::GetInPlaceFrame(
+    IOleInPlaceFrame** in_place_frame) {
+  DCHECK(in_place_frame);
+  if (in_place_frame_) {
+    *in_place_frame = in_place_frame_.get();
+    (*in_place_frame)->AddRef();
+    return S_OK;
+  } else {
+    return S_FALSE;
+  }
+}
+
 HRESULT ChromeActiveDocument::IOleObject_SetClientSite(
     IOleClientSite* client_site) {
   if (client_site == NULL) {
@@ -492,7 +527,6 @@ HRESULT ChromeActiveDocument::IOleObject_SetClientSite(
       doc_host_handler->HideUI();
 
     doc_site_.Release();
-    in_place_frame_.Release();
   }
 
   if (client_site != m_spClientSite)
@@ -538,23 +572,7 @@ HRESULT ChromeActiveDocument::ActiveXDocActivate(LONG verb) {
           return AtlHresultFromLastError();
         }
       }
-
-      ScopedComPtr<IWebBrowser2> web_browser2;
-      DoQueryService(SID_SWebBrowserApp, m_spClientSite,
-                     web_browser2.Receive());
-      if (web_browser2) {
-        if (!dimensions_.IsEmpty()) {
-          web_browser2->put_Width(dimensions_.width());
-          web_browser2->put_Height(dimensions_.height());
-          web_browser2->put_Left(dimensions_.x());
-          web_browser2->put_Top(dimensions_.y());
-          web_browser2->put_MenuBar(VARIANT_FALSE);
-          web_browser2->put_ToolBar(VARIANT_FALSE);
-
-          dimensions_.set_height(0);
-          dimensions_.set_width(0);
-        }
-      }
+      SetWindowDimensions();
     }
     SetObjectRects(&position_rect, &clip_rect);
   }
@@ -711,11 +729,12 @@ void ChromeActiveDocument::UpdateNavigationState(
   // an external tab container within chrome and then connecting to it from IE.
   // We still want to update the address bar/history, etc, to ensure that
   // the special URL used by Chrome to indicate this is updated correctly.
+  ChromeFrameUrl cf_url;
+  bool is_attach_external_tab_url = cf_url.Parse(std::wstring(url_)) &&
+      cf_url.attach_to_external_tab();
   bool is_internal_navigation = ((new_navigation_info.navigation_index > 0) &&
       (new_navigation_info.navigation_index !=
-       navigation_info_.navigation_index)) ||
-       StartsWith(static_cast<BSTR>(url_), kChromeAttachExternalTabPrefix,
-                  false);
+       navigation_info_.navigation_index)) || is_attach_external_tab_url;
 
   if (new_navigation_info.url.is_valid())
     url_.Allocate(UTF8ToWide(new_navigation_info.url.spec()).c_str());
@@ -723,6 +742,15 @@ void ChromeActiveDocument::UpdateNavigationState(
   if (is_internal_navigation) {
     ScopedComPtr<IDocObjectService> doc_object_svc;
     ScopedComPtr<IWebBrowserEventsService> web_browser_events_svc;
+
+    buggy_bho::BuggyBhoTls bad_bho_tls;
+    if (GetConfigBool(true, kEnableBuggyBhoIntercept)) {
+      ScopedComPtr<IWebBrowser2> wb2;
+      DoQueryService(SID_SWebBrowserApp, m_spClientSite, wb2.Receive());
+      if (wb2) {
+        buggy_bho::BuggyBhoTls::PatchBuggyBHOs(wb2);
+      }
+    }
 
     DoQueryService(__uuidof(web_browser_events_svc), m_spClientSite,
                    web_browser_events_svc.Receive());
@@ -736,6 +764,10 @@ void ChromeActiveDocument::UpdateNavigationState(
     if (web_browser_events_svc) {
       VARIANT_BOOL should_cancel = VARIANT_FALSE;
       web_browser_events_svc->FireBeforeNavigate2Event(&should_cancel);
+    } else if (doc_object_svc) {
+      BOOL should_cancel = FALSE;
+      doc_object_svc->FireBeforeNavigate2(NULL, url_, 0, NULL, NULL, 0,
+                                          NULL, FALSE, &should_cancel);
     }
 
     // We need to tell IE that we support navigation so that IE will query us
@@ -764,12 +796,10 @@ void ChromeActiveDocument::UpdateNavigationState(
       // Now call the FireNavigateCompleteEvent which makes IE update the text
       // in the address-bar.
       doc_object_svc->FireNavigateComplete2(this, 0);
-      if (ShouldFireDocumentComplete())
-        doc_object_svc->FireDocumentComplete(this, 0);
+      doc_object_svc->FireDocumentComplete(this, 0);
     } else if (web_browser_events_svc) {
       web_browser_events_svc->FireNavigateComplete2Event();
-      if (ShouldFireDocumentComplete())
-        web_browser_events_svc->FireDocumentCompleteEvent();
+      web_browser_events_svc->FireDocumentCompleteEvent();
     }
   }
 
@@ -820,9 +850,39 @@ void ChromeActiveDocument::OnDetermineSecurityZone(const GUID* cmd_group_guid,
 }
 
 void ChromeActiveDocument::OnDisplayPrivacyInfo() {
-  privacy_info_ = url_fetcher_.privacy_info();
+  privacy_info_ = url_fetcher_->privacy_info();
   Reset();
   DoPrivacyDlg(m_hWnd, url_, this, TRUE);
+}
+
+void ChromeActiveDocument::OnGetZoomRange(const GUID* cmd_group_guid,
+                                          DWORD command_id,
+                                          DWORD cmd_exec_opt,
+                                          VARIANT* in_args,
+                                          VARIANT* out_args) {
+  if (out_args != NULL) {
+    out_args->vt = VT_I4;
+    out_args->lVal = 0;
+  }
+}
+
+void ChromeActiveDocument::OnSetZoomRange(const GUID* cmd_group_guid,
+                                          DWORD command_id,
+                                          DWORD cmd_exec_opt,
+                                          VARIANT* in_args,
+                                          VARIANT* out_args) {
+  const int kZoomIn = 125;
+  const int kZoomOut = 75;
+
+  if (in_args && V_VT(in_args) == VT_I4 && IsValid()) {
+    if (in_args->lVal == kZoomIn) {
+      automation_client_->SetZoomLevel(PageZoom::ZOOM_IN);
+    } else if (in_args->lVal == kZoomOut) {
+      automation_client_->SetZoomLevel(PageZoom::ZOOM_OUT);
+    } else {
+      DLOG(WARNING) << "Unsupported zoom level:" << in_args->lVal;
+    }
+  }
 }
 
 void ChromeActiveDocument::OnOpenURL(int tab_handle,
@@ -928,138 +988,50 @@ HRESULT ChromeActiveDocument::IEExec(const GUID* cmd_group_guid,
   return hr;
 }
 
-DWORD ChromeActiveDocument::MapUrlToZone(const wchar_t* url) {
-  DWORD zone = URLZONE_INVALID;
-  if (security_manager_.get() == NULL) {
-    HRESULT hr = CoCreateInstance(
-        CLSID_InternetSecurityManager,
-        NULL,
-        CLSCTX_ALL,
-        IID_IInternetSecurityManager,
-        reinterpret_cast<void**>(security_manager_.Receive()));
+bool ChromeActiveDocument::LaunchUrl(const ChromeFrameUrl& cf_url,
+                                     const std::string& referrer) {
+  DCHECK(!cf_url.gurl().is_empty());
 
-    if (FAILED(hr)) {
-      NOTREACHED() << __FUNCTION__
-                   << " Failed to create InternetSecurityManager. Error: 0x%x"
-                   << hr;
-      return zone;
-    }
-  }
-
-  security_manager_->MapUrlToZone(url, &zone, 0);
-  return zone;
-}
-
-bool ChromeActiveDocument::ParseUrl(const std::wstring& url,
-                                    bool* is_new_navigation,
-                                    bool* is_chrome_protocol,
-                                    std::wstring* parsed_url) {
-  if (!is_new_navigation || !is_chrome_protocol|| !parsed_url) {
-    NOTREACHED() << __FUNCTION__ << " Invalid arguments";
-    return false;
-  }
-
-  std::wstring initial_url = url;
-
-  *is_chrome_protocol = StartsWith(initial_url, kChromeProtocolPrefix,
-                                   false);
-
-  *is_new_navigation = true;
-
-  if (*is_chrome_protocol) {
-    initial_url.erase(0, lstrlen(kChromeProtocolPrefix));
-    *is_new_navigation =
-        !StartsWith(initial_url, kChromeAttachExternalTabPrefix, false);
-  }
-
-  if (!IsValidUrlScheme(initial_url, is_privileged_)) {
-    DLOG(WARNING) << __FUNCTION__ << " Disallowing navigation to url: "
-                  << url;
-    return false;
-  }
-
-  if (URLZONE_UNTRUSTED == MapUrlToZone(initial_url.c_str())) {
-    DLOG(WARNING) << __FUNCTION__
-                  << " Disallowing navigation to restricted url: "
-                  << initial_url;
-    return false;
-  }
-
-  if (*is_chrome_protocol) {
-    // Allow chrome protocol (gcf:) if -
-    // - explicitly enabled using registry
-    // - for gcf:attach_external_tab
-    // - for gcf:about and gcf:view-source
-    GURL crack_url(initial_url);
-    bool allow_gcf_protocol = !*is_new_navigation ||
-        GetConfigBool(false, kEnableGCFProtocol) ||
-        crack_url.SchemeIs(chrome::kAboutScheme) ||
-        crack_url.SchemeIs(chrome::kViewSourceScheme);
-    if (!allow_gcf_protocol)
-      return false;
-  }
-
-  *parsed_url = initial_url;
-  return true;
-}
-
-bool ChromeActiveDocument::LaunchUrl(const std::wstring& url,
-                                     const std::string& referrer,
-                                     bool is_new_navigation) {
-  DCHECK(automation_client_.get() != NULL);
-
-  url_.Allocate(url.c_str());
-
-  std::string utf8_url;
-
-  if (!is_new_navigation) {
-    int disposition = 0;
-    uint64 external_tab_cookie = 0;
-
-    if (!ParseAttachExternalTabUrl(url, &external_tab_cookie, &dimensions_,
-                                   &disposition)) {
-      NOTREACHED() << "Failed to parse attach tab url:" << url;
+  if (!automation_client_.get()) {
+    // http://code.google.com/p/chromium/issues/detail?id=52894
+    // Still not sure how this happens.
+    DLOG(ERROR) << "No automation client!";
+    if (!Initialize()) {
+      NOTREACHED() << "...and failed to start a new one >:(";
       return false;
     }
+  }
 
-    if (external_tab_cookie == 0) {
-      NOTREACHED() << "invalid url for attach tab: " << url;
-      return false;
-    }
-
-    is_new_navigation_ = false;
-    automation_client_->AttachExternalTab(external_tab_cookie);
-  } else {
-    is_new_navigation_ = true;
-    // Initiate navigation before launching chrome so that the url will be
-    // cached and sent with launch settings.
-    if (url_.Length()) {
-      WideToUTF8(url_, url_.Length(), &utf8_url);
-      if (!automation_client_->InitiateNavigation(utf8_url,
-                                                  referrer,
-                                                  is_privileged_)) {
-        DLOG(ERROR) << "Invalid URL: " << url;
-        Error(L"Invalid URL");
-        url_.Reset();
-        return false;
-      }
-
-      DLOG(INFO) << "Url is " << url_;
-    }
+  url_.Allocate(UTF8ToWide(cf_url.gurl().spec()).c_str());
+  if (cf_url.attach_to_external_tab()) {
+    dimensions_ = cf_url.dimensions();
+    automation_client_->AttachExternalTab(cf_url.cookie());
+    SetWindowDimensions();
+  } else if (!automation_client_->InitiateNavigation(cf_url.gurl().spec(),
+                                                     referrer,
+                                                     is_privileged_)) {
+    DLOG(ERROR) << "Invalid URL: " << url_;
+    Error(L"Invalid URL");
+    url_.Reset();
+    return false;
   }
 
   if (is_automation_client_reused_)
     return true;
 
-  automation_client_->SetUrlFetcher(&url_fetcher_);
-
-  return InitializeAutomation(GetHostProcessName(false), L"", IsIEInPrivate(),
-                              false, GURL(utf8_url), GURL(referrer));
+  automation_client_->SetUrlFetcher(url_fetcher_.get());
+  if (launch_params_) {
+    return automation_client_->Initialize(this, launch_params_);
+  } else {
+    return InitializeAutomation(GetHostProcessName(false), L"", IsIEInPrivate(),
+                                false, cf_url.gurl(), GURL(referrer));
+  }
 }
 
 
 HRESULT ChromeActiveDocument::OnRefreshPage(const GUID* cmd_group_guid,
     DWORD command_id, DWORD cmd_exec_opt, VARIANT* in_args, VARIANT* out_args) {
+  DLOG(INFO) << __FUNCTION__;
   popup_allowed_ = false;
   if (in_args->vt == VT_I4 &&
       in_args->lVal & OLECMDIDF_REFRESH_PAGEACTION_POPUPWINDOW) {
@@ -1068,16 +1040,29 @@ HRESULT ChromeActiveDocument::OnRefreshPage(const GUID* cmd_group_guid,
     // Ask the yellow security band to change the text and icon and to remain
     // visible.
     IEExec(&CGID_DocHostCommandHandler, OLECMDID_PAGEACTIONBLOCKED,
-      0x80000000 | OLECMDIDF_WINDOWSTATE_USERVISIBLE_VALID, NULL, NULL);
+        0x80000000 | OLECMDIDF_WINDOWSTATE_USERVISIBLE_VALID, NULL, NULL);
   }
 
   TabProxy* tab_proxy = GetTabProxy();
-  if (tab_proxy)
+  if (tab_proxy) {
     tab_proxy->ReloadAsync();
+  } else {
+    DLOG(ERROR) << "No automation proxy";
+    DCHECK(automation_client_.get() != NULL) << "how did it get freed?";
+    // The current url request manager (url_fetcher_) has been switched to
+    // a stopping state so we need to reset it and get a new one for the new
+    // automation server.
+    ResetUrlRequestManager();
+    url_fetcher_->set_frame_busting(false);
+    // And now launch the current URL again.  This starts a new server process.
+    DCHECK(navigation_info_.url.is_valid());
+    ChromeFrameUrl cf_url;
+    cf_url.Parse(UTF8ToWide(navigation_info_.url.spec()));
+    LaunchUrl(cf_url, navigation_info_.referrer.spec());
+  }
 
   return S_OK;
 }
-
 
 HRESULT ChromeActiveDocument::SetPageFontSize(const GUID* cmd_group_guid,
                                               DWORD command_id,
@@ -1264,62 +1249,40 @@ LRESULT ChromeActiveDocument::OnFirePrivacyChange(UINT message, WPARAM wparam,
   return 0;
 }
 
-namespace {
-struct ModuleAndVersion {
-  const char* module_name_;
-  const uint32 major_version_;
-  const uint32 minor_version_;
-};
-}  // end namespace
-
-// static
-bool ChromeActiveDocument::ShouldFireDocumentComplete() {
-  typedef enum ModuleCheckResult {
-    CHECK_NOT_DONE,
-    DOCUMENT_COMPLETE_OK,
-    DOCUMENT_COMPLETE_NOT_OK
-  };
-
-  static ModuleCheckResult results = CHECK_NOT_DONE;
-
-  if (results == CHECK_NOT_DONE) {
-    // These modules are missing some checks in their DocumentComplete
-    // implementation that causes a crash.
-    static const ModuleAndVersion buggy_modules[] = {
-      { "askbar.dll", 4, 1 },  // biggest troublemaker: 4.1.0.5.
-      { "gbieh.dll", 3, 8 },  // biggest troublemaker: 3.8.14.12
-      { "gbiehcef.dll", 3, 8 },  // biggest troublemaker: 3.8.11.23
-      { "gbiehUni.dll", 3, 8 },  // Another Banco DLL.
-    };
-
-    for (size_t i = 0; results == CHECK_NOT_DONE &&
-                       i < arraysize(buggy_modules); ++i) {
-      const ModuleAndVersion& module = buggy_modules[i];
-      HMODULE mod = ::GetModuleHandleA(module.module_name_);
-      if (mod) {
-        wchar_t path[MAX_PATH * 2] = {0};
-        ::GetModuleFileNameW(mod, path, arraysize(path));
-        scoped_ptr<FileVersionInfo> version_info(
-            FileVersionInfo::CreateFileVersionInfo(FilePath(path)));
-        DCHECK(version_info.get());
-        if (version_info.get()) {
-          uint32 major = 0, minor = 0;
-          if (!ParseVersion(version_info->file_version(), &major, &minor))
-            ParseVersion(version_info->product_version(), &major, &minor);
-          if (major < module.major_version_ ||
-              (major == module.major_version_ &&
-               minor <= module.minor_version_)) {
-            DLOG(WARNING) << "Buggy module found: " << module.module_name_;
-            results = DOCUMENT_COMPLETE_NOT_OK;
-          }
-        }
-      }
-    }
-
-    if (results == CHECK_NOT_DONE)
-      results = DOCUMENT_COMPLETE_OK;
-  }
-
-  return results == DOCUMENT_COMPLETE_OK;
+LRESULT ChromeActiveDocument::OnShowWindow(UINT message, WPARAM wparam,
+                                           LPARAM lparam,
+                                           BOOL& handled) {  // NO_LINT
+  if (wparam)
+    SetFocus();
+  return 0;
 }
 
+LRESULT ChromeActiveDocument::OnSetFocus(UINT message, WPARAM wparam,
+                                         LPARAM lparam,
+                                         BOOL& handled) {  // NO_LINT
+  if (!ignore_setfocus_)
+    GiveFocusToChrome(false);
+  return 0;
+}
+
+void ChromeActiveDocument::SetWindowDimensions() {
+  ScopedComPtr<IWebBrowser2> web_browser2;
+  DoQueryService(SID_SWebBrowserApp, m_spClientSite,
+                 web_browser2.Receive());
+  if (!web_browser2)
+    return;
+  DLOG(INFO) << "this:" << this;
+  DLOG(INFO) << "dimensions: width:" << dimensions_.width()
+             << "height:" << dimensions_.height();
+  if (!dimensions_.IsEmpty()) {
+    web_browser2->put_Width(dimensions_.width());
+    web_browser2->put_Height(dimensions_.height());
+    web_browser2->put_Left(dimensions_.x());
+    web_browser2->put_Top(dimensions_.y());
+    web_browser2->put_MenuBar(VARIANT_FALSE);
+    web_browser2->put_ToolBar(VARIANT_FALSE);
+
+    dimensions_.set_height(0);
+    dimensions_.set_width(0);
+  }
+}

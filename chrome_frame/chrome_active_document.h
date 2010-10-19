@@ -13,6 +13,7 @@
 #include <perhist.h>
 
 #include <map>
+#include <string>
 
 #include "base/scoped_ptr.h"
 #include "base/scoped_comptr_win.h"
@@ -236,6 +237,8 @@ BEGIN_MSG_MAP(ChromeActiveDocument)
   MESSAGE_HANDLER(WM_FIRE_PRIVACY_CHANGE_NOTIFICATION, OnFirePrivacyChange)
   COMMAND_ID_HANDLER(IDC_CHROMEFRAME_FORWARD, OnForward)
   COMMAND_ID_HANDLER(IDC_CHROMEFRAME_BACK, OnBack)
+  MESSAGE_HANDLER(WM_SHOWWINDOW, OnShowWindow)
+  MESSAGE_HANDLER(WM_SETFOCUS, OnSetFocus)
   CHAIN_MSG_MAP(BaseActiveX)
 END_MSG_MAP()
 
@@ -271,6 +274,8 @@ BEGIN_EXEC_COMMAND_MAP(ChromeActiveDocument)
 
   EXEC_COMMAND_HANDLER_NO_ARGS(&CGID_ShellDocView, DOCHOST_DISPLAY_PRIVACY,
                                OnDisplayPrivacyInfo)
+  EXEC_COMMAND_HANDLER(NULL, OLECMDID_OPTICAL_GETZOOMRANGE, OnGetZoomRange)
+  EXEC_COMMAND_HANDLER(NULL, OLECMDID_OPTICAL_ZOOM, OnSetZoomRange)
 END_EXEC_COMMAND_MAP()
 
   // IPCs from automation server.
@@ -340,7 +345,7 @@ END_EXEC_COMMAND_MAP()
   bool PreProcessContextMenu(HMENU menu);
   bool HandleContextMenuCommand(UINT cmd, const IPC::ContextMenuParams& params);
 
-  // ChromeFramePlugin overrides.
+ // ChromeFramePlugin overrides.
   virtual void OnAutomationServerReady();
 
   // IEnumPrivacyRecords
@@ -348,6 +353,9 @@ END_EXEC_COMMAND_MAP()
   STDMETHOD(GetSize)(ULONG* size);
   STDMETHOD(GetPrivacyImpacted)(BOOL* privacy_impacted);
   STDMETHOD(Next)(BSTR* url, BSTR* policy, LONG* reserved, DWORD* flags);
+
+  // Accessor for InPlaceMenu.  Returns S_OK if set, S_FALSE if NULL.
+  HRESULT GetInPlaceFrame(IOleInPlaceFrame** in_place_frame);
 
  protected:
   // ChromeFrameActivexBase overrides
@@ -376,24 +384,19 @@ END_EXEC_COMMAND_MAP()
                                VARIANT* out_args);
   void OnDisplayPrivacyInfo();
 
+  void OnGetZoomRange(const GUID* cmd_group_guid, DWORD command_id,
+                      DWORD cmd_exec_opt, VARIANT* in_args, VARIANT* out_args);
+
+  void OnSetZoomRange(const GUID* cmd_group_guid, DWORD command_id,
+                      DWORD cmd_exec_opt, VARIANT* in_args, VARIANT* out_args);
+
   // Call exec on our site's command target
   HRESULT IEExec(const GUID* cmd_group_guid, DWORD command_id,
                  DWORD cmd_exec_opt, VARIANT* in_args, VARIANT* out_args);
 
-  DWORD MapUrlToZone(const wchar_t* url);
-
-  // Parses the URL and returns information whether it is a new navigation and
-  // the actual url after stripping out the cf: prefix if any.
-  // This function also checks if the url scheme is valid for navigation within
-  // chrome and whether it is a restricted URL as per IE settings. In either of
-  // these cases it returns false.
-  bool ParseUrl(const std::wstring& url, bool* is_new_navigation,
-                bool* is_chrome_protocol, std::wstring* parsed_url);
-
   // Initiates navigation to the URL passed in.
   // Returns true on success.
-  bool LaunchUrl(const std::wstring& url, const std::string& referrer,
-                 bool is_new_navigation);
+  bool LaunchUrl(const ChromeFrameUrl& cf_url, const std::string& referrer);
 
   // Handler to set the page font size in Chrome.
   HRESULT SetPageFontSize(const GUID* cmd_group_guid,
@@ -421,13 +424,17 @@ END_EXEC_COMMAND_MAP()
 
   LRESULT OnFirePrivacyChange(UINT message, WPARAM wparam, LPARAM lparam,
                               BOOL& handled);
+  LRESULT OnShowWindow(UINT message, WPARAM wparam, LPARAM lparam,
+                       BOOL& handled);
+  LRESULT OnSetFocus(UINT message, WPARAM wparam, LPARAM lparam,
+                     BOOL& handled);
 
-  // Checks for the presence of known-to-be-buggy BHOs.  If we find any
-  // we do not fire the DocumentComplete event to avoid a crash.
-  static bool ShouldFireDocumentComplete();
+  // Sets the dimensions on the IE window. These dimensions are parsed out from
+  // the information passed in from Chrome during window.open.
+  void SetWindowDimensions();
 
  protected:
-  typedef std::map<int, bool> EnabledCommandsMap;
+  typedef std::map<int, OLECMDF> CommandStatusMap;
 
   IPC::NavigationInfo navigation_info_;
   bool is_doc_object_;
@@ -440,15 +447,17 @@ END_EXEC_COMMAND_MAP()
   // Our find dialog
   CFFindDialog find_dialog_;
 
-  // Contains the list of enabled commands ids.
-  EnabledCommandsMap enabled_commands_map_;
+  // These members contain the status of the commands we support.
+  CommandStatusMap null_group_commands_map_;
+  CommandStatusMap mshtml_group_commands_map_;
+  CommandStatusMap explorer_group_commands_map_;
+  CommandStatusMap shdoc_view_group_commands_map_;
 
   // Set to true if the automation_client_ member is initialized from
   // an existing ChromeActiveDocument instance which is going away and
   // a new ChromeActiveDocument instance is taking its place.
   bool is_automation_client_reused_;
 
-  ScopedComPtr<IInternetSecurityManager> security_manager_;
   ScopedComPtr<INewWindowManager> popup_manager_;
   bool popup_allowed_;
   HACCEL accelerator_table_;
@@ -462,10 +471,7 @@ END_EXEC_COMMAND_MAP()
 
   // Dimensions of the window. Used only when opening popups.
   gfx::Rect dimensions_;
-  // Set to true if the document was loaded by a window.open in chrome.
-  bool is_new_navigation_;
  public:
-  ScopedComPtr<IOleInPlaceFrame> in_place_frame_;
   OLEINPLACEFRAMEINFO frame_info_;
 };
 

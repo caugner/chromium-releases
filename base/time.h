@@ -21,6 +21,7 @@
 
 #ifndef BASE_TIME_H_
 #define BASE_TIME_H_
+#pragma once
 
 #include <time.h>
 
@@ -213,6 +214,11 @@ class Time {
     int second;        // Second within the current minute (0-59 plus leap
                        //   seconds which may take it up to 60).
     int millisecond;   // Milliseconds within the current second (0-999)
+
+    // A cursory test for whether the data members are within their
+    // respective ranges. A 'true' return value does not guarantee the
+    // Exploded value can be successfully converted to a Time value.
+    bool HasValidValues() const;
   };
 
   // Contains the NULL time. Use Time::Now() to get the current time.
@@ -253,6 +259,7 @@ class Time {
 #if defined(OS_WIN)
   static Time FromFileTime(FILETIME ft);
   FILETIME ToFileTime() const;
+  static Time FromLargeInteger(LARGE_INTEGER li);
 
   // The minimum time of a low resolution timer.  This is basically a windows
   // constant of ~15.6ms.  While it does vary on some older OS versions, we'll
@@ -452,6 +459,11 @@ class TimeTicks {
   // resolution.  THIS CALL IS GENERALLY MUCH MORE EXPENSIVE THAN Now() AND
   // SHOULD ONLY BE USED WHEN IT IS REALLY NEEDED.
   static TimeTicks HighResNow();
+
+#if defined(OS_WIN)
+  // Get the absolute value of QPC time drift. For testing.
+  static int64 GetQPCDriftMicroseconds();
+#endif
 
   // Returns true if this object has not been initialized.
   bool is_null() const {

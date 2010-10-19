@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_TAB_CONTENTS_TAB_CONTENTS_VIEW_H_
 #define CHROME_BROWSER_TAB_CONTENTS_TAB_CONTENTS_VIEW_H_
+#pragma once
 
 #include <map>
 #include <string>
@@ -15,7 +16,6 @@
 #include "gfx/rect.h"
 #include "gfx/size.h"
 
-class Browser;
 class RenderViewHost;
 class RenderWidgetHost;
 class RenderWidgetHostView;
@@ -127,7 +127,8 @@ class TabContentsView : public RenderViewHostDelegate::View {
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
 
   // Simple mouse event forwarding from the RenderViewHost.
-  virtual void HandleMouseEvent() {}
+  virtual void HandleMouseMove() {}
+  virtual void HandleMouseDown() {}
   virtual void HandleMouseLeave() {}
 
   // Notification that the preferred size of the contents has changed.
@@ -168,6 +169,11 @@ class TabContentsView : public RenderViewHostDelegate::View {
       WebKit::WebPopupType popup_type);
   virtual void ShowCreatedWidgetInternal(RenderWidgetHostView* widget_host_view,
                                          const gfx::Rect& initial_pos);
+  virtual void ShowCreatedFullscreenWidgetInternal(
+      RenderWidgetHostView* widget_host_view);
+  virtual RenderWidgetHostView* CreateNewFullscreenWidgetInternal(
+      int route_id,
+      WebKit::WebPopupType popup_type);
 
   // Common implementations of some RenderViewHostDelegate::View methods.
   RenderViewHostDelegateViewHelper delegate_view_helper_;
@@ -181,11 +187,16 @@ class TabContentsView : public RenderViewHostDelegate::View {
       WindowContainerType window_container_type,
       const string16& frame_name);
   virtual void CreateNewWidget(int route_id, WebKit::WebPopupType popup_type);
+  virtual void CreateNewFullscreenWidget(
+      int route_id, WebKit::WebPopupType popup_type);
   virtual void ShowCreatedWindow(int route_id,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_pos,
                                  bool user_gesture);
   virtual void ShowCreatedWidget(int route_id, const gfx::Rect& initial_pos);
+  virtual void Activate();
+  virtual void Deactivate();
+  virtual void ShowCreatedFullscreenWidget(int route_id);
 
   // The TabContents whose contents we display.
   TabContents* tab_contents_;

@@ -67,6 +67,7 @@ void AudioRendererBase::Seek(base::TimeDelta time, FilterCallback* callback) {
   DCHECK_EQ(0u, pending_reads_) << "Pending reads should have completed";
   state_ = kSeeking;
   seek_callback_.reset(callback);
+  seek_timestamp_ = time;
 
   // Throw away everything and schedule our reads.
   last_fill_buffer_time_ = base::TimeDelta();
@@ -85,8 +86,8 @@ void AudioRendererBase::Initialize(AudioDecoder* decoder,
   scoped_ptr<FilterCallback> c(callback);
   decoder_ = decoder;
 
-  decoder_->set_fill_buffer_done_callback(
-      NewCallback(this, &AudioRendererBase::OnFillBufferDone));
+  decoder_->set_consume_audio_samples_callback(
+      NewCallback(this, &AudioRendererBase::ConsumeAudioSamples));
   // Get the media properties to initialize our algorithms.
   int channels = 0;
   int sample_rate = 0;
@@ -134,7 +135,7 @@ bool AudioRendererBase::HasEnded() {
   return recieved_end_of_stream_ && rendered_end_of_stream_;
 }
 
-void AudioRendererBase::OnFillBufferDone(scoped_refptr<Buffer> buffer_in) {
+void AudioRendererBase::ConsumeAudioSamples(scoped_refptr<Buffer> buffer_in) {
   AutoLock auto_lock(lock_);
   DCHECK(state_ == kPaused || state_ == kSeeking || state_ == kPlaying);
   DCHECK_GT(pending_reads_, 0u);
@@ -147,9 +148,14 @@ void AudioRendererBase::OnFillBufferDone(scoped_refptr<Buffer> buffer_in) {
     return;
   }
 
-  // Don't enqueue an end-of-stream buffer because it has no data.
+  // Don't enqueue an end-of-stream buffer because it has no data, otherwise
+  // discard decoded audio data until we reach our desired seek timestamp.
   if (buffer_in->IsEndOfStream()) {
     recieved_end_of_stream_ = true;
+  } else if (state_ == kSeeking && !buffer_in->IsEndOfStream() &&
+             (buffer_in->GetTimestamp() + buffer_in->GetDuration()) <
+                 seek_timestamp_) {
+    ScheduleRead_Locked();
   } else {
     // Note: Calling this may schedule more reads.
     algorithm_->EnqueueBuffer(buffer_in);
@@ -241,7 +247,7 @@ void AudioRendererBase::ScheduleRead_Locked() {
   // provide buffer pools. In the future, we may want to implement real
   // buffer pool to recycle buffers.
   scoped_refptr<Buffer> buffer;
-  decoder_->FillThisBuffer(buffer);
+  decoder_->ProduceAudioSamples(buffer);
 }
 
 // static

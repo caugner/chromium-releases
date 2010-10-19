@@ -3,20 +3,23 @@
 // found in the LICENSE file.
 
 #include "media/audio/audio_input_controller.h"
+#include "media/base/limits.h"
 
 namespace {
 
-const int kMaxSampleRate = 192000;
-const int kMaxBitsPerSample = 64;
 const int kMaxInputChannels = 2;
-const int kMaxSamplesPerPacket = kMaxSampleRate;
+const int kMaxSamplesPerPacket = media::Limits::kMaxSampleRate;
 
 }  // namespace
 
 namespace media {
 
+// static
+AudioInputController::Factory* AudioInputController::factory_ = NULL;
+
 AudioInputController::AudioInputController(EventHandler* handler)
     : handler_(handler),
+      stream_(NULL),
       state_(kEmpty),
       thread_("AudioInputControllerThread") {
 }
@@ -28,16 +31,16 @@ AudioInputController::~AudioInputController() {
 // static
 scoped_refptr<AudioInputController> AudioInputController::Create(
     EventHandler* event_handler,
-    AudioManager::Format format,
-    int channels,
-    int sample_rate,
-    int bits_per_sample,
+    AudioParameters params,
     int samples_per_packet) {
-  if ((channels > kMaxInputChannels) || (channels <= 0) ||
-      (sample_rate > kMaxSampleRate) || (sample_rate <= 0) ||
-      (bits_per_sample > kMaxBitsPerSample) || (bits_per_sample <= 0) ||
+  if (!params.IsValid() ||
+      (params.channels > kMaxInputChannels) ||
       (samples_per_packet > kMaxSamplesPerPacket) || (samples_per_packet < 0))
     return NULL;
+
+  if (factory_) {
+    return factory_->Create(event_handler, params, samples_per_packet);
+  }
 
   scoped_refptr<AudioInputController> controller = new AudioInputController(
       event_handler);
@@ -47,8 +50,7 @@ scoped_refptr<AudioInputController> AudioInputController::Create(
   controller->thread_.message_loop()->PostTask(
       FROM_HERE,
       NewRunnableMethod(controller.get(), &AudioInputController::DoCreate,
-                        format, channels, sample_rate, bits_per_sample,
-                        samples_per_packet));
+                        params, samples_per_packet));
   return controller;
 }
 
@@ -73,11 +75,10 @@ void AudioInputController::Close() {
   thread_.Stop();
 }
 
-void AudioInputController::DoCreate(AudioManager::Format format, int channels,
-                                    int sample_rate, int bits_per_sample,
+void AudioInputController::DoCreate(AudioParameters params,
                                     uint32 samples_per_packet) {
   stream_ = AudioManager::GetAudioManager()->MakeAudioInputStream(
-      format, channels, sample_rate, bits_per_sample, samples_per_packet);
+      params, samples_per_packet);
 
   if (!stream_) {
     // TODO(satish): Define error types.
@@ -145,6 +146,9 @@ void AudioInputController::OnData(AudioInputStream* stream, const uint8* data,
 }
 
 void AudioInputController::OnClose(AudioInputStream* stream) {
+  // TODO(satish): Sometimes the device driver closes the input stream without
+  // us asking for it (may be if the device was unplugged?). Check how to handle
+  // such cases here.
 }
 
 void AudioInputController::OnError(AudioInputStream* stream, int code) {

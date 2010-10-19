@@ -4,6 +4,7 @@
 
 #ifndef APP_X11_UTIL_H_
 #define APP_X11_UTIL_H_
+#pragma once
 
 // This file declares utility functions for X11 (Linux only).
 //
@@ -14,8 +15,7 @@
 #include <string>
 #include <vector>
 
-#include "base/task.h"
-#include "gfx/rect.h"
+#include "base/basictypes.h"
 
 typedef struct _GdkDrawable GdkWindow;
 typedef struct _GtkWidget GtkWidget;
@@ -24,12 +24,8 @@ typedef unsigned long XID;
 typedef unsigned long XSharedMemoryId;  // ShmSeg in the X headers.
 typedef struct _XDisplay Display;
 
-namespace base {
-class Thread;
-}
-
 namespace gfx {
-class Size;
+class Rect;
 }
 
 namespace x11_util {

@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_EDIT_VIEW_GTK_H_
 #define CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_EDIT_VIEW_GTK_H_
+#pragma once
 
 #include <gtk/gtk.h>
 
@@ -15,10 +16,10 @@
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
+#include "chrome/browser/gtk/owned_widget_gtk.h"
 #include "chrome/browser/toolbar_model.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
-#include "chrome/common/owned_widget_gtk.h"
 #include "chrome/common/page_transition_types.h"
 #include "gfx/rect.h"
 #include "webkit/glue/window_open_disposition.h"

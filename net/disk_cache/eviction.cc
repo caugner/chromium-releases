@@ -28,6 +28,7 @@
 
 #include "net/disk_cache/eviction.h"
 
+#include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -58,6 +59,15 @@ int LowWaterAdjust(int high_water) {
 
 namespace disk_cache {
 
+Eviction::Eviction()
+    : backend_(NULL),
+      init_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)) {
+}
+
+Eviction::~Eviction() {
+}
+
 void Eviction::Init(BackendImpl* backend) {
   // We grab a bunch of info from the backend to make the code a little cleaner
   // when we're actually doing work.
@@ -83,6 +93,7 @@ void Eviction::Stop() {
   // this point on.
   DCHECK(!trimming_);
   trimming_ = true;
+  factory_.RevokeAll();
 }
 
 void Eviction::TrimCache(bool empty) {

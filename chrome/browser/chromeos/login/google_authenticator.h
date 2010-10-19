@@ -4,15 +4,14 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_GOOGLE_AUTHENTICATOR_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_GOOGLE_AUTHENTICATOR_H_
+#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/ref_counted.h"
-#include "base/sha2.h"
+#include "base/scoped_ptr.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
@@ -20,8 +19,11 @@
 
 // Authenticates a Chromium OS user against the Google Accounts ClientLogin API.
 
+class Lock;
 class Profile;
 class GaiaAuthenticator2;
+class GoogleServiceAuthError;
+class LoginFailure;
 
 namespace chromeos {
 
@@ -29,7 +31,6 @@ class GoogleAuthenticatorTest;
 class LoginStatusConsumer;
 
 class GoogleAuthenticator : public Authenticator, public GaiaAuthConsumer {
-
  public:
   explicit GoogleAuthenticator(LoginStatusConsumer* consumer);
   virtual ~GoogleAuthenticator();
@@ -64,21 +65,18 @@ class GoogleAuthenticator : public Authenticator, public GaiaAuthConsumer {
   void set_system_salt(const chromeos::CryptohomeBlob& new_salt) {
     system_salt_ = new_salt;
   }
-  void set_localaccount(const std::string& new_name) {
-    localaccount_ = new_name;
-    checked_for_localaccount_ = true;
-  }
   void set_username(const std::string& fake_user) { username_ = fake_user; }
   void set_password_hash(const std::string& fake_hash) {
     ascii_hash_ = fake_hash;
   }
+  void SetLocalaccount(const std::string& new_name);
 
   // These methods must be called on the UI thread, as they make DBus calls
   // and also call back to the login UI.
   void OnLoginSuccess(const GaiaAuthConsumer::ClientLoginResult& credentials);
-  void CheckOffline(const std::string& error);
-  void CheckLocalaccount(const std::string& error);
-  void OnLoginFailure(const std::string& error);
+  void CheckOffline(const LoginFailure& error);
+  void CheckLocalaccount(const LoginFailure& error);
+  void OnLoginFailure(const LoginFailure& error);
 
   // Call these methods on the UI thread.
   void RecoverEncryptedData(
@@ -86,8 +84,6 @@ class GoogleAuthenticator : public Authenticator, public GaiaAuthConsumer {
       const GaiaAuthConsumer::ClientLoginResult& credentials);
   void ResyncEncryptedData(
       const GaiaAuthConsumer::ClientLoginResult& credentials);
-
-  void Cancel();
 
   // Perform basic canonicalization of |email_address|, taking into account
   // that gmail does not consider '.' or caps inside a username to matter.
@@ -97,7 +93,7 @@ class GoogleAuthenticator : public Authenticator, public GaiaAuthConsumer {
 
   // Callbacks from GaiaAuthenticator2
   virtual void OnClientLoginFailure(
-      const GaiaAuthConsumer::GaiaAuthError& error);
+      const GoogleServiceAuthError& error);
   virtual void OnClientLoginSuccess(
       const GaiaAuthConsumer::ClientLoginResult& credentials);
 
@@ -163,6 +159,9 @@ class GoogleAuthenticator : public Authenticator, public GaiaAuthConsumer {
   // Milliseconds until we timeout our attempt to hit ClientLogin.
   static const int kClientLoginTimeoutMs;
 
+  // Milliseconds until we re-check whether we've gotten the localaccount name.
+  static const int kLocalaccountRetryIntervalMs;
+
   std::string username_;
   // These fields are saved so we can retry client login.
   std::string password_;
@@ -171,10 +170,12 @@ class GoogleAuthenticator : public Authenticator, public GaiaAuthConsumer {
 
   std::string ascii_hash_;
   chromeos::CryptohomeBlob system_salt_;
-  std::string localaccount_;
-  bool checked_for_localaccount_;  // needed because empty localaccount_ is ok.
   bool unlock_;  // True if authenticating to unlock the computer.
   bool try_again_;  // True if we're willing to retry the login attempt.
+
+  std::string localaccount_;
+  bool checked_for_localaccount_;  // needed because empty localaccount_ is ok.
+  Lock localaccount_lock_;  // a lock around checked_for_localaccount_.
 
   friend class GoogleAuthenticatorTest;
   FRIEND_TEST_ALL_PREFIXES(GoogleAuthenticatorTest, SaltToAscii);
@@ -197,6 +198,7 @@ class GoogleAuthenticator : public Authenticator, public GaiaAuthConsumer {
   FRIEND_TEST_ALL_PREFIXES(GoogleAuthenticatorTest,
                            EmailAddressIgnoreMultiPlusSuffix);
   FRIEND_TEST_ALL_PREFIXES(GoogleAuthenticatorTest, ReadSaltOnlyOnce);
+  FRIEND_TEST_ALL_PREFIXES(GoogleAuthenticatorTest, LocalaccountLogin);
   FRIEND_TEST_ALL_PREFIXES(GoogleAuthenticatorTest, ReadLocalaccount);
   FRIEND_TEST_ALL_PREFIXES(GoogleAuthenticatorTest, ReadLocalaccountTrailingWS);
   FRIEND_TEST_ALL_PREFIXES(GoogleAuthenticatorTest, ReadNoLocalaccount);

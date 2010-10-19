@@ -4,21 +4,19 @@
 
 #ifndef CHROME_RENDERER_RENDER_WIDGET_H_
 #define CHROME_RENDERER_RENDER_WIDGET_H_
+#pragma once
 
 #include <vector>
 
 #include "app/surface/transport_dib.h"
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
-#include "base/shared_memory.h"
 #include "chrome/renderer/paint_aggregator.h"
 #include "chrome/renderer/render_process.h"
 #include "gfx/native_widget_types.h"
-#include "gfx/point.h"
 #include "gfx/rect.h"
 #include "gfx/size.h"
 #include "ipc/ipc_channel.h"
-#include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
@@ -31,7 +29,21 @@
 class RenderThreadBase;
 struct ViewHostMsg_ShowPopup_Params;
 
+namespace gfx {
+class Point;
+}
+
+namespace IPC {
+class SyncMessage;
+}
+
+namespace skia {
+class PlatformCanvas;
+}
+
 namespace WebKit {
+class WebMouseEvent;
+class WebWidget;
 struct WebPopupMenuInfo;
 }
 
@@ -52,6 +64,9 @@ class RenderWidget : public IPC::Channel::Listener,
   static RenderWidget* Create(int32 opener_id,
                               RenderThreadBase* render_thread,
                               WebKit::WebPopupType popup_type);
+
+  // Creates a WebWidget based on the popup type.
+  static WebKit::WebWidget* CreateWebWidget(RenderWidget* render_widget);
 
   // Called after Create to configure a RenderWidget to be rendered by the host
   // as a popup menu with the given data.
@@ -121,6 +136,11 @@ class RenderWidget : public IPC::Channel::Listener,
   // Initializes this view with the given opener.  CompleteInit must be called
   // later.
   void Init(int32 opener_id);
+
+  // Called by Init and subclasses to perform initialization.
+  void DoInit(int32 opener_id,
+              WebKit::WebWidget* web_widget,
+              IPC::SyncMessage* create_widget_message);
 
   // Finishes creation of a pending view started with Init.
   void CompleteInit(gfx::NativeViewId parent);
@@ -205,6 +225,8 @@ class RenderWidget : public IPC::Channel::Listener,
   // the focus on our own when the browser did not focus us.
   void ClearFocus();
 
+  bool has_focus() const { return has_focus_; }
+
   // Set the pending window rect.
   // Because the real render_widget is hosted in another process, there is
   // a time period where we may have set a new window rect which has not yet
@@ -216,6 +238,10 @@ class RenderWidget : public IPC::Channel::Listener,
   // Called by OnHandleInputEvent() to notify subclasses that a key event was
   // just handled.
   virtual void DidHandleKeyEvent() {}
+
+  // Called by OnHandleInputEvent() to notify subclasses that a mouse event was
+  // just handled.
+  virtual void DidHandleMouseEvent(const WebKit::WebMouseEvent& event) {}
 
   // Routing ID that allows us to communicate to the parent browser process
   // RenderWidgetHost. When MSG_ROUTING_NONE, no messages may be sent.

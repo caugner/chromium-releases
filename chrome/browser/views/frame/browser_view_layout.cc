@@ -6,10 +6,10 @@
 
 #include "chrome/browser/find_bar.h"
 #include "chrome/browser/find_bar_controller.h"
+#include "chrome/browser/sidebar/sidebar_manager.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/bookmark_bar_view.h"
 #include "chrome/browser/views/download_shelf_view.h"
-#include "chrome/browser/views/extensions/extension_shelf.h"
 #include "chrome/browser/views/frame/browser_frame.h"
 #include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/browser/views/tabs/side_tab_strip.h"
@@ -32,8 +32,6 @@ const int kToolbarTabStripVerticalOverlap = 3;
 // An offset distance between certain toolbars and the toolbar that preceded
 // them in layout.
 const int kSeparationLineHeight = 1;
-// Spacing between extension app icon and title.
-const int kExtensionAppIconTitleSpacing = 4;
 
 }  // namespace
 
@@ -41,15 +39,12 @@ const int kExtensionAppIconTitleSpacing = 4;
 // BrowserViewLayout, public:
 
 BrowserViewLayout::BrowserViewLayout()
-    : extension_app_icon_(NULL),
-      extension_app_title_(NULL),
-      tabstrip_(NULL),
+    : tabstrip_(NULL),
       toolbar_(NULL),
       contents_split_(NULL),
       contents_container_(NULL),
       infobar_container_(NULL),
       download_shelf_(NULL),
-      extension_shelf_(NULL),
       active_bookmark_bar_(NULL),
       browser_view_(NULL),
       find_bar_y_(0) {
@@ -71,10 +66,8 @@ gfx::Size BrowserViewLayout::GetMinimumSize() {
   if (active_bookmark_bar_ &&
       browser()->SupportsWindowFeature(Browser::FEATURE_BOOKMARKBAR)) {
     bookmark_bar_size = active_bookmark_bar_->GetMinimumSize();
-    bookmark_bar_size.Enlarge(
-        0,
-        -kSeparationLineHeight -
-        active_bookmark_bar_->GetToolbarOverlap(true));
+    bookmark_bar_size.Enlarge(0, -(kSeparationLineHeight +
+        active_bookmark_bar_->GetToolbarOverlap(true)));
   }
   gfx::Size contents_size(contents_split_->GetMinimumSize());
 
@@ -203,11 +196,8 @@ void BrowserViewLayout::Installed(views::View* host) {
   contents_container_ = NULL;
   infobar_container_ = NULL;
   download_shelf_ = NULL;
-  extension_shelf_ = NULL;
   active_bookmark_bar_ = NULL;
   tabstrip_ = NULL;
-  extension_app_icon_ = NULL;
-  extension_app_title_ = NULL;
   browser_view_ = static_cast<BrowserView*>(host);
 }
 
@@ -215,18 +205,21 @@ void BrowserViewLayout::Uninstalled(views::View* host) {}
 
 void BrowserViewLayout::ViewAdded(views::View* host, views::View* view) {
   switch (view->GetID()) {
-    case VIEW_ID_CONTENTS_SPLIT:
-      contents_split_ = view;
-      contents_container_ = contents_split_->GetChildViewAt(0);
+    case VIEW_ID_CONTENTS_SPLIT: {
+        contents_split_ = view;
+        if (SidebarManager::IsSidebarAllowed()) {
+          views::View* sidebar_split = contents_split_->GetChildViewAt(0);
+          contents_container_ = sidebar_split->GetChildViewAt(0);
+        } else {
+          contents_container_ = contents_split_->GetChildViewAt(0);
+        }
+      }
       break;
     case VIEW_ID_INFO_BAR_CONTAINER:
       infobar_container_ = view;
       break;
     case VIEW_ID_DOWNLOAD_SHELF:
       download_shelf_ = static_cast<DownloadShelfView*>(view);
-      break;
-    case VIEW_ID_DEV_EXTENSION_SHELF:
-      extension_shelf_ = static_cast<ExtensionShelf*>(view);
       break;
     case VIEW_ID_BOOKMARK_BAR:
       active_bookmark_bar_ = static_cast<BookmarkBarView*>(view);
@@ -236,12 +229,6 @@ void BrowserViewLayout::ViewAdded(views::View* host, views::View* view) {
       break;
     case VIEW_ID_TAB_STRIP:
       tabstrip_ = static_cast<BaseTabStrip*>(view);
-      break;
-    case VIEW_ID_EXTENSION_APP_ICON:
-      extension_app_icon_ = static_cast<views::ImageView*>(view);
-      break;
-    case VIEW_ID_EXTENSION_APP_TITLE:
-      extension_app_title_ = static_cast<views::Label*>(view);
       break;
   }
 }
@@ -256,11 +243,15 @@ void BrowserViewLayout::ViewRemoved(views::View* host, views::View* view) {
 
 void BrowserViewLayout::Layout(views::View* host) {
   vertical_layout_rect_ = browser_view_->GetLocalBounds(true);
-  LayoutExtensionAppIconAndTitle();
   int top = LayoutTabStrip();
+  if (browser_view_->IsTabStripVisible() && !browser_view_->UseVerticalTabs()) {
+    tabstrip_->SetBackgroundOffset(gfx::Point(
+        tabstrip_->MirroredX() + browser_view_->MirroredX(),
+        browser_view_->frame()->GetHorizontalTabStripVerticalOffset(false)));
+  }
   top = LayoutToolbar(top);
   top = LayoutBookmarkAndInfoBars(top);
-  int bottom = LayoutExtensionAndDownloadShelves();
+  int bottom = LayoutDownloadShelf(browser_view_->height());
   LayoutTabContents(top, bottom);
   // This must be done _after_ we lay out the TabContents since this
   // code calls back into us to find the bounding box the find bar
@@ -285,53 +276,27 @@ gfx::Size BrowserViewLayout::GetPreferredSize(views::View* host) {
 //////////////////////////////////////////////////////////////////////////////
 // BrowserViewLayout, private:
 
-void BrowserViewLayout::LayoutExtensionAppIconAndTitle() {
-  if (browser_view_->browser()->type() != Browser::TYPE_EXTENSION_APP)
-    return;
-
-  extension_app_icon_->SetVisible(true);
-  extension_app_icon_->SetBounds(0, 0, Extension::EXTENSION_ICON_SMALL,
-                                 Extension::EXTENSION_ICON_SMALL);
-
-  extension_app_title_->SetVisible(true);
-
-  // Position the title vertically centered with the icon and slightly to its
-  // right.
-  extension_app_title_->SetX(
-      extension_app_icon_->x() + extension_app_icon_->width() +
-      kExtensionAppIconTitleSpacing);
-  extension_app_title_->SetY(
-      extension_app_icon_->y() +
-      ((extension_app_icon_->height() - extension_app_title_->height()) / 2));
-}
-
 int BrowserViewLayout::LayoutTabStrip() {
   if (!browser_view_->IsTabStripVisible()) {
     tabstrip_->SetVisible(false);
     tabstrip_->SetBounds(0, 0, 0, 0);
     return 0;
   }
-  gfx::Rect layout_bounds =
-      browser_view_->frame()->GetBoundsForTabStrip(tabstrip_);
 
-  if (browser_view_->UseVerticalTabs()) {
-    vertical_layout_rect_.Inset(
-        layout_bounds.width(), 0, 0, 0);
-  } else {
-    gfx::Rect toolbar_bounds = browser_view_->GetToolbarBounds();
-    tabstrip_->SetBackgroundOffset(
-        gfx::Point(layout_bounds.x() - toolbar_bounds.x(),
-                   layout_bounds.y()));
-  }
-
-  gfx::Point tabstrip_origin = layout_bounds.origin();
+  gfx::Rect tabstrip_bounds(
+      browser_view_->frame()->GetBoundsForTabStrip(tabstrip_));
+  gfx::Point tabstrip_origin(tabstrip_bounds.origin());
   views::View::ConvertPointToView(browser_view_->GetParent(), browser_view_,
                                   &tabstrip_origin);
-  layout_bounds.set_origin(tabstrip_origin);
+  tabstrip_bounds.set_origin(tabstrip_origin);
+
+  if (browser_view_->UseVerticalTabs())
+    vertical_layout_rect_.Inset(tabstrip_bounds.width(), 0, 0, 0);
+
   tabstrip_->SetVisible(true);
-  tabstrip_->SetBounds(layout_bounds);
+  tabstrip_->SetBounds(tabstrip_bounds);
   return browser_view_->UseVerticalTabs() ?
-      layout_bounds.y() : layout_bounds.bottom();
+      tabstrip_bounds.y() : tabstrip_bounds.bottom();
 }
 
 int BrowserViewLayout::LayoutToolbar(int top) {
@@ -343,15 +308,8 @@ int BrowserViewLayout::LayoutToolbar(int top) {
     y -= ((visible && browser_view_->IsTabStripVisible()) ?
           kToolbarTabStripVerticalOverlap : 0);
   }
-
-  int height = 0;
-  if (visible) {
-    height = toolbar_->GetPreferredSize().height();
-    toolbar_->SetVisible(true);
-  } else {
-    toolbar_->SetVisible(false);
-  }
-
+  int height = visible ? toolbar_->GetPreferredSize().height() : 0;
+  toolbar_->SetVisible(visible);
   toolbar_->SetBounds(vertical_layout_rect_.x(), y, browser_view_width, height);
   return y + height;
 }
@@ -365,7 +323,7 @@ int BrowserViewLayout::LayoutBookmarkAndInfoBars(int top) {
     if (active_bookmark_bar_->IsDetached())
       return LayoutBookmarkBar(LayoutInfoBar(top));
     // Otherwise, Bookmark bar first, Info bar second.
-    top = LayoutBookmarkBar(top);
+    top = std::max(toolbar_->bounds().bottom(), LayoutBookmarkBar(top));
   }
   find_bar_y_ = top + browser_view_->y() - 1;
   return LayoutInfoBar(top);
@@ -380,11 +338,9 @@ int BrowserViewLayout::LayoutBookmarkBar(int top) {
     return y;
   }
 
+  active_bookmark_bar_->set_infobar_visible(InfobarVisible());
   int bookmark_bar_height = active_bookmark_bar_->GetPreferredSize().height();
-  y -= kSeparationLineHeight + (
-      active_bookmark_bar_->IsDetached() ?
-      0 : active_bookmark_bar_->GetToolbarOverlap(false));
-
+  y -= kSeparationLineHeight + active_bookmark_bar_->GetToolbarOverlap(false);
   active_bookmark_bar_->SetVisible(true);
   active_bookmark_bar_->SetBounds(vertical_layout_rect_.x(), y,
                                   vertical_layout_rect_.width(),
@@ -393,7 +349,7 @@ int BrowserViewLayout::LayoutBookmarkBar(int top) {
 }
 
 int BrowserViewLayout::LayoutInfoBar(int top) {
-  bool visible = browser()->SupportsWindowFeature(Browser::FEATURE_INFOBAR);
+  bool visible = InfobarVisible();
   int height = visible ? infobar_container_->GetPreferredSize().height() : 0;
   infobar_container_->SetVisible(visible);
   infobar_container_->SetBounds(vertical_layout_rect_.x(), top,
@@ -406,24 +362,6 @@ int BrowserViewLayout::LayoutInfoBar(int top) {
 void BrowserViewLayout::LayoutTabContents(int top, int bottom) {
   contents_split_->SetBounds(vertical_layout_rect_.x(), top,
                              vertical_layout_rect_.width(), bottom - top);
-}
-
-int BrowserViewLayout::LayoutExtensionAndDownloadShelves() {
-  // If we're showing the Extension bar in detached style, then we
-  // need to show Download shelf _above_ the Extension bar, since
-  // the Extension bar is styled to look like it's part of the page.
-  //
-  // TODO(Oshima): confirm this comment.
-  int bottom = browser_view_->height();
-  if (extension_shelf_) {
-    if (extension_shelf_->IsDetached()) {
-      bottom = LayoutDownloadShelf(bottom);
-      return LayoutExtensionShelf(bottom);
-    }
-    // Otherwise, Extension shelf first, Download shelf second.
-    bottom = LayoutExtensionShelf(bottom);
-  }
-  return LayoutDownloadShelf(bottom);
 }
 
 int BrowserViewLayout::LayoutDownloadShelf(int bottom) {
@@ -444,17 +382,8 @@ int BrowserViewLayout::LayoutDownloadShelf(int bottom) {
   return bottom;
 }
 
-int BrowserViewLayout::LayoutExtensionShelf(int bottom) {
-  if (extension_shelf_) {
-    bool visible = browser()->SupportsWindowFeature(
-        Browser::FEATURE_EXTENSIONSHELF);
-    int height =
-        visible ? extension_shelf_->GetPreferredSize().height() : 0;
-    extension_shelf_->SetVisible(visible && height != 0);
-    extension_shelf_->SetBounds(vertical_layout_rect_.x(), bottom - height,
-                                vertical_layout_rect_.width(), height);
-    extension_shelf_->Layout();
-    bottom -= height;
-  }
-  return bottom;
+bool BrowserViewLayout::InfobarVisible() const {
+  // NOTE: Can't check if the size IsEmpty() since it's always 0-width.
+  return browser()->SupportsWindowFeature(Browser::FEATURE_INFOBAR) &&
+      (infobar_container_->GetPreferredSize().height() != 0);
 }

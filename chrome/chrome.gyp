@@ -68,6 +68,7 @@
     'repack_locales_cmd': ['python', 'tools/build/repack_locales.py'],
     # TODO: remove this helper when we have loops in GYP
     'apply_locales_cmd': ['python', '<(DEPTH)/build/apply_locales.py'],
+    'directxsdk_exists': '<!(python <(DEPTH)/build/dir_exists.py ../third_party/directxsdk)',
     'conditions': [
       ['OS=="win"', {
         'nacl_defines': [
@@ -203,6 +204,9 @@
           'conditions': [
             ['chromeos==1', {
               'action': ['-D', 'chromeos'],
+            }],
+            ['toolkit_views==1', {
+              'action': ['-D', 'toolkit_views'],
             }],
             ['use_titlecase_in_grd_files==1', {
               'action': ['-D', 'use_titlecase'],
@@ -511,6 +515,16 @@
             }
           ],
         }],
+        ['OS=="linux" and chromeos==1', {
+          'copies': [
+            {
+              'destination': '<(PRODUCT_DIR)/extensions',
+              'files': [
+                'browser/extensions/default_extensions/chromeos/external_extensions.json'
+              ]
+            }
+          ],
+        }],
       ],
     },
     {
@@ -615,11 +629,6 @@
       # end up using this module as well.
       'conditions': [
         ['OS=="win"', {
-          'defines': [
-            '__STD_C',
-            '_CRT_SECURE_NO_DEPRECATE',
-            '_SCL_SECURE_NO_DEPRECATE',
-          ],
           'include_dirs': [
             '<(DEPTH)/third_party/wtl/include',
           ],
@@ -704,6 +713,10 @@
         'gpu/gpu_process.h',
         'gpu/gpu_thread.cc',
         'gpu/gpu_thread.h',
+        'gpu/gpu_video_decoder.cc',
+        'gpu/gpu_video_decoder.h',
+        'gpu/gpu_video_service.cc',
+        'gpu/gpu_video_service.h',
         'gpu/gpu_view_win.cc',
         'gpu/gpu_view_win.h',
       ],
@@ -714,6 +727,54 @@
         ['OS=="win"', {
           'include_dirs': [
             '<(DEPTH)/third_party/wtl/include',
+          ],
+          'dependencies': [
+            '../third_party/angle/src/build_angle.gyp:libEGL',
+            '../third_party/angle/src/build_angle.gyp:libGLESv2',
+          ],
+        }],
+        ['OS=="win" and directxsdk_exists=="True"', {
+          'actions': [
+            {
+              'action_name': 'extract_d3dx9',
+              'variables': {
+                'input': 'Aug2009_d3dx9_42_x86.cab',
+                'output': 'd3dx9_42.dll',
+              },
+              'inputs': [
+                '../third_party/directxsdk/files/Redist/<(input)',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/<(output)',
+              ],
+              'action': [
+                'python',
+                '../build/extract_from_cab.py',
+                '..\\third_party\\directxsdk\\files\\Redist\\<(input)',
+                '<(output)',
+                '<(PRODUCT_DIR)',
+              ],
+            },
+            {
+              'action_name': 'extract_d3dcompiler',
+              'variables': {
+                'input': 'Aug2009_D3DCompiler_42_x86.cab',
+                'output': 'D3DCompiler_42.dll',
+              },
+              'inputs': [
+                '../third_party/directxsdk/files/Redist/<(input)',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/<(output)',
+              ],
+              'action': [
+                'python',
+                '../build/extract_from_cab.py',
+                '..\\third_party\\directxsdk\\files\\Redist\\<(input)',
+                '<(output)',
+                '<(PRODUCT_DIR)',
+              ],
+            },
           ],
         }],
         ['OS=="linux" and target_arch!="arm"', {
@@ -816,6 +877,8 @@
         '<(protoc_out_dir)/chrome/browser/sync/protocol/sync.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/encryption.pb.cc',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/encryption.pb.h',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/app_specifics.pb.cc',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/app_specifics.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/autofill_specifics.pb.cc',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/autofill_specifics.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/bookmark_specifics.pb.cc',
@@ -828,6 +891,8 @@
         '<(protoc_out_dir)/chrome/browser/sync/protocol/password_specifics.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/preference_specifics.pb.cc',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/preference_specifics.pb.h',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/session_specifics.pb.cc',
+        '<(protoc_out_dir)/chrome/browser/sync/protocol/session_specifics.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/theme_specifics.pb.cc',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/theme_specifics.pb.h',
         '<(protoc_out_dir)/chrome/browser/sync/protocol/typed_url_specifics.pb.cc',
@@ -1037,6 +1102,8 @@
       'sources': [
         'service/service_child_process_host.cc',
         'service/service_child_process_host.h',
+        'service/service_ipc_server.cc',
+        'service/service_ipc_server.h',
         'service/service_main.cc',
         'service/service_process.cc',
         'service/service_process.h',
@@ -1060,6 +1127,8 @@
         'service/gaia/service_gaia_authenticator.h',
         'service/net/service_url_request_context.cc',
         'service/net/service_url_request_context.h',
+        'service/remoting/remoting_directory_service.cc',
+        'service/remoting/remoting_directory_service.h',
       ],
       'include_dirs': [
         '..',
@@ -1654,7 +1723,6 @@
           'type': '<(library)',
           'msvs_guid': '1556EF78-C7E6-43C8-951F-F6B43AC0DD12',
           'dependencies': [
-            'chrome_version_info',
             'theme_resources',
             '../skia/skia.gyp:skia',
             '../testing/gtest.gyp:gtest',
@@ -1668,6 +1736,7 @@
              'test/automation/automation_constants.h',
              'test/automation/automation_handle_tracker.cc',
              'test/automation/automation_handle_tracker.h',
+             'test/automation/automation_messages.cc',
              'test/automation/automation_messages.h',
              'test/automation/automation_messages_internal.h',
              'test/automation/automation_proxy.cc',
@@ -1753,6 +1822,68 @@
         },
       ]},  # 'targets'
     ],  # OS=="win"
+    ['OS=="win" or OS=="mac" or OS=="linux"',
+      { 'targets': [
+        {
+          # policy_templates has different inputs and outputs, so it can't use
+          # the rules of chrome_strings
+          'target_name': 'policy_templates',
+          'type': 'none',
+          'actions': [
+            {
+              'action_name': 'policy_templates',
+              'variables': {
+                'input_path': 'app/policy/policy_templates.grd',
+                'conditions': [
+                  ['branding=="Chrome"', {
+                    # TODO(mmoss) The .grd files look for _google_chrome, but for
+                    # consistency they should look for GOOGLE_CHROME_BUILD like C++.
+                    # Clean this up when Windows moves to gyp.
+                    'chrome_build': '_google_chrome',
+                  }, {  # else: branding!="Chrome"
+                    'chrome_build': '_chromium',
+                  }],
+                ],
+              },
+              'inputs': [
+                '<!@(<(grit_info_cmd) --inputs <(input_path))',
+              ],
+              'outputs': [
+                '<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(input_path))',
+              ],
+              'action': [
+                '<@(grit_cmd)',
+                '-i', '<(input_path)', 'build',
+                '-o', '<(grit_out_dir)',
+                '-D', '<(chrome_build)'
+              ],
+              'conditions': [
+                ['chromeos==1', {
+                  'action': ['-D', 'chromeos'],
+                }],
+                ['use_titlecase_in_grd_files==1', {
+                  'action': ['-D', 'use_titlecase'],
+                }],
+                ['OS == "mac"', {
+                  'action': ['-D', 'mac_bundle_id=<(mac_bundle_id)'],
+                }],
+              ],
+              'message': 'Generating policy templates from <(input_path)',
+            },
+          ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '<(grit_out_dir)',
+            ],
+          },
+          'conditions': [
+            ['OS=="win"', {
+              'dependencies': ['../build/win/system.gyp:cygwin'],
+            }],
+          ],
+        },
+      ]},  # 'targets'
+    ],  # OS=="win" or OS=="mac" or OS=="linux"
     ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
       'targets': [{
         'target_name': 'packed_resources',

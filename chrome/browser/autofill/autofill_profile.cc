@@ -205,6 +205,7 @@ string16 AutoFillProfile::PreviewSummary() const {
   return summary_format;
 }
 
+// static
 bool AutoFillProfile::AdjustInferredLabels(
     std::vector<AutoFillProfile*>* profiles) {
   std::vector<string16> created_labels;
@@ -222,6 +223,7 @@ bool AutoFillProfile::AdjustInferredLabels(
   return updated_labels;
 }
 
+// static
 void AutoFillProfile::CreateInferredLabels(
     const std::vector<AutoFillProfile*>* profiles,
     std::vector<string16>* created_labels,
@@ -375,6 +377,12 @@ void AutoFillProfile::CreateInferredLabels(
   }
 }
 
+bool AutoFillProfile::IsEmpty() const {
+  FieldTypeSet types;
+  GetAvailableFieldTypes(&types);
+  return types.empty();
+}
+
 void AutoFillProfile::operator=(const AutoFillProfile& source) {
   label_ = source.label_;
   unique_id_ = source.unique_id_;
@@ -453,7 +461,6 @@ string16 AutoFillProfile::ConstructInferredLabel(
   }
   return label;
 }
-
 
 // So we can compare AutoFillProfiles with EXPECT_EQ().
 std::ostream& operator<<(std::ostream& os, const AutoFillProfile& profile) {

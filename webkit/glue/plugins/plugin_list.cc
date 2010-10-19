@@ -45,8 +45,11 @@ void PluginList::RefreshPlugins() {
 }
 
 void PluginList::AddExtraPluginPath(const FilePath& plugin_path) {
+  // Chrome OS only loads plugins from /opt/google/chrome/plugins.
+#if !defined(OS_CHROMEOS)
   AutoLock lock(lock_);
   extra_plugin_paths_.push_back(plugin_path);
+#endif
 }
 
 void PluginList::RemoveExtraPluginPath(const FilePath& plugin_path) {
@@ -59,8 +62,11 @@ void PluginList::RemoveExtraPluginPath(const FilePath& plugin_path) {
 }
 
 void PluginList::AddExtraPluginDir(const FilePath& plugin_dir) {
+  // Chrome OS only loads plugins from /opt/google/chrome/plugins.
+#if !defined(OS_CHROMEOS)
   AutoLock lock(lock_);
   extra_plugin_dirs_.push_back(plugin_dir);
+#endif
 }
 
 void PluginList::RegisterInternalPlugin(const PluginVersionInfo& info) {
@@ -108,8 +114,11 @@ bool PluginList::CreateWebPluginInfo(const PluginVersionInfo& pvi,
 
   info->mime_types.clear();
 
-  if (mime_types.empty())
+  if (mime_types.empty()) {
+    LOG_IF(ERROR, PluginList::DebugPluginLoading())
+        << "Plugin " << pvi.product_name << " has no MIME types, skipping";
     return false;
+  }
 
   info->name = WideToUTF16(pvi.product_name);
   info->desc = WideToUTF16(pvi.file_description);
@@ -230,6 +239,9 @@ void PluginList::LoadPlugins(bool refresh) {
 
 void PluginList::LoadPlugin(const FilePath& path,
                             std::vector<WebPluginInfo>* plugins) {
+  LOG_IF(ERROR, PluginList::DebugPluginLoading())
+      << "Loading plugin " << path.value();
+
   WebPluginInfo plugin_info;
   const PluginEntryPoints* entry_points;
 

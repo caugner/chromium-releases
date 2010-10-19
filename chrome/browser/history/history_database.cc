@@ -26,7 +26,7 @@ namespace {
 // Current version number. We write databases at the "current" version number,
 // but any previous version that can read the "compatible" one can make do with
 // or database without *too* many bad effects.
-static const int kCurrentVersionNumber = 18;
+static const int kCurrentVersionNumber = 19;
 static const int kCompatibleVersionNumber = 16;
 static const char kEarlyExpirationThresholdKey[] = "early_expiration_threshold";
 
@@ -134,14 +134,11 @@ void HistoryDatabase::BeginExclusiveMode() {
 
 // static
 int HistoryDatabase::GetCurrentVersion() {
-  // Temporary solution while TopSites is behind a flag. If there is
-  // no flag, we are still using the Thumbnails file, i.e. we are at
-  // version 17.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kTopSites)) {
+  // If we don't use TopSites, we stay at the last pre-TopSites version.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoTopSites))
+    return 17;  // Last pre-TopSites version.
+  else
     return kCurrentVersionNumber;
-  } else {
-    return kCurrentVersionNumber - 1;
-  }
 }
 
 void HistoryDatabase::BeginTransaction() {
@@ -286,10 +283,17 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion(
   if (cur_version == 17)
     needs_version_18_migration_ = true;
 
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kTopSites) &&
-      cur_version == 18) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoTopSites) &&
+      (cur_version == 18 || cur_version == 19)) {
     // Set DB version back to pre-top sites.
     cur_version = 17;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (needs_version_18_migration_ || cur_version == 18) {
+    // This is the version prior to adding url_source column. We need to
+    // migrate the database.
+    cur_version = 19;
     meta_table_.SetVersionNumber(cur_version);
   }
 
@@ -328,9 +332,13 @@ void HistoryDatabase::MigrateTimeEpoch() {
 #endif
 
 void HistoryDatabase::MigrationToTopSitesDone() {
-  // We should be migrating from 17 to 18.
-  DCHECK_EQ(17, meta_table_.GetVersionNumber());
-  meta_table_.SetVersionNumber(18);
+  // Migration should only happen for version 17 and 19.
+  int version = meta_table_.GetVersionNumber();
+  DCHECK(17 == version || 19 == version);
+  if (17 == version) {
+    // We should be migrating from 17 to 18.
+    meta_table_.SetVersionNumber(18);
+  }
   needs_version_18_migration_ = false;
 }
 

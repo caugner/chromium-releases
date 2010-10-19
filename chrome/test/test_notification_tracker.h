@@ -4,9 +4,11 @@
 
 #ifndef CHROME_TEST_TEST_NOTIFICATION_TRACKER_H_
 #define CHROME_TEST_TEST_NOTIFICATION_TRACKER_H_
+#pragma once
 
 #include <vector>
 
+#include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 
@@ -63,11 +65,11 @@ class TestNotificationTracker : public NotificationObserver {
   // be in [0, size).
   const Event& at(size_t i) const { return events_[i]; }
 
- private:
+ protected:
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
-
+ private:
   NotificationRegistrar registrar_;
 
   // Lists all received since last cleared, in the order they were received.

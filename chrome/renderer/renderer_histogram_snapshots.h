@@ -1,27 +1,24 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_RENDERER_RENDERER_HISTOGRAM_SNAPSHOTS_H_
 #define CHROME_RENDERER_RENDERER_HISTOGRAM_SNAPSHOTS_H_
+#pragma once
 
-#include <list>
 #include <map>
-#include <set>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/histogram.h"
 #include "base/process.h"
-#include "base/scoped_ptr.h"
 #include "base/task.h"
 
 class RendererHistogramSnapshots {
  public:
   RendererHistogramSnapshots();
-
-  ~RendererHistogramSnapshots() {}
+  ~RendererHistogramSnapshots();
 
   // Send the histogram data.
   void SendHistograms(int sequence_number);

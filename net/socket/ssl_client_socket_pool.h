@@ -4,6 +4,7 @@
 
 #ifndef NET_SOCKET_SSL_CLIENT_SOCKET_POOL_H_
 #define NET_SOCKET_SSL_CLIENT_SOCKET_POOL_H_
+#pragma once
 
 #include <string>
 
@@ -12,25 +13,30 @@
 #include "base/time.h"
 #include "net/base/host_resolver.h"
 #include "net/base/ssl_config_service.h"
-#include "net/http/http_proxy_client_socket.h"
-#include "net/http/http_proxy_client_socket_pool.h"
+#include "net/http/http_response_info.h"
 #include "net/proxy/proxy_server.h"
-#include "net/socket/client_socket_factory.h"
+#include "net/socket/ssl_client_socket.h"
 #include "net/socket/client_socket_pool_base.h"
 #include "net/socket/client_socket_pool_histograms.h"
 #include "net/socket/client_socket_pool.h"
-#include "net/socket/socks_client_socket_pool.h"
-#include "net/socket/ssl_client_socket.h"
-#include "net/socket/tcp_client_socket_pool.h"
 
 namespace net {
 
 class ClientSocketFactory;
 class ConnectJobFactory;
+class HttpProxyClientSocketPool;
+class HttpProxySocketParams;
+class SOCKSClientSocketPool;
+class SOCKSSocketParams;
+class SSLClientSocket;
+class TCPClientSocketPool;
+class TCPSocketParams;
+struct RRResponse;
 
 // SSLSocketParams only needs the socket params for the transport socket
 // that will be used (denoted by |proxy|).
-class SSLSocketParams : public base::RefCounted<SSLSocketParams> {
+class SSLSocketParams : public base::RefCounted<SSLSocketParams>,
+                        public DNSSECProvider {
  public:
   SSLSocketParams(const scoped_refptr<TCPSocketParams>& tcp_params,
                   const scoped_refptr<HttpProxySocketParams>& http_proxy_params,
@@ -39,10 +45,11 @@ class SSLSocketParams : public base::RefCounted<SSLSocketParams> {
                   const std::string& hostname,
                   const SSLConfig& ssl_config,
                   int load_flags,
-                  bool want_spdy);
+                  bool force_spdy_over_ssl,
+                  bool want_spdy_over_npn);
 
   const scoped_refptr<TCPSocketParams>& tcp_params() { return tcp_params_; }
-  const scoped_refptr<HttpProxySocketParams>& http_proxy_params () {
+  const scoped_refptr<HttpProxySocketParams>& http_proxy_params() {
     return http_proxy_params_;
   }
   const scoped_refptr<SOCKSSocketParams>& socks_params() {
@@ -52,11 +59,18 @@ class SSLSocketParams : public base::RefCounted<SSLSocketParams> {
   const std::string& hostname() const { return hostname_; }
   const SSLConfig& ssl_config() const { return ssl_config_; }
   int load_flags() const { return load_flags_; }
-  bool want_spdy() const { return want_spdy_; }
+  bool force_spdy_over_ssl() const { return force_spdy_over_ssl_; }
+  bool want_spdy_over_npn() const { return want_spdy_over_npn_; }
+  // Start to resolve DNSSEC records for the given hostname.
+  void StartDNSSECResolution();
+
+  // DNSSECProvider implementation.
+  virtual int GetDNSSECRecords(RRResponse** out, CompletionCallback* callback);
 
  private:
   friend class base::RefCounted<SSLSocketParams>;
   ~SSLSocketParams();
+  void DNSSECResolutionComplete(int rv);
 
   const scoped_refptr<TCPSocketParams> tcp_params_;
   const scoped_refptr<HttpProxySocketParams> http_proxy_params_;
@@ -65,7 +79,15 @@ class SSLSocketParams : public base::RefCounted<SSLSocketParams> {
   const std::string hostname_;
   const SSLConfig ssl_config_;
   const int load_flags_;
-  const bool want_spdy_;
+  const bool force_spdy_over_ssl_;
+  const bool want_spdy_over_npn_;
+
+  // This is true if we have started a DNSSEC resolution.
+  bool dnssec_resolution_attempted_;
+  // This is true if |dnssec_response_| is valid.
+  bool dnssec_resolution_complete_;
+  scoped_ptr<RRResponse> dnssec_response_;
+  CompletionCallback* dnssec_resolution_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLSocketParams);
 };
@@ -110,8 +132,6 @@ class SSLConnectJob : public ConnectJob {
   // Otherwise, it returns a net error code.
   virtual int ConnectInternal();
 
-  void DetermineFirstState();
-
   void OnIOComplete(int result);
 
   // Runs the state transition loop.
@@ -146,7 +166,8 @@ class SSLConnectJob : public ConnectJob {
   DISALLOW_COPY_AND_ASSIGN(SSLConnectJob);
 };
 
-class SSLClientSocketPool : public ClientSocketPool {
+class SSLClientSocketPool : public ClientSocketPool,
+                            public SSLConfigService::Observer {
  public:
   // Only the pools that will be used are required. i.e. if you never
   // try to create an SSL over SOCKS socket, |socks_pool| may be NULL.
@@ -159,6 +180,7 @@ class SSLClientSocketPool : public ClientSocketPool {
       const scoped_refptr<TCPClientSocketPool>& tcp_pool,
       const scoped_refptr<HttpProxyClientSocketPool>& http_proxy_pool,
       const scoped_refptr<SOCKSClientSocketPool>& socks_pool,
+      SSLConfigService* ssl_config_service,
       NetLog* net_log);
 
   // ClientSocketPool methods:
@@ -189,6 +211,11 @@ class SSLClientSocketPool : public ClientSocketPool {
   virtual LoadState GetLoadState(const std::string& group_name,
                                  const ClientSocketHandle* handle) const;
 
+  virtual Value* GetInfoAsValue(const std::string& name,
+                                const std::string& type) const {
+    return base_.GetInfoAsValue(name, type);
+  }
+
   virtual base::TimeDelta ConnectionTimeout() const {
     return base_.ConnectionTimeout();
   }
@@ -201,6 +228,12 @@ class SSLClientSocketPool : public ClientSocketPool {
   virtual ~SSLClientSocketPool();
 
  private:
+  // SSLConfigService::Observer methods:
+
+  // When the user changes the SSL config, we flush all idle sockets so they
+  // won't get re-used.
+  virtual void OnSSLConfigChanged();
+
   typedef ClientSocketPoolBase<SSLSocketParams> PoolBase;
 
   class SSLConnectJobFactory : public PoolBase::ConnectJobFactory {
@@ -236,6 +269,7 @@ class SSLClientSocketPool : public ClientSocketPool {
   };
 
   PoolBase base_;
+  const scoped_refptr<SSLConfigService> ssl_config_service_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLClientSocketPool);
 };

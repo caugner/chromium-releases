@@ -4,14 +4,17 @@
 
 #include "chrome/browser/autofill/autofill_manager.h"
 
+#include <limits>
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/string16.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_dialog.h"
 #include "chrome/browser/autofill/autofill_cc_infobar_delegate.h"
 #include "chrome/browser/autofill/form_structure.h"
-#include "chrome/browser/pref_service.h"
+#include "chrome/browser/autofill/select_control_handler.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -37,32 +40,50 @@ const int kAutoFillPhoneNumberPrefixCount = 3;
 const int kAutoFillPhoneNumberSuffixOffset = 3;
 const int kAutoFillPhoneNumberSuffixCount = 4;
 
-const string16::value_type kLabelSeparator[] = {';',' ',0};
+const string16::value_type kCreditCardPrefix[] = {'*',0};
+const string16::value_type kLabelSeparator[] = {';',' ','*',0};
+
+// Combines the |label| string with the last four digits of the credit card
+// |cc|.  If one, the other, or both are empty strings we omit the separator.
+string16 CombineLabelAndCreditCard(const string16& label,
+                                   const CreditCard* cc) {
+  if (label.empty())
+    return kCreditCardPrefix + cc->LastFourDigits();
+  else if (cc->LastFourDigits().empty())
+    return label;
+  else
+    return label + kLabelSeparator + cc->LastFourDigits();
+}
 
 // Removes duplicate elements whilst preserving original order of |elements| and
 // |unique_ids|.
 void RemoveDuplicateElements(
     std::vector<string16>* elements, std::vector<int>* unique_ids) {
-  std::vector<string16> copy;
+  DCHECK_EQ(elements->size(), unique_ids->size());
+
+  std::vector<string16> elements_copy;
+  std::vector<int> unique_ids_copy;
   for (size_t i = 0; i < elements->size(); ++i) {
     const string16& element = (*elements)[i];
 
     bool unique = true;
-    for (std::vector<string16>::const_iterator copy_iter = copy.begin();
-         copy_iter != copy.end(); ++copy_iter) {
+    for (std::vector<string16>::const_iterator copy_iter
+             = elements_copy.begin();
+         copy_iter != elements_copy.end(); ++copy_iter) {
       if (element == *copy_iter) {
         unique = false;
         break;
       }
     }
 
-    if (unique)
-      copy.push_back(element);
-    else
-      unique_ids->erase(unique_ids->begin() + i);
+    if (unique) {
+      elements_copy.push_back(element);
+      unique_ids_copy.push_back((*unique_ids)[i]);
+    }
   }
 
-  elements->assign(copy.begin(), copy.end());
+  elements->assign(elements_copy.begin(), elements_copy.end());
+  unique_ids->assign(unique_ids_copy.begin(), unique_ids_copy.end());
 }
 
 bool FormIsHTTPS(FormStructure* form) {
@@ -78,7 +99,8 @@ const char* kAutoFillLearnMoreUrl =
 AutoFillManager::AutoFillManager(TabContents* tab_contents)
     : tab_contents_(tab_contents),
       personal_data_(NULL),
-      download_manager_(tab_contents_->profile()) {
+      download_manager_(tab_contents_->profile()),
+      disable_download_manager_requests_(false) {
   DCHECK(tab_contents);
 
   // |personal_data_| is NULL when using TestTabContents.
@@ -117,6 +139,10 @@ void AutoFillManager::FormSubmitted(const FormData& form) {
   if (tab_contents_->profile()->IsOffTheRecord())
     return;
 
+  // Don't save data that was submitted through JavaScript.
+  if (!form.user_submitted)
+    return;
+
   // Grab a copy of the form data.
   upload_form_structure_.reset(new FormStructure(form));
 
@@ -131,11 +157,6 @@ void AutoFillManager::FormSubmitted(const FormData& form) {
 
 void AutoFillManager::FormsSeen(const std::vector<FormData>& forms) {
   if (!IsAutoFillEnabled())
-    return;
-
-  // No profiles or credit cards, no need to parse the forms.
-  if (personal_data_->profiles().empty() &&
-      personal_data_->credit_cards().empty())
     return;
 
   ParseForms(forms);
@@ -187,6 +208,7 @@ bool AutoFillManager::GetAutoFillSuggestions(int query_id,
 
   std::vector<string16> values;
   std::vector<string16> labels;
+  std::vector<string16> icons;
   std::vector<int> unique_ids;
   AutoFillType type(autofill_field->type());
 
@@ -195,15 +217,17 @@ bool AutoFillManager::GetAutoFillSuggestions(int query_id,
   bool handle_billing = FormIsHTTPS(form);
 
   if (type.group() == AutoFillType::CREDIT_CARD)
-    GetCreditCardSuggestions(form, field, type, &values, &labels, &unique_ids);
+    GetCreditCardSuggestions(
+        form, field, type, &values, &labels, &icons, &unique_ids);
   else if (type.group() == AutoFillType::ADDRESS_BILLING)
     GetBillingProfileSuggestions(
-        form, field, type, &values, &labels, &unique_ids);
+        form, field, type, &values, &labels, &icons, &unique_ids);
   else
-    GetProfileSuggestions(
-        form, field, type, handle_billing, &values, &labels, &unique_ids);
+    GetProfileSuggestions(form, field, type, handle_billing,
+                          &values, &labels, &icons, &unique_ids);
 
   DCHECK_EQ(values.size(), labels.size());
+  DCHECK_EQ(values.size(), icons.size());
   DCHECK_EQ(values.size(), unique_ids.size());
 
   // No suggestions.
@@ -217,12 +241,16 @@ bool AutoFillManager::GetAutoFillSuggestions(int query_id,
   if (form_autofilled) {
     RemoveDuplicateElements(&values, &unique_ids);
     labels.resize(values.size());
+    icons.resize(values.size());
 
-    for (size_t i = 0; i < labels.size(); ++i)
+    for (size_t i = 0; i < labels.size(); ++i) {
       labels[i] = string16();
+      icons[i] = string16();
+    }
   }
 
-  host->AutoFillSuggestionsReturned(query_id, values, labels, unique_ids);
+  host->AutoFillSuggestionsReturned(
+      query_id, values, labels, icons, unique_ids);
   return true;
 }
 
@@ -265,39 +293,29 @@ bool AutoFillManager::FillAutoFillFormData(int query_id,
   if (!form_structure->autofill_count())
     return false;
 
-  // |cc_digits| will contain the last four digits of a credit card number only
-  // if the form has billing fields.
-  string16 cc_digits;
+  // Unpack the |unique_id| into component parts.
+  int cc_id = 0;
+  int profile_id = 0;
+  UnpackIDs(unique_id, &cc_id, &profile_id);
 
-  // If the form has billing fields, |label| will contain at least one "; "
-  // followed by the last four digits of a credit card number.
-  if (form_structure->HasBillingFields()) {
-    // We must search for the last "; " as it's possible the profile label
-    // proper can contain this sequence of characters.
-    size_t index = label.find_last_of(kLabelSeparator);
-    if (index != string16::npos) {
-      size_t cc_index = index + 1;
-      cc_digits = label.substr(cc_index);
-    }
-  }
-
-  // Find the profile that matches the |unique_id|.
+  // Find the profile that matches the |profile_id|, if one is specified.
   const AutoFillProfile* profile = NULL;
-  for (std::vector<AutoFillProfile*>::const_iterator iter = profiles.begin();
-       iter != profiles.end(); ++iter) {
-    if ((*iter)->unique_id() == unique_id) {
-      profile = *iter;
+  if (profile_id != 0) {
+    for (std::vector<AutoFillProfile*>::const_iterator iter = profiles.begin();
+         iter != profiles.end(); ++iter) {
+      if ((*iter)->unique_id() == profile_id) {
+        profile = *iter;
+        break;
+      }
     }
   }
 
-  // Don't look for a matching credit card if we fully-matched the profile using
-  // the entire label.
+  // Find the credit card that matches the |cc_id|, if one is specified.
   const CreditCard* credit_card = NULL;
-  if (!cc_digits.empty()) {
-    // Find the credit card that matches the |cc_label|.
+  if (cc_id != 0) {
     for (std::vector<CreditCard*>::const_iterator iter = credit_cards.begin();
          iter != credit_cards.end(); ++iter) {
-      if ((*iter)->LastFourDigits() == cc_digits) {
+      if ((*iter)->unique_id() == cc_id) {
         credit_card = *iter;
         break;
       }
@@ -333,8 +351,7 @@ bool AutoFillManager::FillAutoFillFormData(int query_id,
     AutoFillType autofill_type(field->type());
     if (credit_card &&
         autofill_type.group() == AutoFillType::CREDIT_CARD) {
-      result.fields[i].set_value(
-          credit_card->GetFieldText(autofill_type));
+      FillCreditCardFormField(credit_card, autofill_type, &result.fields[j]);
     } else if (credit_card &&
                autofill_type.group() == AutoFillType::ADDRESS_BILLING) {
       FillBillingFormField(credit_card, autofill_type, &result.fields[j]);
@@ -346,6 +363,7 @@ bool AutoFillManager::FillAutoFillFormData(int query_id,
     // proceed to the next |result| field, and the next |form_structure|.
     ++i;
   }
+  autofilled_forms_signatures_.push_front(form_structure->FormSignature());
 
   host->AutoFillFormDataFilled(query_id, result);
   return true;
@@ -428,10 +446,26 @@ void AutoFillManager::HandleSubmit() {
 }
 
 void AutoFillManager::UploadFormData() {
-  // TODO(georgey): enable upload request when we make sure that our data is in
-  // line with toolbar data:
-  // download_manager_.StartUploadRequest(upload_form_structure_,
-  //                                      form_is_autofilled);
+  if (!disable_download_manager_requests_) {
+    bool was_autofilled = false;
+    // Check if the form among last 3 forms that were auto-filled.
+    // Clear older signatures.
+    std::list<std::string>::iterator it;
+    int total_form_checked = 0;
+    for (it = autofilled_forms_signatures_.begin();
+         it != autofilled_forms_signatures_.end() && total_form_checked < 3;
+         ++it, ++total_form_checked) {
+      if (*it == upload_form_structure_->FormSignature())
+        was_autofilled = true;
+    }
+    // Remove outdated form signatures.
+    if (total_form_checked == 3 && it != autofilled_forms_signatures_.end()) {
+      autofilled_forms_signatures_.erase(it,
+                                         autofilled_forms_signatures_.end());
+    }
+    download_manager_.StartUploadRequest(*(upload_form_structure_.get()),
+                                         was_autofilled);
+  }
 }
 
 void AutoFillManager::OnInfoBarClosed(bool should_save) {
@@ -443,14 +477,16 @@ void AutoFillManager::OnInfoBarClosed(bool should_save) {
 AutoFillManager::AutoFillManager()
     : tab_contents_(NULL),
       personal_data_(NULL),
-      download_manager_(NULL) {
+      download_manager_(NULL),
+      disable_download_manager_requests_(false) {
 }
 
 AutoFillManager::AutoFillManager(TabContents* tab_contents,
                                  PersonalDataManager* personal_data)
     : tab_contents_(tab_contents),
       personal_data_(personal_data),
-      download_manager_(NULL) {
+      download_manager_(NULL),
+      disable_download_manager_requests_(false) {
   DCHECK(tab_contents);
 }
 
@@ -460,6 +496,7 @@ void AutoFillManager::GetProfileSuggestions(FormStructure* form,
                                             bool include_cc_labels,
                                             std::vector<string16>* values,
                                             std::vector<string16>* labels,
+                                            std::vector<string16>* icons,
                                             std::vector<int>* unique_ids) {
   const std::vector<AutoFillProfile*>& profiles = personal_data_->profiles();
   std::vector<AutoFillProfile*> matched_profiles;
@@ -474,19 +511,22 @@ void AutoFillManager::GetProfileSuggestions(FormStructure* form,
         StartsWith(profile_field_value, field.value(), false)) {
       matched_profiles.push_back(profile);
       values->push_back(profile_field_value);
-      unique_ids->push_back(profile->unique_id());
+      unique_ids->push_back(PackIDs(0, profile->unique_id()));
     }
   }
 
   AutoFillProfile::CreateInferredLabels(&matched_profiles, labels, 0,
                                         type.field_type());
 
-  if (!include_cc_labels || !form->HasBillingFields() || !FormIsHTTPS(form))
+  if (!include_cc_labels || !form->HasBillingFields() || !FormIsHTTPS(form)) {
+    icons->resize(values->size());  // No CC, so no icons.
     return;
+  }
 
   size_t i = 0;
   std::vector<string16> expanded_values;
   std::vector<string16> expanded_labels;
+  std::vector<int> expanded_ids;
   for (std::vector<AutoFillProfile*>::const_iterator iter =
        matched_profiles.begin(); iter != matched_profiles.end();
        ++iter, ++i) {
@@ -495,14 +535,16 @@ void AutoFillManager::GetProfileSuggestions(FormStructure* form,
          personal_data_->credit_cards().begin();
          cc != personal_data_->credit_cards().end(); ++cc) {
       expanded_values.push_back((*values)[i]);
-      string16 label = (*labels)[i] + kLabelSeparator +
-          (*cc)->LastFourDigits();
+      string16 label = CombineLabelAndCreditCard((*labels)[i], *cc);
       expanded_labels.push_back(label);
-      unique_ids->push_back(profile->unique_id());
+      icons->push_back((*cc)->type());
+      expanded_ids.push_back(PackIDs((*cc)->unique_id(), profile->unique_id()));
     }
   }
+
   expanded_labels.swap(*labels);
   expanded_values.swap(*values);
+  expanded_ids.swap(*unique_ids);
 }
 
 void AutoFillManager::GetBillingProfileSuggestions(
@@ -511,20 +553,23 @@ void AutoFillManager::GetBillingProfileSuggestions(
     AutoFillType type,
     std::vector<string16>* values,
     std::vector<string16>* labels,
+    std::vector<string16>* icons,
     std::vector<int>* unique_ids) {
-  std::vector<CreditCard*> matching_creditcards;
-  std::vector<AutoFillProfile*> matching_profiles;
-  std::vector<string16> cc_values;
-  std::vector<string16> cc_labels;
 
   // If the form is non-HTTPS, no CC suggestions are provided; however, give the
   // user the option of filling the billing address fields with regular address
   // data.
   if (!FormIsHTTPS(form)) {
-    GetProfileSuggestions(form, field, type, false, values, labels, unique_ids);
+    GetProfileSuggestions(
+        form, field, type, false, values, icons, labels, unique_ids);
     return;
   }
 
+  std::vector<CreditCard*> matching_creditcards;
+  std::vector<AutoFillProfile*> matching_profiles;
+
+  // Collect matching pairs of credit cards and related profiles, where profile
+  // field value matches form field value.
   for (std::vector<CreditCard*>::const_iterator cc =
            personal_data_->credit_cards().begin();
        cc != personal_data_->credit_cards().end(); ++cc) {
@@ -551,17 +596,27 @@ void AutoFillManager::GetBillingProfileSuggestions(
     if (!billing_profile)
       continue;
 
-    for (std::vector<AutoFillProfile*>::const_iterator iter =
-             personal_data_->profiles().begin();
-         iter != personal_data_->profiles().end(); ++iter) {
-      values->push_back(billing_profile->GetFieldText(type));
+    matching_creditcards.push_back(*cc);
+    matching_profiles.push_back(billing_profile);
+  }
 
-      string16 label = (*iter)->Label() +
-                       ASCIIToUTF16("; ") +
-                       (*cc)->LastFourDigits();
-      labels->push_back(label);
-      unique_ids->push_back((*iter)->unique_id());
-    }
+  std::vector<string16> inferred_labels;
+  AutoFillProfile::CreateInferredLabels(&matching_profiles, &inferred_labels, 0,
+                                        type.field_type());
+
+  DCHECK_EQ(matching_profiles.size(), matching_creditcards.size());
+  DCHECK_EQ(matching_profiles.size(), inferred_labels.size());
+
+  // Process the matching pairs into suggested |values|, |labels|, and
+  // |unique_ids|.
+  for (size_t i = 0; i < matching_profiles.size(); ++i) {
+    values->push_back(matching_profiles[i]->GetFieldText(type));
+    string16 label = CombineLabelAndCreditCard(inferred_labels[i],
+                                               matching_creditcards[i]);
+    labels->push_back(label);
+    icons->push_back(matching_creditcards[i]->type());
+    unique_ids->push_back(PackIDs(matching_creditcards[i]->unique_id(),
+                                  matching_profiles[i]->unique_id()));
   }
 }
 
@@ -570,6 +625,7 @@ void AutoFillManager::GetCreditCardSuggestions(FormStructure* form,
                                                AutoFillType type,
                                                std::vector<string16>* values,
                                                std::vector<string16>* labels,
+                                               std::vector<string16>* icons,
                                                std::vector<int>* unique_ids) {
   // Don't return CC suggestions for non-HTTPS pages.
   if (!FormIsHTTPS(form))
@@ -581,8 +637,7 @@ void AutoFillManager::GetCreditCardSuggestions(FormStructure* form,
     CreditCard* credit_card = *iter;
 
     // The value of the stored data for this field type in the |credit_card|.
-    string16 creditcard_field_value =
-        credit_card->GetFieldText(type);
+    string16 creditcard_field_value = credit_card->GetFieldText(type);
     if (!creditcard_field_value.empty() &&
         StartsWith(creditcard_field_value, field.value(), false)) {
       if (type.field_type() == CREDIT_CARD_NUMBER)
@@ -590,19 +645,28 @@ void AutoFillManager::GetCreditCardSuggestions(FormStructure* form,
 
       if (!form->HasNonBillingFields()) {
         values->push_back(creditcard_field_value);
-        labels->push_back(credit_card->Label());
-        unique_ids->push_back(credit_card->unique_id());
+        labels->push_back(CombineLabelAndCreditCard(string16(), credit_card));
+        icons->push_back(credit_card->type());
+        unique_ids->push_back(PackIDs(credit_card->unique_id(), 0));
       } else {
-        for (std::vector<AutoFillProfile*>::const_iterator iter =
-                 personal_data_->profiles().begin();
-             iter != personal_data_->profiles().end(); ++iter) {
+        const std::vector<AutoFillProfile*>& profiles
+            = personal_data_->profiles();
+        std::vector<string16> inferred_labels;
+        AutoFillProfile::CreateInferredLabels(&profiles,
+                                              &inferred_labels,
+                                              0,
+                                              type.field_type());
+        DCHECK_EQ(profiles.size(), inferred_labels.size());
+
+        for (size_t i = 0; i < profiles.size(); ++i) {
           values->push_back(creditcard_field_value);
 
-          string16 label = (*iter)->Label() +
-                           ASCIIToUTF16("; ") +
-                           credit_card->LastFourDigits();
+          string16 label = CombineLabelAndCreditCard(inferred_labels[i],
+                                                     credit_card);
           labels->push_back(label);
-          unique_ids->push_back((*iter)->unique_id());
+          icons->push_back(credit_card->type());
+          unique_ids->push_back(
+              PackIDs(credit_card->unique_id(), profiles[i]->unique_id()));
         }
       }
     }
@@ -634,6 +698,18 @@ void AutoFillManager::FillBillingFormField(const CreditCard* credit_card,
   }
 }
 
+void AutoFillManager::FillCreditCardFormField(const CreditCard* credit_card,
+                                              AutoFillType type,
+                                              webkit_glue::FormField* field) {
+  DCHECK(credit_card);
+  DCHECK(field);
+
+  if (field->form_control_type() == ASCIIToUTF16("select-one"))
+    autofill::FillSelectControl(credit_card, type, field);
+  else
+    field->set_value(credit_card->GetFieldText(type));
+}
+
 void AutoFillManager::FillFormField(const AutoFillProfile* profile,
                                     AutoFillType type,
                                     webkit_glue::FormField* field) {
@@ -643,9 +719,37 @@ void AutoFillManager::FillFormField(const AutoFillProfile* profile,
   if (type.subgroup() == AutoFillType::PHONE_NUMBER) {
     FillPhoneNumberField(profile, field);
   } else {
-    field->set_value(profile->GetFieldText(type));
+    if (field->form_control_type() == ASCIIToUTF16("select-one"))
+      autofill::FillSelectControl(profile, type, field);
+    else
+      field->set_value(profile->GetFieldText(type));
   }
 }
+
+void AutoFillManager::FillSelectOneField(const AutoFillProfile* profile,
+                                         AutoFillType type,
+                                         webkit_glue::FormField* field) {
+  DCHECK(profile);
+  DCHECK(field);
+  DCHECK(field->form_control_type() == ASCIIToUTF16("select-one"));
+  string16 selected_string = profile->GetFieldText(type);
+  std::string ascii_value = UTF16ToASCII(selected_string);
+  for (size_t i = 0; i < field->option_strings().size(); ++i) {
+    if (profile->GetFieldText(type) == field->option_strings()[i]) {
+      // An exact match - use it.
+      selected_string = profile->GetFieldText(type);
+      break;
+    }
+    if (!base::strcasecmp(UTF16ToASCII(field->option_strings()[i]).c_str(),
+                          ascii_value.c_str())) {
+      // A match, but not in the same case - save it for the case we won't
+      // find an exact match.
+      selected_string = field->option_strings()[i];
+    }
+  }
+  field->set_value(selected_string);
+}
+
 
 void AutoFillManager::FillPhoneNumberField(const AutoFillProfile* profile,
                                            webkit_glue::FormField* field) {
@@ -674,15 +778,36 @@ void AutoFillManager::ParseForms(
   for (std::vector<FormData>::const_iterator iter =
            forms.begin();
        iter != forms.end(); ++iter) {
-    FormStructure* form_structure = new FormStructure(*iter);
+    scoped_ptr<FormStructure> form_structure(new FormStructure(*iter));
     if (!form_structure->ShouldBeParsed())
       continue;
 
-    DeterminePossibleFieldTypes(form_structure);
-    form_structures_.push_back(form_structure);
+    DeterminePossibleFieldTypes(form_structure.get());
+    form_structures_.push_back(form_structure.release());
   }
 
   // If none of the forms were parsed, no use querying the server.
-  if (!form_structures_.empty())
+  if (!form_structures_.empty() && !disable_download_manager_requests_)
     download_manager_.StartQueryRequest(form_structures_);
+}
+
+// When sending IDs (across processes) to the renderer we pack credit card and
+// profile IDs into a single integer.  Credit card IDs are sent in the high
+// word and profile IDs are sent in the low word.
+// static
+int AutoFillManager::PackIDs(int cc_id, int profile_id) {
+  DCHECK(cc_id <= std::numeric_limits<unsigned short>::max());
+  DCHECK(profile_id <= std::numeric_limits<unsigned short>::max());
+
+  return cc_id << std::numeric_limits<unsigned short>::digits | profile_id;
+}
+
+// When receiving IDs (across processes) from the renderer we unpack credit card
+// and profile IDs from a single integer.  Credit card IDs are stored in the
+// high word and profile IDs are stored in the low word.
+// static
+void AutoFillManager::UnpackIDs(int id, int* cc_id, int* profile_id) {
+  *cc_id = id >> std::numeric_limits<unsigned short>::digits &
+      std::numeric_limits<unsigned short>::max();
+  *profile_id = id & std::numeric_limits<unsigned short>::max();
 }

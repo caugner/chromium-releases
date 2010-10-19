@@ -4,6 +4,7 @@
 
 #ifndef CHROME_COMMON_EXTENSIONS_EXTENSION_UNPACKER_H_
 #define CHROME_COMMON_EXTENSIONS_EXTENSION_UNPACKER_H_
+#pragma once
 
 #include <string>
 #include <vector>
@@ -23,8 +24,8 @@ class ExtensionUnpacker {
  public:
   typedef std::vector< Tuple2<SkBitmap, FilePath> > DecodedImages;
 
-  explicit ExtensionUnpacker(const FilePath& extension_path)
-      : extension_path_(extension_path) {}
+  explicit ExtensionUnpacker(const FilePath& extension_path);
+  ~ExtensionUnpacker();
 
   // Install the extension file at |extension_path|.  Returns true on success.
   // Otherwise, error_message will contain a string explaining what went wrong.

@@ -4,28 +4,21 @@
 
 #ifndef CHROME_RENDERER_RENDERER_WEBKITCLIENT_IMPL_H_
 #define CHROME_RENDERER_RENDERER_WEBKITCLIENT_IMPL_H_
+#pragma once
 
 #include "base/platform_file.h"
 #include "base/scoped_ptr.h"
-#include "chrome/renderer/websharedworkerrepository_impl.h"
-#include "webkit/glue/simple_webmimeregistry_impl.h"
-#include "webkit/glue/webclipboard_impl.h"
-#include "webkit/glue/webfilesystem_impl.h"
 #include "webkit/glue/webkitclient_impl.h"
 
-#if defined(OS_WIN)
-#include "third_party/WebKit/WebKit/chromium/public/win/WebSandboxSupport.h"
-#elif defined(OS_LINUX)
-#include <string>
-#include <map>
-#include "base/lock.h"
-#include "third_party/WebKit/WebKit/chromium/public/linux/WebSandboxSupport.h"
-#elif defined(OS_MACOSX)
-#include "third_party/WebKit/WebKit/chromium/public/mac/WebSandboxSupport.h"
-#endif
+class WebSharedWorkerRepositoryImpl;
+class WebFileSystemImpl;
 
 namespace IPC {
 class SyncMessage;
+}
+
+namespace webkit_glue {
+class WebClipboardImpl;
 }
 
 class RendererWebKitClientImpl : public webkit_glue::WebKitClientImpl {
@@ -36,7 +29,7 @@ class RendererWebKitClientImpl : public webkit_glue::WebKitClientImpl {
   // WebKitClient methods:
   virtual WebKit::WebClipboard* clipboard();
   virtual WebKit::WebMimeRegistry* mimeRegistry();
-  virtual WebKit::WebFileSystem* fileSystem();
+  virtual WebKit::WebFileUtilities* fileUtilities();
   virtual WebKit::WebSandboxSupport* sandboxSupport();
   virtual WebKit::WebCookieJar* cookieJar();
   virtual bool sandboxEnabled();
@@ -68,70 +61,35 @@ class RendererWebKitClientImpl : public webkit_glue::WebKitClientImpl {
       unsigned key_size_index,
       const WebKit::WebString& challenge,
       const WebKit::WebURL& url);
-  virtual WebKit::WebIndexedDatabase* indexedDatabase();
+  virtual WebKit::WebIDBFactory* idbFactory();
+  virtual void createIDBKeysFromSerializedValuesAndKeyPath(
+      const WebKit::WebVector<WebKit::WebSerializedScriptValue>& values,
+      const WebKit::WebString& keyPath,
+      WebKit::WebVector<WebKit::WebIDBKey>& keys);
+  virtual WebKit::WebFileSystem* fileSystem();
 
   virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository();
   virtual WebKit::WebGraphicsContext3D* createGraphicsContext3D();
   virtual WebKit::WebGLES2Context* createGLES2Context();
 
+  virtual WebKit::WebBlobRegistry* blobRegistry();
+
  private:
-  class MimeRegistry : public webkit_glue::SimpleWebMimeRegistryImpl {
-   public:
-    virtual WebKit::WebString mimeTypeForExtension(const WebKit::WebString&);
-    virtual WebKit::WebString mimeTypeFromFile(const WebKit::WebString&);
-    virtual WebKit::WebString preferredExtensionForMIMEType(
-        const WebKit::WebString&);
-  };
-
-  class FileSystem : public webkit_glue::WebFileSystemImpl {
-   public:
-    virtual bool getFileSize(const WebKit::WebString& path, long long& result);
-    virtual bool getFileModificationTime(const WebKit::WebString& path,
-                                         double& result);
-    virtual base::PlatformFile openFile(const WebKit::WebString& path,
-                                        int mode);
-  };
-
   bool CheckPreparsedJsCachingEnabled() const;
-
-#if defined(OS_WIN)
-  class SandboxSupport : public WebKit::WebSandboxSupport {
-   public:
-    virtual bool ensureFontLoaded(HFONT);
-  };
-#elif defined(OS_LINUX)
-  class SandboxSupport : public WebKit::WebSandboxSupport {
-   public:
-    virtual WebKit::WebString getFontFamilyForCharacters(
-        const WebKit::WebUChar* characters, size_t numCharacters);
-    virtual void getRenderStyleForStrike(
-        const char* family, int sizeAndStyle, WebKit::WebFontRenderStyle* out);
-
-   private:
-    // WebKit likes to ask us for the correct font family to use for a set of
-    // unicode code points. It needs this information frequently so we cache it
-    // here. The key in this map is an array of 16-bit UTF16 values from WebKit.
-    // The value is a string containing the correct font family.
-    Lock unicode_font_families_mutex_;
-    std::map<std::string, std::string> unicode_font_families_;
-  };
-#elif defined(OS_MACOSX)
-  class SandboxSupport : public WebKit::WebSandboxSupport {
-   public:
-    virtual bool loadFont(NSFont* srcFont, ATSFontContainerRef* out);
-  };
-#endif
 
   // Helper function to send synchronous message from any thread.
   static bool SendSyncMessageFromAnyThread(IPC::SyncMessage* msg);
 
-  webkit_glue::WebClipboardImpl clipboard_;
+  scoped_ptr<webkit_glue::WebClipboardImpl> clipboard_;
 
-  FileSystem file_system_;
+  class FileUtilities;
+  scoped_ptr<FileUtilities> file_utilities_;
 
-  MimeRegistry mime_registry_;
+  class MimeRegistry;
+  scoped_ptr<MimeRegistry> mime_registry_;
 
-  SandboxSupport sandbox_support_;
+  class SandboxSupport;
+  scoped_ptr<SandboxSupport> sandbox_support_;
 
   // This counter keeps track of the number of times sudden termination is
   // enabled or disabled. It starts at 0 (enabled) and for every disable
@@ -141,9 +99,13 @@ class RendererWebKitClientImpl : public webkit_glue::WebKitClientImpl {
 
   // Implementation of the WebSharedWorkerRepository APIs (provides an interface
   // to WorkerService on the browser thread.
-  WebSharedWorkerRepositoryImpl shared_worker_repository_;
+  scoped_ptr<WebSharedWorkerRepositoryImpl> shared_worker_repository_;
 
-  scoped_ptr<WebKit::WebIndexedDatabase> web_indexed_database_;
+  scoped_ptr<WebKit::WebIDBFactory> web_idb_factory_;
+
+  scoped_ptr<WebFileSystemImpl> web_file_system_;
+
+  scoped_ptr<WebKit::WebBlobRegistry> blob_registry_;
 };
 
 #endif  // CHROME_RENDERER_RENDERER_WEBKITCLIENT_IMPL_H_

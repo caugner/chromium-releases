@@ -3,18 +3,7 @@
 // found in the LICENSE file.
 
 #include "net/spdy/spdy_io_buffer.h"
-
-#include "googleurl/src/gurl.h"
-#include "net/base/mock_host_resolver.h"
-#include "net/base/ssl_config_service_defaults.h"
-#include "net/base/test_completion_callback.h"
-#include "net/http/http_network_session.h"
-#include "net/http/http_response_info.h"
-#include "net/proxy/proxy_service.h"
-#include "net/socket/socket_test_util.h"
-#include "net/spdy/spdy_http_stream.h"
 #include "net/spdy/spdy_session.h"
-#include "net/spdy/spdy_session_pool.h"
 #include "net/spdy/spdy_stream.h"
 #include "net/spdy/spdy_test_util.h"
 #include "testing/platform_test.h"
@@ -31,37 +20,6 @@ class SpdySessionTest : public PlatformTest {
 };
 
 namespace {
-
-// Helper to manage the lifetimes of the dependencies for a
-// SpdyNetworkTransaction.
-class SessionDependencies {
- public:
-  // Default set of dependencies -- "null" proxy service.
-  SessionDependencies()
-      : host_resolver(new MockHostResolver),
-        proxy_service(ProxyService::CreateNull()),
-        ssl_config_service(new SSLConfigServiceDefaults),
-        spdy_session_pool(new SpdySessionPool()) {
-  }
-
-  scoped_refptr<MockHostResolverBase> host_resolver;
-  scoped_refptr<ProxyService> proxy_service;
-  scoped_refptr<SSLConfigService> ssl_config_service;
-  MockClientSocketFactory socket_factory;
-  scoped_refptr<SpdySessionPool> spdy_session_pool;
-};
-
-HttpNetworkSession* CreateSession(SessionDependencies* session_deps) {
-  return new HttpNetworkSession(session_deps->host_resolver,
-                                session_deps->proxy_service,
-                                &session_deps->socket_factory,
-                                session_deps->ssl_config_service,
-                                session_deps->spdy_session_pool,
-                                NULL,
-                                NULL,
-                                NULL);
-}
-
 // Test the SpdyIOBuffer class.
 TEST_F(SpdySessionTest, SpdyIOBuffer) {
   std::priority_queue<SpdyIOBuffer> queue_;
@@ -100,7 +58,7 @@ TEST_F(SpdySessionTest, SpdyIOBuffer) {
 }
 
 TEST_F(SpdySessionTest, GoAway) {
-  SessionDependencies session_deps;
+  SpdySessionDependencies session_deps;
   session_deps.host_resolver->set_synchronous_mode(true);
 
   MockConnect connect_data(false, OK);
@@ -111,26 +69,25 @@ TEST_F(SpdySessionTest, GoAway) {
   };
   StaticSocketDataProvider data(reads, arraysize(reads), NULL, 0);
   data.set_connect_data(connect_data);
-  session_deps.socket_factory.AddSocketDataProvider(&data);
+  session_deps.socket_factory->AddSocketDataProvider(&data);
 
   SSLSocketDataProvider ssl(false, OK);
-  session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
+  session_deps.socket_factory->AddSSLSocketDataProvider(&ssl);
 
-  scoped_refptr<HttpNetworkSession> http_session(CreateSession(&session_deps));
+  scoped_refptr<HttpNetworkSession> http_session(
+      SpdySessionDependencies::SpdyCreateSession(&session_deps));
 
   const std::string kTestHost("www.foo.com");
   const int kTestPort = 80;
-  HostPortPair test_host_port_pair;
-  test_host_port_pair.host = kTestHost;
-  test_host_port_pair.port = kTestPort;
+  HostPortPair test_host_port_pair(kTestHost, kTestPort);
+  HostPortProxyPair pair(test_host_port_pair, ProxyServer::Direct());
 
   scoped_refptr<SpdySessionPool> spdy_session_pool(
       http_session->spdy_session_pool());
-  EXPECT_FALSE(spdy_session_pool->HasSession(test_host_port_pair));
+  EXPECT_FALSE(spdy_session_pool->HasSession(pair));
   scoped_refptr<SpdySession> session =
-      spdy_session_pool->Get(
-          test_host_port_pair, http_session.get(), BoundNetLog());
-  EXPECT_TRUE(spdy_session_pool->HasSession(test_host_port_pair));
+      spdy_session_pool->Get(pair, http_session.get(), BoundNetLog());
+  EXPECT_TRUE(spdy_session_pool->HasSession(pair));
 
   scoped_refptr<TCPSocketParams> tcp_params =
       new TCPSocketParams(kTestHost, kTestPort, MEDIUM, GURL(), false);
@@ -140,11 +97,10 @@ TEST_F(SpdySessionTest, GoAway) {
   // Flush the SpdySession::OnReadComplete() task.
   MessageLoop::current()->RunAllPending();
 
-  EXPECT_FALSE(spdy_session_pool->HasSession(test_host_port_pair));
+  EXPECT_FALSE(spdy_session_pool->HasSession(pair));
 
   scoped_refptr<SpdySession> session2 =
-      spdy_session_pool->Get(
-          test_host_port_pair, http_session.get(), BoundNetLog());
+      spdy_session_pool->Get(pair, http_session.get(), BoundNetLog());
 
   // Delete the first session.
   session = NULL;
@@ -155,83 +111,4 @@ TEST_F(SpdySessionTest, GoAway) {
 }
 
 }  // namespace
-
-TEST_F(SpdySessionTest, GetActivePushStream) {
-  spdy::SpdyFramer framer;
-  SpdySessionTest::TurnOffCompression();
-
-  SessionDependencies session_deps;
-  session_deps.host_resolver->set_synchronous_mode(true);
-
-  MockConnect connect_data(false, OK);
-  spdy::SpdyHeaderBlock headers;
-  headers["path"] = "/foo.js";
-  headers["status"] = "200";
-  headers["version"] = "HTTP/1.1";
-  scoped_ptr<spdy::SpdyFrame> push_syn(framer.CreateSynStream(
-      2, 1, 0, spdy::CONTROL_FLAG_NONE, false, &headers));
-  MockRead reads[] = {
-    CreateMockRead(*push_syn),
-    MockRead(true, ERR_IO_PENDING, 0)  // EOF
-  };
-  StaticSocketDataProvider data(reads, arraysize(reads), NULL, 0);
-  data.set_connect_data(connect_data);
-  session_deps.socket_factory.AddSocketDataProvider(&data);
-
-  SSLSocketDataProvider ssl(false, OK);
-  session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
-
-  scoped_refptr<HttpNetworkSession> http_session(CreateSession(&session_deps));
-
-  const std::string kTestHost("www.foo.com");
-  const int kTestPort = 80;
-  HostPortPair test_host_port_pair;
-  test_host_port_pair.host = kTestHost;
-  test_host_port_pair.port = kTestPort;
-
-  scoped_refptr<SpdySessionPool> spdy_session_pool(
-      http_session->spdy_session_pool());
-  EXPECT_FALSE(spdy_session_pool->HasSession(test_host_port_pair));
-  scoped_refptr<SpdySession> session =
-      spdy_session_pool->Get(
-          test_host_port_pair, http_session.get(), BoundNetLog());
-  EXPECT_TRUE(spdy_session_pool->HasSession(test_host_port_pair));
-
-  // No push streams should exist in the beginning.
-  std::string test_push_path = "/foo.js";
-  scoped_refptr<SpdyStream> first_stream = session->GetActivePushStream(
-      test_push_path);
-  EXPECT_EQ(static_cast<SpdyStream*>(NULL), first_stream.get());
-
-  // Read in the data which contains a server-issued SYN_STREAM.
-  scoped_refptr<TCPSocketParams> tcp_params =
-      new TCPSocketParams(test_host_port_pair, MEDIUM, GURL(), false);
-  int rv = session->Connect(kTestHost, tcp_params, MEDIUM);
-  ASSERT_EQ(OK, rv);
-  MessageLoop::current()->RunAllPending();
-
-  // An unpushed path should not work.
-  scoped_refptr<SpdyStream> unpushed_stream = session->GetActivePushStream(
-      "/unpushed_path");
-  EXPECT_EQ(static_cast<SpdyStream*>(NULL), unpushed_stream.get());
-
-  // The pushed path should be found.
-  scoped_refptr<SpdyStream> second_stream = session->GetActivePushStream(
-      test_push_path);
-  ASSERT_NE(static_cast<SpdyStream*>(NULL), second_stream.get());
-  EXPECT_EQ(test_push_path, second_stream->path());
-  EXPECT_EQ(2U, second_stream->stream_id());
-  EXPECT_EQ(0, second_stream->priority());
-
-  // Clean up
-  second_stream = NULL;
-  session = NULL;
-  spdy_session_pool->CloseAllSessions();
-
-  // RunAllPending needs to be called here because the
-  // ClientSocketPoolBase posts a task to clean up and destroy the
-  // underlying socket.
-  MessageLoop::current()->RunAllPending();
-}
-
 }  // namespace net

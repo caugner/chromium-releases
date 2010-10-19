@@ -10,28 +10,56 @@
 
 namespace chromeos {
 
-void SynapticsLibraryImpl::SetBoolParameter(SynapticsParameter param,
-                                            bool value) {
-  SetParameter(param, value ? 1 : 0);
-}
+class SynapticsLibraryImpl : public SynapticsLibrary {
+ public:
+  SynapticsLibraryImpl() {}
+  virtual ~SynapticsLibraryImpl() {}
 
-void SynapticsLibraryImpl::SetRangeParameter(SynapticsParameter param,
-                                             int value) {
-  if (value < 1)
-    value = 1;
-  if (value > 10)
-    value = 10;
-  SetParameter(param, value);
-}
-
-void SynapticsLibraryImpl::SetParameter(SynapticsParameter param, int value) {
-  if (CrosLibrary::Get()->EnsureLoaded()) {
-    // This calls SetSynapticsParameter in the cros library which is
-    // potentially time consuming. So we run this on the FILE thread.
-    ChromeThread::PostTask(
-        ChromeThread::FILE, FROM_HERE,
-        NewRunnableFunction(&SetSynapticsParameter, param, value));
+  void SetBoolParameter(SynapticsParameter param, bool value) {
+    SetParameter(param, value ? 1 : 0);
   }
+
+  void SetRangeParameter(SynapticsParameter param, int value) {
+    if (value < 1)
+      value = 1;
+    if (value > 10)
+      value = 10;
+    SetParameter(param, value);
+  }
+
+ private:
+  // This helper methods calls into the libcros library to set the parameter.
+  // This call is run on the FILE thread.
+  void SetParameter(SynapticsParameter param, int value) {
+    if (CrosLibrary::Get()->EnsureLoaded()) {
+      // This calls SetSynapticsParameter in the cros library which is
+      // potentially time consuming. So we run this on the FILE thread.
+      ChromeThread::PostTask(
+          ChromeThread::FILE, FROM_HERE,
+          NewRunnableFunction(&SetSynapticsParameter, param, value));
+    }
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(SynapticsLibraryImpl);
+};
+
+class SynapticsLibraryStubImpl : public SynapticsLibrary {
+ public:
+  SynapticsLibraryStubImpl() {}
+  virtual ~SynapticsLibraryStubImpl() {}
+  void SetBoolParameter(SynapticsParameter param, bool value) {}
+  void SetRangeParameter(SynapticsParameter param, int value) {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SynapticsLibraryStubImpl);
+};
+
+// static
+SynapticsLibrary* SynapticsLibrary::GetImpl(bool stub) {
+  if (stub)
+    return new SynapticsLibraryStubImpl();
+  else
+    return new SynapticsLibraryImpl();
 }
 
 }  // namespace chromeos

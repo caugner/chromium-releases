@@ -12,28 +12,35 @@
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
+#include "base/string_util.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_init.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/external_cookie_handler.h"
+#include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/cookie_fetcher.h"
 #include "chrome/browser/chromeos/login/google_authenticator.h"
+#include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/login/user_image_downloader.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/net/gaia/token_service.h"
+#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
+#include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/cookie_store.h"
 #include "net/url_request/url_request_context.h"
@@ -43,8 +50,6 @@ namespace chromeos {
 
 namespace {
 
-const int kWifiTimeoutInMS = 30000;
-static char kIncognitoUser[] = "incognito";
 
 // Prefix for Auth token received from ClientLogin request.
 const char kAuthPrefix[] = "Auth=";
@@ -57,15 +62,12 @@ class LoginUtilsImpl : public LoginUtils,
                        public NotificationObserver {
  public:
   LoginUtilsImpl()
-      : wifi_connecting_(false),
-        browser_launch_enabled_(true) {
+      : browser_launch_enabled_(true) {
     registrar_.Add(
         this,
         NotificationType::LOGIN_USER_CHANGED,
         NotificationService::AllSources());
   }
-
-  virtual bool ShouldWaitForWifi();
 
   // Invoked after the user has successfully logged in. This launches a browser
   // and does other bookkeeping after logging in.
@@ -74,7 +76,7 @@ class LoginUtilsImpl : public LoginUtils,
 
   // Invoked after the tmpfs is successfully mounted.
   // Launches a browser in the off the record (incognito) mode.
-  virtual void CompleteOffTheRecordLogin();
+  virtual void CompleteOffTheRecordLogin(const GURL& start_url);
 
   // Creates and returns the authenticator to use. The caller owns the returned
   // Authenticator and must delete it when done.
@@ -100,9 +102,6 @@ class LoginUtilsImpl : public LoginUtils,
   void ConnectToPreferredNetwork();
 
   NotificationRegistrar registrar_;
-  bool wifi_connecting_;
-  bool wifi_connection_started_;
-  base::Time wifi_connect_start_time_;
 
   // Indicates if DoBrowserLaunch will actually launch the browser or not.
   bool browser_launch_enabled_;
@@ -136,44 +135,6 @@ class LoginUtilsWrapper {
   DISALLOW_COPY_AND_ASSIGN(LoginUtilsWrapper);
 };
 
-bool LoginUtilsImpl::ShouldWaitForWifi() {
-  // If we are connecting to the preferred network,
-  // wait kWifiTimeoutInMS until connection is made or failed.
-  if (wifi_connecting_) {
-    NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
-    bool failed = false;
-    if (cros->PreferredNetworkConnected()) {
-      base::TimeDelta diff = base::Time::Now() - wifi_connect_start_time_;
-      LOG(INFO) << "Wifi connection successful after " << diff.InSeconds() <<
-          " seconds.";
-      return false;
-    } else if (cros->PreferredNetworkFailed()) {
-      // Sometimes we stay in the failed state before connection starts.
-      // So we only know for sure that connection failed if we get a failed
-      // state after connection has started.
-      if (wifi_connection_started_) {
-        LOG(INFO) << "Wifi connection failed.";
-        return false;
-      }
-      failed = true;
-    }
-
-    // If state is not failed, then we know connection has started.
-    if (!wifi_connection_started_ && !failed) {
-      LOG(INFO) << "Wifi connection started.";
-      wifi_connection_started_ = true;
-    }
-
-    base::TimeDelta diff = base::Time::Now() - wifi_connect_start_time_;
-    // Keep waiting if we have not timed out yet.
-    bool timedout = (diff.InMilliseconds() > kWifiTimeoutInMS);
-    if (timedout)
-      LOG(INFO) << "Wifi connection timed out.";
-    return !timedout;
-  }
-  return false;
-}
-
 void LoginUtilsImpl::CompleteLogin(const std::string& username,
     const GaiaAuthConsumer::ClientLoginResult& credentials) {
 
@@ -181,6 +142,18 @@ void LoginUtilsImpl::CompleteLogin(const std::string& username,
 
   if (CrosLibrary::Get()->EnsureLoaded())
     CrosLibrary::Get()->GetLoginLibrary()->StartSession(username, "");
+
+  const std::vector<UserManager::User>& users = UserManager::Get()->GetUsers();
+
+  bool first_login = true;
+  for (std::vector<UserManager::User>::const_iterator it = users.begin();
+       it < users.end(); ++it) {
+    std::string user_email = it->email();
+    if (username == user_email) {
+      first_login = false;
+      break;
+    }
+  }
 
   UserManager::Get()->UserLoggedIn(username);
   ConnectToPreferredNetwork();
@@ -198,8 +171,18 @@ void LoginUtilsImpl::CompleteLogin(const std::string& username,
       *(CommandLine::ForCurrentProcess()),
       logging::DELETE_OLD_LOG_FILE);
 
-  // Supply credentials for sync and others to use
-  profile->GetTokenService()->SetClientLoginResult(credentials);
+  // Supply credentials for sync and others to use. Load tokens from disk.
+  TokenService* token_service = profile->GetTokenService();
+  token_service->Initialize(GaiaConstants::kChromeOSSource,
+                            profile);
+  token_service->LoadTokensFromDB();
+  token_service->UpdateCredentials(credentials);
+  if (token_service->AreCredentialsValid()) {
+    token_service->StartFetchingTokens();
+  }
+
+  // Attempt to take ownership; this will fail if device is already owned.
+  OwnershipService::GetSharedInstance()->StartTakeOwnershipAttempt();
 
   // Take the credentials passed in and try to exchange them for
   // full-fledged Google authentication cookies.  This is
@@ -210,21 +193,77 @@ void LoginUtilsImpl::CompleteLogin(const std::string& username,
   CookieFetcher* cf = new CookieFetcher(profile);
   cf->AttemptFetch(credentials.data);
   auth_token_ = credentials.token;
+
+  static const char kFallbackInputMethodLocale[] = "en-US";
+  if (first_login) {
+    std::string locale(g_browser_process->GetApplicationLocale());
+    // Add input methods based on the application locale when the user first
+    // logs in. For instance, if the user chooses Japanese as the UI
+    // language at the first login, we'll add input methods associated with
+    // Japanese, such as mozc.
+    if (locale != kFallbackInputMethodLocale) {
+      StringPrefMember language_preload_engines;
+      language_preload_engines.Init(prefs::kLanguagePreloadEngines,
+                                    profile->GetPrefs(), this);
+      StringPrefMember language_preferred_languages;
+      language_preferred_languages.Init(prefs::kLanguagePreferredLanguages,
+                                        profile->GetPrefs(), this);
+
+      std::string preload_engines(language_preload_engines.GetValue());
+      std::vector<std::string> input_method_ids;
+      input_method::GetInputMethodIdsFromLanguageCode(
+          locale, input_method::kAllInputMethods, &input_method_ids);
+      if (!input_method_ids.empty()) {
+        if (!preload_engines.empty())
+          preload_engines += ',';
+        preload_engines += input_method_ids[0];
+      }
+      language_preload_engines.SetValue(preload_engines);
+
+      // Add the UI language to the preferred languages the user first logs in.
+      std::string preferred_languages(locale);
+      preferred_languages += ",";
+      preferred_languages += kFallbackInputMethodLocale;
+      language_preferred_languages.SetValue(preferred_languages);
+    }
+  }
 }
 
-void LoginUtilsImpl::CompleteOffTheRecordLogin() {
+void LoginUtilsImpl::CompleteOffTheRecordLogin(const GURL& start_url) {
   LOG(INFO) << "Completing off the record login";
-
-  if (CrosLibrary::Get()->EnsureLoaded())
-    CrosLibrary::Get()->GetLoginLibrary()->StartSession(kIncognitoUser, "");
-
-  // Incognito flag is not set by default.
-  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kIncognito);
 
   UserManager::Get()->OffTheRecordUserLoggedIn();
   ConnectToPreferredNetwork();
-  LoginUtils::DoBrowserLaunch(
-      ProfileManager::GetDefaultProfile()->GetOffTheRecordProfile());
+
+  if (CrosLibrary::Get()->EnsureLoaded()) {
+    // For BWSI we ask session manager to restart Chrome with --bwsi flag.
+    // We keep only some of the arguments of this process.
+    static const char* kForwardSwitches[] = {
+        switches::kLoggingLevel,
+        switches::kEnableLogging,
+        switches::kUserDataDir,
+        switches::kScrollPixels,
+        switches::kEnableGView,
+        switches::kNoFirstRun,
+        switches::kLoginProfile
+    };
+    const CommandLine& browser_command_line =
+        *CommandLine::ForCurrentProcess();
+    CommandLine command_line(browser_command_line.GetProgram());
+    command_line.CopySwitchesFrom(browser_command_line,
+                                  kForwardSwitches,
+                                  arraysize(kForwardSwitches));
+    command_line.AppendSwitch(switches::kBWSI);
+    command_line.AppendSwitch(switches::kEnableTabbedOptions);
+    command_line.AppendSwitchASCII(
+        switches::kLoginUser,
+        UserManager::Get()->logged_in_user().email());
+    if (start_url.is_valid())
+      command_line.AppendArg(start_url.spec());
+    CrosLibrary::Get()->GetLoginLibrary()->RestartJob(
+        getpid(),
+        command_line.command_line_string());
+  }
 }
 
 Authenticator* LoginUtilsImpl::CreateAuthenticator(
@@ -248,11 +287,8 @@ void LoginUtilsImpl::Observe(NotificationType type,
 }
 
 void LoginUtilsImpl::ConnectToPreferredNetwork() {
-  NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
-  wifi_connection_started_ = false;
-  wifi_connecting_ = cros->ConnectToPreferredNetworkIfAvailable();
-  if (wifi_connecting_)
-    wifi_connect_start_time_ = base::Time::Now();
+  CrosLibrary::Get()->GetNetworkLibrary()->
+      ConnectToPreferredNetworkIfAvailable();
 }
 
 LoginUtils* LoginUtils::Get() {
@@ -264,14 +300,6 @@ void LoginUtils::Set(LoginUtils* mock) {
 }
 
 void LoginUtils::DoBrowserLaunch(Profile* profile) {
-  // If we should wait for wifi connection, post this task with a 100ms delay.
-  if (LoginUtils::Get()->ShouldWaitForWifi()) {
-    ChromeThread::PostDelayedTask(
-        ChromeThread::UI, FROM_HERE,
-        NewRunnableFunction(&LoginUtils::DoBrowserLaunch, profile), 100);
-    return;
-  }
-
   // Browser launch was disabled due to some post login screen.
   if (!LoginUtils::Get()->IsBrowserLaunchEnabled())
     return;
@@ -285,23 +313,9 @@ void LoginUtils::DoBrowserLaunch(Profile* profile) {
   int return_code;
   browser_init.LaunchBrowser(*CommandLine::ForCurrentProcess(),
                              profile,
-                             std::wstring(),
+                             FilePath(),
                              true,
                              &return_code);
-}
-
-std::string LoginUtils::ExtractClientLoginParam(
-    const std::string& credentials,
-    const std::string& param_prefix,
-    const std::string& param_suffix) {
-  size_t start = credentials.find(param_prefix);
-  if (start == std::string::npos)
-    return std::string();
-  start += param_prefix.size();
-  size_t end = credentials.find(param_suffix, start);
-  if (end == std::string::npos)
-    return std::string();
-  return credentials.substr(start, end - start);
 }
 
 }  // namespace chromeos

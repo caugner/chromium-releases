@@ -30,7 +30,7 @@ MenuConfig* MenuConfig::Create() {
   l10n_util::AdjustUIFont(&(metrics.lfMenuFont));
   HFONT font = CreateFontIndirect(&metrics.lfMenuFont);
   DLOG_ASSERT(font);
-  config->font = gfx::Font::CreateFont(font);
+  config->font = gfx::Font(font);
 
   HDC dc = GetDC(NULL);
   RECT bounds = { 0, 0, 200, 200 };
@@ -85,7 +85,8 @@ MenuConfig* MenuConfig::Create() {
           TS_TRUE, &separator_size) == S_OK) {
     config->separator_height = separator_size.cy;
   } else {
-    config->separator_height = GetSystemMetrics(SM_CYMENU) / 2;
+    // -1 makes separator centered.
+    config->separator_height = GetSystemMetrics(SM_CYMENU) / 2 - 1;
   }
 
   ReleaseDC(NULL, dc);

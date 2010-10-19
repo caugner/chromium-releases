@@ -4,6 +4,7 @@
 
 #ifndef SKIA_EXT_BITMAP_PLATFORM_DEVICE_LINUX_H_
 #define SKIA_EXT_BITMAP_PLATFORM_DEVICE_LINUX_H_
+#pragma once
 
 #include "base/ref_counted.h"
 #include "skia/ext/platform_device_linux.h"
@@ -77,6 +78,8 @@ class BitmapPlatformDevice : public PlatformDevice {
 
   // A stub copy constructor.  Needs to be properly implemented.
   BitmapPlatformDevice(const BitmapPlatformDevice& other);
+
+  virtual void makeOpaque(int x, int y, int width, int height);
 
   // Bitmaps aren't vector graphics.
   virtual bool IsVectorial() { return false; }

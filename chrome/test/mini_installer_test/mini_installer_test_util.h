@@ -8,11 +8,14 @@
 
 #ifndef CHROME_TEST_MINI_INSTALLER_TEST_MINI_INSTALLER_TEST_UTIL_H_
 #define CHROME_TEST_MINI_INSTALLER_TEST_MINI_INSTALLER_TEST_UTIL_H_
+#pragma once
 
 #include <windows.h>
 #include <vector>
 
 #include "base/basictypes.h"
+
+class FilePath;
 
 // This structure holds the name and creation time
 // details of all the chrome nightly builds.
@@ -38,7 +41,7 @@ class MiniInstallerTestUtil {
  public:
   // This method will change the current directory to one level up and
   // return the new current path.
-  static bool ChangeCurrentDirectory(std::wstring *current_path);
+  static bool ChangeCurrentDirectory(FilePath* current_path);
 
   // Closes specified process.
   static void CloseProcesses(const std::wstring& executable_name);

@@ -11,8 +11,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "net/http/http_util.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 // Forward declarations
 class HtmlUtilUnittest;
@@ -88,7 +88,7 @@ class HTMLScanner {
 
  private:
   friend class HtmlUtilUnittest;
-  FRIEND_TEST(HtmlUtilUnittest, BasicTest);
+  FRIEND_TEST_ALL_PREFIXES(HtmlUtilUnittest, BasicTest);
 
   // Given html_string which represents the remaining html range, this method
   // returns the next tag in tag and advances html_string to one character after
@@ -129,6 +129,9 @@ std::string AddChromeFrameToUserAgentValue(const std::string& value);
 // comment section.
 // NOTE: The returned string includes the "User-Agent: " header name.
 std::string GetDefaultUserAgentHeaderWithCFTag();
+
+// Returns the User-Agent header as would be used by Chrome itself.
+const char* GetChromeUserAgent();
 
 // Fetches the default user agent string from urlmon.
 // This value does not include the "User-Agent:" header name.

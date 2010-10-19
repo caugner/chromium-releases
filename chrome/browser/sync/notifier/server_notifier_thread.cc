@@ -13,9 +13,10 @@
 
 namespace sync_notifier {
 
-ServerNotifierThread::ServerNotifierThread(bool use_chrome_async_socket)
-    : notifier::MediatorThreadImpl(use_chrome_async_socket),
-      state_(notifier::STATE_CLOSED) {}
+ServerNotifierThread::ServerNotifierThread(bool use_chrome_async_socket,
+                                           bool try_ssltcp_first)
+    : notifier::MediatorThreadImpl(use_chrome_async_socket, try_ssltcp_first),
+      state_(notifier::STATE_DISCONNECTED) {}
 
 ServerNotifierThread::~ServerNotifierThread() {}
 
@@ -54,7 +55,14 @@ void ServerNotifierThread::SendNotification(
 
 void ServerNotifierThread::OnInvalidate(syncable::ModelType model_type) {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  LOG(INFO) << "OnInvalidate: " << syncable::ModelTypeToString(model_type);
+  // TODO(akalin): This is a hack to make new sync data types work
+  // with server-issued notifications.  Remove this when it's not
+  // needed anymore.
+  if (model_type == syncable::UNSPECIFIED) {
+    LOG(INFO) << "OnInvalidate: UNKNOWN";
+  } else {
+    LOG(INFO) << "OnInvalidate: " << syncable::ModelTypeToString(model_type);
+  }
   // TODO(akalin): Signal notification only for the invalidated types.
   parent_message_loop_->PostTask(
       FROM_HERE,
@@ -77,8 +85,7 @@ void ServerNotifierThread::OnClientStateChangeMessage(
     notifier::LoginConnectionState state) {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
   state_ = state;
-  if (state_ != notifier::STATE_OPENED) {
-    // Assume anything but an opened state invalidates xmpp_client().
+  if (state_ != notifier::STATE_CONNECTED) {
     StopInvalidationListener();
   }
   MediatorThreadImpl::OnClientStateChangeMessage(state);
@@ -86,7 +93,7 @@ void ServerNotifierThread::OnClientStateChangeMessage(
 
 void ServerNotifierThread::StartInvalidationListener() {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  if (state_ != notifier::STATE_OPENED) {
+  if (state_ != notifier::STATE_CONNECTED) {
     return;
   }
   buzz::XmppClient* client = xmpp_client();
@@ -108,7 +115,7 @@ void ServerNotifierThread::StartInvalidationListener() {
 
 void ServerNotifierThread::RegisterTypesAndSignalSubscribed() {
   DCHECK_EQ(MessageLoop::current(), worker_message_loop());
-  if (state_ != notifier::STATE_OPENED) {
+  if (state_ != notifier::STATE_CONNECTED) {
     return;
   }
 

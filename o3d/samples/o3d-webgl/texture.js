@@ -65,6 +65,8 @@ o3d.Texture = function() {
 
   /**
    * The associated GL texture target: TEXTURE_2D or TEXTURE_CUBE_MAP.
+   * This is the argument "target" to calls to bindTeture.
+   * NOT THE SAME THING AS the argument "target" to texImage2D.
    * @type {number}
    * @private
    */
@@ -156,6 +158,7 @@ o3d.Texture.prototype.generateMips =
     function(source_level, num_levels) {
   this.gl.bindTexture(this.texture_target_, this.texture_);
   this.gl.generateMipmap(this.texture_target_);
+  this.levels = num_levels;
 };
 
 
@@ -206,10 +209,51 @@ o3d.Texture.prototype.getGLTextureFormat_ = function() {
     case o3d.Texture.DXT1:
     case o3d.Texture.DXT3:
     case o3d.Texture.DXT5:
-      notImplemented();
+    default:
+      o3d.notImplemented();
       return 0;
   }
 }
+
+
+/**
+ * Helper function to determine the proper argument for the texture target
+ * This is either gl.TEXTURE_2D or gl.TEXTURE_CUBE_MAP_POSITIVE_X + face.
+ *
+ * @param {o3d.TextureCUBE.CubeFace} face The current face if applicable.
+ * @return {number} The proper argument for the texture target.
+ */
+o3d.Texture.prototype.getTexImage2DTarget_ = function(opt_face) {
+  if (this.texture_target_ == this.gl.TEXTURE_CUBE_MAP) {
+    return this.gl.TEXTURE_CUBE_MAP_POSITIVE_X + opt_face;
+  } else {
+    return this.gl.TEXTURE_2D;
+  }
+};
+
+
+/**
+ * Computes the maximum number of levels of mips a given width and height could
+ * use.
+ * @param {number} width Width of texture.
+ * @param {number} height Height of texture.
+ * @return {number} The maximum number of levels for the given width and height.
+ */
+o3d.Texture.maxLevels_ = function(width, height) {
+  if (width == 0 || height == 0) {
+    return 0;
+  }
+  var max = Math.max(width, height);
+  var levels = 0;
+  while (max > 0) {
+    ++levels;
+    max = max >> 1;
+  }
+  return levels;
+};
+
+
+var g_counter = 0;
 
 
 /**
@@ -220,12 +264,13 @@ o3d.Texture.prototype.getGLTextureFormat_ = function() {
  * @param {boolean} resize_to_pot Whether or not to resize to a power of two
  *     size.
  * @param {boolean} generate_mips Whether or not to generate mips.
- *
+ * @param {o3d.TextureCUBE.CubeFace} opt_face The face number, if this is a
+ *     cube map.
  * @private
  */
 o3d.Texture.prototype.setFromCanvas_ =
-    function(canvas, resize_to_pot, flip, generate_mips, face) {
-  this.gl.bindTexture(this.texture_target_, this.texture_);
+    function(canvas, resize_to_pot, flip, generate_mips, opt_face) {
+  var gl = this.gl;
 
   if (resize_to_pot && (!o3d.Texture.isPowerOfTwo_(canvas.width) ||
       !o3d.Texture.isPowerOfTwo_(canvas.height))) {
@@ -241,12 +286,15 @@ o3d.Texture.prototype.setFromCanvas_ =
     canvas = scratch;
   }
 
-  var target = this.texture_target_;
-  if (target == this.gl.TEXTURE_CUBE_MAP) {
-    target = this.gl.TEXTURE_CUBE_MAP_POSITIVE_X + face;
-  }
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, flip);
 
-  this.gl.texImage2D(target, 0 /*level*/, canvas, flip);
+  gl.bindTexture(this.texture_target_, this.texture_);
+  gl.texImage2D(this.getTexImage2DTarget_(opt_face), 0 /*level*/, gl.RGBA,
+      gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+
+
   this.texture_width_ = canvas.width;
   this.texture_height_ = canvas.height;
 
@@ -254,55 +302,154 @@ o3d.Texture.prototype.setFromCanvas_ =
     // The texture target is already bound so why bind it again by calling
     // this.generateMip.
     this.gl.generateMipmap(this.texture_target_);
+    this.levels = o3d.Texture.maxLevels_(
+        this.texture_width_, this.texture_height_);
   }
+
+  g_counter++;
+};
+
+
+/**
+ * Copy pixels from source bitmap to certain mip level.
+ * Scales if the width and height of source and dest do not match.
+ *
+ * @param {HTMLCanvas} source_img The source canvas.
+ * @param {number} source_x x-coordinate of the starting pixel in the
+ *     source image.
+ * @param {number} source_y y-coordinate of the starting pixel in the
+ *     source image.
+ * @param {number} source_width width of the source image to draw.
+ * @param {number} source_height Height of the source image to draw.
+ * @param {number} dest_mip on which mip level to draw to.
+ * @param {number} dest_x x-coordinate of the starting pixel in the
+ *     destination texture.
+ * @param {number} dest_y y-coordinate of the starting pixel in the
+ *     destination texture.
+ * @param {number} dest_width width of the dest image.
+ * @param {number} dest_height height of the dest image.
+ * @param {number} opt_face The face number if this is a cube map.
+ */
+o3d.Texture.prototype.drawImageFromCanvas_ =
+    function(source_canvas, source_x, source_y, source_width, source_height,
+             dest_mip, dest_x, dest_y, dest_width, dest_height, opt_face) {
+  var canvas = o3d.Bitmap.getScratchCanvas_();
+  canvas.width = dest_width;
+  canvas.height = dest_height;
+
+  // Get a scratch canvas and set its size to that of the source material.
+  // Set up transformation so that the draw into the canvas fill it with the
+  // source bitmap.
+  var context = canvas.getContext('2d');
+  context.save();
+
+  context.translate(-source_x, -source_y);
+  context.scale(dest_width / source_width,
+                dest_height / source_height);
+
+  // Draw the source image into the canvas, filling it.
+  context.drawImage(
+      source_canvas, 0, 0, source_canvas.width, source_canvas.height);
+
+  // Call texSubImage2D to upload the source image from the scratch canvas
+  // to the texture.
+  var gl = this.gl;
+  gl.bindTexture(this.texture_target_, this.texture_);
+  var format = this.getGLTextureFormat_();
+
+  //*/
+  // TODO(petersont): Replace this with a call to texSubImage2D once
+  // browsers support it.
+  gl.texImage2D(this.getTexImage2DTarget_(opt_face), dest_mip, gl.RGBA,
+      gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+  /*/
+  gl.texSubImage2D(target, 0, dest_x, dest_y, dest_width, dest_height,
+      gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+  //*/
+  this.texture_width_ = canvas.width;
+  this.texture_height_ = canvas.height;
+
+  context.restore();
 };
 
 
 /**
  * Sets the values of the data stored in the texture.
  *
- * It is not recommend that you call this for large textures but it is useful
- * for making simple ramps or noise textures for shaders.
- *
- * NOTE: the number of values must equal the size of the texture * the number
- *  of elements. In other words, for a XRGB8 texture there must be
- *  width * height * 3 values. For an ARGB8, ABGR16F or ABGR32F texture there
- *  must be width * height * 4 values. For an R32F texture there must be
- *  width * height values.
- *
- * NOTE: the order of channels is R G B for XRGB8 textures and R G B A
- * for ARGB8, ABGR16F and ABGR32F textures so for example for XRGB8 textures
- *
- * [1, 0, 0] = a red pixel
- * [0, 0, 1] = a blue pixel
- *
- * For ARGB8, ABGR16F, ABGR32F textures
- *
- * [1, 0, 0, 0] = a red pixel with zero alpha
- * [1, 0, 0, 1] = a red pixel with one alpha
- * [0, 0, 1, 1] = a blue pixel with one alpha
- *
  * @param {number} level the mip level to update.
  * @param {number} values Values to be stored in the buffer.
+ * @param {o3d.TextureCUBE.CubeFace} opt_face The face to set if this is a cube
+ *     texture.
+ * @private
  */
-o3d.Texture.prototype.set =
-    function(level, values) {
-  var target = this.texture_target_;
-  if (target == this.gl.TEXTURE_CUBE_MAP) {
-    target = this.gl.TEXTURE_CUBE_MAP_POSITIVE_X + face;
-  }
-
-  var pixels = new WebGLUnsignedByteArray(values.length);
+o3d.Texture.prototype.setValues_ = function(level, values, opt_face) {
+  var pixels = new Uint8Array(values.length);
   for (var i = 0; i < values.length; ++i) {
     pixels[i] = Math.min(255, Math.max(0, values[i] * 256.0));
   }
 
   var format = this.getGLTextureFormat_();
+  this.gl.bindTexture(this.texture_target_, this.texture_);
 
-  this.gl.bindTexture(target, this.texture_);
-  this.gl.texSubImage2D(
-      target, level, 0, 0, this.texture_width_, this.texture_height_,
+  this.gl.texSubImage2D(this.getTexImage2DTarget_(opt_face),
+      level, 0, 0, this.texture_width_, this.texture_height_,
       format, this.gl.UNSIGNED_BYTE, pixels);
+};
+
+
+/**
+ * Initializes this Texture2D object of the specified size and format and
+ * reserves the necessary resources for it.
+ *
+ * Note: If enable_render_surfaces is true, then the dimensions must be a
+ * power of two.
+ *
+ * @param {number} texture_target The apropriate value for texture_target.
+ * @param {number} width The width of the texture area in texels (max = 2048)
+ * @param {number} height The height of the texture area in texels (max = 2048)
+ * @param {o3d.Texture.Format} format The memory format of each texel
+ * @param {number} levels The number of mipmap levels.  Use zero to create the
+ *     compelete mipmap chain.
+ * @param {boolean} enable_render_surfaces If true, the texture object will
+ *     expose RenderSurface objects through GetRenderSurface(...).
+ * @return {!o3d.Texture2D}  The Texture2D object.
+ */
+o3d.Texture.prototype.initWithTarget_ =
+    function(texture_target, width, height, format, levels,
+        enable_render_surfaces, debug) {
+  this.width = width;
+  this.height = height;
+  this.format = format;
+  this.levels = levels;
+  this.texture_ = this.gl.createTexture();
+  this.texture_target_ = texture_target;
+
+  if (width != undefined && height != undefined) {
+    this.gl.bindTexture(this.texture_target_, this.texture_);
+
+    var format = this.getGLTextureFormat_();
+
+    // TODO(petersont): remove this allocation once Firefox supports
+    // passing null as argument to this form of ... some function.
+    var pixels = new Uint8Array(width * height * 4);
+
+    var canvas = o3d.Bitmap.getScratchCanvas_();
+    canvas.width = width;
+    canvas.height = height;
+
+    var numFaces = 1;
+    if (this.texture_target_ == this.gl.TEXTURE_CUBE_MAP) {
+      numFaces = 6;
+    }
+
+    for (var face = 0; face < numFaces; ++face) {
+      this.gl.texImage2D(this.getTexImage2DTarget_(face), 0, format, width,
+          height, 0, format, this.gl.UNSIGNED_BYTE, pixels);
+    }
+
+    this.texture_width_ = width;
+    this.texture_height_ = height;
+  }
 };
 
 
@@ -340,6 +487,7 @@ o3d.inherit('Texture2D', 'Texture');
 o3d.ParamObject.setUpO3DParam_(o3d.Texture2D, 'width', 'ParamInteger');
 o3d.ParamObject.setUpO3DParam_(o3d.Texture2D, 'height', 'ParamInteger');
 
+
 /**
  * Initializes this Texture2D object of the specified size and format and
  * reserves the necessary resources for it.
@@ -358,26 +506,8 @@ o3d.ParamObject.setUpO3DParam_(o3d.Texture2D, 'height', 'ParamInteger');
  */
 o3d.Texture2D.prototype.init_ =
     function(width, height, format, levels, enable_render_surfaces) {
-  this.width = width;
-  this.height = height;
-  this.format = format;
-  this.levels = levels;
-  this.texture_ = this.gl.createTexture();
-  this.texture_target_ = this.gl.TEXTURE_2D;
-
-  if (width != undefined && height != undefined) {
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture_);
-
-    var format = this.getGLTextureFormat_();
-
-    // TODO(petersont): remove this allocation once Firefox supports
-    // passing null as argument to this form of ... some function.
-    var pixels = new WebGLUnsignedByteArray(width * height * 4);
-    this.gl.texImage2D(this.gl.TEXTURE_2D, 0, format, width, height,
-        0, format, this.gl.UNSIGNED_BYTE, pixels);
-    this.texture_width_ = width;
-    this.texture_height_ = height;
-  }
+  this.initWithTarget_(this.gl.TEXTURE_2D,
+      width, height, format, levels, enable_render_surfaces);
 };
 
 
@@ -397,6 +527,39 @@ o3d.Texture2D.prototype.getRenderSurface =
   }
 
   return this.renderSurfaces_[mip_level];
+};
+
+
+/**
+ * Sets the values of the data stored in the texture.
+ *
+ * It is not recommend that you call this for large textures but it is useful
+ * for making simple ramps or noise textures for shaders.
+ *
+ * NOTE: the number of values must equal the size of the texture * the number
+ *  of elements. In other words, for a XRGB8 texture there must be
+ *  width * height * 3 values. For an ARGB8, ABGR16F or ABGR32F texture there
+ *  must be width * height * 4 values. For an R32F texture there must be
+ *  width * height values.
+ *
+ * NOTE: the order of channels is R G B for XRGB8 textures and R G B A
+ * for ARGB8, ABGR16F and ABGR32F textures so for example for XRGB8 textures
+ *
+ * [1, 0, 0] = a red pixel
+ * [0, 0, 1] = a blue pixel
+ *
+ * For ARGB8, ABGR16F, ABGR32F textures
+ *
+ * [1, 0, 0, 0] = a red pixel with zero alpha
+ * [1, 0, 0, 1] = a red pixel with one alpha
+ * [0, 0, 1, 1] = a blue pixel with one alpha
+ *
+ * @param {number} level the mip level to update.
+ * @param {values} values Values to be stored in the buffer.
+ */
+o3d.Texture2D.prototype.set =
+    function(level, values) {
+  this.setValues_(level, values);
 };
 
 
@@ -421,7 +584,58 @@ o3d.Texture2D.prototype.getRenderSurface =
  */
 o3d.Texture2D.prototype.setRect =
     function(level, destination_x, destination_y, source_width, values) {
-  o3d.notImplemented();
+  var format = this.getGLTextureFormat_();
+  var numChannels = (format == this.gl.RGB ? 3 : 4);
+  var source_height = (values.length / numChannels) / source_width;
+
+  // If completely clipped off, do nothing and return.
+  if (destination_x > this.width || destination_y > this.height ||
+      destination_x + source_width < 0 || destination_y + source_height < 0) {
+    return;
+  }
+
+  // Size of the unclipped, remaining rectangle.
+  var size_x = source_width;
+  if (destination_x < 0) {
+    size_x += destination_x;
+  }
+  if (destination_x + source_width > this.width) {
+    size_x -= (destination_x + source_width) - this.width;
+  }
+
+  var size_y = source_height;
+  if (destination_y < 0) {
+    size_y += destination_y;
+  }
+  if (destination_y + source_height > this.height) {
+    size_y -= (destination_y + source_height) - this.height;
+  }
+
+  // The upper left corner of the rectangle that is not clipped and will be
+  // copied into the texture.
+  var start_x = (destination_x < 0) ? Math.abs(destination_x) : 0;
+  var start_y = (destination_y < 0) ? Math.abs(destination_y) : 0;
+
+  var keptPixels = new Uint8Array(size_x * size_y * numChannels);
+  var count = 0;
+  for (var y = 0; y < size_y; ++y) {
+    for (var x = 0; x < size_x; ++x) {
+      var t = (((start_y + y) * source_width) + (start_x + x)) * numChannels;
+      keptPixels[count++] = Math.min(255, Math.max(0, values[t] * 256.0));
+      keptPixels[count++] = Math.min(255, Math.max(0, values[t + 1] * 256.0));
+      keptPixels[count++] = Math.min(255, Math.max(0, values[t + 2] * 256.0));
+      keptPixels[count++] = Math.min(255, Math.max(0, values[t + 3] * 256.0));
+    }
+  }
+
+  // The (x, y) at which to begin drawing the rectangle on the original texture,
+  // measured from the *BOTTOM* left hand corner.
+  var where_x = Math.max(destination_x, 0);
+  var where_y = this.height - (Math.max(destination_y, 0) + size_y);
+
+  this.gl.bindTexture(this.texture_target_, this.texture_);
+  this.gl.texSubImage2D(this.gl.TEXTURE_2D, level, where_x, where_y,
+      size_x, size_y, format, this.gl.UNSIGNED_BYTE, keptPixels);
 };
 
 
@@ -451,7 +665,7 @@ o3d.Texture2D.prototype.getRect =
  * @param {o3d.Bitmap} bitmap The bitmap to copy data from.
  */
 o3d.Texture2D.prototype.setFromBitmap = function(bitmap) {
-  // Whether resize the texture to power-of-two size
+  // Whether to resize the texture to power-of-two size.
   var resize_to_pot = bitmap.defer_mipmaps_to_texture_;
   this.setFromCanvas_(bitmap.canvas_,
                       resize_to_pot,
@@ -461,12 +675,11 @@ o3d.Texture2D.prototype.setFromBitmap = function(bitmap) {
 
 
 /**
- * Copy pixels from source bitmap to certain mip level.
+ * Copy pixels from source bitmap to certain face and mip level.
  * Scales if the width and height of source and dest do not match.
- * TODO(petersont): Takes optional arguments.
  *
  * @param {o3d.Bitmap} source_img The source bitmap.
- * @param {number} source_mip which mip from the source to copy from.
+ * @param {number} source_mip which mip of the source to copy from.
  * @param {number} source_x x-coordinate of the starting pixel in the
  *     source image.
  * @param {number} source_y y-coordinate of the starting pixel in the
@@ -478,33 +691,15 @@ o3d.Texture2D.prototype.setFromBitmap = function(bitmap) {
  *     destination texture.
  * @param {number} dest_y y-coordinate of the starting pixel in the
  *     destination texture.
- * @param {number} dest_width width of the dest image.
- * @param {number} dest_height height of the dest image.
+ * @param {number} dest_width width of the destination image.
+ * @param {number} dest_height height of the destination image.
  */
 o3d.Texture2D.prototype.drawImage =
     function(source_img, source_mip, source_x, source_y, source_width,
-             source_height, dest_mip, dest_x, dest_y, dest_width,
-             dest_height) {
-  var canvas = o3d.Bitmap.getScratchCanvas_();
-  canvas.width = dest_width;
-  canvas.height = dest_height;
-
-  var context = canvas.getContext('2d');
-
-  context.translate(-source_x, -source_y);
-  context.scale(dest_width / source_width,
-                dest_height / source_height);
-
-  context.drawImage(source_img.canvas_,
-      0, 0, source_img.canvas_.width, source_img.canvas_.height);
-
-  this.gl.bindTexture(this.gl.TEXTURE_2D, this.texture_);
-  // TODO(petersont): replace this with a call to texSubImage2D once
-  // Firefox supports it.
-  this.gl.texImage2D(this.gl.TEXTURE_2D, 0, canvas);
-  // this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, canvas);
-  this.texture_width_ = canvas.width;
-  this.texture_height_ = canvas.height;
+             source_height, dest_mip, dest_x, dest_y, dest_width, dest_height) {
+  this.drawImageFromCanvas_(source_img.canvas_,
+      source_x, source_y, source_width, source_height, dest_mip,
+      dest_x, dest_y, dest_width, dest_height);
 };
 
 
@@ -582,25 +777,9 @@ o3d.ParamObject.setUpO3DParam_(o3d.TextureCUBE, 'edgeLength', 'ParamInteger');
  * @private
  */
 o3d.TextureCUBE.prototype.init_ =
-    function(edgeLength, format, levels, enableRenderSurfaces) {
-  this.edgeLength = edgeLength;
-  this.texture_ = this.gl.createTexture();
-  this.texture_target_ = this.gl.TEXTURE_CUBE_MAP;
-  this.texture_width_ = edgeLength;
-  this.texture_height_ = edgeLength;
-
-  this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, this.texture_);
-  // TODO(petersont): remove this allocation once Firefox supports
-  // passing null as argument to this form of texImage2D.
-  var t = new WebGLUnsignedByteArray(edgeLength * edgeLength * 4);
-  for (var ii = 0; ii < 6; ++ii) {
-    this.gl.texImage2D(this.gl.TEXTURE_CUBE_MAP_POSITIVE_X + ii,
-                       0, this.gl.RGBA, edgeLength, edgeLength, 0,
-                       this.gl.RGBA, this.gl.UNSIGNED_BYTE, t);
-  }
-
-  this.texture_width_ = edgeLength;
-  this.texture_height_ = edgeLength;
+    function(edgeLength, format, levels, enable_render_surfaces, debug) {
+  this.initWithTarget_(this.gl.TEXTURE_CUBE_MAP,
+      edgeLength, edgeLength, format, levels, enable_render_surfaces, debug);
 };
 
 
@@ -635,7 +814,8 @@ o3d.TextureCUBE.prototype.getRenderSurface =
  */
 o3d.TextureCUBE.prototype.set =
     function(face, level, values) {
-  o3d.notImplemented();
+  this.setValues_(level, values, face);
+  this.faces_set_[face] = true;
 };
 
 
@@ -694,20 +874,17 @@ o3d.TextureCUBE.prototype.getRect =
  */
 o3d.TextureCUBE.prototype.setFromBitmap =
     function(face, bitmap) {
-
   var generate_mipmaps = bitmap.defer_mipmaps_to_texture_;
   for (var f in this.faces_set_) {
     generate_mipmaps = generate_mipmaps &&
-        (this.faces_set_[f] || f==face);
+        (this.faces_set_[f] || f == face);
   }
-
   var resize_to_pot = bitmap.defer_mipmaps_to_texture_;
   this.setFromCanvas_(bitmap.canvas_,
                       resize_to_pot,
                       false, // Never flip cube maps.
                       generate_mipmaps,
                       face);
-
   this.faces_set_[face] = true;
 };
 
@@ -738,7 +915,9 @@ o3d.TextureCUBE.prototype.drawImage =
     function(source_img, source_mip, source_x, source_y, source_width,
              source_height, face, dest_mip, dest_x, dest_y, dest_width,
              dest_height) {
-  o3d.notImplemented();
+  this.drawImageFromCanvas_(source_img.canvas_,
+      source_x, source_y, source_width, source_height, dest_mip,
+      dest_x, dest_y, dest_width, dest_height, face);
 };
 
 

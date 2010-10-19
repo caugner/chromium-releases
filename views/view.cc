@@ -314,6 +314,13 @@ void View::Focus() {
   FocusManager* focus_manager = GetFocusManager();
   if (focus_manager)
     focus_manager->ClearNativeFocus();
+
+  // Notify assistive technologies of the focus change.
+  NotifyAccessibilityEvent(AccessibilityTypes::EVENT_FOCUS);
+}
+
+void View::NotifyAccessibilityEvent(AccessibilityTypes::Event event_type) {
+  NotifyAccessibilityEvent(event_type, true);
 }
 
 void View::SetHotTracked(bool flag) {
@@ -393,16 +400,12 @@ void View::ProcessPaint(gfx::Canvas* canvas) {
     // where this view is located (related to its parent).
     canvas->TranslateInt(MirroredX(), y());
 
-    // Save the state again, so that any changes don't effect PaintChildren.
-    canvas->Save();
-
     // If the View we are about to paint requested the canvas to be flipped, we
     // should change the transform appropriately.
-    bool flip_canvas = FlipCanvasOnPaintForRTLUI();
-    if (flip_canvas) {
+    canvas->Save();
+    if (FlipCanvasOnPaintForRTLUI()) {
       canvas->TranslateInt(width(), 0);
       canvas->ScaleInt(-1, 1);
-      canvas->Save();
     }
 
     Paint(canvas);
@@ -410,10 +413,8 @@ void View::ProcessPaint(gfx::Canvas* canvas) {
     // We must undo the canvas mirroring once the View is done painting so that
     // we don't pass the canvas with the mirrored transform to Views that
     // didn't request the canvas to be flipped.
-    if (flip_canvas)
-      canvas->Restore();
-
     canvas->Restore();
+
     PaintChildren(canvas);
   }
 
@@ -667,15 +668,16 @@ bool View::IsFocusable() const {
   return focusable_ && IsEnabled() && IsVisible();
 }
 
-void View::ThemeChanged() {
+void View::PropagateThemeChanged() {
   for (int i = GetChildViewCount() - 1; i >= 0; --i)
-    GetChildViewAt(i)->ThemeChanged();
+    GetChildViewAt(i)->PropagateThemeChanged();
+  OnThemeChanged();
 }
 
-void View::NotifyLocaleChanged() {
-  LocaleChanged();
+void View::PropagateLocaleChanged() {
   for (int i = GetChildViewCount() - 1; i >= 0; --i)
-    GetChildViewAt(i)->NotifyLocaleChanged();
+    GetChildViewAt(i)->PropagateLocaleChanged();
+  OnLocaleChanged();
 }
 
 #ifndef NDEBUG
@@ -1253,6 +1255,12 @@ void View::ConvertPointToScreen(const View* src, gfx::Point* p) {
     widget->GetBounds(&r, false);
     p->SetPoint(p->x() + r.x(), p->y() + r.y());
   }
+}
+
+gfx::Rect View::GetScreenBounds() const {
+  gfx::Point origin;
+  View::ConvertPointToScreen(this, &origin);
+  return gfx::Rect(origin, size());
 }
 
 /////////////////////////////////////////////////////////////////////////////

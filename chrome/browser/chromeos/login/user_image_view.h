@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_USER_IMAGE_VIEW_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_USER_IMAGE_VIEW_H_
+#pragma once
 
 #include "views/controls/button/button.h"
 #include "views/view.h"
@@ -60,7 +61,7 @@ class UserImageView : public views::View,
 
  protected:
   // views::View overrides:
-  virtual void LocaleChanged();
+  virtual void OnLocaleChanged();
 
  private:
   // Delete and recreate native controls that fail to update preferred size

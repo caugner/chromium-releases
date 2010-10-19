@@ -4,6 +4,7 @@
 
 #ifndef SKIA_EXT_PLATFORM_DEVICE_MAC_H_
 #define SKIA_EXT_PLATFORM_DEVICE_MAC_H_
+#pragma once
 
 #import <ApplicationServices/ApplicationServices.h>
 #include "third_party/skia/include/core/SkDevice.h"
@@ -59,18 +60,6 @@ class PlatformDevice : public SkDevice {
   // Loads the specified Skia transform into the device context
   static void LoadTransformToCGContext(CGContextRef context,
                                        const SkMatrix& matrix);
-
-  // Function pointer used by the processPixels method for setting the alpha
-  // value of a particular pixel.
-  typedef void (*adjustAlpha)(uint32_t* pixel);
-
-  // Loops through each of the pixels in the specified range, invoking
-  // adjustor for the alpha value of each pixel.
-  virtual void processPixels(int x,
-                             int y,
-                             int width,
-                             int height,
-                             adjustAlpha adjustor) = 0;
 };
 
 }  // namespace skia

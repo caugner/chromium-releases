@@ -4,27 +4,30 @@
 
 #ifndef CHROME_RENDERER_WEBPLUGIN_DELEGATE_PEPPER_H_
 #define CHROME_RENDERER_WEBPLUGIN_DELEGATE_PEPPER_H_
+#pragma once
 
 #include "build/build_config.h"
 
-#include <map>
 #include <string>
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/id_map.h"
 #include "base/ref_counted.h"
-#include "base/task.h"
 #include "base/weak_ptr.h"
+#include "base/task.h"
 #include "chrome/renderer/pepper_devices.h"
-#include "chrome/renderer/render_view.h"
 #include "chrome/renderer/command_buffer_proxy.h"
 #include "gfx/native_widget_types.h"
 #include "gfx/rect.h"
 #include "third_party/npapi/bindings/npapi.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFileChooserCompletion.h"
 #include "webkit/glue/plugins/webplugin_delegate.h"
-#include "webkit/glue/webcursor.h"
+
+class FilePath;
+class RenderView;
+class WebCursor;
+class WebPluginDelegateProxy;
 
 namespace NPAPI {
 class PluginInstance;
@@ -321,13 +324,13 @@ class WebPluginDelegatePepper : public webkit_glue::WebPluginDelegate,
 #if defined(ENABLE_GPU)
   // The command buffer used to issue commands to the nested GPU plugin.
   CommandBufferProxy* command_buffer_;
+
+  // Runnable methods that must be cancelled when the 3D context is destroyed.
+  ScopedRunnableMethodFactory<WebPluginDelegatePepper> method_factory3d_;
 #endif
 
   // The id of the current find operation, or -1 if none is in process.
   int find_identifier_;
-
-  // Runnable methods that must be cancelled when the 3D context is destroyed.
-  ScopedRunnableMethodFactory<WebPluginDelegatePepper> method_factory3d_;
 
   // When a choose file operation is outstanding, this will contain a
   // pointer to the callback specified by the plugin. Will be NULL otherwise.

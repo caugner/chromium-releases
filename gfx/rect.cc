@@ -12,9 +12,8 @@
 #include <gdk/gdk.h>
 #endif
 
-#include <iostream>
+#include <ostream>
 
-#include "base/logging.h"
 #include "gfx/insets.h"
 
 namespace {
@@ -115,6 +114,18 @@ void Rect::Offset(int horizontal, int vertical) {
 
 bool Rect::operator==(const Rect& other) const {
   return origin_ == other.origin_ && size_ == other.size_;
+}
+
+bool Rect::operator<(const Rect& other) const {
+  if (origin_ == other.origin_) {
+    if (width() == other.width()) {
+      return height() < other.height();
+    } else {
+      return width() < other.width();
+    }
+  } else {
+    return origin_ < other.origin_;
+  }
 }
 
 #if defined(OS_WIN)

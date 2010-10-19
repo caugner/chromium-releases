@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_SYNC_ENGINE_SYNCER_TYPES_H_
 #define CHROME_BROWSER_SYNC_ENGINE_SYNCER_TYPES_H_
+#pragma once
 
 #include <map>
 #include <vector>
@@ -145,7 +146,7 @@ struct SyncerEvent {
 };
 
 struct SyncerShutdownEvent {
-  SyncerShutdownEvent(Syncer *syncer_ptr) : syncer(syncer_ptr) {}
+  explicit SyncerShutdownEvent(Syncer *syncer_ptr) : syncer(syncer_ptr) {}
   Syncer* syncer;
   static bool IsChannelShutdownEvent(Syncer* syncer) {
     return true;

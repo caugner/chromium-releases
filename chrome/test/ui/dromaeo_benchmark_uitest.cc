@@ -7,21 +7,22 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/javascript_test_util.h"
-#include "chrome/test/ui/ui_test.h"
+#include "chrome/test/ui/ui_perf_test.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 
 namespace {
 
-const wchar_t kRunDromaeo[] = L"run-dromaeo-benchmark";
+const char kRunDromaeo[] = "run-dromaeo-benchmark";
 
-class DromaeoTest : public UITest {
+class DromaeoTest : public UIPerfTest {
  public:
   typedef std::map<std::string, std::string> ResultsMap;
 

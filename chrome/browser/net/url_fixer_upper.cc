@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/environment.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/string_util.h"
@@ -120,7 +121,7 @@ static std::string FixupHomedir(const std::string& text) {
   DCHECK(text.length() > 0 && text[0] == '~');
 
   if (text.length() == 1 || text[1] == '/') {
-    const char* home = getenv("HOME");
+    const char* home = getenv(base::env_vars::kHome);
     if (URLFixerUpper::home_directory_override)
       home = URLFixerUpper::home_directory_override;
     // We'll probably break elsewhere if $HOME is undefined, but check here
@@ -169,7 +170,7 @@ static std::string FixupPath(const std::string& text) {
   // Here, we know the input looks like a file.
   GURL file_url = net::FilePathToFileURL(FilePath(filename));
   if (file_url.is_valid()) {
-    return WideToUTF8(net::FormatUrl(file_url, std::wstring(),
+    return UTF16ToUTF8(net::FormatUrl(file_url, std::string(),
         net::kFormatUrlOmitUsernamePassword, UnescapeRule::NORMAL, NULL,
         NULL, NULL));
   }
@@ -567,7 +568,7 @@ GURL URLFixerUpper::FixupRelativeFile(const FilePath& base_dir,
   if (is_file) {
     GURL file_url = net::FilePathToFileURL(full_path);
     if (file_url.is_valid())
-      return GURL(WideToUTF8(net::FormatUrl(file_url, std::wstring(),
+      return GURL(UTF16ToUTF8(net::FormatUrl(file_url, std::string(),
           net::kFormatUrlOmitUsernamePassword, UnescapeRule::NORMAL, NULL,
           NULL, NULL)));
     // Invalid files fall through to regular processing.

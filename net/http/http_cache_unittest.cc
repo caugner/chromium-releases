@@ -9,6 +9,7 @@
 #include "base/scoped_vector.h"
 #include "base/string_util.h"
 #include "net/base/cache_type.h"
+#include "net/base/cert_status_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_log_unittest.h"
@@ -667,6 +668,7 @@ class MockBlockingBackendFactory : public net::HttpCache::BackendFactory {
     }
   }
 
+  disk_cache::Backend** backend() { return backend_; }
   void set_fail(bool fail) { fail_ = fail; }
 
   net::CompletionCallback* callback() { return callback_; }
@@ -678,6 +680,20 @@ class MockBlockingBackendFactory : public net::HttpCache::BackendFactory {
   net::CompletionCallback* callback_;
   bool block_;
   bool fail_;
+};
+
+class DeleteCacheCompletionCallback : public TestCompletionCallback {
+ public:
+  explicit DeleteCacheCompletionCallback(MockHttpCache* cache)
+      : cache_(cache) {}
+
+  virtual void RunWithParams(const Tuple1<int>& params) {
+    delete cache_;
+    TestCompletionCallback::RunWithParams(params);
+  }
+
+ private:
+  MockHttpCache* cache_;
 };
 
 //-----------------------------------------------------------------------------
@@ -2005,11 +2021,54 @@ TEST(HttpCache, DeleteCacheWaitingForBackend) {
   // We cannot call FinishCreation because the factory itself will go away with
   // the cache, so grab the callback and attempt to use it.
   net::CompletionCallback* callback = factory->callback();
+  disk_cache::Backend** backend = factory->backend();
 
   cache.reset();
   MessageLoop::current()->RunAllPending();
 
+  *backend = NULL;
   callback->Run(net::ERR_ABORTED);
+}
+
+// Tests that we can delete the cache while creating the backend, from within
+// one of the callbacks.
+TEST(HttpCache, DeleteCacheWaitingForBackend2) {
+  MockBlockingBackendFactory* factory = new MockBlockingBackendFactory();
+  MockHttpCache* cache = new MockHttpCache(factory);
+
+  DeleteCacheCompletionCallback cb(cache);
+  disk_cache::Backend* backend;
+  int rv = cache->http_cache()->GetBackend(&backend, &cb);
+  EXPECT_EQ(net::ERR_IO_PENDING, rv);
+
+  // Now let's queue a regular transaction
+  MockHttpRequest request(kSimpleGET_Transaction);
+
+  scoped_ptr<Context> c(new Context());
+  c->result = cache->http_cache()->CreateTransaction(&c->trans);
+  EXPECT_EQ(net::OK, c->result);
+
+  c->trans->Start(&request, &c->callback, net::BoundNetLog());
+
+  // And another direct backend request.
+  TestCompletionCallback cb2;
+  rv = cache->http_cache()->GetBackend(&backend, &cb2);
+  EXPECT_EQ(net::ERR_IO_PENDING, rv);
+
+  // Just to make sure that everything is still pending.
+  MessageLoop::current()->RunAllPending();
+
+  // The request should be queued.
+  EXPECT_FALSE(c->callback.have_result());
+
+  // Generate the callback.
+  factory->FinishCreation();
+  rv = cb.WaitForResult();
+
+  // The cache should be gone by now.
+  MessageLoop::current()->RunAllPending();
+  EXPECT_EQ(net::OK, c->callback.GetResult(c->result));
+  EXPECT_FALSE(cb2.have_result());
 }
 
 TEST(HttpCache, TypicalGET_ConditionalRequest) {

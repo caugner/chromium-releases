@@ -5,7 +5,6 @@
 #include "views/view_text_utils.h"
 
 #include "app/bidi_line_iterator.h"
-#include "base/i18n/rtl.h"
 #include "base/i18n/word_iterator.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
@@ -63,7 +62,7 @@ void DrawTextAndPositionUrl(gfx::Canvas* canvas,
   if (link && rect) {
     gfx::Size sz = link->GetPreferredSize();
     gfx::Insets insets = link->GetInsets();
-    WrapIfWordDoesntFit(sz.width(), font.height(), position, bounds);
+    WrapIfWordDoesntFit(sz.width(), font.GetHeight(), position, bounds);
     int x = position->width();
     int y = position->height();
 
@@ -117,11 +116,11 @@ void DrawTextStartingFrom(gfx::Canvas* canvas,
     else
       word = text;  // Draw the whole text at once.
 
-    int w = font.GetStringWidth(word), h = font.height();
+    int w = font.GetStringWidth(word), h = font.GetHeight();
     gfx::CanvasSkia::SizeStringInt(word, font, &w, &h, flags);
 
     // If we exceed the boundaries, we need to wrap.
-    WrapIfWordDoesntFit(w, font.height(), position, bounds);
+    WrapIfWordDoesntFit(w, font.GetHeight(), position, bounds);
 
     int x = label->MirroredXCoordinateInsideView(position->width()) +
                                                  bounds.x();
@@ -131,7 +130,7 @@ void DrawTextStartingFrom(gfx::Canvas* canvas,
       // draw the trailing space (if one exists after the LTR text) to the
       // left of the LTR string.
       if (ltr_within_rtl && word[word.size() - 1] == L' ') {
-        int space_w = font.GetStringWidth(L" "), space_h = font.height();
+        int space_w = font.GetStringWidth(L" "), space_h = font.GetHeight();
         gfx::CanvasSkia::SizeStringInt(L" ", font, &space_w, &space_h, flags);
         x += space_w;
       }
@@ -139,13 +138,13 @@ void DrawTextStartingFrom(gfx::Canvas* canvas,
     int y = position->height() + bounds.y();
 
     // Draw the text on the screen (mirrored, if RTL run).
-    canvas->DrawStringInt(word, font, text_color, x, y, w, font.height(),
+    canvas->DrawStringInt(word, font, text_color, x, y, w, font.GetHeight(),
                           flags);
 
     if (word.size() > 0 && word[word.size() - 1] == L'\x0a') {
       // When we come across '\n', we move to the beginning of the next line.
       position->set_width(0);
-      position->Enlarge(0, font.height());
+      position->Enlarge(0, font.GetHeight());
     } else {
       // Otherwise, we advance position to the next word.
       position->Enlarge(w, 0);

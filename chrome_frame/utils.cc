@@ -7,6 +7,8 @@
 #include <shlobj.h>
 #include <wininet.h>
 
+#include <atlsecurity.h>
+
 #include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/lazy_instance.h"
@@ -16,10 +18,12 @@
 #include "base/scoped_bstr_win.h"
 #include "base/scoped_comptr_win.h"
 #include "base/scoped_variant_win.h"
+#include "base/string_number_conversions.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/thread_local.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/chrome_frame_distribution.h"
 #include "chrome_frame/extra_system_apis.h"
@@ -40,14 +44,19 @@ const wchar_t kContentAttribName[] = L"content";
 const wchar_t kXUACompatValue[] = L"x-ua-compatible";
 const wchar_t kBodyTag[] = L"body";
 const wchar_t kChromeContentPrefix[] = L"chrome=";
+const char kGCFProtocol[] = "gcf";
 const wchar_t kChromeProtocolPrefix[] = L"gcf:";
 const wchar_t kChromeMimeType[] = L"application/chromepage";
 const wchar_t kPatchProtocols[] = L"PatchProtocols";
+const wchar_t kChromeFrameConfigKey[] = L"Software\\Google\\ChromeFrame";
+const wchar_t kRenderInGCFUrlList[] = L"RenderInGcfUrls";
+const wchar_t kRenderInHostUrlList[] = L"RenderInHostUrls";
+const wchar_t kEnableGCFRendererByDefault[] = L"IsDefaultRenderer";
+const wchar_t kIexploreProfileName[] = L"iexplore";
+const wchar_t kRundllProfileName[] = L"rundll32";
 
-static const wchar_t kChromeFrameConfigKey[] =
-    L"Software\\Google\\ChromeFrame";
-static const wchar_t kChromeFrameOptinUrlsKey[] = L"OptinUrls";
-static const wchar_t kEnableGCFProtocol[] = L"EnableGCFProtocol";
+static const wchar_t kAllowUnsafeURLs[] = L"AllowUnsafeURLs";
+static const wchar_t kEnableBuggyBhoIntercept[] = L"EnableBuggyBhoIntercept";
 
 static const wchar_t kChromeFrameNPAPIKey[] =
     L"Software\\MozillaPlugins\\@google.com/ChromeFrame,version=1.0";
@@ -57,7 +66,7 @@ static const wchar_t kChromeFramePersistNPAPIReg[] = L"PersistNPAPIReg";
 const wchar_t kChromeFrameOmahaSuffix[] = L"-cf";
 const wchar_t kDevChannelName[] = L"-dev";
 
-const wchar_t kChromeAttachExternalTabPrefix[] = L"attach_external_tab";
+const char kAttachExternalTabPrefix[] = "attach_external_tab";
 
 // Indicates that we are running in a test environment, where execptions, etc
 // are handled by the chrome test crash server.
@@ -534,23 +543,6 @@ bool GetModuleVersion(HMODULE module, uint32* high, uint32* low) {
   return ok;
 }
 
-bool ParseVersion(const std::wstring& version, uint32* high, uint32* low) {
-  DCHECK(high);
-  if (!isdigit(version[0]))
-    return false;
-
-  *high = _wtoi(version.c_str());
-  if (low) {
-    *low = 0;
-    size_t i = version.find(L'.');
-    if (i != std::wstring::npos) {
-      *low = _wtoi(version.c_str() + i + 1);
-    }
-  }
-
-  return true;
-}
-
 HMODULE GetModuleFromAddress(void* address) {
   MEMORY_BASIC_INFORMATION info = {0};
   ::VirtualQuery(address, &info, sizeof(info));
@@ -692,20 +684,53 @@ bool DeleteConfigValue(const wchar_t* value_name) {
   return false;
 }
 
+bool IsGcfDefaultRenderer() {
+  // TODO(tommi): Implement caching for this config value as it gets
+  // checked frequently.
+  DWORD is_default = 0;  // NOLINT
+  RegKey config_key;
+  if (config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey, KEY_READ)) {
+    config_key.ReadValueDW(kEnableGCFRendererByDefault, &is_default);
+  }
+
+  return is_default != 0;
+}
+
 bool IsOptInUrl(const wchar_t* url) {
+  // TODO(tommi): Unit test.
   RegKey config_key;
   if (!config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey, KEY_READ))
     return false;
 
-  RegistryValueIterator optin_urls_list(config_key.Handle(),
-                                        kChromeFrameOptinUrlsKey);
-  while (optin_urls_list.Valid()) {
-    if (MatchPatternWide(url, optin_urls_list.Name()))
-      return true;
-    ++optin_urls_list;
+  bool load_in_chrome_frame = false;
+
+  const wchar_t* url_list_name = NULL;
+  int render_in_cf_by_default = FALSE;
+  config_key.ReadValueDW(kEnableGCFRendererByDefault,
+                         reinterpret_cast<DWORD*>(&render_in_cf_by_default));
+  if (render_in_cf_by_default) {
+    url_list_name = kRenderInHostUrlList;
+    load_in_chrome_frame = true;  // change the default to true.
+  } else {
+    url_list_name = kRenderInGCFUrlList;
   }
 
-  return false;
+  bool match_found = false;
+  RegistryValueIterator url_list(config_key.Handle(), url_list_name);
+  while (!match_found && url_list.Valid()) {
+    if (MatchPatternWide(url, url_list.Name())) {
+      match_found = true;
+    } else {
+      ++url_list;
+    }
+  }
+
+  if (match_found) {
+    // The lists are there to opt out of whatever is the default.
+    load_in_chrome_frame = !load_in_chrome_frame;
+  }
+
+  return load_in_chrome_frame;
 }
 
 HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
@@ -830,21 +855,19 @@ bool CheckForCFNavigation(IBrowserService* browser, bool clear_flag) {
   return ret;
 }
 
-bool IsValidUrlScheme(const std::wstring& url, bool is_privileged) {
-  if (url.empty())
+bool IsValidUrlScheme(const GURL& url, bool is_privileged) {
+  if (url.is_empty())
     return false;
 
-  GURL crack_url(url);
-
-  if (crack_url.SchemeIs(chrome::kHttpScheme) ||
-      crack_url.SchemeIs(chrome::kHttpsScheme) ||
-      crack_url.SchemeIs(chrome::kAboutScheme))
+  if (url.SchemeIs(chrome::kHttpScheme) ||
+      url.SchemeIs(chrome::kHttpsScheme) ||
+      url.SchemeIs(chrome::kAboutScheme))
     return true;
 
   // Additional checking for view-source. Allow only http and https
   // URLs in view source.
-  if (crack_url.SchemeIs(chrome::kViewSourceScheme)) {
-    GURL sub_url(crack_url.path());
+  if (url.SchemeIs(chrome::kViewSourceScheme)) {
+    GURL sub_url(url.path());
     if (sub_url.SchemeIs(chrome::kHttpScheme) ||
         sub_url.SchemeIs(chrome::kHttpsScheme))
       return true;
@@ -853,11 +876,8 @@ bool IsValidUrlScheme(const std::wstring& url, bool is_privileged) {
   }
 
   if (is_privileged &&
-      (crack_url.SchemeIs(chrome::kDataScheme) ||
-       crack_url.SchemeIs(chrome::kExtensionScheme)))
-    return true;
-
-  if (StartsWith(url, kChromeAttachExternalTabPrefix, false))
+      (url.SchemeIs(chrome::kDataScheme) ||
+       url.SchemeIs(chrome::kExtensionScheme)))
     return true;
 
   return false;
@@ -924,7 +944,9 @@ bool IsHeadlessMode() {
 }
 
 bool IsUnpinnedMode() {
-  bool unpinned = GetConfigBool(false, kChromeFrameUnpinnedMode);
+  // We only check this value once and then cache it since changing the registry
+  // once we've pinned the DLL won't have any effect.
+  static bool unpinned = GetConfigBool(false, kChromeFrameUnpinnedMode);
   return unpinned;
 }
 
@@ -1071,7 +1093,7 @@ int GetHttpResponseStatusFromBinding(IBinding* binding) {
     DWORD reserved = 0;
     if (SUCCEEDED(info->QueryInfo(HTTP_QUERY_STATUS_CODE, status, &buf_size,
                                   &flags, &reserved))) {
-      http_status = StringToInt(status);
+      base::StringToInt(status, &http_status);
     } else {
       NOTREACHED() << "Failed to get HTTP status";
     }
@@ -1106,6 +1128,19 @@ bool IsIBrowserServicePatchEnabled() {
   ProtocolPatchMethod patch_method = GetPatchMethod();
   return patch_method == PATCH_METHOD_IBROWSER;
 }
+
+bool IsSystemProcess() {
+  bool is_system = false;
+  CAccessToken process_token;
+  if (process_token.GetProcessToken(TOKEN_QUERY, GetCurrentProcess())) {
+    CSid logon_sid;
+    if (process_token.GetUser(&logon_sid)) {
+      is_system = logon_sid == Sids::System();
+    }
+  }
+  return is_system;
+}
+
 
 std::string BindStatus2Str(ULONG bind_status) {
   std::string s;
@@ -1175,7 +1210,12 @@ std::string BindStatus2Str(ULONG bind_status) {
 }
 
 std::string PiFlags2Str(DWORD flags) {
-#define ADD_PI_FLAG(x)  if (flags & x) { s.append(#x ## " "); flags &= ~x; }
+#define ADD_PI_FLAG(x)  \
+  if (flags & x) { \
+    s.append(#x ## " "); \
+    flags &= ~x; \
+  }
+
   std::string s = " flags ";
   ADD_PI_FLAG(PI_PARSE_URL);
   ADD_PI_FLAG(PI_FILTER_MODE);
@@ -1200,7 +1240,12 @@ std::string PiFlags2Str(DWORD flags) {
 }
 
 std::string Bscf2Str(DWORD flags) {
-#define ADD_BSCF_FLAG(x)  if (flags & x) { s.append(#x ## " "); flags &= ~x; }
+#define ADD_BSCF_FLAG(x)  \
+  if (flags & x) {\
+    s.append(#x ## " "); \
+    flags &= ~x; \
+  }
+
   std::string s = " flags ";
   ADD_BSCF_FLAG(BSCF_FIRSTDATANOTIFICATION)
   ADD_BSCF_FLAG(BSCF_INTERMEDIATEDATANOTIFICATION)
@@ -1237,21 +1282,36 @@ HRESULT ReadStream(IStream* stream, size_t size, std::string* data) {
   return hr;
 }
 
-bool ParseAttachExternalTabUrl(const std::wstring& url, uint64* cookie,
-                               gfx::Rect* dimensions, int* disposition) {
-  if (!StartsWith(url, kChromeAttachExternalTabPrefix, true)) {
-    DLOG(WARNING) << "Invalid url passed in:"
-                  << url.c_str();
+ChromeFrameUrl::ChromeFrameUrl() {
+  Reset();
+}
+
+bool ChromeFrameUrl::Parse(const std::wstring& url) {
+  Reset();
+  parsed_url_ = GURL(url);
+
+  if (parsed_url_.is_empty())
     return false;
+
+  is_chrome_protocol_ = parsed_url_.SchemeIs(kGCFProtocol);
+  if (is_chrome_protocol_) {
+    parsed_url_ = GURL(url.c_str() + lstrlen(kChromeProtocolPrefix));
+    return true;
   }
 
-  if (!cookie || !dimensions || !disposition)
-    return false;
+  return ParseAttachExternalTabUrl();
+}
 
-  WStringTokenizer tokenizer(url, L"&");
+bool ChromeFrameUrl::ParseAttachExternalTabUrl() {
+  std::string query = parsed_url_.query();
+  if (!StartsWithASCII(query, kAttachExternalTabPrefix, false)) {
+    return parsed_url_.is_valid();
+  }
+
+  attach_to_external_tab_ = true;
+  StringTokenizer tokenizer(query, "&");
   // Skip over kChromeAttachExternalTabPrefix
   tokenizer.GetNext();
-
   // Read the following items in order.
   // 1. cookie
   // 2. disposition
@@ -1260,42 +1320,109 @@ bool ParseAttachExternalTabUrl(const std::wstring& url, uint64* cookie,
   // 5. dimension.width
   // 6. dimension.height.
   if (tokenizer.GetNext()) {
-    wchar_t* end_ptr = 0;
-    *cookie = _wcstoui64(tokenizer.token().c_str(), &end_ptr, 10);
+    char* end_ptr = 0;
+    cookie_ = _strtoui64(tokenizer.token().c_str(), &end_ptr, 10);
   } else {
     return false;
   }
 
   if (tokenizer.GetNext()) {
-    *disposition = _wtoi(tokenizer.token().c_str());
+    disposition_ = atoi(tokenizer.token().c_str());
   } else {
     return false;
   }
 
   if (tokenizer.GetNext()) {
-    dimensions->set_x(_wtoi(tokenizer.token().c_str()));
+    dimensions_.set_x(atoi(tokenizer.token().c_str()));
   } else {
     return false;
   }
 
   if (tokenizer.GetNext()) {
-    dimensions->set_y(_wtoi(tokenizer.token().c_str()));
+    dimensions_.set_y(atoi(tokenizer.token().c_str()));
   } else {
     return false;
   }
 
   if (tokenizer.GetNext()) {
-    dimensions->set_width(_wtoi(tokenizer.token().c_str()));
+    dimensions_.set_width(atoi(tokenizer.token().c_str()));
   } else {
     return false;
   }
 
   if (tokenizer.GetNext()) {
-    dimensions->set_height(_wtoi(tokenizer.token().c_str()));
+    dimensions_.set_height(atoi(tokenizer.token().c_str()));
   } else {
     return false;
+  }
+  return true;
+}
+
+void ChromeFrameUrl::Reset() {
+  attach_to_external_tab_ = false;
+  is_chrome_protocol_ = false;
+  cookie_ = 0;
+  dimensions_.SetRect(0, 0, 0, 0);
+  disposition_ = 0;
+}
+
+bool CanNavigate(const GURL& url, IInternetSecurityManager* security_manager,
+                 bool is_privileged) {
+  if (!url.is_valid()) {
+    DLOG(ERROR) << "Invalid URL passed to InitiateNavigation: " << url;
+    return false;
+  }
+
+  // No sanity checks if unsafe URLs are allowed
+  if (GetConfigBool(false, kAllowUnsafeURLs))
+    return true;
+
+  if (!IsValidUrlScheme(url, is_privileged)) {
+    DLOG(WARNING) << __FUNCTION__ << " Disallowing navigation to url: " << url;
+    return false;
+  }
+
+  // Allow only about:blank or about:version
+  if (url.SchemeIs(chrome::kAboutScheme)) {
+    if (!LowerCaseEqualsASCII(url.spec(), chrome::kAboutBlankURL) &&
+        !LowerCaseEqualsASCII(url.spec(), chrome::kAboutVersionURL)) {
+      DLOG(WARNING) << __FUNCTION__
+                    << " Disallowing navigation to about url: " << url;
+      return false;
+    }
+  }
+
+  // Prevent navigations to URLs in untrusted zone, even in Firefox.
+  if (security_manager) {
+    DWORD zone = URLZONE_INVALID;
+    std::wstring unicode_url = UTF8ToWide(url.spec());
+    security_manager->MapUrlToZone(unicode_url.c_str(), &zone, 0);
+    if (zone == URLZONE_UNTRUSTED) {
+      DLOG(WARNING) << __FUNCTION__
+                    << " Disallowing navigation to restricted url: " << url;
+      return false;
+    }
   }
 
   return true;
+}
+
+void PinModule() {
+  static bool s_pinned = false;
+  if (!s_pinned && !IsUnpinnedMode()) {
+    FilePath module_path;
+    if (PathService::Get(base::FILE_MODULE, &module_path)) {
+      HMODULE unused;
+      if (!GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_PIN,
+                             module_path.value().c_str(), &unused)) {
+        NOTREACHED() << "Failed to pin module " << module_path.value().c_str()
+                     << " , last error: " << GetLastError();
+      } else {
+        s_pinned = true;
+      }
+    } else {
+      NOTREACHED() << "Could not get module path.";
+    }
+  }
 }
 

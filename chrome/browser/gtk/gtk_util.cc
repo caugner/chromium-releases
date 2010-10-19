@@ -18,6 +18,7 @@
 #include "base/i18n/rtl.h"
 #include "base/linux_util.h"
 #include "base/logging.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
@@ -902,6 +903,26 @@ bool AddWindowAlphaChannel(GtkWidget* window) {
   return rgba;
 }
 
+void GetTextColors(GdkColor* normal_base,
+                   GdkColor* selected_base,
+                   GdkColor* normal_text,
+                   GdkColor* selected_text) {
+  GtkWidget* fake_entry = gtk_entry_new();
+  GtkStyle* style = gtk_rc_get_style(fake_entry);
+
+  if (normal_base)
+    *normal_base = style->base[GTK_STATE_NORMAL];
+  if (selected_base)
+    *selected_base = style->base[GTK_STATE_SELECTED];
+  if (normal_text)
+    *normal_text = style->text[GTK_STATE_NORMAL];
+  if (selected_text)
+    *selected_text = style->text[GTK_STATE_SELECTED];
+
+  g_object_ref_sink(fake_entry);
+  g_object_unref(fake_entry);
+}
+
 #if defined(OS_CHROMEOS)
 
 GtkWindow* GetDialogTransientParent(GtkWindow* dialog) {
@@ -1026,7 +1047,23 @@ gfx::Rect GetDialogBounds(GtkWidget* dialog) {
 
   return gfx::Rect(x, y, width, height);
 }
-
 #endif
+
+string16 GetStockPreferencesMenuLabel() {
+  GtkStockItem stock_item;
+  string16 preferences;
+  if (gtk_stock_lookup(GTK_STOCK_PREFERENCES, &stock_item)) {
+    const char16 kUnderscore[] = { '_', 0 };
+    RemoveChars(UTF8ToUTF16(stock_item.label), kUnderscore, &preferences);
+  }
+  return preferences;
+}
+
+bool IsWidgetAncestryVisible(GtkWidget* widget) {
+  GtkWidget* parent = widget;
+  while (parent && GTK_WIDGET_VISIBLE(parent))
+    parent = parent->parent;
+  return !parent;
+}
 
 }  // namespace gtk_util

@@ -1,12 +1,14 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef VIEWS_EXAMPLES_COMBOBOX_EXAMPLE_H_
 #define VIEWS_EXAMPLES_COMBOBOX_EXAMPLE_H_
+#pragma once
 
 #include "app/combobox_model.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "views/controls/combobox/combobox.h"
 #include "views/examples/example_base.h"
 #include "views/fill_layout.h"
@@ -43,8 +45,8 @@ class ComboboxExample : public ExampleBase, public views::Combobox::Listener {
       return 10;
     }
 
-    virtual std::wstring GetItemAt(int index) {
-      return StringPrintf(L"Item %d", index);
+    virtual string16 GetItemAt(int index) {
+      return WideToUTF16Hack(StringPrintf(L"Item %d", index));
     }
 
    private:
@@ -56,7 +58,8 @@ class ComboboxExample : public ExampleBase, public views::Combobox::Listener {
                            int prev_index,
                            int new_index) {
     PrintStatus(L"Selected: index=%d, label=%ls",
-                new_index, combo_box->model()->GetItemAt(new_index).c_str());
+                new_index, UTF16ToWideHack(
+                    combo_box->model()->GetItemAt(new_index)).c_str());
   }
 
   // This test only control.

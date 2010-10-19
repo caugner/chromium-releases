@@ -4,6 +4,7 @@
 
 #ifndef VIEWS_ACCESSIBILITY_ACCESSIBILITY_TYPES_H_
 #define VIEWS_ACCESSIBILITY_ACCESSIBILITY_TYPES_H_
+#pragma once
 
 #include "base/basictypes.h"
 
@@ -37,7 +38,8 @@ class AccessibilityTypes {
     STATE_PROTECTED   = 1 << 10,
     STATE_READONLY    = 1 << 11,
     STATE_SELECTED    = 1 << 12,
-    STATE_UNAVAILABLE = 1 << 13
+    STATE_FOCUSED     = 1 << 13,
+    STATE_UNAVAILABLE = 1 << 14
   };
 
   // This defines an enumeration of the supported accessibility roles in our
@@ -55,6 +57,7 @@ class AccessibilityTypes {
     ROLE_GRAPHIC,
     ROLE_GROUPING,
     ROLE_LINK,
+    ROLE_MENUBAR,
     ROLE_MENUITEM,
     ROLE_MENUPOPUP,
     ROLE_OUTLINE,

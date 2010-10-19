@@ -9,6 +9,7 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "media/base/filter_host.h"
+#include "media/base/limits.h"
 #include "media/base/media_switches.h"
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/ffmpeg/ffmpeg_util.h"
@@ -204,9 +205,29 @@ void FFmpegDemuxerStream::FulfillPendingRead() {
   read_callback->Run(buffer);
 }
 
-void FFmpegDemuxerStream::SetBitstreamConverter(
-    BitstreamConverter* converter) {
-  bitstream_converter_.reset(converter);
+void FFmpegDemuxerStream::EnableBitstreamConverter() {
+  // Called by hardware decoder to require different bitstream converter.
+  // Currently we assume that converter is determined by codec_id;
+  DCHECK(stream_);
+
+  const char* filter_name = NULL;
+  if (stream_->codec->codec_id == CODEC_ID_H264) {
+    filter_name = "h264_mp4toannexb";
+  } else if (stream_->codec->codec_id == CODEC_ID_MPEG4) {
+    filter_name = "mpeg4video_es";
+  } else if (stream_->codec->codec_id == CODEC_ID_WMV3) {
+    filter_name = "vc1_asftorcv";
+  } else if (stream_->codec->codec_id == CODEC_ID_VC1) {
+    filter_name = "vc1_asftoannexg";
+  } else {
+    NOTREACHED();
+  }
+
+  if (filter_name) {
+    bitstream_converter_.reset(
+        new FFmpegBitstreamConverter(filter_name, stream_->codec));
+    CHECK(bitstream_converter_->Initialize());
+  }
 }
 
 // static
@@ -226,8 +247,7 @@ FFmpegDemuxer::FFmpegDemuxer()
       read_event_(false, false),
       read_has_failed_(false),
       last_read_bytes_(0),
-      read_position_(0),
-      first_seek_hack_(true) {
+      read_position_(0) {
 }
 
 FFmpegDemuxer::~FFmpegDemuxer() {
@@ -424,31 +444,6 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
       FFmpegDemuxerStream* demuxer_stream
           = new FFmpegDemuxerStream(this, stream);
 
-      // Initialize the bitstream if OpenMAX is enabled.
-      // TODO(hclam): Should be enabled by the decoder.
-      if (CommandLine::ForCurrentProcess()->HasSwitch(
-              switches::kEnableOpenMax)) {
-        // TODO(ajwong): Unittest this branch of the if statement.
-        // TODO(hclam): In addition to codec we should also check the container.
-        const char* filter_name = NULL;
-        if (stream->codec->codec_id == CODEC_ID_H264) {
-          filter_name = "h264_mp4toannexb";
-        } else if (stream->codec->codec_id == CODEC_ID_MPEG4) {
-          filter_name = "mpeg4video_es";
-        } else if (stream->codec->codec_id == CODEC_ID_WMV3) {
-          filter_name = "vc1_asftorcv";
-        } else if (stream->codec->codec_id == CODEC_ID_VC1) {
-          filter_name = "vc1_asftoannexg";
-        }
-
-        if (filter_name) {
-          BitstreamConverter* bitstream_converter =
-              new FFmpegBitstreamConverter(filter_name, codec_context);
-          CHECK(bitstream_converter->Initialize());
-          demuxer_stream->SetBitstreamConverter(bitstream_converter);
-        }
-      }
-
       DCHECK(demuxer_stream);
       streams_.push_back(demuxer_stream);
       packet_streams_.push_back(demuxer_stream);
@@ -469,7 +464,13 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
     max_duration =
         std::max(max_duration,
                  ConvertTimestamp(av_time_base, format_context_->duration));
+  } else {
+    // If the duration is not a valid value. Assume that this is a live stream
+    // and we set duration to the maximum int64 number to represent infinity.
+    max_duration = base::TimeDelta::FromMicroseconds(
+        Limits::kMaxTimeInMicroseconds);
   }
+
   // Good to go: set the duration and notify we're done initializing.
   host()->SetDuration(max_duration);
   callback->Run();
@@ -485,22 +486,8 @@ void FFmpegDemuxer::SeekTask(base::TimeDelta time, FilterCallback* callback) {
     (*iter)->FlushBuffers();
   }
 
-  // Do NOT call av_seek_frame() if we were just created.  For some reason it
-  // causes Ogg+Theora/Vorbis videos to become heavily out of sync.
-  //
-  // TODO(scherkus): fix the av_seek_frame() hackery!
-  if (first_seek_hack_) {
-    first_seek_hack_ = false;
-    callback->Run();
-    return;
-  }
-
   // Always seek to a timestamp less than or equal to the desired timestamp.
   int flags = AVSEEK_FLAG_BACKWARD;
-
-  // Explicitly set the behavior of Ogg to be able to seek to any frame.
-  if (!strcmp("ogg", format_context_->iformat->name))
-    flags |= AVSEEK_FLAG_ANY;
 
   // Passing -1 as our stream index lets FFmpeg pick a default stream.  FFmpeg
   // will attempt to use the lowest-index video stream, if present, followed by

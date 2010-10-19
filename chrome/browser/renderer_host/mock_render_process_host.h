@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_RENDERER_HOST_MOCK_RENDER_PROCESS_HOST_H_
 #define CHROME_BROWSER_RENDERER_HOST_MOCK_RENDER_PROCESS_HOST_H_
+#pragma once
 
 #include "base/basictypes.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
@@ -30,8 +31,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   int bad_msg_count() const { return bad_msg_count_; }
 
   // RenderProcessHost implementation (public portion).
-  virtual bool Init(bool is_extensions_process,
-                    URLRequestContextGetter* request_context);
+  virtual bool Init(bool is_extensions_process);
   virtual int GetNextRoutingID();
   virtual void CancelResourceRequests(int render_widget_id);
   virtual void CrossSiteClosePageACK(const ViewMsg_ClosePage_Params& params);

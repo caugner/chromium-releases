@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include "base/test/test_file_util.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/password_manager/encryptor.h"
-#include "chrome/browser/sync/engine/all_status.h"
 #include "chrome/browser/sync/engine/auth_watcher.h"
+#include "chrome/browser/sync/engine/syncer_thread.h"
 #include "chrome/browser/sync/util/user_settings.h"
 #include "chrome/common/deprecated/event_sys-inl.h"
 #include "chrome/common/net/http_return.h"
@@ -43,7 +43,7 @@ class GaiaAuthMockForAuthWatcher : public gaia::GaiaAuthenticator {
 
   virtual int GetBackoffDelaySeconds(
       int current_backoff_delay) {
-    return AllStatus::GetRecommendedDelaySeconds(current_backoff_delay);
+    return SyncerThread::GetRecommendedDelaySeconds(current_backoff_delay);
   }
 
   void SendBadAuthTokenForNextRequest() { use_bad_auth_token_ = true; }
@@ -84,7 +84,8 @@ class AuthWatcherTest : public testing::Test {
  public:
   AuthWatcherTest() : metadb_(kUserDisplayEmail),
                       consumer_ready(false, false),
-                      event_produced(false, false) {}
+                      event_produced(false, false),
+                      last_event_reason_(AuthWatcherEvent::ILLEGAL_VALUE) {}
   virtual void SetUp() {
 #if defined(OS_MACOSX)
     // Need to mock the Keychain for unit tests on Mac to avoid possible

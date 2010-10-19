@@ -1,11 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_PROXY_PROXY_RESOLVER_WINHTTP_H_
 #define NET_PROXY_PROXY_RESOLVER_WINHTTP_H_
-
-#include <string>
+#pragma once
 
 #include "googleurl/src/gurl.h"
 #include "net/proxy/proxy_resolver.h"
@@ -28,12 +27,11 @@ class ProxyResolverWinHttp : public ProxyResolver {
                              RequestHandle* /*request*/,
                              const BoundNetLog& /*net_log*/);
   virtual void CancelRequest(RequestHandle request);
+  virtual int SetPacScript(
+      const scoped_refptr<ProxyResolverScriptData>& script_data,
+      CompletionCallback* /*callback*/);
 
  private:
-  // ProxyResolver implementation:
-  virtual int SetPacScript(const GURL& pac_url,
-                           const string16& /*pac_script*/,
-                           CompletionCallback* /*callback*/);
   bool OpenWinHttpSession();
   void CloseWinHttpSession();
 

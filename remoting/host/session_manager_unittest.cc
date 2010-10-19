@@ -4,6 +4,7 @@
 
 #include "base/message_loop.h"
 #include "base/task.h"
+#include "remoting/base/mock_objects.h"
 #include "remoting/host/mock_objects.h"
 #include "remoting/host/session_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -32,10 +33,10 @@ class SessionManagerTest : public testing::Test {
     encoder_ = new MockEncoder();
     client_ = new MockClientConnection();
     record_ = new SessionManager(&message_loop_,
-                                &message_loop_,
-                                &message_loop_,
-                                capturer_,
-                                encoder_);
+                                 &message_loop_,
+                                 &message_loop_,
+                                 capturer_,
+                                 encoder_);
   }
 
   scoped_refptr<SessionManager> record_;
@@ -52,8 +53,12 @@ TEST_F(SessionManagerTest, Init) {
 }
 
 ACTION_P2(RunCallback, rects, data) {
-  RectVector& dirty_rects = data->mutable_dirty_rects();
-  dirty_rects.insert(dirty_rects.end(), rects.begin(), rects.end());
+  InvalidRects& dirty_rects = data->mutable_dirty_rects();
+  InvalidRects temp_rects;
+  std::set_union(dirty_rects.begin(), dirty_rects.end(),
+                 rects.begin(), rects.end(),
+                 std::inserter(temp_rects, temp_rects.begin()));
+  dirty_rects.swap(temp_rects);
   arg0->Run(data);
   delete arg0;
 }
@@ -63,32 +68,21 @@ ACTION_P(FinishEncode, msg) {
                                   Encoder::EncodingInProgress |
                                   Encoder::EncodingEnded);
   arg2->Run(msg, state);
-}
-
-ACTION_P(AssignCaptureData, data) {
-  arg0[0] = data[0];
-  arg0[1] = data[1];
-  arg0[2] = data[2];
-}
-
-ACTION_P(AssignDirtyRect, rects) {
-  *arg0 = *rects;
+  delete arg2;
 }
 
 TEST_F(SessionManagerTest, OneRecordCycle) {
   Init();
 
-  RectVector update_rects;
-  update_rects.push_back(gfx::Rect(0, 0, 10, 10));
-  Capturer::DataPlanes planes;
-  for (int i = 0; i < Capturer::DataPlanes::kPlaneCount; ++i) {
+  InvalidRects update_rects;
+  update_rects.insert(gfx::Rect(0, 0, 10, 10));
+  DataPlanes planes;
+  for (int i = 0; i < DataPlanes::kPlaneCount; ++i) {
     planes.data[i] = reinterpret_cast<uint8*>(i);
     planes.strides[i] = kWidth * 4;
   }
-  scoped_refptr<Capturer::CaptureData> data(new Capturer::CaptureData(planes,
-                                                                      kWidth,
-                                                                      kHeight,
-                                                                      kFormat));
+  scoped_refptr<CaptureData> data(new CaptureData(planes, kWidth,
+                                                  kHeight, kFormat));
   // Set the recording rate to very low to avoid capture twice.
   record_->SetMaxRate(0.01);
 
@@ -99,12 +93,11 @@ TEST_F(SessionManagerTest, OneRecordCycle) {
   record_->AddClient(client_);
 
   // First the capturer is called.
-  EXPECT_CALL(*capturer_, InvalidateFullScreen());
   EXPECT_CALL(*capturer_, CaptureInvalidRects(NotNull()))
       .WillOnce(RunCallback(update_rects, data));
 
   // Expect the encoder be called.
-  HostMessage* msg = new HostMessage();
+  ChromotingHostMessage* msg = new ChromotingHostMessage();
   EXPECT_CALL(*encoder_, Encode(data, false, NotNull()))
       .WillOnce(FinishEncode(msg));
 
@@ -115,7 +108,6 @@ TEST_F(SessionManagerTest, OneRecordCycle) {
   EXPECT_CALL(*client_, GetPendingUpdateStreamMessages())
       .Times(AtLeast(0))
       .WillRepeatedly(Return(0));
-
 
   // Start the recording.
   record_->Start();

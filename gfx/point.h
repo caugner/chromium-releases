@@ -4,6 +4,7 @@
 
 #ifndef GFX_POINT_H_
 #define GFX_POINT_H_
+#pragma once
 
 #include "build/build_config.h"
 
@@ -70,6 +71,16 @@ class Point {
 
   bool operator!=(const Point& rhs) const {
     return !(*this == rhs);
+  }
+
+  // A point is less than another point if its y-value is closer
+  // to the origin. If the y-values are the same, then point with
+  // the x-value closer to the origin is considered less than the
+  // other.
+  // This comparison is required to use Points in sets, or sorted
+  // vectors.
+  bool operator<(const Point& rhs) const {
+    return (y_ == rhs.y_) ? (x_ < rhs.x_) : (y_ < rhs.y_);
   }
 
 #if defined(OS_WIN)

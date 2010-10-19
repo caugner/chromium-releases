@@ -36,8 +36,7 @@ class BrowserTabStripController::TabContextMenuContents
   TabContextMenuContents(BaseTab* tab,
                          BrowserTabStripController* controller)
       : ALLOW_THIS_IN_INITIALIZER_LIST(
-          model_(this, controller->IsTabPinned(tab), controller->IsAppTab(tab),
-                 controller->IsToolbarVisible(tab))),
+          model_(this, controller->IsTabPinned(tab))),
         tab_(tab),
         controller_(controller),
         last_command_(TabStripModel::CommandFirst) {
@@ -113,9 +112,11 @@ class BrowserTabStripController::TabContextMenuContents
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserTabStripController, public:
 
-BrowserTabStripController::BrowserTabStripController(TabStripModel* model)
+BrowserTabStripController::BrowserTabStripController(Browser* browser,
+                                                     TabStripModel* model)
     : model_(model),
-      tabstrip_(NULL) {
+      tabstrip_(NULL),
+      browser_(browser) {
   model_->AddObserver(this);
 
   notification_registrar_.Add(this,
@@ -169,22 +170,6 @@ void BrowserTabStripController::ExecuteCommandForTab(
 
 bool BrowserTabStripController::IsTabPinned(BaseTab* tab) {
   return IsTabPinned(tabstrip_->GetModelIndexOfBaseTab(tab));
-}
-
-bool BrowserTabStripController::IsAppTab(BaseTab* tab) {
-  int index = tabstrip_->GetModelIndexOfBaseTab(tab);
-  if (!model_->ContainsIndex(index))
-    return false;
-
-  return model_->IsAppTab(index);
-}
-
-bool BrowserTabStripController::IsToolbarVisible(BaseTab* tab) {
-  int index = tabstrip_->GetModelIndexOfBaseTab(tab);
-  if (!model_->ContainsIndex(index))
-    return false;
-
-  return model_->IsToolbarVisible(index);
 }
 
 int BrowserTabStripController::GetCount() const {
@@ -286,12 +271,7 @@ void BrowserTabStripController::CreateNewTab() {
   UserMetrics::RecordAction(UserMetricsAction("NewTab_Button"),
                             model_->profile());
 
-  TabContents* selected_tab = model_->GetSelectedTabContents();
-  if (!selected_tab)
-    return;
-
-  Browser* browser = selected_tab->delegate()->GetBrowser();
-  if (browser->OpenAppsPanelAsNewTab())
+  if (browser_ && browser_->OpenAppsPanelAsNewTab())
     return;
 
   model_->delegate()->AddBlankTab(true);
@@ -385,7 +365,13 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
     TabContents* contents,
     int model_index,
     TabRendererData* data) {
-  SkBitmap* app_icon = contents->GetExtensionAppIcon();
+  SkBitmap* app_icon = NULL;
+
+  // Extension App icons are slightly larger than favicons, so only allow
+  // them if permitted by the model.
+  if (model_->delegate()->LargeIconsPermitted())
+    app_icon = contents->GetExtensionAppIcon();
+
   if (app_icon)
     data->favicon = *app_icon;
   else

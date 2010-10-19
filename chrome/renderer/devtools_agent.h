@@ -1,15 +1,16 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_RENDERER_DEVTOOLS_AGENT_H_
 #define CHROME_RENDERER_DEVTOOLS_AGENT_H_
+#pragma once
 
 #include <map>
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
+#include "chrome/common/devtools_messages.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDevToolsAgentClient.h"
 
 namespace IPC {
@@ -38,15 +39,15 @@ class DevToolsAgent : public WebKit::WebDevToolsAgentClient {
   virtual bool OnMessageReceived(const IPC::Message& message);
 
   // WebDevToolsAgentClient implementation
-  virtual void sendMessageToFrontend(
-      const WebKit::WebDevToolsMessageData& data);
+  virtual void sendMessageToInspectorFrontend(const WebKit::WebString& data);
+  virtual void sendDebuggerOutput(const WebKit::WebString& data);
+  virtual void sendDispatchToAPU(const WebKit::WebString& data);
 
   virtual int hostIdentifier();
-  virtual void forceRepaint();
   virtual void runtimeFeatureStateChanged(const WebKit::WebString& feature,
                                           bool enabled);
-  virtual WebKit::WebCString injectedScriptSource();
-  virtual WebKit::WebCString injectedScriptDispatcherSource();
+  virtual void runtimePropertyChanged(const WebKit::WebString& name,
+                                      const WebKit::WebString& value);
   virtual WebKit::WebCString debuggerScriptSource();
   virtual WebKit::WebDevToolsAgentClient::WebKitClientMessageLoop*
       createClientMessageLoop();
@@ -62,9 +63,10 @@ class DevToolsAgent : public WebKit::WebDevToolsAgentClient {
  private:
   friend class DevToolsAgentFilter;
 
-  void OnAttach(const std::vector<std::string>& runtime_features);
+  void OnAttach(const DevToolsRuntimeProperties& runtime_properties);
   void OnDetach();
-  void OnRpcMessage(const DevToolsMessageData& data);
+  void OnFrontendLoaded();
+  void OnDispatchOnInspectorBackend(const std::string& message);
   void OnInspectElement(int x, int y);
   void OnSetApuAgentEnabled(bool enabled);
 

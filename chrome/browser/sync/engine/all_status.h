@@ -7,10 +7,10 @@
 
 #ifndef CHROME_BROWSER_SYNC_ENGINE_ALL_STATUS_H_
 #define CHROME_BROWSER_SYNC_ENGINE_ALL_STATUS_H_
+#pragma once
 
 #include <map>
 
-#include "base/atomicops.h"
 #include "base/lock.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/sync/util/channel.h"
@@ -86,9 +86,6 @@ class AllStatus : public ChannelEventHandler<SyncerEvent> {
     int64 updates_received;
   };
 
-  // Maximum interval for exponential backoff.
-  static const int kMaxBackoffSeconds;
-
   AllStatus();
   ~AllStatus();
 
@@ -107,12 +104,6 @@ class AllStatus : public ChannelEventHandler<SyncerEvent> {
   Channel* channel() const { return channel_; }
 
   Status status() const;
-
-  // DDOS avoidance function.  The argument and return value is in seconds
-  static int GetRecommendedDelaySeconds(int base_delay_seconds);
-
-  // This uses AllStatus' max_consecutive_errors as the error count
-  int GetRecommendedDelay(int base_delay) const;
 
   void SetNotificationsEnabled(bool notifications_enabled);
 

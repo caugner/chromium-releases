@@ -1,9 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef VIEWS_CONTROLS_NATIVE_CONTROL_WIN_H_
 #define VIEWS_CONTROLS_NATIVE_CONTROL_WIN_H_
+#pragma once
 
 #include "views/controls/combobox/combobox.h"
 #include "views/controls/native/native_view_host.h"

@@ -4,12 +4,14 @@
 
 #ifndef CHROME_BROWSER_BROWSER_ACCESSIBILITY_MANAGER_WIN_H_
 #define CHROME_BROWSER_BROWSER_ACCESSIBILITY_MANAGER_WIN_H_
+#pragma once
 
 #include <atlbase.h>
 #include <atlcom.h>
 #include <oleacc.h>
 
-#include <map>
+#include <hash_map>
+#include <vector>
 
 #include "base/hash_tables.h"
 #include "base/scoped_comptr_win.h"
@@ -17,8 +19,6 @@
 #include "webkit/glue/webaccessibility.h"
 
 class BrowserAccessibility;
-class RenderProcessHost;
-class RenderWidgetHost;
 
 class BrowserAccessibilityFactory {
  public:
@@ -35,6 +35,7 @@ class BrowserAccessibilityDelegate {
   virtual ~BrowserAccessibilityDelegate() {}
   virtual void SetAccessibilityFocus(int acc_obj_id) = 0;
   virtual void AccessibilityDoDefaultAction(int acc_obj_id) = 0;
+  virtual void AccessibilityObjectChildrenChangeAck() = 0;
 };
 
 // Manages a tree of BrowserAccessibility objects.
@@ -50,6 +51,9 @@ class BrowserAccessibilityManager {
 
   // Return a pointer to the root of the tree, does not make a new reference.
   BrowserAccessibility* GetRoot();
+
+  // Removes the BrowserAccessibility child_id from the manager.
+  void Remove(LONG child_id);
 
   // Return a pointer to the object corresponding to the given child_id,
   // does not make a new reference.
@@ -72,16 +76,29 @@ class BrowserAccessibilityManager {
   // Tell the renderer to do the default action for this node.
   void DoDefaultAction(const BrowserAccessibility& node);
 
-  // Called when the renderer process has notified us of a focus or state
-  // change. Send a notification to MSAA clients of the change.
+  // Called when the renderer process has notified us of a focus, state,
+  // or children change. Send a notification to MSAA clients of the change.
   void OnAccessibilityFocusChange(int acc_obj_id);
-  void OnAccessibilityObjectStateChange(int acc_obj_id);
+  void OnAccessibilityObjectStateChange(
+      const webkit_glue::WebAccessibility& acc_obj);
+  void OnAccessibilityObjectChildrenChange(
+      const std::vector<webkit_glue::WebAccessibility>& acc_changes);
 
  private:
+  // Update the accessibility tree with an updated WebAccessibility tree or
+  // subtree received from the renderer process. Returns the updated node or
+  // NULL if no node was updated.
+  BrowserAccessibility* UpdateTree(
+      const webkit_glue::WebAccessibility& acc_obj);
+
+  // Returns the next MSAA child id.
+  static LONG GetNextChildID();
+
   // Recursively build a tree of BrowserAccessibility objects from
   // the WebAccessibility tree received from the renderer process.
   BrowserAccessibility* CreateAccessibilityTree(
       BrowserAccessibility* parent,
+      int child_id,
       const webkit_glue::WebAccessibility& src,
       int index_in_parent);
 
