@@ -17,13 +17,14 @@
 #include "chrome/browser/app_icon_win.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/renderer_host/backing_store.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -915,11 +916,11 @@ LRESULT AeroPeekWindow::OnCreate(LPCREATESTRUCT create_struct) {
   // may take some time. (For example, when we create an ITaskbarList3
   // interface for the first time, Windows loads DLLs and we need to wait for
   // some time.)
-  ChromeThread::PostTask(ChromeThread::IO,
-                         FROM_HERE,
-                         new RegisterThumbnailTask(frame_window_,
-                                                   hwnd(),
-                                                   tab_active_));
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      new RegisterThumbnailTask(frame_window_, hwnd(), tab_active_));
+
   return 0;
 }
 
@@ -954,13 +955,13 @@ LRESULT AeroPeekWindow::OnDwmSendIconicThumbnail(UINT message,
   delegate_->GetTabThumbnail(tab_id_, &thumbnail);
 
   gfx::Size aeropeek_size(HIWORD(lparam), LOWORD(lparam));
-  ChromeThread::PostTask(ChromeThread::IO,
-                         FROM_HERE,
-                         new SendThumbnailTask(hwnd(),
-                                               GetContentBounds(),
-                                               aeropeek_size,
-                                               thumbnail,
-                                               &ready_to_update_thumbnail_));
+  BrowserThread::PostTask(BrowserThread::IO,
+                          FROM_HERE,
+                          new SendThumbnailTask(hwnd(),
+                                                GetContentBounds(),
+                                                aeropeek_size,
+                                                thumbnail,
+                                                &ready_to_update_thumbnail_));
   return 0;
 }
 
@@ -978,11 +979,11 @@ LRESULT AeroPeekWindow::OnDwmSendIconicLivePreviewBitmap(UINT message,
   SkBitmap preview;
   delegate_->GetTabPreview(tab_id_, &preview);
 
-  ChromeThread::PostTask(ChromeThread::IO,
-                         FROM_HERE,
-                         new SendLivePreviewTask(hwnd(),
-                                                 GetContentBounds(),
-                                                 preview));
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      new SendLivePreviewTask(hwnd(), GetContentBounds(), preview));
+
   return 0;
 }
 

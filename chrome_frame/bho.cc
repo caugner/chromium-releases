@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/path_service.h"
 #include "base/scoped_bstr_win.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "chrome_tab.h" // NOLINT
 #include "chrome_frame/crash_reporting/crash_metrics.h"
 #include "chrome_frame/extra_system_apis.h"
@@ -265,7 +266,7 @@ HRESULT Bho::OnHttpEquiv(IBrowserService_OnHttpEquiv_Fn original_httpequiv,
         NavigationManager* mgr = NavigationManager::GetThreadInstance();
         DCHECK(mgr);
         DLOG(INFO) << "Found tag in page. Marking browser." <<
-            StringPrintf(" tid=0x%08X", ::GetCurrentThreadId());
+            base::StringPrintf(" tid=0x%08X", ::GetCurrentThreadId());
         if (mgr) {
           // TODO(tommi): See if we can't figure out a cleaner way to avoid
           // this.  For some documents we can hit a problem here.  When we
@@ -302,7 +303,7 @@ void Bho::ProcessOptInUrls(IWebBrowser2* browser, BSTR url) {
   std::wstring current_url(url, SysStringLen(url));
   if (IsValidUrlScheme(GURL(current_url), false)) {
     bool cf_protocol = StartsWith(current_url, kChromeProtocolPrefix, false);
-    if (!cf_protocol && IsOptInUrl(current_url.c_str())) {
+    if (!cf_protocol && IsChrome(RendererTypeForUrl(current_url))) {
       DLOG(INFO) << "Opt-in URL. Switching to cf.";
       ScopedComPtr<IBrowserService> browser_service;
       DoQueryService(SID_SShellBrowser, browser, browser_service.Receive());

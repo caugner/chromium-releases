@@ -12,10 +12,10 @@
 #include "base/command_line.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/chromeos/frame/panel_browser_view.h"
-#include "chrome/browser/chromeos/status/status_area_view.h"
 #include "chrome/browser/chromeos/status/language_menu_button.h"
 #include "chrome/browser/chromeos/status/network_menu_button.h"
 #include "chrome/browser/chromeos/status/status_area_button.h"
+#include "chrome/browser/chromeos/status/status_area_view.h"
 #include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/views/app_launcher.h"
@@ -27,9 +27,9 @@
 #include "chrome/browser/views/theme_background.h"
 #include "chrome/browser/views/toolbar_view.h"
 #include "chrome/common/chrome_switches.h"
+#include "cros/chromeos_wm_ipc_enums.h"
 #include "gfx/canvas.h"
 #include "grit/generated_resources.h"
-#include "cros/chromeos_wm_ipc_enums.h"
 #include "views/controls/button/button.h"
 #include "views/controls/button/image_button.h"
 #include "views/controls/menu/menu_2.h"
@@ -274,8 +274,7 @@ void BrowserView::ChildPreferredSizeChanged(View* child) {
 }
 
 bool BrowserView::GetSavedWindowBounds(gfx::Rect* bounds) const {
-  if ((browser()->type() & Browser::TYPE_POPUP) == 0 &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeosFrame)) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeosFrame)) {
     // Typically we don't request a full screen size. This means we'll request a
     // non-full screen size, layout/paint at that size, then the window manager
     // will snap us to full screen size. This results in an ugly
@@ -367,9 +366,7 @@ void BrowserView::InitSystemMenu() {
 BrowserWindow* BrowserWindow::CreateBrowserWindow(Browser* browser) {
   // Create a browser view for chromeos.
   BrowserView* view;
-  if ((browser->type() == Browser::TYPE_POPUP) ||
-      (browser->type() == Browser::TYPE_APP_POPUP) ||
-      (browser->type() == Browser::TYPE_APP_PANEL))
+  if (browser->type() & Browser::TYPE_POPUP)
     view = new chromeos::PanelBrowserView(browser);
   else
     view = new chromeos::BrowserView(browser);

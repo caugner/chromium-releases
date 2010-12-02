@@ -11,6 +11,7 @@
 #include "chrome/browser/tab_contents/render_view_host_manager.h"
 #include "chrome/browser/tab_contents/test_tab_contents.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/test_notification_tracker.h"
 #include "chrome/test/testing_profile.h"
@@ -42,7 +43,7 @@ class RenderViewHostManagerTest : public RenderViewHostTestHarness {
 // different SiteInstances, BrowsingInstances, and RenderProcessHosts. This is
 // a regression test for bug 9364.
 TEST_F(RenderViewHostManagerTest, NewTabPageProcesses) {
-  ChromeThread ui_thread(ChromeThread::UI, MessageLoop::current());
+  BrowserThread ui_thread(BrowserThread::UI, MessageLoop::current());
   GURL ntp(chrome::kChromeUINewTabURL);
   GURL dest("http://www.google.com/");
 
@@ -87,7 +88,7 @@ TEST_F(RenderViewHostManagerTest, NewTabPageProcesses) {
 // EnableViewSourceMode message is sent on every navigation regardless
 // RenderView is being newly created or reused.
 TEST_F(RenderViewHostManagerTest, AlwaysSendEnableViewSourceMode) {
-  ChromeThread ui_thread(ChromeThread::UI, MessageLoop::current());
+  BrowserThread ui_thread(BrowserThread::UI, MessageLoop::current());
   const GURL kNtpUrl(chrome::kChromeUINewTabURL);
   const GURL kUrl("view-source:http://foo");
 
@@ -233,7 +234,7 @@ TEST_F(RenderViewHostManagerTest, Navigate) {
 
 // Tests DOMUI creation.
 TEST_F(RenderViewHostManagerTest, DOMUI) {
-  ChromeThread ui_thread(ChromeThread::UI, MessageLoop::current());
+  BrowserThread ui_thread(BrowserThread::UI, MessageLoop::current());
   SiteInstance* instance = SiteInstance::CreateSiteInstance(profile_.get());
 
   TestTabContents tab_contents(profile_.get(), instance);
@@ -294,4 +295,52 @@ TEST_F(RenderViewHostManagerTest, NonDOMUIChromeURLs) {
                               PageTransition::TYPED);
 
   EXPECT_TRUE(ShouldSwapProcesses(&manager, &ntp_entry, &about_entry));
+}
+
+// Tests that we don't end up in an inconsistent state if a page does a back and
+// then reload. http://crbug.com/51680
+TEST_F(RenderViewHostManagerTest, PageDoesBackAndReload) {
+  GURL url1("http://www.google.com/");
+  GURL url2("http://www.evil-site.com/");
+
+  // Navigate to a safe site, then an evil site.
+  // This will switch RenderViewHosts.  We cannot assert that the first and
+  // second RVHs are different, though, because the first one may be promptly
+  // deleted.
+  contents()->NavigateAndCommit(url1);
+  contents()->NavigateAndCommit(url2);
+  RenderViewHost* evil_rvh = contents()->render_view_host();
+
+  // Casts the TabContents to a RenderViewHostDelegate::BrowserIntegration so we
+  // can call GoToEntryAtOffset which is private.
+  RenderViewHostDelegate::BrowserIntegration* rvh_delegate =
+      static_cast<RenderViewHostDelegate::BrowserIntegration*>(contents());
+
+  // Now let's simulate the evil page calling history.back().
+  rvh_delegate->GoToEntryAtOffset(-1);
+  // We should have a new pending RVH.
+  // Note that in this case, the navigation has not committed, so evil_rvh will
+  // not be deleted yet.
+  EXPECT_NE(evil_rvh, contents()->render_manager()->pending_render_view_host());
+
+  // Before that RVH has committed, the evil page reloads itself.
+  ViewHostMsg_FrameNavigate_Params params;
+  params.page_id = 1;
+  params.url = url2;
+  params.transition = PageTransition::CLIENT_REDIRECT;
+  params.should_update_history = false;
+  params.gesture = NavigationGestureAuto;
+  params.was_within_same_page = false;
+  params.is_post = false;
+  contents()->TestDidNavigate(evil_rvh, params);
+
+  // That should have cancelled the pending RVH, and the evil RVH should be the
+  // current one.
+  EXPECT_TRUE(contents()->render_manager()->pending_render_view_host() == NULL);
+  EXPECT_EQ(evil_rvh, contents()->render_manager()->current_host());
+
+  // Also we should not have a pending navigation entry.
+  NavigationEntry* entry = contents()->controller().GetActiveEntry();
+  ASSERT_TRUE(entry != NULL);
+  EXPECT_EQ(url2, entry->url());
 }

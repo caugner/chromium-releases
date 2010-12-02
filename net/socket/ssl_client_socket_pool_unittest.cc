@@ -32,12 +32,15 @@ namespace {
 const int kMaxSockets = 32;
 const int kMaxSocketsPerGroup = 6;
 
-class SSLClientSocketPoolTest : public ClientSocketPoolTest {
+class SSLClientSocketPoolTest : public testing::Test {
  protected:
   SSLClientSocketPoolTest()
-      : http_auth_handler_factory_(HttpAuthHandlerFactory::CreateDefault()),
-        session_(new HttpNetworkSession(new MockHostResolver,
-                                        ProxyService::CreateNull(),
+      : host_resolver_(new MockHostResolver),
+        http_auth_handler_factory_(HttpAuthHandlerFactory::CreateDefault(
+            host_resolver_.get())),
+        session_(new HttpNetworkSession(host_resolver_.get(),
+                                        NULL /* dnsrr_resolver */,
+                                        ProxyService::CreateDirect(),
                                         &socket_factory_,
                                         new SSLConfigServiceDefaults,
                                         new SpdySessionPool(NULL),
@@ -46,57 +49,65 @@ class SSLClientSocketPoolTest : public ClientSocketPoolTest {
                                         NULL)),
         direct_tcp_socket_params_(new TCPSocketParams(
             HostPortPair("host", 443), MEDIUM, GURL(), false)),
-        tcp_socket_pool_(new MockTCPClientSocketPool(
+        tcp_histograms_("MockTCP"),
+        tcp_socket_pool_(
             kMaxSockets,
             kMaxSocketsPerGroup,
-            make_scoped_refptr(new ClientSocketPoolHistograms("MockTCP")),
-            &socket_factory_)),
+            &tcp_histograms_,
+            &socket_factory_),
         proxy_tcp_socket_params_(new TCPSocketParams(
             HostPortPair("proxy", 443), MEDIUM, GURL(), false)),
-        http_proxy_socket_params_(new HttpProxySocketParams(
-            proxy_tcp_socket_params_, NULL, GURL("http://host"), "",
-            HostPortPair("host", 80), session_, true)),
-        http_proxy_socket_pool_(new HttpProxyClientSocketPool(
-            kMaxSockets,
-            kMaxSocketsPerGroup,
-            make_scoped_refptr(new ClientSocketPoolHistograms("MockHttpProxy")),
-            new MockHostResolver,
-            tcp_socket_pool_,
-            NULL,
-            NULL)),
         socks_socket_params_(new SOCKSSocketParams(
             proxy_tcp_socket_params_, true, HostPortPair("sockshost", 443),
             MEDIUM, GURL())),
-        socks_socket_pool_(new MockSOCKSClientSocketPool(
+        socks_histograms_("MockSOCKS"),
+        socks_socket_pool_(
             kMaxSockets,
             kMaxSocketsPerGroup,
-            make_scoped_refptr(new ClientSocketPoolHistograms("MockSOCKS")),
-            tcp_socket_pool_)) {
+            &socks_histograms_,
+            &tcp_socket_pool_),
+        http_proxy_socket_params_(new HttpProxySocketParams(
+            proxy_tcp_socket_params_, NULL, GURL("http://host"), "",
+            HostPortPair("host", 80),
+            session_->auth_cache(),
+            session_->http_auth_handler_factory(),
+            true)),
+        http_proxy_histograms_("MockHttpProxy"),
+        http_proxy_socket_pool_(
+            kMaxSockets,
+            kMaxSocketsPerGroup,
+            &http_proxy_histograms_,
+            host_resolver_.get(),
+            &tcp_socket_pool_,
+            NULL,
+            NULL) {
     scoped_refptr<SSLConfigService> ssl_config_service(
         new SSLConfigServiceDefaults);
     ssl_config_service->GetSSLConfig(&ssl_config_);
   }
 
   void CreatePool(bool tcp_pool, bool http_proxy_pool, bool socks_pool) {
-    pool_ = new SSLClientSocketPool(
+    ssl_histograms_.reset(new ClientSocketPoolHistograms("SSLUnitTest"));
+    pool_.reset(new SSLClientSocketPool(
         kMaxSockets,
         kMaxSocketsPerGroup,
-        make_scoped_refptr(new ClientSocketPoolHistograms("SSLUnitTest")),
+        ssl_histograms_.get(),
         NULL,
+        NULL /* dnsrr_resolver */,
         &socket_factory_,
-        tcp_pool ? tcp_socket_pool_ : NULL,
-        http_proxy_pool ? http_proxy_socket_pool_ : NULL,
-        socks_pool ? socks_socket_pool_ : NULL,
+        tcp_pool ? &tcp_socket_pool_ : NULL,
+        socks_pool ? &socks_socket_pool_ : NULL,
+        http_proxy_pool ? &http_proxy_socket_pool_ : NULL,
         NULL,
-        NULL);
+        NULL));
   }
 
   scoped_refptr<SSLSocketParams> SSLParams(ProxyServer::Scheme proxy,
                                            bool want_spdy_over_npn) {
     return make_scoped_refptr(new SSLSocketParams(
         proxy == ProxyServer::SCHEME_DIRECT ? direct_tcp_socket_params_ : NULL,
-        proxy == ProxyServer::SCHEME_HTTP ? http_proxy_socket_params_ : NULL,
         proxy == ProxyServer::SCHEME_SOCKS5 ? socks_socket_params_ : NULL,
+        proxy == ProxyServer::SCHEME_HTTP ? http_proxy_socket_params_ : NULL,
         proxy,
         "host",
         ssl_config_,
@@ -113,21 +124,27 @@ class SSLClientSocketPoolTest : public ClientSocketPoolTest {
   }
 
   MockClientSocketFactory socket_factory_;
+  scoped_ptr<HostResolver> host_resolver_;
   scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory_;
   scoped_refptr<HttpNetworkSession> session_;
 
   scoped_refptr<TCPSocketParams> direct_tcp_socket_params_;
-  scoped_refptr<MockTCPClientSocketPool> tcp_socket_pool_;
+  ClientSocketPoolHistograms tcp_histograms_;
+  MockTCPClientSocketPool tcp_socket_pool_;
 
   scoped_refptr<TCPSocketParams> proxy_tcp_socket_params_;
-  scoped_refptr<HttpProxySocketParams> http_proxy_socket_params_;
-  scoped_refptr<HttpProxyClientSocketPool> http_proxy_socket_pool_;
 
   scoped_refptr<SOCKSSocketParams> socks_socket_params_;
-  scoped_refptr<MockSOCKSClientSocketPool> socks_socket_pool_;
+  ClientSocketPoolHistograms socks_histograms_;
+  MockSOCKSClientSocketPool socks_socket_pool_;
+
+  scoped_refptr<HttpProxySocketParams> http_proxy_socket_params_;
+  ClientSocketPoolHistograms http_proxy_histograms_;
+  HttpProxyClientSocketPool http_proxy_socket_pool_;
 
   SSLConfig ssl_config_;
-  scoped_refptr<SSLClientSocketPool> pool_;
+  scoped_ptr<ClientSocketPoolHistograms> ssl_histograms_;
+  scoped_ptr<SSLClientSocketPool> pool_;
 };
 
 TEST_F(SSLClientSocketPoolTest, TCPFail) {
@@ -140,7 +157,7 @@ TEST_F(SSLClientSocketPoolTest, TCPFail) {
                                                     false);
 
   ClientSocketHandle handle;
-  int rv = handle.Init("a", params, MEDIUM, NULL, pool_, BoundNetLog());
+  int rv = handle.Init("a", params, MEDIUM, NULL, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_CONNECTION_FAILED, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -158,7 +175,8 @@ TEST_F(SSLClientSocketPoolTest, TCPFailAsync) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -182,7 +200,8 @@ TEST_F(SSLClientSocketPoolTest, BasicDirect) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(OK, rv);
   EXPECT_TRUE(handle.is_initialized());
   EXPECT_TRUE(handle.socket());
@@ -200,7 +219,8 @@ TEST_F(SSLClientSocketPoolTest, BasicDirectAsync) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -222,7 +242,8 @@ TEST_F(SSLClientSocketPoolTest, DirectCertError) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -244,7 +265,8 @@ TEST_F(SSLClientSocketPoolTest, DirectSSLError) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -269,7 +291,8 @@ TEST_F(SSLClientSocketPoolTest, DirectWithNPN) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -295,7 +318,8 @@ TEST_F(SSLClientSocketPoolTest, DirectNoSPDY) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -320,7 +344,8 @@ TEST_F(SSLClientSocketPoolTest, DirectGotSPDY) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -351,7 +376,8 @@ TEST_F(SSLClientSocketPoolTest, DirectGotBonusSPDY) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -379,7 +405,8 @@ TEST_F(SSLClientSocketPoolTest, SOCKSFail) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_CONNECTION_FAILED, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -397,7 +424,8 @@ TEST_F(SSLClientSocketPoolTest, SOCKSFailAsync) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -421,7 +449,8 @@ TEST_F(SSLClientSocketPoolTest, SOCKSBasic) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(OK, rv);
   EXPECT_TRUE(handle.is_initialized());
   EXPECT_TRUE(handle.socket());
@@ -439,7 +468,8 @@ TEST_F(SSLClientSocketPoolTest, SOCKSBasicAsync) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -460,8 +490,9 @@ TEST_F(SSLClientSocketPoolTest, HttpProxyFail) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
-  EXPECT_EQ(ERR_CONNECTION_FAILED, rv);
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
+  EXPECT_EQ(ERR_PROXY_CONNECTION_FAILED, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
   EXPECT_FALSE(handle.is_ssl_error());
@@ -478,12 +509,13 @@ TEST_F(SSLClientSocketPoolTest, HttpProxyFailAsync) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
 
-  EXPECT_EQ(ERR_CONNECTION_FAILED, callback.WaitForResult());
+  EXPECT_EQ(ERR_PROXY_CONNECTION_FAILED, callback.WaitForResult());
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
   EXPECT_FALSE(handle.is_ssl_error());
@@ -514,7 +546,8 @@ TEST_F(SSLClientSocketPoolTest, HttpProxyBasic) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(OK, rv);
   EXPECT_TRUE(handle.is_initialized());
   EXPECT_TRUE(handle.socket());
@@ -543,7 +576,8 @@ TEST_F(SSLClientSocketPoolTest, HttpProxyBasicAsync) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
@@ -577,7 +611,8 @@ TEST_F(SSLClientSocketPoolTest, NeedProxyAuth) {
 
   ClientSocketHandle handle;
   TestCompletionCallback callback;
-  int rv = handle.Init("a", params, MEDIUM, &callback, pool_, BoundNetLog());
+  int rv = handle.Init(
+      "a", params, MEDIUM, &callback, pool_.get(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());

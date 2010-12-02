@@ -4,6 +4,12 @@
 
 #include "base/ref_counted_memory.h"
 
+RefCountedMemory::RefCountedMemory() {
+}
+
+RefCountedMemory::~RefCountedMemory() {
+}
+
 const unsigned char* RefCountedStaticMemory::front() const {
   return data_;
 }
@@ -24,6 +30,9 @@ RefCountedBytes::RefCountedBytes() {
 
 RefCountedBytes::RefCountedBytes(const std::vector<unsigned char>& initializer)
     : data(initializer) {
+}
+
+RefCountedBytes::~RefCountedBytes() {
 }
 
 const unsigned char* RefCountedBytes::front() const {

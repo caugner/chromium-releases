@@ -20,6 +20,7 @@
 #include "base/field_trial.h"
 #include "base/histogram.h"
 #include "base/logging.h"
+#include "base/platform_file.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/thread.h"
@@ -46,6 +47,8 @@
 #include "chrome/browser/visitedlink_master.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/child_process_info.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/gpu_messages.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/net/url_request_context_getter.h"
@@ -63,6 +66,7 @@
 #include "ipc/ipc_platform_file.h"
 #include "ipc/ipc_switches.h"
 #include "media/base/media_switches.h"
+#include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/glue/plugins/plugin_switches.h"
 
 #if defined(OS_WIN)
@@ -73,6 +77,8 @@ using WebKit::WebCache;
 
 #include "third_party/skia/include/core/SkBitmap.h"
 
+// TODO(finnur): Remove after capturing debug info.
+#include <iostream>
 
 // This class creates the IO thread for the renderer when running in
 // single-process mode.  It's not used in multi-process mode.
@@ -199,6 +205,7 @@ BrowserRenderProcessHost::BrowserRenderProcessHost(Profile* profile)
       ALLOW_THIS_IN_INITIALIZER_LIST(cached_dibs_cleaner_(
             base::TimeDelta::FromSeconds(5),
             this, &BrowserRenderProcessHost::ClearTransportDIBCache)),
+      accessibility_enabled_(false),
       extension_process_(false) {
   widget_helper_ = new RenderWidgetHelper();
 
@@ -219,6 +226,25 @@ BrowserRenderProcessHost::BrowserRenderProcessHost(Profile* profile)
 
   WebCacheManager::GetInstance()->Add(id());
   ChildProcessSecurityPolicy::GetInstance()->Add(id());
+
+  // Grant most file permissions to this renderer.
+  // PLATFORM_FILE_TEMPORARY, PLATFORM_FILE_HIDDEN and
+  // PLATFORM_FILE_DELETE_ON_CLOSE are not granted, because no existing API
+  // requests them.
+  ChildProcessSecurityPolicy::GetInstance()->GrantPermissionsForFile(
+      id(), profile->GetPath().Append(
+          fileapi::FileSystemPathManager::kFileSystemDirectory),
+      base::PLATFORM_FILE_OPEN |
+      base::PLATFORM_FILE_CREATE |
+      base::PLATFORM_FILE_OPEN_ALWAYS |
+      base::PLATFORM_FILE_CREATE_ALWAYS |
+      base::PLATFORM_FILE_READ |
+      base::PLATFORM_FILE_WRITE |
+      base::PLATFORM_FILE_EXCLUSIVE_READ |
+      base::PLATFORM_FILE_EXCLUSIVE_WRITE |
+      base::PLATFORM_FILE_ASYNC |
+      base::PLATFORM_FILE_TRUNCATE |
+      base::PLATFORM_FILE_WRITE_ATTRIBUTES);
 
   // Note: When we create the BrowserRenderProcessHost, it's technically
   //       backgrounded, because it has no visible listeners.  But the process
@@ -244,11 +270,14 @@ BrowserRenderProcessHost::~BrowserRenderProcessHost() {
   ClearTransportDIBCache();
 }
 
-bool BrowserRenderProcessHost::Init(bool is_extensions_process) {
+bool BrowserRenderProcessHost::Init(
+    bool is_accessibility_enabled, bool is_extensions_process) {
   // calling Init() more than once does nothing, this makes it more convenient
   // for the view host which may not be sure in some cases
   if (channel_.get())
     return true;
+
+  accessibility_enabled_ = is_accessibility_enabled;
 
   // It is possible for an extension process to be reused for non-extension
   // content, e.g. if an extension calls window.open.
@@ -447,6 +476,9 @@ void BrowserRenderProcessHost::AppendRendererCommandLine(
   if (logging::DialogsAreSuppressed())
     command_line->AppendSwitch(switches::kNoErrorDialogs);
 
+  if (accessibility_enabled_)
+    command_line->AppendSwitch(switches::kEnableAccessibility);
+
   // Now send any options from our own command line we want to propogate.
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
   PropagateBrowserCommandLineToRenderer(browser_command_line, command_line);
@@ -513,6 +545,8 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kNoJsRandomness,
     switches::kDisableBreakpad,
     switches::kFullMemoryCrashReport,
+    switches::kV,
+    switches::kVModule,
     switches::kEnableLogging,
     switches::kDumpHistogramsOnExit,
     switches::kDisableLogging,
@@ -542,8 +576,8 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kDisableSharedWorkers,
     switches::kDisableApplicationCache,
     switches::kDisableDeviceOrientation,
-    switches::kEnableIndexedDatabase,
-    switches::kEnableSpeechInput,
+    switches::kDisableIndexedDatabase,
+    switches::kDisableSpeechInput,
     switches::kDisableGeolocation,
     switches::kShowPaintRects,
     switches::kEnableOpenMax,
@@ -559,10 +593,10 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     // WebGLArray constructors on the DOMWindow visible. This
     // information is needed very early during bringup. We prefer to
     // use the WebPreferences to set this flag on a page-by-page basis.
-    switches::kEnableExperimentalWebGL,
+    switches::kDisableExperimentalWebGL,
     switches::kDisableGLSLTranslator,
     switches::kInProcessWebGL,
-    switches::kEnableAcceleratedCompositing,
+    switches::kDisableAcceleratedCompositing,
 #if defined(OS_MACOSX)
     // Allow this to be set when invoking the browser and relayed along.
     switches::kEnableSandboxLogging,
@@ -576,9 +610,9 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kDisableClickToPlay,
     switches::kEnableResourceContentSettings,
     switches::kPrelaunchGpuProcess,
-    switches::kEnableAcceleratedCompositing,
     switches::kEnableAcceleratedDecoding,
-    switches::kEnableFileSystem,
+    switches::kEnableMatchPreview,
+    switches::kDisableFileSystem
   };
   renderer_cmd->CopySwitchesFrom(browser_cmd, kSwitchNames,
                                  arraysize(kSwitchNames));
@@ -671,8 +705,19 @@ void BrowserRenderProcessHost::SendExtensionInfo() {
     info.web_extent = extension->web_extent();
     info.name = extension->name();
     info.location = extension->location();
-    info.icon_url =
-        extension->GetIconURLAllowLargerSize(Extension::EXTENSION_ICON_MEDIUM);
+    info.allowed_to_execute_script_everywhere =
+        extension->CanExecuteScriptEverywhere();
+    info.host_permissions = extension->host_permissions();
+
+    // TODO(finnur): Remove after capturing debug info.
+    if (Extension::emit_traces_for_whitelist_extension_test_)
+      std::cout << "*-*-* Sending down: " << info.allowed_to_execute_script_everywhere << " for CanExecuteEverywhere \n" << std::flush;
+
+    // The icon in the page is 96px.  We'd rather not scale up, so use 128.
+    info.icon_url = extension->GetIconURL(Extension::EXTENSION_ICON_LARGE,
+                                          ExtensionIconSet::MATCH_EXACTLY);
+    if (info.icon_url.is_empty())
+      info.icon_url = GURL("chrome://theme/IDR_APP_DEFAULT_ICON");
     params.extensions.push_back(info);
   }
 

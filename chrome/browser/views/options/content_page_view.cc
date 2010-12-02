@@ -139,13 +139,13 @@ void ContentPageView::ButtonPressed(
               IDS_CONFIRM_STOP_SYNCING_DIALOG_HEIGHT_LINES)));
       return;
     } else {
-      sync_service_->EnableForUser(GetWindow()->GetNativeWindow());
+      sync_service_->ShowLoginDialog(GetWindow()->GetNativeWindow());
       ProfileSyncService::SyncEvent(ProfileSyncService::START_FROM_OPTIONS);
     }
   } else if (sender == sync_customize_button_) {
     // sync_customize_button_ should be invisible if sync is not yet set up.
     DCHECK(sync_service_->HasSyncSetupCompleted());
-    sync_service_->ShowChooseDataTypes(GetWindow()->GetNativeWindow());
+    sync_service_->ShowConfigure(GetWindow()->GetNativeWindow());
   }
 }
 
@@ -419,9 +419,6 @@ void ContentPageView::InitSyncGroup() {
   privacy_dashboard_link_->SetController(this);
   privacy_dashboard_link_->SetText(
       l10n_util::GetString(IDS_SYNC_PRIVACY_DASHBOARD_LINK_LABEL));
-  privacy_dashboard_link_->SetVisible(
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kShowPrivacyDashboardLink));
 
   sync_start_stop_button_ = new views::NativeButton(this, std::wstring());
   sync_customize_button_ = new views::NativeButton(this, std::wstring());

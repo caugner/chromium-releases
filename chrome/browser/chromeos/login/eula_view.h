@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/scoped_ptr.h"
+#include "chrome/browser/chromeos/login/message_bubble.h"
 #include "chrome/browser/chromeos/login/view_screen.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "gfx/native_widget_types.h"
@@ -28,6 +29,7 @@ class DOMView;
 namespace chromeos {
 
 class HelpAppLauncher;
+class MetricsCrosSettingsProvider;
 
 // Delegate for TabContents that will show EULA.
 // Blocks context menu and other actions.
@@ -75,6 +77,7 @@ class EulaView
     : public views::View,
       public views::ButtonListener,
       public views::LinkController,
+      public MessageBubbleDelegate,
       public EULATabContentsDelegate {
  public:
   explicit EulaView(chromeos::ScreenObserver* observer);
@@ -97,6 +100,11 @@ class EulaView
   void LinkActivated(views::Link* source, int event_flags);
 
  private:
+  // views::View implementation.
+  virtual bool SkipDefaultKeyEventProcessing(const views::KeyEvent& e) {
+    return true; }
+  virtual bool OnKeyPressed(const views::KeyEvent& e);
+
   // TabContentsDelegate implementation.
   virtual void NavigationStateChanged(const TabContents* contents,
                                       unsigned changed_flags);
@@ -111,6 +119,13 @@ class EulaView
                     views::Label* eula_label,
                     const GURL& eula_url);
 
+  // Overridden from views::InfoBubbleDelegate.
+  virtual void InfoBubbleClosing(InfoBubble* info_bubble,
+                                 bool closed_by_escape) { bubble_ = NULL; }
+  virtual bool CloseOnEscape() { return true; }
+  virtual bool FadeInOnShow() { return false; }
+  virtual void OnHelpLinkActivated() {}
+
   // Dialog controls.
   views::Label* google_eula_label_;
   DOMView* google_eula_view_;
@@ -119,7 +134,7 @@ class EulaView
   views::Label* oem_eula_label_;
   DOMView* oem_eula_view_;
   views::Link* system_security_settings_link_;
-  views::NativeButton* cancel_button_;
+  views::NativeButton* back_button_;
   views::NativeButton* continue_button_;
 
   chromeos::ScreenObserver* observer_;
@@ -129,6 +144,15 @@ class EulaView
 
   // Help application used for help dialogs.
   scoped_ptr<HelpAppLauncher> help_app_;
+
+  // Pointer to shown message bubble. We don't need to delete it because
+  // it will be deleted on bubble closing.
+  MessageBubble* bubble_;
+
+  // TPM password local storage. By convention, we clear the password
+  // from TPM as soon as we read it. We store it here locally until
+  // EULA screen is closed.
+  std::string tpm_password_;
 
   DISALLOW_COPY_AND_ASSIGN(EulaView);
 };

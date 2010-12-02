@@ -15,6 +15,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/linked_ptr.h"
 #include "base/ref_counted.h"
+#include "base/task.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_states.h"
 #include "net/base/net_errors.h"
@@ -39,9 +40,9 @@ namespace net {
 const int kMss = 1430;
 const int kMaxSpdyFrameChunkSize = (2 * kMss) - spdy::SpdyFrame::size();
 
-class SpdyStream;
-class HttpNetworkSession;
 class BoundNetLog;
+class SpdySettingsStorage;
+class SpdyStream;
 class SSLInfo;
 
 class SpdySession : public base::RefCounted<SpdySession>,
@@ -50,10 +51,13 @@ class SpdySession : public base::RefCounted<SpdySession>,
   // Create a new SpdySession.
   // |host_port_proxy_pair| is the host/port that this session connects to, and
   // the proxy configuration settings that it's using.
+  // |spdy_session_pool| is the SpdySessionPool that owns us.  Its lifetime must
+  // strictly be greater than |this|.
   // |session| is the HttpNetworkSession.  |net_log| is the NetLog that we log
   // network events to.
   SpdySession(const HostPortProxyPair& host_port_proxy_pair,
-              HttpNetworkSession* session,
+              SpdySessionPool* spdy_session_pool,
+              SpdySettingsStorage* spdy_settings,
               NetLog* net_log);
 
   const HostPortPair& host_port_pair() const {
@@ -62,14 +66,6 @@ class SpdySession : public base::RefCounted<SpdySession>,
   const HostPortProxyPair& host_port_proxy_pair() const {
     return host_port_proxy_pair_;
   }
-
-  // Connect the Spdy Socket.
-  // Returns net::Error::OK on success.
-  // Note that this call does not wait for the connect to complete. Callers can
-  // immediately start using the SpdySession while it connects.
-  net::Error Connect(const std::string& group_name,
-                     const scoped_refptr<TCPSocketParams>& destination,
-                     RequestPriority priority);
 
   // Get a pushed stream for a given |url|.
   // If the server initiates a stream, it might already exist for a given path.
@@ -165,7 +161,15 @@ class SpdySession : public base::RefCounted<SpdySession>,
     return frames_received_ > 0;
   }
 
-  void set_in_session_pool(bool val) { in_session_pool_ = val; }
+  // Returns true if the underlying transport socket ever had any reads or
+  // writes.
+  bool WasEverUsed() const {
+    return connection_->socket()->WasEverUsed();
+  }
+
+  void set_spdy_session_pool(SpdySessionPool* pool) {
+    spdy_session_pool_ = NULL;
+  }
 
   // Access to the number of active and pending streams.  These are primarily
   // available for testing and diagnostics.
@@ -175,6 +179,10 @@ class SpdySession : public base::RefCounted<SpdySession>,
   }
 
   const BoundNetLog& net_log() const { return net_log_; }
+
+  int GetPeerAddress(AddressList* address) const {
+    return connection_->socket()->GetPeerAddress(address);
+  }
 
  private:
   friend class base::RefCounted<SpdySession>;
@@ -237,8 +245,6 @@ class SpdySession : public base::RefCounted<SpdySession>,
   void OnWindowUpdate(const spdy::SpdyWindowUpdateControlFrame& frame);
 
   // IO Callbacks
-  void OnTCPConnect(int result);
-  void OnSSLConnect(int result);
   void OnReadComplete(int result);
   void OnWriteComplete(int result);
 
@@ -289,18 +295,27 @@ class SpdySession : public base::RefCounted<SpdySession>,
   // Closes all streams.  Used as part of shutdown.
   void CloseAllStreams(net::Error status);
 
+  // Invokes a user callback for stream creation.  We provide this method so it
+  // can be deferred to the MessageLoop, so we avoid re-entrancy problems.
+  void InvokeUserStreamCreationCallback(CompletionCallback* callback, int rv);
+
   // Callbacks for the Spdy session.
-  CompletionCallbackImpl<SpdySession> connect_callback_;
-  CompletionCallbackImpl<SpdySession> ssl_connect_callback_;
   CompletionCallbackImpl<SpdySession> read_callback_;
   CompletionCallbackImpl<SpdySession> write_callback_;
+
+  // Used for posting asynchronous IO tasks.  We use this even though
+  // SpdySession is refcounted because we don't need to keep the SpdySession
+  // alive if the last reference is within a RunnableMethod.  Just revoke the
+  // method.
+  ScopedRunnableMethodFactory<SpdySession> method_factory_;
 
   // The domain this session is connected to.
   const HostPortProxyPair host_port_proxy_pair_;
 
-  SSLConfig ssl_config_;
-
-  scoped_refptr<HttpNetworkSession> session_;
+  // |spdy_session_pool_| owns us, therefore its lifetime must exceed ours.  We
+  // set this to NULL after we are removed from the pool.
+  SpdySessionPool* spdy_session_pool_;
+  SpdySettingsStorage* const spdy_settings_;
 
   // The socket handle for this session.
   scoped_ptr<ClientSocketHandle> connection_;
@@ -365,8 +380,6 @@ class SpdySession : public base::RefCounted<SpdySession>,
   bool sent_settings_;      // Did this session send settings when it started.
   bool received_settings_;  // Did this session receive at least one settings
                             // frame.
-
-  bool in_session_pool_;  // True if the session is currently in the pool.
 
   // Initial send window size for the session; can be changed by an
   // arriving SETTINGS frame; newly created streams use this value for the

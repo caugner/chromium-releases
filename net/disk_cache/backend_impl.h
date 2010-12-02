@@ -29,7 +29,8 @@ enum BackendFlags {
   kUpgradeMode = 1 << 3,        // This is the upgrade tool (dump).
   kNewEviction = 1 << 4,        // Use of new eviction was specified.
   kNoRandom = 1 << 5,           // Don't add randomness to the behavior.
-  kNoLoadProtection = 1 << 6    // Don't act conservatively under load.
+  kNoLoadProtection = 1 << 6,   // Don't act conservatively under load.
+  kNoBuffering = 1 << 7         // Disable extended IO buffering.
 };
 
 // This class implements the Backend interface. An object of this
@@ -140,9 +141,14 @@ class BackendImpl : public Backend {
   // Removes all references to this entry.
   void RemoveEntry(EntryImpl* entry);
 
-  // This method must be called whenever an entry is released for the last time.
-  // |address| is the cache address of the entry.
-  void CacheEntryDestroyed(Addr address);
+  // This method must be called when an entry is released for the last time, so
+  // the entry should not be used anymore. |address| is the cache address of the
+  // entry.
+  void OnEntryDestroyBegin(Addr address);
+
+  // This method must be called after all resources for an entry have been
+  // released.
+  void OnEntryDestroyEnd();
 
   // If the data stored by the provided |rankings| points to an open entry,
   // returns a pointer to that entry, otherwise returns NULL. Note that this
@@ -185,9 +191,7 @@ class BackendImpl : public Backend {
   }
 
   // Returns a weak pointer to this object.
-  base::WeakPtr<BackendImpl> GetWeakPtr() {
-    return ptr_factory_.GetWeakPtr();
-  }
+  base::WeakPtr<BackendImpl> GetWeakPtr();
 
   // Returns the group for this client, based on the current cache size.
   int GetSizeGroup() const;
@@ -213,6 +217,9 @@ class BackendImpl : public Backend {
   void OnRead(int bytes);
   void OnWrite(int bytes);
 
+  // Keeps track of the time needed to complete some IO operations.
+  void OnOperationCompleted(base::TimeDelta elapsed_time);
+
   // Timer callback to calculate usage statistics.
   void OnStatsTimer();
 
@@ -237,6 +244,10 @@ class BackendImpl : public Backend {
 
   // Sends a dummy operation through the operation queue, for unit tests.
   int FlushQueueForTest(CompletionCallback* callback);
+
+  // Runs the provided task on the cache thread. The task will be automatically
+  // deleted after it runs.
+  int RunTaskForTest(Task* task, CompletionCallback* callback);
 
   // Peforms a simple self-check, and returns the number of dirty items
   // or an error code (negative value).
@@ -330,6 +341,7 @@ class BackendImpl : public Backend {
   int entry_count_;  // Number of entries accessed lately.
   int byte_count_;  // Number of bytes read/written lately.
   int buffer_bytes_;  // Total size of the temporary entries' buffers.
+  int io_delay_;  // Average time (ms) required to complete some IO operations.
   net::CacheType cache_type_;
   int uma_report_;  // Controls transmision of UMA data.
   uint32 user_flags_;  // Flags set by the user.
@@ -340,6 +352,7 @@ class BackendImpl : public Backend {
   bool disabled_;
   bool new_eviction_;  // What eviction algorithm should be used.
   bool first_timer_;  // True if the timer has not been called.
+  bool throttle_requests_;
 
   Stats stats_;  // Usage statistcs.
   base::RepeatingTimer<BackendImpl> timer_;  // Usage timer.

@@ -4,6 +4,7 @@
 
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/message_loop.h"
 #include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
@@ -219,8 +220,6 @@ void FFmpegDemuxerStream::EnableBitstreamConverter() {
     filter_name = "vc1_asftorcv";
   } else if (stream_->codec->codec_id == CODEC_ID_VC1) {
     filter_name = "vc1_asftoannexg";
-  } else {
-    NOTREACHED();
   }
 
   if (filter_name) {

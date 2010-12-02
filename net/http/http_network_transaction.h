@@ -24,11 +24,13 @@
 
 namespace net {
 
+class ClientSocketHandle;
 class HttpAuthController;
 class HttpNetworkSession;
 class HttpStream;
-class HttpStreamHandle;
+class HttpStreamRequest;
 class IOBuffer;
+class SSLNonSensitiveHostInfo;
 struct HttpRequestInfo;
 
 class HttpNetworkTransaction : public HttpTransaction,
@@ -55,9 +57,10 @@ class HttpNetworkTransaction : public HttpTransaction,
   virtual const HttpResponseInfo* GetResponseInfo() const;
   virtual LoadState GetLoadState() const;
   virtual uint64 GetUploadProgress() const;
+  virtual void SetSSLNonSensitiveHostInfo(SSLNonSensitiveHostInfo* host_info);
 
   // StreamRequestDelegate methods:
-  virtual void OnStreamReady(HttpStreamHandle* stream);
+  virtual void OnStreamReady(HttpStream* stream);
   virtual void OnStreamFailed(int status);
   virtual void OnCertificateError(int status, const SSLInfo& ssl_info);
   virtual void OnNeedsProxyAuth(
@@ -206,7 +209,11 @@ class HttpNetworkTransaction : public HttpTransaction,
   ProxyInfo proxy_info_;
 
   scoped_refptr<StreamFactory::StreamRequestJob> stream_request_;
-  scoped_ptr<HttpStreamHandle> stream_;
+  scoped_ptr<HttpStream> stream_;
+
+  // Reuse the same connection for each round of a connection-based HTTP
+  // authentication scheme.
+  scoped_ptr<ClientSocketHandle> auth_connection_;
 
   // True if we've validated the headers that the stream parser has returned.
   bool headers_valid_;
@@ -223,7 +230,7 @@ class HttpNetworkTransaction : public HttpTransaction,
   // The size in bytes of the buffer we use to drain the response body that
   // we want to throw away.  The response body is typically a small error
   // page just a few hundred bytes long.
-  enum { kDrainBodyBufferSize = 1024 };
+  static const int kDrainBodyBufferSize = 1024;
 
   // User buffer and length passed to the Read method.
   scoped_refptr<IOBuffer> read_buf_;

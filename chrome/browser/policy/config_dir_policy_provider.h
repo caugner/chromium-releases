@@ -11,23 +11,31 @@
 #include "base/lock.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "base/time.h"
 #include "base/weak_ptr.h"
 #include "chrome/browser/file_path_watcher.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
 
-class ConfigDirPolicyProvider;
+class CancelableTask;
 class DictionaryValue;
 class MessageLoop;
+
+namespace policy {
+
+class ConfigDirPolicyProvider;
 
 // FilePathWatcher delegate implementation that handles change notifications for
 // the configuration directory. It keeps the authorative version of the
 // currently effective policy dictionary and updates it as appropriate.
 class PolicyDirLoader : public FilePathWatcher::Delegate {
  public:
-  // Create a new loader that'll load its data from |config_dir|.
+  // Creates a new loader that'll load its data from |config_dir|. The
+  // parameters |settle_interval_seconds| and |reload_interval_minutes| specify
+  // the time to wait before reading the directory contents after a change and
+  // the period for checking |config_dir| for changes, respectively.
   PolicyDirLoader(base::WeakPtr<ConfigDirPolicyProvider> provider,
                   const FilePath& config_dir,
-                  int settle_interval_second,
+                  int settle_interval_seconds,
                   int reload_interval_minutes);
 
   // Stops any pending reload tasks.
@@ -37,8 +45,8 @@ class PolicyDirLoader : public FilePathWatcher::Delegate {
   // called on the file thread.
   void Reload();
 
-  // Get the current dictionary value object. Ownership of the returned value is
-  // transferred to the caller.
+  // Gets the current dictionary value object. Ownership of the returned value
+  // is transferred to the caller.
   DictionaryValue* GetPolicy();
 
   const FilePath& config_dir() { return config_dir_; }
@@ -48,16 +56,17 @@ class PolicyDirLoader : public FilePathWatcher::Delegate {
   void OnError();
 
  private:
-  // Load the policy information. Ownership of the return value is transferred
+  // Loads the policy information. Ownership of the return value is transferred
   // to the caller.
   DictionaryValue* Load();
 
-  // Check the directory modification time to see whether reading the
+  // Checks the directory modification time to see whether reading the
   // configuration directory is safe. If not, returns false and the delay until
   // it is considered safe to reload in |delay|.
   bool IsSafeToReloadPolicy(const base::Time& now, base::TimeDelta* delay);
 
-  // Post a reload task. Must be called on the file thread.
+  // Schedules a reload task to run when |delay| expires. Must be called on the
+  // file thread.
   void ScheduleReloadTask(const base::TimeDelta& delay);
 
   // Notifies the policy provider to send out a policy changed notification.
@@ -107,18 +116,24 @@ class PolicyDirLoader : public FilePathWatcher::Delegate {
 
 // Wraps a FilePathWatcher for the configuration directory and takes care of
 // initializing the watcher object on the file thread.
-class PolicyDirWatcher : public FilePathWatcher,
-                         public base::RefCountedThreadSafe<PolicyDirWatcher> {
+class PolicyDirWatcher : public base::RefCountedThreadSafe<PolicyDirWatcher> {
  public:
   PolicyDirWatcher() {}
 
-  // Run initialization. This is in a separate method since we need to post a
+  // Runs initialization. This is in a separate method since we need to post a
   // task (which cannot be done from the constructor).
   void Init(PolicyDirLoader* loader);
 
  private:
+  // PolicyDirWatcher objects should only be deleted by RefCountedThreadSafe.
+  friend class base::RefCountedThreadSafe<PolicyDirWatcher>;
+  ~PolicyDirWatcher() {}
+
   // Actually sets up the watch with the FilePathWatcher code.
   void InitWatcher(const scoped_refptr<PolicyDirLoader>& loader);
+
+  // Wrapped watcher that takes care of the actual watching.
+  FilePathWatcher watcher_;
 
   DISALLOW_COPY_AND_ASSIGN(PolicyDirWatcher);
 };
@@ -133,7 +148,9 @@ class ConfigDirPolicyProvider
     : public ConfigurationPolicyProvider,
       public base::SupportsWeakPtr<ConfigDirPolicyProvider> {
  public:
-  explicit ConfigDirPolicyProvider(const FilePath& config_dir);
+  explicit ConfigDirPolicyProvider(
+      const ConfigurationPolicyProvider::StaticPolicyValueMap& policy_map,
+      const FilePath& config_dir);
   virtual ~ConfigDirPolicyProvider();
 
   // ConfigurationPolicyProvider implementation.
@@ -152,5 +169,7 @@ class ConfigDirPolicyProvider
 
   DISALLOW_COPY_AND_ASSIGN(ConfigDirPolicyProvider);
 };
+
+}  // namespace policy
 
 #endif  // CHROME_BROWSER_POLICY_CONFIG_DIR_POLICY_PROVIDER_H_

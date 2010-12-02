@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "net/base/ssl_config_service.h"
+#include "net/base/ssl_false_start_blacklist.h"
 
 #if defined(OS_WIN)
 #include "net/base/ssl_config_service_win.h"
@@ -13,6 +14,35 @@
 #endif
 
 namespace net {
+
+SSLConfig::CertAndStatus::CertAndStatus() {}
+
+SSLConfig::CertAndStatus::~CertAndStatus() {}
+
+SSLConfig::SSLConfig()
+    : rev_checking_enabled(true),  ssl2_enabled(false), ssl3_enabled(true),
+      tls1_enabled(true), dnssec_enabled(false), snap_start_enabled(false),
+      mitm_proxies_allowed(false), false_start_enabled(true),
+      send_client_cert(false), verify_ev_cert(false), ssl3_fallback(false) {
+}
+
+SSLConfig::~SSLConfig() {
+}
+
+bool SSLConfig::IsAllowedBadCert(X509Certificate* cert) const {
+  for (size_t i = 0; i < allowed_bad_certs.size(); ++i) {
+    if (cert == allowed_bad_certs[i].cert)
+      return true;
+  }
+  return false;
+}
+
+SSLConfigService::SSLConfigService()
+    : observer_list_(ObserverList<Observer>::NOTIFY_EXISTING_ONLY) {
+}
+
+SSLConfigService::~SSLConfigService() {
+}
 
 // static
 SSLConfigService* SSLConfigService::CreateSystemSSLConfigService() {
@@ -58,46 +88,20 @@ bool SSLConfigService::IsKnownStrictTLSServer(const std::string& hostname) {
 // static
 bool SSLConfigService::IsKnownFalseStartIncompatibleServer(
     const std::string& hostname) {
-  // If this list starts growing, it'll need to be something more efficient
-  // than a linear list.
-  static const char kFalseStartIncompatibleServers[][15] = {
-      "www.picnik.com",
-  };
-
-  static const char kFalseStartIncompatibleDomains[][11] = {
-      // Added at the request of A10.
-      "yodlee.com",
-  };
-
-  // Note that the hostname is normalised to lower-case by this point.
-  for (size_t i = 0; i < arraysize(kFalseStartIncompatibleServers); i++) {
-    if (strcmp(hostname.c_str(), kFalseStartIncompatibleServers[i]) == 0)
-      return true;
-  }
-
-  for (size_t i = 0; i < arraysize(kFalseStartIncompatibleDomains); i++) {
-    const char* domain = kFalseStartIncompatibleDomains[i];
-    const size_t len = strlen(domain);
-    if (hostname.size() >= len &&
-        memcmp(&hostname[hostname.size() - len], domain, len) == 0 &&
-        (hostname.size() == len ||
-         hostname[hostname.size() - len - 1] == '.')) {
-      return true;
-    }
-  }
-
-  return false;
+  return SSLFalseStartBlacklist::IsMember(hostname.c_str());
 }
 
 static bool g_dnssec_enabled = false;
 static bool g_false_start_enabled = true;
 static bool g_mitm_proxies_allowed = false;
+static bool g_snap_start_enabled = false;
 
 // static
 void SSLConfigService::SetSSLConfigFlags(SSLConfig* ssl_config) {
   ssl_config->dnssec_enabled = g_dnssec_enabled;
   ssl_config->false_start_enabled = g_false_start_enabled;
   ssl_config->mitm_proxies_allowed = g_mitm_proxies_allowed;
+  ssl_config->snap_start_enabled = g_snap_start_enabled;
 }
 
 // static
@@ -108,6 +112,16 @@ void SSLConfigService::EnableDNSSEC() {
 // static
 bool SSLConfigService::dnssec_enabled() {
   return g_dnssec_enabled;
+}
+
+// static
+void SSLConfigService::EnableSnapStart() {
+  g_snap_start_enabled = true;
+}
+
+// static
+bool SSLConfigService::snap_start_enabled() {
+  return g_snap_start_enabled;
 }
 
 // static

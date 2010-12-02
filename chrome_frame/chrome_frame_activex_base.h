@@ -21,6 +21,7 @@
 #include "base/scoped_comptr_win.h"
 #include "base/scoped_variant_win.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "grit/chrome_frame_resources.h"
 #include "chrome/common/url_constants.h"
@@ -36,6 +37,7 @@
 
 // Include without path to make GYP build see it.
 #include "chrome_tab.h"  // NOLINT
+
 
 // Connection point class to support firing IChromeFrameEvents (dispinterface).
 template<class T>
@@ -69,7 +71,7 @@ class ATL_NO_VTABLE ProxyDIChromeFrameEvents
                                     LOCALE_USER_DEFAULT, DISPATCH_METHOD,
                                     &disp_params, NULL, NULL, NULL);
         DLOG_IF(ERROR, FAILED(hr)) << "invoke(" << dispid << ") failed" <<
-            StringPrintf("0x%08X", hr);
+            base::StringPrintf("0x%08X", hr);
       }
     }
   }
@@ -261,9 +263,10 @@ END_MSG_MAP()
       THREAD_SAFE_UMA_HISTOGRAM_CUSTOM_COUNTS("ChromeFrame.IEVersion",
                                               GetIEVersion(),
                                               IE_INVALID,
-                                              IE_8,
-                                              IE_8 + 1);
+                                              IE_9,
+                                              IE_9 + 1);
     }
+
     return S_OK;
   }
 
@@ -387,43 +390,6 @@ END_MSG_MAP()
     return true;
   }
 
-  // IOleInPlaceObject overrides.
-  STDMETHOD(InPlaceDeactivate)(void) {
-    static UINT onload_handlers_done_msg =
-        RegisterWindowMessage(L"ChromeFrame_OnloadHandlersDone");
-
-    if (m_bInPlaceActive && IsWindow() && IsValid()) {
-      static const int kChromeFrameUnloadEventTimerId = 0xdeadbeef;
-      static const int kChromeFrameUnloadEventTimeout = 1000;
-
-      // To prevent us from indefinitely waiting for an acknowledgement from
-      // Chrome indicating that unload handlers have been run, we set a 1
-      // second timer and exit the loop when it fires.
-      ::SetTimer(m_hWnd, kChromeFrameUnloadEventTimerId,
-                 kChromeFrameUnloadEventTimeout, NULL);
-
-      automation_client_->RunUnloadHandlers(m_hWnd, onload_handlers_done_msg);
-
-      MSG msg = {0};
-      while (GetMessage(&msg, NULL, 0, 0)) {
-        if (msg.message == onload_handlers_done_msg &&
-            msg.hwnd == m_hWnd) {
-          break;
-        }
-
-        if (msg.message == WM_TIMER &&
-            msg.wParam == kChromeFrameUnloadEventTimerId) {
-          break;
-        }
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-      }
-
-      ::KillTimer(m_hWnd, kChromeFrameUnloadEventTimerId);
-    }
-    return IOleInPlaceObjectWindowlessImpl<T>::InPlaceDeactivate();
-  }
-
  protected:
   virtual void GetProfilePath(const std::wstring& profile_name,
                               FilePath* profile_path) {
@@ -509,16 +475,32 @@ END_MSG_MAP()
     std::wstring wide_url = url_;
     GURL parsed_url(WideToUTF8(wide_url));
 
-    std::string url =
-        StringPrintf("%hs:%hs?attach_external_tab&%I64u&%d&%d&%d&%d&%d",
-                     parsed_url.scheme().c_str(),
-                     parsed_url.host().c_str(),
-                     params.cookie,
-                     params.disposition,
-                     params.dimensions.x(),
-                     params.dimensions.y(),
-                     params.dimensions.width(),
-                     params.dimensions.height());
+    std::string scheme(parsed_url.scheme());
+    std::string host(parsed_url.host());
+
+    // If Chrome-Frame is presently navigated to an extension page, navigating
+    // the host to a url with scheme chrome-extension will fail, so we
+    // point the host at http:local_host.  Note that this is NOT the URL
+    // to which the host is directed.  It is only used as a temporary message
+    // passing mechanism between this CF instance, and the BHO that will
+    // be constructed in the new IE tab.
+    if (parsed_url.SchemeIs("chrome-extension") &&
+        is_privileged_) {
+      scheme = "http";
+      host = "local_host";
+    }
+
+    std::string url = base::StringPrintf(
+        "%hs:%hs?attach_external_tab&%I64u&%d&%d&%d&%d&%d&%hs",
+        scheme.c_str(),
+        host.c_str(),
+        params.cookie,
+        params.disposition,
+        params.dimensions.x(),
+        params.dimensions.y(),
+        params.dimensions.width(),
+        params.dimensions.height(),
+        params.profile_name.c_str());
     HostNavigate(GURL(url), GURL(), params.disposition);
   }
 
@@ -931,7 +913,8 @@ END_MSG_MAP()
         hr = E_ACCESSDENIED;
       }
     } else {
-      Error(StringPrintf("Event type '%ls' not found", event_type).c_str());
+      Error(base::StringPrintf(
+          "Event type '%ls' not found", event_type).c_str());
       hr = E_INVALIDARG;
     }
 
@@ -1093,7 +1076,7 @@ END_MSG_MAP()
       hr = AllowFrameToTranslateAccelerator(accel_message);
 
     DLOG(INFO) << __FUNCTION__ << " browser response: "
-               << StringPrintf("0x%08x", hr);
+               << base::StringPrintf("0x%08x", hr);
 
     if (hr != S_OK) {
       // The WM_SYSCHAR message is not processed by the IOleControlSite
@@ -1216,6 +1199,18 @@ END_MSG_MAP()
 
     web_browser2->Navigate2(url.AsInput(), &flags, &empty, &empty,
                             http_headers.AsInput());
+  }
+
+  void InitializeAutomationSettings() {
+    static const wchar_t kHandleTopLevelRequests[] = L"HandleTopLevelRequests";
+    static const wchar_t kUseChromeNetworking[] = L"UseChromeNetworking";
+
+    // Query and assign the top-level-request routing, and host networking
+    // settings from the registry.
+    bool top_level_requests = GetConfigBool(true, kHandleTopLevelRequests);
+    bool chrome_network = GetConfigBool(false, kUseChromeNetworking);
+    automation_client_->set_handle_top_level_requests(top_level_requests);
+    automation_client_->set_use_chrome_network(chrome_network);
   }
 
   ScopedBstr url_;

@@ -12,6 +12,7 @@
 
 #include "base/scoped_ptr.h"
 #include "chrome/renderer/ggl/ggl.h"
+#include "gfx/native_widget_types.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
@@ -41,7 +42,8 @@ class WebGraphicsContext3DCommandBufferImpl
   //----------------------------------------------------------------------
   // WebGraphicsContext3D methods
   virtual bool initialize(WebGraphicsContext3D::Attributes attributes,
-                          WebKit::WebView*);
+                          WebKit::WebView*,
+                          bool renderDirectlyToWebView);
 
   virtual bool makeContextCurrent();
 
@@ -341,6 +343,26 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual void synthesizeGLError(unsigned long error);
   virtual bool supportsBGRA();
 
+  virtual bool supportsMapSubCHROMIUM();
+  virtual void* mapBufferSubDataCHROMIUM(
+      unsigned target, int offset, int size, unsigned access);
+  virtual void unmapBufferSubDataCHROMIUM(const void*);
+  virtual void* mapTexSubImage2DCHROMIUM(
+      unsigned target,
+      int level,
+      int xoffset,
+      int yoffset,
+      int width,
+      int height,
+      unsigned format,
+      unsigned type,
+      unsigned access);
+  virtual void unmapTexSubImage2DCHROMIUM(const void*);
+
+  virtual bool supportsCopyTextureToParentTextureCHROMIUM();
+  virtual void copyTextureToParentTextureCHROMIUM(
+      unsigned texture, unsigned parentTexture);
+
   virtual unsigned createCompositorTexture(unsigned width, unsigned height);
   virtual void deleteCompositorTexture(unsigned parent_texture);
   virtual void copyTextureToCompositor(unsigned texture,
@@ -349,6 +371,12 @@ class WebGraphicsContext3DCommandBufferImpl
  private:
   // The GGL context we use for OpenGL rendering.
   ggl::Context* context_;
+  // If rendering directly to WebView, weak pointer to it.
+  WebKit::WebView* web_view_;
+#if defined(OS_MACOSX)
+  // "Fake" plugin window handle in browser process for the compositor's output.
+  gfx::PluginWindowHandle plugin_handle_;
+#endif
 
   WebKit::WebGraphicsContext3D::Attributes attributes_;
   int cached_width_, cached_height_;

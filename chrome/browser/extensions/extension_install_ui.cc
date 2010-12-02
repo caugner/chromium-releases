@@ -19,15 +19,11 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/views/app_launcher.h"
-#include "chrome/browser/views/extensions/extension_installed_bubble.h"
-#elif defined(TOOLKIT_GTK)
-#include "chrome/browser/gtk/extension_installed_bubble_gtk.h"
-#endif
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/notification_service.h"
@@ -36,13 +32,19 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 
-#if defined(TOOLKIT_GTK)
-#include "chrome/browser/extensions/gtk_theme_installed_infobar_delegate.h"
-#include "chrome/browser/gtk/gtk_theme_provider.h"
-#endif
-
 #if defined(OS_MACOSX)
 #include "chrome/browser/cocoa/extension_installed_bubble_bridge.h"
+#endif
+
+#if defined(TOOLKIT_VIEWS)
+#include "chrome/browser/views/app_launcher.h"
+#include "chrome/browser/views/extensions/extension_installed_bubble.h"
+#endif
+
+#if defined(TOOLKIT_GTK)
+#include "chrome/browser/extensions/gtk_theme_installed_infobar_delegate.h"
+#include "chrome/browser/gtk/extension_installed_bubble_gtk.h"
+#include "chrome/browser/gtk/gtk_theme_provider.h"
 #endif
 
 // static
@@ -66,82 +68,7 @@ namespace {
 // Size of extension icon in top left of dialog.
 const int kIconSize = 69;
 
-static void GetV2Warnings(Extension* extension,
-                          std::vector<string16>* warnings) {
-  if (!extension->plugins().empty()) {
-    // TODO(aa): This one is a bit awkward. Should we have a separate
-    // presentation for this case?
-    warnings->push_back(
-        l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT2_WARNING_FULL_ACCESS));
-    return;
-  }
-
-  if (extension->HasAccessToAllHosts()) {
-    warnings->push_back(
-        l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT2_WARNING_ALL_HOSTS));
-  } else {
-    std::vector<std::string> hosts =
-        ExtensionInstallUI::GetDistinctHostsForDisplay(
-            extension->GetEffectiveHostPermissions().patterns());
-    if (hosts.size() == 1) {
-      warnings->push_back(
-          l10n_util::GetStringFUTF16(IDS_EXTENSION_PROMPT2_WARNING_1_HOST,
-                                     UTF8ToUTF16(hosts[0])));
-    } else if (hosts.size() == 2) {
-      warnings->push_back(
-          l10n_util::GetStringFUTF16(IDS_EXTENSION_PROMPT2_WARNING_2_HOSTS,
-                                     UTF8ToUTF16(hosts[0]),
-                                     UTF8ToUTF16(hosts[1])));
-    } else if (hosts.size() == 3) {
-      warnings->push_back(
-          l10n_util::GetStringFUTF16(IDS_EXTENSION_PROMPT2_WARNING_3_HOSTS,
-                                     UTF8ToUTF16(hosts[0]),
-                                     UTF8ToUTF16(hosts[1]),
-                                     UTF8ToUTF16(hosts[2])));
-    } else if (hosts.size() >= 4) {
-      warnings->push_back(
-          l10n_util::GetStringFUTF16(
-              IDS_EXTENSION_PROMPT2_WARNING_4_OR_MORE_HOSTS,
-              UTF8ToUTF16(hosts[0]),
-              UTF8ToUTF16(hosts[1]),
-              base::IntToString16(hosts.size() - 2)));
-    }
-  }
-
-  if (extension->HasEffectiveBrowsingHistoryPermission()) {
-    warnings->push_back(
-        l10n_util::GetStringUTF16(
-            IDS_EXTENSION_PROMPT2_WARNING_BROWSING_HISTORY));
-  }
-
-  const Extension::SimplePermissions& simple_permissions =
-      Extension::GetSimplePermissions();
-
-  for (Extension::SimplePermissions::const_iterator iter =
-           simple_permissions.begin();
-       iter != simple_permissions.end(); ++iter) {
-    if (extension->HasApiPermission(iter->first))
-      warnings->push_back(iter->second);
-  }
-}
-
 }  // namespace
-
-std::vector<std::string> ExtensionInstallUI::GetDistinctHostsForDisplay(
-    const std::vector<URLPattern>& host_patterns) {
-  // Vector because we later want to access these by index.
-  std::vector<std::string> distinct_hosts;
-
-  for (size_t i = 0; i < host_patterns.size(); ++i) {
-    std::string candidate = host_patterns[i].host();
-    if (std::find(distinct_hosts.begin(), distinct_hosts.end(), candidate) ==
-                  distinct_hosts.end()) {
-      distinct_hosts.push_back(candidate);
-    }
-  }
-
-  return distinct_hosts;
-}
 
 ExtensionInstallUI::ExtensionInstallUI(Profile* profile)
     : profile_(profile),
@@ -179,7 +106,7 @@ void ExtensionInstallUI::ConfirmInstall(Delegate* delegate,
     DCHECK(!previous_use_system_theme_);
 #endif
 
-    delegate->InstallUIProceed(false);
+    delegate->InstallUIProceed();
     return;
   }
 
@@ -221,9 +148,7 @@ void ExtensionInstallUI::OnInstallSuccess(Extension* extension) {
       std::string url(chrome::kChromeUINewTabURL);
       url += "/#";
       url += hash_params;
-      browser->AddTabWithURL(GURL(url), GURL(), PageTransition::TYPED, -1,
-                             TabStripModel::ADD_SELECTED, NULL, std::string(),
-                             NULL);
+      browser->AddSelectedTabWithURL(GURL(url), PageTransition::TYPED);
     }
 
     return;
@@ -292,8 +217,7 @@ void ExtensionInstallUI::OnImageLoaded(
           Source<ExtensionInstallUI>(this),
           NotificationService::NoDetails());
 
-      std::vector<string16> warnings;
-      GetV2Warnings(extension_, &warnings);
+      std::vector<string16> warnings = extension_->GetPermissionMessages();
       ShowExtensionInstallUIPrompt2Impl(profile_, delegate_, extension_, &icon_,
                                         warnings);
       break;
@@ -359,7 +283,8 @@ void ExtensionInstallUI::ShowConfirmation(PromptType prompt_type) {
   // Load the image asynchronously. For the response, check OnImageLoaded.
   prompt_type_ = prompt_type;
   ExtensionResource image =
-      extension_->GetIconResource(Extension::EXTENSION_ICON_LARGE);
+      extension_->GetIconResource(Extension::EXTENSION_ICON_LARGE,
+                                  ExtensionIconSet::MATCH_EXACTLY);
   tracker_.LoadImage(extension_, image,
                      gfx::Size(kIconSize, kIconSize),
                      ImageLoadingTracker::DONT_CACHE);

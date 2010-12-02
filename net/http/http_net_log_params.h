@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
+#include "base/stringprintf.h"
 #include "base/values.h"
 #include "net/base/net_log.h"
 #include "net/http/http_request_headers.h"
@@ -32,12 +33,16 @@ class NetLogHttpRequestParameter : public NetLog::EventParameters {
     HttpRequestHeaders::Iterator iterator(headers_);
     while (iterator.GetNext()) {
       headers->Append(
-          new StringValue(StringPrintf("%s: %s",
-                                       iterator.name().c_str(),
-                                       iterator.value().c_str())));
+          new StringValue(base::StringPrintf("%s: %s",
+                                            iterator.name().c_str(),
+                                            iterator.value().c_str())));
     }
     dict->Set("headers", headers);
     return dict;
+  }
+
+  const HttpRequestHeaders& GetHeaders() const {
+    return headers_;
   }
 
  private:
@@ -64,10 +69,15 @@ class NetLogHttpResponseParameter : public NetLog::EventParameters {
     std::string value;
     while (headers_->EnumerateHeaderLines(&iterator, &name, &value)) {
       headers->Append(
-          new StringValue(StringPrintf("%s: %s", name.c_str(), value.c_str())));
+          new StringValue(base::StringPrintf("%s: %s", name.c_str(),
+                                             value.c_str())));
     }
     dict->Set("headers", headers);
     return dict;
+  }
+
+  const HttpResponseHeaders& GetHeaders() const {
+    return *headers_;
   }
 
  private:

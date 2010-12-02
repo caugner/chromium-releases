@@ -57,7 +57,8 @@ TEST_F(LoginPromptTest, TestBasicAuth) {
 
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
-  ASSERT_TRUE(tab->NavigateToURL(test_server_.GetURL("auth-basic")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            tab->NavigateToURL(test_server_.GetURL("auth-basic")));
 
   EXPECT_TRUE(tab->NeedsAuth());
   EXPECT_FALSE(tab->SetAuth(username_basic_, password_bad_));
@@ -65,7 +66,8 @@ TEST_F(LoginPromptTest, TestBasicAuth) {
   EXPECT_TRUE(tab->CancelAuth());
   EXPECT_EQ(L"Denied: wrong password", GetActiveTabTitle());
 
-  ASSERT_TRUE(tab->NavigateToURL(test_server_.GetURL("auth-basic")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            tab->NavigateToURL(test_server_.GetURL("auth-basic")));
 
   EXPECT_TRUE(tab->NeedsAuth());
   EXPECT_TRUE(tab->SetAuth(username_basic_, password_));
@@ -79,14 +81,16 @@ TEST_F(LoginPromptTest, TestDigestAuth) {
 
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
-  ASSERT_TRUE(tab->NavigateToURL(test_server_.GetURL("auth-digest")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            tab->NavigateToURL(test_server_.GetURL("auth-digest")));
 
   EXPECT_TRUE(tab->NeedsAuth());
   EXPECT_FALSE(tab->SetAuth(username_digest_, password_bad_));
   EXPECT_TRUE(tab->CancelAuth());
   EXPECT_EQ(L"Denied: wrong password", GetActiveTabTitle());
 
-  ASSERT_TRUE(tab->NavigateToURL(test_server_.GetURL("auth-digest")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            tab->NavigateToURL(test_server_.GetURL("auth-digest")));
 
   EXPECT_TRUE(tab->NeedsAuth());
   EXPECT_TRUE(tab->SetAuth(username_digest_, password_));
@@ -100,13 +104,14 @@ TEST_F(LoginPromptTest, TestTwoAuths) {
 
   scoped_refptr<TabProxy> basic_tab(GetActiveTab());
   ASSERT_TRUE(basic_tab.get());
-  ASSERT_TRUE(basic_tab->NavigateToURL(test_server_.GetURL("auth-basic")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            basic_tab->NavigateToURL(test_server_.GetURL("auth-basic")));
 
   AppendTab(GURL(chrome::kAboutBlankURL));
   scoped_refptr<TabProxy> digest_tab(GetActiveTab());
   ASSERT_TRUE(digest_tab.get());
-  ASSERT_TRUE(
-      digest_tab->NavigateToURL(test_server_.GetURL("auth-digest")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            digest_tab->NavigateToURL(test_server_.GetURL("auth-digest")));
 
   EXPECT_TRUE(basic_tab->NeedsAuth());
   EXPECT_TRUE(basic_tab->SetAuth(username_basic_, password_));
@@ -129,30 +134,37 @@ TEST_F(LoginPromptTest, TestCancelAuth) {
   ASSERT_TRUE(tab.get());
 
   // First navigate to a test server page so we have something to go back to.
-  ASSERT_TRUE(tab->NavigateToURL(test_server_.GetURL("a")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
+            tab->NavigateToURL(test_server_.GetURL("a")));
 
   // Navigating while auth is requested is the same as cancelling.
-  ASSERT_TRUE(tab->NavigateToURL(test_server_.GetURL("auth-basic")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            tab->NavigateToURL(test_server_.GetURL("auth-basic")));
   EXPECT_TRUE(tab->NeedsAuth());
-  ASSERT_TRUE(tab->NavigateToURL(test_server_.GetURL("b")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
+            tab->NavigateToURL(test_server_.GetURL("b")));
   EXPECT_FALSE(tab->NeedsAuth());
 
-  ASSERT_TRUE(tab->NavigateToURL(test_server_.GetURL("auth-basic")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            tab->NavigateToURL(test_server_.GetURL("auth-basic")));
   EXPECT_TRUE(tab->NeedsAuth());
   EXPECT_TRUE(tab->GoBack());  // should bring us back to 'a'
   EXPECT_FALSE(tab->NeedsAuth());
 
   // Now add a page and go back, so we have something to go forward to.
-  ASSERT_TRUE(tab->NavigateToURL(test_server_.GetURL("c")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
+            tab->NavigateToURL(test_server_.GetURL("c")));
   EXPECT_TRUE(tab->GoBack());  // should bring us back to 'a'
 
-  ASSERT_TRUE(tab->NavigateToURL(test_server_.GetURL("auth-basic")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            tab->NavigateToURL(test_server_.GetURL("auth-basic")));
   EXPECT_TRUE(tab->NeedsAuth());
   EXPECT_TRUE(tab->GoForward());  // should bring us to 'c'
   EXPECT_FALSE(tab->NeedsAuth());
 
   // Now test that cancelling works as expected.
-  ASSERT_TRUE(tab->NavigateToURL(test_server_.GetURL("auth-basic")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            tab->NavigateToURL(test_server_.GetURL("auth-basic")));
   EXPECT_TRUE(tab->NeedsAuth());
   EXPECT_TRUE(tab->CancelAuth());
   EXPECT_FALSE(tab->NeedsAuth());
@@ -160,21 +172,21 @@ TEST_F(LoginPromptTest, TestCancelAuth) {
 }
 
 // If multiple tabs are looking for the same auth, the user should only have to
-// enter it once (http://crbug.com/8914).
+// enter it once.
 TEST_F(LoginPromptTest, SupplyRedundantAuths) {
   ASSERT_TRUE(test_server_.Start());
 
   scoped_refptr<TabProxy> basic_tab1(GetActiveTab());
   ASSERT_TRUE(basic_tab1.get());
-  ASSERT_TRUE(
-      basic_tab1->NavigateToURL(test_server_.GetURL("auth-basic/1")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            basic_tab1->NavigateToURL(test_server_.GetURL("auth-basic/1")));
   EXPECT_TRUE(basic_tab1->NeedsAuth());
 
   AppendTab(GURL(chrome::kAboutBlankURL));
   scoped_refptr<TabProxy> basic_tab2(GetActiveTab());
   ASSERT_TRUE(basic_tab2.get());
-  ASSERT_TRUE(
-      basic_tab2->NavigateToURL(test_server_.GetURL("auth-basic/2")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            basic_tab2->NavigateToURL(test_server_.GetURL("auth-basic/2")));
   EXPECT_TRUE(basic_tab2->NeedsAuth());
 
   // Set the auth in only one of the tabs (but wait for the other to load).
@@ -199,15 +211,15 @@ TEST_F(LoginPromptTest, CancelRedundantAuths) {
 
   scoped_refptr<TabProxy> basic_tab1(GetActiveTab());
   ASSERT_TRUE(basic_tab1.get());
-  ASSERT_TRUE(
-      basic_tab1->NavigateToURL(test_server_.GetURL("auth-basic/1")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            basic_tab1->NavigateToURL(test_server_.GetURL("auth-basic/1")));
   EXPECT_TRUE(basic_tab1->NeedsAuth());
 
   AppendTab(GURL(chrome::kAboutBlankURL));
   scoped_refptr<TabProxy> basic_tab2(GetActiveTab());
   ASSERT_TRUE(basic_tab2.get());
-  ASSERT_TRUE(
-      basic_tab2->NavigateToURL(test_server_.GetURL("auth-basic/2")));
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED,
+            basic_tab2->NavigateToURL(test_server_.GetURL("auth-basic/2")));
   EXPECT_TRUE(basic_tab2->NeedsAuth());
 
   // Cancel the auth in only one of the tabs (but wait for the other to load).

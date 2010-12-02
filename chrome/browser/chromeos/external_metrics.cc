@@ -18,7 +18,7 @@
 #include "base/histogram.h"
 #include "base/perftimer.h"
 #include "base/time.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/metrics/user_metrics.h"
 
 // Steps to add an action.
@@ -75,8 +75,8 @@ void ExternalMetrics::RecordActionUI(std::string action_string) {
 
 void ExternalMetrics::RecordAction(const char* action) {
   std::string action_string(action);
-  ChromeThread::PostTask(
-      ChromeThread::UI, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
       NewRunnableMethod(this, &ExternalMetrics::RecordActionUI, action));
 }
 
@@ -229,8 +229,8 @@ void ExternalMetrics::CollectEventsAndReschedule() {
 
 void ExternalMetrics::ScheduleCollector() {
   bool result;
-  result = ChromeThread::PostDelayedTask(
-    ChromeThread::FILE, FROM_HERE, NewRunnableMethod(
+  result = BrowserThread::PostDelayedTask(
+    BrowserThread::FILE, FROM_HERE, NewRunnableMethod(
         this, &chromeos::ExternalMetrics::CollectEventsAndReschedule),
     kExternalMetricsCollectionIntervalMs);
   DCHECK(result);

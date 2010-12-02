@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/format_macros.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "net/ftp/ftp_directory_listing_parser_ls.h"
 
 namespace {
@@ -13,10 +14,6 @@ namespace {
 typedef net::FtpDirectoryListingParserTest FtpDirectoryListingParserLsTest;
 
 TEST_F(FtpDirectoryListingParserLsTest, Good) {
-  base::Time mock_current_time;
-  ASSERT_TRUE(base::Time::FromString(L"Tue, 15 Nov 1994 12:45:26 GMT",
-                                     &mock_current_time));
-
   const struct SingleLineTestData good_cases[] = {
     { "-rw-r--r--    1 ftp      ftp           528 Nov 01  2007 README",
       net::FtpDirectoryListingEntry::FILE, "README", 528,
@@ -48,6 +45,9 @@ TEST_F(FtpDirectoryListingParserLsTest, Good) {
     { "drwxrwxrwx   1 owner    group               0 Sep 13  0:30 audio",
       net::FtpDirectoryListingEntry::DIRECTORY, "audio", -1,
       1994, 9, 13, 0, 30 },
+    { "lrwxrwxrwx 1 0  0 26 Sep 18 2008 pub",
+      net::FtpDirectoryListingEntry::SYMLINK, "pub", -1,
+      2008, 9, 18, 0, 0 },
 
     // Tests for the wu-ftpd variant:
     { "drwxr-xr-x   2 sys          512 Mar 27  2009 pub",
@@ -77,19 +77,17 @@ TEST_F(FtpDirectoryListingParserLsTest, Good) {
       2006, 7, 17, 0, 0 },
   };
   for (size_t i = 0; i < arraysize(good_cases); i++) {
-    SCOPED_TRACE(StringPrintf("Test[%" PRIuS "]: %s", i, good_cases[i].input));
+    SCOPED_TRACE(base::StringPrintf("Test[%" PRIuS "]: %s", i,
+                                    good_cases[i].input));
 
-    net::FtpDirectoryListingParserLs parser(mock_current_time);
+    net::FtpDirectoryListingParserLs parser(GetMockCurrentTime());
     RunSingleLineTestCase(&parser, good_cases[i]);
   }
 }
 
 TEST_F(FtpDirectoryListingParserLsTest, Bad) {
-  base::Time mock_current_time;
-  ASSERT_TRUE(base::Time::FromString(L"Tue, 15 Nov 1994 12:45:26 GMT",
-                                     &mock_current_time));
-
   const char* bad_cases[] = {
+    " foo",
     "garbage",
     "-rw-r--r-- ftp ftp",
     "-rw-r--rgb ftp ftp 528 Nov 01 2007 README",
@@ -116,7 +114,7 @@ TEST_F(FtpDirectoryListingParserLsTest, Bad) {
     "drwxr-xr-x   folder     0 May 15 18:11",
   };
   for (size_t i = 0; i < arraysize(bad_cases); i++) {
-    net::FtpDirectoryListingParserLs parser(mock_current_time);
+    net::FtpDirectoryListingParserLs parser(GetMockCurrentTime());
     EXPECT_FALSE(parser.ConsumeLine(UTF8ToUTF16(bad_cases[i]))) << bad_cases[i];
   }
 }

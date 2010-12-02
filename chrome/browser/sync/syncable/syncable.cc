@@ -19,6 +19,7 @@
 #endif
 
 #include <algorithm>
+#include <cstring>
 #include <functional>
 #include <iomanip>
 #include <iterator>
@@ -154,6 +155,13 @@ bool LessPathNames::operator() (const string& a, const string& b) const {
 }
 
 ///////////////////////////////////////////////////////////////////////////
+// EntryKernel
+
+EntryKernel::EntryKernel() : dirty_(false) {}
+
+EntryKernel::~EntryKernel() {}
+
+///////////////////////////////////////////////////////////////////////////
 // Directory
 
 static const DirectoryChangeEvent kShutdownChangesEvent =
@@ -163,6 +171,21 @@ void Directory::init_kernel(const std::string& name) {
   DCHECK(kernel_ == NULL);
   kernel_ = new Kernel(FilePath(), name, KernelLoadInfo());
 }
+
+Directory::PersistedKernelInfo::PersistedKernelInfo()
+    : next_id(0) {
+  for (int i = 0; i < MODEL_TYPE_COUNT; ++i) {
+    last_download_timestamp[i] = 0;
+  }
+}
+
+Directory::PersistedKernelInfo::~PersistedKernelInfo() {}
+
+Directory::SaveChangesSnapshot::SaveChangesSnapshot()
+    : kernel_info_status(KERNEL_SHARE_INFO_INVALID) {
+}
+
+Directory::SaveChangesSnapshot::~SaveChangesSnapshot() {}
 
 Directory::Kernel::Kernel(const FilePath& db_path,
                           const string& name,
@@ -716,6 +739,14 @@ void Directory::set_last_download_timestamp_unsafe(ModelType model_type,
   kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
+void Directory::SetNotificationStateUnsafe(
+    const std::string& notification_state) {
+  if (notification_state == kernel_->persisted_info.notification_state)
+    return;
+  kernel_->persisted_info.notification_state = notification_state;
+  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
+}
+
 string Directory::store_birthday() const {
   ScopedKernelLock lock(this);
   return kernel_->persisted_info.store_birthday;
@@ -727,6 +758,18 @@ void Directory::set_store_birthday(string store_birthday) {
     return;
   kernel_->persisted_info.store_birthday = store_birthday;
   kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
+}
+
+std::string Directory::GetAndClearNotificationState() {
+  ScopedKernelLock lock(this);
+  std::string notification_state = kernel_->persisted_info.notification_state;
+  SetNotificationStateUnsafe(std::string());
+  return notification_state;
+}
+
+void Directory::SetNotificationState(const std::string& notification_state) {
+  ScopedKernelLock lock(this);
+  SetNotificationStateUnsafe(notification_state);
 }
 
 string Directory::cache_guid() const {
@@ -933,11 +976,6 @@ ScopedKernelLock::ScopedKernelLock(const Directory* dir)
 
 ///////////////////////////////////////////////////////////////////////////
 // Transactions
-#if defined LOG_ALL || !defined NDEBUG
-static const bool kLoggingInfo = true;
-#else
-static const bool kLoggingInfo = false;
-#endif
 
 void BaseTransaction::Lock() {
   base::TimeTicks start_time = base::TimeTicks::Now();
@@ -946,7 +984,10 @@ void BaseTransaction::Lock() {
 
   time_acquired_ = base::TimeTicks::Now();
   const base::TimeDelta elapsed = time_acquired_ - start_time;
-  if (kLoggingInfo && elapsed.InMilliseconds() > 200) {
+  if (LOG_IS_ON(INFO) &&
+      (1 <= logging::GetVlogLevelHelper(
+          source_file_, ::strlen(source_file_))) &&
+      (elapsed.InMilliseconds() > 200)) {
     logging::LogMessage(source_file_, line_, logging::LOG_INFO).stream()
       << name_ << " transaction waited "
       << elapsed.InSecondsF() << " seconds.";
@@ -963,11 +1004,27 @@ BaseTransaction::BaseTransaction(Directory* directory, const char* name,
 BaseTransaction::~BaseTransaction() {}
 
 void BaseTransaction::UnlockAndLog(OriginalEntries* originals_arg) {
+  // Triggers the CALCULATE_CHANGES and TRANSACTION_ENDING events while
+  // holding dir_kernel_'s transaction_mutex and changes_channel mutex.
+  // Releases all mutexes upon completion.
+  if (!NotifyTransactionChangingAndEnding(originals_arg)) {
+    return;
+  }
+
+  // Triggers the TRANSACTION_COMPLETE event (and does not hold any mutexes).
+  NotifyTransactionComplete();
+}
+
+bool BaseTransaction::NotifyTransactionChangingAndEnding(
+    OriginalEntries* originals_arg) {
   dirkernel_->transaction_mutex.AssertAcquired();
 
   scoped_ptr<OriginalEntries> originals(originals_arg);
   const base::TimeDelta elapsed = base::TimeTicks::Now() - time_acquired_;
-  if (kLoggingInfo && elapsed.InMilliseconds() > 50) {
+  if (LOG_IS_ON(INFO) &&
+      (1 <= logging::GetVlogLevelHelper(
+          source_file_, ::strlen(source_file_))) &&
+      (elapsed.InMilliseconds() > 50)) {
     logging::LogMessage(source_file_, line_, logging::LOG_INFO).stream()
         << name_ << " transaction completed in " << elapsed.InSecondsF()
         << " seconds.";
@@ -975,26 +1032,37 @@ void BaseTransaction::UnlockAndLog(OriginalEntries* originals_arg) {
 
   if (NULL == originals.get() || originals->empty()) {
     dirkernel_->transaction_mutex.Release();
-    return;
+    return false;
   }
 
-  AutoLock scoped_lock(dirkernel_->changes_channel_mutex);
-  // Tell listeners to calculate changes while we still have the mutex.
-  DirectoryChangeEvent event = { DirectoryChangeEvent::CALCULATE_CHANGES,
-                                 originals.get(), this, writer_ };
-  dirkernel_->changes_channel.Notify(event);
 
-  // Necessary for reads to be performed prior to transaction mutex release.
-  // Allows the listener to use the current transaction to perform reads.
-  DirectoryChangeEvent ending_event =
-      { DirectoryChangeEvent::TRANSACTION_ENDING,
-        NULL, this, INVALID };
-  dirkernel_->changes_channel.Notify(ending_event);
+  {
+    // Scoped_lock is only active through the calculate_changes and
+    // transaction_ending events.
+    AutoLock scoped_lock(dirkernel_->changes_channel_mutex);
 
-  dirkernel_->transaction_mutex.Release();
+    // Tell listeners to calculate changes while we still have the mutex.
+    DirectoryChangeEvent event = { DirectoryChangeEvent::CALCULATE_CHANGES,
+                                   originals.get(), this, writer_ };
+    dirkernel_->changes_channel.Notify(event);
 
-  // Directly after transaction mutex release, but lock on changes channel.
-  // You cannot be re-entrant to a transaction in this handler.
+    // Necessary for reads to be performed prior to transaction mutex release.
+    // Allows the listener to use the current transaction to perform reads.
+    DirectoryChangeEvent ending_event =
+        { DirectoryChangeEvent::TRANSACTION_ENDING,
+          NULL, this, INVALID };
+    dirkernel_->changes_channel.Notify(ending_event);
+
+    dirkernel_->transaction_mutex.Release();
+  }
+
+  return true;
+}
+
+void BaseTransaction::NotifyTransactionComplete() {
+  // Transaction is no longer holding any locks/mutexes, notify that we're
+  // complete (and commit any outstanding changes that should not be performed
+  // while holding mutexes).
   DirectoryChangeEvent complete_event =
       { DirectoryChangeEvent::TRANSACTION_COMPLETE,
         NULL, NULL, INVALID };
@@ -1506,7 +1574,6 @@ namespace {
   } separator;
   class DumpColon {
   } colon;
-}  // namespace
 
 inline FastDump& operator<<(FastDump& dump, const DumpSeparator&) {
   dump.out_->sputn(", ", 2);
@@ -1517,26 +1584,13 @@ inline FastDump& operator<<(FastDump& dump, const DumpColon&) {
   dump.out_->sputn(": ", 2);
   return dump;
 }
+}  // namespace
 
-std::ostream& operator<<(std::ostream& stream, const syncable::Entry& entry) {
+namespace syncable {
+
+std::ostream& operator<<(std::ostream& stream, const Entry& entry) {
   // Using ostreams directly here is dreadfully slow, because a mutex is
   // acquired for every <<.  Users noticed it spiking CPU.
-  using syncable::BEGIN_FIELDS;
-  using syncable::BIT_FIELDS_END;
-  using syncable::BIT_TEMPS_BEGIN;
-  using syncable::BIT_TEMPS_END;
-  using syncable::BitField;
-  using syncable::BitTemp;
-  using syncable::EntryKernel;
-  using syncable::ID_FIELDS_END;
-  using syncable::INT64_FIELDS_END;
-  using syncable::IdField;
-  using syncable::Int64Field;
-  using syncable::PROTO_FIELDS_END;
-  using syncable::ProtoField;
-  using syncable::STRING_FIELDS_END;
-  using syncable::StringField;
-  using syncable::g_metas_columns;
 
   int i;
   FastDump s(&stream);
@@ -1572,17 +1626,19 @@ std::ostream& operator<<(std::ostream& stream, const syncable::Entry& entry) {
   return stream;
 }
 
-std::ostream& operator<<(std::ostream& s, const syncable::Blob& blob) {
-  for (syncable::Blob::const_iterator i = blob.begin(); i != blob.end(); ++i)
+std::ostream& operator<<(std::ostream& s, const Blob& blob) {
+  for (Blob::const_iterator i = blob.begin(); i != blob.end(); ++i)
     s << std::hex << std::setw(2)
       << std::setfill('0') << static_cast<unsigned int>(*i);
   return s << std::dec;
 }
 
-FastDump& operator<<(FastDump& dump, const syncable::Blob& blob) {
+FastDump& operator<<(FastDump& dump, const Blob& blob) {
   if (blob.empty())
     return dump;
   string buffer(base::HexEncode(&blob[0], blob.size()));
   dump.out_->sputn(buffer.c_str(), buffer.size());
   return dump;
 }
+
+}  // namespace syncable

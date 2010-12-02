@@ -125,10 +125,18 @@ std::string GetCreditCardType(const string16& number) {
 
 }  // namespace
 
+CreditCard::CreditCard()
+    : expiration_month_(0),
+      expiration_year_(0),
+      billing_address_id_(0),
+      unique_id_(0) {
+}
+
 CreditCard::CreditCard(const string16& label, int unique_id)
     : expiration_month_(0),
       expiration_year_(0),
       label_(label),
+      billing_address_id_(0),
       unique_id_(unique_id) {
 }
 
@@ -136,11 +144,7 @@ CreditCard::CreditCard(const CreditCard& card) : FormGroup() {
   operator=(card);
 }
 
-CreditCard::CreditCard()
-    : expiration_month_(0),
-      expiration_year_(0),
-      unique_id_(0) {
-}
+CreditCard::~CreditCard() {}
 
 FormGroup* CreditCard::Clone() const {
   return new CreditCard(*this);
@@ -367,7 +371,7 @@ void CreditCard::operator=(const CreditCard& source) {
   expiration_month_ = source.expiration_month_;
   expiration_year_ = source.expiration_year_;
   label_ = source.label_;
-  billing_address_ = source.billing_address_;
+  billing_address_id_ = source.billing_address_id_;
   unique_id_ = source.unique_id_;
 }
 
@@ -383,7 +387,7 @@ bool CreditCard::operator==(const CreditCard& creditcard) const {
 
   if (label_ != creditcard.label_ ||
       unique_id_ != creditcard.unique_id_ ||
-      billing_address_ != creditcard.billing_address_) {
+      billing_address_id_ != creditcard.billing_address_id_) {
     return false;
   }
 
@@ -429,7 +433,7 @@ bool CreditCard::IsCreditCardNumber(const string16& text) {
 bool CreditCard::IsEmpty() const {
   FieldTypeSet types;
   GetAvailableFieldTypes(&types);
-  return types.empty() && billing_address().empty();
+  return types.empty() && billing_address_id_ == 0;
 }
 
 
@@ -605,7 +609,7 @@ std::ostream& operator<<(std::ostream& os, const CreditCard& creditcard) {
       << " "
       << creditcard.unique_id()
       << " "
-      << UTF16ToUTF8(creditcard.billing_address())
+      << creditcard.billing_address_id()
       << " "
       << UTF16ToUTF8(creditcard.GetFieldText(AutoFillType(CREDIT_CARD_NAME)))
       << " "

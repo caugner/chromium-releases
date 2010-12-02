@@ -195,6 +195,10 @@ void NativeMenuGtk::RemoveMenuListener(MenuListener* listener) {
   }
 }
 
+void NativeMenuGtk::SetMinimumWidth(int width) {
+  gtk_widget_set_size_request(menu_, width, -1);
+}
+
 bool NativeMenuGtk::Dispatch(GdkEvent* event) {
   if (menu_hidden_) {
     // The menu has been closed but the message loop is still nested. Don't
@@ -494,9 +498,13 @@ void NativeMenuGtk::MenuDestroyed(GtkWidget* widget, Menu2* menu2) {
 ////////////////////////////////////////////////////////////////////////////////
 // MenuWrapper, public:
 
+#if !defined(OS_CHROMEOS)
+
 // static
 MenuWrapper* MenuWrapper::CreateWrapper(Menu2* menu) {
   return new NativeMenuGtk(menu);
 }
+
+#endif  // OS_CHROMEOS
 
 }  // namespace views

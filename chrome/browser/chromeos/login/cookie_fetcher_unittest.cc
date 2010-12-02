@@ -5,7 +5,7 @@
 #include <errno.h>
 #include <string>
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/login/client_login_response_handler.h"
 #include "chrome/browser/chromeos/login/cookie_fetcher.h"
 #include "chrome/browser/chromeos/login/issue_response_handler.h"
@@ -14,8 +14,8 @@
 #include "chrome/test/testing_profile.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request_status.h"
-#include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
 using ::testing::Return;
@@ -37,7 +37,7 @@ class CookieFetcherTest : public ::testing::Test {
         ta_url_(AuthResponseHandler::kTokenAuthUrl),
         client_login_data_("SID n' LSID"),
         token_("auth token"),
-        ui_thread_(ChromeThread::UI, &message_loop_) {
+        ui_thread_(BrowserThread::UI, &message_loop_) {
   }
 
   const GURL iat_url_;
@@ -45,7 +45,7 @@ class CookieFetcherTest : public ::testing::Test {
   const std::string client_login_data_;
   const std::string token_;
   MessageLoopForUI message_loop_;
-  ChromeThread ui_thread_;
+  BrowserThread ui_thread_;
   TestingProfile profile_;
 };
 

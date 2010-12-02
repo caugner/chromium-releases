@@ -48,6 +48,13 @@ class FileUtilProxy {
                            int file_flags,
                            CreateOrOpenCallback* callback);
 
+  // Creates a file with the given flags.  This one is a variation of
+  // CreateOrOpen but it doesn't return a file handle.
+  static bool Create(scoped_refptr<MessageLoopProxy> message_loop_proxy,
+                     const FilePath& file_path,
+                     int file_flags,
+                     CreateOrOpenCallback* callback);
+
   // Creates a temporary file for writing.  The path and an open file handle
   // are returned.  It is invalid to pass NULL for the callback.
   typedef Callback3<base::PlatformFileError /* error code */,
@@ -72,6 +79,11 @@ class FileUtilProxy {
       const FilePath& file_path,
       GetFileInfoCallback* callback);
 
+  static bool GetFileInfoFromPlatformFile(
+      scoped_refptr<MessageLoopProxy> message_loop_proxy,
+      base::PlatformFile file,
+      GetFileInfoCallback* callback);
+
   typedef Callback2<base::PlatformFileError /* error code */,
       const std::vector<base::file_util_proxy::Entry>&
        >::Type ReadDirectoryCallback;
@@ -84,6 +96,7 @@ class FileUtilProxy {
   // If destination file doesn't exist or destination's parent
   // doesn't exists.
   // If source dir exists but destination path is an existing file.
+  // If source file exists but destination path is an existing directory.
   // If source is a parent of destination.
   // If source doesn't exists.
   static bool Copy(scoped_refptr<MessageLoopProxy> message_loop_proxy,
@@ -97,11 +110,14 @@ class FileUtilProxy {
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
       const FilePath& file_path,
       bool exclusive,
+      bool recursive,
       StatusCallback* callback);
 
-  // Deletes a file or empty directory.
+  // Deletes a file or a directory.
+  // It is an error to delete a non-empty directory with recursive=false.
   static bool Delete(scoped_refptr<MessageLoopProxy> message_loop_proxy,
                      const FilePath& file_path,
+                     bool recursive,
                      StatusCallback* callback);
 
   // Moves a file or a directory from src_file_path to dest_file_path.
@@ -116,6 +132,69 @@ class FileUtilProxy {
   static bool RecursiveDelete(
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
       const FilePath& file_path,
+      StatusCallback* callback);
+
+  // Reads from a file. On success, the file pointer is moved to position
+  // |offset + bytes_to_read| in the file. The callback can be NULL.
+  typedef Callback2<base::PlatformFileError /* error code */,
+                    int /* bytes read/written */>::Type ReadWriteCallback;
+  static bool Read(
+      scoped_refptr<MessageLoopProxy> message_loop_proxy,
+      base::PlatformFile file,
+      int64 offset,
+      char* buffer,
+      int bytes_to_read,
+      ReadWriteCallback* callback);
+
+  // Writes to a file. If |offset| is greater than the length of the file,
+  // |false| is returned. On success, the file pointer is moved to position
+  // |offset + bytes_to_write| in the file. The callback can be NULL.
+  static bool Write(
+      scoped_refptr<MessageLoopProxy> message_loop_proxy,
+      base::PlatformFile file,
+      int64 offset,
+      const char* buffer,
+      int bytes_to_write,
+      ReadWriteCallback* callback);
+
+  // Touches a file. The callback can be NULL.
+  static bool Touch(
+      scoped_refptr<MessageLoopProxy> message_loop_proxy,
+      base::PlatformFile file,
+      const base::Time& last_access_time,
+      const base::Time& last_modified_time,
+      StatusCallback* callback);
+
+  // Touches a file. The callback can be NULL.
+  static bool Touch(
+      scoped_refptr<MessageLoopProxy> message_loop_proxy,
+      const FilePath& file_path,
+      const base::Time& last_access_time,
+      const base::Time& last_modified_time,
+      StatusCallback* callback);
+
+  // Truncates a file to the given length. If |length| is greater than the
+  // current length of the file, the file will be extended with zeroes.
+  // The callback can be NULL.
+  static bool Truncate(
+      scoped_refptr<MessageLoopProxy> message_loop_proxy,
+      base::PlatformFile file,
+      int64 length,
+      StatusCallback* callback);
+
+  // Truncates a file to the given length. If |length| is greater than the
+  // current length of the file, the file will be extended with zeroes.
+  // The callback can be NULL.
+  static bool Truncate(
+      scoped_refptr<MessageLoopProxy> message_loop_proxy,
+      const FilePath& path,
+      int64 length,
+      StatusCallback* callback);
+
+  // Flushes a file. The callback can be NULL.
+  static bool Flush(
+      scoped_refptr<MessageLoopProxy> message_loop_proxy,
+      base::PlatformFile file,
       StatusCallback* callback);
 
  private:

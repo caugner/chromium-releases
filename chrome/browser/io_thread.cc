@@ -8,6 +8,7 @@
 #include "base/leak_tracker.h"
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
@@ -17,6 +18,7 @@
 #include "chrome/browser/net/passive_log_collector.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/url_fetcher.h"
+#include "net/base/dnsrr_resolver.h"
 #include "net/base/mapped_host_resolver.h"
 #include "net/base/host_cache.h"
 #include "net/base/host_resolver.h"
@@ -27,6 +29,7 @@
 #if defined(USE_NSS)
 #include "net/ocsp/nss_ocsp.h"
 #endif  // defined(USE_NSS)
+#include "net/proxy/proxy_script_fetcher.h"
 
 namespace {
 
@@ -60,26 +63,8 @@ net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
       net::HostResolverImpl* host_resolver_impl =
           global_host_resolver->GetAsHostResolverImpl();
       if (host_resolver_impl != NULL) {
-        // (optionally) Use probe to decide if support is warranted.
-        bool use_ipv6_probe = true;
-
-#if defined(OS_WIN)
-        // Measure impact of probing to allow IPv6.
-        // Some users report confused OS handling of IPv6, leading to large
-        // latency.  If we can show that IPv6 is not supported, then disabliing
-        // it will work around such problems. This is the test of the probe.
-        const FieldTrial::Probability kDivisor = 100;
-        const FieldTrial::Probability kProbability = 50;  // 50% probability.
-        FieldTrial* trial = new FieldTrial("IPv6_Probe", kDivisor);
-        int skip_group = trial->AppendGroup("IPv6_probe_skipped",
-                                            kProbability);
-        trial->AppendGroup("IPv6_probe_done",
-                           FieldTrial::kAllRemainingProbability);
-        use_ipv6_probe = (trial->group() != skip_group);
-#endif
-
-        if (use_ipv6_probe)
-          host_resolver_impl->ProbeIPv6Support();
+        // Use probe to decide if support is warranted.
+        host_resolver_impl->ProbeIPv6Support();
       }
     }
   }
@@ -132,7 +117,7 @@ class LoggingNetworkChangeObserver
 DISABLE_RUNNABLE_METHOD_REFCOUNT(IOThread);
 
 IOThread::IOThread()
-    : BrowserProcessSubThread(ChromeThread::IO),
+    : BrowserProcessSubThread(BrowserThread::IO),
       globals_(NULL),
       speculative_interceptor_(NULL),
       predictor_(NULL) {}
@@ -145,7 +130,7 @@ IOThread::~IOThread() {
 }
 
 IOThread::Globals* IOThread::globals() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   return globals_;
 }
 
@@ -156,7 +141,7 @@ void IOThread::InitNetworkPredictor(
     const chrome_common_net::UrlList& startup_urls,
     ListValue* referral_list,
     bool preconnect_enabled) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   message_loop()->PostTask(
       FROM_HERE,
       NewRunnableMethod(
@@ -167,7 +152,7 @@ void IOThread::InitNetworkPredictor(
 }
 
 void IOThread::ChangedToOnTheRecord() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   message_loop()->PostTask(
       FROM_HERE,
       NewRunnableMethod(
@@ -195,9 +180,11 @@ void IOThread::Init() {
   network_change_observer_.reset(
       new LoggingNetworkChangeObserver(globals_->net_log.get()));
 
-  globals_->host_resolver = CreateGlobalHostResolver(globals_->net_log.get());
+  globals_->host_resolver.reset(
+      CreateGlobalHostResolver(globals_->net_log.get()));
+  globals_->dnsrr_resolver.reset(new net::DnsRRResolver);
   globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory(
-      globals_->host_resolver));
+      globals_->host_resolver.get()));
 }
 
 void IOThread::CleanUp() {
@@ -229,15 +216,14 @@ void IOThread::CleanUp() {
     globals_->host_resolver.get()->GetAsHostResolverImpl()->Shutdown();
   }
 
+  net::EnsureNoProxyScriptFetches();
+
   // We will delete the NetLog as part of CleanUpAfterMessageLoopDestruction()
   // in case any of the message loop destruction observers try to access it.
   deferred_net_log_to_delete_.reset(globals_->net_log.release());
 
   delete globals_;
   globals_ = NULL;
-
-  // URLRequest instances must NOT outlive the IO thread.
-  base::LeakTracker<URLRequest>::CheckForLeaks();
 
   BrowserProcessSubThread::CleanUp();
 }
@@ -249,6 +235,13 @@ void IOThread::CleanUpAfterMessageLoopDestruction() {
   // combine the two cleanups.
   deferred_net_log_to_delete_.reset();
   BrowserProcessSubThread::CleanUpAfterMessageLoopDestruction();
+
+  // URLRequest instances must NOT outlive the IO thread.
+  //
+  // To allow for URLRequests to be deleted from
+  // MessageLoop::DestructionObserver this check has to happen after CleanUp
+  // (which runs before DestructionObservers).
+  base::LeakTracker<URLRequest>::CheckForLeaks();
 }
 
 net::HttpAuthHandlerFactory* IOThread::CreateDefaultAuthHandlerFactory(
@@ -295,13 +288,13 @@ void IOThread::InitNetworkPredictorOnIOThread(
     const chrome_common_net::UrlList& startup_urls,
     ListValue* referral_list,
     bool preconnect_enabled) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   CHECK(!predictor_);
 
   chrome_browser_net::EnablePredictor(prefetching_enabled);
 
   predictor_ = new chrome_browser_net::Predictor(
-      globals_->host_resolver,
+      globals_->host_resolver.get(),
       max_dns_queue_delay,
       max_concurrent,
       preconnect_enabled);
@@ -315,7 +308,7 @@ void IOThread::InitNetworkPredictorOnIOThread(
 }
 
 void IOThread::ChangedToOnTheRecordOnIOThread() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   if (predictor_) {
     // Destroy all evidence of our OTR session.

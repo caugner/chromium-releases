@@ -28,17 +28,29 @@ void GpuChannelHost::Connect(const std::string& channel_name) {
   state_ = CONNECTED;
 }
 
+void GpuChannelHost::set_gpu_info(const GPUInfo& gpu_info) {
+  gpu_info_ = gpu_info;
+}
+
+const GPUInfo& GpuChannelHost::gpu_info() const {
+  return gpu_info_;
+}
+
 void GpuChannelHost::OnMessageReceived(const IPC::Message& message) {
   DCHECK(message.routing_id() != MSG_ROUTING_CONTROL);
-  if (!router_.RouteMessage(message)) {
-    NOTREACHED() << "GpuChannelHost failed to route message";
-  }
+
+  // The object to which the message is addressed might have been destroyed.
+  // This is expected, for example an asynchronous SwapBuffers notification
+  // to a command buffer proxy that has since been destroyed. This function
+  // fails silently in that case.
+  router_.RouteMessage(message);
 }
 
 void GpuChannelHost::OnChannelConnected(int32 peer_pid) {
-  GpuVideoServiceHost::get()->OnGpuChannelConnected(this,
-                                                    &router_,
-                                                    channel_.get());
+  // When the channel is connected we create a GpuVideoServiceHost and add it
+  // as a message filter.
+  gpu_video_service_host_.reset(new GpuVideoServiceHost());
+  channel_->AddFilter(gpu_video_service_host_.get());
 }
 
 void GpuChannelHost::OnChannelError() {
@@ -98,6 +110,7 @@ CommandBufferProxy* GpuChannelHost::CreateViewCommandBuffer(
 CommandBufferProxy* GpuChannelHost::CreateOffscreenCommandBuffer(
     CommandBufferProxy* parent,
     const gfx::Size& size,
+    const std::vector<int32>& attribs,
     uint32 parent_texture_id) {
 #if defined(ENABLE_GPU)
   // An error occurred. Need to get the host again to reinitialize it.
@@ -108,6 +121,7 @@ CommandBufferProxy* GpuChannelHost::CreateOffscreenCommandBuffer(
   int32 route_id;
   if (!Send(new GpuChannelMsg_CreateOffscreenCommandBuffer(parent_route_id,
                                                            size,
+                                                           attribs,
                                                            parent_texture_id,
                                                            &route_id)) &&
       route_id != MSG_ROUTING_NONE) {
@@ -137,4 +151,3 @@ void GpuChannelHost::DestroyCommandBuffer(CommandBufferProxy* command_buffer) {
   delete command_buffer;
 #endif
 }
-

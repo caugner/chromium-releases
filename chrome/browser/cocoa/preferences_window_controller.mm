@@ -36,7 +36,6 @@
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/options_util.h"
 #include "chrome/browser/options_window.h"
@@ -46,6 +45,7 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/show_options_url.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -330,7 +330,6 @@ CGFloat AutoSizeUnderTheHoodContent(NSView* view,
 // Record the user performed a certain action and save the preferences.
 - (void)recordUserAction:(const UserMetricsAction&) action;
 - (void)registerPrefObservers;
-- (void)unregisterPrefObservers;
 
 // KVC setter methods.
 - (void)setNewTabPageIsHomePageIndex:(NSInteger)val;
@@ -389,7 +388,7 @@ class PrefObserverBridge : public NotificationObserver,
 
 // Tracks state for a managed prefs banner and triggers UI updates through the
 // PreferencesWindowController as appropriate.
-class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
+class ManagedPrefsBannerState : public policy::ManagedPrefsBannerBase {
  public:
   virtual ~ManagedPrefsBannerState() { }
 
@@ -397,7 +396,7 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
                                    OptionsPage page,
                                    PrefService* local_state,
                                    PrefService* prefs)
-    : ManagedPrefsBannerBase(local_state, prefs, page),
+    : policy::ManagedPrefsBannerBase(local_state, prefs, page),
         controller_(controller),
         page_(page) { }
 
@@ -423,6 +422,7 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
 @synthesize restoreButtonsEnabled = restoreButtonsEnabled_;
 @synthesize restoreURLsEnabled = restoreURLsEnabled_;
 @synthesize showHomeButtonEnabled = showHomeButtonEnabled_;
+@synthesize defaultSearchEngineEnabled = defaultSearchEngineEnabled_;
 @synthesize passwordManagerChoiceEnabled = passwordManagerChoiceEnabled_;
 @synthesize passwordManagerButtonEnabled = passwordManagerButtonEnabled_;
 @synthesize autoFillSettingsButtonEnabled = autoFillSettingsButtonEnabled_;
@@ -507,10 +507,10 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
     [self setPasswordManagerButtonEnabled:
         !askSavePasswords_.IsManaged() || askSavePasswords_.GetValue()];
 
-    // Initialize the enabled state of the show home button and
-    // restore on startup elements.
+    // Initialize the enabled state of the elements on the general tab.
     [self setShowHomeButtonEnabled:!showHomeButton_.IsManaged()];
     [self setEnabledStateOfRestoreOnStartup];
+    [self setDefaultSearchEngineEnabled:![searchEngineModel_ isDefaultManaged]];
 
     // Initialize UI state for the advanced page.
     [self setShowAlternateErrorPagesEnabled:!alternateErrorPages_.IsManaged()];
@@ -761,7 +761,6 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
     syncService_->RemoveObserver(observer_.get());
   }
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [self unregisterPrefObservers];
   [animation_ setDelegate:nil];
   [animation_ stopAnimation];
   [super dealloc];
@@ -781,7 +780,8 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
   if (!prefs_) return;
 
   // Basics panel
-  prefs_->AddPrefObserver(prefs::kURLsToRestoreOnStartup, observer_.get());
+  registrar_.Init(prefs_);
+  registrar_.Add(prefs::kURLsToRestoreOnStartup, observer_.get());
   restoreOnStartup_.Init(prefs::kRestoreOnStartup, prefs_, observer_.get());
   newTabPageIsHomePage_.Init(prefs::kHomePageIsNewTabPage,
                              prefs_, observer_.get());
@@ -821,17 +821,6 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
 
   // We don't need to observe changes in this value.
   lastSelectedPage_.Init(prefs::kOptionsWindowLastTabIndex, local, NULL);
-}
-
-// Clean up what was registered in -registerPrefObservers. We only have to
-// clean up the non-PrefMember registrations.
-- (void)unregisterPrefObservers {
-  if (!prefs_) return;
-
-  // Basics
-  prefs_->RemovePrefObserver(prefs::kURLsToRestoreOnStartup, observer_.get());
-
-  // Nothing to do for other panels...
 }
 
 // Called when the window wants to be closed.
@@ -924,23 +913,16 @@ class ManagedPrefsBannerState : public ManagedPrefsBannerBase {
         SessionStartupPref::GetStartupPref(prefs_);
     [self setRestoreOnStartupIndex:startupPref.type];
     [self setEnabledStateOfRestoreOnStartup];
-  }
-
-  if (*prefName == prefs::kURLsToRestoreOnStartup) {
+  } else if (*prefName == prefs::kURLsToRestoreOnStartup) {
     [customPagesSource_ reloadURLs];
     [self setEnabledStateOfRestoreOnStartup];
-  }
-
-  if (*prefName == prefs::kHomePageIsNewTabPage) {
+  } else if (*prefName == prefs::kHomePageIsNewTabPage) {
     NSInteger useNewTabPage = newTabPageIsHomePage_.GetValue() ? 0 : 1;
     [self setNewTabPageIsHomePageIndex:useNewTabPage];
-  }
-  if (*prefName == prefs::kHomePage) {
+  } else if (*prefName == prefs::kHomePage) {
     NSString* value = base::SysUTF8ToNSString(homepage_.GetValue());
     [self setHomepageURL:value];
-  }
-
-  if (*prefName == prefs::kShowHomeButton) {
+  } else if (*prefName == prefs::kShowHomeButton) {
     [self setShowHomeButton:showHomeButton_.GetValue() ? YES : NO];
     [self setShowHomeButtonEnabled:!showHomeButton_.IsManaged()];
   }
@@ -1185,6 +1167,8 @@ enum { kHomepageNewTabPage, kHomepageURL };
 // popup by tickling the bindings with the new value.
 - (void)searchEngineModelChanged:(NSNotification*)notify {
   [self setSearchEngineSelectedIndex:[self searchEngineSelectedIndex]];
+  [self setDefaultSearchEngineEnabled:![searchEngineModel_ isDefaultManaged]];
+
 }
 
 - (IBAction)manageSearchEngines:(id)sender {
@@ -1350,7 +1334,7 @@ const int kDisabledIndex = 1;
   } else {
     // Otherwise, the sync button was a "sync my bookmarks" button.
     // Kick off the sync setup process.
-    syncService_->EnableForUser(NULL);
+    syncService_->ShowLoginDialog(NULL);
     ProfileSyncService::SyncEvent(ProfileSyncService::START_FROM_OPTIONS);
   }
 }
@@ -1368,7 +1352,7 @@ const int kDisabledIndex = 1;
 // "Personal Stuff" pane.  Spawns a dialog-modal sheet that cleans
 // itself up on close.
 - (IBAction)doSyncCustomize:(id)sender {
-  syncService_->ShowChooseDataTypes(NULL);
+  syncService_->ShowConfigure(NULL);
 }
 
 - (IBAction)doSyncReauthentication:(id)sender {
@@ -1505,17 +1489,15 @@ const int kDisabledIndex = 1;
 - (IBAction)privacyLearnMore:(id)sender {
   // We open a new browser window so the Options dialog doesn't get lost
   // behind other windows.
-  Browser* browser = Browser::Create(profile_);
-  browser->OpenURL(GURL(l10n_util::GetStringUTF16(IDS_LEARN_MORE_PRIVACY_URL)),
-                   GURL(), NEW_WINDOW, PageTransition::LINK);
+  browser::ShowOptionsURL(
+      profile_,
+      GURL(l10n_util::GetStringUTF16(IDS_LEARN_MORE_PRIVACY_URL)));
 }
 
 - (IBAction)backgroundModeLearnMore:(id)sender {
-  // We open a new browser window so the Options dialog doesn't get lost
-  // behind other windows.
-  Browser::Create(profile_)->OpenURL(
-      GURL(l10n_util::GetStringUTF16(IDS_LEARN_MORE_BACKGROUND_MODE_URL)),
-      GURL(), NEW_WINDOW, PageTransition::LINK);
+  browser::ShowOptionsURL(
+      profile_,
+      GURL(l10n_util::GetStringUTF16(IDS_LEARN_MORE_BACKGROUND_MODE_URL)));
 }
 
 - (IBAction)resetAutoOpenFiles:(id)sender {
@@ -1594,7 +1576,6 @@ const int kDisabledIndex = 1;
     [self recordUserAction:UserMetricsAction(
                            "Options_DnsPrefetchCheckbox_Disable")];
   dnsPrefetch_.SetValueIfNotManaged(value ? true : false);
-  chrome_browser_net::EnablePredictor(dnsPrefetch_.GetValue());
 }
 
 // Returns whether the safe browsing checkbox should be checked based on the
@@ -1855,10 +1836,6 @@ const int kDisabledIndex = 1;
     [syncStatus_ setBackgroundColor:syncStatusNoErrorBackgroundColor_];
     [syncLinkCell setBackgroundColor:syncLinkNoErrorBackgroundColor_];
   }
-
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kShowPrivacyDashboardLink))
-    [privacyDashboardLink_ setHidden:YES];
 }
 
 // Show the preferences window.

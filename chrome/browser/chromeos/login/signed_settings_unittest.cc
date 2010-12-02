@@ -9,11 +9,11 @@
 #include "base/nss_util.h"
 #include "base/scoped_temp_dir.h"
 #include "base/stringprintf.h"
-#include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/chromeos/login/mock_owner_key_utils.h"
-#include "chrome/browser/chromeos/login/ownership_service.h"
-#include "chrome/browser/chromeos/login/owner_manager_unittest.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/login/mock_owner_key_utils.h"
+#include "chrome/browser/chromeos/login/mock_ownership_service.h"
+#include "chrome/browser/chromeos/login/owner_manager_unittest.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -62,19 +62,6 @@ class Quitter : public DummyDelegate<bool> {
 };
 }  // anonymous namespace
 
-class MockService : public OwnershipService {
- public:
-  MOCK_METHOD0(IsAlreadyOwned, bool(void));
-  MOCK_METHOD0(StartLoadOwnerKeyAttempt, bool(void));
-  MOCK_METHOD0(StartTakeOwnershipAttempt, bool(void));
-  MOCK_METHOD2(StartSigningAttempt, void(const std::string&,
-                                         OwnerManager::Delegate*));
-  MOCK_METHOD3(StartVerifyAttempt, void(const std::string&,
-                                        const std::vector<uint8>&,
-                                        OwnerManager::Delegate*));
-  MOCK_METHOD0(CurrentUserIsOwner, bool(void));
-};
-
 class SignedSettingsTest : public ::testing::Test {
  public:
   SignedSettingsTest()
@@ -82,8 +69,8 @@ class SignedSettingsTest : public ::testing::Test {
         fake_prop_("prop_name"),
         fake_value_("stub"),
         message_loop_(MessageLoop::TYPE_UI),
-        ui_thread_(ChromeThread::UI, &message_loop_),
-        file_thread_(ChromeThread::FILE),
+        ui_thread_(BrowserThread::UI, &message_loop_),
+        file_thread_(BrowserThread::FILE),
         mock_(new MockKeyUtils),
         injector_(mock_) /* injector_ takes ownership of mock_ */ {
   }
@@ -99,7 +86,7 @@ class SignedSettingsTest : public ::testing::Test {
     OwnerKeyUtils::set_factory(NULL);
   }
 
-  void mock_service(SignedSettings* s, MockService* m) {
+  void mock_service(SignedSettings* s, MockOwnershipService* m) {
     s->set_service(m);
   }
 
@@ -162,14 +149,14 @@ class SignedSettingsTest : public ::testing::Test {
   const std::string fake_email_;
   const std::string fake_prop_;
   const std::string fake_value_;
-  MockService m_;
+  MockOwnershipService m_;
 
   ScopedTempDir tmpdir_;
   FilePath tmpfile_;
 
   MessageLoop message_loop_;
-  ChromeThread ui_thread_;
-  ChromeThread file_thread_;
+  BrowserThread ui_thread_;
+  BrowserThread file_thread_;
 
   std::vector<uint8> fake_public_key_;
   scoped_ptr<RSAPrivateKey> fake_private_key_;

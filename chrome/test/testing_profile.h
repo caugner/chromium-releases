@@ -23,6 +23,7 @@ class CookieMonster;
 class AutocompleteClassifier;
 class BookmarkModel;
 class BrowserThemeProvider;
+class CommandLine;
 class DesktopNotificationService;
 class FaviconService;
 class FindBarState;
@@ -79,12 +80,27 @@ class TestingProfile : public Profile {
   // CreateBookmarkModel.
   void BlockUntilBookmarkModelLoaded();
 
-  // Creates a TemplateURLModel. If not invoked the TemplateURLModel is NULL.
+  // Creates a TemplateURLFetcher. If not invoked, the TemplateURLFetcher is
+  // NULL.
+  void CreateTemplateURLFetcher();
+
+  // Creates a TemplateURLModel. If not invoked, the TemplateURLModel is NULL.
   void CreateTemplateURLModel();
+
+  // Sets the TemplateURLModel. Takes ownership of it.
+  void SetTemplateURLModel(TemplateURLModel* model);
 
   // Uses a specific theme provider for this profile. TestingProfile takes
   // ownership of |theme_provider|.
   void UseThemeProvider(BrowserThemeProvider* theme_provider);
+
+  // Creates an ExtensionsService initialized with the testing profile and
+  // returns it. The profile keeps its own copy of a scoped_refptr to the
+  // ExtensionsService to make sure that is still alive to be notified when the
+  // profile is destroyed.
+  scoped_refptr<ExtensionsService> CreateExtensionsService(
+      const CommandLine* command_line,
+      const FilePath& install_directory);
 
   TestingPrefService* GetTestingPrefService();
 
@@ -109,7 +125,7 @@ class TestingProfile : public Profile {
   virtual ChromeAppCacheService* GetAppCacheService() { return NULL; }
   virtual webkit_database::DatabaseTracker* GetDatabaseTracker();
   virtual VisitedLinkMaster* GetVisitedLinkMaster() { return NULL; }
-  virtual ExtensionsService* GetExtensionsService() { return NULL; }
+  virtual ExtensionsService* GetExtensionsService();
   virtual UserScriptMaster* GetUserScriptMaster() { return NULL; }
   virtual ExtensionDevToolsManager* GetExtensionDevToolsManager() {
     return NULL;
@@ -148,11 +164,17 @@ class TestingProfile : public Profile {
   virtual PasswordStore* GetPasswordStore(ServiceAccessType access) {
     return NULL;
   }
+  // Initialized the profile's PrefService with an explicity specified
+  // PrefService. Must be called before the TestingProfile.
+  // The profile takes ownership of |pref|.
+  void SetPrefService(PrefService* prefs);
   virtual PrefService* GetPrefs();
   virtual TemplateURLModel* GetTemplateURLModel() {
     return template_url_model_.get();
   }
-  virtual TemplateURLFetcher* GetTemplateURLFetcher() { return NULL; }
+  virtual TemplateURLFetcher* GetTemplateURLFetcher() {
+    return template_url_fetcher_.get();
+  }
   virtual history::TopSites* GetTopSites();
   virtual DownloadManager* GetDownloadManager() { return NULL; }
   virtual PersonalDataManager* GetPersonalDataManager() { return NULL; }
@@ -178,6 +200,9 @@ class TestingProfile : public Profile {
   // the CookieMonster. See implementation comments for more details.
   virtual URLRequestContextGetter* GetRequestContext();
   void CreateRequestContext();
+  // Clears out the created request context (which must be done before shutting
+  // down the IO thread to avoid leaks).
+  void ResetRequestContext();
 
   virtual URLRequestContextGetter* GetRequestContextForMedia() { return NULL; }
   virtual URLRequestContextGetter* GetRequestContextForExtensions();
@@ -224,6 +249,7 @@ class TestingProfile : public Profile {
   virtual void InitExtensions() {}
   virtual void InitWebResources() {}
   virtual NTPResourceCache* GetNTPResourceCache();
+
   virtual DesktopNotificationService* GetDesktopNotificationService();
   virtual BackgroundContentsService* GetBackgroundContentsService() {
     return NULL;
@@ -252,15 +278,17 @@ class TestingProfile : public Profile {
   // Creates and initializes a profile sync service if the tests require one.
   virtual TokenService* GetTokenService();
   virtual ProfileSyncService* GetProfileSyncService();
+  virtual ProfileSyncService* GetProfileSyncService(
+      const std::string& cros_notes);
   virtual CloudPrintProxyService* GetCloudPrintProxyService() { return NULL; }
-
-  virtual ChromeBlobStorageContext* GetBlobStorageContext() {
-    return NULL;
-  }
+  virtual ChromeBlobStorageContext* GetBlobStorageContext() { return NULL; }
+  virtual ExtensionInfoMap* GetExtensionInfoMap() { return NULL; }
 
  protected:
   base::Time start_time_;
-  scoped_ptr<TestingPrefService> prefs_;
+  scoped_ptr<PrefService> prefs_;
+  // ref only for right type, lifecycle is managed by prefs_
+  TestingPrefService* testing_prefs_;
 
  private:
   // Destroys favicon service if it has been created.
@@ -273,6 +301,9 @@ class TestingProfile : public Profile {
   // If the webdata service has been created, it is destroyed.  This is invoked
   // from the destructor.
   void DestroyWebDataService();
+
+  // Creates a TestingPrefService and associates it with the TestingProfile
+  void CreateTestingPrefService();
 
   // The favicon service. Only created if CreateFaviconService is invoked.
   scoped_refptr<FaviconService> favicon_service_;
@@ -296,7 +327,11 @@ class TestingProfile : public Profile {
   // The WebDataService.  Only created if CreateWebDataService is invoked.
   scoped_refptr<WebDataService> web_data_service_;
 
-  // The TemplateURLFetcher. Only created if CreateTemplateURLModel is invoked.
+  // The TemplateURLFetcher. Only created if CreateTemplateURLFetcher is
+  // invoked.
+  scoped_ptr<TemplateURLFetcher> template_url_fetcher_;
+
+  // The TemplateURLModel. Only created if CreateTemplateURLModel is invoked.
   scoped_ptr<TemplateURLModel> template_url_model_;
 
   scoped_ptr<NTPResourceCache> ntp_resource_cache_;
@@ -342,6 +377,10 @@ class TestingProfile : public Profile {
 
   FilePath last_selected_directory_;
   scoped_refptr<history::TopSites> top_sites_;  // For history and thumbnails.
+
+  // For properly notifying the ExtensionsService when the profile
+  // is disposed.
+  scoped_refptr<ExtensionsService> extensions_service_;
 
   // We use a temporary directory to store testing profile data.
   ScopedTempDir temp_dir_;

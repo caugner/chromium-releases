@@ -10,7 +10,10 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebKitClient.h"
 #if defined(OS_WIN)
 #include "webkit/glue/webthemeengine_impl_win.h"
+#elif defined(OS_LINUX)
+#include "webkit/glue/webthemeengine_impl_linux.h"
 #endif
+
 
 class MessageLoop;
 
@@ -35,6 +38,7 @@ class WebKitClientImpl : public WebKit::WebKitClient {
       unsigned key_size_index, const WebKit::WebString& challenge,
       const WebKit::WebURL& url);
   virtual size_t memoryUsageMB();
+  virtual size_t actualMemoryUsageMB();
   virtual WebKit::WebURLLoader* createURLLoader();
   virtual WebKit::WebSocketStreamHandle* createSocketStreamHandle();
   virtual WebKit::WebString userAgent(const WebKit::WebURL& url);
@@ -70,7 +74,7 @@ class WebKitClientImpl : public WebKit::WebKitClient {
   double shared_timer_fire_time_;
   int shared_timer_suspended_;  // counter
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
   WebThemeEngineImpl theme_engine_;
 #endif
 };

@@ -20,6 +20,7 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/search_engines/template_url_model_observer.h"
+#include "chrome/browser/show_options_url.h"
 #include "chrome/browser/views/keyword_editor_view.h"
 #include "chrome/browser/views/options/managed_prefs_banner_view.h"
 #include "chrome/browser/views/options/options_group_view.h"
@@ -50,6 +51,21 @@ bool IsNewTabUIURLString(const GURL& url) {
   return url == GURL(chrome::kChromeUINewTabURL);
 }
 }  // namespace
+
+///////////////////////////////////////////////////////////////////////////////
+// OptionsGroupContents
+class OptionsGroupContents : public views::View {
+ public:
+  OptionsGroupContents() { }
+
+  // views::View overrides:
+  virtual AccessibilityTypes::Role GetAccessibleRole() {
+    return AccessibilityTypes::ROLE_GROUPING;
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(OptionsGroupContents);
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // SearchEngineListModel
@@ -155,8 +171,6 @@ void SearchEngineListModel::ResetContents() {
 
 void SearchEngineListModel::ChangeComboboxSelection() {
   if (template_urls_.size()) {
-    combobox_->SetEnabled(true);
-
     const TemplateURL* default_search_provider =
         template_url_model_->GetDefaultSearchProvider();
     if (default_search_provider) {
@@ -167,10 +181,13 @@ void SearchEngineListModel::ChangeComboboxSelection() {
         combobox_->SetSelectedItem(
             static_cast<int>(i - template_urls_.begin()));
       }
+    } else {
+        combobox_->SetSelectedItem(-1);
     }
-  } else {
-    combobox_->SetEnabled(false);
   }
+  // If the default search is managed or there are no URLs, disable the control.
+  combobox_->SetEnabled(!template_urls_.empty() &&
+                        !template_url_model_->is_default_search_managed());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -202,9 +219,6 @@ GeneralPageView::GeneralPageView(Profile* profile)
 }
 
 GeneralPageView::~GeneralPageView() {
-  profile()->GetPrefs()->RemovePrefObserver(prefs::kRestoreOnStartup, this);
-  profile()->GetPrefs()->RemovePrefObserver(
-      prefs::kURLsToRestoreOnStartup, this);
   if (startup_custom_pages_table_)
     startup_custom_pages_table_->SetModel(NULL);
   default_browser_worker_->ObserverDestroyed();
@@ -341,8 +355,9 @@ void GeneralPageView::InitControlLayout() {
 #endif
 
   // Register pref observers that update the controls when a pref changes.
-  profile()->GetPrefs()->AddPrefObserver(prefs::kRestoreOnStartup, this);
-  profile()->GetPrefs()->AddPrefObserver(prefs::kURLsToRestoreOnStartup, this);
+  registrar_.Init(profile()->GetPrefs());
+  registrar_.Add(prefs::kRestoreOnStartup, this);
+  registrar_.Add(prefs::kURLsToRestoreOnStartup, this);
 
   new_tab_page_is_home_page_.Init(prefs::kHomePageIsNewTabPage,
       profile()->GetPrefs(), this);
@@ -488,7 +503,7 @@ void GeneralPageView::InitStartupGroup() {
   using views::GridLayout;
   using views::ColumnSet;
 
-  views::View* contents = new views::View;
+  views::View* contents = new OptionsGroupContents;
   GridLayout* layout = new GridLayout(contents);
   contents->SetLayoutManager(layout);
 

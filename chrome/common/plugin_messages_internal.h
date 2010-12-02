@@ -221,11 +221,11 @@ IPC_BEGIN_MESSAGES(Plugin)
                              bool /* handled */,
                              WebCursor /* cursor type*/)
 
-#if defined(OS_MACOSX)
-  IPC_MESSAGE_ROUTED1(PluginMsg_SetWindowFocus,
+  IPC_MESSAGE_ROUTED1(PluginMsg_SetContentAreaFocus,
                       bool /* has_focus */)
 
-  IPC_MESSAGE_ROUTED1(PluginMsg_SetContentAreaFocus,
+#if defined(OS_MACOSX)
+  IPC_MESSAGE_ROUTED1(PluginMsg_SetWindowFocus,
                       bool /* has_focus */)
 
   IPC_MESSAGE_ROUTED0(PluginMsg_ContainerHidden)
@@ -238,6 +238,9 @@ IPC_BEGIN_MESSAGES(Plugin)
   IPC_MESSAGE_ROUTED2(PluginMsg_WindowFrameChanged,
                       gfx::Rect /* window_frame */,
                       gfx::Rect /* view_frame */)
+
+  IPC_MESSAGE_ROUTED1(PluginMsg_ImeCompositionConfirmed,
+                      string16 /* text */)
 #endif
 
   IPC_SYNC_MESSAGE_ROUTED2_0(PluginMsg_WillSendRequest,
@@ -401,6 +404,9 @@ IPC_BEGIN_MESSAGES(PluginHost)
 #if defined(OS_MACOSX)
   IPC_MESSAGE_ROUTED1(PluginHostMsg_UpdateGeometry_ACK,
                       int /* ack_key */)
+
+  IPC_MESSAGE_ROUTED1(PluginHostMsg_SetImeEnabled,
+                      bool /* enabled */)
 
   // This message, used in Mac OS X 10.5 and earlier, is sent from the plug-in
   // process to the renderer process to indicate that the plug-in allocated a

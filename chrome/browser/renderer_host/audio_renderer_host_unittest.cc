@@ -12,6 +12,7 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
 #include "ipc/ipc_message_utils.h"
+#include "media/audio/audio_manager.h"
 #include "media/audio/fake_audio_output_stream.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -44,9 +45,9 @@ class MockAudioRendererHost : public AudioRendererHost {
   }
 
   // A list of mock methods.
-  MOCK_METHOD4(OnRequestPacket,
+  MOCK_METHOD3(OnRequestPacket,
                void(int routing_id, int stream_id,
-                    uint32 bytes_in_buffer, int64 message_timestamp));
+                    AudioBuffersState buffers_state));
   MOCK_METHOD3(OnStreamCreated,
                void(int routing_id, int stream_id, int length));
   MOCK_METHOD3(OnLowLatencyStreamCreated,
@@ -89,9 +90,8 @@ class MockAudioRendererHost : public AudioRendererHost {
 
   // These handler methods do minimal things and delegate to the mock methods.
   void OnRequestPacket(const IPC::Message& msg, int stream_id,
-                       uint32 bytes_in_buffer, int64 message_timestamp) {
-    OnRequestPacket(msg.routing_id(), stream_id, bytes_in_buffer,
-                    message_timestamp);
+                       AudioBuffersState buffers_state) {
+    OnRequestPacket(msg.routing_id(), stream_id, buffers_state);
   }
 
   void OnStreamCreated(const IPC::Message& msg, int stream_id,
@@ -171,7 +171,7 @@ class AudioRendererHostTest : public testing::Test {
   virtual void SetUp() {
     // Create a message loop so AudioRendererHost can use it.
     message_loop_.reset(new MessageLoop(MessageLoop::TYPE_IO));
-    io_thread_.reset(new ChromeThread(ChromeThread::IO, message_loop_.get()));
+    io_thread_.reset(new BrowserThread(BrowserThread::IO, message_loop_.get()));
     host_ = new MockAudioRendererHost();
 
     // Simulate IPC channel connected.
@@ -192,7 +192,7 @@ class AudioRendererHostTest : public testing::Test {
     host_ = NULL;
 
     // We need to continue running message_loop_ to complete all destructions.
-    message_loop_->RunAllPending();
+    SyncWithAudioThread();
 
     io_thread_.reset();
   }
@@ -204,7 +204,7 @@ class AudioRendererHostTest : public testing::Test {
                 OnStreamCreated(kRouteId, kStreamId, _));
 
     // 2. First packet request will arrive.
-    EXPECT_CALL(*host_, OnRequestPacket(kRouteId, kStreamId, _, _))
+    EXPECT_CALL(*host_, OnRequestPacket(kRouteId, kStreamId, _))
         .WillOnce(QuitMessageLoop(message_loop_.get()));
 
     IPC::Message msg;
@@ -289,7 +289,7 @@ class AudioRendererHostTest : public testing::Test {
   }
 
   void NotifyPacketReady() {
-    EXPECT_CALL(*host_, OnRequestPacket(kRouteId, kStreamId, _, _))
+    EXPECT_CALL(*host_, OnRequestPacket(kRouteId, kStreamId, _))
         .WillOnce(QuitMessageLoop(message_loop_.get()));
 
     IPC::Message msg;
@@ -309,15 +309,36 @@ class AudioRendererHostTest : public testing::Test {
     CHECK(controller) << "AudioOutputController not found";
 
     // Expect an error signal sent through IPC.
-    EXPECT_CALL(*host_, OnStreamError(kRouteId, kStreamId))
-        .WillOnce(QuitMessageLoop(message_loop_.get()));
+    EXPECT_CALL(*host_, OnStreamError(kRouteId, kStreamId));
 
     // Simulate an error sent from the audio device.
     host_->OnError(controller, 0);
-    message_loop_->Run();
+    SyncWithAudioThread();
 
     // Expect the audio stream record is removed.
     EXPECT_EQ(0u, host_->audio_entries_.size());
+  }
+
+  // Called on the audio thread.
+  static void PostQuitMessageLoop(MessageLoop* message_loop) {
+    message_loop->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+  }
+
+  // Called on the main thread.
+  static void PostQuitOnAudioThread(MessageLoop* message_loop) {
+    AudioManager::GetAudioManager()->GetMessageLoop()->PostTask(
+        FROM_HERE, NewRunnableFunction(&PostQuitMessageLoop, message_loop));
+  }
+
+  // SyncWithAudioThread() waits until all pending tasks on the audio thread
+  // are executed while also processing pending task in message_loop_ on the
+  // current thread. It is used to synchronize with the audio thread when we are
+  // closing an audio stream.
+  void SyncWithAudioThread() {
+    message_loop_->PostTask(
+        FROM_HERE, NewRunnableFunction(&PostQuitOnAudioThread,
+                                       message_loop_.get()));
+    message_loop_->Run();
   }
 
   MessageLoop* message_loop() { return message_loop_.get(); }
@@ -328,7 +349,7 @@ class AudioRendererHostTest : public testing::Test {
   bool mock_stream_;
   scoped_refptr<MockAudioRendererHost> host_;
   scoped_ptr<MessageLoop> message_loop_;
-  scoped_ptr<ChromeThread> io_thread_;
+  scoped_ptr<BrowserThread> io_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererHostTest);
 };

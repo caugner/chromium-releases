@@ -402,7 +402,7 @@ void BrowserWindowCocoa::ShowPageInfo(Profile* profile,
                                       const NavigationEntry::SSLStatus& ssl,
                                       bool show_history) {
   const CommandLine* command_line(CommandLine::ForCurrentProcess());
-  if (command_line->HasSwitch(switches::kEnableNewPageInfoBubble))
+  if (!command_line->HasSwitch(switches::kDisableNewPageInfoBubble))
     browser::ShowPageInfoBubble(window(), profile, url, ssl, show_history);
   else
     browser::ShowPageInfo(window(), profile, url, ssl, show_history);
@@ -562,6 +562,20 @@ void BrowserWindowCocoa::ToggleTabStripMode() {
 
 void BrowserWindowCocoa::OpenTabpose() {
   [controller_ openTabpose];
+}
+
+void BrowserWindowCocoa::ShowInstant(TabContents* preview_contents) {
+  [controller_ showInstant:preview_contents];
+}
+
+void BrowserWindowCocoa::HideInstant() {
+  [controller_ hideInstant];
+}
+
+gfx::Rect BrowserWindowCocoa::GetInstantBounds() {
+  // TODO: implement me
+  NOTIMPLEMENTED();
+  return gfx::Rect();
 }
 
 void BrowserWindowCocoa::Observe(NotificationType type,

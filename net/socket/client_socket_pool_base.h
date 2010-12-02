@@ -24,12 +24,12 @@
 #pragma once
 
 #include <deque>
+#include <list>
 #include <map>
 #include <set>
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/compiler_specific.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
@@ -96,6 +96,8 @@ class ConnectJob {
   // additional error state to the ClientSocketHandle (post late-binding).
   virtual void GetAdditionalErrorState(ClientSocketHandle* handle) {}
 
+  const BoundNetLog& net_log() const { return net_log_; }
+
  protected:
   void set_socket(ClientSocket* socket);
   ClientSocket* socket() { return socket_.get(); }
@@ -132,8 +134,7 @@ namespace internal {
 // ClientSocketPoolBaseHelper.  This class is not for external use, please use
 // ClientSocketPoolBase instead.
 class ClientSocketPoolBaseHelper
-    : public base::RefCounted<ClientSocketPoolBaseHelper>,
-      public ConnectJob::Delegate,
+    : public ConnectJob::Delegate,
       public NetworkChangeNotifier::Observer {
  public:
   class Request {
@@ -181,6 +182,8 @@ class ClientSocketPoolBaseHelper
       base::TimeDelta unused_idle_socket_timeout,
       base::TimeDelta used_idle_socket_timeout,
       ConnectJobFactory* connect_job_factory);
+
+  ~ClientSocketPoolBaseHelper();
 
   // See ClientSocketPool::RequestSocket for documentation on this function.
   // ClientSocketPoolBaseHelper takes ownership of |request|, which must be
@@ -238,7 +241,8 @@ class ClientSocketPoolBaseHelper
   void CleanupIdleSockets(bool force);
 
   // See ClientSocketPool::GetInfoAsValue for documentation on this function.
-  Value* GetInfoAsValue(const std::string& name, const std::string& type) const;
+  DictionaryValue* GetInfoAsValue(const std::string& name,
+                                  const std::string& type) const;
 
   base::TimeDelta ConnectionTimeout() const {
     return connect_job_factory_->ConnectionTimeout();
@@ -320,14 +324,14 @@ class ClientSocketPoolBaseHelper
     void DecrementActiveSocketCount() { active_socket_count_--; }
 
     const std::set<const ConnectJob*>& jobs() const { return jobs_; }
-    const std::deque<IdleSocket>& idle_sockets() const { return idle_sockets_; }
+    const std::list<IdleSocket>& idle_sockets() const { return idle_sockets_; }
     const RequestQueue& pending_requests() const { return pending_requests_; }
     int active_socket_count() const { return active_socket_count_; }
     RequestQueue* mutable_pending_requests() { return &pending_requests_; }
-    std::deque<IdleSocket>* mutable_idle_sockets() { return &idle_sockets_; }
+    std::list<IdleSocket>* mutable_idle_sockets() { return &idle_sockets_; }
 
    private:
-    std::deque<IdleSocket> idle_sockets_;
+    std::list<IdleSocket> idle_sockets_;
     std::set<const ConnectJob*> jobs_;
     RequestQueue pending_requests_;
     int active_socket_count_;  // number of active sockets used by clients
@@ -351,12 +355,10 @@ class ClientSocketPoolBaseHelper
   typedef std::map<const ClientSocketHandle*, CallbackResultPair>
       PendingCallbackMap;
 
-  ~ClientSocketPoolBaseHelper();
-
   static void InsertRequestIntoQueue(const Request* r,
                                      RequestQueue* pending_requests);
   static const Request* RemoveRequestFromQueue(RequestQueue::iterator it,
-                                               RequestQueue* pending_requests);
+                                               Group* group);
 
   Group* GetOrCreateGroup(const std::string& group_name);
   void RemoveGroup(const std::string& group_name);
@@ -485,8 +487,9 @@ class ClientSocketPoolBaseHelper
   // make sure that they are discarded rather than reused.
   int pool_generation_number_;
 
-  // Some parts of this class need to know if the destructor is running.
-  bool in_destructor_;
+  ScopedRunnableMethodFactory<ClientSocketPoolBaseHelper> method_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(ClientSocketPoolBaseHelper);
 };
 
 }  // namespace internal
@@ -539,15 +542,14 @@ class ClientSocketPoolBase {
   ClientSocketPoolBase(
       int max_sockets,
       int max_sockets_per_group,
-      const scoped_refptr<ClientSocketPoolHistograms>& histograms,
+      ClientSocketPoolHistograms* histograms,
       base::TimeDelta unused_idle_socket_timeout,
       base::TimeDelta used_idle_socket_timeout,
       ConnectJobFactory* connect_job_factory)
       : histograms_(histograms),
-        helper_(new internal::ClientSocketPoolBaseHelper(
-            max_sockets, max_sockets_per_group,
-            unused_idle_socket_timeout, used_idle_socket_timeout,
-            new ConnectJobFactoryAdaptor(connect_job_factory))) {}
+        helper_(max_sockets, max_sockets_per_group,
+                unused_idle_socket_timeout, used_idle_socket_timeout,
+                new ConnectJobFactoryAdaptor(connect_job_factory)) {}
 
   virtual ~ClientSocketPoolBase() {}
 
@@ -563,64 +565,64 @@ class ClientSocketPoolBase {
                     CompletionCallback* callback,
                     const BoundNetLog& net_log) {
     Request* request = new Request(handle, callback, priority, params, net_log);
-    return helper_->RequestSocket(group_name, request);
+    return helper_.RequestSocket(group_name, request);
   }
 
   void CancelRequest(const std::string& group_name,
                      ClientSocketHandle* handle) {
-    return helper_->CancelRequest(group_name, handle);
+    return helper_.CancelRequest(group_name, handle);
   }
 
   void ReleaseSocket(const std::string& group_name, ClientSocket* socket,
                      int id) {
-    return helper_->ReleaseSocket(group_name, socket, id);
+    return helper_.ReleaseSocket(group_name, socket, id);
   }
 
-  void CloseIdleSockets() { return helper_->CloseIdleSockets(); }
+  void CloseIdleSockets() { return helper_.CloseIdleSockets(); }
 
-  int idle_socket_count() const { return helper_->idle_socket_count(); }
+  int idle_socket_count() const { return helper_.idle_socket_count(); }
 
   int IdleSocketCountInGroup(const std::string& group_name) const {
-    return helper_->IdleSocketCountInGroup(group_name);
+    return helper_.IdleSocketCountInGroup(group_name);
   }
 
   LoadState GetLoadState(const std::string& group_name,
                          const ClientSocketHandle* handle) const {
-    return helper_->GetLoadState(group_name, handle);
+    return helper_.GetLoadState(group_name, handle);
   }
 
   virtual void OnConnectJobComplete(int result, ConnectJob* job) {
-    return helper_->OnConnectJobComplete(result, job);
+    return helper_.OnConnectJobComplete(result, job);
   }
 
   int NumConnectJobsInGroup(const std::string& group_name) const {
-    return helper_->NumConnectJobsInGroup(group_name);
+    return helper_.NumConnectJobsInGroup(group_name);
   }
 
   bool HasGroup(const std::string& group_name) const {
-    return helper_->HasGroup(group_name);
+    return helper_.HasGroup(group_name);
   }
 
   void CleanupIdleSockets(bool force) {
-    return helper_->CleanupIdleSockets(force);
+    return helper_.CleanupIdleSockets(force);
   }
 
-  Value* GetInfoAsValue(const std::string& name,
-                        const std::string& type) const {
-    return helper_->GetInfoAsValue(name, type);
+  DictionaryValue* GetInfoAsValue(const std::string& name,
+                                  const std::string& type) const {
+    return helper_.GetInfoAsValue(name, type);
   }
 
   base::TimeDelta ConnectionTimeout() const {
-    return helper_->ConnectionTimeout();
+    return helper_.ConnectionTimeout();
   }
 
-  scoped_refptr<ClientSocketPoolHistograms> histograms() const {
+  ClientSocketPoolHistograms* histograms() const {
     return histograms_;
   }
 
-  void EnableConnectBackupJobs() { helper_->EnableConnectBackupJobs(); }
+  void EnableConnectBackupJobs() { helper_.EnableConnectBackupJobs(); }
 
-  void Flush() { helper_->Flush(); }
+  void Flush() { helper_.Flush(); }
 
  private:
   // This adaptor class exists to bridge the
@@ -655,13 +657,8 @@ class ClientSocketPoolBase {
   };
 
   // Histograms for the pool
-  const scoped_refptr<ClientSocketPoolHistograms> histograms_;
-
-  // The reason for reference counting here is because the operations on
-  // the ClientSocketPoolBaseHelper which release sockets can cause the
-  // ClientSocketPoolBase<T> reference to drop to zero.  While we're deep
-  // in cleanup code, we'll often hold a reference to |self|.
-  scoped_refptr<internal::ClientSocketPoolBaseHelper> helper_;
+  ClientSocketPoolHistograms* const histograms_;
+  internal::ClientSocketPoolBaseHelper helper_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientSocketPoolBase);
 };

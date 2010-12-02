@@ -12,6 +12,7 @@
 #include "chrome/browser/views/download_shelf_view.h"
 #include "chrome/browser/views/frame/browser_frame.h"
 #include "chrome/browser/views/frame/browser_view.h"
+#include "chrome/browser/views/frame/contents_container.h"
 #include "chrome/browser/views/tabs/side_tab_strip.h"
 #include "chrome/browser/views/tabs/tab_strip.h"
 #include "chrome/browser/views/toolbar_view.h"
@@ -206,15 +207,13 @@ void BrowserViewLayout::Uninstalled(views::View* host) {}
 void BrowserViewLayout::ViewAdded(views::View* host, views::View* view) {
   switch (view->GetID()) {
     case VIEW_ID_CONTENTS_SPLIT: {
-        contents_split_ = view;
-        if (SidebarManager::IsSidebarAllowed()) {
-          views::View* sidebar_split = contents_split_->GetChildViewAt(0);
-          contents_container_ = sidebar_split->GetChildViewAt(0);
-        } else {
-          contents_container_ = contents_split_->GetChildViewAt(0);
-        }
-      }
+      contents_split_ = view;
+      // We're installed as the LayoutManager before BrowserView creates the
+      // contents, so we have to set contents_container_ here rather than
+      // Installed.
+      contents_container_ = browser_view_->contents_;
       break;
+    }
     case VIEW_ID_INFO_BAR_CONTAINER:
       infobar_container_ = view;
       break;
@@ -252,6 +251,9 @@ void BrowserViewLayout::Layout(views::View* host) {
   top = LayoutToolbar(top);
   top = LayoutBookmarkAndInfoBars(top);
   int bottom = LayoutDownloadShelf(browser_view_->height());
+  int active_top_margin = GetTopMarginForActiveContent();
+  top -= active_top_margin;
+  contents_container_->SetActiveTopMargin(active_top_margin);
   LayoutTabContents(top, bottom);
   // This must be done _after_ we lay out the TabContents since this
   // code calls back into us to find the bounding box the find bar
@@ -261,10 +263,6 @@ void BrowserViewLayout::Layout(views::View* host) {
     browser()->GetFindBarController()->find_bar()->MoveWindowIfNecessary(
         gfx::Rect(), true);
   }
-  // Align status bubble with the bottom of the contents_container.
-  browser_view_->LayoutStatusBubble(
-      top + contents_container_->bounds().height());
-  browser_view_->SchedulePaint();
 }
 
 // Return the preferred size which is the size required to give each
@@ -275,6 +273,14 @@ gfx::Size BrowserViewLayout::GetPreferredSize(views::View* host) {
 
 //////////////////////////////////////////////////////////////////////////////
 // BrowserViewLayout, private:
+
+Browser* BrowserViewLayout::browser() {
+  return browser_view_->browser();
+}
+
+const Browser* BrowserViewLayout::browser() const {
+  return browser_view_->browser();
+}
 
 int BrowserViewLayout::LayoutTabStrip() {
   if (!browser_view_->IsTabStripVisible()) {
@@ -357,11 +363,30 @@ int BrowserViewLayout::LayoutInfoBar(int top) {
   return top + height;
 }
 
-// Layout the TabContents container, between the coordinates |top| and
-// |bottom|.
 void BrowserViewLayout::LayoutTabContents(int top, int bottom) {
   contents_split_->SetBounds(vertical_layout_rect_.x(), top,
                              vertical_layout_rect_.width(), bottom - top);
+}
+
+int BrowserViewLayout::GetTopMarginForActiveContent() {
+  if (!active_bookmark_bar_ || !browser_view_->IsBookmarkBarVisible() ||
+      !active_bookmark_bar_->IsDetached()) {
+    return 0;
+  }
+
+  if (contents_split_->GetChildViewAt(1) &&
+      contents_split_->GetChildViewAt(1)->IsVisible())
+    return 0;
+
+  if (SidebarManager::IsSidebarAllowed()) {
+    views::View* sidebar_split = contents_split_->GetChildViewAt(0);
+    if (sidebar_split->GetChildViewAt(1) &&
+        sidebar_split->GetChildViewAt(1)->IsVisible())
+      return 0;
+  }
+
+  // Adjust for separator.
+  return active_bookmark_bar_->height() - kSeparationLineHeight;
 }
 
 int BrowserViewLayout::LayoutDownloadShelf(int bottom) {

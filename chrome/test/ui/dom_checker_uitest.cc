@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -50,16 +51,16 @@ class DomCheckerTest : public UITest {
 
     std::string failures_file = use_http ?
 #if defined(OS_MACOSX)
-        "expected_failures_mac-http.txt" : "expected_failures_mac-file.txt";
+        "expected_failures-http.txt" : "expected_failures_mac-file.txt";
 #elif defined(OS_LINUX)
-        "expected_failures_linux-http.txt" : "expected_failures_linux-file.txt";
+        "expected_failures-http.txt" : "expected_failures_linux-file.txt";
 #elif defined(OS_WIN)
-        "expected_failures_win-http.txt" : "expected_failures_win-file.txt";
+        "expected_failures-http.txt" : "expected_failures_win-file.txt";
 #else
         "" : "";
 #endif
 
-    GetExpectedFailures(failures_file, &expected_failures);
+    ASSERT_TRUE(GetExpectedFailures(failures_file, &expected_failures));
 
     RunDomChecker(use_http, &test_count, &current_failures);
     printf("\nTests run: %d\n", test_count);
@@ -129,13 +130,15 @@ class DomCheckerTest : public UITest {
     }
   }
 
-  void GetExpectedFailures(const std::string& failures_file,
+  bool GetExpectedFailures(const std::string& failures_file,
                            ResultsSet* expected_failures) {
     std::string expected_failures_text;
     bool have_expected_results = ReadExpectedResults(failures_file,
                                                      &expected_failures_text);
-    ASSERT_TRUE(have_expected_results);
+    if (!have_expected_results)
+      return false;
     ParseExpectedFailures(expected_failures_text, expected_failures);
+    return true;
   }
 
   bool WaitUntilTestCompletes(TabProxy* tab) {
@@ -234,8 +237,11 @@ TEST_F(DomCheckerTest, File) {
   PrintResults(new_passes, new_failures);
 }
 
-// TODO(arv): http://crbug.com/21321
-TEST_F(DomCheckerTest, FLAKY_Http) {
+// This test was previously failing because it was looking for an
+// expected results file that didn't exist.  Fixing that bug revealed
+// that the expected results weren't correct anyway.
+// http://crbug.com/21321
+TEST_F(DomCheckerTest, FAILS_Http) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(kRunDomCheckerTest))
     return;
 

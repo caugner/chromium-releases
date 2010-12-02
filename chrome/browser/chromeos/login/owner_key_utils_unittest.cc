@@ -10,21 +10,18 @@
 #include "base/crypto/rsa_private_key.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/logging.h"
-#include "base/nss_util_internal.h"
 #include "base/nss_util.h"
+#include "base/nss_util_internal.h"
 #include "base/ref_counted.h"
 #include "base/scoped_temp_dir.h"
-#include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
 
 class OwnerKeyUtilsTest : public ::testing::Test {
  public:
-  OwnerKeyUtilsTest() : utils_(OwnerKeyUtils::Create()) {
-
-  }
+  OwnerKeyUtilsTest() : utils_(OwnerKeyUtils::Create()) {}
   virtual ~OwnerKeyUtilsTest() {}
 
   virtual void SetUp() {

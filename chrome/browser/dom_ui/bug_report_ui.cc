@@ -1,47 +1,35 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/dom_ui/bug_report_ui.h"
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/callback.h"
-#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/path_service.h"
 #include "base/singleton.h"
 #include "base/string_piece.h"
-#include "base/string_util.h"
 #include "base/string_number_conversions.h"
-#include "base/thread.h"
-#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/weak_ptr.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_window.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/bug_report_util.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/dom_ui_screenshot_source.h"
-#include "chrome/browser/download/download_manager.h"
-#include "chrome/browser/download/download_util.h"
-#include "chrome/browser/history/history_types.h"
-#include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/jstemplate_builder.h"
-#include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/net/url_fetcher.h"
-#include "gfx/codec/png_codec.h"
-#include "net/base/escape.h"
+#include "gfx/rect.h"
 #include "views/window/window.h"
 
 #include "grit/browser_resources.h"
@@ -49,15 +37,18 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 
-#if defined(OS_LINUX)
+#if defined(USE_X11)
 #include "app/x11_util.h"
 #elif defined(OS_MACOSX)
 #include "base/mac_util.h"
-#else
+#elif defined(OS_WIN)
 #include "app/win_util.h"
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "base/file_util.h"
+#include "base/path_service.h"
+#include "base/waitable_event.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/syslogs_library.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -106,9 +97,9 @@ void GetSavedScreenshots(std::vector<std::string>* saved_screenshots,
 // and saved screenshots.
 void GetScreenshotUrls(std::vector<std::string>* saved_screenshots) {
   base::WaitableEvent done(true, false);
-  ChromeThread::PostTask(ChromeThread::FILE, FROM_HERE,
-                         NewRunnableFunction(&GetSavedScreenshots,
-                                             saved_screenshots, &done));
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                          NewRunnableFunction(&GetSavedScreenshots,
+                                              saved_screenshots, &done));
   done.Wait();
 }
 
@@ -120,19 +111,7 @@ std::string GetUserEmail() {
     return manager->logged_in_user().email();
 }
 
-chromeos::LogDictionaryType* GetSystemInformation() {
-  chromeos::LogDictionaryType* sys_info = NULL;
-  chromeos::SyslogsLibrary* syslogs_lib =
-      chromeos::CrosLibrary::Get()->GetSyslogsLibrary();
-
-  if (syslogs_lib)
-    sys_info = syslogs_lib->GetSyslogs(NULL);
-
-  return sys_info;
-}
 #endif
-
-
 }  // namespace
 
 
@@ -150,14 +129,14 @@ void RefreshLastScreenshot(views::Window* parent) {
   else
     last_screenshot_png = new std::vector<unsigned char>;
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if defined(USE_X11)
   screen_size = parent->GetBounds();
   x11_util::GrabWindowSnapshot(parent->GetNativeWindow(), last_screenshot_png);
 #elif defined(OS_MACOSX)
   int width = 0, height = 0;
   mac_util::GrabWindowSnapshot(parent->GetNativeWindow(), last_screenshot_png,
                                &width, &height);
-#else
+#elif defined(OS_WIN)
   screen_size = parent->GetBounds();
   win_util::GrabWindowSnapshot(parent->GetNativeWindow(), last_screenshot_png);
 #endif
@@ -195,8 +174,6 @@ class BugReportUIHTMLSource : public ChromeURLDataManager::DataSource {
   DISALLOW_COPY_AND_ASSIGN(BugReportUIHTMLSource);
 };
 
-class TaskProxy;
-
 // The handler for Javascript messages related to the "bug report" dialog
 class BugReportHandler : public DOMMessageHandler,
                          public base::SupportsWeakPtr<BugReportHandler> {
@@ -217,23 +194,51 @@ class BugReportHandler : public DOMMessageHandler,
                           const ResponseCookies& cookies,
                           const std::string& data);
 
-  void HandleGetDialogDefaults(const ListValue*);
-  void HandleRefreshScreenshots(const ListValue*);
-  void HandleSendReport(const ListValue* list_value);
-  void HandleCancel(const ListValue*);
+  void HandleGetDialogDefaults(const ListValue* args);
+  void HandleRefreshScreenshots(const ListValue* args);
+  void HandleSendReport(const ListValue* args);
+  void HandleCancel(const ListValue* args);
+  void HandleOpenSystemTab(const ListValue* args);
 
   void SetupScreenshotsSource();
   void ClobberScreenshotsSource();
 
  private:
   void CloseTab();
+  void SendReport();
+#if defined(OS_CHROMEOS)
+  void SyslogsComplete(chromeos::LogDictionaryType* logs,
+                       std::string* zip_content);
+#endif
 
-  std::string page_url_;
   TabContents* tab_;
-  TabContents* target_tab_;
   DOMUIScreenshotSource* screenshot_source_;
-#if defined (OS_CHROMEOS)
+
+  // Target tab url.
+  std::string target_tab_url_;
+  // Target tab page title.
+  string16 target_tab_title_;
+
+  // These are filled in by HandleSendReport and used in SendReport.
+  int problem_type_;
+  std::string page_url_;
+  std::string description_;
+  std::vector<unsigned char> image_;
+
+#if defined(OS_CHROMEOS)
+  // Chromeos specific values for SendReport.
+  std::string user_email_;
   chromeos::LogDictionaryType* sys_info_;
+  // Flags to control behavior of SyslogsComplete callback.
+  bool send_sys_info_;
+  // NOTE: Extra boolean sent_report_ is required because callback may
+  // occur before or after we call SendReport().
+  bool sent_report_;
+  // Content of the compressed system logs.
+  std::string* zip_content_;
+  // Variables to track SyslogsLibrary::RequestSyslogs callback.
+  chromeos::SyslogsLibrary::Handle syslogs_handle_;
+  CancelableRequestConsumer syslogs_consumer_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(BugReportHandler);
@@ -375,18 +380,45 @@ void BugReportUIHTMLSource::StartDataRequest(const std::string& path,
 //
 ////////////////////////////////////////////////////////////////////////////////
 BugReportHandler::BugReportHandler(TabContents* tab)
-    : tab_(tab), screenshot_source_(NULL) {
+    : tab_(tab)
+    , screenshot_source_(NULL)
+    , problem_type_(0)
+#if defined(OS_CHROMEOS)
+    , sys_info_(NULL)
+    , send_sys_info_(false)
+    , sent_report_(false)
+    , zip_content_(NULL)
+    , syslogs_handle_(0)
+#endif
+{
 }
 
 BugReportHandler::~BugReportHandler() {
+#if defined(OS_CHROMEOS)
+  // If we requested the syslogs but haven't received them, cancel the request.
+  if (syslogs_handle_ != 0) {
+    chromeos::SyslogsLibrary* syslogs_lib =
+        chromeos::CrosLibrary::Get()->GetSyslogsLibrary();
+    if (syslogs_lib)
+      syslogs_lib->CancelRequest(syslogs_handle_);
+  }
+  if (sys_info_) {
+    delete sys_info_;
+    sys_info_ = NULL;
+  }
+  if (zip_content_) {
+    delete zip_content_;
+    zip_content_ = NULL;
+  }
+#endif
 }
 
 void BugReportHandler::ClobberScreenshotsSource() {
   // Re-create our screenshots data source (this clobbers the last source)
   // setting the screenshot to NULL, effectively disabling the source
   // TODO(rkc): Once there is a method to 'remove' a source, change this code
-  ChromeThread::PostTask(
-      ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
           Singleton<ChromeURLDataManager>::get(),
           &ChromeURLDataManager::AddDataSource,
@@ -404,8 +436,8 @@ void BugReportHandler::SetupScreenshotsSource() {
         browser::last_screenshot_png);
 
   // Add the source to the data manager.
-  ChromeThread::PostTask(
-      ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
           Singleton<ChromeURLDataManager>::get(),
           &ChromeURLDataManager::AddDataSource,
@@ -425,7 +457,8 @@ base::StringPiece BugReportHandler::Init() {
 
   std::string params = page_url.substr(strlen(chrome::kChromeUIBugReportURL));
   // Erase the # - the first character.
-  params.erase(params.begin(),params.begin() + 1);
+  if (params.length())
+    params.erase(params.begin(), params.begin() + 1);
 
   int index = 0;
   if (!base::StringToInt(params, &index)) {
@@ -443,7 +476,11 @@ base::StringPiece BugReportHandler::Init() {
             IDR_BUGREPORT_HTML_INVALID));
   }
 
-  target_tab_ = browser->GetTabContentsAt(index);
+  TabContents* target_tab = browser->GetTabContentsAt(index);
+  if (target_tab) {
+    target_tab_title_ = target_tab->GetTitle();
+    target_tab_url_ = target_tab->controller().GetActiveEntry()->url().spec();
+  }
 
   // Setup the screenshot source after we've verified input is legit.
   SetupScreenshotsSource();
@@ -462,6 +499,8 @@ void BugReportHandler::RegisterMessages() {
       NewCallback(this, &BugReportHandler::HandleSendReport));
   dom_ui_->RegisterMessageCallback("cancel",
       NewCallback(this, &BugReportHandler::HandleCancel));
+  dom_ui_->RegisterMessageCallback("openSystemTab",
+      NewCallback(this, &BugReportHandler::HandleOpenSystemTab));
 }
 
 void BugReportHandler::HandleGetDialogDefaults(const ListValue*) {
@@ -469,17 +508,22 @@ void BugReportHandler::HandleGetDialogDefaults(const ListValue*) {
   ListValue dialog_defaults;
 
   // 0: current url
-  if (target_tab_)
-    dialog_defaults.Append(new StringValue(
-        target_tab_->controller().GetActiveEntry()->url().spec()));
+  if (target_tab_url_.length())
+    dialog_defaults.Append(new StringValue(target_tab_url_));
   else
     dialog_defaults.Append(new StringValue(""));
 
 #if defined(OS_CHROMEOS)
-  // 1: user e-mail
-  sys_info_ = GetSystemInformation();
-  dialog_defaults.Append(new StringValue(chrome::kAboutSystemURL));
-
+  // 1: about:system
+  dialog_defaults.Append(new StringValue(chrome::kChromeUISystemInfoURL));
+  // Trigger the request for system information here.
+  chromeos::SyslogsLibrary* syslogs_lib =
+      chromeos::CrosLibrary::Get()->GetSyslogsLibrary();
+  if (syslogs_lib) {
+    syslogs_handle_ = syslogs_lib->RequestSyslogs(
+        true, &syslogs_consumer_,
+        NewCallback(this, &BugReportHandler::SyslogsComplete));
+  }
   // 2: user e-mail
   dialog_defaults.Append(new StringValue(GetUserEmail()));
 #endif
@@ -513,9 +557,8 @@ void BugReportHandler::HandleSendReport(const ListValue* list_value) {
 
   // #0 - Problem type.
   std::string problem_type_str;
-  int problem_type = 0;
   (*i)->GetAsString(&problem_type_str);
-  if (!base::StringToInt(problem_type_str, &problem_type)) {
+  if (!base::StringToInt(problem_type_str, &problem_type_)) {
     LOG(ERROR) << "Incorrect data passed to sendReport.";
     return;
   }
@@ -525,16 +568,14 @@ void BugReportHandler::HandleSendReport(const ListValue* list_value) {
   }
 
   // #1 - Page url.
-  std::string page_url;
-  (*i)->GetAsString(&page_url);
+  (*i)->GetAsString(&page_url_);
   if (++i == list_value->end()) {
     LOG(ERROR) << "Incorrect data passed to sendReport.";
     return;
   }
 
   // #2 - Description.
-  std::string description;
-  (*i)->GetAsString(&description);
+  (*i)->GetAsString(&description_);
   if (++i == list_value->end()) {
     LOG(ERROR) << "Incorrect data passed to sendReport.";
     return;
@@ -544,6 +585,12 @@ void BugReportHandler::HandleSendReport(const ListValue* list_value) {
   std::string screenshot_path;
   (*i)->GetAsString(&screenshot_path);
   screenshot_path.erase(0, strlen(kScreenshotBaseUrl));
+
+  // Get the image to send in the report.
+  if (screenshot_path.size() > 0) {
+    image_ = screenshot_source_->GetScreenshot(screenshot_path);
+  }
+
 #if defined(OS_CHROMEOS)
   if (++i == list_value->end()) {
     LOG(ERROR) << "Incorrect data passed to sendReport.";
@@ -551,8 +598,7 @@ void BugReportHandler::HandleSendReport(const ListValue* list_value) {
   }
 
   // #4 - User e-mail
-  std::string user_email;
-  (*i)->GetAsString(&user_email);
+  (*i)->GetAsString(&user_email_);
   if (++i == list_value->end()) {
     LOG(ERROR) << "Incorrect data passed to sendReport.";
     return;
@@ -561,40 +607,89 @@ void BugReportHandler::HandleSendReport(const ListValue* list_value) {
   // #5 - System info checkbox.
   std::string sys_info_checkbox;
   (*i)->GetAsString(&sys_info_checkbox);
-#endif
+  send_sys_info_ = (sys_info_checkbox == "true");
 
-  // Get the image to send in the report.
-  char* image_data = NULL;
-  int image_data_size = 0;
-  // Make sure this object remains in scope till SendReport returns.
-  std::vector<unsigned char> image;
-  if (screenshot_path.size() > 0) {
-    image = screenshot_source_->GetScreenshot(screenshot_path);
-    image_data = reinterpret_cast<char*>(&(image.front()));
-    image_data_size = image.size();
+  // If we don't require sys_info, or we have it, or we never requested it
+  // (because libcros failed to load), then send the report now.
+  // Otherwise, the report will get sent when we receive sys_info.
+  if (!send_sys_info_ || sys_info_ != NULL || syslogs_handle_ == 0) {
+    SendReport();
+    // If we scheduled a callback, don't call SendReport() again.
+    send_sys_info_ = false;
   }
-
-  BugReportUtil::SendReport(dom_ui_->GetProfile(),
-                            UTF16ToUTF8(target_tab_->GetTitle()),
-                            problem_type,
-                            page_url,
-                            description,
-                            image_data,
-                            image_data_size, browser::screen_size.width(),
-#if defined(OS_CHROMEOS)
-                            browser::screen_size.height(),
-                            user_email,
-                            ((sys_info_checkbox == "true") ?
-                            GetSystemInformation() : NULL));
 #else
-                            browser::screen_size.height());
+  SendReport();
+#endif
+}
+
+void BugReportHandler::SendReport() {
+  int image_data_size = image_.size();
+  char* image_data = image_data_size ?
+      reinterpret_cast<char*>(&(image_.front())) : NULL;
+  if (!dom_ui_)
+    return;
+  BugReportUtil::SendReport(dom_ui_->GetProfile()
+                            , UTF16ToUTF8(target_tab_title_)
+                            , problem_type_
+                            , page_url_
+                            , description_
+                            , image_data
+                            , image_data_size
+                            , browser::screen_size.width()
+                            , browser::screen_size.height()
+#if defined(OS_CHROMEOS)
+                            , user_email_
+                            , zip_content_ ? zip_content_->c_str() : NULL
+                            , zip_content_ ? zip_content_->length() : 0
+                            , send_sys_info_ ? sys_info_ : NULL
+#endif
+                            );
+
+#if defined(OS_CHROMEOS)
+  if (sys_info_) {
+    delete sys_info_;
+    sys_info_ = NULL;
+  }
+  if (zip_content_) {
+    delete zip_content_;
+    zip_content_ = NULL;
+  }
+  sent_report_ = true;
 #endif
 
   CloseTab();
 }
 
+#if defined(OS_CHROMEOS)
+// Called from the same thread as HandleGetDialogDefaults, i.e. the UI thread.
+void BugReportHandler::SyslogsComplete(chromeos::LogDictionaryType* logs,
+                                       std::string* zip_content) {
+  if (sent_report_) {
+    // We already sent the report, just delete the data.
+    if (logs)
+      delete logs;
+    if (zip_content)
+      delete zip_content;
+  } else {
+    zip_content_ = zip_content;
+    sys_info_ = logs;  // Will get deleted when SendReport() is called.
+    if (send_sys_info_) {
+      // We already prepared the report, send it now.
+      SendReport();
+    }
+  }
+  syslogs_handle_ = 0;
+}
+#endif
+
 void BugReportHandler::HandleCancel(const ListValue*) {
   CloseTab();
+}
+
+void BugReportHandler::HandleOpenSystemTab(const ListValue* args) {
+#if defined(OS_CHROMEOS)
+  BrowserList::GetLastActive()->OpenSystemTabAndActivate();
+#endif
 }
 
 void BugReportHandler::CloseTab() {
@@ -621,8 +716,8 @@ BugReportUI::BugReportUI(TabContents* tab) : HtmlDialogUI(tab) {
   BugReportUIHTMLSource* html_source =
       new BugReportUIHTMLSource(handler->Init());
   // Set up the chrome://bugreport/ source.
-  ChromeThread::PostTask(
-      ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
           Singleton<ChromeURLDataManager>::get(),
           &ChromeURLDataManager::AddDataSource,

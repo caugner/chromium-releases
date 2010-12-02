@@ -8,20 +8,24 @@
 #include "base/scoped_cftyperef.h"
 #include "base/sys_string_conversions.h"
 
-ConfigurationPolicyProviderMac::ConfigurationPolicyProviderMac()
-    : preferences_(new MacPreferences()) {
+namespace policy {
+
+ConfigurationPolicyProviderMac::ConfigurationPolicyProviderMac(
+    const StaticPolicyValueMap& policy_map)
+    : ConfigurationPolicyProvider(policy_map),
+      preferences_(new MacPreferences()) {
 }
 
 ConfigurationPolicyProviderMac::ConfigurationPolicyProviderMac(
-    MacPreferences* preferences) : preferences_(preferences) {
+    const StaticPolicyValueMap& policy_map, MacPreferences* preferences)
+    : ConfigurationPolicyProvider(policy_map), preferences_(preferences) {
 }
 
 bool ConfigurationPolicyProviderMac::Provide(ConfigurationPolicyStore* store) {
-  bool success = true;
-  const PolicyValueMap* mapping = PolicyValueMapping();
+  const PolicyValueMap& mapping = policy_value_map();
 
-  for (PolicyValueMap::const_iterator current = mapping->begin();
-       current != mapping->end(); ++current) {
+  for (PolicyValueMap::const_iterator current = mapping.begin();
+       current != mapping.end(); ++current) {
     scoped_cftyperef<CFStringRef> name(
         base::SysUTF8ToCFStringRef(current->name));
     scoped_cftyperef<CFPropertyListRef> value(
@@ -39,8 +43,6 @@ bool ConfigurationPolicyProviderMac::Provide(ConfigurationPolicyStore* store) {
           store->Apply(
               current->policy_type,
               Value::CreateStringValue(string_value));
-        } else {
-          success = false;
         }
         break;
       case Value::TYPE_BOOLEAN:
@@ -48,8 +50,6 @@ bool ConfigurationPolicyProviderMac::Provide(ConfigurationPolicyStore* store) {
           bool bool_value = CFBooleanGetValue((CFBooleanRef)value.get());
           store->Apply(current->policy_type,
                        Value::CreateBooleanValue(bool_value));
-        } else {
-          success = false;
         }
         break;
       case Value::TYPE_INTEGER:
@@ -61,10 +61,6 @@ bool ConfigurationPolicyProviderMac::Provide(ConfigurationPolicyStore* store) {
           if (cast)
             store->Apply(current->policy_type,
                          Value::CreateIntegerValue(int_value));
-          else
-            success = false;
-        } else {
-          success = false;
         }
         break;
       case Value::TYPE_LIST:
@@ -86,10 +82,6 @@ bool ConfigurationPolicyProviderMac::Provide(ConfigurationPolicyStore* store) {
           }
           if (valid_array)
             store->Apply(current->policy_type, list_value.release());
-          else
-            success = false;
-        } else {
-          success = false;
         }
         break;
       default:
@@ -98,6 +90,7 @@ bool ConfigurationPolicyProviderMac::Provide(ConfigurationPolicyStore* store) {
     }
   }
 
-  return success;
+  return true;
 }
 
+}  // namespace policy

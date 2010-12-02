@@ -27,6 +27,7 @@
 #include "base/iat_patch.h"
 #include "base/lazy_instance.h"
 #include "base/ref_counted.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/autocomplete/autocomplete_accessibility.h"
@@ -495,6 +496,21 @@ AutocompleteEditViewWin::~AutocompleteEditViewWin() {
   g_paint_patcher.Pointer()->DerefPatch();
 }
 
+int AutocompleteEditViewWin::TextWidth() {
+  return WidthNeededToDisplay(GetText());
+}
+
+int AutocompleteEditViewWin::WidthOfTextAfterCursor() {
+  CHARRANGE selection;
+  GetSelection(selection);
+  const int start = std::max(0, static_cast<int>(selection.cpMax - 1));
+  return WidthNeededToDisplay(GetText().substr(start));
+ }
+
+gfx::Font AutocompleteEditViewWin::GetFont() {
+  return font_;
+}
+
 void AutocompleteEditViewWin::SaveStateToTab(TabContents* tab) {
   DCHECK(tab);
 
@@ -613,6 +629,10 @@ int AutocompleteEditViewWin::GetIcon() const {
       toolbar_model_->GetIcon();
 }
 
+void AutocompleteEditViewWin::SetUserText(const std::wstring& text) {
+  SetUserText(text, text, true);
+}
+
 void AutocompleteEditViewWin::SetUserText(const std::wstring& text,
                                           const std::wstring& display_text,
                                           bool update_popup) {
@@ -633,16 +653,25 @@ void AutocompleteEditViewWin::SetWindowTextAndCaretPos(const std::wstring& text,
 
 void AutocompleteEditViewWin::SetForcedQuery() {
   const std::wstring current_text(GetText());
-  if (current_text.empty() || (current_text[0] != '?'))
+  const size_t start = current_text.find_first_not_of(kWhitespaceWide);
+  if (start == std::wstring::npos || (current_text[start] != '?'))
     SetUserText(L"?");
   else
-    SetSelection(current_text.length(), 1);
+    SetSelection(current_text.length(), start + 1);
 }
 
 bool AutocompleteEditViewWin::IsSelectAll() {
   CHARRANGE selection;
   GetSel(selection);
   return IsSelectAllForRange(selection);
+}
+
+void AutocompleteEditViewWin::GetSelectionBounds(std::wstring::size_type* start,
+                                                 std::wstring::size_type* end) {
+  CHARRANGE selection;
+  GetSel(selection);
+  *start = static_cast<size_t>(selection.cpMin);
+  *end = static_cast<size_t>(selection.cpMax);
 }
 
 void AutocompleteEditViewWin::SelectAll(bool reversed) {
@@ -1305,8 +1334,17 @@ LRESULT AutocompleteEditViewWin::OnImeNotify(UINT message,
 void AutocompleteEditViewWin::OnKeyDown(TCHAR key,
                                         UINT repeat_count,
                                         UINT flags) {
-  if (OnKeyDownAllModes(key, repeat_count, flags) || popup_window_mode_ ||
-      OnKeyDownOnlyWritable(key, repeat_count, flags))
+  if (OnKeyDownAllModes(key, repeat_count, flags))
+    return;
+
+  // Make sure that we handle system key events like Alt-F4.
+  if (popup_window_mode_) {
+    DefWindowProc(GetCurrentMessage()->message, key, MAKELPARAM(repeat_count,
+                                                                flags));
+    return;
+  }
+
+  if (OnKeyDownOnlyWritable(key, repeat_count, flags))
     return;
 
   // CRichEditCtrl changes its text on WM_KEYDOWN instead of WM_CHAR for many
@@ -1800,10 +1838,22 @@ bool AutocompleteEditViewWin::OnKeyDownOnlyWritable(TCHAR key,
   // WM_SYSKEYDOWN, so we need to check (flags & KF_ALTDOWN) in various places
   // in this function even with a WM_SYSKEYDOWN handler.
 
-  // Update LocationBarView::SkipDefaultKeyEventProcessing() as well when you
-  // add some key combinations here.
+  // If adding a new key that could possibly be an accelerator then you'll need
+  // to update LocationBarView::SkipDefaultKeyEventProcessing() as well.
   int count = repeat_count;
   switch (key) {
+    case VK_RIGHT:
+      // TODO(sky): figure out RTL.
+      if (base::i18n::IsRTL())
+        return false;
+      {
+        CHARRANGE selection;
+        GetSel(selection);
+        return (selection.cpMin == selection.cpMax) &&
+            (selection.cpMin == GetTextLength()) &&
+            controller_->OnCommitSuggestedText(GetText());
+      }
+
     case VK_RETURN:
       model_->AcceptInput((flags & KF_ALTDOWN) ?
           NEW_FOREGROUND_TAB : CURRENT_TAB, false);
@@ -2490,4 +2540,20 @@ void AutocompleteEditViewWin::TrackMousePosition(MouseButton button,
     tracking_click_[button] = true;
     click_point_[button] = point;
   }
+}
+
+int AutocompleteEditViewWin::GetHorizontalMargin() {
+  RECT rect;
+  GetRect(&rect);
+  RECT client_rect;
+  GetClientRect(&client_rect);
+  return (rect.left - client_rect.left) + (client_rect.right - rect.right);
+}
+
+int AutocompleteEditViewWin::WidthNeededToDisplay(const std::wstring& text) {
+  // Use font_.GetStringWidth() instead of
+  // PosFromChar(location_entry_->GetTextLength()) because PosFromChar() is
+  // apparently buggy. In both LTR UI and RTL UI with left-to-right layout,
+  // PosFromChar(i) might return 0 when i is greater than 1.
+  return font_.GetStringWidth(text) + GetHorizontalMargin();
 }

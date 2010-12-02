@@ -12,13 +12,24 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
+namespace net {
+
+namespace {
+
 class HttpNetworkLayerTest : public PlatformTest {
 };
 
 TEST_F(HttpNetworkLayerTest, CreateAndDestroy) {
-  net::HttpNetworkLayer factory(NULL, new net::MockHostResolver,
-      net::ProxyService::CreateNull(), new net::SSLConfigServiceDefaults, NULL,
-      NULL, NULL);
+  MockHostResolver host_resolver;
+  net::HttpNetworkLayer factory(
+      NULL,
+      &host_resolver,
+      NULL /* dnsrr_resolver */,
+      net::ProxyService::CreateDirect(),
+      new net::SSLConfigServiceDefaults,
+      NULL,
+      NULL,
+      NULL);
 
   scoped_ptr<net::HttpTransaction> trans;
   int rv = factory.CreateTransaction(&trans);
@@ -27,9 +38,16 @@ TEST_F(HttpNetworkLayerTest, CreateAndDestroy) {
 }
 
 TEST_F(HttpNetworkLayerTest, Suspend) {
-  net::HttpNetworkLayer factory(NULL, new net::MockHostResolver,
-      net::ProxyService::CreateNull(), new net::SSLConfigServiceDefaults, NULL,
-      NULL, NULL);
+  MockHostResolver host_resolver;
+  net::HttpNetworkLayer factory(
+      NULL,
+      &host_resolver,
+      NULL /* dnsrr_resolver */,
+      net::ProxyService::CreateDirect(),
+      new net::SSLConfigServiceDefaults,
+      NULL,
+      NULL,
+      NULL);
 
   scoped_ptr<net::HttpTransaction> trans;
   int rv = factory.CreateTransaction(&trans);
@@ -67,9 +85,16 @@ TEST_F(HttpNetworkLayerTest, GET) {
                                      data_writes, arraysize(data_reads));
   mock_socket_factory.AddSocketDataProvider(&data);
 
-  net::HttpNetworkLayer factory(&mock_socket_factory, new net::MockHostResolver,
-      net::ProxyService::CreateNull(), new net::SSLConfigServiceDefaults, NULL,
-      NULL, NULL);
+  MockHostResolver host_resolver;
+  net::HttpNetworkLayer factory(
+      &mock_socket_factory,
+      &host_resolver,
+      NULL /* dnsrr_resolver */,
+      net::ProxyService::CreateDirect(),
+      new net::SSLConfigServiceDefaults,
+      NULL,
+      NULL,
+      NULL);
 
   TestCompletionCallback callback;
 
@@ -94,3 +119,7 @@ TEST_F(HttpNetworkLayerTest, GET) {
   EXPECT_EQ(net::OK, rv);
   EXPECT_EQ("hello world", contents);
 }
+
+}  // namespace
+
+}  // namespace net

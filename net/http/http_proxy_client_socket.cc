@@ -5,55 +5,31 @@
 #include "net/http/http_proxy_client_socket.h"
 
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_log.h"
 #include "net/base/net_util.h"
-#include "net/http/http_basic_stream.h"
 #include "net/http/http_net_log_params.h"
 #include "net/http/http_network_session.h"
+#include "net/http/http_proxy_utils.h"
 #include "net/http/http_request_info.h"
+#include "net/http/http_stream_parser.h"
 #include "net/socket/client_socket_handle.h"
 
 namespace net {
 
-namespace {
-
-// The HTTP CONNECT method for establishing a tunnel connection is documented
-// in draft-luotonen-web-proxy-tunneling-01.txt and RFC 2817, Sections 5.2 and
-// 5.3.
-void BuildTunnelRequest(const HttpRequestInfo* request_info,
-                        const HttpRequestHeaders& authorization_headers,
-                        const HostPortPair& endpoint,
-                        std::string* request_line,
-                        HttpRequestHeaders* request_headers) {
-  // RFC 2616 Section 9 says the Host request-header field MUST accompany all
-  // HTTP/1.1 requests.  Add "Proxy-Connection: keep-alive" for compat with
-  // HTTP/1.0 proxies such as Squid (required for NTLM authentication).
-  *request_line = StringPrintf(
-      "CONNECT %s HTTP/1.1\r\n", endpoint.ToString().c_str());
-  request_headers->SetHeader(HttpRequestHeaders::kHost,
-                             GetHostAndOptionalPort(request_info->url));
-  request_headers->SetHeader(HttpRequestHeaders::kProxyConnection,
-                             "keep-alive");
-
-  std::string user_agent;
-  if (request_info->extra_headers.GetHeader(HttpRequestHeaders::kUserAgent,
-                                            &user_agent))
-    request_headers->SetHeader(HttpRequestHeaders::kUserAgent, user_agent);
-
-  request_headers->MergeFrom(authorization_headers);
-}
-
-}  // namespace
-
 HttpProxyClientSocket::HttpProxyClientSocket(
-    ClientSocketHandle* transport_socket, const GURL& request_url,
-    const std::string& user_agent, const HostPortPair& endpoint,
+    ClientSocketHandle* transport_socket,
+    const GURL& request_url,
+    const std::string& user_agent,
+    const HostPortPair& endpoint,
     const HostPortPair& proxy_server,
-    const scoped_refptr<HttpNetworkSession>& session, bool tunnel,
+    HttpAuthCache* http_auth_cache,
+    HttpAuthHandlerFactory* http_auth_handler_factory,
+    bool tunnel,
     bool using_spdy)
     : ALLOW_THIS_IN_INITIALIZER_LIST(
           io_callback_(this, &HttpProxyClientSocket::OnIOComplete)),
@@ -64,7 +40,9 @@ HttpProxyClientSocket::HttpProxyClientSocket(
       auth_(tunnel ?
           new HttpAuthController(HttpAuth::AUTH_PROXY,
                                  GURL("http://" + proxy_server.ToString()),
-                                 session) : NULL),
+                                 http_auth_cache,
+                                 http_auth_handler_factory)
+          : NULL),
       tunnel_(tunnel),
       using_spdy_(using_spdy),
       net_log_(transport_socket->socket()->NetLog()) {
@@ -124,8 +102,8 @@ int HttpProxyClientSocket::PrepareForAuthRestart() {
 
   bool keep_alive = false;
   if (response_.headers->IsKeepAlive() &&
-      http_stream_->CanFindEndOfResponse()) {
-    if (!http_stream_->IsResponseBodyComplete()) {
+      http_stream_parser_->CanFindEndOfResponse()) {
+    if (!http_stream_parser_->IsResponseBodyComplete()) {
       next_state_ = STATE_DRAIN_BODY;
       drain_buf_ = new IOBuffer(kDrainBodyBufferSize);
       return OK;
@@ -151,7 +129,8 @@ int HttpProxyClientSocket::DidDrainBodyForAuthRestart(bool keep_alive) {
 
   // Reset the other member variables.
   drain_buf_ = NULL;
-  http_stream_.reset();
+  parser_buf_ = NULL;
+  http_stream_parser_.reset();
   request_headers_.clear();
   response_ = HttpResponseInfo();
   return OK;
@@ -350,7 +329,7 @@ int HttpProxyClientSocket::DoSendRequest() {
       auth_->AddAuthorizationHeader(&authorization_headers);
     std::string request_line;
     HttpRequestHeaders request_headers;
-    BuildTunnelRequest(&request_, authorization_headers, endpoint_,
+    BuildTunnelRequest(request_, authorization_headers, endpoint_,
                        &request_line, &request_headers);
     if (net_log_.IsLoggingAll()) {
       net_log_.AddEvent(
@@ -361,10 +340,12 @@ int HttpProxyClientSocket::DoSendRequest() {
     request_headers_ = request_line + request_headers.ToString();
   }
 
-  http_stream_.reset(new HttpBasicStream(transport_.get()));
-  http_stream_->InitializeStream(&request_, net_log_, NULL);
-  return http_stream_->SendRequest(request_headers_, NULL,
-                                   &response_, &io_callback_);
+
+  parser_buf_ = new GrowableIOBuffer();
+  http_stream_parser_.reset(
+      new HttpStreamParser(transport_.get(), &request_, parser_buf_, net_log_));
+  return http_stream_parser_->SendRequest(request_headers_, NULL,
+                                          &response_, &io_callback_);
 }
 
 int HttpProxyClientSocket::DoSendRequestComplete(int result) {
@@ -377,7 +358,7 @@ int HttpProxyClientSocket::DoSendRequestComplete(int result) {
 
 int HttpProxyClientSocket::DoReadHeaders() {
   next_state_ = STATE_READ_HEADERS_COMPLETE;
-  return http_stream_->ReadResponseHeaders(&io_callback_);
+  return http_stream_parser_->ReadResponseHeaders(&io_callback_);
 }
 
 int HttpProxyClientSocket::DoReadHeadersComplete(int result) {
@@ -396,7 +377,7 @@ int HttpProxyClientSocket::DoReadHeadersComplete(int result) {
 
   switch (response_.headers->response_code()) {
     case 200:  // OK
-      if (http_stream_->IsMoreDataBuffered())
+      if (http_stream_parser_->IsMoreDataBuffered())
         // The proxy sent extraneous data after the headers.
         return ERR_TUNNEL_CONNECTION_FAILED;
 
@@ -432,15 +413,15 @@ int HttpProxyClientSocket::DoDrainBody() {
   DCHECK(drain_buf_);
   DCHECK(transport_->is_initialized());
   next_state_ = STATE_DRAIN_BODY_COMPLETE;
-  return http_stream_->ReadResponseBody(drain_buf_, kDrainBodyBufferSize,
-                                        &io_callback_);
+  return http_stream_parser_->ReadResponseBody(drain_buf_, kDrainBodyBufferSize,
+                                               &io_callback_);
 }
 
 int HttpProxyClientSocket::DoDrainBodyComplete(int result) {
   if (result < 0)
     return result;
 
-  if (http_stream_->IsResponseBodyComplete())
+  if (http_stream_parser_->IsResponseBodyComplete())
     return DidDrainBodyForAuthRestart(true);
 
   // Keep draining.

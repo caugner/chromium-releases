@@ -6,6 +6,7 @@
 
 #include "base/json/json_writer.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_dom_ui.h"
 #include "chrome/browser/extensions/extension_host.h"
@@ -165,6 +166,15 @@ class ExtensionPopupHost : public ExtensionPopup::Observer,
         GetRoutingFromDispatcher(dispatcher_);
     if (router)
       router->RegisterRenderViewHost(host->render_view_host());
+
+    // Extension hosts created for popup contents exist in the same tab
+    // contents as the ExtensionFunctionDispatcher that requested the popup.
+    // For example, '_blank' link navigation should be routed through the tab
+    // contents that requested the popup.
+    if (dispatcher_ && dispatcher_->delegate()) {
+      host->set_associated_tab_contents(
+          dispatcher_->delegate()->associated_tab_contents());
+    }
   }
 
   virtual void ExtensionPopupResized(ExtensionPopup* popup) {
@@ -494,7 +504,7 @@ void PopupShowFunction::Observe(NotificationType type,
 // static
 void PopupEventRouter::OnPopupClosed(Profile* profile,
                                      int routing_id) {
-  std::string full_event_name = StringPrintf(
+  std::string full_event_name = base::StringPrintf(
       extension_popup_module_events::kOnPopupClosed,
       routing_id);
 

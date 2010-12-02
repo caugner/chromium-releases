@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "net/base/completion_callback.h"
 #include "net/base/net_log.h"
 #include "net/base/upload_data_stream.h"
 #include "net/http/http_chunked_decoder.h"
@@ -110,14 +111,15 @@ class HttpStreamParser {
   int DoReadBody();
   int DoReadBodyComplete(int result);
 
-  // Examines |read_buf_| to find the start and end of the headers. Return
-  // the offset for the end of the headers, or -1 if the complete headers
-  // were not found. If they are are found, parse them with
-  // DoParseResponseHeaders().
+  // Examines |read_buf_| to find the start and end of the headers. If they are
+  // found, parse them with DoParseResponseHeaders().  Return the offset for
+  // the end of the headers, or -1 if the complete headers were not found, or
+  // with a net::Error if we encountered an error during parsing.
   int ParseResponseHeaders();
 
-  // Parse the headers into response_.
-  void DoParseResponseHeaders(int end_of_header_offset);
+  // Parse the headers into response_.  Returns OK on success or a net::Error on
+  // failure.
+  int DoParseResponseHeaders(int end_of_header_offset);
 
   // Examine the parsed headers to try to determine the response body size.
   void CalculateResponseBodySize();

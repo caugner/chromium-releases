@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,10 +24,7 @@ struct TestURLInfo {
   std::string title;
   int visit_count;
   int typed_count;
-};
-
-// Contents of the test database.
-static TestURLInfo test_db[] = {
+} test_db[] = {
   {"http://www.google.com/", "Google", 3, 3},
 
   // High-quality pages should get a host synthesized as a lower-quality match.
@@ -99,8 +96,8 @@ class HistoryURLProviderTest : public testing::Test,
                                public ACProviderListener {
  public:
   HistoryURLProviderTest()
-      : ui_thread_(ChromeThread::UI, &message_loop_),
-        file_thread_(ChromeThread::FILE, &message_loop_) {}
+      : ui_thread_(BrowserThread::UI, &message_loop_),
+        file_thread_(BrowserThread::FILE, &message_loop_) {}
 
   // ACProviderListener
   virtual void OnProviderUpdate(bool updated_matches);
@@ -129,8 +126,8 @@ class HistoryURLProviderTest : public testing::Test,
   void RunAdjustOffsetTest(const std::wstring text, size_t expected_offset);
 
   MessageLoopForUI message_loop_;
-  ChromeThread ui_thread_;
-  ChromeThread file_thread_;
+  BrowserThread ui_thread_;
+  BrowserThread file_thread_;
   ACMatches matches_;
   scoped_ptr<TestingProfile> profile_;
   HistoryService* history_service_;

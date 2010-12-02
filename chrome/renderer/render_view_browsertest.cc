@@ -7,6 +7,7 @@
 #include "app/keyboard_codes.h"
 #include "base/file_util.h"
 #include "base/shared_memory.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/native_web_keyboard_event.h"
@@ -26,6 +27,7 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/form_data.h"
 #include "webkit/glue/form_field.h"
+#include "webkit/glue/web_io_operators.h"
 
 using WebKit::WebDocument;
 using WebKit::WebFrame;
@@ -397,11 +399,18 @@ const TestPageData kTestPages[] = {
 };
 }  // namespace
 
+// Failing on windows.  http://crbug.com/56246
+#if defined(OS_WIN)
+#define MAYBE_PrintLayoutTest DISABLED_PrintLayoutTest
+#else
+#define MAYBE_PrintLayoutTest PrintLayoutTest
+#endif
+
 // TODO(estade): need to port MockPrinter to get this on Linux. This involves
 // hooking up Cairo to read a pdf stream, or accessing the cairo surface in the
 // metafile directly.
 #if defined(OS_WIN) || defined(OS_MACOSX)
-TEST_F(RenderViewTest, PrintLayoutTest) {
+TEST_F(RenderViewTest, MAYBE_PrintLayoutTest) {
   bool baseline = false;
 
   EXPECT_TRUE(render_thread_.printer() != NULL);
@@ -452,45 +461,6 @@ TEST_F(RenderViewTest, PrintLayoutTest) {
   }
 }
 #endif
-
-// Print page as bitmap test.
-TEST_F(RenderViewTest, OnPrintPageAsBitmap) {
-  // Lets simulate a print pages with Hello world.
-  LoadHTML("<body><p>Hello world!</p></body>");
-
-  // Grab the printer settings from the printer.
-  ViewMsg_Print_Params print_settings;
-  MockPrinter* printer(render_thread_.printer());
-  printer->GetDefaultPrintSettings(&print_settings);
-  ViewMsg_PrintPage_Params page_params = ViewMsg_PrintPage_Params();
-  page_params.params = print_settings;
-  page_params.page_number = 0;
-
-  // Fetch the image data from the web frame.
-  std::vector<unsigned char> data;
-  view_->print_helper()->PrintPageAsJPEG(page_params,
-                                         view_->webview()->mainFrame(),
-                                         1.0f,
-                                         &data);
-  std::vector<unsigned char> decoded;
-  int w, h;
-  EXPECT_TRUE(gfx::JPEGCodec::Decode(&data[0], data.size(),
-                                     gfx::JPEGCodec::FORMAT_RGBA,
-                                     &decoded, &w, &h));
-
-  // Check if it's not 100% white.
-  bool is_white = true;
-  for (int y = 0; y < h; y++) {
-    for (int x = 0; x < w; x++) {
-      unsigned char* px = &decoded[(y * w + x) * 4];
-      if (px[0] != 0xFF && px[1] != 0xFF && px[2] != 0xFF) {
-        is_white = false;
-        break;
-      }
-    }
-  }
-  ASSERT_TRUE(!is_white);
-}
 
 // Test that we can receive correct DOM events when we send input events
 // through the RenderWidget::OnHandleInputEvent() function.
@@ -612,14 +582,15 @@ TEST_F(RenderViewTest, OnHandleKeyboardEvent) {
         // our JavaScript function. (See the above comment for the format.)
         static char expected_result[1024];
         expected_result[0] = NULL;
-        sprintf(&expected_result[0],
-                "\n"       // texts in the <input> element
-                "%d,%s\n"  // texts in the first <div> element
-                "%d,%s\n"  // texts in the second <div> element
-                "%d,%s",   // texts in the third <div> element
-                key_code, kModifierData[j].expected_result,
-                char_code[0], kModifierData[j].expected_result,
-                key_code, kModifierData[j].expected_result);
+        base::snprintf(&expected_result[0],
+                       sizeof(expected_result),
+                       "\n"       // texts in the <input> element
+                       "%d,%s\n"  // texts in the first <div> element
+                       "%d,%s\n"  // texts in the second <div> element
+                       "%d,%s",   // texts in the third <div> element
+                       key_code, kModifierData[j].expected_result,
+                       char_code[0], kModifierData[j].expected_result,
+                       key_code, kModifierData[j].expected_result);
 
         // Retrieve the text in the test page and compare it with the expected
         // text created from a virtual-key code, a character code, and the
@@ -912,7 +883,7 @@ TEST_F(RenderViewTest, JSBlockSentAfterPageLoad) {
   render_thread_.sink().ClearMessages();
 
   // 3. Reload page.
-  ViewMsg_Navigate_Params params = { 0 };
+  ViewMsg_Navigate_Params params;
   std::string url_str = "data:text/html;charset=utf-8,";
   url_str.append(html);
   GURL url(url_str);

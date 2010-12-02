@@ -8,6 +8,7 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
@@ -42,7 +43,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest,
 
   // Create a new popup.
   Profile* profile = browser()->profile();
-  Browser* popup = Browser::CreateForPopup(profile);
+  Browser* popup = Browser::CreateForType(Browser::TYPE_POPUP, profile);
   popup->window()->Show();
 
   // Close the browser.
@@ -75,18 +76,15 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreIndividualTabFromWindow) {
       FilePath(FILE_PATH_LITERAL("title3.html"))));
 
   // Add and navigate three tabs.
-  Browser* browser_used = NULL;
   ui_test_utils::NavigateToURL(browser(), url1);
-  browser()->AddTabWithURL(url2, GURL(), PageTransition::LINK, 1,
-                           TabStripModel::ADD_SELECTED, NULL, std::string(),
-                           &browser_used);
-  EXPECT_EQ(browser(), browser_used);
+  Browser::AddTabWithURLParams params1(url2, PageTransition::LINK);
+  browser()->AddTabWithURL(&params1);
+  EXPECT_EQ(browser(), params1.target);
   ui_test_utils::WaitForNavigationInCurrentTab(browser());
 
-  browser()->AddTabWithURL(url3, GURL(), PageTransition::LINK, 2,
-                           TabStripModel::ADD_SELECTED, NULL, std::string(),
-                           &browser_used);
-  EXPECT_EQ(browser(), browser_used);
+  Browser::AddTabWithURLParams params2(url3, PageTransition::LINK);
+  browser()->AddTabWithURL(&params2);
+  EXPECT_EQ(browser(), params2.target);
   ui_test_utils::WaitForNavigationInCurrentTab(browser());
 
   TabRestoreService* service = browser()->profile()->GetTabRestoreService();
@@ -119,4 +117,3 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreIndividualTabFromWindow) {
   window = static_cast<TabRestoreService::Window*>(service->entries().front());
   EXPECT_EQ(2U, window->tabs.size());
 }
-

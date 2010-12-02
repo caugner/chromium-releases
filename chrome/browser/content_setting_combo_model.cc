@@ -21,31 +21,26 @@ const ContentSetting kSessionSettings[] = { CONTENT_SETTING_ALLOW,
                                             CONTENT_SETTING_SESSION_ONLY,
                                             CONTENT_SETTING_BLOCK };
 
-// The settings shown in the combobox if show_session_ is true, and we still
-// offer the cookie prompt mode.
-const ContentSetting kSessionAskSettings[] = { CONTENT_SETTING_ALLOW,
-                                               CONTENT_SETTING_ASK,
-                                               CONTENT_SETTING_SESSION_ONLY,
-                                               CONTENT_SETTING_BLOCK };
+// The settings shown in the combobox for plug-ins;
+const ContentSetting kAskSettings[] = { CONTENT_SETTING_ALLOW,
+                                        CONTENT_SETTING_ASK,
+                                        CONTENT_SETTING_BLOCK };
 
 }  // namespace
 
-ContentSettingComboModel::ContentSettingComboModel(bool show_session)
-    : show_session_(show_session),
-      disable_cookie_prompt_(!CommandLine::ForCurrentProcess()->HasSwitch(
-                             switches::kEnableCookiePrompt)) {
+ContentSettingComboModel::ContentSettingComboModel(ContentSettingsType type)
+    : content_type_(type) {
 }
 
 ContentSettingComboModel::~ContentSettingComboModel() {
 }
 
 int ContentSettingComboModel::GetItemCount() {
-  if (show_session_) {
-    return disable_cookie_prompt_ ?
-        arraysize(kSessionSettings) : arraysize(kSessionAskSettings);
-  } else {
-    return arraysize(kNoSessionSettings);
-  }
+  if (content_type_ == CONTENT_SETTINGS_TYPE_PLUGINS)
+    return arraysize(kAskSettings);
+  if (content_type_ == CONTENT_SETTINGS_TYPE_COOKIES)
+    return arraysize(kSessionSettings);
+  return arraysize(kNoSessionSettings);
 }
 
 string16 ContentSettingComboModel::GetItemAt(int index) {
@@ -65,12 +60,11 @@ string16 ContentSettingComboModel::GetItemAt(int index) {
 }
 
 ContentSetting ContentSettingComboModel::SettingForIndex(int index) {
-  if (show_session_) {
-    return disable_cookie_prompt_ ?
-        kSessionSettings[index] : kSessionAskSettings[index];
-  } else {
-    return kNoSessionSettings[index];
-  }
+  if (content_type_ == CONTENT_SETTINGS_TYPE_PLUGINS)
+    return kAskSettings[index];
+  if (content_type_ == CONTENT_SETTINGS_TYPE_COOKIES)
+    return kSessionSettings[index];
+  return kNoSessionSettings[index];
 }
 
 int ContentSettingComboModel::IndexForSetting(ContentSetting setting) {

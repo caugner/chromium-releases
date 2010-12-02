@@ -22,6 +22,7 @@
 #import "chrome/browser/cocoa/bookmark_editor_controller.h"
 #import "chrome/browser/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/cocoa/browser_window_controller_private.h"
+#import "chrome/browser/cocoa/dev_tools_controller.h"
 #import "chrome/browser/cocoa/download_shelf_controller.h"
 #import "chrome/browser/cocoa/event_utils.h"
 #import "chrome/browser/cocoa/fast_resize_view.h"
@@ -32,11 +33,13 @@
 #import "chrome/browser/cocoa/fullscreen_window.h"
 #import "chrome/browser/cocoa/infobar_container_controller.h"
 #import "chrome/browser/cocoa/location_bar/autocomplete_text_field_editor.h"
+#import "chrome/browser/cocoa/previewable_contents_controller.h"
+#import "chrome/browser/cocoa/nswindow_additions.h"
 #import "chrome/browser/cocoa/sad_tab_controller.h"
+#import "chrome/browser/cocoa/sidebar_controller.h"
 #import "chrome/browser/cocoa/status_bubble_mac.h"
 #import "chrome/browser/cocoa/tab_contents_controller.h"
 #import "chrome/browser/cocoa/tab_strip_controller.h"
-#import "chrome/browser/cocoa/tab_strip_model_observer_bridge.h"
 #import "chrome/browser/cocoa/tab_strip_view.h"
 #import "chrome/browser/cocoa/tab_view.h"
 #import "chrome/browser/cocoa/tabpose_window.h"
@@ -55,7 +58,6 @@
 #include "chrome/browser/window_sizer.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-
 
 // ORGANIZATION: This is a big file. It is (in principle) organized as follows
 // (in order):
@@ -191,8 +193,6 @@
     initializing_ = YES;
     browser_.reset(browser);
     ownsBrowser_ = ownIt;
-    tabObserver_.reset(
-        new TabStripModelObserverBridge(browser->tabstrip_model(), self));
     NSWindow* window = [self window];
     windowShim_.reset(new BrowserWindowCocoa(browser, self, window));
 
@@ -212,7 +212,8 @@
     // offscreen, but there will always be enough window onscreen to
     // drag the whole window back into view.
     NSSize minSize = [[self window] minSize];
-    gfx::Rect windowRect = browser_->GetSavedWindowBounds();
+    gfx::Rect desiredContentRect = browser_->GetSavedWindowBounds();
+    gfx::Rect windowRect = desiredContentRect;
     if (windowRect.width() < minSize.width)
       windowRect.set_width(minSize.width);
     if (windowRect.height() < minSize.height)
@@ -226,10 +227,36 @@
       windowRect.set_origin(WindowSizer::GetDefaultPopupOrigin(size));
     }
 
+    // Size and position the window.  Note that it is not yet onscreen.  Popup
+    // windows may get resized later on in this function, once the actual size
+    // of the toolbar/tabstrip is known.
     windowShim_->SetBounds(windowRect);
 
     // Puts the incognito badge on the window frame, if necessary.
     [self installIncognitoBadge];
+
+    // Create a sub-controller for the docked devTools and add its view to the
+    // hierarchy.  This must happen before the sidebar controller is
+    // instantiated.
+    devToolsController_.reset([[DevToolsController alloc] init]);
+    [[devToolsController_ view] setFrame:[[self tabContentArea] bounds]];
+    [[self tabContentArea] addSubview:[devToolsController_ view]];
+
+    // Create a sub-controller for the docked sidebar and add its view to the
+    // hierarchy.  This must happen before the previewable contents controller
+    // is instantiated.
+    sidebarController_.reset([[SidebarController alloc] init]);
+    [[sidebarController_ view] setFrame:[[devToolsController_ view] bounds]];
+    [[devToolsController_ view] addSubview:[sidebarController_ view]];
+
+    // Create the previewable contents controller.  This provides the switch
+    // view that TabStripController needs.
+    previewableContentsController_.reset(
+        [[PreviewableContentsController alloc] init]);
+    [[previewableContentsController_ view]
+        setFrame:[[sidebarController_ view] bounds]];
+    [[sidebarController_ view]
+        addSubview:[previewableContentsController_ view]];
 
     // Create a controller for the tab strip, giving it the model object for
     // this window's Browser and the tab strip view. The controller will handle
@@ -240,9 +267,7 @@
     // Create the infobar container view, so we can pass it to the
     // ToolbarController.
     infoBarContainerController_.reset(
-        [[InfoBarContainerController alloc]
-          initWithTabStripModel:(browser_->tabstrip_model())
-                 resizeDelegate:self]);
+        [[InfoBarContainerController alloc] initWithResizeDelegate:self]);
     [[[self window] contentView] addSubview:[infoBarContainerController_ view]];
 
     // Create a controller for the toolbar, giving it the toolbar model object
@@ -286,6 +311,27 @@
 
     // Force a relayout of all the various bars.
     [self layoutSubviews];
+
+    // For a popup window, |desiredContentRect| contains the desired height of
+    // the content, not of the whole window.  Now that all the views are laid
+    // out, measure the current content area size and grow if needed.  The
+    // window has not been placed onscreen yet, so this extra resize will not
+    // cause visible jank.
+    if (browser_->type() & Browser::TYPE_POPUP) {
+      CGFloat deltaH = desiredContentRect.height() -
+                       NSHeight([[self tabContentArea] frame]);
+      // Do not shrink the window, as that may break minimum size invariants.
+      if (deltaH > 0) {
+        // Convert from tabContentArea coordinates to window coordinates.
+        NSSize convertedSize =
+            [[self tabContentArea] convertSize:NSMakeSize(0, deltaH)
+                                        toView:nil];
+        NSRect frame = [[self window] frame];
+        frame.size.height += convertedSize.height;
+        frame.origin.y -= convertedSize.height;
+        [[self window] setFrame:frame display:NO];
+      }
+    }
 
     // Create the bridge for the status bubble.
     statusBubble_ = new StatusBubbleMac([self window], self);
@@ -371,8 +417,7 @@
 // from this method.
 - (void)windowWillClose:(NSNotification*)notification {
   DCHECK_EQ([notification object], [self window]);
-  DCHECK(!browser_->tabstrip_model()->HasNonPhantomTabs() ||
-         !browser_->tabstrip_model()->count());
+  DCHECK(browser_->tabstrip_model()->empty());
   [savedRegularWindow_ close];
   // We delete statusBubble here because we need to kill off the dependency
   // that its window has on our window before our window goes away.
@@ -396,11 +441,11 @@
 }
 
 - (void)updateDevToolsForContents:(TabContents*)contents {
-  [tabStripController_ updateDevToolsForContents:contents];
+  [devToolsController_ updateDevToolsForTabContents:contents];
 }
 
 - (void)updateSidebarForContents:(TabContents*)contents {
-  [tabStripController_ updateSidebarForContents:contents];
+  [sidebarController_ updateSidebarForTabContents:contents];
 }
 
 // Called when the user wants to close a window or from the shutdown process.
@@ -422,7 +467,7 @@
   // have to save the window position before we call orderOut:.
   [self saveWindowPositionIfNeeded];
 
-  if (browser_->tabstrip_model()->HasNonPhantomTabs()) {
+  if (!browser_->tabstrip_model()->empty()) {
     // Tab strip isn't empty.  Hide the frame (so it appears to have closed
     // immediately) and close all the tabs, allowing the renderers to shut
     // down. When the tab strip is empty we'll be called back again.
@@ -977,11 +1022,11 @@
     browser_->ExecuteCommand(command);
 }
 
-// StatusBubble delegate method: tell the status bubble how far above the bottom
-// of the window it should position itself.
-- (CGFloat)verticalOffsetForStatusBubble {
-  return verticalOffsetForStatusBubble_ +
-         [[tabStripController_ activeTabContentsController] devToolsHeight];
+// StatusBubble delegate method: tell the status bubble the frame it should
+// position itself in.
+- (NSRect)statusBubbleBaseFrame {
+  NSView* view = [previewableContentsController_ view];
+  return [view convertRect:[view bounds] toView:nil];
 }
 
 - (GTMWindowSheetController*)sheetController {
@@ -1147,7 +1192,15 @@
   gfx::Rect browserRect(windowRect.origin.x, windowRect.origin.y,
                         windowRect.size.width, windowRect.size.height);
 
-  NSRect tabRect = [tabView frame];
+  NSRect sourceTabRect = [tabView frame];
+  NSView* tabStrip = [self tabStripView];
+
+  // Pushes tabView's frame back inside the tabstrip.
+  NSSize tabOverflow =
+      [self overflowFrom:[tabStrip convertRectToBase:sourceTabRect]
+                      to:[tabStrip frame]];
+  NSRect tabRect = NSOffsetRect(sourceTabRect,
+                                -tabOverflow.width, -tabOverflow.height);
 
   // Before detaching the tab, store the pinned state.
   bool isPinned = browser_->tabstrip_model()->IsTabPinned(index);
@@ -1274,12 +1327,12 @@
 }
 
 - (NSInteger)numberOfTabs {
-  // count() includes pinned tabs (both live and phantom).
+  // count() includes pinned tabs.
   return browser_->tabstrip_model()->count();
 }
 
 - (BOOL)hasLiveTabs {
-  return browser_->tabstrip_model()->HasNonPhantomTabs();
+  return !browser_->tabstrip_model()->empty();
 }
 
 - (NSString*)selectedTabTitle {
@@ -1297,41 +1350,52 @@
   return [self supportsWindowFeature:Browser::FEATURE_TABSTRIP];
 }
 
-- (void)selectTabWithContents:(TabContents*)newContents
-             previousContents:(TabContents*)oldContents
-                      atIndex:(NSInteger)index
-                  userGesture:(bool)wasUserGesture {
-  DCHECK(oldContents != newContents);
-
+// TabStripControllerDelegate protocol.
+- (void)onSelectTabWithContents:(TabContents*)contents {
   // Update various elements that are interested in knowing the current
   // TabContents.
 
   // Update all the UI bits.
   windowShim_->UpdateTitleBar();
 
+  [self updateSidebarForContents:contents];
+  [self updateDevToolsForContents:contents];
+
   // Update the bookmark bar.
+  // Must do it after sidebar and devtools update, otherwise bookmark bar might
+  // call resizeView -> layoutSubviews and cause unnecessary relayout.
   // TODO(viettrungluu): perhaps update to not terminate running animations (if
   // applicable)?
   [self updateBookmarkBarVisibilityWithAnimation:NO];
+
+  [infoBarContainerController_ changeTabContents:contents];
 }
 
-- (void)tabChangedWithContents:(TabContents*)contents
-                       atIndex:(NSInteger)index
-                    changeType:(TabStripModelObserver::TabChangeType)change {
-  if (index == browser_->tabstrip_model()->selected_index()) {
-    // Update titles if this is the currently selected tab and if it isn't just
-    // the loading state which changed.
-    if (change != TabStripModelObserver::LOADING_ONLY)
-      windowShim_->UpdateTitleBar();
+- (void)onReplaceTabWithContents:(TabContents*)contents {
+  // This is only called when instant results are committed.  Simply remove the
+  // preview view; the tab strip controller will reinstall the view as the
+  // active view.
+  [previewableContentsController_ hidePreview];
+  [self updateBookmarkBarVisibilityWithAnimation:NO];
+}
 
-    // Update the bookmark bar if this is the currently selected tab and if it
-    // isn't just the title which changed. This for transitions between the NTP
-    // (showing its floating bookmark bar) and normal web pages (showing no
-    // bookmark bar).
-    // TODO(viettrungluu): perhaps update to not terminate running animations?
-    if (change != TabStripModelObserver::TITLE_NOT_LOADING)
-      [self updateBookmarkBarVisibilityWithAnimation:NO];
-  }
+- (void)onSelectedTabChange:(TabStripModelObserver::TabChangeType)change {
+  // Update titles if this is the currently selected tab and if it isn't just
+  // the loading state which changed.
+  if (change != TabStripModelObserver::LOADING_ONLY)
+    windowShim_->UpdateTitleBar();
+
+  // Update the bookmark bar if this is the currently selected tab and if it
+  // isn't just the title which changed. This for transitions between the NTP
+  // (showing its floating bookmark bar) and normal web pages (showing no
+  // bookmark bar).
+  // TODO(viettrungluu): perhaps update to not terminate running animations?
+  if (change != TabStripModelObserver::TITLE_NOT_LOADING)
+    [self updateBookmarkBarVisibilityWithAnimation:NO];
+}
+
+- (void)onTabDetachedWithContents:(TabContents*)contents {
+  [infoBarContainerController_ tabDetachedWithContents:contents];
 }
 
 - (void)userChangedTheme {
@@ -1627,6 +1691,27 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   isShrinkingFromZoomed_ = NO;
 }
 
+- (NSSize)overflowFrom:(NSRect)source
+                    to:(NSRect)target {
+  // If |source|'s boundary is outside of |target|'s, set its distance
+  // to |x|.  Note that |source| can overflow to both side, but we
+  // have nothing to do for such case.
+  CGFloat x = 0;
+  if (NSMaxX(target) < NSMaxX(source)) // |source| overflows to right
+    x = NSMaxX(source) - NSMaxX(target);
+  else if (NSMinX(source) < NSMinX(target)) // |source| overflows to left
+    x = NSMinX(source) - NSMinX(target);
+
+  // Same as |x| above.
+  CGFloat y = 0;
+  if (NSMaxY(target) < NSMaxY(source))
+    y = NSMaxY(source) - NSMaxY(target);
+  else if (NSMinY(source) < NSMinY(target))
+    y = NSMinY(source) - NSMinY(target);
+
+  return NSMakeSize(x, y);
+}
+
 // Override to swap in the correct tab strip controller based on the new
 // tab strip mode.
 - (void)toggleTabStripDisplayMode {
@@ -1636,6 +1721,21 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 
 - (BOOL)useVerticalTabs {
   return browser_->tabstrip_model()->delegate()->UseVerticalTabs();
+}
+
+- (void)showInstant:(TabContents*)previewContents {
+  [previewableContentsController_ showPreview:previewContents];
+  [self updateBookmarkBarVisibilityWithAnimation:NO];
+}
+
+- (void)hideInstant {
+  // TODO(rohitrao): Revisit whether or not this method should be called when
+  // instant isn't showing.
+  if (![previewableContentsController_ isShowingPreview])
+    return;
+
+  [previewableContentsController_ hidePreview];
+  [self updateBookmarkBarVisibilityWithAnimation:NO];
 }
 
 - (void)sheetDidEnd:(NSWindow*)sheet
@@ -1721,6 +1821,11 @@ willAnimateFromState:(bookmarks::VisualState)oldState
     DCHECK(savedRegularWindow_);
     destWindow = [savedRegularWindow_ autorelease];
     savedRegularWindow_ = nil;
+
+    CGSWorkspaceID workspace;
+    if ([window cr_workspace:&workspace]) {
+      [destWindow cr_moveToWorkspace:workspace];
+    }
   }
   DCHECK(destWindow);
 

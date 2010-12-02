@@ -20,13 +20,11 @@
 #include "base/values.h"
 #include "chrome/common/policy_constants.h"
 
-namespace {
+namespace policy {
 
 // Period at which to run the reload task in case the group policy change
 // watchers fail.
 const int kReloadIntervalMinutes = 15;
-
-}
 
 ConfigurationPolicyProviderWin::GroupPolicyChangeWatcher::
     GroupPolicyChangeWatcher(
@@ -129,7 +127,9 @@ void ConfigurationPolicyProviderWin::GroupPolicyChangeWatcher::
   MessageLoop::current()->RemoveDestructionObserver(this);
 }
 
-ConfigurationPolicyProviderWin::ConfigurationPolicyProviderWin() {
+ConfigurationPolicyProviderWin::ConfigurationPolicyProviderWin(
+    const StaticPolicyValueMap& policy_map)
+    : ConfigurationPolicyProvider(policy_map) {
   watcher_ = new GroupPolicyChangeWatcher(this->AsWeakPtr(),
                                           kReloadIntervalMinutes);
   watcher_->Start();
@@ -141,7 +141,7 @@ ConfigurationPolicyProviderWin::~ConfigurationPolicyProviderWin() {
 
 bool ConfigurationPolicyProviderWin::GetRegistryPolicyString(
     const string16& name, string16* result) {
-  string16 path = string16(policy::kRegistrySubKey);
+  string16 path = string16(kRegistrySubKey);
   RegKey policy_key;
   // First try the global policy.
   if (policy_key.Open(HKEY_LOCAL_MACHINE, path.c_str(), KEY_READ)) {
@@ -179,7 +179,7 @@ bool ConfigurationPolicyProviderWin::ReadRegistryStringValue(
 
 bool ConfigurationPolicyProviderWin::GetRegistryPolicyStringList(
     const string16& key, ListValue* result) {
-  string16 path = string16(policy::kRegistrySubKey);
+  string16 path = string16(kRegistrySubKey);
   path += ASCIIToUTF16("\\") + key;
   RegKey policy_key;
   if (!policy_key.Open(HKEY_LOCAL_MACHINE, path.c_str(), KEY_READ)) {
@@ -200,13 +200,13 @@ bool ConfigurationPolicyProviderWin::GetRegistryPolicyStringList(
 bool ConfigurationPolicyProviderWin::GetRegistryPolicyBoolean(
     const string16& value_name, bool* result) {
   DWORD value;
-  RegKey hkcu_policy_key(HKEY_LOCAL_MACHINE, policy::kRegistrySubKey, KEY_READ);
+  RegKey hkcu_policy_key(HKEY_LOCAL_MACHINE, kRegistrySubKey, KEY_READ);
   if (hkcu_policy_key.ReadValueDW(value_name.c_str(), &value)) {
     *result = value != 0;
     return true;
   }
 
-  RegKey hklm_policy_key(HKEY_CURRENT_USER, policy::kRegistrySubKey, KEY_READ);
+  RegKey hklm_policy_key(HKEY_CURRENT_USER, kRegistrySubKey, KEY_READ);
   if (hklm_policy_key.ReadValueDW(value_name.c_str(), &value)) {
     *result = value != 0;
     return true;
@@ -217,13 +217,13 @@ bool ConfigurationPolicyProviderWin::GetRegistryPolicyBoolean(
 bool ConfigurationPolicyProviderWin::GetRegistryPolicyInteger(
     const string16& value_name, uint32* result) {
   DWORD value;
-  RegKey hkcu_policy_key(HKEY_LOCAL_MACHINE, policy::kRegistrySubKey, KEY_READ);
+  RegKey hkcu_policy_key(HKEY_LOCAL_MACHINE, kRegistrySubKey, KEY_READ);
   if (hkcu_policy_key.ReadValueDW(value_name.c_str(), &value)) {
     *result = value;
     return true;
   }
 
-  RegKey hklm_policy_key(HKEY_CURRENT_USER, policy::kRegistrySubKey, KEY_READ);
+  RegKey hklm_policy_key(HKEY_CURRENT_USER, kRegistrySubKey, KEY_READ);
   if (hklm_policy_key.ReadValueDW(value_name.c_str(), &value)) {
     *result = value;
     return true;
@@ -233,10 +233,9 @@ bool ConfigurationPolicyProviderWin::GetRegistryPolicyInteger(
 
 bool ConfigurationPolicyProviderWin::Provide(
     ConfigurationPolicyStore* store) {
-  const PolicyValueMap* mapping = PolicyValueMapping();
-
-  for (PolicyValueMap::const_iterator current = mapping->begin();
-       current != mapping->end(); ++current) {
+  const PolicyValueMap& mapping(policy_value_map());
+  for (PolicyValueMap::const_iterator current = mapping.begin();
+       current != mapping.end(); ++current) {
     std::wstring name = UTF8ToWide(current->name);
     switch (current->value_type) {
       case Value::TYPE_STRING: {
@@ -277,3 +276,5 @@ bool ConfigurationPolicyProviderWin::Provide(
 
   return true;
 }
+
+}  // namespace policy

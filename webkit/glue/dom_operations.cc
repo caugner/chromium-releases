@@ -8,6 +8,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebAnimationController.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
@@ -185,10 +186,13 @@ static bool FillFormImpl(FormElements* fe, const FormData& data) {
     WebKit::WebInputElement& element = it->second;
     if (!element.value().isEmpty())  // Don't overwrite pre-filled values.
       continue;
-    if (element.inputType() == WebInputElement::Password &&
+    if (element.isPasswordField() &&
         (!element.isEnabledFormControl() || element.hasAttribute("readonly"))) {
       continue;  // Don't fill uneditable password fields.
     }
+    if (!element.isValidValue(data_map[it->first]))
+      continue;
+
     element.setValue(data_map[it->first]);
     element.setAutofilled(true);
     element.dispatchFormControlChangeEvent();
@@ -313,7 +317,7 @@ WebString GetSubResourceLinkFromElement(const WebElement& element) {
     attribute_name = "src";
   } else if (element.hasTagName("input")) {
     const WebInputElement input = element.toConst<WebInputElement>();
-    if (input.inputType() == WebInputElement::Image) {
+    if (input.isImageButton()) {
       attribute_name = "src";
     }
   } else if (element.hasTagName("body") ||
@@ -416,7 +420,7 @@ static int ParseSingleIconSize(const string16& text) {
 // If the input couldn't be parsed, a size with a width/height < 0 is returned.
 static gfx::Size ParseIconSize(const string16& text) {
   std::vector<string16> sizes;
-  SplitStringDontTrim(text, L'x', &sizes);
+  base::SplitStringDontTrim(text, L'x', &sizes);
   if (sizes.size() != 2)
     return gfx::Size();
 

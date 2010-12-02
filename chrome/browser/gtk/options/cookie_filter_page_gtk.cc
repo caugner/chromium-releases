@@ -15,6 +15,7 @@
 #include "chrome/browser/gtk/options/cookies_view.h"
 #include "chrome/browser/host_content_settings_map.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/show_options_url.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
@@ -66,9 +67,6 @@ void CookieFilterPageGtk::HighlightGroup(OptionsGroup highlight_group) {
 }
 
 GtkWidget* CookieFilterPageGtk::InitCookieStoringGroup() {
-  bool disable_cookie_prompt = !CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableCookiePrompt);
-
   GtkWidget* vbox = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
 
   allow_radio_ = gtk_radio_button_new_with_label(NULL,
@@ -76,15 +74,6 @@ GtkWidget* CookieFilterPageGtk::InitCookieStoringGroup() {
   g_signal_connect(G_OBJECT(allow_radio_), "toggled",
                    G_CALLBACK(OnCookiesAllowToggledThunk), this);
   gtk_box_pack_start(GTK_BOX(vbox), allow_radio_, FALSE, FALSE, 0);
-
-  if (!disable_cookie_prompt) {
-    ask_every_time_radio_ = gtk_radio_button_new_with_label_from_widget(
-        GTK_RADIO_BUTTON(allow_radio_),
-        l10n_util::GetStringUTF8(IDS_COOKIES_ASK_EVERY_TIME_RADIO).c_str());
-    g_signal_connect(G_OBJECT(ask_every_time_radio_), "toggled",
-                     G_CALLBACK(OnCookiesAllowToggledThunk), this);
-    gtk_box_pack_start(GTK_BOX(vbox), ask_every_time_radio_, FALSE, FALSE, 0);
-  }
 
   block_radio_ = gtk_radio_button_new_with_label_from_widget(
       GTK_RADIO_BUTTON(allow_radio_),
@@ -205,19 +194,13 @@ void CookieFilterPageGtk::OnShowCookiesClicked(GtkWidget* button) {
   UserMetricsRecordAction(UserMetricsAction("Options_ShowCookies"), NULL);
   CookiesView::Show(GTK_WINDOW(gtk_widget_get_toplevel(button)),
                     profile(),
-                    new BrowsingDataDatabaseHelper(
-                        profile()),
-                    new BrowsingDataLocalStorageHelper(
-                        profile()),
-                    new BrowsingDataAppCacheHelper(
-                        profile()));
+                    new BrowsingDataDatabaseHelper(profile()),
+                    new BrowsingDataLocalStorageHelper(profile()),
+                    new BrowsingDataAppCacheHelper(profile()),
+                    BrowsingDataIndexedDBHelper::Create(profile()));
 }
 
 void CookieFilterPageGtk::OnFlashLinkClicked(GtkWidget* button) {
-  // We open a new browser window so the Options dialog doesn't get lost
-  // behind other windows.
-  Browser* browser = Browser::Create(profile());
-  browser->OpenURL(GURL(l10n_util::GetStringUTF8(IDS_FLASH_STORAGE_URL)),
-                   GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
-  browser->window()->Show();
+  browser::ShowOptionsURL(
+      profile(), GURL(l10n_util::GetStringUTF8(IDS_FLASH_STORAGE_URL)));
 }

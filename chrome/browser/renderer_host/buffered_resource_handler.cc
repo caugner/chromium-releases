@@ -112,8 +112,6 @@ bool BufferedResourceHandler::OnWillRead(int request_id, net::IOBuffer** buf,
     my_buffer_ = new net::IOBuffer(net::kMaxBytesToSniff);
     *buf = my_buffer_.get();
     *buf_size = net::kMaxBytesToSniff;
-    // TODO(willchan): Remove after debugging bug 16371.
-    CHECK((*buf)->data());
     return true;
   }
 
@@ -124,8 +122,6 @@ bool BufferedResourceHandler::OnWillRead(int request_id, net::IOBuffer** buf,
     return false;
   }
   read_buffer_ = *buf;
-  // TODO(willchan): Remove after debugging bug 16371.
-  CHECK(read_buffer_->data());
   read_buffer_size_ = *buf_size;
   DCHECK_GE(read_buffer_size_, net::kMaxBytesToSniff * 2);
   bytes_read_ = 0;
@@ -137,7 +133,6 @@ bool BufferedResourceHandler::OnReadCompleted(int request_id, int* bytes_read) {
     if (KeepBuffering(*bytes_read))
       return true;
 
-    LOG(INFO) << "Finished buffering " << request_->url().spec();
     *bytes_read = bytes_read_;
 
     // Done buffering, send the pending ResponseStarted event.
@@ -205,7 +200,6 @@ bool BufferedResourceHandler::DelayResponse() {
     // enough data to decode the doctype in order to select the rendering
     // mode.
     should_buffer_ = true;
-    LOG(INFO) << "To buffer: " << request_->url().spec();
     return true;
   }
 
@@ -369,8 +363,8 @@ bool BufferedResourceHandler::ShouldWaitForPlugins() {
   host_->PauseRequest(info->child_id(), info->request_id(), true);
 
   // Schedule plugin loading on the file thread.
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(this, &BufferedResourceHandler::LoadPlugins));
   return true;
 }
@@ -474,8 +468,8 @@ void BufferedResourceHandler::LoadPlugins() {
   std::vector<WebPluginInfo> plugins;
   NPAPI::PluginList::Singleton()->GetPlugins(false, &plugins);
 
-  ChromeThread::PostTask(
-      ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(this, &BufferedResourceHandler::OnPluginsLoaded));
 }
 

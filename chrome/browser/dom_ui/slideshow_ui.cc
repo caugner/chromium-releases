@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "app/resource_bundle.h"
 #include "base/callback.h"
-#include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_piece.h"
@@ -16,7 +15,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/weak_ptr.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/dom_ui_favicon_source.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/metrics/user_metrics.h"
@@ -150,8 +149,8 @@ SlideshowHandler::~SlideshowHandler() {
 
 DOMMessageHandler* SlideshowHandler::Attach(DOMUI* dom_ui) {
   // Create our favicon data source.
-  ChromeThread::PostTask(
-      ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
           Singleton<ChromeURLDataManager>::get(),
           &ChromeURLDataManager::AddDataSource,
@@ -278,15 +277,15 @@ void SlideshowHandler::OnListDone(int error) {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-SlideshowUI::SlideshowUI(TabContents* contents) : DOMUI(contents){
+SlideshowUI::SlideshowUI(TabContents* contents) : DOMUI(contents) {
   SlideshowHandler* handler = new SlideshowHandler();
   AddMessageHandler((handler)->Attach(this));
   handler->Init();
   SlideshowUIHTMLSource* html_source = new SlideshowUIHTMLSource();
 
   // Set up the chrome://slideshow/ source.
-  ChromeThread::PostTask(
-      ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
           Singleton<ChromeURLDataManager>::get(),
           &ChromeURLDataManager::AddDataSource,

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include "chrome/browser/download/download_util.h"
 
-#include "base/logging.h"
 #include "base/string_util.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
@@ -199,9 +198,11 @@ static const char* kExecutableWhiteList[] = {
   // JavaScript is just as powerful as EXE.
   "text/javascript",
   "text/javascript;version=*",
+  "text/html",
   // Registry files can cause critical changes to the MS OS behavior.
   // Addition of this mimetype also addresses bug 7337.
   "text/x-registry",
+  "text/x-sh",
   // Some sites use binary/octet-stream to mean application/octet-stream.
   // See http://code.google.com/p/chromium/issues/detail?id=1573
   "binary/octet-stream"

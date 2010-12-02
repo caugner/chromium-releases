@@ -6,6 +6,7 @@
 
 #include "base/stl_util-inl.h"
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "net/base/net_log.h"
 #include "net/base/net_util.h"
@@ -45,13 +46,20 @@ void HttpStreamFactory::RequestStream(
     const HttpRequestInfo* request_info,
     SSLConfig* ssl_config,
     ProxyInfo* proxy_info,
+    ClientSocketHandle* connection,
     StreamFactory::StreamRequestDelegate* delegate,
     const BoundNetLog& net_log,
     const scoped_refptr<HttpNetworkSession>& session,
     scoped_refptr<StreamRequestJob>* stream) {
   DCHECK(stream != NULL);
   *stream = new HttpStreamRequest(this, session);
-  (*stream)->Start(request_info, ssl_config, proxy_info, delegate, net_log);
+  (*stream)->Start(
+      request_info,
+      ssl_config,
+      proxy_info,
+      connection,
+      delegate,
+      net_log);
 }
 
 void HttpStreamFactory::AddTLSIntolerantServer(const GURL& url) {

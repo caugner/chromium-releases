@@ -9,6 +9,7 @@
 
 #include "base/string_util.h"
 #include "base/string_tokenizer.h"
+#include "base/stringprintf.h"
 #include "chrome_frame/utils.h"
 #include "net/base/net_util.h"
 #include "webkit/glue/user_agent.h"
@@ -365,7 +366,7 @@ std::string GetDefaultUserAgent() {
   }
 
   if (FAILED(hr)) {
-    NOTREACHED() << StringPrintf("ObtainUserAgentString==0x%08X", hr);
+    NOTREACHED() << base::StringPrintf("ObtainUserAgentString==0x%08X", hr);
     return std::string();
   }
 
@@ -384,6 +385,16 @@ bool HasFrameBustingHeader(const std::string& http_headers) {
       return true;
   }
   return false;
+}
+
+std::string GetHttpHeaderFromHeaderList(const std::string& header,
+                                        const std::string& headers) {
+  net::HttpUtil::HeadersIterator it(headers.begin(), headers.end(), "\r\n");
+  while (it.GetNext()) {
+    if (!lstrcmpiA(it.name().c_str(), header.c_str()))
+      return std::string(it.values_begin(), it.values_end());
+  }
+  return std::string();
 }
 
 }  // namespace http_utils

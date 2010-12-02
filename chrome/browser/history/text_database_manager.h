@@ -55,7 +55,8 @@ class TextDatabaseManager {
   // our internals.
   class ChangeSet {
    public:
-    ChangeSet() {}
+    ChangeSet();
+    ~ChangeSet();
 
    private:
     friend class TextDatabaseManager;
@@ -173,6 +174,7 @@ class TextDatabaseManager {
   class PageInfo {
    public:
     PageInfo(URLID url_id, VisitID visit_id, base::Time visit_time);
+    ~PageInfo();
 
     // Getters.
     URLID url_id() const { return url_id_; }
@@ -276,7 +278,7 @@ class TextDatabaseManager {
   typedef OwningMRUCache<TextDatabase::DBIdent, TextDatabase*> DBCache;
   DBCache db_cache_;
 
-  // Tells us about the existance of database files on disk. All existing
+  // Tells us about the existence of database files on disk. All existing
   // databases will be in here, and non-existant ones will not, so we don't
   // have to check the disk every time.
   //

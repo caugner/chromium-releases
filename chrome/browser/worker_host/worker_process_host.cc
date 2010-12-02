@@ -16,9 +16,12 @@
 #include "chrome/browser/appcache/appcache_dispatcher_host.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/child_process_security_policy.h"
+#include "chrome/browser/file_system/file_system_dispatcher_host.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/blob_dispatcher_host.h"
 #include "chrome/browser/renderer_host/database_dispatcher_host.h"
+#include "chrome/browser/renderer_host/file_utilities_dispatcher_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/renderer_host/resource_message_filter.h"
@@ -31,6 +34,7 @@
 #include "chrome/common/render_messages_params.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/common/worker_messages.h"
+#include "net/base/mime_util.h"
 #include "ipc/ipc_switches.h"
 #include "net/base/registry_controlled_domain.h"
 
@@ -63,7 +67,14 @@ WorkerProcessHost::WorkerProcessHost(
     : BrowserChildProcessHost(WORKER_PROCESS, resource_dispatcher_host),
       request_context_(request_context),
       appcache_dispatcher_host_(
-          new AppCacheDispatcherHost(request_context)) {
+          new AppCacheDispatcherHost(request_context)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(blob_dispatcher_host_(
+          new BlobDispatcherHost(
+              this->id(), request_context->blob_storage_context()))),
+      ALLOW_THIS_IN_INITIALIZER_LIST(file_system_dispatcher_host_(
+          new FileSystemDispatcherHost(this, request_context))),
+      ALLOW_THIS_IN_INITIALIZER_LIST(file_utilities_dispatcher_host_(
+          new FileUtilitiesDispatcherHost(this, this->id()))) {
   next_route_id_callback_.reset(NewCallbackWithReturnValue(
       WorkerService::GetInstance(), &WorkerService::next_worker_route_id));
   db_dispatcher_host_ = new DatabaseDispatcherHost(
@@ -75,6 +86,15 @@ WorkerProcessHost::WorkerProcessHost(
 WorkerProcessHost::~WorkerProcessHost() {
   // Shut down the database dispatcher host.
   db_dispatcher_host_->Shutdown();
+
+  // Shut down the blob dispatcher host.
+  blob_dispatcher_host_->Shutdown();
+
+  // Shut down the file system dispatcher host.
+  file_system_dispatcher_host_->Shutdown();
+
+  // Shut down the file utilities dispatcher host.
+  file_utilities_dispatcher_host_->Shutdown();
 
   // Let interested observers know we are being deleted.
   NotificationService::current()->Notify(
@@ -88,8 +108,8 @@ WorkerProcessHost::~WorkerProcessHost() {
         i->worker_document_set()->documents();
     for (WorkerDocumentSet::DocumentInfoSet::const_iterator parent_iter =
              parents.begin(); parent_iter != parents.end(); ++parent_iter) {
-      ChromeThread::PostTask(
-          ChromeThread::UI, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
           new WorkerCrashTask(parent_iter->renderer_id(),
                               parent_iter->render_view_route_id()));
     }
@@ -122,11 +142,14 @@ bool WorkerProcessHost::Init() {
 #if defined(OS_WIN)
     switches::kDisableDesktopNotifications,
 #endif
+    switches::kDisableFileSystem,
   };
   cmd_line->CopySwitchesFrom(*CommandLine::ForCurrentProcess(), kSwitchNames,
                              arraysize(kSwitchNames));
 
 #if defined(OS_POSIX)
+  bool use_zygote = true;
+
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kWaitForDebuggerChildren)) {
     // Look to pass-on the kWaitForDebugger flag.
@@ -134,6 +157,7 @@ bool WorkerProcessHost::Init() {
         switches::kWaitForDebuggerChildren);
     if (value.empty() || value == switches::kWorkerProcess) {
       cmd_line->AppendSwitch(switches::kWaitForDebugger);
+      use_zygote = false;
     }
   }
 
@@ -145,14 +169,8 @@ bool WorkerProcessHost::Init() {
       // launches a new xterm, and runs the worker process in gdb, reading
       // optional commands from gdb_chrome file in the working directory.
       cmd_line->PrependWrapper("xterm -e gdb -x gdb_chrome --args");
+      use_zygote = false;
     }
-  }
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kRendererCmdPrefix)) {
-    cmd_line->PrependWrapper(
-        CommandLine::ForCurrentProcess()->GetSwitchValueNative(
-            switches::kRendererCmdPrefix));
   }
 #endif
 
@@ -160,7 +178,7 @@ bool WorkerProcessHost::Init() {
 #if defined(OS_WIN)
       FilePath(),
 #elif defined(OS_POSIX)
-      false,
+      use_zygote,
       base::environment_vector(),
 #endif
       cmd_line);
@@ -236,6 +254,9 @@ void WorkerProcessHost::OnMessageReceived(const IPC::Message& message) {
   bool handled =
       appcache_dispatcher_host_->OnMessageReceived(message, &msg_is_ok) ||
       db_dispatcher_host_->OnMessageReceived(message, &msg_is_ok) ||
+      blob_dispatcher_host_->OnMessageReceived(message, &msg_is_ok) ||
+      file_system_dispatcher_host_->OnMessageReceived(message, &msg_is_ok) ||
+      file_utilities_dispatcher_host_->OnMessageReceived(message, &msg_is_ok) ||
       MessagePortDispatcher::GetInstance()->OnMessageReceived(
           message, this, next_route_id_callback_.get(), &msg_is_ok);
 
@@ -250,6 +271,12 @@ void WorkerProcessHost::OnMessageReceived(const IPC::Message& message) {
                           OnWorkerContextClosed);
       IPC_MESSAGE_HANDLER(ViewHostMsg_ForwardToWorker,
                           OnForwardToWorker)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_GetMimeTypeFromExtension,
+                          OnGetMimeTypeFromExtension)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_GetMimeTypeFromFile,
+                          OnGetMimeTypeFromFile)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_GetPreferredExtensionForMimeType,
+                          OnGetPreferredExtensionForMimeType)
       IPC_MESSAGE_UNHANDLED(handled = false)
     IPC_END_MESSAGE_MAP_EX()
   }
@@ -284,6 +311,8 @@ void WorkerProcessHost::OnMessageReceived(const IPC::Message& message) {
 
 void WorkerProcessHost::OnProcessLaunched() {
   db_dispatcher_host_->Init(handle());
+  file_system_dispatcher_host_->Init(handle());
+  file_utilities_dispatcher_host_->Init(handle());
 }
 
 CallbackWithReturnValue<int>::Type* WorkerProcessHost::GetNextRouteIdCallback(
@@ -398,7 +427,7 @@ void WorkerProcessHost::UpdateTitle() {
     // the name of the extension.
     std::string extension_name = static_cast<ChromeURLRequestContext*>(
         Profile::GetDefaultRequestContext()->GetURLRequestContext())->
-        GetNameForExtension(title);
+        extension_info_map()->GetNameForExtension(title);
     if (!extension_name.empty()) {
       titles.insert(extension_name);
       continue;
@@ -473,9 +502,23 @@ void WorkerProcessHost::OnForwardToWorker(const IPC::Message& message) {
   WorkerService::GetInstance()->ForwardMessage(message, this);
 }
 
+void WorkerProcessHost::OnGetMimeTypeFromExtension(
+    const FilePath::StringType& ext, std::string* mime_type) {
+  net::GetMimeTypeFromExtension(ext, mime_type);
+}
+
+void WorkerProcessHost::OnGetMimeTypeFromFile(
+    const FilePath& file_path, std::string* mime_type) {
+  net::GetMimeTypeFromFile(file_path, mime_type);
+}
+
+void WorkerProcessHost::OnGetPreferredExtensionForMimeType(
+    const std::string& mime_type, FilePath::StringType* ext) {
+  net::GetPreferredExtensionForMimeType(mime_type, ext);
+}
+
 void WorkerProcessHost::DocumentDetached(IPC::Message::Sender* parent,
-                                         unsigned long long document_id)
-{
+                                         unsigned long long document_id) {
   // Walk all instances and remove the document from their document set.
   for (Instances::iterator i = instances_.begin(); i != instances_.end();) {
     if (!i->shared()) {
@@ -516,6 +559,9 @@ WorkerProcessHost::WorkerInstance::WorkerInstance(
       worker_document_set_(new WorkerDocumentSet()) {
   DCHECK(!request_context ||
          (off_the_record == request_context->is_off_the_record()));
+}
+
+WorkerProcessHost::WorkerInstance::~WorkerInstance() {
 }
 
 // Compares an instance based on the algorithm in the WebWorkers spec - an

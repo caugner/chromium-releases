@@ -174,9 +174,6 @@ bool Delete(const FilePath& path, bool recursive) {
     directories.pop();
     success = (rmdir(dir.value().c_str()) == 0);
   }
-#if defined(OS_CHROMEOS)
-  sync();
-#endif
   return success;
 }
 
@@ -484,13 +481,6 @@ bool GetFileInfo(const FilePath& file_path, base::PlatformFileInfo* results) {
   results->last_accessed = base::Time::FromTimeT(file_info.st_atime);
   results->creation_time = base::Time::FromTimeT(file_info.st_ctime);
   return true;
-}
-
-bool SetLastModifiedTime(const FilePath& file_path, base::Time last_modified) {
-  struct timeval times[2];
-  times[0] = last_modified.ToTimeVal();
-  times[1] = last_modified.ToTimeVal();
-  return (utimes(file_path.value().c_str(), times) == 0);
 }
 
 bool GetInode(const FilePath& path, ino_t* inode) {

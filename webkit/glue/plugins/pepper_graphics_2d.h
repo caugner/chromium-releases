@@ -36,16 +36,18 @@ class Graphics2D : public Resource {
 
   bool Init(int width, int height, bool is_always_opaque);
 
+  bool is_always_opaque() const { return is_always_opaque_; }
+
   // Resource override.
   virtual Graphics2D* AsGraphics2D() { return this; }
 
   // PPB_Graphics2D functions.
   bool Describe(PP_Size* size, bool* is_always_opaque);
-  bool PaintImageData(PP_Resource image,
+  void PaintImageData(PP_Resource image_data,
                       const PP_Point* top_left,
                       const PP_Rect* src_rect);
-  bool Scroll(const PP_Rect* clip_rect, const PP_Point* amount);
-  bool ReplaceContents(PP_Resource image);
+  void Scroll(const PP_Rect* clip_rect, const PP_Point* amount);
+  void ReplaceContents(PP_Resource image_data);
   int32_t Flush(const PP_CompletionCallback& callback);
 
   bool ReadImageData(PP_Resource image, const PP_Point* top_left);
@@ -165,6 +167,10 @@ class Graphics2D : public Resource {
   // later. This is set when one of those tasks is pending so that we can
   // enforce the "only one pending flush at a time" constraint in the API.
   bool offscreen_flush_pending_;
+
+  // Set to true if the plugin declares that this device will always be opaque.
+  // This allows us to do more optimized painting in some cases.
+  bool is_always_opaque_;
 
   DISALLOW_COPY_AND_ASSIGN(Graphics2D);
 };

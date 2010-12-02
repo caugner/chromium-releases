@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_CHROMEOS_DOM_UI_LABS_HANDLER_H_
 #pragma once
 
-#include "chrome/browser/dom_ui/options_ui.h"
+#include "chrome/browser/dom_ui/options/options_ui.h"
 
 // ChromeOS labs options page UI handler.
 class LabsHandler : public OptionsPageUIHandler {
@@ -18,7 +18,6 @@ class LabsHandler : public OptionsPageUIHandler {
   virtual void GetLocalizedValues(DictionaryValue* localized_strings);
 
  private:
-
   DISALLOW_COPY_AND_ASSIGN(LabsHandler);
 };
 

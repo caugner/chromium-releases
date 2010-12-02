@@ -22,10 +22,8 @@
     "chrome.extension.sendRequest": "extension.html#method-sendRequest", 
     "chrome.windows.getAll": "windows.html#method-getAll", 
     "chrome.tabs.captureVisibleTab": "tabs.html#method-captureVisibleTab", 
-    "chrome.experimental.management.onUninstalled": "experimental.management.html#event-onUninstalled", 
     "chrome.idle.onStateChanged": "idle.html#event-onStateChanged", 
     "chrome.i18n.getMessage": "i18n.html#method-getMessage", 
-    "chrome.experimental.management.onEnabled": "experimental.management.html#event-onEnabled", 
     "chrome.bookmarks.import": "bookmarks.html#method-import", 
     "chrome.extension.onConnect": "extension.html#event-onConnect", 
     "chrome.bookmarks.removeTree": "bookmarks.html#method-removeTree", 
@@ -38,11 +36,14 @@
     "chrome.bookmarks.onChanged": "bookmarks.html#event-onChanged", 
     "chrome.tabs.detectLanguage": "tabs.html#method-detectLanguage", 
     "chrome.windows.onRemoved": "windows.html#event-onRemoved", 
+    "chrome.management.uninstall": "management.html#method-uninstall", 
     "chrome.experimental.clipboard.executePaste": "experimental.clipboard.html#method-executePaste", 
     "chrome.experimental.webNavigation.onCompleted": "experimental.webNavigation.html#event-onCompleted", 
+    "chrome.management.setEnabled": "management.html#method-setEnabled", 
     "chrome.tabs.update": "tabs.html#method-update", 
     "chrome.history.deleteRange": "history.html#method-deleteRange", 
     "chrome.tabs.connect": "tabs.html#method-connect", 
+    "chrome.management.onEnabled": "management.html#event-onEnabled", 
     "chrome.cookies.set": "cookies.html#method-set", 
     "chrome.experimental.sidebar.setBadgeText": "experimental.sidebar.html#method-setBadgeText", 
     "chrome.experimental.webNavigation.onBeforeNavigate": "experimental.webNavigation.html#event-onBeforeNavigate", 
@@ -52,6 +53,7 @@
     "chrome.experimental.webRequest.onBeforeRedirect": "experimental.webRequest.html#event-onBeforeRedirect", 
     "chrome.tabs.getCurrent": "tabs.html#method-getCurrent", 
     "chrome.experimental.sidebar.getState": "experimental.sidebar.html#method-getState", 
+    "chrome.management.launchApp": "management.html#method-launchApp", 
     "chrome.browserAction.setTitle": "browserAction.html#method-setTitle", 
     "chrome.contextMenus.remove": "contextMenus.html#method-remove", 
     "chrome.experimental.omnibox.onInputStarted": "experimental.omnibox.html#event-onInputStarted", 
@@ -59,6 +61,7 @@
     "chrome.tabs.create": "tabs.html#method-create", 
     "chrome.cookies.get": "cookies.html#method-get", 
     "chrome.experimental.webRequest.onBeforeRequest": "experimental.webRequest.html#event-onBeforeRequest", 
+    "chrome.management.onDisabled": "management.html#event-onDisabled", 
     "chrome.windows.onCreated": "windows.html#event-onCreated", 
     "chrome.experimental.webNavigation.onCommitted": "experimental.webNavigation.html#event-onCommitted", 
     "chrome.bookmarks.create": "bookmarks.html#method-create", 
@@ -71,6 +74,7 @@
     "chrome.experimental.webRequest.onCompleted": "experimental.webRequest.html#event-onCompleted", 
     "chrome.bookmarks.onCreated": "bookmarks.html#event-onCreated", 
     "chrome.pageAction.show": "pageAction.html#method-show", 
+    "chrome.management.onInstalled": "management.html#event-onInstalled", 
     "chrome.bookmarks.search": "bookmarks.html#method-search", 
     "chrome.extension.onRequest": "extension.html#event-onRequest", 
     "chrome.extension.getBackgroundPage": "extension.html#method-getBackgroundPage", 
@@ -90,7 +94,6 @@
     "chrome.cookies.getAll": "cookies.html#method-getAll", 
     "chrome.extension.onRequestExternal": "extension.html#event-onRequestExternal", 
     "chrome.bookmarks.onRemoved": "bookmarks.html#event-onRemoved", 
-    "chrome.experimental.management.onDisabled": "experimental.management.html#event-onDisabled", 
     "chrome.contextMenus.update": "contextMenus.html#method-update", 
     "chrome.experimental.sidebar.setTitle": "experimental.sidebar.html#method-setTitle", 
     "chrome.bookmarks.export": "bookmarks.html#method-export", 
@@ -99,7 +102,8 @@
     "chrome.experimental.sidebar.show": "experimental.sidebar.html#method-show", 
     "chrome.tabs.onSelectionChanged": "tabs.html#event-onSelectionChanged", 
     "chrome.cookies.onChanged": "cookies.html#event-onChanged", 
-    "chrome.experimental.management.uninstall": "experimental.management.html#method-uninstall", 
+    "chrome.management.getAll": "management.html#method-getAll", 
+    "chrome.management.onUninstalled": "management.html#event-onUninstalled", 
     "chrome.windows.update": "windows.html#method-update", 
     "chrome.extension.getURL": "extension.html#method-getURL", 
     "chrome.idle.queryState": "idle.html#method-queryState", 
@@ -109,7 +113,6 @@
     "chrome.tabs.onMoved": "tabs.html#event-onMoved", 
     "chrome.experimental.omnibox.sendSuggestions": "experimental.omnibox.html#method-sendSuggestions", 
     "chrome.bookmarks.update": "bookmarks.html#method-update", 
-    "chrome.experimental.management.install": "experimental.management.html#method-install", 
     "chrome.contextMenus.removeAll": "contextMenus.html#method-removeAll", 
     "chrome.windows.remove": "windows.html#method-remove", 
     "chrome.tabs.sendRequest": "tabs.html#method-sendRequest", 
@@ -120,17 +123,14 @@
     "chrome.experimental.proxy.useCustomProxySettings": "experimental.proxy.html#method-useCustomProxySettings", 
     "chrome.browserAction.setPopup": "browserAction.html#method-setPopup", 
     "chrome.bookmarks.onChildrenReordered": "bookmarks.html#event-onChildrenReordered", 
-    "chrome.experimental.management.onInstalled": "experimental.management.html#event-onInstalled", 
     "chrome.experimental.webRequest.onRequestSent": "experimental.webRequest.html#event-onRequestSent", 
     "chrome.extension.getToolstrips": "extension.html#method-getToolstrips", 
     "chrome.history.onVisited": "history.html#event-onVisited", 
     "chrome.tabs.onUpdated": "tabs.html#event-onUpdated", 
-    "chrome.experimental.management.setEnabled": "experimental.management.html#method-setEnabled", 
     "chrome.history.deleteAll": "history.html#method-deleteAll", 
     "chrome.experimental.webNavigation.onDOMContentLoaded": "experimental.webNavigation.html#event-onDOMContentLoaded", 
     "chrome.tabs.getAllInWindow": "tabs.html#method-getAllInWindow", 
     "chrome.contextMenus.create": "contextMenus.html#method-create", 
-    "chrome.experimental.management.getAll": "experimental.management.html#method-getAll", 
     "chrome.tabs.getSelected": "tabs.html#method-getSelected", 
     "chrome.tabs.onAttached": "tabs.html#event-onAttached", 
     "chrome.tabs.remove": "tabs.html#method-remove", 
@@ -155,6 +155,7 @@
         "background.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/api/browserAction/set_icon_path.zip", 
       "path": "examples/api/browserAction/set_icon_path/", 
       "api_calls": [
         "chrome.browserAction.onClicked", 
@@ -179,6 +180,7 @@
         "manifest.json", 
         "popup.html"
       ], 
+      "zip_path": "examples/api/browserAction/set_page_color.zip", 
       "path": "examples/api/browserAction/set_page_color/", 
       "api_calls": [
         "chrome.tabs.executeScript"
@@ -203,6 +205,7 @@
         "background.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/api/browserAction/make_page_red.zip", 
       "path": "examples/api/browserAction/make_page_red/", 
       "api_calls": [
         "chrome.browserAction.onClicked", 
@@ -231,6 +234,7 @@
         "manifest.json", 
         "popup.html"
       ], 
+      "zip_path": "examples/api/i18n/getMessage.zip", 
       "path": "examples/api/i18n/getMessage/", 
       "api_calls": [
         "chrome.i18n.getAcceptLanguages", 
@@ -253,6 +257,7 @@
         "background.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/api/pageAction/set_icon.zip", 
       "path": "examples/api/pageAction/set_icon/", 
       "api_calls": [
         "chrome.pageAction.hide", 
@@ -279,6 +284,7 @@
         "blank.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/api/override/blank_ntp.zip", 
       "path": "examples/api/override/blank_ntp/", 
       "api_calls": [], 
       "id": "9747e3d6a3eab39bc7c17f11a80573c62d44c7e5", 
@@ -302,6 +308,7 @@
         "manifest.json", 
         "options.html"
       ], 
+      "zip_path": "examples/extensions/fx.zip", 
       "path": "examples/extensions/fx/", 
       "api_calls": [
         "chrome.bookmarks.onCreated", 
@@ -346,6 +353,7 @@
         "options.html", 
         "popup.html"
       ], 
+      "zip_path": "examples/extensions/buildbot.zip", 
       "path": "examples/extensions/buildbot/", 
       "api_calls": [
         "chrome.browserAction.setBadgeBackgroundColor", 
@@ -373,6 +381,7 @@
         "background.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/extensions/chrome_search.zip", 
       "path": "examples/extensions/chrome_search/", 
       "api_calls": [
         "chrome.experimental.omnibox.onInputChanged", 
@@ -403,6 +412,7 @@
         "background.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/api/i18n/cld.zip", 
       "path": "examples/api/i18n/cld/", 
       "api_calls": [
         "chrome.browserAction.setBadgeText", 
@@ -429,6 +439,7 @@
         "manifest.json", 
         "sample.js"
       ], 
+      "zip_path": "examples/api/contextMenus/basic.zip", 
       "path": "examples/api/contextMenus/basic/", 
       "api_calls": [
         "chrome.contextMenus.create"
@@ -452,6 +463,7 @@
         "manager.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/api/cookies.zip", 
       "path": "examples/api/cookies/", 
       "api_calls": [
         "chrome.browserAction.onClicked", 
@@ -484,6 +496,7 @@
         "contentscript.js", 
         "manifest.json"
       ], 
+      "zip_path": "examples/howto/contentscript_xhr.zip", 
       "path": "examples/howto/contentscript_xhr/", 
       "api_calls": [
         "chrome.extension.onRequest", 
@@ -511,6 +524,7 @@
         "manifest.json", 
         "options.html"
       ], 
+      "zip_path": "examples/extensions/email_this_page.zip", 
       "path": "examples/extensions/email_this_page/", 
       "api_calls": [
         "chrome.browserAction.onClicked", 
@@ -542,6 +556,7 @@
         "manifest.json", 
         "popup.html"
       ], 
+      "zip_path": "examples/tutorials/analytics.zip", 
       "path": "examples/tutorials/analytics/", 
       "api_calls": [], 
       "id": "763a08e9b06595d785568a8d392b95a2f3700258", 
@@ -569,6 +584,7 @@
         "options.html", 
         "popup.html"
       ], 
+      "zip_path": "examples/extensions/gdocs.zip", 
       "path": "examples/extensions/gdocs/", 
       "api_calls": [
         "chrome.browserAction.setBadgeText", 
@@ -646,6 +662,7 @@
         "manifest.json", 
         "options.html"
       ], 
+      "zip_path": "examples/extensions/gmail.zip", 
       "path": "examples/extensions/gmail/", 
       "api_calls": [
         "chrome.browserAction.onClicked", 
@@ -688,6 +705,7 @@
         "popup.html", 
         "prettyload.js"
       ], 
+      "zip_path": "examples/extensions/wave.zip", 
       "path": "examples/extensions/wave/", 
       "api_calls": [
         "chrome.extension.getBackgroundPage", 
@@ -717,6 +735,7 @@
         "manifest.json", 
         "popup.html"
       ], 
+      "zip_path": "examples/tutorials/getstarted.zip", 
       "path": "examples/tutorials/getstarted/", 
       "api_calls": [], 
       "id": "14b9651fda4e57b2a5914ba73a779812201b750a", 
@@ -724,6 +743,32 @@
         "http://"
       ], 
       "name": "Hello World"
+    }, 
+    {
+      "features": [
+        "background_page", 
+        "browser_action", 
+        "idle"
+      ], 
+      "icon": "sample-128.png", 
+      "description": "Demonstrates the Idle API", 
+      "search_string": "IDLE - SIMPLE EXAMPLE DEMONSTRATES THE IDLE API BACKGROUND_PAGE BROWSER_ACTION IDLE CHROME.BROWSERACTION.ONCLICKED CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.IDLE.ONSTATECHANGED CHROME.IDLE.QUERYSTATE", 
+      "source_files": [
+        "background.html", 
+        "history.html", 
+        "manifest.json"
+      ], 
+      "zip_path": "examples/api/idle/idle_simple.zip", 
+      "path": "examples/api/idle/idle_simple/", 
+      "api_calls": [
+        "chrome.browserAction.onClicked", 
+        "chrome.extension.getBackgroundPage", 
+        "chrome.idle.onStateChanged", 
+        "chrome.idle.queryState"
+      ], 
+      "id": "2020d72f2577f53caf8e94e3dbac0fb849ceaa4d", 
+      "protocols": [], 
+      "name": "Idle - Simple Example"
     }, 
     {
       "features": [
@@ -736,11 +781,45 @@
         "manifest.json", 
         "redirect.html"
       ], 
+      "zip_path": "examples/api/override/override_igoogle.zip", 
       "path": "examples/api/override/override_igoogle/", 
       "api_calls": [], 
       "id": "0ea1588bd07b20338fc21f725de1542a5fdf9726", 
       "protocols": [], 
       "name": "iGoogle new tab page"
+    }, 
+    {
+      "features": [
+        "background_page", 
+        "contextMenus", 
+        "tabs"
+      ], 
+      "icon": "imageinfo-128.png", 
+      "description": "Get image info for images, including EXIF data", 
+      "search_string": "IMAGEINFO GET IMAGE INFO FOR IMAGES, INCLUDING EXIF DATA BACKGROUND_PAGE CONTEXTMENUS TABS CHROME.CONTEXTMENUS.CREATE CHROME.TABS.GET CHROME.TABS.GETCURRENT CHROME.WINDOWS.CREATE CHROME.WINDOWS.UPDATE", 
+      "source_files": [
+        "background.html", 
+        "imageinfo/binaryajax.js", 
+        "imageinfo/exif.js", 
+        "imageinfo/imageinfo.js", 
+        "info.html", 
+        "manifest.json"
+      ], 
+      "zip_path": "examples/extensions/imageinfo.zip", 
+      "path": "examples/extensions/imageinfo/", 
+      "api_calls": [
+        "chrome.contextMenus.create", 
+        "chrome.tabs.get", 
+        "chrome.tabs.getCurrent", 
+        "chrome.windows.create", 
+        "chrome.windows.update"
+      ], 
+      "id": "646325c25f572a1d15edc73d057f821d847a4fbe", 
+      "protocols": [
+        "http://", 
+        "https://"
+      ], 
+      "name": "Imageinfo"
     }, 
     {
       "features": [
@@ -758,6 +837,7 @@
         "mappy_content_script.js", 
         "popup.html"
       ], 
+      "zip_path": "examples/extensions/mappy.zip", 
       "path": "examples/extensions/mappy/", 
       "api_calls": [
         "chrome.extension.getBackgroundPage", 
@@ -790,6 +870,7 @@
         "background.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/api/windows/merge_windows.zip", 
       "path": "examples/api/windows/merge_windows/", 
       "api_calls": [
         "chrome.browserAction.onClicked", 
@@ -818,6 +899,7 @@
         "page.js", 
         "popup.html"
       ], 
+      "zip_path": "examples/api/messaging/timer.zip", 
       "path": "examples/api/messaging/timer/", 
       "api_calls": [
         "chrome.extension.onConnect", 
@@ -845,6 +927,7 @@
         "manifest.json", 
         "popup.html"
       ], 
+      "zip_path": "examples/api/bookmarks/basic.zip", 
       "path": "examples/api/bookmarks/basic/", 
       "api_calls": [
         "chrome.bookmarks.create", 
@@ -871,6 +954,7 @@
         "feed.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/extensions/news.zip", 
       "path": "examples/extensions/news/", 
       "api_calls": [
         "chrome.tabs.create"
@@ -894,6 +978,7 @@
         "feed.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/extensions/news_a11y.zip", 
       "path": "examples/extensions/news_a11y/", 
       "api_calls": [
         "chrome.tabs.create"
@@ -920,6 +1005,7 @@
         "feed.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/extensions/news_i18n.zip", 
       "path": "examples/extensions/news_i18n/", 
       "api_calls": [
         "chrome.i18n.getMessage", 
@@ -948,6 +1034,7 @@
         "manifest.json", 
         "options.html"
       ], 
+      "zip_path": "examples/api/notifications.zip", 
       "path": "examples/api/notifications/", 
       "api_calls": [
         "chrome.tabs.create"
@@ -968,6 +1055,7 @@
         "background.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/api/omnibox.zip", 
       "path": "examples/api/omnibox/", 
       "api_calls": [
         "chrome.experimental.omnibox.onInputChanged", 
@@ -990,6 +1078,7 @@
         "contentscript.js", 
         "manifest.json"
       ], 
+      "zip_path": "examples/api/pageAction/pageaction_by_content.zip", 
       "path": "examples/api/pageAction/pageaction_by_content/", 
       "api_calls": [
         "chrome.extension.onRequest", 
@@ -1013,6 +1102,7 @@
         "background.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/api/pageAction/pageaction_by_url.zip", 
       "path": "examples/api/pageAction/pageaction_by_url/", 
       "api_calls": [
         "chrome.pageAction.show", 
@@ -1042,6 +1132,7 @@
         "options.html", 
         "script.js"
       ], 
+      "zip_path": "examples/extensions/benchmark.zip", 
       "path": "examples/extensions/benchmark/", 
       "api_calls": [
         "chrome.browserAction.onClicked", 
@@ -1079,6 +1170,7 @@
         "background.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/api/browserAction/print.zip", 
       "path": "examples/api/browserAction/print/", 
       "api_calls": [
         "chrome.browserAction.onClicked", 
@@ -1108,6 +1200,7 @@
         "contacts.html", 
         "manifest.json"
       ], 
+      "zip_path": "examples/extensions/oauth_contacts.zip", 
       "path": "examples/extensions/oauth_contacts/", 
       "api_calls": [
         "chrome.browserAction.onClicked", 
@@ -1131,6 +1224,31 @@
     }, 
     {
       "features": [
+        "background_page", 
+        "experimental"
+      ], 
+      "icon": "sandwich-128.png", 
+      "description": "Shows an infobar on pages which contain the word 'sandwich'", 
+      "search_string": "SANDWICHBAR SHOWS AN INFOBAR ON PAGES WHICH CONTAIN THE WORD SANDWICH BACKGROUND_PAGE EXPERIMENTAL CHROME.EXPERIMENTAL.INFOBARS.SHOW CHROME.EXTENSION.ONREQUEST CHROME.EXTENSION.SENDREQUEST", 
+      "source_files": [
+        "background.html", 
+        "contentscript.js", 
+        "infobar.html", 
+        "manifest.json"
+      ], 
+      "zip_path": "examples/api/infobars/sandwichbar.zip", 
+      "path": "examples/api/infobars/sandwichbar/", 
+      "api_calls": [
+        "chrome.experimental.infobars.show", 
+        "chrome.extension.onRequest", 
+        "chrome.extension.sendRequest"
+      ], 
+      "id": "38f6e1e17756ede38b1364c7114a738ca717dcbb", 
+      "protocols": [], 
+      "name": "SandwichBar"
+    }, 
+    {
+      "features": [
         "browser_action", 
         "experimental", 
         "popup", 
@@ -1143,6 +1261,7 @@
         "manifest.json", 
         "popup.html"
       ], 
+      "zip_path": "examples/api/processes/show_tabs.zip", 
       "path": "examples/api/processes/show_tabs/", 
       "api_calls": [
         "chrome.experimental.processes.getProcessForTab", 
@@ -1173,6 +1292,7 @@
         "manifest.json", 
         "tabs_api.html"
       ], 
+      "zip_path": "examples/api/tabs/inspector.zip", 
       "path": "examples/api/tabs/inspector/", 
       "api_calls": [
         "chrome.browserAction.onClicked", 
@@ -1221,6 +1341,7 @@
         "screenshot.html", 
         "screenshot.js"
       ], 
+      "zip_path": "examples/api/tabs/screenshot.zip", 
       "path": "examples/api/tabs/screenshot/", 
       "api_calls": [
         "chrome.browserAction.onClicked", 
@@ -1248,6 +1369,7 @@
         "typedUrls.html", 
         "typedUrls.js"
       ], 
+      "zip_path": "examples/api/history/showHistory.zip", 
       "path": "examples/api/history/showHistory/", 
       "api_calls": [
         "chrome.history.getVisits", 

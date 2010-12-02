@@ -6,11 +6,15 @@
 
 #include "base/basictypes.h"
 #include "base/json/json_writer.h"
+#include "base/scoped_ptr.h"
 #include "base/string_util.h"
+#include "base/values.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/automation_provider_json.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/browser.h"
+#include "chrome/browser/browser_list.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/save_package.h"
@@ -21,6 +25,7 @@
 #include "chrome/browser/metrics/metric_event_duration_details.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/translate/page_translated_details.h"
@@ -28,6 +33,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/test/automation/automation_constants.h"
+#include "gfx/rect.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/authentication_notification_details.h"
@@ -338,6 +344,49 @@ void TabClosedNotificationObserver::ObserveTab(
 void TabClosedNotificationObserver::set_for_browser_command(
     bool for_browser_command) {
   for_browser_command_ = for_browser_command;
+}
+
+TabCountChangeObserver::TabCountChangeObserver(AutomationProvider* automation,
+                                               Browser* browser,
+                                               IPC::Message* reply_message,
+                                               int target_tab_count)
+    : automation_(automation),
+      reply_message_(reply_message),
+      tab_strip_model_(browser->tabstrip_model()),
+      target_tab_count_(target_tab_count) {
+  tab_strip_model_->AddObserver(this);
+  CheckTabCount();
+}
+
+TabCountChangeObserver::~TabCountChangeObserver() {
+  tab_strip_model_->RemoveObserver(this);
+}
+
+void TabCountChangeObserver::TabInsertedAt(TabContents* contents,
+                                           int index,
+                                           bool foreground) {
+  CheckTabCount();
+}
+
+void TabCountChangeObserver::TabDetachedAt(TabContents* contents, int index) {
+  CheckTabCount();
+}
+
+void TabCountChangeObserver::TabStripModelDeleted() {
+  AutomationMsg_WaitForTabCountToBecome::WriteReplyParams(reply_message_,
+                                                          false);
+  automation_->Send(reply_message_);
+  delete this;
+}
+
+void TabCountChangeObserver::CheckTabCount() {
+  if (tab_strip_model_->count() != target_tab_count_)
+    return;
+
+  AutomationMsg_WaitForTabCountToBecome::WriteReplyParams(reply_message_,
+                                                          true);
+  automation_->Send(reply_message_);
+  delete this;
 }
 
 bool DidExtensionHostsStopLoading(ExtensionProcessManager* manager) {
@@ -788,9 +837,10 @@ bool ExecuteBrowserCommandObserver::GetNotificationType(
 
 FindInPageNotificationObserver::FindInPageNotificationObserver(
     AutomationProvider* automation, TabContents* parent_tab,
-    IPC::Message* reply_message)
+    bool reply_with_json, IPC::Message* reply_message)
     : automation_(automation),
       active_match_ordinal_(-1),
+      reply_with_json_(reply_with_json),
       reply_message_(reply_message) {
   registrar_.Add(this, NotificationType::FIND_RESULT_AVAILABLE,
                  Source<TabContents>(parent_tab));
@@ -802,28 +852,40 @@ FindInPageNotificationObserver::~FindInPageNotificationObserver() {
 void FindInPageNotificationObserver::Observe(
     NotificationType type, const NotificationSource& source,
     const NotificationDetails& details) {
-  if (type == NotificationType::FIND_RESULT_AVAILABLE) {
-    Details<FindNotificationDetails> find_details(details);
-    if (find_details->request_id() == kFindInPageRequestId) {
-      // We get multiple responses and one of those will contain the ordinal.
-      // This message comes to us before the final update is sent.
-      if (find_details->active_match_ordinal() > -1)
+  Details<FindNotificationDetails> find_details(details);
+  if (!(find_details->final_update() && reply_message_ != NULL)) {
+    DLOG(INFO) << "Ignoring, since we only care about the final message";
+    return;
+  }
+  // We get multiple responses and one of those will contain the ordinal.
+  // This message comes to us before the final update is sent.
+  if (find_details->request_id() == kFindInPageRequestId) {
+    if (reply_with_json_) {
+      scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+      return_value->SetInteger("match_count",
+          find_details->number_of_matches());
+      gfx::Rect rect = find_details->selection_rect();
+      // If MatchCount is > 0, then rect should not be Empty.
+      // We dont guard it here because we want to let the test
+      // code catch this invalid case if needed.
+      if (!rect.IsEmpty()) {
+        return_value->SetInteger("match_left", rect.x());
+        return_value->SetInteger("match_top", rect.y());
+        return_value->SetInteger("match_right", rect.right());
+        return_value->SetInteger("match_bottom", rect.bottom());
+      }
+      AutomationJSONReply(automation_, reply_message_)
+          .SendSuccess(return_value.get());
+      delete this;
+    } else {
+      if (find_details->active_match_ordinal() > -1) {
         active_match_ordinal_ = find_details->active_match_ordinal();
-      if (find_details->final_update()) {
-        if (reply_message_ != NULL) {
-          AutomationMsg_FindInPage::WriteReplyParams(reply_message_,
-              active_match_ordinal_, find_details->number_of_matches());
-          automation_->Send(reply_message_);
-          reply_message_ = NULL;
-        } else {
-          DLOG(WARNING) << "Multiple final Find messages observed.";
-        }
-      } else {
-        DLOG(INFO) << "Ignoring, since we only care about the final message";
+        AutomationMsg_Find::WriteReplyParams(reply_message_,
+            active_match_ordinal_, find_details->number_of_matches());
+        automation_->Send(reply_message_);
+        reply_message_ = NULL;
       }
     }
-  } else {
-    NOTREACHED();
   }
 }
 
@@ -1011,6 +1073,37 @@ void TabLanguageDeterminedObserver::Observe(
   delete this;
 }
 
+InfoBarCountObserver::InfoBarCountObserver(AutomationProvider* automation,
+                                           IPC::Message* reply_message,
+                                           TabContents* tab_contents,
+                                           int target_count)
+    : automation_(automation),
+      reply_message_(reply_message),
+      tab_contents_(tab_contents),
+      target_count_(target_count) {
+  Source<TabContents> source(tab_contents);
+  registrar_.Add(this, NotificationType::TAB_CONTENTS_INFOBAR_ADDED, source);
+  registrar_.Add(this, NotificationType::TAB_CONTENTS_INFOBAR_REMOVED, source);
+  CheckCount();
+}
+
+void InfoBarCountObserver::Observe(NotificationType type,
+                                   const NotificationSource& source,
+                                   const NotificationDetails& details) {
+  DCHECK(type == NotificationType::TAB_CONTENTS_INFOBAR_ADDED ||
+         type == NotificationType::TAB_CONTENTS_INFOBAR_REMOVED);
+  CheckCount();
+}
+
+void InfoBarCountObserver::CheckCount() {
+  if (tab_contents_->infobar_delegate_count() != target_count_)
+    return;
+
+  AutomationMsg_WaitForInfoBarCount::WriteReplyParams(reply_message_, true);
+  automation_->Send(reply_message_);
+  delete this;
+}
+
 #if defined(OS_CHROMEOS)
 LoginManagerObserver::LoginManagerObserver(
     AutomationProvider* automation,
@@ -1034,7 +1127,8 @@ void LoginManagerObserver::Observe(NotificationType type,
 }
 #endif
 
-AutomationProviderBookmarkModelObserver::AutomationProviderBookmarkModelObserver(
+AutomationProviderBookmarkModelObserver::
+AutomationProviderBookmarkModelObserver(
     AutomationProvider* provider,
     IPC::Message* reply_message,
     BookmarkModel* model) {
@@ -1044,7 +1138,8 @@ AutomationProviderBookmarkModelObserver::AutomationProviderBookmarkModelObserver
   model_->AddObserver(this);
 }
 
-AutomationProviderBookmarkModelObserver::~AutomationProviderBookmarkModelObserver() {
+AutomationProviderBookmarkModelObserver::
+~AutomationProviderBookmarkModelObserver() {
   model_->RemoveObserver(this);
 }
 
@@ -1092,6 +1187,13 @@ void AutomationProviderDownloadUpdatedObserver::OnDownloadOpened(
 void AutomationProviderDownloadModelChangedObserver::ModelChanged() {
   AutomationJSONReply(provider_, reply_message_).SendSuccess(NULL);
   download_manager_->RemoveObserver(this);
+  delete this;
+}
+
+void AutomationProviderSearchEngineObserver::OnTemplateURLModelChanged() {
+  TemplateURLModel* url_model = provider_->profile()->GetTemplateURLModel();
+  url_model->RemoveObserver(this);
+  AutomationJSONReply(provider_, reply_message_).SendSuccess(NULL);
   delete this;
 }
 
@@ -1216,5 +1318,27 @@ void SavePackageNotificationObserver::Observe(
   } else {
     NOTREACHED();
   }
+}
+
+AutocompleteEditFocusedObserver::AutocompleteEditFocusedObserver(
+    AutomationProvider* automation,
+    AutocompleteEditModel* autocomplete_edit,
+    IPC::Message* reply_message)
+    : automation_(automation),
+      reply_message_(reply_message),
+      autocomplete_edit_model_(autocomplete_edit) {
+  Source<AutocompleteEditModel> source(autocomplete_edit);
+  registrar_.Add(this, NotificationType::AUTOCOMPLETE_EDIT_FOCUSED, source);
+}
+
+void AutocompleteEditFocusedObserver::Observe(
+    NotificationType type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+  DCHECK(type == NotificationType::AUTOCOMPLETE_EDIT_FOCUSED);
+  AutomationMsg_WaitForAutocompleteEditFocus::WriteReplyParams(
+      reply_message_, true);
+  automation_->Send(reply_message_);
+  delete this;
 }
 

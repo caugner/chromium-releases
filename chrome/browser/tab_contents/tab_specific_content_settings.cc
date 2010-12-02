@@ -7,6 +7,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browsing_data_appcache_helper.h"
 #include "chrome/browser/browsing_data_database_helper.h"
+#include "chrome/browser/browsing_data_indexed_db_helper.h"
 #include "chrome/browser/browsing_data_local_storage_helper.h"
 #include "chrome/browser/cookies_tree_model.h"
 #include "net/base/cookie_monster.h"
@@ -15,6 +16,7 @@ bool TabSpecificContentSettings::LocalSharedObjectsContainer::empty() const {
   return cookies_->GetAllCookies().empty() &&
       appcaches_->empty() &&
       databases_->empty() &&
+      indexed_dbs_->empty() &&
       local_storages_->empty() &&
       session_storages_->empty();
 }
@@ -72,10 +74,10 @@ void TabSpecificContentSettings::OnContentBlocked(
   DCHECK(type != CONTENT_SETTINGS_TYPE_GEOLOCATION)
       << "Geolocation settings handled by OnGeolocationPermissionSet";
   content_accessed_[type] = true;
+  if (!resource_identifier.empty())
+    AddBlockedResource(type, resource_identifier);
   if (!content_blocked_[type]) {
     content_blocked_[type] = true;
-    if (!resource_identifier.empty())
-      AddBlockedResource(type, resource_identifier);
     if (delegate_)
       delegate_->OnContentSettingsAccessed(true);
   }
@@ -102,6 +104,22 @@ void TabSpecificContentSettings::OnCookieAccessed(
   } else {
     allowed_local_shared_objects_.cookies()->SetCookieWithOptions(
         url, cookie_line, options);
+    OnContentAccessed(CONTENT_SETTINGS_TYPE_COOKIES);
+  }
+}
+
+void TabSpecificContentSettings::OnIndexedDBAccessed(
+    const GURL& url,
+    const string16& name,
+    const string16& description,
+    bool blocked_by_policy) {
+  if (blocked_by_policy) {
+    blocked_local_shared_objects_.indexed_dbs()->AddIndexedDB(
+        url, name, description);
+    OnContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES, std::string());
+  }else {
+    allowed_local_shared_objects_.indexed_dbs()->AddIndexedDB(
+        url, name, description);
     OnContentAccessed(CONTENT_SETTINGS_TYPE_COOKIES);
   }
 }
@@ -222,6 +240,7 @@ TabSpecificContentSettings::LocalSharedObjectsContainer::
     : cookies_(new net::CookieMonster(NULL, NULL)),
       appcaches_(new CannedBrowsingDataAppCacheHelper(profile)),
       databases_(new CannedBrowsingDataDatabaseHelper(profile)),
+      indexed_dbs_(new CannedBrowsingDataIndexedDBHelper(profile)),
       local_storages_(new CannedBrowsingDataLocalStorageHelper(profile)),
       session_storages_(new CannedBrowsingDataLocalStorageHelper(profile)) {
 }
@@ -234,12 +253,17 @@ void TabSpecificContentSettings::LocalSharedObjectsContainer::Reset() {
   cookies_->DeleteAll(false);
   appcaches_->Reset();
   databases_->Reset();
+  indexed_dbs_->Reset();
   local_storages_->Reset();
   session_storages_->Reset();
 }
 
 CookiesTreeModel*
 TabSpecificContentSettings::LocalSharedObjectsContainer::GetCookiesTreeModel() {
-  return new CookiesTreeModel(
-      cookies_, databases_, local_storages_, session_storages_, appcaches_);
+  return new CookiesTreeModel(cookies_,
+                              databases_,
+                              local_storages_,
+                              session_storages_,
+                              appcaches_,
+                              indexed_dbs_);
 }

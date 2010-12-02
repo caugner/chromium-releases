@@ -56,6 +56,10 @@ const CGFloat kScrollWindowVerticalMargin = 0.0;
 // Return the new width (so that the window can be adjusted, if necessary).
 - (CGFloat)adjustButtonWidths;
 
+// Returns the total menu height needed to display |buttonCount| buttons.
+// Does not do any fancy tricks like trimming the height to fit on the screen.
+- (int)windowHeightForButtonCount:(int)buttonCount;
+
 // Adjust the height and horizontal position of the window such that the
 // scroll arrows are shown as needed and the window appears completely
 // on screen.
@@ -305,7 +309,8 @@ const CGFloat kScrollWindowVerticalMargin = 0.0;
       x = NSMaxX([[parentButton_ window] frame]) -
           bookmarks::kBookmarkMenuOverlap;
       // If off the screen, switch direction.
-      if ((x + windowWidth + bookmarks::kBookmarkHorizontalScreenPadding) >
+      if ((x + windowWidth +
+           bookmarks::kBookmarkHorizontalScreenPadding) >
           NSMaxX([[[self window] screen] frame])) {
         [self setSubFolderGrowthToRight:NO];
       } else {
@@ -381,12 +386,18 @@ const CGFloat kScrollWindowVerticalMargin = 0.0;
   [[self window] setLevel:NSPopUpMenuWindowLevel];
 }
 
+- (int)windowHeightForButtonCount:(int)buttonCount {
+  return (buttonCount * (bookmarks::kBookmarkButtonHeight +
+                         bookmarks::kBookmarkVerticalPadding)) +
+      bookmarks::kBookmarkVerticalPadding;
+}
+
 - (void)adjustWindowForHeight:(int)windowHeight {
   // Adjust all button widths to be consistent, determine the best size for
   // the window, and set the window frame.
   CGFloat windowWidth =
-      [self adjustButtonWidths] + (2 * bookmarks::kBookmarkVerticalPadding) +
-      bookmarks::kScrollViewContentWidthMargin;
+      [self adjustButtonWidths] +
+      (2 * bookmarks::kBookmarkSubMenuHorizontalPadding);
   NSPoint newWindowTopLeft = [self windowTopLeftForWidth:windowWidth];
   NSSize windowSize = NSMakeSize(windowWidth, windowHeight);
   windowSize = [scrollView_ convertSize:windowSize toView:nil];
@@ -456,16 +467,16 @@ const CGFloat kScrollWindowVerticalMargin = 0.0;
   int buttons = std::max(node->GetChildCount() - startingIndex, 1);
 
   // Prelim height of the window.  We'll trim later as needed.
-  int height = buttons * bookmarks::kBookmarkButtonHeight +
-      bookmarks::kBookmarkVerticalPadding;
+  int height = [self windowHeightForButtonCount:buttons];
   // We'll need this soon...
   [self window];
 
   // TODO(jrg): combine with frame code in bookmark_bar_controller.mm
   // http://crbug.com/35966
   NSRect buttonsOuterFrame = NSMakeRect(
-    bookmarks::kBookmarkHorizontalPadding,
-    height - bookmarks::kBookmarkButtonHeight,
+    bookmarks::kBookmarkSubMenuHorizontalPadding,
+    (height -
+     (bookmarks::kBookmarkButtonHeight + bookmarks::kBookmarkVerticalPadding)),
     bookmarks::kDefaultBookmarkWidth,
     bookmarks::kBookmarkButtonHeight);
 
@@ -487,7 +498,8 @@ const CGFloat kScrollWindowVerticalMargin = 0.0;
                                                  frame:buttonsOuterFrame];
       [buttons_ addObject:button];
       [mainView_ addSubview:button];
-      buttonsOuterFrame.origin.y -= bookmarks::kBookmarkButtonHeight;
+      buttonsOuterFrame.origin.y -= (bookmarks::kBookmarkButtonHeight +
+                                     bookmarks::kBookmarkVerticalPadding);
     }
   }
 
@@ -714,11 +726,13 @@ const CGFloat kScrollWindowVerticalMargin = 0.0;
   NSPoint eventScreenLocation =
       [[theEvent window] convertBaseToScreen:[theEvent locationInWindow]];
 
-  NSRect visibleRect = [[[self window] screen] visibleFrame];
+  // We use frame (not visibleFrame) since our bookmark folder is on
+  // TOP of the menubar.
+  NSRect visibleRect = [[[self window] screen] frame];
   CGFloat closeToTopOfScreen = NSMaxY(visibleRect) -
-      kBookmarkBarFolderScrollAmount;
+      verticalScrollArrowHeight_;
   CGFloat closeToBottomOfScreen = NSMinY(visibleRect) +
-      kBookmarkBarFolderScrollAmount;
+      verticalScrollArrowHeight_;
 
   if (eventScreenLocation.y <= closeToBottomOfScreen) {
     [self beginScrollWindowUp];
@@ -1042,6 +1056,21 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   return [parentController_ browserWindow];
 }
 
+- (BOOL)canDragBookmarkButtonToTrash:(BookmarkButton*)button {
+  return [barController_ canEditBookmark:[button bookmarkNode]];
+}
+
+- (void)didDragBookmarkToTrash:(BookmarkButton*)button {
+  // TODO(mrossetti): Refactor BookmarkBarFolder common code.
+  // http://crbug.com/35966
+  const BookmarkNode* node = [button bookmarkNode];
+  if (node) {
+    const BookmarkNode* parent = node->GetParent();
+    [self bookmarkModel]->Remove(parent,
+                                 parent->IndexOfChild(node));
+  }
+}
+
 #pragma mark BookmarkButtonControllerProtocol
 
 // Recursively close all bookmark folders.
@@ -1237,7 +1266,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     [buttons_ removeLastObject];
   }
 
-  if (buttonIndex == -1)
+  if (buttonIndex == -1 || buttonIndex > (NSInteger)[buttons_ count])
     buttonIndex = [buttons_ count];
 
   // Offset upward by one button height all buttons above insertion location.
@@ -1262,8 +1291,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   [self closeBookmarkFolder:self];
 
   // Prelim height of the window.  We'll trim later as needed.
-  int height = [buttons_ count] * bookmarks::kBookmarkButtonHeight +
-      bookmarks::kBookmarkVerticalPadding;
+  int height = [self windowHeightForButtonCount:[buttons_ count]];
   [self adjustWindowForHeight:height];
 }
 
@@ -1349,15 +1377,26 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 - (void)removeButton:(NSInteger)buttonIndex animate:(BOOL)animate {
   // TODO(mrossetti): Get disappearing animation to work. http://crbug.com/42360
   BookmarkButton* oldButton = [buttons_ objectAtIndex:buttonIndex];
-  NSRect poofFrame = [oldButton bounds];
-  NSPoint poofPoint = NSMakePoint(NSMidX(poofFrame), NSMidY(poofFrame));
-  poofPoint = [oldButton convertPoint:poofPoint toView:nil];
-  poofPoint = [[oldButton window] convertBaseToScreen:poofPoint];
+  NSPoint poofPoint = [oldButton screenLocationForRemoveAnimation];
 
   // If a hover-open is pending, cancel it.
   if (oldButton == buttonThatMouseIsIn_) {
     [NSObject cancelPreviousPerformRequestsWithTarget:self];
     buttonThatMouseIsIn_ = nil;
+  }
+
+  // Deleting a button causes rearrangement that enables us to lose a
+  // mouse-exited event.  This problem doesn't appear to exist with
+  // other keep-menu-open options (e.g. add folder).  Since the
+  // showsBorderOnlyWhileMouseInside uses a tracking area, simple
+  // tricks (e.g. sending an extra mouseExited: to the button) don't
+  // fix the problem.
+  // http://crbug.com/54324
+  for (NSButton* button in buttons_.get()) {
+    if ([button showsBorderOnlyWhileMouseInside]) {
+      [button setShowsBorderOnlyWhileMouseInside:NO];
+      [button setShowsBorderOnlyWhileMouseInside:YES];
+    }
   }
 
   [oldButton setDelegate:nil];
@@ -1369,7 +1408,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   for (NSInteger i = 0; i < buttonIndex; ++i) {
     BookmarkButton* button = [buttons_ objectAtIndex:i];
     NSRect buttonFrame = [button frame];
-    buttonFrame.origin.y -= bookmarks::kBookmarkBarHeight +
+    buttonFrame.origin.y -= bookmarks::kBookmarkButtonHeight +
       bookmarks::kBookmarkVerticalPadding;
     [button setFrame:buttonFrame];
   }
@@ -1387,13 +1426,14 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   } else {
     // If all nodes have been removed from this folder then add in the
     // 'empty' placeholder button.
-    NSRect buttonFrame = NSMakeRect(bookmarks::kBookmarkHorizontalPadding,
-                                    bookmarks::kBookmarkButtonHeight -
-                                    (bookmarks::kBookmarkBarHeight -
-                                     bookmarks::kBookmarkVerticalPadding),
-                                    bookmarks::kDefaultBookmarkWidth,
-                                    (bookmarks::kBookmarkBarHeight -
-                                     2 * bookmarks::kBookmarkVerticalPadding));
+    NSRect buttonFrame =
+        NSMakeRect(bookmarks::kBookmarkSubMenuHorizontalPadding,
+                   bookmarks::kBookmarkButtonHeight -
+                   (bookmarks::kBookmarkBarHeight -
+                    bookmarks::kBookmarkVerticalPadding),
+                   bookmarks::kDefaultBookmarkWidth,
+                   (bookmarks::kBookmarkBarHeight -
+                    2 * bookmarks::kBookmarkVerticalPadding));
     BookmarkButton* button = [self makeButtonForNode:nil
                                                frame:buttonFrame];
     [buttons_ addObject:button];
@@ -1402,9 +1442,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   }
 
   // Propose a height for the window.  We'll trim later as needed.
-  int height = buttonCount * bookmarks::kBookmarkButtonHeight +
-      bookmarks::kBookmarkVerticalPadding;
-  [self adjustWindowForHeight:height];
+  [self adjustWindowForHeight:[self windowHeightForButtonCount:buttonCount]];
 }
 
 - (id<BookmarkButtonControllerProtocol>)controllerForNode:

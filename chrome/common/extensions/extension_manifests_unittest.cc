@@ -46,7 +46,6 @@ class ExtensionManifestTest : public testing::Test {
 
     scoped_ptr<Extension> extension(new Extension(path.DirName()));
     extension->set_location(location);
-    extension->set_apps_enabled(enable_apps_);
 
     if (!extension->InitFromValue(*value, false, error))
       return NULL;
@@ -97,7 +96,7 @@ class ExtensionManifestTest : public testing::Test {
     EXPECT_FALSE(extension) <<
         "Expected failure loading extension '" << name <<
         "', but didn't get one.";
-    EXPECT_TRUE(MatchPatternASCII(error, expected_error)) << name <<
+    EXPECT_TRUE(MatchPattern(error, expected_error)) << name <<
         " expected '" << expected_error << "' but got '" << error << "'";
   }
 
@@ -119,17 +118,6 @@ class ExtensionManifestTest : public testing::Test {
   bool enable_apps_;
 };
 
-TEST_F(ExtensionManifestTest, AppsDisabledByDefault) {
-#if defined(OS_CHROMEOS)
-  // On ChromeOS, apps are enabled by default.
-  if (Extension::AppsAreEnabled())
-    return;
-#endif
-
-  enable_apps_ = false;
-  LoadAndExpectError("launch_local_path.json", errors::kAppsNotEnabled);
-}
-
 TEST_F(ExtensionManifestTest, ValidApp) {
   scoped_ptr<Extension> extension(LoadAndExpectSuccess("valid_app.json"));
   ASSERT_EQ(2u, extension->web_extent().patterns().size());
@@ -137,7 +125,7 @@ TEST_F(ExtensionManifestTest, ValidApp) {
             extension->web_extent().patterns()[0].GetAsString());
   EXPECT_EQ("http://www.google.com/foobar/*",
             extension->web_extent().patterns()[1].GetAsString());
-  EXPECT_EQ(Extension::LAUNCH_TAB, extension->launch_container());
+  EXPECT_EQ(extension_misc::LAUNCH_TAB, extension->launch_container());
   EXPECT_EQ("http://www.google.com/mail/", extension->launch_web_url());
 }
 
@@ -153,6 +141,9 @@ TEST_F(ExtensionManifestTest, AppWebUrls) {
   LoadAndExpectError("web_urls_invalid_3.json",
                      ExtensionErrorUtils::FormatErrorMessage(
                          errors::kInvalidWebURL, "0"));
+  LoadAndExpectError("web_urls_invalid_4.json",
+                     ExtensionErrorUtils::FormatErrorMessage(
+                         errors::kInvalidWebURL, "0"));
 
   scoped_ptr<Extension> extension(
       LoadAndExpectSuccess("web_urls_default.json"));
@@ -165,13 +156,13 @@ TEST_F(ExtensionManifestTest, AppLaunchContainer) {
   scoped_ptr<Extension> extension;
 
   extension.reset(LoadAndExpectSuccess("launch_tab.json"));
-  EXPECT_EQ(Extension::LAUNCH_TAB, extension->launch_container());
+  EXPECT_EQ(extension_misc::LAUNCH_TAB, extension->launch_container());
 
   extension.reset(LoadAndExpectSuccess("launch_panel.json"));
-  EXPECT_EQ(Extension::LAUNCH_PANEL, extension->launch_container());
+  EXPECT_EQ(extension_misc::LAUNCH_PANEL, extension->launch_container());
 
   extension.reset(LoadAndExpectSuccess("launch_default.json"));
-  EXPECT_EQ(Extension::LAUNCH_TAB, extension->launch_container());
+  EXPECT_EQ(extension_misc::LAUNCH_TAB, extension->launch_container());
 
   extension.reset(LoadAndExpectSuccess("launch_width.json"));
   EXPECT_EQ(640, extension->launch_width());
@@ -318,7 +309,7 @@ TEST_F(ExtensionManifestTest, DisallowExtensionPermissions) {
   ListValue *permissions = new ListValue();
   manifest->Set(keys::kPermissions, permissions);
   for (size_t i = 0; i < Extension::kNumPermissions; i++) {
-    const char* name = Extension::kPermissionNames[i];
+    const char* name = Extension::kPermissions[i].name;
     StringValue* p = new StringValue(name);
     permissions->Clear();
     permissions->Append(p);
@@ -331,4 +322,19 @@ TEST_F(ExtensionManifestTest, DisallowExtensionPermissions) {
                          errors::kInvalidPermission);
     }
   }
+}
+
+TEST_F(ExtensionManifestTest, NormalizeIconPaths) {
+  scoped_ptr<Extension> extension(
+      LoadAndExpectSuccess("normalize_icon_paths.json"));
+  EXPECT_EQ("16.png",
+            extension->icons().Get(16, ExtensionIconSet::MATCH_EXACTLY));
+  EXPECT_EQ("48.png",
+            extension->icons().Get(48, ExtensionIconSet::MATCH_EXACTLY));
+}
+
+TEST_F(ExtensionManifestTest, DisallowMultipleUISurfaces) {
+  LoadAndExpectError("multiple_ui_surfaces_1.json", errors::kOneUISurfaceOnly);
+  LoadAndExpectError("multiple_ui_surfaces_2.json", errors::kOneUISurfaceOnly);
+  LoadAndExpectError("multiple_ui_surfaces_3.json", errors::kOneUISurfaceOnly);
 }

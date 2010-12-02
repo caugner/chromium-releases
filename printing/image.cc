@@ -93,6 +93,8 @@ Image::Image(const Image& image)
       ignore_alpha_(image.ignore_alpha_) {
 }
 
+Image::~Image() {}
+
 std::string Image::checksum() const {
   MD5Digest digest;
   MD5Sum(&data_[0], data_.size(), &digest);
@@ -192,7 +194,7 @@ bool Image::LoadMetafile(const std::string& data) {
   DCHECK(!data.empty());
 #if defined(OS_WIN) || defined(OS_MACOSX)
   NativeMetafile metafile;
-  metafile.CreateFromData(data.data(), data.size());
+  metafile.Init(data.data(), data.size());
   return LoadMetafile(metafile);
 #else
   NOTIMPLEMENTED();

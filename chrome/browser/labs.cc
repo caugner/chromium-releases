@@ -12,9 +12,7 @@
 #include "app/l10n_util.h"
 #include "base/command_line.h"
 #include "base/values.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
@@ -22,6 +20,8 @@
 namespace about_labs {
 
 enum { kOsMac = 1 << 0, kOsWin = 1 << 1, kOsLinux = 1 << 2 };
+
+unsigned kOsAll = kOsMac | kOsWin | kOsLinux;
 
 struct Experiment {
   // The internal name of the experiment. This is never shown to the user.
@@ -48,8 +48,8 @@ struct Experiment {
 const Experiment kExperiments[] = {
   {
     "expose-for-tabs",  // Do not change; see above.
-    IDS_LABS_TABPOSE_NAME,
-    IDS_LABS_TABPOSE_DESCRIPTION,
+    IDS_FLAGS_TABPOSE_NAME,
+    IDS_FLAGS_TABPOSE_DESCRIPTION,
     kOsMac,
 #if defined(OS_MACOSX)
     // The switch exists only on OS X.
@@ -60,14 +60,105 @@ const Experiment kExperiments[] = {
   },
   {
     "vertical-tabs",  // Do not change; see above.
-    IDS_LABS_SIDE_TABS_NAME,
-    IDS_LABS_SIDE_TABS_DESCRIPTION,
+    IDS_FLAGS_SIDE_TABS_NAME,
+    IDS_FLAGS_SIDE_TABS_DESCRIPTION,
     kOsWin,
     switches::kEnableVerticalTabs
+  },
+  {
+    "tabbed-options",  // Do not change; see above.
+    IDS_FLAGS_TABBED_OPTIONS_NAME,
+    IDS_FLAGS_TABBED_OPTIONS_DESCRIPTION,
+    kOsAll,
+    switches::kEnableTabbedOptions
+  },
+  {
+    "remoting",  // Do not change; see above.
+    IDS_FLAGS_REMOTING_NAME,
+#if defined(OS_WIN)
+    // Windows only supports host functionality at the moment.
+    IDS_FLAGS_REMOTING_HOST_DESCRIPTION,
+#elif defined(OS_LINUX)
+    // Linux only supports client functionality at the moment.
+    IDS_FLAGS_REMOTING_CLIENT_DESCRIPTION,
+#else
+    // On other platforms, this lab isn't available at all.
+    0,
+#endif
+    kOsWin | kOsLinux,
+    switches::kEnableRemoting
+  },
+  {
+    "disable-outdated-plugins",  // Do not change; see above.
+    IDS_FLAGS_DISABLE_OUTDATED_PLUGINS_NAME,
+    IDS_FLAGS_DISABLE_OUTDATED_PLUGINS_DESCRIPTION,
+    kOsAll,
+    switches::kDisableOutdatedPlugins
+  },
+  {
+    "xss-auditor",  // Do not change; see above.
+    IDS_FLAGS_XSS_AUDITOR_NAME,
+    IDS_FLAGS_XSS_AUDITOR_DESCRIPTION,
+    kOsAll,
+    switches::kEnableXSSAuditor
+  },
+  {
+    "background-webapps", // Do not change; see above
+    IDS_FLAGS_BACKGROUND_WEBAPPS_NAME,
+    IDS_FLAGS_BACKGROUND_WEBAPPS_DESCRIPTION,
+    kOsAll,
+    switches::kEnableBackgroundMode
+  },
+  {
+    "cloud-print-proxy", // Do not change; see above.
+    IDS_FLAGS_CLOUD_PRINT_PROXY_NAME,
+    IDS_FLAGS_CLOUD_PRINT_PROXY_DESCRIPTION,
+#if defined(GOOGLE_CHROME_BUILD)
+    // For a Chrome build, we know we have a PDF plug-in, and so we'll
+    // enable by platform as we get things working.
+    0,
+#else
+    // Otherwise, where we know it could be working if a viable PDF
+    // plug-in could be supplied, we'll keep the lab enabled.
+    kOsWin,
+#endif
+    switches::kEnableCloudPrintProxy
+  },
+  {
+    "match-preview",  // Do not change; see above.
+    IDS_FLAGS_INSTANT_NAME,
+    IDS_FLAGS_INSTANT_DESCRIPTION,
+    kOsMac,
+    switches::kEnableMatchPreview
+  },
+  // FIXME(scheib): Add Labs entry for accelerated Compositing, 
+  // or pull it and the strings in generated_resources.grd by Dec 2010
+  //{
+  //  "gpu-compositing", // Do not change; see above
+  //  IDS_FLAGS_ACCELERATED_COMPOSITING_NAME,
+  //  IDS_FLAGS_ACCELERATED_COMPOSITING_DESCRIPTION,
+  //  kOsAll,
+  //  switches::kDisableAcceleratedCompositing
+  //},
+  {
+    "gpu-canvas-2d", // Do not change; see above
+    IDS_FLAGS_ACCELERATED_CANVAS_2D_NAME,
+    IDS_FLAGS_ACCELERATED_CANVAS_2D_DESCRIPTION,
+    kOsWin | kOsLinux,
+    switches::kEnableAccelerated2dCanvas
   }
+  // FIXME(scheib): Add Labs entry for WebGL,
+  // or pull it and the strings in generated_resources.grd by Dec 2010
+  //{
+  //  "webgl", // Do not change; see above
+  //  IDS_FLAGS_WEBGL_NAME,
+  //  IDS_FLAGS_WEBGL_DESCRIPTION,
+  //  kOsAll,
+  //  switches::kDisableExperimentalWebGL
+  //}
 };
 
-// Extracts the list of enabled lab experiments from a profile and stores them
+// Extracts the list of enabled lab experiments from preferences and stores them
 // in a set.
 void GetEnabledLabs(const PrefService* prefs, std::set<std::string>* result) {
   const ListValue* enabled_experiments = prefs->GetList(
@@ -145,22 +236,22 @@ bool IsEnabled() {
 #if defined(OS_CHROMEOS)
   // ChromeOS uses a different mechanism for about:labs; integrated with their
   // dom ui options.
+  // TODO(thakis): Port about:labs to chromeos -- http://crbug.com/57634
   return false;
-#elif defined(GOOGLE_CHROME_BUILD)
-  // Don't enable this on the stable channel.
-  return !platform_util::GetVersionStringModifier().empty();
 #else
   return true;
 #endif
 }
 
-void ConvertLabsToSwitches(Profile* profile, CommandLine* command_line) {
-  // Do not activate labs features on the stable channel.
+void ConvertLabsToSwitches(PrefService* prefs, CommandLine* command_line) {
   if (!IsEnabled())
     return;
 
+  if (command_line->HasSwitch(switches::kNoLabs))
+    return;
+
   std::set<std::string> enabled_experiments;
-  GetSanitizedEnabledLabs(profile->GetPrefs(), &enabled_experiments);
+  GetSanitizedEnabledLabs(prefs, &enabled_experiments);
 
   std::map<std::string, const Experiment*> experiments;
   for (size_t i = 0; i < arraysize(kExperiments); ++i)
@@ -180,9 +271,9 @@ void ConvertLabsToSwitches(Profile* profile, CommandLine* command_line) {
   }
 }
 
-ListValue* GetLabsExperimentsData(Profile* profile) {
+ListValue* GetLabsExperimentsData(PrefService* prefs) {
   std::set<std::string> enabled_experiments;
-  GetSanitizedEnabledLabs(profile->GetPrefs(), &enabled_experiments);
+  GetSanitizedEnabledLabs(prefs, &enabled_experiments);
 
   int current_platform = GetCurrentPlatform();
 
@@ -214,18 +305,18 @@ bool IsRestartNeededToCommitChanges() {
 }
 
 void SetExperimentEnabled(
-    Profile* profile, const std::string& internal_name, bool enable) {
+    PrefService* prefs, const std::string& internal_name, bool enable) {
   needs_restart_ = true;
 
   std::set<std::string> enabled_experiments;
-  GetSanitizedEnabledLabs(profile->GetPrefs(), &enabled_experiments);
+  GetSanitizedEnabledLabs(prefs, &enabled_experiments);
 
   if (enable)
     enabled_experiments.insert(internal_name);
   else
     enabled_experiments.erase(internal_name);
 
-  SetEnabledLabs(profile->GetPrefs(), enabled_experiments);
+  SetEnabledLabs(prefs, enabled_experiments);
 }
 
 }  // namespace Labs

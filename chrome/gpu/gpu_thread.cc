@@ -26,6 +26,7 @@
 #endif
 
 #if defined(OS_LINUX)
+#include "app/x11_util.h"
 #include <gtk/gtk.h>
 #endif
 
@@ -57,7 +58,7 @@ GpuThread::GpuThread() {
     for (size_t i = 0; i < args.size(); ++i) {
       free(argv[i]);
     }
-    x11_util::SetX11ErrorHandlers();
+    x11_util::SetDefaultX11ErrorHandlers();
   }
 #endif
 }
@@ -86,44 +87,51 @@ void GpuThread::OnControlMessageReceived(const IPC::Message& msg) {
                         OnSynchronize)
     IPC_MESSAGE_HANDLER(GpuMsg_NewRenderWidgetHostView,
                         OnNewRenderWidgetHostView)
+    IPC_MESSAGE_HANDLER(GpuMsg_CollectGraphicsInfo,
+                        OnCollectGraphicsInfo)
+    IPC_MESSAGE_HANDLER(GpuMsg_Crash,
+                        OnCrash)
+    IPC_MESSAGE_HANDLER(GpuMsg_Hang,
+                        OnHang)
   IPC_END_MESSAGE_MAP_EX()
 }
 
 void GpuThread::OnEstablishChannel(int renderer_id) {
   scoped_refptr<GpuChannel> channel;
   IPC::ChannelHandle channel_handle;
+  GPUInfo gpu_info;
 
   // Fail to establish a channel if some implementation of GL cannot be
   // initialized.
   if (gfx::GLContext::InitializeOneOff()) {
-    GpuChannelMap::const_iterator iter = gpu_channels_.find(renderer_id);
-    if (iter == gpu_channels_.end()) {
-      channel = new GpuChannel(renderer_id);
-    } else {
-      channel = iter->second;
-    }
+    // Fail to establish channel if GPU stats cannot be retreived.
+    if (gpu_info_collector::CollectGraphicsInfo(&gpu_info)) {
+      GpuChannelMap::const_iterator iter = gpu_channels_.find(renderer_id);
+      if (iter == gpu_channels_.end()) {
+        channel = new GpuChannel(renderer_id);
+      } else {
+        channel = iter->second;
+      }
 
-    DCHECK(channel != NULL);
+      DCHECK(channel != NULL);
 
-    if (channel->Init()) {
-      gpu_channels_[renderer_id] = channel;
-    } else {
-      channel = NULL;
-    }
+      if (channel->Init()) {
+        gpu_channels_[renderer_id] = channel;
+      } else {
+        channel = NULL;
+      }
 
-    if (channel.get()) {
-      channel_handle.name = channel->GetChannelName();
+      if (channel.get()) {
+        channel_handle.name = channel->GetChannelName();
 #if defined(OS_POSIX)
-      // On POSIX, pass the renderer-side FD. Also mark it as auto-close so that
-      // it gets closed after it has been sent.
-      int renderer_fd = channel->DisownRendererFd();
-      channel_handle.socket = base::FileDescriptor(renderer_fd, true);
+        // On POSIX, pass the renderer-side FD. Also mark it as auto-close so
+        // that it gets closed after it has been sent.
+        int renderer_fd = channel->DisownRendererFd();
+        channel_handle.socket = base::FileDescriptor(renderer_fd, true);
 #endif
+      }
     }
   }
-
-  GPUInfo gpu_info;
-  gpu_info_collector::CollectGraphicsInfo(gpu_info);
 
   Send(new GpuHostMsg_ChannelEstablished(channel_handle, gpu_info));
 }
@@ -144,4 +152,26 @@ void GpuThread::OnNewRenderWidgetHostView(GpuNativeWindowHandle parent_window,
 #else
   NOTIMPLEMENTED();
 #endif
+}
+
+void GpuThread::OnCollectGraphicsInfo() {
+  // Fail to establish a channel if some implementation of GL cannot be
+  // initialized.
+  GPUInfo gpu_info;
+  if (gfx::GLContext::InitializeOneOff()) {
+    gpu_info_collector::CollectGraphicsInfo(&gpu_info);
+  }
+
+  Send(new GpuHostMsg_GraphicsInfoCollected(gpu_info));
+}
+
+void GpuThread::OnCrash() {
+  // Good bye, cruel world.
+  volatile int* it_s_the_end_of_the_world_as_we_know_it = NULL;
+  *it_s_the_end_of_the_world_as_we_know_it = 0xdead;
+}
+
+void GpuThread::OnHang() {
+  for (;;)
+    PlatformThread::Sleep(1000);
 }

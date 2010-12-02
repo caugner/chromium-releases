@@ -9,7 +9,6 @@ It supports several test URLs, as specified by the handlers in TestPageHandler.
 It defaults to living on localhost:8888.
 It can use https if you specify the flag --https=CERT where CERT is the path
 to a pem file containing the certificate and private key that should be used.
-To shut it down properly, visit localhost:8888/kill.
 """
 
 import base64
@@ -38,6 +37,9 @@ try:
 except ImportError:
   import md5
   _new_md5 = md5.new
+
+if sys.platform == 'win32':
+  import msvcrt
 
 SERVER_HTTP = 0
 SERVER_FTP = 1
@@ -105,7 +107,6 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       self.ServerAuthConnectHandler,
       self.DefaultConnectResponseHandler]
     self._get_handlers = [
-      self.KillHandler,
       self.NoCacheMaxAgeTimeHandler,
       self.NoCacheTimeHandler,
       self.CacheTimeHandler,
@@ -138,19 +139,17 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       self.MultipartHandler,
       self.DefaultResponseHandler]
     self._post_handlers = [
-      self.WriteFile,
       self.EchoTitleHandler,
       self.EchoAllHandler,
-      self.ChromiumSyncConfigureHandler,
       self.ChromiumSyncCommandHandler,
       self.EchoHandler] + self._get_handlers
     self._put_handlers = [
-      self.WriteFile,
       self.EchoTitleHandler,
       self.EchoAllHandler,
       self.EchoHandler] + self._get_handlers
 
     self._mime_types = {
+      'crx' : 'application/x-chrome-extension',
       'gif': 'image/gif',
       'jpeg' : 'image/jpeg',
       'jpg' : 'image/jpeg',
@@ -180,32 +179,13 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     """Returns the mime type for the specified file_name. So far it only looks
     at the file extension."""
 
-    (shortname, extension) = os.path.splitext(file_name)
+    (shortname, extension) = os.path.splitext(file_name.split("?")[0])
     if len(extension) == 0:
       # no extension.
       return self._default_mime_type
 
     # extension starts with a dot, so we need to remove it
     return self._mime_types.get(extension[1:], self._default_mime_type)
-
-  def KillHandler(self):
-    """This request handler kills the server, for use when we're done"
-    with the a particular test."""
-
-    if (self.path.find("kill") < 0):
-      return False
-
-    self.send_response(200)
-    self.send_header('Content-type', 'text/html')
-    self.send_header('Cache-Control', 'max-age=0')
-    self.end_headers()
-    if options.never_die:
-      self.wfile.write('I cannot die!! BWAHAHA')
-    else:
-      self.wfile.write('Goodbye cruel world!')
-      self.server.stop = True
-
-    return True
 
   def NoCacheMaxAgeTimeHandler(self):
     """This request handler yields a page with the title set to the current
@@ -484,32 +464,6 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     length = int(self.headers.getheader('content-length'))
     request = self.rfile.read(length)
     self.wfile.write(request)
-    return True
-
-  def WriteFile(self):
-    """This is handler dumps the content of POST/PUT request to a disk file
-    into the data_dir/dump. Sub-directories are not supported."""
-
-    prefix='/writefile/'
-    if not self.path.startswith(prefix):
-      return False
-
-    file_name = self.path[len(prefix):]
-
-    # do not allow fancy chars in file name
-    re.sub('[^a-zA-Z0-9_.-]+', '', file_name)
-    if len(file_name) and file_name[0] != '.':
-      path = os.path.join(self.server.data_dir, 'dump', file_name);
-      length = int(self.headers.getheader('content-length'))
-      request = self.rfile.read(length)
-      f = open(path, "wb")
-      f.write(request);
-      f.close()
-
-    self.send_response(200)
-    self.send_header('Content-type', 'text/html')
-    self.end_headers()
-    self.wfile.write('<html>%s</html>' % file_name)
     return True
 
   def EchoTitleHandler(self):
@@ -1026,29 +980,6 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     self.end_headers()
     return True
 
-  def ChromiumSyncConfigureHandler(self):
-    """Handle updating the configuration of the sync server.
-
-    The name and value pairs of the post payload will update the
-    configuration of the sync server.  Supported tuples are:
-      user_email,<email address> - Sets the email for the fake user account
-    """
-    test_name = "/chromiumsync/configure"
-    if not self._ShouldHandleRequest(test_name):
-      return False
-
-    length = int(self.headers.getheader('content-length'))
-    raw_request = self.rfile.read(length)
-    config = cgi.parse_qs(raw_request, keep_blank_values=1)
-
-    success = self._sync_handler.HandleConfigure(config)
-    if success:
-      self.send_response(200)
-    else:
-      self.send_response(500)
-    self.end_headers()
-    return True
-
   def ChromiumSyncCommandHandler(self):
     """Handle a chromiumsync command arriving via http.
 
@@ -1066,7 +997,7 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       import chromiumsync
       self.server._sync_handler = chromiumsync.TestServer()
     http_response, raw_reply = self.server._sync_handler.HandleCommand(
-        raw_request)
+        self.path, raw_request)
     self.send_response(http_response)
     self.end_headers()
     self.wfile.write(raw_reply)
@@ -1182,15 +1113,6 @@ class TestPageHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     self.wfile.write('Use <pre>%s?http://dest...</pre>' % redirect_name)
     self.wfile.write('</body></html>')
 
-def MakeDumpDir(data_dir):
-  """Create directory named 'dump' where uploaded data via HTTP POST/PUT
-  requests will be stored. If the directory already exists all files and
-  subdirectories will be deleted."""
-  dump_dir = os.path.join(data_dir, 'dump');
-  if os.path.isdir(dump_dir):
-    shutil.rmtree(dump_dir)
-  os.mkdir(dump_dir)
-
 def MakeDataDir():
   if options.data_dir:
     if not os.path.isdir(options.data_dir):
@@ -1257,17 +1179,9 @@ def main(options, args):
     server.file_root_url = options.file_root_url
     server._sync_handler = None
 
-    MakeDumpDir(server.data_dir)
-
   # means FTP Server
   else:
     my_data_dir = MakeDataDir()
-
-    def line_logger(msg):
-      if (msg.find("kill") >= 0):
-        server.stop = True
-        print 'shutting down server'
-        sys.exit(0)
 
     # Instantiate a dummy authorizer for managing 'virtual' users
     authorizer = pyftpdlib.ftpserver.DummyAuthorizer()
@@ -1281,7 +1195,6 @@ def main(options, args):
     # Instantiate FTP handler class
     ftp_handler = pyftpdlib.ftpserver.FTPHandler
     ftp_handler.authorizer = authorizer
-    pyftpdlib.ftpserver.logline = line_logger
 
     # Define a customized banner (string returned when client connects)
     ftp_handler.banner = ("pyftpdlib %s based ftpd ready." %
@@ -1291,6 +1204,17 @@ def main(options, args):
     address = ('127.0.0.1', port)
     server = pyftpdlib.ftpserver.FTPServer(address, ftp_handler)
     print 'FTP server started on port %d...' % port
+
+  # Notify the parent that we've started. (BaseServer subclasses
+  # bind their sockets on construction.)
+  if options.startup_pipe is not None:
+    if sys.platform == 'win32':
+      fd = msvcrt.open_osfhandle(options.startup_pipe, 0)
+    else:
+      fd = options.startup_pipe
+    startup_pipe = os.fdopen(fd, "w")
+    startup_pipe.write("READY")
+    startup_pipe.close()
 
   try:
     server.serve_forever()
@@ -1320,11 +1244,9 @@ if __name__ == '__main__':
                            'in the specified certificate file')
   option_parser.add_option('', '--file-root-url', default='/files/',
                            help='Specify a root URL for files served.')
-  option_parser.add_option('', '--never-die', default=False,
-                           action="store_true",
-                           help='Prevent the server from dying when visiting '
-                           'a /kill URL. Useful for manually running some '
-                           'tests.')
+  option_parser.add_option('', '--startup-pipe', type='int',
+                           dest='startup_pipe',
+                           help='File handle of pipe to parent process')
   options, args = option_parser.parse_args()
 
   sys.exit(main(options, args))

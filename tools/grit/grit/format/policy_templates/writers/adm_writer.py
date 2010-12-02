@@ -6,12 +6,12 @@
 from grit.format.policy_templates.writers import template_writer
 
 
-def GetWriter(info, messages):
+def GetWriter(config, messages):
   '''Factory method for creating AdmWriter objects.
   See the constructor of TemplateWriter for description of
   arguments.
   '''
-  return AdmWriter(info, messages)
+  return AdmWriter(['win'], config, messages)
 
 
 class AdmWriter(template_writer.TemplateWriter):
@@ -55,31 +55,28 @@ class AdmWriter(template_writer.TemplateWriter):
     self._PrintLine('SUPPORTED !!SUPPORTED_WINXPSP2')
     self._PrintLine('#endif', -1)
 
-  def WritePolicy(self, policy):
-    policy_type = policy['type']
-    policy_name = policy['name']
-    if policy_type == 'main':
-      self._PrintLine('VALUENAME "%s"' % policy_name )
-      self._PrintLine('VALUEON NUMERIC 1')
-      self._PrintLine('VALUEOFF NUMERIC 0')
-      return
+  def _WritePart(self, policy):
+    '''Writes the PART ... END PART section of a policy.
 
-    policy_part_name = policy_name + '_Part'
-    self._AddGuiString(policy_part_name, policy['caption'])
+    Args:
+      policy: The policy to write to the output.
+    '''
+    policy_part_name = policy['name'] + '_Part'
+    self._AddGuiString(policy_part_name, policy['label'])
 
-    self._PrintLine()
     # Print the PART ... END PART section:
-    self._PrintLine(
-        'PART !!%s  %s' % (policy_part_name, self.TYPE_TO_INPUT[policy_type]),
-        1)
-    if policy_type == 'list':
+    self._PrintLine()
+    adm_type = self.TYPE_TO_INPUT[policy['type']]
+    self._PrintLine('PART !!%s  %s' % (policy_part_name, adm_type), 1)
+    if policy['type'] == 'list':
       # Note that the following line causes FullArmor ADMX Migrator to create
       # corrupt ADMX files. Please use admx_writer to get ADMX files.
-      self._PrintLine('KEYNAME "%s\\%s"' % (self._key_name, policy_name))
+      self._PrintLine('KEYNAME "%s\\%s"' %
+                      (self.config['win_reg_key_name'], policy['name']))
       self._PrintLine('VALUEPREFIX ""')
     else:
-      self._PrintLine('VALUENAME "%s"' % policy_name)
-    if policy_type == 'enum':
+      self._PrintLine('VALUENAME "%s"' % policy['name'])
+    if policy['type'] == 'enum':
       self._PrintLine('ITEMLIST', 1)
       for item in policy['items']:
         self._PrintLine('NAME !!%s_DropDown VALUE NUMERIC %s' %
@@ -88,46 +85,65 @@ class AdmWriter(template_writer.TemplateWriter):
       self._PrintLine('END ITEMLIST', -1)
     self._PrintLine('END PART', -1)
 
-  def BeginPolicyGroup(self, group):
-    group_explain_name = group['name'] + '_Explain'
-    self._AddGuiString(group['name'] + '_Policy', group['caption'])
-    self._AddGuiString(group_explain_name, group['desc'])
-
-    self._PrintLine('POLICY !!%s_Policy' % group['name'], 1)
+  def WritePolicy(self, policy):
+    self._AddGuiString(policy['name'] + '_Policy', policy['caption'])
+    self._PrintLine('POLICY !!%s_Policy' % policy['name'], 1)
     self._WriteSupported()
-    self._PrintLine('EXPLAIN !!' + group_explain_name)
+    policy_explain_name = policy['name'] + '_Explain'
+    self._AddGuiString(policy_explain_name, policy['desc'])
+    self._PrintLine('EXPLAIN !!' + policy_explain_name)
 
-  def EndPolicyGroup(self):
+    if policy['type'] == 'main':
+      self._PrintLine('VALUENAME "%s"' % policy['name'])
+      self._PrintLine('VALUEON NUMERIC 1')
+      self._PrintLine('VALUEOFF NUMERIC 0')
+    else:
+      self._WritePart(policy)
+
     self._PrintLine('END POLICY', -1)
     self._PrintLine()
 
+  def BeginPolicyGroup(self, group):
+    self._open_category = len(group['policies']) > 1
+    # Open a category for the policies if there is more than one in the
+    # group.
+    if self._open_category:
+      category_name = group['name'] + '_Category'
+      self._AddGuiString(category_name, group['caption'])
+      self._PrintLine('CATEGORY !!' + category_name, 1)
+
+  def EndPolicyGroup(self):
+    if self._open_category:
+      self._PrintLine('END CATEGORY', -1)
+
   def BeginTemplate(self):
-    self._AddGuiString('SUPPORTED_WINXPSP2',
-                       self.messages['IDS_POLICY_WIN_SUPPORTED_WINXPSP2'])
-    self._PrintLine('CLASS MACHINE', 1)
-    if self.info['build'] == 'chrome':
-      self._AddGuiString('google', 'Google')
-      self._AddGuiString('googlechrome', 'Google Chrome')
-      self._PrintLine('CATEGORY !!google', 1)
-      self._PrintLine('CATEGORY !!googlechrome', 1)
-      self._key_name = 'Software\\Policies\\Google\\Google Chrome'
-    elif self.info['build'] == 'chromium':
-      self._AddGuiString('chromium', 'Chromium')
-      self._PrintLine('CATEGORY !!chromium', 1)
-      self._key_name = 'Software\\Policies\\Chromium'
-    self._PrintLine('KEYNAME "%s"' % self._key_name)
+    category_path = self.config['win_category_path']
+    self._AddGuiString(self.config['win_supported_os'],
+                       self.messages[self.config['win_supported_os_msg']])
+    self._PrintLine(
+        'CLASS ' + self.config['win_group_policy_class'].upper(),
+        1)
+    if self.config['build'] == 'chrome':
+      self._AddGuiString(category_path[0], 'Google')
+      self._AddGuiString(category_path[1], self.config['app_name'])
+      self._PrintLine('CATEGORY !!' + category_path[0], 1)
+      self._PrintLine('CATEGORY !!' + category_path[1], 1)
+    elif self.config['build'] == 'chromium':
+      self._AddGuiString(category_path[0], self.config['app_name'])
+      self._PrintLine('CATEGORY !!' + category_path[0], 1)
+    self._PrintLine('KEYNAME "%s"' % self.config['win_reg_key_name'])
     self._PrintLine()
 
   def EndTemplate(self):
-    if self.info['build'] == 'chrome':
+    if self.config['build'] == 'chrome':
       self._PrintLine('END CATEGORY', -1)
       self._PrintLine('END CATEGORY', -1)
       self._PrintLine('', -1)
-    elif self.info['build'] == 'chromium':
+    elif self.config['build'] == 'chromium':
       self._PrintLine('END CATEGORY', -1)
       self._PrintLine('', -1)
 
-  def Prepare(self):
+  def Init(self):
     self.policy_list = []
     self.str_list = ['[Strings]']
     self.indent = ''

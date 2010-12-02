@@ -72,12 +72,16 @@ class ShellIntegration {
   // which is deprecated. If |extension_app_id| is non-empty, an arguments
   // string is created using the kAppId=<id> flag. Otherwise, the kApp=<url> is
   // used.
-  // FIXME This function is dangerous, do not use!  You cannot treat
+  // NOTE: This function is dangerous, do not use!  You cannot treat
   // command lines as plain strings as there are metacharacters.
+  // TODO(evanm): remove it.
   static std::string GetCommandLineArgumentsCommon(const GURL& url,
       const string16& extension_app_id);
 
 #if defined(USE_X11)
+  // Returns filename of the desktop shortcut used to launch the browser.
+  static std::string GetDesktopName(base::Environment* env);
+
   static bool GetDesktopShortcutTemplate(base::Environment* env,
                                          std::string* output);
 

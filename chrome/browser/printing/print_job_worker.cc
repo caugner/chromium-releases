@@ -52,6 +52,8 @@ PrintJobWorker::PrintJobWorker(PrintJobWorkerOwner* owner)
       owner_(owner) {
   // The object is created in the IO thread.
   DCHECK_EQ(owner_->message_loop(), MessageLoop::current());
+
+  printing_context_.reset(PrintingContext::Create());
 }
 
 PrintJobWorker::~PrintJobWorker() {
@@ -75,22 +77,24 @@ void PrintJobWorker::GetSettings(bool ask_user_for_settings,
   // Recursive task processing is needed for the dialog in case it needs to be
   // destroyed by a task.
   MessageLoop::current()->SetNestableTasksAllowed(true);
-  printing_context_.SetUseOverlays(use_overlays);
+  printing_context_->set_use_overlays(use_overlays);
 
   if (ask_user_for_settings) {
-#if defined(OS_MACOSX)
-    ChromeThread::PostTask(
-        ChromeThread::UI, FROM_HERE,
+#if defined(OS_MACOSX) || defined(USE_X11)
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
         NewRunnableMethod(this, &PrintJobWorker::GetSettingsWithUI,
                           parent_view, document_page_count,
                           has_selection));
 #else
-    PrintingContext::Result result = printing_context_.AskUserForSettings(
-        parent_view, document_page_count, has_selection);
-    GetSettingsDone(result);
-#endif
+    printing_context_->AskUserForSettings(
+        parent_view,
+        document_page_count,
+        has_selection,
+        NewCallback(this, &PrintJobWorker::GetSettingsDone));
+#endif  // defined(OS_MACOSX) || defined(USE_X11)
   } else {
-    PrintingContext::Result result = printing_context_.UseDefaultSettings();
+    PrintingContext::Result result = printing_context_->UseDefaultSettings();
     GetSettingsDone(result);
   }
 }
@@ -106,39 +110,43 @@ void PrintJobWorker::GetSettingsDone(PrintingContext::Result result) {
   owner_->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
       owner_,
       &PrintJobWorkerOwner::GetSettingsDone,
-      printing_context_.settings(),
+      printing_context_->settings(),
       result));
 }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(USE_X11)
 void PrintJobWorker::GetSettingsWithUI(gfx::NativeView parent_view,
                                        int document_page_count,
                                        bool has_selection) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  PrintingContext::Result result = printing_context_.AskUserForSettings(
-      parent_view, document_page_count, has_selection);
+  printing_context_->AskUserForSettings(
+      parent_view,
+      document_page_count,
+      has_selection,
+      NewCallback(this, &PrintJobWorker::GetSettingsWithUIDone));
+}
+
+void PrintJobWorker::GetSettingsWithUIDone(PrintingContext::Result result) {
   message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
       this, &PrintJobWorker::GetSettingsDone, result));
 }
-#endif
+#endif  // defined(OS_MACOSX) || defined(USE_X11)
 
 void PrintJobWorker::StartPrinting(PrintedDocument* new_document) {
   DCHECK_EQ(message_loop(), MessageLoop::current());
   DCHECK_EQ(page_number_, PageNumber::npos());
   DCHECK_EQ(document_, new_document);
   DCHECK(document_.get());
-  DCHECK(new_document->settings().Equals(printing_context_.settings()));
-#if !defined(OS_MACOSX)
-  DCHECK(printing_context_.context());
-#endif
+  DCHECK(new_document->settings().Equals(printing_context_->settings()));
+
   if (!document_.get() || page_number_ != PageNumber::npos() ||
       document_ != new_document) {
     return;
   }
 
   PrintingContext::Result result =
-      printing_context_.NewDocument(document_->name());
+      printing_context_->NewDocument(document_->name());
   if (result != PrintingContext::OK) {
     OnFailure();
     return;
@@ -157,10 +165,8 @@ void PrintJobWorker::OnDocumentChanged(PrintedDocument* new_document) {
   DCHECK_EQ(message_loop(), MessageLoop::current());
   DCHECK_EQ(page_number_, PageNumber::npos());
   DCHECK(!new_document ||
-         new_document->settings().Equals(printing_context_.settings()));
-#if !defined(OS_MACOSX)
-  DCHECK(printing_context_.context());
-#endif
+         new_document->settings().Equals(printing_context_->settings()));
+
   if (page_number_ != PageNumber::npos())
     return;
 
@@ -174,11 +180,6 @@ void PrintJobWorker::OnNewPage() {
   }
   // message_loop() could return NULL when the print job is cancelled.
   DCHECK_EQ(message_loop(), MessageLoop::current());
-#if !defined(OS_MACOSX)
-  DCHECK(printing_context_.context());
-  if (!printing_context_.context())
-    return;
-#endif
 
   if (page_number_ == PageNumber::npos()) {
     // Find first page to print.
@@ -218,24 +219,21 @@ void PrintJobWorker::OnNewPage() {
 
 void PrintJobWorker::Cancel() {
   // This is the only function that can be called from any thread.
-  printing_context_.Cancel();
+  printing_context_->Cancel();
   // Cannot touch any member variable since we don't know in which thread
   // context we run.
 }
 
 void PrintJobWorker::DismissDialog() {
-  printing_context_.DismissDialog();
+  printing_context_->DismissDialog();
 }
 
 void PrintJobWorker::OnDocumentDone() {
   DCHECK_EQ(message_loop(), MessageLoop::current());
   DCHECK_EQ(page_number_, PageNumber::npos());
   DCHECK(document_.get());
-#if !defined(OS_MACOSX)
-  DCHECK(printing_context_.context());
-#endif
 
-  if (printing_context_.DocumentDone() != PrintingContext::OK) {
+  if (printing_context_->DocumentDone() != PrintingContext::OK) {
     OnFailure();
     return;
   }
@@ -255,9 +253,7 @@ void PrintJobWorker::OnDocumentDone() {
 void PrintJobWorker::SpoolPage(PrintedPage& page) {
   DCHECK_EQ(message_loop(), MessageLoop::current());
   DCHECK_NE(page_number_, PageNumber::npos());
-#if !defined(OS_MACOSX)
-  DCHECK(printing_context_.context());
-#endif
+
   // Signal everyone that the page is about to be printed.
   NotificationTask* task = new NotificationTask();
   task->Init(owner_,
@@ -267,20 +263,16 @@ void PrintJobWorker::SpoolPage(PrintedPage& page) {
   owner_->message_loop()->PostTask(FROM_HERE, task);
 
   // Preprocess.
-  if (printing_context_.NewPage() != PrintingContext::OK) {
+  if (printing_context_->NewPage() != PrintingContext::OK) {
     OnFailure();
     return;
   }
 
-#if defined(OS_MACOSX)
-  // Context is only valid between NewPage and PageDone, so we only check here.
-  DCHECK(printing_context_.context());
-#endif
   // Actual printing.
-  document_->RenderPrintedPage(page, printing_context_.context());
+  document_->RenderPrintedPage(page, printing_context_->context());
 
   // Postprocess.
-  if (printing_context_.PageDone() != PrintingContext::OK) {
+  if (printing_context_->PageDone() != PrintingContext::OK) {
     OnFailure();
     return;
   }

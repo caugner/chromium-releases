@@ -10,6 +10,8 @@
 
 #include "base/basictypes.h"
 
+class FilePath;
+
 namespace gfx {
 class Rect;
 }
@@ -26,6 +28,9 @@ class Emf {
   Emf();
   ~Emf();
 
+  // Initializes the Emf with the data in |src_buffer|. Returns true on success.
+  bool Init(const void* src_buffer, uint32 src_buffer_size);
+
   // Generates a virtual HDC that will record every GDI commands and compile it
   // in a EMF data stream.
   // hdc is used to setup the default DPI and color settings. hdc is optional.
@@ -33,8 +38,11 @@ class Emf {
   // optional.
   bool CreateDc(HDC sibling, const RECT* rect);
 
-  // Load a EMF data stream. buffer contains EMF data.
-  bool CreateFromData(const void* buffer, uint32 size);
+  // Similar to the above method but the metafile is backed by a file.
+  bool CreateFileBackedDc(HDC sibling, const RECT* rect, const FilePath& path);
+
+    // Load an EMF file.
+  bool CreateFromFile(const FilePath& metafile_path);
 
   // TODO(maruel): CreateFromFile(). If ever used. Maybe users would like to
   // have the ability to save web pages to an EMF file? Afterward, it is easy to

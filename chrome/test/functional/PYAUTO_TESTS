@@ -31,6 +31,8 @@
     'cookies',
     'crash_reporter',
     'downloads',
+    # 'find_in_page',  crashes during shutdown. crbug.com/58516
+    'execute_javascript',
     'history',
     'imports',
     'infobars',
@@ -38,7 +40,9 @@
     'omnibox',
     'passwords',
     'plugins',
+    # 'popups',  crbug.com/59208
     'prefs',
+    'search_engines',
     'special_tabs',
     'test_basic.SimpleTest.testCanOpenGoogle',
     'themes',
@@ -67,6 +71,7 @@
     # codesign tests should run *after* signing. crbug.com/50481
     '-codesign',
     '-content.ContentTest.testThreeWindows',  # crbug.com/47457
+    '-downloads.DownloadsTest.testSaveDangerousFile',  # crbug.com/57875
   ],
 
   'linux': [  # linux != chromeos
@@ -80,5 +85,29 @@
   'chromeos': [
     # you cannot resize browser window on chromeos
     '-browser.BrowserTest.testWindowResize',
+    # Importer tests are invalid on chromeos since chrome is the only browser
+    '-imports',
+
+    # crbug.com/42823
+    '-bookmark_bar.BookmarkBarTest.testBookmarkBarVisible',
+    # chrome/test/data/plugins dir missing in autotest pkg. crosbug.com/6855
+    '-browser.BrowserTest.testCanLoadFlash',
+    '-browser.BrowserTest.testFlashLoadsAfterKill',
+    '-browser.BrowserTest.testSingleFlashPluginProcess',
+    '-infobars.InfobarTest.testPluginCrashInfobar',
+    '-omnibox',  # http://crbug.com/44203
+    # crosbug.com/6856
+    '-prefs.PrefsTest.testNavigationStateOnSessionRestore',
+    '-prefs.PrefsTest.testSessionRestoreURLs',
+    '-prefs.PrefsTest.testSessionRestore',
+    '-translate.TranslateTest.testSessionRestore',
+    '-downloads.DownloadsTest.testNoUnsafeDownloadsOnRestart',
+    '-downloads.DownloadsTest.testZip',
+    '-downloads.DownloadsTest.testZipInIncognito',
+    '-downloads.DownloadsTest.testCrazyFilenames',
+    '-downloads.DownloadsTest.testBigZip',
+    '-downloads.DownloadsTest.testCancelDownload',
+    '-downloads.DownloadsTest.testPauseAndResume',
+    '-translate.TranslateTest.testDownloadsNotTranslated',
   ],
 }

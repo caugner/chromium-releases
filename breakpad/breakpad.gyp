@@ -47,6 +47,9 @@
         {
           'target_name': 'crash_inspector',
           'type': 'executable',
+          'variables': {
+            'mac_real_dsym': 1,
+          },
           'dependencies': [
             'breakpad_utilities',
           ],
@@ -67,6 +70,9 @@
           'target_name': 'crash_report_sender',
           'type': 'executable',
           'mac_bundle': 1,
+          'variables': {
+            'mac_real_dsym': 1,
+          },
           'include_dirs': [
             'src/common/mac',
           ],
@@ -301,7 +307,7 @@
             'src/common/linux/libcurl_wrapper.h',
             'src/common/linux/linux_libc_support.h',
             'src/common/linux/linux_syscall_support.h',
-            'src/common/linux/memory.h',
+            'src/common/memory.h',
             'src/common/string_conversion.cc',
             'src/common/string_conversion.h',
           ],
@@ -321,6 +327,30 @@
           ],
         },
         {
+          # Breakpad r693 uses some files from src/processor in unit tests.
+          'target_name': 'breakpad_processor_support',
+          'type': '<(library)',
+
+          'sources': [
+            'src/processor/basic_code_modules.cc',
+            'src/processor/basic_code_modules.h',
+            'src/processor/logging.cc',
+            'src/processor/logging.h',
+            'src/processor/minidump.cc',
+            'src/processor/minidump.h',
+            'src/processor/pathname_stripper.cc',
+            'src/processor/pathname_stripper.h',
+          ],
+
+          'include_dirs': [
+            'src',
+            'src/client',
+            'src/third_party/linux/include',
+            '..',
+            '.',
+          ],
+        },
+        {
           'target_name': 'breakpad_unittests',
           'type': 'executable',
           'dependencies': [
@@ -328,6 +358,7 @@
             '../testing/gtest.gyp:gtestmain',
             '../testing/gmock.gyp:gmock',
             'breakpad_client',
+            'breakpad_processor_support',
           ],
 
           'sources': [
@@ -339,7 +370,7 @@
             'src/client/linux/minidump_writer/minidump_writer_unittest.cc',
             'src/common/linux/file_id_unittest.cc',
             'src/common/linux/linux_libc_support_unittest.cc',
-            'src/common/linux/memory_unittest.cc',
+            'src/common/memory_unittest.cc',
           ],
 
           'include_dirs': [

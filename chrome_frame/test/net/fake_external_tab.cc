@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "base/path_service.h"
 #include "base/scoped_comptr_win.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -105,7 +106,8 @@ class SupplyProxyCredentials : public WindowObserver {
     HWND password_;
   };
 
-  virtual void OnWindowDetected(HWND hwnd, const std::string& caption);
+  virtual void OnWindowOpen(HWND hwnd);
+  virtual void OnWindowClose(HWND hwnd);
   static BOOL CALLBACK EnumChildren(HWND hwnd, LPARAM param);
 
  protected:
@@ -119,12 +121,9 @@ SupplyProxyCredentials::SupplyProxyCredentials(const char* username,
     : username_(username), password_(password) {
 }
 
-void SupplyProxyCredentials::OnWindowDetected(HWND hwnd,
-                                              const std::string& caption) {
-  // IE's dialog caption (en-US).
-  if (caption.compare("Windows Security") != 0)
-    return;
+void SupplyProxyCredentials::OnWindowClose(HWND hwnd) { }
 
+void SupplyProxyCredentials::OnWindowOpen(HWND hwnd) {
   DialogProps props = {0};
   ::EnumChildWindows(hwnd, EnumChildren, reinterpret_cast<LPARAM>(&props));
   DCHECK(::IsWindow(props.username_));
@@ -253,9 +252,9 @@ CFUrlRequestUnittestRunner::CFUrlRequestUnittestRunner(int argc, char** argv)
     : NetTestSuite(argc, argv),
       chrome_frame_html_("/chrome_frame", kChromeFrameHtml) {
   // Register the main thread by instantiating it, but don't call any methods.
-  main_thread_.reset(new ChromeThread(ChromeThread::UI,
-                                      MessageLoop::current()));
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  main_thread_.reset(new BrowserThread(BrowserThread::UI,
+                                       MessageLoop::current()));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   fake_chrome_.Initialize();
   pss_subclass_.reset(new ProcessSingletonSubclass(this));
   EXPECT_TRUE(pss_subclass_->Subclass(fake_chrome_.user_data()));
@@ -275,8 +274,8 @@ void CFUrlRequestUnittestRunner::StartChromeFrameInHostBrowser() {
 
   test_http_server_.reset(new test_server::SimpleWebServer(kTestServerPort));
   test_http_server_->AddResponse(&chrome_frame_html_);
-  std::wstring url(StringPrintf(L"http://localhost:%i/chrome_frame",
-                                kTestServerPort).c_str());
+  std::wstring url(base::StringPrintf(L"http://localhost:%i/chrome_frame",
+                                      kTestServerPort).c_str());
 
   // Launch IE.  This launches IE correctly on Vista too.
   ScopedHandle ie_process(chrome_frame_test::LaunchIE(url));
@@ -474,8 +473,7 @@ int main(int argc, char** argv) {
   WindowWatchdog watchdog;
   // See url_request_unittest.cc for these credentials.
   SupplyProxyCredentials credentials("user", "secret");
-  // Check for a dialog class ("#32770")
-  watchdog.AddObserver(&credentials, "#32770");
+  watchdog.AddObserver(&credentials, "Windows Security");
   testing::InitGoogleTest(&argc, argv);
   FilterDisabledTests();
   PluginService::EnableChromePlugins(false);

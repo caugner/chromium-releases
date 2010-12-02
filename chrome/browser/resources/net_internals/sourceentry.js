@@ -5,12 +5,11 @@
 /**
  * Each row in the filtered items list is backed by a SourceEntry. This
  * instance contains all of the data pertaining to that row, and notifies
- * its parent view (the RequestsView) whenever its data changes.
+ * its parent view (the EventsView) whenever its data changes.
  *
  * @constructor
  */
-function SourceEntry(parentView, id, maxPreviousSourceId) {
-  this.id_ = id;
+function SourceEntry(parentView, maxPreviousSourceId) {
   this.maxPreviousSourceId_ = maxPreviousSourceId;
   this.entries_ = [];
   this.parentView_ = parentView;
@@ -98,8 +97,6 @@ SourceEntry.prototype.onCheckboxToggled_ = function() {
 };
 
 SourceEntry.prototype.matchesFilter = function(filter) {
-  // TODO(eroman): Support more advanced filter syntax.
-
   // Safety check.
   if (this.row_ == null)
     return false;
@@ -109,10 +106,23 @@ SourceEntry.prototype.matchesFilter = function(filter) {
   if (filter.isInactive && this.isActive_)
     return false;
 
+  // Check source type, if needed.
+  if (filter.type) {
+    var sourceType = this.getSourceTypeString().toLowerCase();
+    if (filter.type.indexOf(sourceType) == -1)
+      return false;
+  }
+
+  // Check source ID, if needed.
+  if (filter.id) {
+    if (filter.id.indexOf(this.getSourceId() + '') == -1)
+      return false;
+  }
+
   if (filter.text == '')
     return true;
 
-  var filterText = filter.text.toLowerCase();
+  var filterText = filter.text;
   var entryText = PrintSourceEntriesAsText(this.entries_).toLowerCase();
 
   return entryText.indexOf(filterText) != -1;
@@ -218,6 +228,8 @@ SourceEntry.prototype.getDescription = function() {
     case LogSourceType.HOST_RESOLVER_IMPL_REQUEST:
     case LogSourceType.HOST_RESOLVER_IMPL_JOB:
       return e.params.host;
+    case LogSourceType.SPDY_SESSION:
+      return e.params.host + ' (' + e.params.proxy + ')';
   }
 
   return '';
@@ -253,7 +265,7 @@ SourceEntry.prototype.getSelectionCheckbox = function() {
 };
 
 SourceEntry.prototype.getSourceId = function() {
-  return this.id_;
+  return this.entries_[0].source.id;
 };
 
 /**

@@ -77,14 +77,15 @@ class WebPluginDelegateStub : public IPC::Channel::Listener,
                               bool success,
                               int notify_id);
 
+  void OnSetContentAreaFocus(bool has_focus);
 #if defined(OS_MACOSX)
   void OnSetWindowFocus(bool has_focus);
-  void OnSetContentAreaFocus(bool has_focus);
   void OnContainerHidden();
   void OnContainerShown(gfx::Rect window_frame, gfx::Rect view_frame,
                         bool has_focus);
   void OnWindowFrameChanged(const gfx::Rect& window_frame,
                             const gfx::Rect& view_frame);
+  void OnImeCompositionConfirmed(const string16& text);
 #endif
 
   void OnDidReceiveManualResponse(

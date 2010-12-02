@@ -30,9 +30,6 @@ struct FormData;
 class FormField;
 }  // namespace webkit_glue
 
-// TODO(jhawkins): Maybe this should be in a grd file?
-extern const char* kAutoFillLearnMoreUrl;
-
 // Manages saving and restoring the user's personal information entered into web
 // forms.
 class AutoFillManager : public RenderViewHostDelegate::AutoFill,
@@ -58,8 +55,6 @@ class AutoFillManager : public RenderViewHostDelegate::AutoFill,
                                       const webkit_glue::FormField& field);
   virtual bool FillAutoFillFormData(int query_id,
                                     const webkit_glue::FormData& form,
-                                    const string16& value,
-                                    const string16& label,
                                     int unique_id);
   virtual void ShowAutoFillDialog();
 
@@ -157,13 +152,6 @@ class AutoFillManager : public RenderViewHostDelegate::AutoFill,
                      AutoFillType type,
                      webkit_glue::FormField* field);
 
-  // Select matching data in the |field|. For now only fixes the cases of the
-  // wrong case, in the future should do extended matching (for example,
-  // Hawaii -> HI).
-  void FillSelectOneField(const AutoFillProfile* profile,
-                          AutoFillType type,
-                          webkit_glue::FormField* field);
-
   // Set |field| argument's value for phone number based on contents of the
   // |profile|.
   void FillPhoneNumberField(const AutoFillProfile* profile,
@@ -209,7 +197,8 @@ class AutoFillManager : public RenderViewHostDelegate::AutoFill,
   scoped_ptr<FormStructure> upload_form_structure_;
 
   // The InfoBar that asks for permission to store credit card information.
-  scoped_ptr<AutoFillCCInfoBarDelegate> cc_infobar_;
+  // Deletes itself when closed.
+  AutoFillCCInfoBarDelegate* cc_infobar_;
 
   friend class TestAutoFillManager;
   FRIEND_TEST_ALL_PREFIXES(AutoFillManagerTest, FillCreditCardForm);

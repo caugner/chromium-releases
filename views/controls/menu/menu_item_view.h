@@ -88,8 +88,8 @@ class MenuItemView : public View {
 
   // Overridden from View:
   virtual bool GetTooltipText(const gfx::Point& p, std::wstring* tooltip);
-  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
-  virtual bool GetAccessibleState(AccessibilityTypes::State* state);
+  virtual AccessibilityTypes::Role GetAccessibleRole();
+  virtual AccessibilityTypes::State GetAccessibleState();
 
   // Returns the preferred height of menu items. This is only valid when the
   // menu is about to be shown.
@@ -97,6 +97,11 @@ class MenuItemView : public View {
 
   // X-coordinate of where the label starts.
   static int label_start() { return label_start_; }
+
+  // Returns the accessible name to be used with screen readers. Mnemonics are
+  // removed and the menu item accelerator text is appended.
+  static std::wstring GetAccessibleNameForMenuItem(
+      const std::wstring& item_text, const std::wstring& accelerator_text);
 
   // Run methods. See description above class for details. Both Run methods take
   // a rectangle, which is used to position the menu. |has_mnemonics| indicates

@@ -11,6 +11,7 @@
 
 #include "app/surface/transport_dib.h"
 #include "base/file_path.h"
+#include "base/file_util_proxy.h"
 #include "base/ref_counted.h"
 #include "base/shared_memory.h"
 #include "base/time.h"
@@ -24,15 +25,16 @@
 #include "chrome/common/navigation_types.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/common/renderer_preferences.h"
+#include "chrome/common/serialized_script_value.h"
 #include "chrome/common/window_container_type.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_param_traits.h"
 #include "media/audio/audio_parameters.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileSystem.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebTextDirection.h"
 #include "webkit/glue/password_form.h"
 #include "webkit/glue/plugins/webplugin.h"
 #include "webkit/glue/resource_type.h"
+#include "webkit/glue/webaccessibility.h"
 #include "webkit/glue/webmenuitem.h"
 #include "webkit/glue/webpreferences.h"
 
@@ -63,6 +65,9 @@ struct ViewMsg_Navigate_Params {
     // Navigation type not categorized by the other types.
     NORMAL
   };
+
+  ViewMsg_Navigate_Params();
+  ~ViewMsg_Navigate_Params();
 
   // The page_id for this navigation, or -1 if it is a new navigation.  Back,
   // Forward, and Reload navigations should have a valid page_id.  If the load
@@ -110,6 +115,14 @@ struct ViewMsg_AudioStreamState_Params {
     kError
   };
 
+  ViewMsg_AudioStreamState_Params()
+      : state(kPlaying) {
+  }
+
+  explicit ViewMsg_AudioStreamState_Params(State s)
+      : state(s) {
+  }
+
   // Carries the current playback state.
   State state;
 };
@@ -123,8 +136,48 @@ struct ViewMsg_StopFinding_Params {
     kActivateSelection
   };
 
+  ViewMsg_StopFinding_Params()
+      : action(kClearSelection) {
+  }
+
   // The action that should be taken when the find is completed.
   Action action;
+};
+
+// The type of OSDD that the renderer is giving to the browser.
+struct ViewHostMsg_PageHasOSDD_Type {
+  enum Type {
+    // The Open Search Description URL was detected automatically.
+    AUTODETECTED_PROVIDER,
+
+    // The Open Search Description URL was given by Javascript.
+    EXPLICIT_PROVIDER,
+
+    // The Open Search Description URL was given by Javascript to be the new
+    // default search engine.
+    EXPLICIT_DEFAULT_PROVIDER
+  };
+
+  Type type;
+
+  ViewHostMsg_PageHasOSDD_Type() : type(AUTODETECTED_PROVIDER) {
+  }
+
+  explicit ViewHostMsg_PageHasOSDD_Type(Type t)
+      : type(t) {
+  }
+
+  static ViewHostMsg_PageHasOSDD_Type Autodetected() {
+    return ViewHostMsg_PageHasOSDD_Type(AUTODETECTED_PROVIDER);
+  }
+
+  static ViewHostMsg_PageHasOSDD_Type Explicit() {
+    return ViewHostMsg_PageHasOSDD_Type(EXPLICIT_PROVIDER);
+  }
+
+  static ViewHostMsg_PageHasOSDD_Type ExplicitDefault() {
+    return ViewHostMsg_PageHasOSDD_Type(EXPLICIT_DEFAULT_PROVIDER);
+  }
 };
 
 // The install state of the search provider (not installed, installed, default).
@@ -179,11 +232,18 @@ struct ViewHostMsg_GetSearchProviderInstallState_Params {
 // Parameters structure for ViewHostMsg_FrameNavigate, which has too many data
 // parameters to be reasonably put in a predefined IPC message.
 struct ViewHostMsg_FrameNavigate_Params {
+  ViewHostMsg_FrameNavigate_Params();
+  ~ViewHostMsg_FrameNavigate_Params();
+
   // Page ID of this navigation. The renderer creates a new unique page ID
   // anytime a new session history entry is created. This means you'll get new
   // page IDs for user actions, and the old page IDs will be reloaded when
   // iframes are loaded automatically.
   int32 page_id;
+
+  // The frame ID for this navigation. The frame ID uniquely identifies the
+  // frame the navigation happened in for a given renderer.
+  long long frame_id;
 
   // URL of the page being loaded.
   GURL url;
@@ -258,6 +318,9 @@ struct ViewHostMsg_UpdateRect_Flags {
 };
 
 struct ViewHostMsg_UpdateRect_Params {
+  ViewHostMsg_UpdateRect_Params();
+  ~ViewHostMsg_UpdateRect_Params();
+
   // The bitmap to be painted into the view at the locations specified by
   // update_rects.
   TransportDIB::Id bitmap;
@@ -308,6 +371,9 @@ struct ViewHostMsg_UpdateRect_Params {
 // Information on closing a tab. This is used both for ViewMsg_ClosePage, and
 // the corresponding ViewHostMsg_ClosePage_ACK.
 struct ViewMsg_ClosePage_Params {
+  ViewMsg_ClosePage_Params();
+  ~ViewMsg_ClosePage_Params();
+
   // The identifier of the RenderProcessHost for the currently closing view.
   //
   // These first two parameters are technically redundant since they are
@@ -343,6 +409,9 @@ struct ViewMsg_ClosePage_Params {
 
 // Parameters for a resource request.
 struct ViewHostMsg_Resource_Request {
+  ViewHostMsg_Resource_Request();
+  ~ViewHostMsg_Resource_Request();
+
   // The request method: GET, POST, etc.
   std::string method;
 
@@ -406,6 +475,9 @@ struct ViewHostMsg_Resource_Request {
 
 // Parameters for a render request.
 struct ViewMsg_Print_Params {
+  ViewMsg_Print_Params();
+  ~ViewMsg_Print_Params();
+
   // Physical size of the page, including non-printable margins,
   // in pixels according to dpi.
   gfx::Size page_size;
@@ -445,6 +517,9 @@ struct ViewMsg_Print_Params {
 };
 
 struct ViewMsg_PrintPage_Params {
+  ViewMsg_PrintPage_Params();
+  ~ViewMsg_PrintPage_Params();
+
   // Parameters to render the page as a printed page. It must always be the same
   // value for all the document.
   ViewMsg_Print_Params params;
@@ -455,6 +530,9 @@ struct ViewMsg_PrintPage_Params {
 };
 
 struct ViewMsg_PrintPages_Params {
+  ViewMsg_PrintPages_Params();
+  ~ViewMsg_PrintPages_Params();
+
   // Parameters to render the page as a printed page. It must always be the same
   // value for all the document.
   ViewMsg_Print_Params params;
@@ -465,6 +543,9 @@ struct ViewMsg_PrintPages_Params {
 
 // Parameters to describe a rendered page.
 struct ViewHostMsg_DidPrintPage_Params {
+  ViewHostMsg_DidPrintPage_Params();
+  ~ViewHostMsg_DidPrintPage_Params();
+
   // A shared memory handle to the EMF data. This data can be quite large so a
   // memory map needs to be used.
   base::SharedMemoryHandle metafile_data_handle;
@@ -493,6 +574,9 @@ struct ViewHostMsg_DidPrintPage_Params {
 
 // Parameters for creating an audio output stream.
 struct ViewHostMsg_Audio_CreateStream_Params {
+  ViewHostMsg_Audio_CreateStream_Params();
+  ~ViewHostMsg_Audio_CreateStream_Params();
+
   // Format request for the stream.
   AudioParameters params;
 
@@ -507,6 +591,9 @@ struct ViewHostMsg_Audio_CreateStream_Params {
 // Cocoa controls. The renderer sends us this message which we use to populate
 // the popup menu.
 struct ViewHostMsg_ShowPopup_Params {
+  ViewHostMsg_ShowPopup_Params();
+  ~ViewHostMsg_ShowPopup_Params();
+
   // Position on the screen.
   gfx::Rect bounds;
 
@@ -528,6 +615,9 @@ struct ViewHostMsg_ShowPopup_Params {
 
 // Parameters for the IPC message ViewHostMsg_ScriptedPrint
 struct ViewHostMsg_ScriptedPrint_Params {
+  ViewHostMsg_ScriptedPrint_Params();
+  ~ViewHostMsg_ScriptedPrint_Params();
+
   int routing_id;
   gfx::NativeViewId host_window_id;
   int cookie;
@@ -538,6 +628,9 @@ struct ViewHostMsg_ScriptedPrint_Params {
 
 // Signals a storage event.
 struct ViewMsg_DOMStorageEvent_Params {
+  ViewMsg_DOMStorageEvent_Params();
+  ~ViewMsg_DOMStorageEvent_Params();
+
   // The key that generated the storage event.  Null if clear() was called.
   NullableString16 key_;
 
@@ -559,6 +652,9 @@ struct ViewMsg_DOMStorageEvent_Params {
 
 // Used to open an indexed database.
 struct ViewHostMsg_IDBFactoryOpen_Params {
+  ViewHostMsg_IDBFactoryOpen_Params();
+  ~ViewHostMsg_IDBFactoryOpen_Params();
+
   // The routing ID of the view initiating the open.
   int32 routing_id_;
 
@@ -573,12 +669,15 @@ struct ViewHostMsg_IDBFactoryOpen_Params {
 
   // The description of the database.
   string16 description_;
+
+  // The maximum size of the database.
+  uint64 maximum_size_;
 };
 
 // Used to create an object store.
 struct ViewHostMsg_IDBDatabaseCreateObjectStore_Params {
-  // The response should have this id.
-  int32 response_id_;
+  ViewHostMsg_IDBDatabaseCreateObjectStore_Params();
+  ~ViewHostMsg_IDBDatabaseCreateObjectStore_Params();
 
   // The name of the object store.
   string16 name_;
@@ -589,14 +688,68 @@ struct ViewHostMsg_IDBDatabaseCreateObjectStore_Params {
   // Whether the object store created should have a key generator.
   bool auto_increment_;
 
+  // The transaction this is associated with.
+  int32 transaction_id_;
+
   // The database the object store belongs to.
   int32 idb_database_id_;
 };
 
-// Used to create an index.
-struct ViewHostMsg_IDBObjectStoreCreateIndex_Params {
+// Used to open both cursors and object cursors in IndexedDB.
+struct ViewHostMsg_IDBIndexOpenCursor_Params {
+  ViewHostMsg_IDBIndexOpenCursor_Params();
+  ~ViewHostMsg_IDBIndexOpenCursor_Params();
+
   // The response should have this id.
   int32 response_id_;
+
+  // The serialized left key.
+  IndexedDBKey left_key_;
+
+  // The serialized right key.
+  IndexedDBKey right_key_;
+
+  // The key flags.
+  int32 key_flags_;
+
+  // The direction of this cursor.
+  int32 direction_;
+
+  // The index the index belongs to.
+  int32 idb_index_id_;
+
+  // The transaction this request belongs to.
+  int transaction_id_;
+};
+
+// Used to set a value in an object store.
+struct ViewHostMsg_IDBObjectStorePut_Params {
+  ViewHostMsg_IDBObjectStorePut_Params();
+  ~ViewHostMsg_IDBObjectStorePut_Params();
+
+  // The object store's id.
+  int32 idb_object_store_id_;
+
+  // The id any response should contain.
+  int32 response_id_;
+
+  // The value to set.
+  SerializedScriptValue serialized_value_;
+
+  // The key to set it on (may not be "valid"/set in some cases).
+  IndexedDBKey key_;
+
+  // If it already exists, don't update (just return an error).
+  bool add_only_;
+
+  // The transaction it's associated with.
+  int transaction_id_;
+};
+
+// Used to create an index.
+struct ViewHostMsg_IDBObjectStoreCreateIndex_Params {
+  ViewHostMsg_IDBObjectStoreCreateIndex_Params();
+  ~ViewHostMsg_IDBObjectStoreCreateIndex_Params();
 
   // The name of the index.
   string16 name_;
@@ -607,33 +760,47 @@ struct ViewHostMsg_IDBObjectStoreCreateIndex_Params {
   // Whether the index created has unique keys.
   bool unique_;
 
+  // The transaction this is associated with.
+  int32 transaction_id_;
+
   // The object store the index belongs to.
   int32 idb_object_store_id_;
 };
 
 // Used to open an IndexedDB cursor.
 struct ViewHostMsg_IDBObjectStoreOpenCursor_Params {
+  ViewHostMsg_IDBObjectStoreOpenCursor_Params();
+  ~ViewHostMsg_IDBObjectStoreOpenCursor_Params();
+
   // The response should have this id.
   int32 response_id_;
+
   // The serialized left key.
   IndexedDBKey left_key_;
+
   // The serialized right key.
   IndexedDBKey right_key_;
+
   // The key flags.
   int32 flags_;
+
   // The direction of this cursor.
   int32 direction_;
-  // The object store the index belongs to.
+
+  // The object store the cursor belongs to.
   int32 idb_object_store_id_;
+
+  // The transaction this request belongs to.
+  int transaction_id_;
 };
 
 // Allows an extension to execute code in a tab.
 struct ViewMsg_ExecuteCode_Params {
   ViewMsg_ExecuteCode_Params();
   ViewMsg_ExecuteCode_Params(int request_id, const std::string& extension_id,
-                             const std::vector<URLPattern>& host_permissions,
                              bool is_javascript, const std::string& code,
                              bool all_frames);
+  ~ViewMsg_ExecuteCode_Params();
 
   // The extension API request id, for responding.
   int request_id;
@@ -641,10 +808,6 @@ struct ViewMsg_ExecuteCode_Params {
   // The ID of the requesting extension. To know which isolated world to
   // execute the code inside of.
   std::string extension_id;
-
-  // The host permissions of the requesting extension. So that we can check them
-  // right before injecting, to avoid any race conditions.
-  std::vector<URLPattern> host_permissions;
 
   // Whether the code is JavaScript or CSS.
   bool is_javascript;
@@ -658,6 +821,9 @@ struct ViewMsg_ExecuteCode_Params {
 
 // Parameters for the message that creates a worker thread.
 struct ViewHostMsg_CreateWorker_Params {
+  ViewHostMsg_CreateWorker_Params();
+  ~ViewHostMsg_CreateWorker_Params();
+
   // URL for the worker script.
   GURL url;
 
@@ -687,6 +853,9 @@ struct ViewHostMsg_CreateWorker_Params {
 
 // Parameters for the message that creates a desktop notification.
 struct ViewHostMsg_ShowNotification_Params {
+  ViewHostMsg_ShowNotification_Params();
+  ~ViewHostMsg_ShowNotification_Params();
+
   // URL which is the origin that created this notification.
   GURL origin;
 
@@ -714,6 +883,9 @@ struct ViewHostMsg_ShowNotification_Params {
 
 // Creates a new view via a control message since the view doesn't yet exist.
 struct ViewMsg_New_Params {
+  ViewMsg_New_Params();
+  ~ViewMsg_New_Params();
+
   // The parent window's id.
   gfx::NativeViewId parent_window;
 
@@ -734,6 +906,9 @@ struct ViewMsg_New_Params {
 };
 
 struct ViewHostMsg_CreateWindow_Params {
+  ViewHostMsg_CreateWindow_Params();
+  ~ViewHostMsg_CreateWindow_Params();
+
   // Routing ID of the view initiating the open.
   int opener_id;
 
@@ -767,6 +942,9 @@ struct ViewHostMsg_RunFileChooser_Params {
     Save,
   };
 
+  ViewHostMsg_RunFileChooser_Params();
+  ~ViewHostMsg_RunFileChooser_Params();
+
   Mode mode;
 
   // Title to be used for the dialog. This may be empty for the default title,
@@ -775,22 +953,37 @@ struct ViewHostMsg_RunFileChooser_Params {
 
   // Default file name to select in the dialog.
   FilePath default_file_name;
+
+  // A comma-separated MIME types such as "audio/*,text/plain", that is used
+  // to restrict selectable files to such types.
+  string16 accept_types;
 };
 
 struct ViewMsg_ExtensionRendererInfo {
+  ViewMsg_ExtensionRendererInfo();
+  ~ViewMsg_ExtensionRendererInfo();
+
   std::string id;
   ExtensionExtent web_extent;
   std::string name;
   GURL icon_url;
   Extension::Location location;
+  bool allowed_to_execute_script_everywhere;
+  std::vector<URLPattern> host_permissions;
 };
 
 struct ViewMsg_ExtensionsUpdated_Params {
+  ViewMsg_ExtensionsUpdated_Params();
+  ~ViewMsg_ExtensionsUpdated_Params();
+
   // Describes the installed extension apps and the URLs they cover.
   std::vector<ViewMsg_ExtensionRendererInfo> extensions;
 };
 
 struct ViewMsg_DeviceOrientationUpdated_Params {
+  ViewMsg_DeviceOrientationUpdated_Params();
+  ~ViewMsg_DeviceOrientationUpdated_Params();
+
   // These fields have the same meaning as in device_orientation::Orientation.
   bool can_provide_alpha;
   double alpha;
@@ -802,6 +995,9 @@ struct ViewMsg_DeviceOrientationUpdated_Params {
 
 // Parameters structure for ViewHostMsg_ExtensionRequest.
 struct ViewHostMsg_DomMessage_Params {
+  ViewHostMsg_DomMessage_Params();
+  ~ViewHostMsg_DomMessage_Params();
+
   // Message name.
   std::string name;
 
@@ -821,42 +1017,32 @@ struct ViewHostMsg_DomMessage_Params {
   bool user_gesture;
 };
 
-struct ViewHostMsg_OpenFileSystemRequest_Params {
-  // The routing ID of the view initiating the request.
-  int routing_id;
+struct ViewHostMsg_AccessibilityNotification_Params {
+  enum NotificationType {
+    // The node checked state has changed.
+    NOTIFICATION_TYPE_CHECK_STATE_CHANGED,
 
-  // The response should have this id.
-  int request_id;
+    // The node tree structure has changed.
+    NOTIFICATION_TYPE_CHILDREN_CHANGED,
 
-  // The origin doing the initiating.
-  GURL origin_url;
+    // The node in focus has changed.
+    NOTIFICATION_TYPE_FOCUS_CHANGED,
 
-  // The requested FileSystem type.
-  WebKit::WebFileSystem::Type type;
+    // The document node has loaded.
+    NOTIFICATION_TYPE_LOAD_COMPLETE,
 
-  // Indicates how much storage space (in bytes) the caller expects to need.
-  int64 requested_size;
-};
+    // The node value has changed.
+    NOTIFICATION_TYPE_VALUE_CHANGED,
 
-struct ViewMsg_FileSystem_DidReadDirectory_Params {
-  // The response should have this id.
-  int request_id;
-
-  // TODO(kinuko): replace this with file_util_proxy's entry structure
-  // once it's defined.
-  struct Entry {
-    // Name of the entry.
-    FilePath name;
-
-    // Indicates if the entry is directory or not.
-    bool is_directory;
+    // The text cursor or selection changed.
+    NOTIFICATION_TYPE_SELECTED_TEXT_CHANGED,
   };
 
-  // A vector of directory entries.
-  std::vector<Entry> entries;
+  // Type of notification.
+  NotificationType notification_type;
 
-  // Indicates if there will be more entries.
-  bool has_more;
+  // The accessibility node tree.
+  webkit_glue::WebAccessibility acc_obj;
 };
 
 namespace IPC {
@@ -883,6 +1069,14 @@ struct ParamTraits<ViewMsg_AudioStreamState_Params> {
 template <>
 struct ParamTraits<ViewMsg_StopFinding_Params> {
   typedef ViewMsg_StopFinding_Params param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* p);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<ViewHostMsg_PageHasOSDD_Type> {
+  typedef ViewHostMsg_PageHasOSDD_Type param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* p);
   static void Log(const param_type& p, std::string* l);
@@ -1009,6 +1203,22 @@ struct ParamTraits<ViewHostMsg_IDBDatabaseCreateObjectStore_Params> {
 };
 
 template <>
+struct ParamTraits<ViewHostMsg_IDBIndexOpenCursor_Params> {
+  typedef ViewHostMsg_IDBIndexOpenCursor_Params param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* p);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<ViewHostMsg_IDBObjectStorePut_Params> {
+  typedef ViewHostMsg_IDBObjectStorePut_Params param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* p);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
 struct ParamTraits<ViewHostMsg_IDBObjectStoreCreateIndex_Params> {
   typedef ViewHostMsg_IDBObjectStoreCreateIndex_Params param_type;
   static void Write(Message* m, const param_type& p);
@@ -1105,24 +1315,16 @@ struct ParamTraits<ViewHostMsg_DomMessage_Params> {
 };
 
 template <>
-struct ParamTraits<ViewHostMsg_OpenFileSystemRequest_Params> {
-  typedef ViewHostMsg_OpenFileSystemRequest_Params param_type;
+struct ParamTraits<base::file_util_proxy::Entry> {
+  typedef base::file_util_proxy::Entry param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* p);
   static void Log(const param_type& p, std::string* l);
 };
 
 template <>
-struct ParamTraits<ViewMsg_FileSystem_DidReadDirectory_Params> {
-  typedef ViewMsg_FileSystem_DidReadDirectory_Params param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* p);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct ParamTraits<ViewMsg_FileSystem_DidReadDirectory_Params::Entry> {
-  typedef ViewMsg_FileSystem_DidReadDirectory_Params::Entry param_type;
+struct ParamTraits<ViewHostMsg_AccessibilityNotification_Params> {
+  typedef ViewHostMsg_AccessibilityNotification_Params param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* p);
   static void Log(const param_type& p, std::string* l);

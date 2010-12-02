@@ -22,7 +22,6 @@
 #include "chrome/renderer/renderer_webidbfactory_impl.h"
 #include "chrome/renderer/renderer_webstoragenamespace_impl.h"
 #include "chrome/renderer/visitedlink_slave.h"
-#include "chrome/renderer/webgles2context_impl.h"
 #include "chrome/renderer/webgraphicscontext3d_command_buffer_impl.h"
 #include "chrome/renderer/websharedworkerrepository_impl.h"
 #include "googleurl/src/gurl.h"
@@ -128,12 +127,10 @@ class RendererWebKitClientImpl::SandboxSupport
 
 RendererWebKitClientImpl::RendererWebKitClientImpl()
     : clipboard_(new webkit_glue::WebClipboardImpl),
-      file_utilities_(new RendererWebKitClientImpl::FileUtilities),
       mime_registry_(new RendererWebKitClientImpl::MimeRegistry),
       sandbox_support_(new RendererWebKitClientImpl::SandboxSupport),
       sudden_termination_disables_(0),
       shared_worker_repository_(new WebSharedWorkerRepositoryImpl) {
-  file_utilities_->set_sandbox_enabled(sandboxEnabled());
 }
 
 RendererWebKitClientImpl::~RendererWebKitClientImpl() {
@@ -150,6 +147,10 @@ WebKit::WebMimeRegistry* RendererWebKitClientImpl::mimeRegistry() {
 }
 
 WebKit::WebFileUtilities* RendererWebKitClientImpl::fileUtilities() {
+  if (!file_utilities_.get()) {
+    file_utilities_.reset(new FileUtilities);
+    file_utilities_->set_sandbox_enabled(sandboxEnabled());
+  }
   return file_utilities_.get();
 }
 
@@ -503,15 +504,6 @@ RendererWebKitClientImpl::createGraphicsContext3D() {
     return NULL;
 #endif
   }
-}
-
-WebKit::WebGLES2Context*
-RendererWebKitClientImpl::createGLES2Context() {
-#if defined(ENABLE_GPU)
-    return new WebGLES2ContextImpl();
-#else
-    return NULL;
-#endif
 }
 
 //------------------------------------------------------------------------------

@@ -8,8 +8,8 @@
 
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/version_loader.h"
 #include "chrome/browser/chromeos/status/status_area_host.h"
+#include "chrome/browser/chromeos/version_loader.h"
 #include "views/controls/button/button.h"
 #include "views/view.h"
 
@@ -63,9 +63,12 @@ class BackgroundView : public views::View,
 
   // Creates a window containing an instance of WizardContentsView as the root
   // view. The caller is responsible for showing (and closing) the returned
-  // widget. The BackgroundView is set in |view|.
-  static views::Widget* CreateWindowContainingView(const gfx::Rect& bounds,
-                                                   BackgroundView** view);
+  // widget. The BackgroundView is set in |view|. If background_url is non
+  // empty, the content page of the url is displayed as a background.
+  static views::Widget* CreateWindowContainingView(
+      const gfx::Rect& bounds,
+      const GURL& background_url,
+      BackgroundView** view);
 
   // Toggles status area visibility.
   void SetStatusAreaVisible(bool visible);
@@ -93,6 +96,9 @@ class BackgroundView : public views::View,
 
   // Tells if screen saver is enabled.
   bool ScreenSaverEnabled();
+
+  // Tells that owner has been changed.
+  void OnOwnerChanged();
 
  protected:
   // Overridden from views::View:
@@ -159,6 +165,8 @@ class BackgroundView : public views::View,
   // TODO(sky): nuke this when the wm knows when chrome has painted.
   bool did_paint_;
 
+  // NOTE: |delegate_| is assigned to NULL when the owner is changed. See
+  // 'OnOwnerChanged()' for more info.
   Delegate *delegate_;
 
   // DOMView for rendering a webpage as a background.

@@ -30,21 +30,22 @@ class BoundNetLog;
 class ClientSocketHandle;
 class HttpNetworkSession;
 class SpdySession;
+class SpdySettingsStorage;
 
 // This is a very simple pool for open SpdySessions.
 // TODO(mbelshe): Make this production ready.
 class SpdySessionPool
-    : public base::RefCounted<SpdySessionPool>,
-      public NetworkChangeNotifier::Observer,
+    : public NetworkChangeNotifier::Observer,
       public SSLConfigService::Observer {
  public:
   explicit SpdySessionPool(SSLConfigService* ssl_config_service);
+  virtual ~SpdySessionPool();
 
   // Either returns an existing SpdySession or creates a new SpdySession for
   // use.
   scoped_refptr<SpdySession> Get(
       const HostPortProxyPair& host_port_proxy_pair,
-      HttpNetworkSession* session,
+      SpdySettingsStorage* spdy_settings,
       const BoundNetLog& net_log);
 
   // Set the maximum concurrent sessions per domain.
@@ -65,7 +66,7 @@ class SpdySessionPool
   // Returns an error on failure, and |spdy_session| will be NULL.
   net::Error GetSpdySessionFromSocket(
       const HostPortProxyPair& host_port_proxy_pair,
-      HttpNetworkSession* session,
+      SpdySettingsStorage* spdy_settings,
       ClientSocketHandle* connection,
       const BoundNetLog& net_log,
       int certificate_error_code,
@@ -100,15 +101,12 @@ class SpdySessionPool
   virtual void OnSSLConfigChanged();
 
  private:
-  friend class base::RefCounted<SpdySessionPool>;
   friend class SpdySessionPoolPeer;  // For testing.
   friend class SpdyNetworkTransactionTest;  // For testing.
   FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest, WindowUpdateOverflow);
 
   typedef std::list<scoped_refptr<SpdySession> > SpdySessionList;
   typedef std::map<HostPortProxyPair, SpdySessionList*> SpdySessionsMap;
-
-  virtual ~SpdySessionPool();
 
   // Helper functions for manipulating the lists.
   SpdySessionList* AddSessionList(

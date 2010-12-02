@@ -123,22 +123,19 @@ TEST(AudioUtilTest, FoldChannels_s32) {
   EXPECT_EQ(0, expected_test);
 }
 
-// This mimics 1 second of audio at 48000 samples per second.
-// Running the unittest will produce timing.
-TEST(AudioUtilTest, DISABLED_FoldChannels_s16_benchmark) {
-  const int kBufferSize = 1024 * 6;
-  // Test AdjustVolume() on 16 bit samples.
-  for (int i = 0; i < 48000; ++i) {
-    int16 samples_s16[kBufferSize];
-    for (int j = 0; j < kBufferSize; ++j)
-      samples_s16[j] = j;
-
-    bool result_s16 = media::FoldChannels(samples_s16, sizeof(samples_s16),
-                                          6,  // channels.
-                                          sizeof(samples_s16[0]),
-                                          0.5f);
-    EXPECT_EQ(true, result_s16);
-  }
+// Fold 7.1
+TEST(AudioUtilTest, FoldChannels71_s16) {
+  // Test FoldChannels() on 16 bit samples.
+  int16 samples_s16[8] = { 1, 3, 12, 7, 13, 17, 30, 40 };
+  int16 expected_s16[2] = { static_cast<int16>(12 * .707 + 1),
+                            static_cast<int16>(12 * .707 + 3) };
+  bool result_s16 = media::FoldChannels(samples_s16, sizeof(samples_s16),
+                                        8,  // channels.
+                                        sizeof(samples_s16[0]),
+                                        1.00f);
+  EXPECT_EQ(true, result_s16);
+  int expected_test = memcmp(samples_s16, expected_s16, sizeof(expected_s16));
+  EXPECT_EQ(0, expected_test);
 }
 
 }  // namespace media

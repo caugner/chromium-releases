@@ -13,6 +13,7 @@
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "chrome/browser/chromeos/login/view_screen.h"
 #include "chrome/browser/chromeos/login/wizard_screen.h"
+#include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
@@ -41,6 +42,7 @@ class Rect;
 namespace views {
 class Views;
 class Widget;
+class WidgetGtk;
 }
 
 // Class that manages control flow between wizard screens. Wizard controller
@@ -64,6 +66,9 @@ class WizardController : public chromeos::ScreenObserver,
 
   // Returns device registration completion status, i.e. second part of OOBE.
   static bool IsDeviceRegistered();
+
+  // Returns true if valid registration URL is defined.
+  static bool IsRegisterScreenDefined();
 
   // Marks device registered. i.e. second part of OOBE is completed.
   static void MarkDeviceRegistered();
@@ -128,6 +133,9 @@ class WizardController : public chromeos::ScreenObserver,
   // Returns partner startup customization document owned by WizardController.
   const chromeos::StartupCustomizationDocument* GetCustomization() const;
 
+  // If being at register screen proceeds to the next one.
+  void SkipRegistration();
+
   // Registers OOBE preferences.
   static void RegisterPrefs(PrefService* local_state);
 
@@ -162,6 +170,16 @@ class WizardController : public chromeos::ScreenObserver,
   void OnRegistrationSkipped();
   void OnOOBECompleted();
 
+  // Creates wizard screen window with the specified |bounds|.
+  // If |initial_show| initial animation (window & background) is shown.
+  // Otherwise only window is animated.
+  views::WidgetGtk* CreateScreenWindow(const gfx::Rect& bounds,
+                                       bool initial_show);
+
+  // Returns bounds for the wizard screen host window in screen coordinates.
+  // Calculates bounds using screen_bounds_.
+  gfx::Rect GetWizardScreenBounds(int screen_width, int screen_height) const;
+
   // Switches from one screen to another.
   void SetCurrentScreen(WizardScreen* screen);
 
@@ -194,6 +212,9 @@ class WizardController : public chromeos::ScreenObserver,
   // Contents view.
   views::View* contents_;
 
+  // Used to calculate position of the wizard screen.
+  gfx::Rect screen_bounds_;
+
   // Screens.
   scoped_ptr<chromeos::NetworkScreen> network_screen_;
   scoped_ptr<chromeos::LoginScreen> login_screen_;
@@ -220,6 +241,9 @@ class WizardController : public chromeos::ScreenObserver,
   // login screen.
   bool is_test_mode_;
 
+  // Value of the screen name that WizardController was started with.
+  std::string first_screen_name_;
+
   // NULL by default - controller itself is observer. Mock could be assigned.
   ScreenObserver* observer_;
 
@@ -234,6 +258,7 @@ class WizardController : public chromeos::ScreenObserver,
 
   FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, ControlFlowErrorNetwork);
   FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, ControlFlowErrorUpdate);
+  FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, ControlFlowEulaDeclined);
   FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest,
                            ControlFlowLanguageOnLogin);
   FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest,

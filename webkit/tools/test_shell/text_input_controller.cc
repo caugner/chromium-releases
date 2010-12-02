@@ -1,19 +1,26 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/tools/test_shell/text_input_controller.h"
 
 #include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRange.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/tools/test_shell/test_shell.h"
 
+using WebKit::WebBindings;
 using WebKit::WebFrame;
 using WebKit::WebRange;
+using WebKit::WebRect;
 using WebKit::WebString;
+using WebKit::WebVector;
 
 TestShell* TextInputController::shell_ = NULL;
 
@@ -140,7 +147,8 @@ void TextInputController::markedRange(
   WebRange range = main_frame->markedRange();
 
   std::string range_str;
-  SStringPrintf(&range_str, "%d,%d", range.startOffset(), range.endOffset());
+  base::SStringPrintf(&range_str, "%d,%d", range.startOffset(),
+                      range.endOffset());
   result->Set(range_str);
 }
 
@@ -155,14 +163,33 @@ void TextInputController::selectedRange(
   WebRange range = main_frame->selectionRange();
 
   std::string range_str;
-  SStringPrintf(&range_str, "%d,%d", range.startOffset(), range.endOffset());
+  base::SStringPrintf(&range_str, "%d,%d", range.startOffset(),
+                      range.endOffset());
   result->Set(range_str);
 }
 
 void TextInputController::firstRectForCharacterRange(
     const CppArgumentList& args, CppVariant* result) {
-  NOTIMPLEMENTED();
   result->SetNull();
+
+  WebFrame* main_frame = GetMainFrame();
+  if (!main_frame)
+    return;
+
+  if (args.size() < 2 || !args[0].isNumber() || !args[1].isNumber())
+    return;
+
+  WebRect rect;
+  if (!main_frame->firstRectForCharacterRange(
+      args[0].ToInt32(), args[1].ToInt32(), rect))
+    return;
+
+  WebVector<int> intArray(static_cast<size_t>(4));
+  intArray[0] = rect.x;
+  intArray[1] = rect.y;
+  intArray[2] = rect.width;
+  intArray[3] = rect.height;
+  result->Set(WebBindings::makeIntArray(intArray));
 }
 
 void TextInputController::characterIndexForPoint(

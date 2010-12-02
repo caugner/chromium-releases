@@ -12,7 +12,7 @@
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
 #include "chrome/browser/geolocation/geolocation_dispatcher_host.h"
-#include "chrome/browser/geolocation/location_arbitrator.h"
+#include "chrome/browser/geolocation/geolocation_provider.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
@@ -206,6 +206,23 @@ GeolocationInfoBarQueueController::~GeolocationInfoBarQueueController() {
 void GeolocationInfoBarQueueController::CreateInfoBarRequest(
     int render_process_id, int render_view_id, int bridge_id,
     const GURL& requesting_frame, const GURL& embedder) {
+  // This makes sure that no duplicates are added to
+  // |pending_infobar_requests_| as an artificial permission request may
+  // already exist in the queue as per
+  // GeolocationPermissionContext::StartUpdatingRequested
+  // See http://crbug.com/51899 for more details.
+  // TODO(joth): Once we have CLIENT_BASED_GEOLOCATION and
+  // WTF_USE_PREEMPT_GEOLOCATION_PERMISSION set in WebKit we should be able to
+  // just use a DCHECK to check if a duplicate is attempting to be added.
+  PendingInfoBarRequests::iterator i = pending_infobar_requests_.begin();
+  while (i != pending_infobar_requests_.end()) {
+    if (i->Equals(render_process_id, render_view_id, bridge_id)) {
+      // The request already exists.
+      DCHECK(i->IsForPair(requesting_frame, embedder));
+      return;
+    }
+    ++i;
+  }
   PendingInfoBarRequest pending_infobar_request;
   pending_infobar_request.render_process_id = render_process_id;
   pending_infobar_request.render_view_id = render_view_id;
@@ -230,7 +247,7 @@ void GeolocationInfoBarQueueController::CancelInfoBarRequest(
 
 void GeolocationInfoBarQueueController::OnInfoBarClosed(
     int render_process_id, int render_view_id, int bridge_id) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   for (PendingInfoBarRequests::iterator i = pending_infobar_requests_.begin();
        i != pending_infobar_requests_.end(); ++i) {
     if (i->Equals(render_process_id, render_view_id, bridge_id)) {
@@ -244,7 +261,7 @@ void GeolocationInfoBarQueueController::OnInfoBarClosed(
 void GeolocationInfoBarQueueController::OnPermissionSet(
     int render_process_id, int render_view_id, int bridge_id,
     const GURL& requesting_frame, const GURL& embedder, bool allowed) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Persist the permission.
   ContentSetting content_setting =
       allowed ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK;
@@ -333,15 +350,15 @@ GeolocationPermissionContext::~GeolocationPermissionContext() {
 void GeolocationPermissionContext::RequestGeolocationPermission(
     int render_process_id, int render_view_id, int bridge_id,
     const GURL& requesting_frame) {
-  if (!ChromeThread::CurrentlyOn(ChromeThread::UI)) {
-    ChromeThread::PostTask(
-        ChromeThread::UI, FROM_HERE,
+  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
         NewRunnableMethod(this,
             &GeolocationPermissionContext::RequestGeolocationPermission,
             render_process_id, render_view_id, bridge_id, requesting_frame));
     return;
   }
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   ExtensionsService* extensions = profile_->GetExtensionsService();
   if (extensions) {
@@ -403,23 +420,22 @@ void GeolocationPermissionContext::CancelGeolocationPermissionRequest(
   CancelPendingInfoBarRequest(render_process_id, render_view_id, bridge_id);
 }
 
-GeolocationArbitrator* GeolocationPermissionContext::StartUpdatingRequested(
+void GeolocationPermissionContext::StartUpdatingRequested(
     int render_process_id, int render_view_id, int bridge_id,
     const GURL& requesting_frame) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // Note we cannot store the arbitrator as a member as it is not thread safe.
-  GeolocationArbitrator* arbitrator = GeolocationArbitrator::GetInstance();
+  GeolocationProvider* provider = GeolocationProvider::GetInstance();
 
   // WebKit will not request permission until it has received a valid
   // location, but the google network location provider will not give a
   // valid location until the user has granted permission. So we cut the Gordian
   // Knot by reusing the the 'start updating' request to also trigger
   // a 'permission request' should the provider still be awaiting permission.
-  if (!arbitrator->HasPermissionBeenGranted()) {
+  if (!provider->HasPermissionBeenGranted()) {
     RequestGeolocationPermission(render_process_id, render_view_id, bridge_id,
                                  requesting_frame);
   }
-  return arbitrator;
 }
 
 void GeolocationPermissionContext::StopUpdatingRequested(
@@ -430,7 +446,7 @@ void GeolocationPermissionContext::StopUpdatingRequested(
 void GeolocationPermissionContext::NotifyPermissionSet(
     int render_process_id, int render_view_id, int bridge_id,
     const GURL& requesting_frame, bool allowed) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   TabContents* tab_contents =
       tab_util::GetTabContentsByID(render_process_id, render_view_id);
@@ -449,8 +465,8 @@ void GeolocationPermissionContext::NotifyPermissionSet(
       new ViewMsg_Geolocation_PermissionSet(render_view_id, bridge_id,
           allowed));
   if (allowed) {
-    ChromeThread::PostTask(
-        ChromeThread::IO, FROM_HERE,
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
         NewRunnableMethod(this,
             &GeolocationPermissionContext::NotifyArbitratorPermissionGranted,
             requesting_frame));
@@ -459,21 +475,21 @@ void GeolocationPermissionContext::NotifyPermissionSet(
 
 void GeolocationPermissionContext::NotifyArbitratorPermissionGranted(
     const GURL& requesting_frame) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
-  GeolocationArbitrator::GetInstance()->OnPermissionGranted(requesting_frame);
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  GeolocationProvider::GetInstance()->OnPermissionGranted(requesting_frame);
 }
 
 void GeolocationPermissionContext::CancelPendingInfoBarRequest(
     int render_process_id, int render_view_id, int bridge_id) {
-  if (!ChromeThread::CurrentlyOn(ChromeThread::UI)) {
-    ChromeThread::PostTask(
-        ChromeThread::UI, FROM_HERE,
+  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
         NewRunnableMethod(this,
             &GeolocationPermissionContext::CancelPendingInfoBarRequest,
             render_process_id, render_view_id, bridge_id));
      return;
   }
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   geolocation_infobar_queue_controller_->CancelInfoBarRequest(
       render_process_id, render_view_id, bridge_id);
 }

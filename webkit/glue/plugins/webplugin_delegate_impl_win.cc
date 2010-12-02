@@ -16,7 +16,9 @@
 #include "base/scoped_ptr.h"
 #include "base/stats_counters.h"
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/win_util.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
@@ -265,7 +267,10 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
       user_gesture_msg_factory_(this),
       handle_event_depth_(0),
       mouse_hook_(NULL),
-      first_set_window_call_(true) {
+      first_set_window_call_(true),
+      plugin_has_focus_(false),
+      has_webkit_focus_(false),
+      containing_view_has_focus_(true) {
   memset(&window_, 0, sizeof(window_));
 
   const WebPluginInfo& plugin_info = instance_->plugin_lib()->plugin_info();
@@ -1015,6 +1020,8 @@ void WebPluginDelegateImpl::WindowlessPaint(HDC hdc,
   damage_rect_win.right  = damage_rect_win.left + damage_rect.width();
   damage_rect_win.bottom = damage_rect_win.top + damage_rect.height();
 
+  // Save away the old HDC as this could be a nested invocation.
+  void* old_dc = window_.window;
   window_.window = hdc;
 
   NPEvent paint_event;
@@ -1025,6 +1032,7 @@ void WebPluginDelegateImpl::WindowlessPaint(HDC hdc,
   static StatsRate plugin_paint("Plugin.Paint");
   StatsScope<StatsRate> scope(plugin_paint);
   instance()->NPP_HandleEvent(&paint_event);
+  window_.window = old_dc;
 }
 
 void WebPluginDelegateImpl::WindowlessSetWindow() {
@@ -1051,7 +1059,7 @@ void WebPluginDelegateImpl::WindowlessSetWindow() {
   DCHECK(err == NPERR_NO_ERROR);
 }
 
-void WebPluginDelegateImpl::SetFocus(bool focused) {
+bool WebPluginDelegateImpl::PlatformSetPluginHasFocus(bool focused) {
   DCHECK(instance()->windowless());
 
   NPEvent focus_event;
@@ -1060,6 +1068,7 @@ void WebPluginDelegateImpl::SetFocus(bool focused) {
   focus_event.lParam = 0;
 
   instance()->NPP_HandleEvent(&focus_event);
+  return true;
 }
 
 static bool NPEventFromWebMouseEvent(const WebMouseEvent& event,
@@ -1190,7 +1199,7 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
       parent_thread_id_ = GetWindowThreadProcessId(parent_, NULL);
     HKL parent_layout = GetKeyboardLayout(parent_thread_id_);
     if (keyboard_layout_ != parent_layout) {
-      std::wstring layout_name(StringPrintf(L"%08x", parent_layout));
+      std::wstring layout_name(base::StringPrintf(L"%08x", parent_layout));
       LoadKeyboardLayout(layout_name.c_str(), KLF_ACTIVATE);
       keyboard_layout_ = parent_layout;
     }

@@ -39,12 +39,14 @@ bool InitializeGLBindings(GLImplementation implementation) {
 
   switch (implementation) {
     case kGLImplementationOSMesaGL: {
-      FilePath exe_path;
-      if (!PathService::Get(base::DIR_EXE, &exe_path))
+      FilePath module_path;
+      if (!PathService::Get(base::DIR_MODULE, &module_path)) {
+        LOG(ERROR) << "PathService::Get failed.";
         return false;
+      }
 
       base::NativeLibrary library = base::LoadNativeLibrary(
-          exe_path.Append("libosmesa.so"));
+          module_path.Append("libosmesa.so"));
       if (!library) {
         DLOG(INFO) << "libosmesa.so not found";
         return false;
@@ -54,6 +56,11 @@ bool InitializeGLBindings(GLImplementation implementation) {
           reinterpret_cast<GLGetProcAddressProc>(
               base::GetFunctionPointerFromNativeLibrary(
                   library, "OSMesaGetProcAddress"));
+      if (!get_proc_address) {
+        DLOG(ERROR) << "OSMesaGetProcAddress not found.";
+        base::UnloadNativeLibrary(library);
+        return false;
+      }
 
       SetGLGetProcAddressProc(get_proc_address);
       AddGLNativeLibrary(library);
@@ -67,7 +74,7 @@ bool InitializeGLBindings(GLImplementation implementation) {
       base::NativeLibrary library = base::LoadNativeLibrary(
           FilePath("libGL.so.1"));
       if (!library) {
-        DLOG(INFO) << "libGL.so.1 not found.";
+        LOG(ERROR) << "libGL.so.1 not found.";
         return false;
       }
 
@@ -75,6 +82,11 @@ bool InitializeGLBindings(GLImplementation implementation) {
           reinterpret_cast<GLGetProcAddressProc>(
               base::GetFunctionPointerFromNativeLibrary(
                   library, "glXGetProcAddress"));
+      if (!get_proc_address) {
+        LOG(ERROR) << "glxGetProcAddress not found.";
+        base::UnloadNativeLibrary(library);
+        return false;
+      }
 
       SetGLGetProcAddressProc(get_proc_address);
       AddGLNativeLibrary(library);
@@ -85,10 +97,18 @@ bool InitializeGLBindings(GLImplementation implementation) {
       break;
     }
     case kGLImplementationEGLGLES2: {
+      base::NativeLibrary gles_library = base::LoadNativeLibrary(
+          FilePath("libGLESv2.so"));
+      if (!gles_library) {
+        DLOG(ERROR) << "libGLESv2.so not found";
+        return false;
+      }
+
       base::NativeLibrary egl_library = base::LoadNativeLibrary(
           FilePath("libEGL.so"));
       if (!egl_library) {
-        DLOG(INFO) << "libEGL.so not found";
+        DLOG(ERROR) << "libEGL.so not found";
+        base::UnloadNativeLibrary(gles_library);
         return false;
       }
 
@@ -96,12 +116,10 @@ bool InitializeGLBindings(GLImplementation implementation) {
           reinterpret_cast<GLGetProcAddressProc>(
               base::GetFunctionPointerFromNativeLibrary(
                   egl_library, "eglGetProcAddress"));
-
-      base::NativeLibrary gles_library = base::LoadNativeLibrary(
-          FilePath("libGLESv2.so"));
-      if (!gles_library) {
+      if (!get_proc_address) {
+        LOG(ERROR) << "eglGetProcAddress not found.";
         base::UnloadNativeLibrary(egl_library);
-        DLOG(INFO) << "libGLESv2.so not found";
+        base::UnloadNativeLibrary(gles_library);
         return false;
       }
 

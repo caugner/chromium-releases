@@ -4,6 +4,27 @@
 
 #include "chrome/test/live_sync/live_bookmarks_sync_test.h"
 
+IN_PROC_BROWSER_TEST_F(SingleClientLiveBookmarksSyncTest, OfflineToOnline) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  DisableNetwork(GetProfile(0));
+
+  BookmarkModel* bm = GetBookmarkModel(0);
+  BookmarkModelVerifier* v = verifier_helper();
+  const BookmarkNode* top = v->AddGroup(bm, bm->other_node(), 0, L"top");
+  v->SetTitle(bm, top, L"title");
+
+  EXPECT_FALSE(GetClient(0)->AwaitSyncCycleCompletion("Offline state change."));
+  EXPECT_EQ(ProfileSyncService::Status::OFFLINE_UNSYNCED,
+            GetClient(0)->GetStatus().summary);
+
+  EnableNetwork(GetProfile(0));
+  EXPECT_TRUE(GetClient(0)->AwaitSyncCycleCompletion("Commit changes."));
+  EXPECT_EQ(ProfileSyncService::Status::READY,
+            GetClient(0)->GetStatus().summary);
+
+  v->ExpectMatch(bm);
+}
+
 IN_PROC_BROWSER_TEST_F(SingleClientLiveBookmarksSyncTest, Sanity) {
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
   BookmarkModel* bm = GetBookmarkModel(0);
@@ -110,17 +131,4 @@ IN_PROC_BROWSER_TEST_F(SingleClientLiveBookmarksSyncTest, Sanity) {
   ASSERT_TRUE(GetClient(0)->AwaitSyncCycleCompletion(
       "Move after addition of bookmarks."));
   v->ExpectMatch(bm);
-}
-
-// Connects a client with no bookmarks to a cloud account. As a natural
-// consequence of shutdown, this will encode the BookmarkModel as JSON to the
-// 'Bookmarks' file.  This is mostly useful to verify server state.
-// DISABLED because it should be; we use this as a utility more than a test.
-IN_PROC_BROWSER_TEST_F(SingleClientLiveBookmarksSyncTest, DISABLED_GetUpdates) {
-  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-
-  EXPECT_TRUE(GetClient(0)->ServiceIsPushingChanges());
-  ProfileSyncService::Status status(GetService(0)->QueryDetailedSyncStatus());
-  EXPECT_EQ(status.summary, ProfileSyncService::Status::READY);
-  EXPECT_EQ(status.unsynced_count, 0);
 }

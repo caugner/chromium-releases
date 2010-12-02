@@ -42,9 +42,9 @@ class BaseTool(object):
 
   def __init__(self):
     # If we have a testing.tmp directory, we didn't cleanup last time.
-    if os.path.exists(self.TMP_DIR):
-      shutil.rmtree(self.TMP_DIR)
-    os.mkdir(self.TMP_DIR)
+    if os.path.exists(BaseTool.TMP_DIR):
+      shutil.rmtree(BaseTool.TMP_DIR)
+    os.mkdir(BaseTool.TMP_DIR)
 
     self.option_parser_hooks = []
 
@@ -207,6 +207,16 @@ class BaseTool(object):
     logging.info("elapsed time: %02d:%02d:%02d" % (hours, minutes, seconds))
     return retcode
 
+  def Run(self, args, module):
+    MODULES_TO_SANITY_CHECK = ["base"]
+
+    # TODO(timurrrr): this is a temporary workaround for http://crbug.com/47844
+    if self.ToolName() == "tsan" and common.IsMac():
+      MODULES_TO_SANITY_CHECK = []
+
+    check_sanity = module in MODULES_TO_SANITY_CHECK
+    return self.Main(args, check_sanity)
+
 
 class ValgrindTool(BaseTool):
   """Abstract class for running Valgrind tools.
@@ -215,7 +225,7 @@ class ValgrindTool(BaseTool):
   ExtendOptionParser() for tool-specific stuff.
   """
   def __init__(self):
-    BaseTool.__init__(self)
+    super(ValgrindTool, self).__init__()
     self.RegisterOptionParserHook(ValgrindTool.ExtendOptionParser)
 
   def UseXML(self):
@@ -423,7 +433,7 @@ class ValgrindTool(BaseTool):
     os.putenv("BROWSER_WRAPPER", indirect_fname)
     logging.info('export BROWSER_WRAPPER=' + indirect_fname)
 
-  def CreateAnalyzer(self, filenames):
+  def CreateAnalyzer(self):
     raise NotImplementedError, "This method should be implemented " \
                                "in the tool-specific subclass"
 
@@ -476,7 +486,7 @@ class Memcheck(ValgrindTool):
   """
 
   def __init__(self):
-    ValgrindTool.__init__(self)
+    super(Memcheck, self).__init__()
     self.RegisterOptionParserHook(Memcheck.ExtendOptionParser)
 
   def ToolName(self):
@@ -523,9 +533,6 @@ class PinTool(BaseTool):
   Always subclass this and implement ToolSpecificFlags() and
   ExtendOptionParser() for tool-specific stuff.
   """
-  def __init__(self):
-    BaseTool.__init__(self)
-
   def PrepareForTest(self):
     pass
 
@@ -569,6 +576,7 @@ class ThreadSanitizerBase(object):
                "ThreadSanitizer"
 
   def __init__(self):
+    super(ThreadSanitizerBase, self).__init__()
     self.RegisterOptionParserHook(ThreadSanitizerBase.ExtendOptionParser)
 
   def ToolName(self):
@@ -646,10 +654,6 @@ class ThreadSanitizerBase(object):
     return ret
 
 class ThreadSanitizerPosix(ThreadSanitizerBase, ValgrindTool):
-  def __init__(self):
-    ValgrindTool.__init__(self)
-    ThreadSanitizerBase.__init__(self)
-
   def ToolSpecificFlags(self):
     proc = ThreadSanitizerBase.ToolSpecificFlags(self)
     # The -v flag is needed for printing the list of used suppressions and
@@ -669,9 +673,9 @@ class ThreadSanitizerPosix(ThreadSanitizerBase, ValgrindTool):
     return ret
 
 class ThreadSanitizerWindows(ThreadSanitizerBase, PinTool):
+
   def __init__(self):
-    PinTool.__init__(self)
-    ThreadSanitizerBase.__init__(self)
+    super(ThreadSanitizerWindows, self).__init__()
     self.RegisterOptionParserHook(ThreadSanitizerWindows.ExtendOptionParser)
 
   def ExtendOptionParser(self, parser):
@@ -719,7 +723,7 @@ class DrMemory(BaseTool):
   """
 
   def __init__(self):
-    BaseTool.__init__(self)
+    super(DrMemory, self).__init__()
     self.RegisterOptionParserHook(DrMemory.ExtendOptionParser)
 
   def ToolName(self):
@@ -775,6 +779,133 @@ class DrMemory(BaseTool):
     return ret
 
 
+# RaceVerifier support. See
+# http://code.google.com/p/data-race-test/wiki/RaceVerifier for more details.
+
+class ThreadSanitizerRV1Analyzer(tsan_analyze.TsanAnalyzer):
+  """ TsanAnalyzer that saves race reports to a file. """
+
+  TMP_FILE = "rvlog.tmp"
+
+  def __init__(self, source_dir, use_gdb):
+    super(ThreadSanitizerRV1Analyzer, self).__init__(source_dir, use_gdb)
+    self.out = open(self.TMP_FILE, "w")
+
+  def Report(self, files, check_sanity=False):
+    reports = self.GetReports(files)
+    for report in reports:
+      print >>self.out, report
+    if len(reports) > 0:
+      logging.info("RaceVerifier pass 1 of 2, found %i reports" % len(reports))
+      return -1
+    return 0
+
+  def CloseOutputFile(self):
+    self.out.close()
+
+
+class ThreadSanitizerRV1Mixin(object):
+  """RaceVerifier first pass.
+
+  Runs ThreadSanitizer as usual, but hides race reports and collects them in a
+  temporary file"""
+
+  def __init__(self):
+    super(ThreadSanitizerRV1Mixin, self).__init__()
+    self.RegisterOptionParserHook(ThreadSanitizerRV1Mixin.ExtendOptionParser)
+
+  def ExtendOptionParser(self, parser):
+    parser.set_defaults(hybrid="yes")
+
+  def CreateAnalyzer(self):
+    use_gdb = common.IsMac()
+    self.analyzer = ThreadSanitizerRV1Analyzer(self._source_dir, use_gdb)
+    return self.analyzer
+
+  def Cleanup(self):
+    super(ThreadSanitizerRV1Mixin, self).Cleanup()
+    self.analyzer.CloseOutputFile()
+
+class ThreadSanitizerRV2Mixin(object):
+  """RaceVerifier second pass."""
+
+  def __init__(self):
+    super(ThreadSanitizerRV2Mixin, self).__init__()
+    self.RegisterOptionParserHook(ThreadSanitizerRV2Mixin.ExtendOptionParser)
+
+  def ExtendOptionParser(self, parser):
+    parser.add_option("", "--race-verifier-sleep-ms",
+                            dest="race_verifier_sleep_ms", default=10,
+                            help="duration of RaceVerifier delays")
+
+  def ToolSpecificFlags(self):
+    proc = super(ThreadSanitizerRV2Mixin, self).ToolSpecificFlags()
+    proc += ['--race-verifier=%s' % ThreadSanitizerRV1Analyzer.TMP_FILE,
+             '--race-verifier-sleep-ms=%d' %
+             int(self._options.race_verifier_sleep_ms)]
+    return proc
+
+  def Cleanup(self):
+    super(ThreadSanitizerRV2Mixin, self).Cleanup()
+    os.unlink(ThreadSanitizerRV1Analyzer.TMP_FILE)
+
+
+class ThreadSanitizerRV1Posix(ThreadSanitizerRV1Mixin, ThreadSanitizerPosix):
+  pass
+
+class ThreadSanitizerRV2Posix(ThreadSanitizerRV2Mixin, ThreadSanitizerPosix):
+  pass
+
+class ThreadSanitizerRV1Windows(ThreadSanitizerRV1Mixin,
+                                ThreadSanitizerWindows):
+  pass
+
+class ThreadSanitizerRV2Windows(ThreadSanitizerRV2Mixin,
+                                ThreadSanitizerWindows):
+  pass
+
+class RaceVerifier(object):
+  """Runs tests under RaceVerifier/Valgrind."""
+
+  MORE_INFO_URL = "http://code.google.com/p/data-race-test/wiki/RaceVerifier"
+
+  def RV1Factory(self):
+    if common.IsWindows():
+      return ThreadSanitizerRV1Windows()
+    else:
+      return ThreadSanitizerRV1Posix()
+
+  def RV2Factory(self):
+    if common.IsWindows():
+      return ThreadSanitizerRV2Windows()
+    else:
+      return ThreadSanitizerRV2Posix()
+
+  def ToolName(self):
+    return "tsan"
+
+  def Main(self, args, check_sanity):
+    logging.info("Running a TSan + RaceVerifier test. For more information, " +
+                 "see " + self.MORE_INFO_URL)
+    cmd1 = self.RV1Factory()
+    ret = cmd1.Main(args, check_sanity)
+    # Verify race reports, if there are any.
+    if ret == -1:
+      logging.info("Starting pass 2 of 2. Running the same binary in " +
+                   "RaceVerifier mode to confirm possible race reports.")
+      logging.info("For more information, see " + self.MORE_INFO_URL)
+      cmd2 = self.RV2Factory()
+      ret = cmd2.Main(args, check_sanity)
+    else:
+      logging.info("No reports, skipping RaceVerifier second pass")
+    logging.info("Please see " + self.MORE_INFO_URL + " for more information " +
+                 "on RaceVerifier")
+    return ret
+
+  def Run(self, args, module):
+   return self.Main(args, False)
+
+
 class ToolFactory:
   def Create(self, tool_name):
     if tool_name == "memcheck" and not common.IsWine():
@@ -783,12 +914,13 @@ class ToolFactory:
       return Memcheck()
     if tool_name == "tsan":
       if common.IsWindows():
-        logging.info("WARNING: ThreadSanitizer on Windows is experimental.")
         return ThreadSanitizerWindows()
       else:
         return ThreadSanitizerPosix()
     if tool_name == "drmemory":
       return DrMemory()
+    if tool_name == "tsan_rv":
+      return RaceVerifier()
     try:
       platform_name = common.PlatformNames()[0]
     except common.NotImplementedError:
@@ -796,32 +928,9 @@ class ToolFactory:
     raise RuntimeError, "Unknown tool (tool=%s, platform=%s)" % (tool_name,
                                                                  platform_name)
 
-def RunTool(argv, module):
-  # TODO(timurrrr): customize optparse instead
-  tool_name = "memcheck"
-  args = argv[1:]
-  for arg in args:
-    if arg.startswith("--tool="):
-      tool_name = arg[7:]
-      args.remove(arg)
-      break
+def CreateTool(tool):
+  return ToolFactory().Create(tool)
 
-  tool = ToolFactory().Create(tool_name)
-  MODULES_TO_SANITY_CHECK = ["base"]
-
-  # TODO(timurrrr): this is a temporary workaround for http://crbug.com/47844
-  if tool_name == "tsan" and common.IsMac():
-    MODULES_TO_SANITY_CHECK = []
-
-  check_sanity = module in MODULES_TO_SANITY_CHECK
-  return tool.Main(args, check_sanity)
-
-if __name__ == "__main__":
-  if sys.argv.count("-v") > 0 or sys.argv.count("--verbose") > 0:
-    logging_utils.config_root(logging.DEBUG)
-  else:
-    logging_utils.config_root()
-  # TODO(timurrrr): valgrind tools may use -v/--verbose as well
-
-  ret = RunTool(sys.argv)
-  sys.exit(ret)
+if __name__ == '__main__':
+  logging.error(sys.argv[0] + " can not be run from command line")
+  sys.exit(1)

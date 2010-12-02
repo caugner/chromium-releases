@@ -27,14 +27,18 @@ class DiagnosticErrorDelegate : public ErrorDelegate {
 
   virtual int OnError(int error, Connection* connection,
                       Statement* stmt) {
-    NOTREACHED() << "sqlite error " << error << ": " <<
-        connection->GetErrorMessage();
+    NOTREACHED() << "sqlite error " << error
+                 << ", errno " << connection->GetLastErrno()
+                 << ": " << connection->GetErrorMessage();
     RecordErrorInHistogram(error);
     return error;
   }
 
  private:
   static void RecordErrorInHistogram(int error) {
+    // Trim off the extended error codes.
+    error &= 0xff;
+
     // The histogram values from sqlite result codes go currently from 1 to
     // 26 currently but 50 gives them room to grow.
     UMA_HISTOGRAM_ENUMERATION(UniqueT::name(), error, 50);

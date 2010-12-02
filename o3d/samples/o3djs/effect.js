@@ -409,16 +409,23 @@ o3djs.effect.getLanguage = function() {
  * @param {boolean} specular Whether to include stuff for diffuse
  *     calculations.
  * @param {boolean} bumpSampler Whether there is a bump sampler.
+ * @param {boolean} skinning Whether this mesh has a skin.
  * @return {string} The code for the declarations.
  */
 o3djs.effect.buildAttributeDecls =
-    function(material, diffuse, specular, bumpSampler) {
+    function(material, diffuse, specular, bumpSampler, skinning) {
   var str = o3djs.effect.BEGIN_IN_STRUCT +
             o3djs.effect.ATTRIBUTE + o3djs.effect.FLOAT4 + ' ' + 'position' +
             o3djs.effect.semanticSuffix('POSITION') + ';\n';
   if (diffuse || specular) {
     str += o3djs.effect.ATTRIBUTE + o3djs.effect.FLOAT3 + ' ' + 'normal' +
     o3djs.effect.semanticSuffix('NORMAL') + ';\n';
+  }
+  if (skinning) {
+    str += o3djs.effect.ATTRIBUTE + o3djs.effect.FLOAT4 + ' influenceWeights' +
+        o3djs.effect.semanticSuffix('BLENDWEIGHT') + ';\n';
+    str += o3djs.effect.ATTRIBUTE + o3djs.effect.FLOAT4 + ' influenceIndices' +
+        o3djs.effect.semanticSuffix('BLENDINDICES') + ';\n';
   }
   str += o3djs.effect.buildTexCoords(material, false) +
          o3djs.effect.buildBumpInputCoords(bumpSampler) +
@@ -459,7 +466,7 @@ o3djs.effect.buildVaryingDecls =
         p.semanticSuffix('TEXCOORD' +
            p.interpolant_++ + '') + ';\n' +
         p.VARYING + p.FLOAT3 + ' ' +
-        p.VARYING_DECLARATION_PREFIX + 'surfaceToLight' +
+        p.VARYING_DECLARATION_PREFIX + 'surfacePosition' +
         p.semanticSuffix(
             'TEXCOORD' + p.interpolant_++ + '') + ';\n';
   }
@@ -829,15 +836,42 @@ o3djs.effect.createEffectFromFile = function(pack, url) {
  *
  * @param {!o3d.Material} material Material for which to build the shader.
  * @param {string} effectType Type of effect to create ('phong', 'lambert',
- *     'constant').
+ *     'constant', 'blinn').
+ * @param {Object} opt_options Parameters to customize shader code generation.
+       See o3djs.effect.getStandardShader for details on the possible values.
  * @return {{description: string, shader: string}} A description and the shader
  *     string.
  */
 o3djs.effect.buildStandardShaderString = function(material,
-                                                  effectType) {
+                                                  effectType,
+                                                  opt_options) {
+  if (!opt_options) {
+    opt_options = {};
+  }
+  var numLights = 0;
+  var currentLightWorldPos = 'lightWorldPos';
+  if (opt_options.lights) {
+    numLights = opt_options.lights;
+    currentLightWorldPos = 'lightWorldPosList[i]';
+  }
   var p = o3djs.effect;
   var bumpSampler = material.getParam('bumpSampler');
   var bumpUVInterpolant;
+  var skinning;
+
+  var maxSkinInfluences = 4;
+
+  // Hardcode reasonable maximum for number of skinning uniforms.
+  // glsl: Table 6.19: minimum MAX_VERTEX_UNIFORM_VECTORS is 128.
+  // (DX9 requires a minimum of 256, so not a problem in o3d).
+  var maxSkinUniforms = 36 * 3;
+  if (o3djs.base.o3d && o3djs.base.o3d.SkinEval &&
+      o3djs.base.o3d.SkinEval.getMaxNumBones) {
+    maxSkinUniforms = o3d.SkinEval.getMaxNumBones(material) * 3;
+    skinning = true;
+  } else {
+    skinning = false;
+  }
 
   /**
    * Extracts the texture type from a texture param.
@@ -879,9 +913,9 @@ o3djs.effect.buildStandardShaderString = function(material,
    * @return {string} The effect code for the common shader uniforms.
    */
   var buildCommonVertexUniforms = function() {
+    //var size = numLights ? '['+numLights+']' : '';
     return 'uniform ' + p.MATRIX4 + ' worldViewProjection' +
-        p.semanticSuffix('WORLDVIEWPROJECTION') + ';\n' +
-        'uniform ' + p.FLOAT3 + ' lightWorldPos;\n';
+        p.semanticSuffix('WORLDVIEWPROJECTION') + ';\n';
   };
 
   /**
@@ -889,7 +923,13 @@ o3djs.effect.buildStandardShaderString = function(material,
    * @return {string} The effect code for the common shader uniforms.
    */
   var buildCommonPixelUniforms = function() {
-    return 'uniform ' + p.FLOAT4 + ' lightColor;\n';
+    if (numLights > 0) {
+      return 'uniform ' + p.FLOAT4 + ' lightColorList[' + numLights + '];\n' +
+          'uniform ' + p.FLOAT3 + ' lightWorldPosList[' + numLights + '];\n';
+    } else {
+      return 'uniform ' + p.FLOAT4 + ' lightColor;\n' +
+          'uniform ' + p.FLOAT3 + ' lightWorldPos' + ';\n';
+    }
   };
 
   /**
@@ -903,6 +943,17 @@ o3djs.effect.buildStandardShaderString = function(material,
         ' viewInverse' + p.semanticSuffix('VIEWINVERSE') + ';\n' +
         'uniform ' + p.MATRIX4 + ' worldInverseTranspose' +
         p.semanticSuffix('WORLDINVERSETRANSPOSE') + ';\n';
+  };
+
+  /**
+   * If skinning is enabled, builds the bone matrix uniform variables needed
+   * for skinning. Otherwise, returns the empty string.
+   * @return {string} The effect code for skinning uniforms.
+   */
+  var buildSkinningUniforms = function() {
+    return skinning ? 'uniform ' + p.FLOAT4 + ' boneToWorld3x4' +
+        '[' + maxSkinUniforms + '];\n' +
+        'uniform float usingSkinShader;\n' : '';
   };
 
   /**
@@ -958,6 +1009,37 @@ o3djs.effect.buildStandardShaderString = function(material,
   };
 
   /**
+   * Begins a section of code which is to be run once for each light.
+   * @return {string} The effect code for the for loop, or the empty string if
+   *                  not using multiple lights.
+   */
+  var beginLightLoop = function() {
+    if (numLights) {
+      return '  ' + p.FLOAT4 + ' lightColorDiffuse = ' + p.FLOAT4 + '(0);\n' +
+          '  for (int i = 0; i < ' + numLights + '; i++) {\n';
+    } else {
+      return '';
+    }
+  };
+
+  /**
+   * Ends the block of code which is to be run for each light. Adds the current
+   * light's color times (diffuseExpression) into lightColorDiffuse.
+   * @param {string} diffuseExpression Expression to multiply by light color.
+   * @return {string} The effect code to set lightColorDiffuse.
+   */
+  var endLightLoop = function(diffuseExpression) {
+    if (numLights) {
+      return '    lightColorDiffuse += ' +
+          'lightColorList[i] * ( ' + diffuseExpression + ');\n' +
+          '  }\n';
+    } else {
+      return '  ' + p.FLOAT4 + ' lightColorDiffuse = ' +
+          'lightColor * (' + diffuseExpression + ');';
+    }
+  };
+
+  /**
    * Builds vertex and fragment shader string for the Constant lighting type.
    * @param {!o3d.Material} material The material for which to build
    *     shaders.
@@ -967,6 +1049,7 @@ o3djs.effect.buildStandardShaderString = function(material,
   var buildConstantShaderString = function(material, descriptions) {
     descriptions.push('constant');
     return buildCommonVertexUniforms() +
+           buildSkinningUniforms() +
            buildVertexDecls(material, false, false) +
            p.beginVertexShaderMain() +
            positionVertexShaderCode() +
@@ -994,12 +1077,13 @@ o3djs.effect.buildStandardShaderString = function(material,
     descriptions.push('lambert');
     return buildCommonVertexUniforms() +
            buildLightingUniforms() +
+           buildSkinningUniforms() +
            buildVertexDecls(material, true, false) +
            p.beginVertexShaderMain() +
            p.buildUVPassthroughs(material) +
            positionVertexShaderCode() +
            normalVertexShaderCode() +
-           surfaceToLightVertexShaderCode() +
+           surfacePositionVertexShaderCode() +
            bumpVertexShaderCode() +
            p.endVertexShaderMain() +
            p.pixelShaderHeader(material, true, false) +
@@ -1015,14 +1099,16 @@ o3djs.effect.buildStandardShaderString = function(material,
            getColorParam(material, 'ambient') +
            getColorParam(material, 'diffuse') +
            getNormalShaderCode() +
-           '  ' + p.FLOAT3 + ' surfaceToLight = normalize(' +
-           p.PIXEL_VARYING_PREFIX + 'surfaceToLight);\n' +
-           '  ' + p.FLOAT4 +
-           ' litR = lit(dot(normal, surfaceToLight), 0.0, 0.0);\n' +
+           beginLightLoop() +
+           '    ' + p.FLOAT3 + ' surfaceToLight = normalize(' +
+           currentLightWorldPos + ' - ' +
+           p.PIXEL_VARYING_PREFIX + 'surfacePosition);\n' +
+           '    ' + p.FLOAT4 +
+           '    litR = lit(dot(normal, surfaceToLight), 0.0, 0.0);\n' +
+           endLightLoop('ambient * diffuse + diffuse * litR.y') +
            p.endPixelShaderMain(p.FLOAT4 +
            '((emissive +\n' +
-           '      lightColor *' +
-           ' (ambient * diffuse + diffuse * litR.y)).rgb,\n' +
+           '      lightColorDiffuse).rgb,\n' +
            '          diffuse.a)') +
            p.entryPoints() +
            p.matrixLoadOrder();
@@ -1041,12 +1127,13 @@ o3djs.effect.buildStandardShaderString = function(material,
     descriptions.push('phong');
     return buildCommonVertexUniforms() +
         buildLightingUniforms() +
+        buildSkinningUniforms() +
         buildVertexDecls(material, true, true) +
         p.beginVertexShaderMain() +
         p.buildUVPassthroughs(material) +
         positionVertexShaderCode() +
         normalVertexShaderCode() +
-        surfaceToLightVertexShaderCode() +
+        surfacePositionVertexShaderCode() +
         surfaceToViewVertexShaderCode() +
         bumpVertexShaderCode() +
         p.endVertexShaderMain() +
@@ -1067,22 +1154,21 @@ o3djs.effect.buildStandardShaderString = function(material,
         getColorParam(material, 'diffuse') +
         getColorParam(material, 'specular') +
         getNormalShaderCode() +
-        '  ' + p.FLOAT3 + ' surfaceToLight = normalize(' +
-        p.PIXEL_VARYING_PREFIX + 'surfaceToLight);\n' +
         '  ' + p.FLOAT3 + ' surfaceToView = normalize(' +
         p.PIXEL_VARYING_PREFIX + 'surfaceToView);\n' +
-        '  ' + p.FLOAT3 +
-        ' halfVector = normalize(surfaceToLight + ' +
-        p.PIXEL_VARYING_PREFIX + 'surfaceToView);\n' +
-        '  ' + p.FLOAT4 +
+        beginLightLoop() +
+        '    ' + p.FLOAT3 + ' surfaceToLight = normalize(' +
+        currentLightWorldPos + ' - ' +
+        p.PIXEL_VARYING_PREFIX + 'surfacePosition);\n' +
+        '    ' + p.FLOAT3 +
+        ' halfVector = normalize(surfaceToLight + surfaceToView);\n' +
+        '    ' + p.FLOAT4 +
         ' litR = lit(dot(normal, surfaceToLight), \n' +
         '                    dot(normal, halfVector), shininess);\n' +
+        endLightLoop('ambient * diffuse + diffuse * litR.y\n' +
+        '                  + specular * litR.z * specularFactor') +
         p.endPixelShaderMain( p.FLOAT4 +
-        '((emissive +\n' +
-        '  lightColor *' +
-        ' (ambient * diffuse + diffuse * litR.y +\n' +
-        '                        + specular * litR.z *' +
-        ' specularFactor)).rgb,\n' +
+        '((emissive + lightColorDiffuse).rgb,\n' +
         '      diffuse.a)') +
         p.entryPoints() +
         p.matrixLoadOrder();
@@ -1099,12 +1185,13 @@ o3djs.effect.buildStandardShaderString = function(material,
     descriptions.push('phong');
     return buildCommonVertexUniforms() +
         buildLightingUniforms() +
+        buildSkinningUniforms() +
         buildVertexDecls(material, true, true) +
         p.beginVertexShaderMain() +
         p.buildUVPassthroughs(material) +
         positionVertexShaderCode() +
         normalVertexShaderCode() +
-        surfaceToLightVertexShaderCode() +
+        surfacePositionVertexShaderCode() +
         surfaceToViewVertexShaderCode() +
         bumpVertexShaderCode() +
         p.endVertexShaderMain() +
@@ -1125,20 +1212,21 @@ o3djs.effect.buildStandardShaderString = function(material,
         getColorParam(material, 'diffuse') +
         getColorParam(material, 'specular') +
         getNormalShaderCode() +
-        '  ' + p.FLOAT3 + ' surfaceToLight = normalize(' +
-        p.PIXEL_VARYING_PREFIX + 'surfaceToLight);\n' +
         '  ' + p.FLOAT3 + ' surfaceToView = normalize(' +
         p.PIXEL_VARYING_PREFIX + 'surfaceToView);\n' +
-        '  ' + p.FLOAT3 +
+        beginLightLoop() +
+        '    ' + p.FLOAT3 + ' surfaceToLight = normalize(' +
+        currentLightWorldPos + ' - ' +
+        p.PIXEL_VARYING_PREFIX + 'surfacePosition);\n' +
+        '    ' + p.FLOAT3 +
         ' halfVector = normalize(surfaceToLight + surfaceToView);\n' +
-        '  ' + p.FLOAT4 +
+        '    ' + p.FLOAT4 +
         ' litR = lit(dot(normal, surfaceToLight), \n' +
         '                    dot(normal, halfVector), shininess);\n' +
+        endLightLoop('ambient * diffuse + diffuse * litR.y +\n' +
+        '                  + specular * litR.z * specularFactor') +
         p.endPixelShaderMain(p.FLOAT4 +
-        '((emissive +\n' +
-        '  lightColor * (ambient * diffuse + diffuse * litR.y +\n' +
-        '                        + specular * litR.z *' +
-        ' specularFactor)).rgb,\n' +
+        '((emissive + lightColorDiffuse).rgb,\n' +
         '      diffuse.a)') +
         p.entryPoints() +
         p.matrixLoadOrder();
@@ -1149,9 +1237,27 @@ o3djs.effect.buildStandardShaderString = function(material,
    * @return {string} The code for the vertex shader.
    */
   var positionVertexShaderCode = function() {
-    return '  ' + p.VERTEX_VARYING_PREFIX + 'position = ' +
-        p.mul(p.ATTRIBUTE_PREFIX +
-        'position', 'worldViewProjection') + ';\n';
+    var attribute_position = p.ATTRIBUTE_PREFIX + 'position';
+    if (skinning) {
+      return '  ' + p.FLOAT4 + ' weightedpos = ' + attribute_position + ';\n' +
+          '  for (int i = 0; i < ' + maxSkinInfluences + '; i++) {\n' +
+          '    ' + p.FLOAT4 + ' temp = ' + p.FLOAT4 + '(' +
+          'dot(boneToWorld3x4[int(influenceIndices[i] * 3.0)], ' +
+          attribute_position + '),\n' +
+          '    dot(boneToWorld3x4[int(influenceIndices[i] * 3.0 + 1.0)], ' +
+          attribute_position + '),\n' +
+          '    dot(boneToWorld3x4[int(influenceIndices[i] * 3.0 + 2.0)], ' +
+          attribute_position + '),\n' +
+          '    1.0);\n' +
+          '    weightedpos += usingSkinShader * influenceWeights[i] * ' +
+          '(temp - ' + attribute_position + ');\n' +
+          '  }\n' +
+          '  ' + p.VERTEX_VARYING_PREFIX + 'position = ' +
+          p.mul('weightedpos', 'worldViewProjection') + ';\n';
+    } else {
+      return '  ' + p.VERTEX_VARYING_PREFIX + 'position = ' +
+          p.mul(attribute_position, 'worldViewProjection') + ';\n';
+    }
   };
 
   /**
@@ -1159,20 +1265,40 @@ o3djs.effect.buildStandardShaderString = function(material,
    * @return {string} The code for the vertex shader.
    */
   var normalVertexShaderCode = function() {
-    return '  ' + p.VERTEX_VARYING_PREFIX + 'normal = ' +
-        p.mul(p.FLOAT4 + '(' +
-        p.ATTRIBUTE_PREFIX +
-        'normal, 0)', 'worldInverseTranspose') + '.xyz;\n';
+    var attribute_normal = p.ATTRIBUTE_PREFIX + 'normal';
+    if (skinning) {
+      return '  ' + p.FLOAT3 + ' weightednorm = ' + attribute_normal + ';\n' +
+          '  for (int i = 0; i < ' + maxSkinInfluences + '; i++) {\n' +
+          '    ' + p.FLOAT3 + ' temp = ' + p.FLOAT3 + '(' +
+          'dot(boneToWorld3x4[int(influenceIndices[i] * 3.0)].xyz, ' +
+          attribute_normal + '),\n' +
+          '    dot(boneToWorld3x4[int(influenceIndices[i] * 3.0 + 1.0)].xyz, ' +
+          attribute_normal + '),\n' +
+          '    dot(boneToWorld3x4[int(influenceIndices[i] * 3.0 + 2.0)].xyz, ' +
+          attribute_normal + '));\n' +
+          '    weightednorm += usingSkinShader * influenceWeights[i] * ' +
+          '(temp - ' + attribute_normal + ');\n' +
+          '  }\n' +
+          '  ' + p.VERTEX_VARYING_PREFIX + 'normal = ' +
+          p.mul(p.FLOAT4 + '(' + 'weightednorm' + ', 0)',
+                'worldInverseTranspose') + '.xyz;\n';
+    } else {
+      return '  ' + p.VERTEX_VARYING_PREFIX + 'normal = ' +
+          p.mul(p.FLOAT4 + '(' +
+          attribute_normal + ', 0)', 'worldInverseTranspose') +
+          '.xyz;\n';
+    }
   };
 
   /**
-   * Builds the surface to light code for the vertex shader.
+   * Builds the surface position code for the vertex shader. To support
+   * multiple lights, the dot product with each light should then be
+   * computed in the fragment shader.
    * @return {string} The code for the vertex shader.
    */
-  var surfaceToLightVertexShaderCode = function() {
+  var surfacePositionVertexShaderCode = function() {
     return '  ' + p.VERTEX_VARYING_PREFIX +
-        'surfaceToLight = lightWorldPos - \n' +
-           '                          ' +
+        'surfacePosition =  \n' +
            p.mul(p.ATTRIBUTE_PREFIX + 'position',
               'world') + '.xyz;\n';
   };
@@ -1238,7 +1364,7 @@ o3djs.effect.buildStandardShaderString = function(material,
    */
   var buildVertexDecls = function(material, diffuse, specular) {
     return p.buildAttributeDecls(
-        material, diffuse, specular, bumpSampler) +
+        material, diffuse, specular, bumpSampler, skinning) +
         p.buildVaryingDecls(
             material, diffuse, specular, bumpSampler);
   };
@@ -1272,14 +1398,19 @@ o3djs.effect.buildStandardShaderString = function(material,
  * @param {!o3d.Pack} pack Pack in which to create the new Effect.
  * @param {!o3d.Material} material Material for which to build the shader.
  * @param {string} effectType Type of effect to create ('phong', 'lambert',
- *     'constant').
+ *     'constant', 'blinn').
+ * @param {{lights: number}} opt_options Extra options.
+ *     If 'lights' is non-zero, creates an array of light params; otherwise
+ *     only a single light is supported.
  * @return {o3d.Effect} The created effect.
  */
 o3djs.effect.getStandardShader = function(pack,
                                           material,
-                                          effectType) {
+                                          effectType,
+                                          opt_options) {
   var record = o3djs.effect.buildStandardShaderString(material,
-                                                      effectType);
+                                                      effectType,
+                                                      opt_options);
   var effects = pack.getObjectsByClassName('o3d.Effect');
   for (var ii = 0; ii < effects.length; ++ii) {
     if (effects[ii].name == record.description &&
@@ -1309,16 +1440,19 @@ o3djs.effect.getStandardShader = function(pack,
  * @param {!o3d.Material} material Material for which to build the shader.
  * @param {!o3djs.math.Vector3} lightPos Position of the default light.
  * @param {string} effectType Type of effect to create ('phong', 'lambert',
- *     'constant').
+ *     'constant', 'blinn').
+ * @param {Object} opt_options Extra options for effect.getStandardShader
  * @return {boolean} True on success.
  */
 o3djs.effect.attachStandardShader = function(pack,
                                              material,
                                              lightPos,
-                                             effectType) {
+                                             effectType,
+                                             opt_options) {
   var effect = o3djs.effect.getStandardShader(pack,
                                               material,
-                                              effectType);
+                                              effectType,
+                                              opt_options);
   if (effect) {
     material.effect = effect;
     effect.createUniformParameters(material);

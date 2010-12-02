@@ -10,14 +10,17 @@ cr.define('options.contentSettings', function() {
   /**
    * Creates a new exceptions list item.
    * @param {string} contentType The type of the list.
+   * @param {string} mode The browser mode, 'otr' or 'normal'.
    * @param {boolean} enableAskOption Whether to show an 'ask every time'
    *     option in the select.
-   * @param {Array} exception A pair of the form [filter, setting].
+   * @param {Object} exception A dictionary that contains the data of the
+   *     exception.
    * @constructor
    * @extends {cr.ui.ListItem}
    */
-  function ExceptionsListItem(contentType, enableAskOption, exception) {
+  function ExceptionsListItem(contentType, mode, enableAskOption, exception) {
     var el = cr.doc.createElement('li');
+    el.mode = mode;
     el.contentType = contentType;
     el.enableAskOption = enableAskOption;
     el.dataItem = exception;
@@ -98,6 +101,8 @@ cr.define('options.contentSettings', function() {
       this.optionBlock = optionBlock;
 
       this.updateEditables();
+      if (!this.pattern)
+        input.value = templateData.examplePattern;
 
       var listItem = this;
       this.ondblclick = function(event) {
@@ -108,7 +113,7 @@ cr.define('options.contentSettings', function() {
       input.oninput = function(event) {
         listItem.inputValidityKnown = false;
         chrome.send('checkExceptionPatternValidity',
-                    [listItem.contentType, input.value]);
+                    [listItem.contentType, listItem.mode, input.value]);
       };
 
       // Handles enter and escape which trigger reset and commit respectively.
@@ -123,7 +128,7 @@ cr.define('options.contentSettings', function() {
             // Reset the inputs.
             listItem.updateEditables();
             if (listItem.pattern)
-              listItem.maybeSetPatternValidity(listItem.pattern, true);
+              listItem.maybeSetPatternValid(listItem.pattern, true);
           case 'Enter':
             if (listItem.parentNode)
               listItem.parentNode.focus();
@@ -155,10 +160,10 @@ cr.define('options.contentSettings', function() {
      * @type {string}
      */
     get pattern() {
-      return this.dataItem[0];
+      return this.dataItem['displayPattern'];
     },
     set pattern(pattern) {
-      this.dataItem[0] = pattern;
+      this.dataItem['displayPattern'] = pattern;
     },
 
     /**
@@ -166,10 +171,10 @@ cr.define('options.contentSettings', function() {
      * @type {string}
      */
     get setting() {
-      return this.dataItem[1];
+      return this.dataItem['setting'];
     },
     set setting(setting) {
-      this.dataItem[1] = setting;
+      this.dataItem['setting'] = setting;
     },
 
     /**
@@ -214,9 +219,6 @@ cr.define('options.contentSettings', function() {
      * Copy the data model values to the editable nodes.
      */
     updateEditables: function() {
-      if (!(this.pattern && this.setting))
-        return;
-
       this.input.value = this.pattern;
 
       if (this.setting == 'allow')
@@ -253,18 +255,18 @@ cr.define('options.contentSettings', function() {
       var optionSession = this.optionSession;
       var optionAsk = this.optionAsk;
 
+      // Just delete this row if it was added via the Add button.
+      if (!editing && !pattern && !input.value) {
+        var model = listItem.parentNode.dataModel;
+        model.splice(model.indexOf(listItem.dataItem), 1);
+        return;
+      }
+
       // Check that we have a valid pattern and if not we do not change the
       // editing mode.
       if (!editing && (!this.inputValidityKnown || !this.inputIsValid)) {
-        if (this.pattern) {
-          input.focus();
-          input.select();
-        } else {
-          // Just delete this row if it was added via the Add button.
-          var model = listItem.parentNode.dataModel;
-          model.splice(model.indexOf(listItem.dataItem), 1);
-        }
-
+        input.focus();
+        input.select();
         return;
       }
 
@@ -302,12 +304,13 @@ cr.define('options.contentSettings', function() {
         this.setting = newSetting;
         settingLabel.textContent = this.settingForDisplay();
 
-        var contentType = this.contentType;
+        if (pattern != this.pattern) {
+          chrome.send('removeExceptions',
+                      [this.contentType, this.mode, pattern]);
+        }
 
-        if (pattern != this.pattern)
-          chrome.send('removeExceptions', [contentType, pattern]);
-
-        chrome.send('setException', [contentType, this.pattern, this.setting]);
+        chrome.send('setException',
+                    [this.contentType, this.mode, this.pattern, this.setting]);
       }
     }
   };
@@ -331,7 +334,7 @@ cr.define('options.contentSettings', function() {
       this.dataModel = new ArrayDataModel([]);
 
       // Whether the exceptions in this list allow an 'Ask every time' option.
-      this.enableAskOption = false;
+      this.enableAskOption = (this.contentType == 'plugins');
     },
 
     /**
@@ -340,19 +343,20 @@ cr.define('options.contentSettings', function() {
      */
     createItem: function(entry) {
       return new ExceptionsListItem(this.contentType,
+                                    this.mode,
                                     this.enableAskOption,
                                     entry);
     },
 
     /**
      * Adds an exception to the js model.
-     * @param {Array} entry A pair of the form [filter, setting].
+     * @param {Object} entry A dictionary of values for the exception.
      */
     addException: function(entry) {
       this.dataModel.push(entry);
 
       // When an empty row is added, put it into editing mode.
-      if (!entry[0] && !entry[1]) {
+      if (!entry['displayPattern'] && !entry['setting']) {
         var index = this.dataModel.length - 1;
         var sm = this.selectionModel;
         sm.anchorIndex = sm.leadIndex = sm.selectedIndex = index;
@@ -388,12 +392,20 @@ cr.define('options.contentSettings', function() {
      * Removes all selected rows from browser's model.
      */
     removeSelectedRows: function() {
-      // The first member is the content type; the rest of the values are
+      // The first member is the content type; the rest of the values describe
       // the patterns we are removing.
       var args = [this.contentType];
       var selectedItems = this.selectedItems;
       for (var i = 0; i < selectedItems.length; i++) {
-        args.push(selectedItems[i][0]);
+        if (this.contentType == 'location') {
+          args.push(selectedItems[i]['origin']);
+          args.push(selectedItems[i]['embeddingOrigin']);
+        } else if (this.contentType == 'notifications') {
+          // TODO(estade): fill this in.
+        } else {
+          args.push(this.mode);
+          args.push(selectedItems[i]['displayPattern']);
+        }
       }
 
       chrome.send('removeExceptions', args);
@@ -419,33 +431,40 @@ cr.define('options.contentSettings', function() {
       // empty.
       this.exceptionsList = this.querySelector('list');
       this.exceptionsList.contentType = this.contentType;
+      this.exceptionsList.mode = this.mode;
 
       ExceptionsList.decorate(this.exceptionsList);
       this.exceptionsList.selectionModel.addEventListener(
-          'change', cr.bind(this.handleOnSelectionChange_, this));
+          'change', this.handleOnSelectionChange_.bind(this));
 
-      var addRow = cr.doc.createElement('button');
-      addRow.textContent = templateData.addExceptionRow;
-      this.appendChild(addRow);
+      var self = this;
+      if (this.contentType != 'location' &&
+          this.contentType != 'notifications') {
+        var addRow = cr.doc.createElement('button');
+        addRow.textContent = templateData.addExceptionRow;
+        this.appendChild(addRow);
 
-      var editRow = cr.doc.createElement('button');
-      editRow.textContent = templateData.editExceptionRow;
-      this.appendChild(editRow);
-      this.editRow = editRow;
+        addRow.onclick = function(event) {
+          var emptyException = new Object;
+          emptyException.displayPattern = '';
+          emptyException.setting = '';
+          self.exceptionsList.addException(emptyException);
+        };
+
+        var editRow = cr.doc.createElement('button');
+        editRow.textContent = templateData.editExceptionRow;
+        this.appendChild(editRow);
+        this.editRow = editRow;
+
+        editRow.onclick = function(event) {
+          self.exceptionsList.editSelectedRow();
+        };
+      }
 
       var removeRow = cr.doc.createElement('button');
       removeRow.textContent = templateData.removeExceptionRow;
       this.appendChild(removeRow);
       this.removeRow = removeRow;
-
-      var self = this;
-      addRow.onclick = function(event) {
-        self.exceptionsList.addException(['', '']);
-      };
-
-      editRow.onclick = function(event) {
-        self.exceptionsList.editSelectedRow();
-      };
 
       removeRow.onclick = function(event) {
         self.exceptionsList.removeSelectedRows();
@@ -454,6 +473,8 @@ cr.define('options.contentSettings', function() {
       this.updateButtonSensitivity();
 
       this.classList.add('hidden');
+
+      this.otrProfileExists = false;
     },
 
     /**
@@ -468,12 +489,24 @@ cr.define('options.contentSettings', function() {
     },
 
     /**
+     * The browser mode type for this exceptions area, 'otr' or 'normal'.
+     * @type {string}
+     */
+    get mode() {
+      return this.getAttribute('mode');
+    },
+    set mode(mode) {
+      return this.setAttribute('mode', mode);
+    },
+
+    /**
      * Update the enabled/disabled state of the editing buttons based on which
      * rows are selected.
      */
     updateButtonSensitivity: function() {
       var selectionSize = this.exceptionsList.selectedItems.length;
-      this.editRow.disabled = selectionSize != 1;
+      if (this.editRow)
+        this.editRow.disabled = selectionSize != 1;
       this.removeRow.disabled = selectionSize == 0;
     },
 

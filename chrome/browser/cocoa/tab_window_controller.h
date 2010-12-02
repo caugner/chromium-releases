@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_TAB_WINDOW_CONTROLLER_H_
-#define CHROME_BROWSER_TAB_WINDOW_CONTROLLER_H_
+#ifndef CHROME_BROWSER_COCOA_TAB_WINDOW_CONTROLLER_H_
+#define CHROME_BROWSER_COCOA_TAB_WINDOW_CONTROLLER_H_
 #pragma once
 
 // A class acting as the Objective-C window controller for a window that has
@@ -130,8 +130,8 @@
 - (NSInteger)numberOfTabs;
 
 // YES if there are tabs in the tab strip which have content, allowing for
-// the notion of tabs in the tab strip that are placeholders, or phantoms, but
-// currently have no content.
+// the notion of tabs in the tab strip that are placeholders but currently have
+// no content.
 - (BOOL)hasLiveTabs;
 
 // Return the view of the selected tab.
@@ -174,4 +174,4 @@
 - (void)layoutSubviews;
 @end
 
-#endif  // CHROME_BROWSER_TAB_WINDOW_CONTROLLER_H_
+#endif  // CHROME_BROWSER_COCOA_TAB_WINDOW_CONTROLLER_H_

@@ -7,8 +7,8 @@
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
-#include <windows.h>
 #include <shlobj.h>
+#include <windows.h>
 #elif defined(USE_NSS)
 #include "base/nss_util.h"
 #endif
@@ -21,15 +21,16 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/string_piece.h"
 #include "base/string_number_conversions.h"
+#include "base/string_piece.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/cookie_policy.h"
 #include "net/base/load_flags.h"
+#include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
-#include "net/base/net_errors.h"
 #include "net/base/net_module.h"
 #include "net/base/net_util.h"
 #include "net/base/ssl_connection_status_flags.h"
@@ -278,85 +279,6 @@ TEST_F(URLRequestTestHTTP, HTTPSToHTTPRedirectNoRefererTest) {
   EXPECT_EQ(1, d.received_redirect_count());
   EXPECT_EQ(http_destination, req.url());
   EXPECT_EQ(std::string(), req.referrer());
-}
-
-namespace {
-
-// Used by MakeGETRequest to implement sync load behavior.
-class SyncTestDelegate : public TestDelegate {
- public:
-  SyncTestDelegate() : event_(false, false), success_(false) {
-  }
-  virtual void OnResponseCompleted(URLRequest* request) {
-    MessageLoop::current()->DeleteSoon(FROM_HERE, request);
-    success_ = request->status().is_success();
-    event_.Signal();
-  }
-  bool Wait(int64 secs) {
-    return event_.TimedWait(TimeDelta::FromSeconds(secs));
-  }
-  bool did_succeed() const { return success_; }
- private:
-  base::WaitableEvent event_;
-  bool success_;
-  DISALLOW_COPY_AND_ASSIGN(SyncTestDelegate);
-};
-
-void StartGETRequest(const GURL& url, URLRequest::Delegate* delegate) {
-  URLRequest* request = new URLRequest(url, delegate);
-  request->set_context(new TestURLRequestContext());
-  request->set_method("GET");
-  request->Start();
-  EXPECT_TRUE(request->is_pending());
-}
-
-bool MakeGETRequest(const GURL& url) {
-  // Spin up a background thread for this request so that we have access to
-  // an IO message loop, and in cases where this thread already has an IO
-  // message loop, we also want to avoid spinning a nested message loop.
-  SyncTestDelegate d;
-  {
-    base::Thread io_thread("MakeGETRequest");
-    base::Thread::Options options;
-    options.message_loop_type = MessageLoop::TYPE_IO;
-    io_thread.StartWithOptions(options);
-    io_thread.message_loop()->PostTask(FROM_HERE, NewRunnableFunction(
-        &StartGETRequest, url, &d));
-
-    const int kWaitSeconds = 30;
-    if (!d.Wait(kWaitSeconds))
-      return false;
-  }
-  return d.did_succeed();
-}
-
-}  // namespace
-
-// Some tests use browser javascript to fetch a 'kill' url that causes
-// the server to exit by itself (rather than letting TestServerLauncher's
-// destructor kill it). We now unit test this mechanism.
-TEST_F(URLRequestTest, QuitTest) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
-  ASSERT_TRUE(test_server.Start());
-
-  // Append the time to avoid problems where the kill page
-  // is being cached rather than being executed on the server
-  std::string page_name = StringPrintf("kill?%u",
-      static_cast<int>(base::Time::Now().ToInternalValue()));
-  int retry_count = 5;
-  while (retry_count > 0) {
-    bool r = MakeGETRequest(test_server.GetURL(page_name));
-    // BUG #1048625 causes the kill GET to fail.  For now we just retry.
-    // Once the bug is fixed, we should remove the while loop and put back
-    // the following DCHECK.
-    // DCHECK(r);
-    if (r)
-      break;
-    retry_count--;
-  }
-  // Make sure we were successful in stopping the testserver.
-  EXPECT_LT(0, retry_count);
-  EXPECT_TRUE(test_server.WaitToFinish(20000));
 }
 
 class HTTPSRequestTest : public testing::Test {
@@ -804,8 +726,9 @@ TEST_F(URLRequestTest, FileTestFullSpecifiedRange) {
 
     net::HttpRequestHeaders headers;
     headers.SetHeader(net::HttpRequestHeaders::kRange,
-                      StringPrintf("bytes=%" PRIuS "-%" PRIuS,
-                                   first_byte_position, last_byte_position));
+                      base::StringPrintf(
+                           "bytes=%" PRIuS "-%" PRIuS,
+                           first_byte_position, last_byte_position));
     r.SetExtraRequestHeaders(headers);
     r.Start();
     EXPECT_TRUE(r.is_pending());
@@ -847,8 +770,8 @@ TEST_F(URLRequestTest, FileTestHalfSpecifiedRange) {
 
     net::HttpRequestHeaders headers;
     headers.SetHeader(net::HttpRequestHeaders::kRange,
-                      StringPrintf("bytes=%" PRIuS "-",
-                                   first_byte_position));
+                      base::StringPrintf("bytes=%" PRIuS "-",
+                                         first_byte_position));
     r.SetExtraRequestHeaders(headers);
     r.Start();
     EXPECT_TRUE(r.is_pending());
@@ -1555,6 +1478,26 @@ TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy) {
 
     EXPECT_EQ(0, d.blocked_get_cookies_count());
     EXPECT_EQ(0, d.blocked_set_cookie_count());
+  }
+}
+
+TEST_F(URLRequestTest, DoNotSaveEmptyCookies) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
+  ASSERT_TRUE(test_server.Start());
+
+  scoped_refptr<TestURLRequestContext> context = new TestURLRequestContext();
+
+  // Set up an empty cookie.
+  {
+    TestDelegate d;
+    URLRequest req(test_server.GetURL("set-cookie"), &d);
+    req.set_context(context);
+    req.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(0, d.blocked_get_cookies_count());
+    EXPECT_EQ(0, d.blocked_set_cookie_count());
+    EXPECT_EQ(0, d.set_cookie_count());
   }
 }
 

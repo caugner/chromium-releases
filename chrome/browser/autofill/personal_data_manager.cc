@@ -14,7 +14,7 @@
 #include "chrome/browser/autofill/autofill_field.h"
 #include "chrome/browser/autofill/form_structure.h"
 #include "chrome/browser/autofill/phone_number.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -49,6 +49,11 @@ class DereferenceFunctor {
     return *iterator;
   }
 };
+
+template<typename T>
+T* address_of(T& v) {
+  return &v;
+}
 
 }  // namespace
 
@@ -285,6 +290,15 @@ void PersonalDataManager::SetProfiles(std::vector<AutoFillProfile>* profiles) {
     }
   }
 
+  // Ensure that profile labels are up to date.  Currently, sync relies on
+  // labels to identify a profile.
+  // TODO(dhollowa): We need to deprecate labels and update the way sync
+  // identifies profiles.
+  std::vector<AutoFillProfile*> profile_pointers(profiles->size());
+  std::transform(profiles->begin(), profiles->end(), profile_pointers.begin(),
+      address_of<AutoFillProfile>);
+  AutoFillProfile::AdjustInferredLabels(&profile_pointers);
+
   // Add the new profiles to the web database.
   for (std::vector<AutoFillProfile>::iterator iter = profiles->begin();
        iter != profiles->end(); ++iter) {
@@ -306,7 +320,15 @@ void PersonalDataManager::SetProfiles(std::vector<AutoFillProfile>* profiles) {
   // Read our writes to ensure consistency with the database.
   Refresh();
 
-  FOR_EACH_OBSERVER(Observer, observers_, OnPersonalDataChanged());
+  {
+    // We're now done with the unique IDs, and observers might call into a
+    // method that needs the lock, so release it.  For example, observers on Mac
+    // might call profiles() which calls LoadAuxiliaryProfiles(), which needs
+    // the lock.
+    AutoUnlock unlock(unique_ids_lock_);
+
+    FOR_EACH_OBSERVER(Observer, observers_, OnPersonalDataChanged());
+  }
 }
 
 void PersonalDataManager::SetCreditCards(
@@ -381,7 +403,15 @@ void PersonalDataManager::SetCreditCards(
     credit_cards_.push_back(new CreditCard(*iter));
   }
 
-  FOR_EACH_OBSERVER(Observer, observers_, OnPersonalDataChanged());
+  {
+    // We're now done with the unique IDs, and observers might call into a
+    // method that needs the lock, so release it.  For example, observers on Mac
+    // might call profiles() which calls LoadAuxiliaryProfiles(), which needs
+    // the lock.
+    AutoUnlock unlock(unique_ids_lock_);
+
+    FOR_EACH_OBSERVER(Observer, observers_, OnPersonalDataChanged());
+  }
 }
 
 // TODO(jhawkins): Refactor SetProfiles so this isn't so hacky.
@@ -455,6 +485,36 @@ void PersonalDataManager::RemoveProfile(int unique_id) {
       profiles.end());
 
   SetProfiles(&profiles);
+}
+
+// TODO(jhawkins): Refactor SetCreditCards so this isn't so hacky.
+void PersonalDataManager::AddCreditCard(const CreditCard& credit_card) {
+  std::vector<CreditCard> credit_cards(credit_cards_.size());
+  std::transform(credit_cards_.begin(), credit_cards_.end(),
+                 credit_cards.begin(),
+                 DereferenceFunctor<CreditCard>());
+
+  credit_cards.push_back(credit_card);
+  SetCreditCards(&credit_cards);
+}
+
+void PersonalDataManager::UpdateCreditCard(const CreditCard& credit_card) {
+  WebDataService* wds = profile_->GetWebDataService(Profile::EXPLICIT_ACCESS);
+  if (!wds)
+    return;
+
+  // Update the cached credit card.
+  for (std::vector<CreditCard*>::iterator iter = credit_cards_->begin();
+       iter != credit_cards_->end(); ++iter) {
+    if ((*iter)->unique_id() == credit_card.unique_id()) {
+      delete *iter;
+      *iter = new CreditCard(credit_card);
+      break;
+    }
+  }
+
+  wds->UpdateCreditCard(credit_card);
+  FOR_EACH_OBSERVER(Observer, observers_, OnPersonalDataChanged());
 }
 
 void PersonalDataManager::RemoveCreditCard(int unique_id) {
@@ -547,7 +607,7 @@ const std::vector<AutoFillProfile*>& PersonalDataManager::web_profiles() {
 AutoFillProfile* PersonalDataManager::CreateNewEmptyAutoFillProfileForDBThread(
     const string16& label) {
   // See comment in header for thread details.
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   AutoLock lock(unique_ids_lock_);
   AutoFillProfile* p = new AutoFillProfile(label,
       CreateNextUniqueIDFor(&unique_profile_ids_));

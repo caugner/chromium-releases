@@ -16,10 +16,11 @@
 #include "base/hash_tables.h"
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/keyboard_library.h"
 #include "chrome/browser/chromeos/language_preferences.h"
@@ -34,10 +35,7 @@ struct IdMaps {
   scoped_ptr<std::map<std::string, std::string> > id_to_language_code;
   scoped_ptr<std::map<std::string, std::string> > id_to_display_name;
 
- private:
-  IdMaps() : language_code_to_ids(NULL),
-             id_to_language_code(NULL),
-             id_to_display_name(NULL) {
+  void ReloadMaps() {
     chromeos::InputMethodLibrary* library =
         chromeos::CrosLibrary::Get()->GetInputMethodLibrary();
     scoped_ptr<chromeos::InputMethodDescriptors> supported_input_methods(
@@ -47,9 +45,9 @@ struct IdMaps {
       // TODO(yusukes): Handle this error in nicer way.
     }
 
-    language_code_to_ids.reset(new LanguageCodeToIdsMap);
-    id_to_language_code.reset(new std::map<std::string, std::string>);
-    id_to_display_name.reset(new std::map<std::string, std::string>);
+    language_code_to_ids->clear();
+    id_to_language_code->clear();
+    id_to_display_name->clear();
 
     // Build the id to descriptor map for handling kExtraLanguages later.
     typedef std::map<std::string,
@@ -80,6 +78,13 @@ struct IdMaps {
         AddInputMethodToMaps(language_code, input_method);
       }
     }
+  }
+
+ private:
+  IdMaps() : language_code_to_ids(new LanguageCodeToIdsMap),
+             id_to_language_code(new std::map<std::string, std::string>),
+             id_to_display_name(new std::map<std::string, std::string>) {
+    ReloadMaps();
   }
 
   void AddInputMethodToMaps(
@@ -216,6 +221,8 @@ const struct EnglishToResouceId {
   { "Canada", IDS_STATUSBAR_LAYOUT_CANADA },
   { "Canada - English", IDS_STATUSBAR_LAYOUT_CANADA_ENGLISH },
   { "Israel", IDS_STATUSBAR_LAYOUT_ISRAEL },
+  { "Korea, Republic of - 101/104 key Compatible",
+    IDS_STATUSBAR_LAYOUT_KOREA_104 },
 };
 const size_t kNumEntries = arraysize(kEnglishToResourceIdArray);
 
@@ -583,6 +590,10 @@ void EnableInputMethods(const std::string& language_code, InputMethodType type,
   if (!initial_input_method_id.empty()) {
     library->ChangeInputMethod(initial_input_method_id);
   }
+}
+
+void OnLocaleChanged() {
+  Singleton<IdMaps>::get()->ReloadMaps();
 }
 
 }  // namespace input_method

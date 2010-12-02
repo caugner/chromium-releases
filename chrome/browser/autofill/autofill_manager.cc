@@ -10,8 +10,8 @@
 #include "base/basictypes.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autofill/autofill_dialog.h"
 #include "chrome/browser/autofill/autofill_cc_infobar_delegate.h"
+#include "chrome/browser/autofill/autofill_dialog.h"
 #include "chrome/browser/autofill/form_structure.h"
 #include "chrome/browser/autofill/select_control_handler.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -87,20 +87,17 @@ void RemoveDuplicateElements(
 }
 
 bool FormIsHTTPS(FormStructure* form) {
-  return form->ConvertToFormData().origin.SchemeIs(chrome::kHttpsScheme);
+  return form->source_url().SchemeIs(chrome::kHttpsScheme);
 }
 
 }  // namespace
-
-// TODO(jhawkins): Maybe this should be in a grd file?
-const char* kAutoFillLearnMoreUrl =
-    "http://www.google.com/support/chrome/bin/answer.py?answer=142893";
 
 AutoFillManager::AutoFillManager(TabContents* tab_contents)
     : tab_contents_(tab_contents),
       personal_data_(NULL),
       download_manager_(tab_contents_->profile()),
-      disable_download_manager_requests_(false) {
+      disable_download_manager_requests_(false),
+      cc_infobar_(NULL) {
   DCHECK(tab_contents);
 
   // |personal_data_| is NULL when using TestTabContents.
@@ -182,7 +179,7 @@ bool AutoFillManager::GetAutoFillSuggestions(int query_id,
   AutoFillField* autofill_field = NULL;
   for (std::vector<FormStructure*>::iterator form_iter =
            form_structures_.begin();
-       form_iter != form_structures_.end(); ++form_iter) {
+       form_iter != form_structures_.end() && !autofill_field; ++form_iter) {
     form = *form_iter;
 
     // Don't send suggestions for forms that aren't auto-fillable.
@@ -203,7 +200,7 @@ bool AutoFillManager::GetAutoFillSuggestions(int query_id,
     }
   }
 
-  if (autofill_field == NULL)
+  if (!autofill_field)
     return false;
 
   std::vector<string16> values;
@@ -254,11 +251,8 @@ bool AutoFillManager::GetAutoFillSuggestions(int query_id,
   return true;
 }
 
-// TODO(jhawkins): Remove the |value| parameter.
 bool AutoFillManager::FillAutoFillFormData(int query_id,
                                            const FormData& form,
-                                           const string16& value,
-                                           const string16& label,
                                            int unique_id) {
   if (!IsAutoFillEnabled())
     return false;
@@ -438,15 +432,20 @@ void AutoFillManager::HandleSubmit() {
   CreditCard* credit_card;
   personal_data_->GetImportedFormData(&profile, &credit_card);
 
-  if (credit_card) {
-    cc_infobar_.reset(new AutoFillCCInfoBarDelegate(tab_contents_, this));
-  } else {
+  if (!credit_card) {
     UploadFormData();
+    return;
+  }
+
+  // Show an infobar to offer to save the credit card info.
+  if (tab_contents_) {
+    tab_contents_->AddInfoBar(new AutoFillCCInfoBarDelegate(tab_contents_,
+                                                            this));
   }
 }
 
 void AutoFillManager::UploadFormData() {
-  if (!disable_download_manager_requests_) {
+  if (!disable_download_manager_requests_ && upload_form_structure_.get()) {
     bool was_autofilled = false;
     // Check if the form among last 3 forms that were auto-filled.
     // Clear older signatures.
@@ -478,7 +477,8 @@ AutoFillManager::AutoFillManager()
     : tab_contents_(NULL),
       personal_data_(NULL),
       download_manager_(NULL),
-      disable_download_manager_requests_(false) {
+      disable_download_manager_requests_(false),
+      cc_infobar_(NULL) {
 }
 
 AutoFillManager::AutoFillManager(TabContents* tab_contents,
@@ -486,7 +486,8 @@ AutoFillManager::AutoFillManager(TabContents* tab_contents,
     : tab_contents_(tab_contents),
       personal_data_(personal_data),
       download_manager_(NULL),
-      disable_download_manager_requests_(false) {
+      disable_download_manager_requests_(false),
+      cc_infobar_(NULL) {
   DCHECK(tab_contents);
 }
 
@@ -573,7 +574,7 @@ void AutoFillManager::GetBillingProfileSuggestions(
   for (std::vector<CreditCard*>::const_iterator cc =
            personal_data_->credit_cards().begin();
        cc != personal_data_->credit_cards().end(); ++cc) {
-    string16 label = (*cc)->billing_address();
+    int billing_address_id = (*cc)->billing_address_id();
     AutoFillProfile* billing_profile = NULL;
 
     // The value of the stored data for this field type in the |profile|.
@@ -585,7 +586,7 @@ void AutoFillManager::GetBillingProfileSuggestions(
       AutoFillProfile* profile = *iter;
 
       // This assumes that labels are unique.
-      if (profile->Label() == label &&
+      if (profile->unique_id() == billing_address_id &&
           !profile->GetFieldText(type).empty() &&
           StartsWith(profile->GetFieldText(type), field.value(), false)) {
         billing_profile = profile;
@@ -680,13 +681,13 @@ void AutoFillManager::FillBillingFormField(const CreditCard* credit_card,
   DCHECK(type.group() == AutoFillType::ADDRESS_BILLING);
   DCHECK(field);
 
-  string16 billing_address = credit_card->billing_address();
-  if (!billing_address.empty()) {
+  int billing_address_id = credit_card->billing_address_id();
+  if (billing_address_id != 0) {
     AutoFillProfile* profile = NULL;
     const std::vector<AutoFillProfile*>& profiles = personal_data_->profiles();
     for (std::vector<AutoFillProfile*>::const_iterator iter = profiles.begin();
          iter != profiles.end(); ++iter) {
-      if ((*iter)->Label() == billing_address) {
+      if ((*iter)->unique_id() == billing_address_id) {
         profile = *iter;
         break;
       }
@@ -725,31 +726,6 @@ void AutoFillManager::FillFormField(const AutoFillProfile* profile,
       field->set_value(profile->GetFieldText(type));
   }
 }
-
-void AutoFillManager::FillSelectOneField(const AutoFillProfile* profile,
-                                         AutoFillType type,
-                                         webkit_glue::FormField* field) {
-  DCHECK(profile);
-  DCHECK(field);
-  DCHECK(field->form_control_type() == ASCIIToUTF16("select-one"));
-  string16 selected_string = profile->GetFieldText(type);
-  std::string ascii_value = UTF16ToASCII(selected_string);
-  for (size_t i = 0; i < field->option_strings().size(); ++i) {
-    if (profile->GetFieldText(type) == field->option_strings()[i]) {
-      // An exact match - use it.
-      selected_string = profile->GetFieldText(type);
-      break;
-    }
-    if (!base::strcasecmp(UTF16ToASCII(field->option_strings()[i]).c_str(),
-                          ascii_value.c_str())) {
-      // A match, but not in the same case - save it for the case we won't
-      // find an exact match.
-      selected_string = field->option_strings()[i];
-    }
-  }
-  field->set_value(selected_string);
-}
-
 
 void AutoFillManager::FillPhoneNumberField(const AutoFillProfile* profile,
                                            webkit_glue::FormField* field) {

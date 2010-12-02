@@ -10,11 +10,12 @@
 #include "app/menus/button_menu_item_model.h"
 #include "app/menus/simple_menu_model.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/tabs/tab_strip_model_observer.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 
 class Browser;
+class TabStripModel;
 
 namespace {
 class MockWrenchMenuModel;
@@ -25,7 +26,7 @@ class EncodingMenuModel : public menus::SimpleMenuModel,
                           public menus::SimpleMenuModel::Delegate {
  public:
   explicit EncodingMenuModel(Browser* browser);
-  virtual ~EncodingMenuModel() {}
+  virtual ~EncodingMenuModel();
 
   // Overridden from menus::SimpleMenuModel::Delegate:
   virtual bool IsCommandIdChecked(int command_id) const;
@@ -46,7 +47,7 @@ class EncodingMenuModel : public menus::SimpleMenuModel,
 class ZoomMenuModel : public menus::SimpleMenuModel {
  public:
   explicit ZoomMenuModel(menus::SimpleMenuModel::Delegate* delegate);
-  virtual ~ZoomMenuModel() {}
+  virtual ~ZoomMenuModel();
 
  private:
   void Build();
@@ -76,6 +77,9 @@ class WrenchMenuModel : public menus::SimpleMenuModel,
  public:
   WrenchMenuModel(menus::AcceleratorProvider* provider, Browser* browser);
   virtual ~WrenchMenuModel();
+
+  // Overridden for ButtonMenuItemModel::Delegate:
+  virtual bool DoesCommandIdDismissMenu(int command_id) const;
 
   // Overridden for both ButtonMenuItemModel::Delegate and SimpleMenuModel:
   virtual bool IsLabelForCommandIdDynamic(int command_id) const;
@@ -119,9 +123,6 @@ class WrenchMenuModel : public menus::SimpleMenuModel,
   // model for button items.
   void CreateCutCopyPaste();
   void CreateZoomFullscreen();
-
-  // Gets the current zoom information from the renderer.
-  double GetZoom(bool* enable_increment, bool* enable_decrement);
 
   string16 GetSyncMenuLabel() const;
 

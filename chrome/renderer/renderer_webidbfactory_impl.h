@@ -25,11 +25,13 @@ class RendererWebIDBFactoryImpl : public WebKit::WebIDBFactory {
 
   // See WebIDBFactory.h for documentation on these functions.
   virtual void open(
-      const WebKit::WebString& name, const WebKit::WebString& description,
+      const WebKit::WebString& name,
+      const WebKit::WebString& description,
       WebKit::WebIDBCallbacks* callbacks,
-      const WebKit::WebSecurityOrigin& origin, WebKit::WebFrame* web_frame);
-  virtual void abortPendingTransactions(
-      const WebKit::WebVector<int>& pendingIDs);
+      const WebKit::WebSecurityOrigin& origin,
+      WebKit::WebFrame* web_frame,
+      const WebKit::WebString& dataDir,
+      unsigned long long maximum_size);
 };
 
 #endif  // CHROME_RENDERER_RENDERER_WEBIDBFACTORY_IMPL_H_

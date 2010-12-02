@@ -23,6 +23,7 @@
 #include "webkit/glue/webcursor.h"
 #include "webkit/glue/webmenuitem.h"
 
+@class AcceleratedPluginView;
 class RenderWidgetHostViewMac;
 class RWHVMEditCommandHelper;
 @class ToolTip;
@@ -44,6 +45,7 @@ class RWHVMEditCommandHelper;
  @private
   scoped_ptr<RenderWidgetHostViewMac> renderWidgetHostView_;
   BOOL canBeKeyView_;
+  BOOL takesFocusOnlyOnMouseDown_;
   BOOL closeOnDeactivate_;
   BOOL rendererAccessible_;
   BOOL accessibilityRequested_;
@@ -122,11 +124,15 @@ class RWHVMEditCommandHelper;
   // handling a key down event, not including inserting commands, eg. insertTab,
   // etc.
   EditCommands editCommands_;
+
+  // The plugin for which IME is currently enabled (-1 if not enabled).
+  int pluginImeIdentifier_;
 }
 
 @property(assign, nonatomic) NSRect caretRect;
 
 - (void)setCanBeKeyView:(BOOL)can;
+- (void)setTakesFocusOnlyOnMouseDown:(BOOL)b;
 - (void)setCloseOnDeactivate:(BOOL)b;
 - (void)setToolTipAtMousePoint:(NSString *)string;
 // Set frame, then notify the RenderWidgetHost that the frame has been changed,
@@ -142,6 +148,11 @@ class RWHVMEditCommandHelper;
 - (void)setAccessibilityTree:(const webkit_glue::WebAccessibility&) tree;
 // Confirm ongoing composition.
 - (void)confirmComposition;
+// Enables or disables plugin IME for the given plugin.
+- (void)setPluginImeEnabled:(BOOL)enabled forPlugin:(int)pluginId;
+// Evaluates the event in the context of plugin IME, if plugin IME is enabled.
+// Returns YES if the event was handled.
+- (BOOL)postProcessEventForPluginIme:(NSEvent*)event;
 
 @end
 
@@ -203,6 +214,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void SelectionChanged(const std::string& text);
   virtual BackingStore* AllocBackingStore(const gfx::Size& size);
   virtual VideoLayer* AllocVideoLayer(const gfx::Size& size);
+  virtual void SetTakesFocusOnlyOnMouseDown(bool flag);
   virtual void ShowPopupWithItems(gfx::Rect bounds,
                                   int item_height,
                                   double item_font_size,
@@ -218,13 +230,22 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual bool ContainsNativeView(gfx::NativeView native_view) const;
   virtual void UpdateAccessibilityTree(
       const webkit_glue::WebAccessibility& tree);
-  virtual void OnAccessibilityFocusChange(int acc_obj_id);
-  virtual void OnAccessibilityObjectStateChange(int acc_obj_id);
+  virtual void SetPluginImeEnabled(bool enabled, int plugin_id);
+  virtual bool PostProcessEventForPluginIme(
+      const NativeWebKeyboardEvent& event);
+
   // Methods associated with GPU-accelerated plug-in instances and the
   // accelerated compositor.
   virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle(bool opaque,
                                                                  bool root);
   virtual void DestroyFakePluginWindowHandle(gfx::PluginWindowHandle window);
+
+  // Helper to do the actual cleanup after a plugin handle has been destroyed.
+  // Required because DestroyFakePluginWindowHandle() isn't always called for
+  // all handles (it's e.g. not called on navigation, when the RWHVMac gets
+  // destroyed anyway).
+  void DeallocFakePluginWindowHandle(gfx::PluginWindowHandle window);
+
   virtual void AcceleratedSurfaceSetIOSurface(gfx::PluginWindowHandle window,
                                               int32 width,
                                               int32 height,
@@ -237,7 +258,9 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void AcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window);
   virtual void GpuRenderingStateDidChange();
   void DrawAcceleratedSurfaceInstance(
-      CGLContextObj context, gfx::PluginWindowHandle plugin_handle);
+      CGLContextObj context,
+      gfx::PluginWindowHandle plugin_handle,
+      NSSize size);
   // Forces the textures associated with any accelerated plugin instances
   // to be reloaded.
   void ForceTextureReload();
@@ -249,6 +272,9 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   void set_parent_view(NSView* parent_view) { parent_view_ = parent_view; }
 
   void SetTextInputActive(bool active);
+
+  // Sends confirmed plugin IME text back to the renderer.
+  void PluginImeCompositionConfirmed(const string16& text, int plugin_id);
 
   const std::string& selected_text() const { return selected_text_; }
 
@@ -284,7 +310,8 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // Current text input type.
   WebKit::WebTextInputType text_input_type_;
 
-  typedef std::map<gfx::PluginWindowHandle, NSView*> PluginViewMap;
+  typedef std::map<gfx::PluginWindowHandle, AcceleratedPluginView*>
+      PluginViewMap;
   PluginViewMap plugin_views_;  // Weak values.
 
   // Helper class for managing instances of accelerated plug-ins.
@@ -298,6 +325,9 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // Shuts down the render_widget_host_.  This is a separate function so we can
   // invoke it from the message loop.
   void ShutdownHost();
+
+  // Used to determine whether or not to enable accessibility.
+  bool IsVoiceOverRunning();
 
   // The associated view. This is weak and is inserted into the view hierarchy
   // to own this RenderWidgetHostViewMac object unless is_popup_menu_ is true.

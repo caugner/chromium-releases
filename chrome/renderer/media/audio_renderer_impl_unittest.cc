@@ -29,7 +29,7 @@ class AudioRendererImplTest : public ::testing::Test {
     filter_->message_loop_ = message_loop_.get();
 
     // Create temporary shared memory.
-    CHECK(shared_mem_.Create(L"", false, false, kSize));
+    CHECK(shared_mem_.Create("", false, false, kSize));
 
     // Setup expectations for initialization.
     EXPECT_CALL(callback_, OnFilterCallback());
@@ -105,12 +105,12 @@ TEST_F(AudioRendererImplTest, SetVolume) {
 
 TEST_F(AudioRendererImplTest, Stop) {
   // Declare some state messages.
-  const ViewMsg_AudioStreamState_Params kError =
-      { ViewMsg_AudioStreamState_Params::kError };
-  const ViewMsg_AudioStreamState_Params kPlaying =
-      { ViewMsg_AudioStreamState_Params::kPlaying };
-  const ViewMsg_AudioStreamState_Params kPaused =
-      { ViewMsg_AudioStreamState_Params::kPaused };
+  const ViewMsg_AudioStreamState_Params kError(
+      ViewMsg_AudioStreamState_Params::kError);
+  const ViewMsg_AudioStreamState_Params kPlaying(
+      ViewMsg_AudioStreamState_Params::kPlaying);
+  const ViewMsg_AudioStreamState_Params kPaused(
+      ViewMsg_AudioStreamState_Params::kPaused);
 
   // Execute Stop() codepath to create an IPC message.
   EXPECT_CALL(stop_callback_, OnFilterCallback());
@@ -119,7 +119,7 @@ TEST_F(AudioRendererImplTest, Stop) {
 
   // Run AudioMessageFilter::Delegate methods, which can be executed after being
   // stopped.  AudioRendererImpl shouldn't create any messages.
-  renderer_->OnRequestPacket(kSize, base::Time());
+  renderer_->OnRequestPacket(AudioBuffersState(kSize, 0));
   renderer_->OnStateChanged(kError);
   renderer_->OnStateChanged(kPlaying);
   renderer_->OnStateChanged(kPaused);

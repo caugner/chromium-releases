@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "net/ftp/ftp_util.h"
@@ -157,9 +158,11 @@ bool FtpDirectoryListingParserLs::ConsumeLine(const string16& line) {
   entry.name = FtpUtil::GetStringPartAfterColumns(line, 6 + column_offset);
   if (entry.type == FtpDirectoryListingEntry::SYMLINK) {
     string16::size_type pos = entry.name.rfind(ASCIIToUTF16(" -> "));
-    if (pos == string16::npos)
-      return false;
-    entry.name = entry.name.substr(0, pos);
+
+    // We don't require the " -> " to be present. Some FTP servers don't send
+    // the symlink target, possibly for security reasons.
+    if (pos != string16::npos)
+      entry.name = entry.name.substr(0, pos);
   }
 
   entries_.push(entry);

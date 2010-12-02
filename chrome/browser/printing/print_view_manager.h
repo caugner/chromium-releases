@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/ref_counted.h"
+#include "base/string16.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -39,7 +40,7 @@ class PrintViewManager : public NotificationObserver,
   bool OnRenderViewGone(RenderViewHost* render_view_host);
 
   // PrintedPagesSource implementation.
-  virtual std::wstring RenderSourceName();
+  virtual string16 RenderSourceName();
   virtual GURL RenderSourceUrl();
 
   // RenderViewHostDelegate::Printing implementation.
@@ -88,12 +89,6 @@ class PrintViewManager : public NotificationObserver,
   // Releases print_job_. Correctly deregisters from notifications. Noop if
   // no print job has been created.
   void ReleasePrintJob();
-
-  // Prints the document. Starts the actual print job. Requests asynchronously
-  // the renderered pages from the renderer. Is called once the printing context
-  // is initialized, on a DEFAULT_INIT_DONE notification when waiting_to_print_
-  // is true.
-  void PrintNowInternal();
 
   // Runs an inner message loop. It will set inside_inner_message_loop_ to true
   // while the blocking inner message loop is running. This is useful in cases

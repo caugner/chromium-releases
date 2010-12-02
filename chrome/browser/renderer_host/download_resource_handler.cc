@@ -8,7 +8,7 @@
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_file_manager.h"
-#include "chrome/browser/history/download_types.h"
+#include "chrome/browser/history/download_create_info.h"
 #include "chrome/browser/renderer_host/global_request_id.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/common/resource_response.h"
@@ -91,10 +91,15 @@ bool DownloadResourceHandler::OnResponseStarted(int request_id,
   info->is_dangerous = false;
   info->referrer_charset = request_->context()->referrer_charset();
   info->save_info = save_info_;
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
       NewRunnableMethod(
           download_file_manager_, &DownloadFileManager::StartDownload, info));
+
+  // We can't start saving the data before we create the file on disk.
+  // The request will be un-paused in DownloadFileManager::CreateDownloadFile.
+  rdh_->PauseRequest(global_id_.child_id, global_id_.request_id, true);
+
   return true;
 }
 
@@ -114,8 +119,6 @@ bool DownloadResourceHandler::OnWillRead(int request_id, net::IOBuffer** buf,
     read_buffer_ = new net::IOBuffer(*buf_size);
   }
   *buf = read_buffer_.get();
-  // TODO(willchan): Remove after debugging bug 16371.
-  CHECK(read_buffer_->data());
   return true;
 }
 
@@ -132,8 +135,8 @@ bool DownloadResourceHandler::OnReadCompleted(int request_id, int* bytes_read) {
   read_buffer_.swap(&buffer);
   buffer_->contents.push_back(std::make_pair(buffer, *bytes_read));
   if (need_update) {
-    ChromeThread::PostTask(
-        ChromeThread::FILE, FROM_HERE,
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
         NewRunnableMethod(download_file_manager_,
                           &DownloadFileManager::UpdateDownload,
                           download_id_,
@@ -152,10 +155,10 @@ bool DownloadResourceHandler::OnResponseCompleted(
     int request_id,
     const URLRequestStatus& status,
     const std::string& security_info) {
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(download_file_manager_,
-                        &DownloadFileManager::DownloadFinished,
+                        &DownloadFileManager::OnResponseCompleted,
                         download_id_,
                         buffer_));
   read_buffer_ = NULL;

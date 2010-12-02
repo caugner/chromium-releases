@@ -4,12 +4,6 @@
 
 #include "net/base/x509_certificate.h"
 
-#if defined(OS_MACOSX)
-#include <Security/Security.h>
-#elif defined(USE_NSS)
-#include <cert.h>
-#endif
-
 #include <map>
 
 #include "base/histogram.h"
@@ -46,33 +40,6 @@ const char kCertificateHeader[] = "CERTIFICATE";
 const char kPKCS7Header[] = "PKCS7";
 
 }  // namespace
-
-// static
-bool X509Certificate::IsSameOSCert(X509Certificate::OSCertHandle a,
-                                   X509Certificate::OSCertHandle b) {
-  DCHECK(a && b);
-  if (a == b)
-    return true;
-#if defined(OS_WIN)
-  return a->cbCertEncoded == b->cbCertEncoded &&
-      memcmp(a->pbCertEncoded, b->pbCertEncoded, a->cbCertEncoded) == 0;
-#elif defined(OS_MACOSX)
-  if (CFEqual(a, b))
-    return true;
-  CSSM_DATA a_data, b_data;
-  return SecCertificateGetData(a, &a_data) == noErr &&
-      SecCertificateGetData(b, &b_data) == noErr &&
-      a_data.Length == b_data.Length &&
-      memcmp(a_data.Data, b_data.Data, a_data.Length) == 0;
-#elif defined(USE_NSS)
-  return a->derCert.len == b->derCert.len &&
-      memcmp(a->derCert.data, b->derCert.data, a->derCert.len) == 0;
-#else
-  // TODO(snej): not implemented
-  UNREACHED();
-  return false;
-#endif
-}
 
 bool X509Certificate::LessThan::operator()(X509Certificate* lhs,
                                            X509Certificate* rhs) const {
@@ -204,60 +171,61 @@ CertificateList X509Certificate::CreateCertificateListFromBytes(
     const char* data, int length, int format) {
   OSCertHandles certificates;
 
+  // Check to see if it is in a PEM-encoded form. This check is performed
+  // first, as both OS X and NSS will both try to convert if they detect
+  // PEM encoding, except they don't do it consistently between the two.
+  base::StringPiece data_string(data, length);
+  std::vector<std::string> pem_headers;
+
+  // To maintain compatibility with NSS/Firefox, CERTIFICATE is a universally
+  // valid PEM block header for any format.
+  pem_headers.push_back(kCertificateHeader);
+  if (format & FORMAT_PKCS7)
+    pem_headers.push_back(kPKCS7Header);
+
+  PEMTokenizer pem_tok(data_string, pem_headers);
+  while (pem_tok.GetNext()) {
+    std::string decoded(pem_tok.data());
+
+    OSCertHandle handle = NULL;
+    if (format & FORMAT_PEM_CERT_SEQUENCE)
+      handle = CreateOSCertHandleFromBytes(decoded.c_str(), decoded.size());
+    if (handle != NULL) {
+      // Parsed a DER encoded certificate. All PEM blocks that follow must
+      // also be DER encoded certificates wrapped inside of PEM blocks.
+      format = FORMAT_PEM_CERT_SEQUENCE;
+      certificates.push_back(handle);
+      continue;
+    }
+
+    // If the first block failed to parse as a DER certificate, and
+    // formats other than PEM are acceptable, check to see if the decoded
+    // data is one of the accepted formats.
+    if (format & ~FORMAT_PEM_CERT_SEQUENCE) {
+      for (size_t i = 0; certificates.empty() &&
+           i < arraysize(kFormatDecodePriority); ++i) {
+        if (format & kFormatDecodePriority[i]) {
+          certificates = CreateOSCertHandlesFromBytes(decoded.c_str(),
+              decoded.size(), kFormatDecodePriority[i]);
+        }
+      }
+    }
+
+    // Stop parsing after the first block for any format but a sequence of
+    // PEM-encoded DER certificates. The case of FORMAT_PEM_CERT_SEQUENCE
+    // is handled above, and continues processing until a certificate fails
+    // to parse.
+    break;
+  }
+
   // Try each of the formats, in order of parse preference, to see if |data|
-  // contains the binary representation of a Format.
+  // contains the binary representation of a Format, if it failed to parse
+  // as a PEM certificate/chain.
   for (size_t i = 0; certificates.empty() &&
        i < arraysize(kFormatDecodePriority); ++i) {
     if (format & kFormatDecodePriority[i])
       certificates = CreateOSCertHandlesFromBytes(data, length,
                                                   kFormatDecodePriority[i]);
-  }
-
-  // No certs were read. Check to see if it is in a PEM-encoded form.
-  if (certificates.empty()) {
-    base::StringPiece data_string(data, length);
-    std::vector<std::string> pem_headers;
-
-    // To maintain compatibility with NSS/Firefox, CERTIFICATE is a universally
-    // valid PEM block header for any format.
-    pem_headers.push_back(kCertificateHeader);
-    if (format & FORMAT_PKCS7)
-      pem_headers.push_back(kPKCS7Header);
-
-    PEMTokenizer pem_tok(data_string, pem_headers);
-    while (pem_tok.GetNext()) {
-      std::string decoded(pem_tok.data());
-
-      OSCertHandle handle = NULL;
-      if (format & FORMAT_PEM_CERT_SEQUENCE)
-        handle = CreateOSCertHandleFromBytes(decoded.c_str(), decoded.size());
-      if (handle != NULL) {
-        // Parsed a DER encoded certificate. All PEM blocks that follow must
-        // also be DER encoded certificates wrapped inside of PEM blocks.
-        format = FORMAT_PEM_CERT_SEQUENCE;
-        certificates.push_back(handle);
-        continue;
-      }
-
-      // If the first block failed to parse as a DER certificate, and
-      // formats other than PEM are acceptable, check to see if the decoded
-      // data is one of the accepted formats.
-      if (format & ~FORMAT_PEM_CERT_SEQUENCE) {
-        for (size_t i = 0; certificates.empty() &&
-             i < arraysize(kFormatDecodePriority); ++i) {
-          if (format & kFormatDecodePriority[i]) {
-            certificates = CreateOSCertHandlesFromBytes(decoded.c_str(),
-                decoded.size(), kFormatDecodePriority[i]);
-          }
-        }
-      }
-
-      // Stop parsing after the first block for any format but a sequence of
-      // PEM-encoded DER certificates. The case of FORMAT_PEM_CERT_SEQUENCE
-      // is handled above, and continues processing until a certificate fails
-      // to parse.
-      break;
-    }
   }
 
   CertificateList results;
@@ -281,7 +249,7 @@ X509Certificate::X509Certificate(OSCertHandle cert_handle,
                                  const OSCertHandles& intermediates)
     : cert_handle_(DupOSCertHandle(cert_handle)),
       source_(source) {
-#if defined(OS_MACOSX) || defined(OS_WIN)
+#if defined(OS_MACOSX) || defined(OS_WIN) || defined(USE_OPENSSL)
   // Copy/retain the intermediate cert handles.
   for (size_t i = 0; i < intermediates.size(); ++i)
     intermediate_ca_certs_.push_back(DupOSCertHandle(intermediates[i]));
@@ -319,7 +287,7 @@ bool X509Certificate::HasExpired() const {
 }
 
 bool X509Certificate::HasIntermediateCertificate(OSCertHandle cert) {
-#if defined(OS_MACOSX) || defined(OS_WIN)
+#if defined(OS_MACOSX) || defined(OS_WIN) || defined(USE_OPENSSL)
   for (size_t i = 0; i < intermediate_ca_certs_.size(); ++i) {
     if (IsSameOSCert(cert, intermediate_ca_certs_[i]))
       return true;

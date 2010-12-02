@@ -151,6 +151,30 @@ class WorkerTest : public UILayoutTest {
     EXPECT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(about_url));
   }
 
+  void RunWorkerFileSystemLayoutTest(const std::string& test_case_file_name) {
+    FilePath worker_test_dir;
+    worker_test_dir = worker_test_dir.AppendASCII("fast");
+
+    FilePath filesystem_test_dir;
+    filesystem_test_dir = filesystem_test_dir.AppendASCII("filesystem");
+    filesystem_test_dir = filesystem_test_dir.AppendASCII("workers");
+    InitializeForLayoutTest(worker_test_dir, filesystem_test_dir, kNoHttpPort);
+
+    FilePath resource_dir;
+    resource_dir = resource_dir.AppendASCII("resources");
+    AddResourceForLayoutTest(worker_test_dir.AppendASCII("filesystem"),
+                             resource_dir);
+
+    RunLayoutTest(test_case_file_name, kNoHttpPort);
+
+    // Navigate to a blank page so that any workers are cleaned up.
+    // This helps leaks trackers do a better job of reporting.
+    scoped_refptr<TabProxy> tab(GetActiveTab());
+    DCHECK(tab.get());
+    GURL about_url(chrome::kAboutBlankURL);
+    EXPECT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(about_url));
+  }
+
   bool NavigateAndWaitForAuth(TabProxy* tab, const GURL& url) {
     // Pass a large number of navigations to tell the tab to block until an auth
     // dialog pops up.
@@ -391,8 +415,8 @@ TEST_F(WorkerTest, FLAKY_SharedWorkerFastSimple) {
   RunWorkerFastLayoutTest("shared-worker-simple.html");
 }
 
-// Flaky, http://crbug.com/16934.
-TEST_F(WorkerTest, FLAKY_WorkerHttpLayoutTests) {
+// http://crbug.com/16934
+TEST_F(WorkerTest, DISABLED_WorkerHttpLayoutTests) {
   static const char* kLayoutTestFiles[] = {
     "shared-worker-importScripts.html",
     "shared-worker-redirect.html",
@@ -419,8 +443,8 @@ TEST_F(WorkerTest, FLAKY_WorkerHttpLayoutTests) {
   StopHttpServer();
 }
 
-// Flaky, see http://crbug.com/49381
-TEST_F(WorkerTest, FLAKY_WorkerWebSocketLayoutTests) {
+// Times out, see http://crbug.com/49381
+TEST_F(WorkerTest, DISABLED_WorkerWebSocketLayoutTests) {
   static const char* kLayoutTestFiles[] = {
     "close-in-onmessage-crash.html",
     "close-in-shared-worker.html",
@@ -431,12 +455,16 @@ TEST_F(WorkerTest, FLAKY_WorkerWebSocketLayoutTests) {
   };
 
   FilePath websocket_test_dir;
+  websocket_test_dir = websocket_test_dir.AppendASCII("http");
+  websocket_test_dir = websocket_test_dir.AppendASCII("tests");
   websocket_test_dir = websocket_test_dir.AppendASCII("websocket");
   websocket_test_dir = websocket_test_dir.AppendASCII("tests");
 
   FilePath worker_test_dir;
   worker_test_dir = worker_test_dir.AppendASCII("workers");
   InitializeForLayoutTest(websocket_test_dir, worker_test_dir, kWebSocketPort);
+  test_case_dir_ = test_case_dir_.AppendASCII("http");
+  test_case_dir_ = test_case_dir_.AppendASCII("tests");
   test_case_dir_ = test_case_dir_.AppendASCII("websocket");
   test_case_dir_ = test_case_dir_.AppendASCII("tests");
   test_case_dir_ = test_case_dir_.AppendASCII("workers");
@@ -659,4 +687,31 @@ TEST_F(WorkerTest, FLAKY_QueuedSharedWorkerStartedFromOtherTab) {
       kTestCompleteCookie, action_max_timeout_ms());
   ASSERT_STREQ(kTestCompleteSuccess, value.c_str());
   ASSERT_TRUE(WaitForProcessCountToBe(2, max_workers_per_tab+1));
+}
+
+// FileSystem worker tests.
+// They are disabled for now as the feature is not enabled by default.
+// http://crbug.com/32277
+TEST_F(WorkerTest, DISABLED_WorkerFileSystemTemporaryTest) {
+  RunWorkerFileSystemLayoutTest("simple-temporary.html");
+}
+
+TEST_F(WorkerTest, DISABLED_WorkerFileSystemPersistentTest) {
+  RunWorkerFileSystemLayoutTest("simple-persistent.html");
+}
+
+TEST_F(WorkerTest, DISABLED_WorkerFileSystemSyncTemporaryTest) {
+  RunWorkerFileSystemLayoutTest("simple-temporary-sync.html");
+}
+
+TEST_F(WorkerTest, DISABLED_WorkerFileSystemSyncPersistentTest) {
+  RunWorkerFileSystemLayoutTest("simple-persistent-sync.html");
+}
+
+TEST_F(WorkerTest, DISABLED_WorkerFileSystemAsyncOperationsTest) {
+  RunWorkerFileSystemLayoutTest("async-operations.html");
+}
+
+TEST_F(WorkerTest, DISABLED_WorkerFileSystemSyncOperationsTest) {
+  RunWorkerFileSystemLayoutTest("sync-operations.html");
 }

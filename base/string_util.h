@@ -23,6 +23,12 @@
 // and then remove this.
 #include "base/stringprintf.h"
 
+#ifdef RLZ_WIN_LIB_RLZ_LIB_H_
+// TODO(tfarina): Fix the rlz library to include this instead and remove
+// this include.
+#include "base/string_split.h"
+#endif  // RLZ_WIN_LIB_RLZ_LIB_H_
+
 // Safe standard library wrappers for all platforms.
 
 namespace base {
@@ -236,23 +242,6 @@ bool ContainsOnlyChars(const std::string& input, const std::string& characters);
 // beforehand.
 std::string WideToASCII(const std::wstring& wide);
 std::string UTF16ToASCII(const string16& utf16);
-
-#ifdef RLZ_WIN_LIB_RLZ_LIB_H_
-// Forward-declares for functions in utf_string_conversions.h. They used to
-// be here and they were moved. We keep these here temporarily until all
-// callers are converted.
-//
-// Currently, the only user is the RLZ project which needs to be updated
-// asynchronously. It's needed in only one file, so we key off of the ifdef
-// for that particular file to allow this case yet prevent other users from
-// adding dependencies on this file.
-//
-// TODO(brettw) delete these when we fix RLZ to use the right header.
-std::wstring ASCIIToWide(const char* ascii);
-std::wstring ASCIIToWide(const std::string& ascii);
-string16 ASCIIToUTF16(const char* ascii);
-string16 ASCIIToUTF16(const std::string& ascii);
-#endif  // RLZ_WIN_LIB_RLZ_LIB_H_
 
 // Converts the given wide string to the corresponding Latin1. This will fail
 // (return false) if any characters are more than 255.
@@ -504,36 +493,6 @@ template<typename Char> struct CaseInsensitiveCompareASCII {
   }
 };
 
-// TODO(timsteele): Move these split string functions into their own API on
-// string_split.cc/.h files.
-//-----------------------------------------------------------------------------
-
-// Splits |str| into a vector of strings delimited by |s|. Append the results
-// into |r| as they appear. If several instances of |s| are contiguous, or if
-// |str| begins with or ends with |s|, then an empty string is inserted.
-//
-// Every substring is trimmed of any leading or trailing white space.
-void SplitString(const std::wstring& str,
-                 wchar_t s,
-                 std::vector<std::wstring>* r);
-void SplitString(const string16& str,
-                 char16 s,
-                 std::vector<string16>* r);
-void SplitString(const std::string& str,
-                 char s,
-                 std::vector<std::string>* r);
-
-// The same as SplitString, but don't trim white space.
-void SplitStringDontTrim(const std::wstring& str,
-                         wchar_t s,
-                         std::vector<std::wstring>* r);
-void SplitStringDontTrim(const string16& str,
-                         char16 s,
-                         std::vector<string16>* r);
-void SplitStringDontTrim(const std::string& str,
-                         char s,
-                         std::vector<std::string>* r);
-
 // Splits a string into its fields delimited by any of the characters in
 // |delimiters|.  Each field is added to the |tokens| vector.  Returns the
 // number of tokens found.
@@ -582,7 +541,7 @@ std::string ReplaceStringPlaceholders(const base::StringPiece& format_string,
                                       const std::vector<std::string>& subst,
                                       std::vector<size_t>* offsets);
 
-// Single-string shortcut for ReplaceStringHolders.
+// Single-string shortcut for ReplaceStringHolders. |offset| may be NULL.
 string16 ReplaceStringPlaceholders(const string16& format_string,
                                    const string16& a,
                                    size_t* offset);
@@ -599,8 +558,10 @@ bool ElideString(const std::wstring& input, int max_len, std::wstring* output);
 // string can contain wildcards like * and ?
 // The backslash character (\) is an escape character for * and ?
 // We limit the patterns to having a max of 16 * or ? characters.
-bool MatchPatternWide(const std::wstring& string, const std::wstring& pattern);
-bool MatchPatternASCII(const std::string& string, const std::string& pattern);
+// ? matches 0 or 1 character, while * matches 0 or more characters.
+bool MatchPattern(const base::StringPiece& string,
+                  const base::StringPiece& pattern);
+bool MatchPattern(const string16& string, const string16& pattern);
 
 // Hack to convert any char-like type to its unsigned counterpart.
 // For example, it will convert char, signed char and unsigned char to unsigned

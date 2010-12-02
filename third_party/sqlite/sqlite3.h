@@ -14,9 +14,9 @@
 
 // A no-op implementation of database preloading (not available
 // when using system sqlite).
-int sqlite3Preload(sqlite3 *db) { return SQLITE_OK; }
+static int sqlite3Preload(sqlite3 *db) { return SQLITE_OK; }
 #else
-#include "third_party/sqlite/src/preprocessed/sqlite3.h"
+#include "third_party/sqlite/preprocessed/sqlite3.h"
 #endif
 
 #endif  // THIRD_PARTY_SQLITE_SQLITE3_H_

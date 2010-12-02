@@ -6,16 +6,15 @@
 
 #include <algorithm>
 
+#include "app/l10n_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "grit/generated_resources.h"
 
 namespace chromeos {
-
-static const std::string kGoogleWifi = "Google";
-static const std::string kGoogleAWifi = "Google-A";
 
 // Helper function to wrap Html with <th> tag.
 static std::string WrapWithTH(std::string text) {
@@ -62,11 +61,16 @@ static std::string ToHtmlTableRow(Network* network) {
   return str;
 }
 
+// Safe string constructor since we can't rely on non NULL pointers
+// for string values from libcros.
+static std::string SafeString(const char* s) {
+  return s ? std::string(s) : std::string();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Network
 
 void Network::Clear() {
-  type_ = TYPE_UNKNOWN;
   state_ = STATE_UNKNOWN;
   error_ = ERROR_UNKNOWN;
   service_path_.clear();
@@ -78,8 +82,8 @@ void Network::ConfigureFromService(const ServiceInfo& service) {
   type_ = service.type;
   state_ = service.state;
   error_ = service.error;
-  service_path_ = service.service_path;
-  device_path_ = service.device_path ? service.device_path : std::string();
+  service_path_ = SafeString(service.service_path);
+  device_path_ = SafeString(service.device_path);
   ip_address_.clear();
   // If connected, get ip config.
   if (connected() && service.device_path) {
@@ -95,46 +99,70 @@ void Network::ConfigureFromService(const ServiceInfo& service) {
   }
 }
 
-std::string Network::GetStateString() {
+// Used by GetHtmlInfo() which is called from the about:network handler.
+std::string Network::GetStateString() const {
   switch (state_) {
     case STATE_UNKNOWN:
-      break;
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_UNKNOWN);
     case STATE_IDLE:
-      return "Idle";
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_IDLE);
     case STATE_CARRIER:
-      return "Carrier";
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_CARRIER);
     case STATE_ASSOCIATION:
-      return "Association";
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_ASSOCIATION);
     case STATE_CONFIGURATION:
-      return "Configuration";
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_CONFIGURATION);
     case STATE_READY:
-      return "Ready";
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_READY);
     case STATE_DISCONNECT:
-      return "Disconnect";
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_DISCONNECT);
     case STATE_FAILURE:
-      return "Failure";
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_FAILURE);
+    case STATE_ACTIVATION_FAILURE:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_STATE_ACTIVATION_FAILURE);
+    default:
+      // Usually no default, but changes to libcros may add states.
+      break;
   }
-  return "Unknown";
+  return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_UNRECOGNIZED);
 }
 
-std::string Network::GetErrorString() {
+std::string Network::GetErrorString() const {
   switch (error_) {
     case ERROR_UNKNOWN:
-      return "Unknown Error";
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_ERROR_UNKNOWN);
     case ERROR_OUT_OF_RANGE:
-      return "Out Of Range";
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_ERROR_OUT_OF_RANGE);
     case ERROR_PIN_MISSING:
-      return "Pin Missing";
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_ERROR_PIN_MISSING);
     case ERROR_DHCP_FAILED:
-      return "DHCP Failed";
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_ERROR_DHCP_FAILED);
     case ERROR_CONNECT_FAILED:
-      return "Connect Failed";
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ERROR_CONNECT_FAILED);
     case ERROR_BAD_PASSPHRASE:
-      return "Bad Passphrase";
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ERROR_BAD_PASSPHRASE);
     case ERROR_BAD_WEPKEY:
-      return "Bad WEP Key";
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_ERROR_BAD_WEPKEY);
+    case ERROR_ACTIVATION_FAILED:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ERROR_ACTIVATION_FAILED);
+    case ERROR_NEED_EVDO:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_ERROR_NEED_EVDO);
+    case ERROR_NEED_HOME_NETWORK:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ERROR_NEED_HOME_NETWORK);
+    case ERROR_OTASP_FAILED:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_ERROR_OTASP_FAILED);
+    case ERROR_AAA_FAILED:
+      return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_ERROR_AAA_FAILED);
+    default:
+      // Usually no default, but changes to libcros may add errors.
+      break;
   }
-  return "";
+  return l10n_util::GetStringUTF8(IDS_CHROMEOS_NETWORK_STATE_UNRECOGNIZED);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -145,28 +173,219 @@ void WirelessNetwork::Clear() {
   name_.clear();
   strength_ = 0;
   auto_connect_ = false;
+  favorite_ = false;
 }
 
 void WirelessNetwork::ConfigureFromService(const ServiceInfo& service) {
   Network::ConfigureFromService(service);
-  name_ = service.name;
+  name_ = SafeString(service.name);
   strength_ = service.strength;
   auto_connect_ = service.auto_connect;
+  favorite_ = service.favorite;
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // CellularNetwork
 
+CellularNetwork::CellularNetwork()
+    : WirelessNetwork(),
+      activation_state_(ACTIVATION_STATE_UNKNOWN),
+      network_technology_(NETWORK_TECHNOLOGY_UNKNOWN),
+      roaming_state_(ROAMING_STATE_UNKNOWN),
+      restricted_pool_(false),
+      prl_version_(0) {
+  type_ = TYPE_CELLULAR;
+}
+
+bool CellularNetwork::StartActivation() const {
+  if (!CrosLibrary::Get()->EnsureLoaded())
+    return false;
+  return ActivateCellularModem(service_path_.c_str(), NULL);
+}
+
 void CellularNetwork::Clear() {
   WirelessNetwork::Clear();
+  activation_state_ = ACTIVATION_STATE_UNKNOWN;
+  roaming_state_ = ROAMING_STATE_UNKNOWN;
+  network_technology_ = NETWORK_TECHNOLOGY_UNKNOWN;
+  restricted_pool_ = false;
+  service_name_.clear();
+  operator_name_.clear();
+  operator_code_.clear();
+  payment_url_.clear();
+  meid_.clear();
+  imei_.clear();
+  imsi_.clear();
+  esn_.clear();
+  mdn_.clear();
+  min_.clear();
+  model_id_.clear();
+  manufacturer_.clear();
+  firmware_revision_.clear();
+  hardware_revision_.clear();
+  last_update_.clear();
+  prl_version_ = 0;
 }
 
 void CellularNetwork::ConfigureFromService(const ServiceInfo& service) {
   WirelessNetwork::ConfigureFromService(service);
+  service_name_ = SafeString(service.name);
+  activation_state_ = service.activation_state;
+  network_technology_ = service.network_technology;
+  roaming_state_ = service.roaming_state;
+  restricted_pool_ = service.restricted_pool;
+  // Carrier Info
+  if (service.carrier_info) {
+    operator_name_ = SafeString(service.carrier_info->operator_name);
+    operator_code_ = SafeString(service.carrier_info->operator_code);
+    payment_url_ = SafeString(service.carrier_info->payment_url);
+  }
+  // Device Info
+  if (service.device_info) {
+    meid_ = SafeString(service.device_info->MEID);
+    imei_ = SafeString(service.device_info->IMEI);
+    imsi_ = SafeString(service.device_info->IMSI);
+    esn_ = SafeString(service.device_info->ESN);
+    mdn_ = SafeString(service.device_info->MDN);
+    min_ = SafeString(service.device_info->MIN);
+    model_id_ = SafeString(service.device_info->model_id);
+    manufacturer_ = SafeString(service.device_info->manufacturer);
+    firmware_revision_ = SafeString(service.device_info->firmware_revision);
+    hardware_revision_ = SafeString(service.device_info->hardware_revision);
+    last_update_ = SafeString(service.device_info->last_update);
+    prl_version_ = service.device_info->PRL_version;
+  }
 }
+
+bool CellularNetwork::is_gsm() const {
+  return network_technology_ != NETWORK_TECHNOLOGY_EVDO &&
+      network_technology_ != NETWORK_TECHNOLOGY_1XRTT &&
+      network_technology_ != NETWORK_TECHNOLOGY_UNKNOWN;
+}
+
+CellularNetwork::DataLeft CellularNetwork::data_left() const {
+  if (data_plans_.empty())
+    return DATA_NORMAL;
+  CellularDataPlan plan = data_plans_[0];
+  if (plan.plan_type == CELLULAR_DATA_PLAN_UNLIMITED) {
+    int64 remaining = plan.plan_end_time - plan.update_time;
+    if (remaining <= 0)
+      return DATA_NONE;
+    else if (remaining <= kCellularDataVeryLowSecs)
+      return DATA_VERY_LOW;
+    else if (remaining <= kCellularDataLowSecs)
+      return DATA_LOW;
+    else
+      return DATA_NORMAL;
+  } else if (plan.plan_type == CELLULAR_DATA_PLAN_METERED_PAID ||
+             plan.plan_type == CELLULAR_DATA_PLAN_METERED_BASE) {
+    int64 remaining = plan.plan_data_bytes - plan.data_bytes_used;
+    if (remaining <= 0)
+      return DATA_NONE;
+    else if (remaining <= kCellularDataVeryLowBytes)
+      return DATA_VERY_LOW;
+    else if (remaining <= kCellularDataLowBytes)
+      return DATA_LOW;
+    else
+      return DATA_NORMAL;
+  }
+  return DATA_NORMAL;
+}
+
+std::string CellularNetwork::GetNetworkTechnologyString() const {
+  // No need to localize these cellular technology abbreviations.
+  switch (network_technology_) {
+    case NETWORK_TECHNOLOGY_1XRTT:
+      return "1xRTT";
+      break;
+    case NETWORK_TECHNOLOGY_EVDO:
+      return "EVDO";
+      break;
+    case NETWORK_TECHNOLOGY_GPRS:
+      return "GPRS";
+      break;
+    case NETWORK_TECHNOLOGY_EDGE:
+      return "EDGE";
+      break;
+    case NETWORK_TECHNOLOGY_UMTS:
+      return "UMTS";
+      break;
+    case NETWORK_TECHNOLOGY_HSPA:
+      return "HSPA";
+      break;
+    case NETWORK_TECHNOLOGY_HSPA_PLUS:
+      return "HSPA Plus";
+      break;
+    case NETWORK_TECHNOLOGY_LTE:
+      return "LTE";
+      break;
+    case NETWORK_TECHNOLOGY_LTE_ADVANCED:
+      return "LTE Advanced";
+      break;
+    default:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_CELLULAR_TECHNOLOGY_UNKNOWN);
+      break;
+  }
+}
+
+std::string CellularNetwork::GetActivationStateString() const {
+  switch (this->activation_state_) {
+    case ACTIVATION_STATE_ACTIVATED:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_ACTIVATED);
+      break;
+    case ACTIVATION_STATE_ACTIVATING:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_ACTIVATING);
+      break;
+    case ACTIVATION_STATE_NOT_ACTIVATED:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_NOT_ACTIVATED);
+      break;
+    case ACTIVATION_STATE_PARTIALLY_ACTIVATED:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_PARTIALLY_ACTIVATED);
+      break;
+    default:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_UNKNOWN);
+      break;
+  }
+}
+
+std::string CellularNetwork::GetRoamingStateString() const {
+  switch (this->roaming_state_) {
+    case ROAMING_STATE_HOME:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ROAMING_STATE_HOME);
+      break;
+    case ROAMING_STATE_ROAMING:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ROAMING_STATE_ROAMING);
+      break;
+    default:
+      return l10n_util::GetStringUTF8(
+          IDS_CHROMEOS_NETWORK_ROAMING_STATE_UNKNOWN);
+      break;
+  };
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // WifiNetwork
+
+WifiNetwork::WifiNetwork()
+    : WirelessNetwork(),
+      encryption_(SECURITY_NONE) {
+  type_ = TYPE_WIFI;
+}
+
+WifiNetwork::WifiNetwork(const ServiceInfo& service) : WirelessNetwork() {
+  ConfigureFromService(service);
+  type_ = TYPE_WIFI;
+}
 
 void WifiNetwork::Clear() {
   WirelessNetwork::Clear();
@@ -179,9 +398,9 @@ void WifiNetwork::Clear() {
 void WifiNetwork::ConfigureFromService(const ServiceInfo& service) {
   WirelessNetwork::ConfigureFromService(service);
   encryption_ = service.security;
-  passphrase_ = service.passphrase;
-  identity_ = service.identity;
-  cert_path_ = service.cert_path;
+  passphrase_ = SafeString(service.passphrase);
+  identity_ = SafeString(service.identity);
+  cert_path_ = SafeString(service.cert_path);
 }
 
 std::string WifiNetwork::GetEncryptionString() {
@@ -199,7 +418,26 @@ std::string WifiNetwork::GetEncryptionString() {
     case SECURITY_8021X:
       return "8021X";
   }
-  return "Unknown";}
+  return "Unknown";
+}
+
+// Parse 'path' to determine if the certificate is stored in a pkcs#11 device.
+// flimflam recognizes the string "SETTINGS:" to specify authentication
+// parameters. 'key_id=' indicates that the certificate is stored in a pkcs#11
+// device. See src/third_party/flimflam/files/doc/service-api.txt.
+bool WifiNetwork::IsCertificateLoaded() const {
+  static const std::string settings_string("SETTINGS:");
+  static const std::string pkcs11_key("key_id");
+  if (cert_path_.find(settings_string) == 0) {
+    std::string::size_type idx = cert_path_.find(pkcs11_key);
+    if (idx != std::string::npos)
+      idx = cert_path_.find_first_not_of(kWhitespaceASCII,
+                                         idx + pkcs11_key.length());
+    if (idx != std::string::npos && cert_path_[idx] == '=')
+      return true;
+  }
+  return false;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // NetworkLibrary
@@ -208,6 +446,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
  public:
   NetworkLibraryImpl()
       : network_status_connection_(NULL),
+        data_plan_monitor_(NULL),
         available_devices_(0),
         enabled_devices_(0),
         connected_devices_(0),
@@ -223,6 +462,9 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     if (network_status_connection_) {
       DisconnectMonitorNetwork(network_status_connection_);
     }
+    if (data_plan_monitor_) {
+      DisconnectDataPlanUpdateMonitor(data_plan_monitor_);
+    }
   }
 
   void AddObserver(Observer* observer) {
@@ -237,15 +479,13 @@ class NetworkLibraryImpl : public NetworkLibrary  {
   virtual bool ethernet_connecting() const { return ethernet_.connecting(); }
   virtual bool ethernet_connected() const { return ethernet_.connected(); }
 
-  virtual const std::string& wifi_name() const { return wifi_.name(); }
+  virtual const WifiNetwork& wifi_network() const { return wifi_; }
   virtual bool wifi_connecting() const { return wifi_.connecting(); }
   virtual bool wifi_connected() const { return wifi_.connected(); }
-  virtual int wifi_strength() const { return wifi_.strength(); }
 
-  virtual const std::string& cellular_name() const { return cellular_.name(); }
+  virtual const CellularNetwork& cellular_network() const { return cellular_; }
   virtual bool cellular_connecting() const { return cellular_.connecting(); }
   virtual bool cellular_connected() const { return cellular_.connected(); }
-  virtual int cellular_strength() const { return cellular_.strength(); }
 
   bool Connected() const {
     return ethernet_connected() || wifi_connected() || cellular_connected();
@@ -284,7 +524,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
 
   /////////////////////////////////////////////////////////////////////////////
 
-  bool FindWifiNetworkByPath(
+  virtual bool FindWifiNetworkByPath(
       const std::string& path, WifiNetwork* result) const {
     const WifiNetwork* wifi =
         GetWirelessNetworkByPath(wifi_networks_, path);
@@ -296,7 +536,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     return false;
   }
 
-  bool FindCellularNetworkByPath(
+  virtual bool FindCellularNetworkByPath(
       const std::string& path, CellularNetwork* result) const {
     const CellularNetwork* cellular =
         GetWirelessNetworkByPath(cellular_networks_, path);
@@ -308,13 +548,13 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     return false;
   }
 
-  void RequestWifiScan() {
+  virtual void RequestWifiScan() {
     if (CrosLibrary::Get()->EnsureLoaded()) {
       RequestScan(TYPE_WIFI);
     }
   }
 
-  bool GetWifiAccessPoints(WifiAccessPointVector* result) {
+  virtual bool GetWifiAccessPoints(WifiAccessPointVector* result) {
     if (!CrosLibrary::Get()->EnsureLoaded())
       return false;
     DeviceNetworkList* network_list = GetDeviceNetworkList();
@@ -327,8 +567,8 @@ class NetworkLibraryImpl : public NetworkLibrary  {
       DCHECK(network_list->networks[i].address);
       DCHECK(network_list->networks[i].name);
       WifiAccessPoint ap;
-      ap.mac_address = network_list->networks[i].address;
-      ap.name = network_list->networks[i].name;
+      ap.mac_address = SafeString(network_list->networks[i].address);
+      ap.name = SafeString(network_list->networks[i].name);
       ap.timestamp = now -
           base::TimeDelta::FromSeconds(network_list->networks[i].age_seconds);
       ap.signal_strength = network_list->networks[i].strength;
@@ -339,88 +579,35 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     return true;
   }
 
-  bool ConnectToPreferredNetworkIfAvailable() {
-    // TODO(chocobo): Add the concept of preferred network to libcros.
-    // So that we don't have to hard-code Google-A here.
+  virtual void ConnectToWifiNetwork(WifiNetwork network,
+                                    const std::string& password,
+                                    const std::string& identity,
+                                    const std::string& certpath) {
     if (CrosLibrary::Get()->EnsureLoaded()) {
-      LOG(INFO) << "Attempting to auto-connect to Google wifi.";
-      // First force a refresh of the system info.
-      UpdateSystemInfo();
-
-      // If ethernet is connected, then don't bother.
-      if (ethernet_connected()) {
-        LOG(INFO) << "Ethernet connected, so don't need Google wifi.";
-        return false;
-      }
-
-      WifiNetwork* wifi = GetPreferredNetwork();
-      if (!wifi) {
-        LOG(INFO) <<
-            "Google-A/Google wifi not found or set to not auto-connect.";
-        return false;
-      }
-
-      // Save the wifi path, so we know which one we want to auto-connect to.
-      const std::string wifi_path = wifi->service_path();
-
-      // It takes some time for the enterprise daemon to start up and populate
-      // the certificate and identity. So we wait at most 3 seconds here. And
-      // every 100ms, we refetch the system info and check the cert and identify
-      // on the wifi. The enterprise daemon takes between 0.4 to 0.9 seconds to
-      // setup.
-      bool setup = false;
-      for (int i = 0; i < 30; i++) {
-        // Update the system and refetch the network.
-        UpdateSystemInfo();
-        wifi = GetWirelessNetworkByPath(wifi_networks_, wifi_path);
-        // See if identity and certpath are available.
-        if (wifi && !wifi->identity().empty() && !wifi->cert_path().empty()) {
-          LOG(INFO) << "Google wifi set up after " << (i*0.1) << " seconds.";
-          setup = true;
-          break;
+      if (ConnectToNetworkWithCertInfo(network.service_path().c_str(),
+          password.empty() ? NULL : password.c_str(),
+          identity.empty() ? NULL : identity.c_str(),
+          certpath.empty() ? NULL : certpath.c_str())) {
+        // Update local cache and notify listeners.
+        WifiNetwork* wifi = GetWirelessNetworkByPath(
+            wifi_networks_, network.service_path());
+        if (wifi) {
+          wifi->set_passphrase(password);
+          wifi->set_identity(identity);
+          wifi->set_cert_path(certpath);
+          wifi->set_connecting(true);
+          wifi_ = *wifi;
         }
-        PlatformThread::Sleep(100);
+        NotifyNetworkChanged();
       }
-
-      if (!setup) {
-        LOG(INFO) << "Google wifi not set up after 3 seconds.";
-        return false;
-      }
-
-      // Now that we have a setup Google wifi, we can connect to it.
-      ConnectToNetwork(wifi_path.c_str(), NULL);
-      return true;
-    }
-    return false;
-  }
-
-  bool PreferredNetworkConnected() {
-    WifiNetwork* wifi = GetPreferredNetwork();
-    return wifi && wifi->connected();
-  }
-
-  bool PreferredNetworkFailed() {
-    WifiNetwork* wifi = GetPreferredNetwork();
-    return !wifi || wifi->failed();
-  }
-
-  void ConnectToWifiNetwork(WifiNetwork network,
-                            const std::string& password,
-                            const std::string& identity,
-                            const std::string& certpath) {
-    if (CrosLibrary::Get()->EnsureLoaded()) {
-      ConnectToNetworkWithCertInfo(network.service_path().c_str(),
-                       password.empty() ? NULL : password.c_str(),
-                       identity.empty() ? NULL : identity.c_str(),
-                       certpath.empty() ? NULL : certpath.c_str());
     }
   }
 
-  void ConnectToWifiNetwork(const std::string& ssid,
-                            const std::string& password,
-                            const std::string& identity,
-                            const std::string& certpath,
-                            bool auto_connect) {
+  virtual void ConnectToWifiNetwork(const std::string& ssid,
+                                    const std::string& password,
+                                    const std::string& identity,
+                                    const std::string& certpath,
+                                    bool auto_connect) {
     if (CrosLibrary::Get()->EnsureLoaded()) {
       // First create a service from hidden network.
       ServiceInfo* service = GetWifiService(ssid.c_str(),
@@ -430,9 +617,9 @@ class NetworkLibraryImpl : public NetworkLibrary  {
         SetAutoConnect(service->service_path, auto_connect);
         // Now connect to that service.
         ConnectToNetworkWithCertInfo(service->service_path,
-                         password.empty() ? NULL : password.c_str(),
-                         identity.empty() ? NULL : identity.c_str(),
-                         certpath.empty() ? NULL : certpath.c_str());
+            password.empty() ? NULL : password.c_str(),
+            identity.empty() ? NULL : identity.c_str(),
+            certpath.empty() ? NULL : certpath.c_str());
 
         // Clean up ServiceInfo object.
         FreeServiceInfo(service);
@@ -443,23 +630,55 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     }
   }
 
-  void ConnectToCellularNetwork(CellularNetwork network) {
+  virtual void ConnectToCellularNetwork(CellularNetwork network) {
     if (CrosLibrary::Get()->EnsureLoaded()) {
-      ConnectToNetwork(network.service_path().c_str(), NULL);
+      if (ConnectToNetwork(network.service_path().c_str(), NULL)) {
+        // Update local cache and notify listeners.
+        CellularNetwork* cellular = GetWirelessNetworkByPath(
+            cellular_networks_, network.service_path());
+        if (cellular) {
+          cellular->set_connecting(true);
+          cellular_ = *cellular;
+        }
+        NotifyNetworkChanged();
+      }
     }
   }
 
-  void DisconnectFromWirelessNetwork(const WirelessNetwork& network) {
+  virtual void RefreshCellularDataPlans(const CellularNetwork& network) {
+    if (!CrosLibrary::Get()->EnsureLoaded())
+      return;
+    RequestCellularDataPlanUpdate(network.service_path().c_str());
+  }
+
+  virtual void DisconnectFromWirelessNetwork(const WirelessNetwork& network) {
     if (CrosLibrary::Get()->EnsureLoaded()) {
-      DisconnectFromNetwork(network.service_path().c_str());
+      if (DisconnectFromNetwork(network.service_path().c_str())) {
+        // Update local cache and notify listeners.
+        if (network.type() == TYPE_WIFI) {
+          WifiNetwork* wifi = GetWirelessNetworkByPath(
+              wifi_networks_, network.service_path());
+          if (wifi) {
+            wifi->set_connected(false);
+            wifi_ = WifiNetwork();
+          }
+        } else if (network.type() == TYPE_CELLULAR) {
+          CellularNetwork* cellular = GetWirelessNetworkByPath(
+              cellular_networks_, network.service_path());
+          if (cellular) {
+            cellular->set_connected(false);
+            cellular_ = CellularNetwork();
+          }
+        }
+        NotifyNetworkChanged();
+      }
     }
   }
 
-  void SaveCellularNetwork(const CellularNetwork& network) {
+  virtual void SaveCellularNetwork(const CellularNetwork& network) {
     // Update the wifi network in the local cache.
     CellularNetwork* cellular = GetWirelessNetworkByPath(
-        cellular_networks_,
-        network.service_path());
+        cellular_networks_, network.service_path());
     if (cellular)
       *cellular = network;
 
@@ -469,10 +688,10 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     }
   }
 
-  void SaveWifiNetwork(const WifiNetwork& network) {
+  virtual void SaveWifiNetwork(const WifiNetwork& network) {
     // Update the wifi network in the local cache.
-    WifiNetwork* wifi = GetWirelessNetworkByPath(wifi_networks_,
-                                                 network.service_path());
+    WifiNetwork* wifi = GetWirelessNetworkByPath(
+        wifi_networks_, network.service_path());
     if (wifi)
       *wifi = network;
 
@@ -486,9 +705,18 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     }
   }
 
-  void ForgetWirelessNetwork(const std::string& service_path) {
+  virtual void ForgetWirelessNetwork(const std::string& service_path) {
     if (CrosLibrary::Get()->EnsureLoaded()) {
-      DeleteRememberedService(service_path.c_str());
+      if (DeleteRememberedService(service_path.c_str())) {
+        // Update local cache and notify listeners.
+        std::remove_if(remembered_wifi_networks_.begin(),
+                       remembered_wifi_networks_.end(),
+                       WirelessNetwork::ServicePathEq(service_path));
+        std::remove_if(remembered_cellular_networks_.begin(),
+                       remembered_cellular_networks_.end(),
+                       WirelessNetwork::ServicePathEq(service_path));
+        NotifyNetworkChanged();
+      }
     }
   }
 
@@ -514,19 +742,19 @@ class NetworkLibraryImpl : public NetworkLibrary  {
 
   virtual bool offline_mode() const { return offline_mode_; }
 
-  void EnableEthernetNetworkDevice(bool enable) {
+  virtual void EnableEthernetNetworkDevice(bool enable) {
     EnableNetworkDeviceType(TYPE_ETHERNET, enable);
   }
 
-  void EnableWifiNetworkDevice(bool enable) {
+  virtual void EnableWifiNetworkDevice(bool enable) {
     EnableNetworkDeviceType(TYPE_WIFI, enable);
   }
 
-  void EnableCellularNetworkDevice(bool enable) {
+  virtual void EnableCellularNetworkDevice(bool enable) {
     EnableNetworkDeviceType(TYPE_CELLULAR, enable);
   }
 
-  void EnableOfflineMode(bool enable) {
+  virtual void EnableOfflineMode(bool enable) {
     if (!CrosLibrary::Get()->EnsureLoaded())
       return;
 
@@ -546,7 +774,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     }
   }
 
-  NetworkIPConfigVector GetIPConfigs(const std::string& device_path) {
+  virtual NetworkIPConfigVector GetIPConfigs(const std::string& device_path) {
     NetworkIPConfigVector ipconfig_vector;
     if (!device_path.empty()) {
       IPConfigStatus* ipconfig_status = ListIPConfigs(device_path.c_str());
@@ -566,7 +794,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     return ipconfig_vector;
   }
 
-  std::string GetHtmlInfo(int refresh) {
+  virtual std::string GetHtmlInfo(int refresh) {
     std::string output;
     output.append("<html><head><title>About Network</title>");
     if (refresh > 0)
@@ -629,6 +857,20 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     NetworkLibraryImpl* network = static_cast<NetworkLibraryImpl*>(object);
     DCHECK(network);
     network->UpdateNetworkStatus();
+  }
+
+  static void DataPlanUpdateHandler(void* object,
+                                    const char* modem_service_path,
+                                    const CellularDataPlanList* dataplan) {
+    NetworkLibraryImpl* network = static_cast<NetworkLibraryImpl*>(object);
+    DCHECK(network);
+    // Store data plan for currently connected cellular network.
+    if (network->cellular_network().service_path()
+        .compare(modem_service_path) == 0) {
+      if (dataplan != NULL) {
+        network->UpdateCellularDataPlan(*dataplan);
+      }
+    }
   }
 
   static void ParseSystem(SystemInfo* system,
@@ -695,11 +937,14 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     // Now, register to receive updates on network status.
     network_status_connection_ = MonitorNetwork(&NetworkStatusChangedHandler,
                                                 this);
+    LOG(INFO) << "Registering for cellular data plan updates.";
+    data_plan_monitor_ = MonitorCellularDataPlan(&DataPlanUpdateHandler, this);
   }
 
   void InitTestData() {
     ethernet_.Clear();
     ethernet_.set_connected(true);
+    ethernet_.set_service_path("eth1");
 
     wifi_networks_.clear();
     WifiNetwork wifi1 = WifiNetwork();
@@ -766,29 +1011,29 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     enabled_devices_ = devices;
     connected_devices_ = devices;
     offline_mode_ = false;
+
+    chromeos::CellularDataPlan test_plan;
+    test_plan.plan_name = "Fake plan";
+    test_plan.data_bytes_used = 5LL * 1024LL * 1024LL * 1024LL;
+    test_plan.plan_start_time =
+        (base::Time::Now() - base::TimeDelta::FromDays(15)).ToInternalValue() /
+            base::Time::kMicrosecondsPerSecond;
+    test_plan.plan_end_time =
+        (base::Time::Now() + base::TimeDelta::FromDays(12)).ToInternalValue() /
+            base::Time::kMicrosecondsPerSecond;
+    test_plan.plan_data_bytes = 20LL * 1024LL * 1024LL * 1024LL;
+    test_plan.plan_type = CELLULAR_DATA_PLAN_METERED_PAID;
+    test_plan.update_time = base::Time::Now().ToInternalValue() /
+        base::Time::kMicrosecondsPerSecond;
+    chromeos::CellularDataPlanList test_plans;
+    test_plans.push_back(test_plan);
+    cellular_.SetDataPlans(test_plans);
   }
 
   void UpdateSystemInfo() {
     if (CrosLibrary::Get()->EnsureLoaded()) {
       UpdateNetworkStatus();
     }
-  }
-
-  WifiNetwork* GetPreferredNetwork() {
-    // First look for Google-A then look for Google.
-    // Only care if set to auto-connect.
-    WifiNetwork* wifi = GetWifiNetworkByName(kGoogleAWifi);
-    // If wifi found and set to not auto-connect, then ignore it.
-    if (wifi && !wifi->auto_connect())
-      wifi = NULL;
-
-    if (!wifi) {
-      wifi = GetWifiNetworkByName(kGoogleWifi);
-      // If wifi found and set to not auto-connect, then ignore it.
-      if (wifi && !wifi->auto_connect())
-        wifi = NULL;
-    }
-    return wifi;
   }
 
   WifiNetwork* GetWifiNetworkByName(const std::string& name) {
@@ -836,11 +1081,19 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     EnableNetworkDevice(device, enable);
   }
 
+  void NotifyNetworkChanged() {
+    FOR_EACH_OBSERVER(Observer, observers_, NetworkChanged(this));
+  }
+
+  void NotifyCellularDataPlanChanged() {
+    FOR_EACH_OBSERVER(Observer, observers_, CellularDataPlanChanged(this));
+  }
+
   void UpdateNetworkStatus() {
     // Make sure we run on UI thread.
-    if (!ChromeThread::CurrentlyOn(ChromeThread::UI)) {
-      ChromeThread::PostTask(
-          ChromeThread::UI, FROM_HERE,
+    if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
           NewRunnableMethod(this,
                             &NetworkLibraryImpl::UpdateNetworkStatus));
       return;
@@ -864,9 +1117,16 @@ class NetworkLibraryImpl : public NetworkLibrary  {
         break;  // There is only one connected or connecting wifi network.
       }
     }
+    std::string prev_service_path = cellular_.service_path();
     cellular_ = CellularNetwork();
     for (size_t i = 0; i < cellular_networks_.size(); i++) {
       if (cellular_networks_[i].connecting_or_connected()) {
+        // If new cellular, then update data plan list.
+        if (cellular_networks_[i].service_path() != prev_service_path) {
+          CellularDataPlanList list;
+          RetrieveCellularDataPlans(cellular_.service_path().c_str(), &list);
+          UpdateCellularDataPlan(list);
+        }
         cellular_ = cellular_networks_[i];
         break;  // There is only one connected or connecting cellular network.
       }
@@ -877,14 +1137,22 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     connected_devices_ = system->connected_technologies;
     offline_mode_ = system->offline_mode;
 
-    FOR_EACH_OBSERVER(Observer, observers_, NetworkChanged(this));
+    NotifyNetworkChanged();
     FreeSystemInfo(system);
+  }
+
+  void UpdateCellularDataPlan(const CellularDataPlanList& data_plans) {
+    cellular_.SetDataPlans(data_plans);
+    NotifyCellularDataPlanChanged();
   }
 
   ObserverList<Observer> observers_;
 
   // The network status connection for monitoring network status changes.
   MonitorNetworkConnection network_status_connection_;
+
+  // For monitoring data plan changes to the connected cellular network.
+  DataPlanUpdateMonitor data_plan_monitor_;
 
   // The ethernet network.
   EthernetNetwork ethernet_;
@@ -932,15 +1200,16 @@ class NetworkLibraryStubImpl : public NetworkLibrary {
   }
   virtual bool ethernet_connecting() const { return false; }
   virtual bool ethernet_connected() const { return true; }
-  virtual const std::string& wifi_name() const { return EmptyString(); }
+  virtual const WifiNetwork& wifi_network() const {
+    return wifi_;
+  }
   virtual bool wifi_connecting() const { return false; }
   virtual bool wifi_connected() const { return false; }
-  virtual int wifi_strength() const { return 0; }
-
-  virtual const std::string& cellular_name() const { return EmptyString(); }
+  virtual const CellularNetwork& cellular_network() const {
+    return cellular_;
+  }
   virtual bool cellular_connecting() const { return false; }
   virtual bool cellular_connected() const { return false; }
-  virtual int cellular_strength() const { return false; }
 
   bool Connected() const { return true; }
   bool Connecting() const { return false; }
@@ -960,29 +1229,30 @@ class NetworkLibraryStubImpl : public NetworkLibrary {
 
   /////////////////////////////////////////////////////////////////////////////
 
-  bool FindWifiNetworkByPath(
+  virtual bool FindWifiNetworkByPath(
       const std::string& path, WifiNetwork* result) const { return false; }
-  bool FindCellularNetworkByPath(
+  virtual bool FindCellularNetworkByPath(
       const std::string& path, CellularNetwork* result) const { return false; }
-  void RequestWifiScan() {}
-  bool GetWifiAccessPoints(WifiAccessPointVector* result) { return false; }
-  bool ConnectToPreferredNetworkIfAvailable() { return false; }
-  bool PreferredNetworkConnected() { return false; }
-  bool PreferredNetworkFailed() { return false; }
-  void ConnectToWifiNetwork(WifiNetwork network,
-                            const std::string& password,
-                            const std::string& identity,
-                            const std::string& certpath) {}
-  void ConnectToWifiNetwork(const std::string& ssid,
-                            const std::string& password,
-                            const std::string& identity,
-                            const std::string& certpath,
-                            bool auto_connect) {}
-  void ConnectToCellularNetwork(CellularNetwork network) {}
-  void DisconnectFromWirelessNetwork(const WirelessNetwork& network) {}
-  void SaveCellularNetwork(const CellularNetwork& network) {}
-  void SaveWifiNetwork(const WifiNetwork& network) {}
-  void ForgetWirelessNetwork(const std::string& service_path) {}
+  virtual void RequestWifiScan() {}
+  virtual bool GetWifiAccessPoints(WifiAccessPointVector* result) {
+    return false;
+  }
+
+  virtual void ConnectToWifiNetwork(WifiNetwork network,
+                                    const std::string& password,
+                                    const std::string& identity,
+                                    const std::string& certpath) {}
+  virtual void ConnectToWifiNetwork(const std::string& ssid,
+                                    const std::string& password,
+                                    const std::string& identity,
+                                    const std::string& certpath,
+                                    bool auto_connect) {}
+  virtual void ConnectToCellularNetwork(CellularNetwork network) {}
+  virtual void RefreshCellularDataPlans(const CellularNetwork& network) {}
+  virtual void DisconnectFromWirelessNetwork(const WirelessNetwork& network) {}
+  virtual void SaveCellularNetwork(const CellularNetwork& network) {}
+  virtual void SaveWifiNetwork(const WifiNetwork& network) {}
+  virtual void ForgetWirelessNetwork(const std::string& service_path) {}
   virtual bool ethernet_available() const { return true; }
   virtual bool wifi_available() const { return false; }
   virtual bool cellular_available() const { return false; }
@@ -990,19 +1260,21 @@ class NetworkLibraryStubImpl : public NetworkLibrary {
   virtual bool wifi_enabled() const { return false; }
   virtual bool cellular_enabled() const { return false; }
   virtual bool offline_mode() const { return false; }
-  void EnableEthernetNetworkDevice(bool enable) {}
-  void EnableWifiNetworkDevice(bool enable) {}
-  void EnableCellularNetworkDevice(bool enable) {}
-  void EnableOfflineMode(bool enable) {}
-  NetworkIPConfigVector GetIPConfigs(const std::string& device_path) {
+  virtual void EnableEthernetNetworkDevice(bool enable) {}
+  virtual void EnableWifiNetworkDevice(bool enable) {}
+  virtual void EnableCellularNetworkDevice(bool enable) {}
+  virtual void EnableOfflineMode(bool enable) {}
+  virtual NetworkIPConfigVector GetIPConfigs(const std::string& device_path) {
     return NetworkIPConfigVector();
   }
-  std::string GetHtmlInfo(int refresh) { return std::string(); }
-  void UpdateSystemInfo() {}
+  virtual std::string GetHtmlInfo(int refresh) { return std::string(); }
+  virtual void UpdateSystemInfo() {}
 
  private:
   std::string ip_address_;
   EthernetNetwork ethernet_;
+  WifiNetwork wifi_;
+  CellularNetwork cellular_;
   WifiNetworkVector wifi_networks_;
   CellularNetworkVector cellular_networks_;
 };

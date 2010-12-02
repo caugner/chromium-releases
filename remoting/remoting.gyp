@@ -113,24 +113,24 @@
       'dependencies': [
         '../gfx/gfx.gyp:gfx',
         '../media/media.gyp:media',
-        '../third_party/protobuf2/protobuf.gyp:protobuf_lite',
+        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
+        '../third_party/libvpx/libvpx.gyp:libvpx_include',
         '../third_party/zlib/zlib.gyp:zlib',
+        'chromoting_jingle_glue',
         'base/protocol/chromotocol.gyp:chromotocol_proto_lib',
         'base/protocol/chromotocol.gyp:trace_proto_lib',
-        'chromoting_jingle_glue',
         # TODO(hclam): Enable VP8 in the build.
         #'third_party/on2/on2.gyp:vp8',
       ],
       'export_dependent_settings': [
-        '../third_party/protobuf2/protobuf.gyp:protobuf_lite',
+        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         'base/protocol/chromotocol.gyp:chromotocol_proto_lib',
-        # TODO(hclam): Enable VP8 in the build.
-        #'third_party/on2/on2.gyp:vp8',
       ],
       # This target needs a hard dependency because dependent targets
       # depend on chromotocol_proto_lib for headers.
       'hard_dependency': 1,
       'sources': [
+        'base/capture_data.cc',
         'base/capture_data.h',
         'base/compressor.h',
         'base/compressor_zlib.cc',
@@ -138,30 +138,29 @@
         'base/constants.cc',
         'base/constants.h',
         'base/decoder.h',
-        'base/decoder_verbatim.cc',
-        'base/decoder_verbatim.h',
-        'base/decoder_zlib.cc',
-        'base/decoder_zlib.h',
+# BUG57374,BUG57266       'base/decoder_vp8.cc',
+# BUG57374,BUG57266       'base/decoder_vp8.h',
+        'base/decoder_row_based.cc',
+        'base/decoder_row_based.h',
         'base/decompressor.h',
+        'base/decompressor_verbatim.cc',
+        'base/decompressor_verbatim.h',
         'base/decompressor_zlib.cc',
         'base/decompressor_zlib.h',
         'base/encoder.h',
         'base/encoder_verbatim.cc',
         'base/encoder_verbatim.h',
+# BUG57374       'base/encoder_vp8.cc',
+# BUG57374       'base/encoder_vp8.h',
         'base/encoder_zlib.cc',
         'base/encoder_zlib.h',
-        # TODO(hclam): Enable VP8 in the build.
-        #'base/encoder_vp8.cc',
-        #'base/encoder_vp8.h',
         'base/multiple_array_input_stream.cc',
         'base/multiple_array_input_stream.h',
-        'base/protocol_decoder.cc',
-        'base/protocol_decoder.h',
-        'base/protocol_util.cc',
-        'base/protocol_util.h',
         'base/tracer.cc',
         'base/tracer.h',
         'base/types.h',
+        'base/util.cc',
+        'base/util.h',
       ],
     },  # end of target 'chromoting_base'
 
@@ -171,6 +170,7 @@
       'dependencies': [
         'chromoting_base',
         'chromoting_jingle_glue',
+        'chromoting_protocol',
       ],
       'sources': [
         'host/access_verifier.cc',
@@ -242,6 +242,7 @@
       'dependencies': [
         'chromoting_base',
         'chromoting_jingle_glue',
+        'chromoting_protocol',
       ],
       'sources': [
         'client/chromoting_client.cc',
@@ -253,11 +254,14 @@
         'client/client_context.h',
         'client/client_util.cc',
         'client/client_util.h',
+        'client/frame_consumer.h',
         'client/host_connection.h',
         'client/input_handler.cc',
         'client/input_handler.h',
         'client/jingle_host_connection.cc',
         'client/jingle_host_connection.h',
+        'client/rectangle_update_decoder.cc',
+        'client/rectangle_update_decoder.h',
       ],
     },  # end of target 'chromoting_client'
 
@@ -298,12 +302,15 @@
         '../jingle/jingle.gyp:notifier',
         '../third_party/libjingle/libjingle.gyp:libjingle',
         '../third_party/libjingle/libjingle.gyp:libjingle_p2p',
+        '../third_party/libsrtp/libsrtp.gyp:libsrtp',
       ],
       'export_dependent_settings': [
         '../third_party/libjingle/libjingle.gyp:libjingle',
         '../third_party/libjingle/libjingle.gyp:libjingle_p2p',
       ],
       'sources': [
+        'jingle_glue/channel_socket_adapter.cc',
+        'jingle_glue/channel_socket_adapter.h',
         'jingle_glue/iq_request.cc',
         'jingle_glue/iq_request.h',
         'jingle_glue/jingle_channel.cc',
@@ -316,6 +323,16 @@
         'jingle_glue/jingle_thread.h',
         'jingle_glue/relay_port_allocator.cc',
         'jingle_glue/relay_port_allocator.h',
+        'jingle_glue/stream_socket_adapter.cc',
+        'jingle_glue/stream_socket_adapter.h',
+        'jingle_glue/ssl_adapter.h',
+        'jingle_glue/ssl_adapter.cc',
+        'jingle_glue/ssl_socket_adapter.cc',
+        'jingle_glue/ssl_socket_adapter.h',
+        'jingle_glue/utils.cc',
+        'jingle_glue/utils.h',
+        'jingle_glue/xmpp_socket_adapter.cc',
+        'jingle_glue/xmpp_socket_adapter.h',
       ],
     },  # end of target 'chromoting_jingle_glue'
 
@@ -332,6 +349,48 @@
       ],
     },  # end of target 'chromoting_jingle_test_client'
 
+    {
+      'target_name': 'chromoting_protocol',
+      'type': '<(library)',
+      'dependencies': [
+        'chromoting_base',
+        'chromoting_jingle_glue',
+      ],
+      'export_dependent_settings': [
+        'chromoting_jingle_glue',
+      ],
+      'sources': [
+        'protocol/messages_decoder.cc',
+        'protocol/messages_decoder.h',
+        'protocol/buffered_socket_writer.cc',
+        'protocol/buffered_socket_writer.h',
+        'protocol/chromoting_connection.h',
+        'protocol/chromoting_server.h',
+        'protocol/jingle_chromoting_connection.cc',
+        'protocol/jingle_chromoting_connection.h',
+        'protocol/jingle_chromoting_server.cc',
+        'protocol/jingle_chromoting_server.h',
+        'protocol/stream_reader.cc',
+        'protocol/stream_reader.h',
+        'protocol/stream_writer.cc',
+        'protocol/stream_writer.h',
+        'protocol/util.cc',
+        'protocol/util.h',
+      ],
+    },  # end of target 'chromoting_protocol'
+
+    {
+      'target_name': 'chromotocol_test_client',
+      'type': 'executable',
+      'dependencies': [
+        'chromoting_base',
+        'chromoting_protocol',
+      ],
+      'sources': [
+        'protocol/protocol_test_client.cc',
+      ],
+    },  # end of target 'chromotocol_test_client'
+
     # Remoting unit tests
     {
       'target_name': 'remoting_unittests',
@@ -341,6 +400,7 @@
         'chromoting_client',
         'chromoting_host',
         'chromoting_jingle_glue',
+        'chromoting_protocol',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
@@ -352,20 +412,18 @@
         '../testing/gmock/include',
       ],
       'sources': [
-        'base/codec_test.cc',
-        'base/codec_test.h',
+# BUG57351        'base/codec_test.cc',
+# BUG57351        'base/codec_test.h',
         'base/compressor_zlib_unittest.cc',
-        'base/decoder_verbatim_unittest.cc',
-        'base/decoder_zlib_unittest.cc',
+# BUG57374        'base/decoder_vp8_unittest.cc',
         'base/decompressor_zlib_unittest.cc',
-        'base/encoder_verbatim_unittest.cc',
-        # TODO(hclam): Enable VP8 in the build.
-        #'base/encoder_vp8_unittest.cc',
-        'base/encoder_zlib_unittest.cc',
+# BUG57351        'base/encode_decode_unittest.cc',
+# BUG57351        'base/encoder_verbatim_unittest.cc',
+# BUG57374        'base/encoder_vp8_unittest.cc',
+# BUG57351        'base/encoder_zlib_unittest.cc',
         'base/mock_objects.h',
         'base/multiple_array_input_stream_unittest.cc',
-        'base/protocol_decoder_unittest.cc',
-        'client/chromoting_view_unittest.cc',
+# BUG57351        'client/chromoting_view_unittest.cc',
         'client/mock_objects.h',
         'host/access_verifier_unittest.cc',
         'host/chromoting_host_context_unittest.cc',
@@ -378,11 +436,19 @@
         'host/mock_objects.h',
         'host/session_manager_unittest.cc',
         'host/test_key_pair.h',
+        'jingle_glue/channel_socket_adapter_unittest.cc',
         'jingle_glue/jingle_client_unittest.cc',
         'jingle_glue/jingle_channel_unittest.cc',
         'jingle_glue/jingle_thread_unittest.cc',
         'jingle_glue/iq_request_unittest.cc',
         'jingle_glue/mock_objects.h',
+        'jingle_glue/stream_socket_adapter_unittest.cc',
+        'protocol/jingle_chromoting_connection_unittest.cc',
+        'protocol/messages_decoder_unittest.cc',
+        'protocol/fake_connection.cc',
+        'protocol/fake_connection.h',
+        'protocol/session_manager_pair.cc',
+        'protocol/session_manager_pair.h',
         'run_all_unittests.cc',
       ],
       'conditions': [

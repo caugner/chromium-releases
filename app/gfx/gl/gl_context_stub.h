@@ -20,10 +20,11 @@ class StubGLContext : public gfx::GLContext {
   virtual bool MakeCurrent() { return true; }
   virtual bool IsCurrent() { return true; }
   virtual bool IsOffscreen() { return false; }
-  virtual void SwapBuffers() {}
+  virtual bool SwapBuffers() { return true; }
   virtual gfx::Size GetSize() { return size_; }
   virtual void* GetHandle() { return NULL; }
-  virtual bool HasExtension(const char* name) { return false; }
+  virtual void SetSwapInterval(int interval) {}
+  virtual std::string GetExtensions() { return std::string(); }
 
   void SetSize(const gfx::Size& size) { size_ = size; }
 

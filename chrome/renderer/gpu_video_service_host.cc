@@ -9,60 +9,49 @@
 #include "chrome/renderer/render_thread.h"
 
 GpuVideoServiceHost::GpuVideoServiceHost()
-    : channel_host_(NULL),
-      router_(NULL),
-      message_loop_(NULL) {
-  memset(&service_info_, 0, sizeof(service_info_));
+    : channel_(NULL),
+      next_decoder_host_id_(0) {
 }
 
-void GpuVideoServiceHost::OnChannelError() {
-  LOG(ERROR) << "GpuVideoServiceHost::OnChannelError";
-  channel_host_ = NULL;
-  router_ = NULL;
+void GpuVideoServiceHost::OnFilterAdded(IPC::Channel* channel) {
+  channel_ = channel;
 }
 
-void GpuVideoServiceHost::OnMessageReceived(const IPC::Message& msg) {
-#if 0
-  IPC_BEGIN_MESSAGE_MAP(GpuVideoServiceHost, msg)
-    IPC_MESSAGE_UNHANDLED_ERROR()
-  IPC_END_MESSAGE_MAP()
-#endif
+void GpuVideoServiceHost::OnFilterRemoved() {
+  // TODO(hclam): Implement.
 }
 
-void GpuVideoServiceHost::OnRendererThreadInit(MessageLoop* message_loop) {
-  message_loop_ = message_loop;
+void GpuVideoServiceHost::OnChannelClosing() {
+  // TODO(hclam): Implement.
 }
 
-void GpuVideoServiceHost::OnGpuChannelConnected(
-    GpuChannelHost* channel_host,
-    MessageRouter* router,
-    IPC::SyncChannel* channel) {
-
-  channel_host_ = channel_host;
-  router_ = router;
-
-  // Get the routing_id of video service in GPU process.
-  service_info_.service_available_ = 0;
-  if (!channel_host_->Send(new GpuChannelMsg_GetVideoService(&service_info_))) {
-    LOG(ERROR) << "GpuChannelMsg_GetVideoService failed";
+bool GpuVideoServiceHost::OnMessageReceived(const IPC::Message& msg) {
+  switch (msg.type()) {
+    case GpuVideoDecoderHostMsg_CreateVideoDecoderDone::ID:
+    case GpuVideoDecoderHostMsg_InitializeACK::ID:
+    case GpuVideoDecoderHostMsg_DestroyACK::ID:
+    case GpuVideoDecoderHostMsg_FlushACK::ID:
+    case GpuVideoDecoderHostMsg_PrerollDone::ID:
+    case GpuVideoDecoderHostMsg_EmptyThisBufferACK::ID:
+    case GpuVideoDecoderHostMsg_EmptyThisBufferDone::ID:
+    case GpuVideoDecoderHostMsg_ConsumeVideoFrame::ID:
+    case GpuVideoDecoderHostMsg_AllocateVideoFrames::ID:
+    case GpuVideoDecoderHostMsg_ReleaseAllVideoFrames::ID:
+      if (!router_.RouteMessage(msg)) {
+        LOG(ERROR) << "GpuVideoDecoderHostMsg cannot be dispatched.";
+      }
+      return true;
+    default:
+      return false;
   }
-
-  if (service_info_.service_available_)
-    router->AddRoute(service_info_.video_service_host_route_id_, this);
 }
 
 GpuVideoDecoderHost* GpuVideoServiceHost::CreateVideoDecoder(
     int context_route_id) {
-  DCHECK(RenderThread::current());
-
-  return new GpuVideoDecoderHost(this, channel_host_, context_route_id);
-}
-
-void GpuVideoServiceHost::AddRoute(int route_id,
-                                   GpuVideoDecoderHost* decoder_host) {
-  router_->AddRoute(route_id, decoder_host);
-}
-
-void GpuVideoServiceHost::RemoveRoute(int route_id) {
-  router_->RemoveRoute(route_id);
+  GpuVideoDecoderHost* host = new GpuVideoDecoderHost(&router_, channel_,
+                                                      context_route_id,
+                                                      next_decoder_host_id_);
+  // TODO(hclam): Handle thread safety of incrementing the ID.
+  ++next_decoder_host_id_;
+  return host;
 }

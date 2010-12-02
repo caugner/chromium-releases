@@ -6,12 +6,13 @@
 #define WEBKIT_SUPPORT_WEBIT_SUPPORT_H_
 
 #include <string>
+#include <vector>
 
 #include "app/keyboard_codes.h"
 #include "base/basictypes.h"
+#include "base/string16.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDevToolsAgentClient.h"
 
-class Task;
 class WebURLLoaderMockFactory;
 namespace WebKit {
 class WebApplicationCacheHost;
@@ -50,10 +51,6 @@ namespace webkit_support {
 // initialized (as it is already done by the TestSuite).
 void SetUpTestEnvironment();
 void SetUpTestEnvironmentForUnitTests();
-// TODO(jcivelli): the method below is deprecated and should be removed when
-//                 DumpRenderTree has been modified to use the version with no
-//                 parameter.
-void SetUpTestEnvironment(bool unit_test_mode);
 void TearDownTestEnvironment();
 
 // Returns a pointer to a WebKitClient implementation for DumpRenderTree.
@@ -101,10 +98,10 @@ void RunMessageLoop();
 void QuitMessageLoop();
 void RunAllPendingMessages();
 void DispatchMessageLoop();
+bool MessageLoopNestableTasksAllowed();
+void MessageLoopSetNestableTasksAllowed(bool allowed);
 WebKit::WebDevToolsAgentClient::WebKitClientMessageLoop*
     CreateDevToolsMessageLoop();
-void PostTaskFromHere(Task* task);  // TODO(tkent): Eliminate Task.
-void PostDelayedTaskFromHere(Task* task, int64 delay_ms);  // ditto.
 void PostDelayedTask(void (*func)(void*), void* context, int64 delay_ms);
 
 // -------- File path and PathService
@@ -124,6 +121,9 @@ WebKit::WebURL RewriteLayoutTestsURL(const std::string& utf8_url);
 
 // Set the directory of specified file: URL as the current working directory.
 bool SetCurrentDirectoryForFileURL(const WebKit::WebURL& fileUrl);
+
+// Convert a file:/// URL to a base64 encoded data: URL.
+WebKit::WebURL LocalFileToDataURL(const WebKit::WebURL& fileUrl);
 
 // -------- Time
 int64 GetCurrentTimeInMillisecond();

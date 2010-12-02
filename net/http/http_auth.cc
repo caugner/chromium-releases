@@ -18,6 +18,8 @@
 
 namespace net {
 
+HttpAuth::Identity::Identity() : source(IDENT_SRC_NONE), invalid(true) {}
+
 // static
 void HttpAuth::ChooseBestChallenge(
     HttpAuthHandlerFactory* http_auth_handler_factory,
@@ -28,21 +30,7 @@ void HttpAuth::ChooseBestChallenge(
     const BoundNetLog& net_log,
     scoped_ptr<HttpAuthHandler>* handler) {
   DCHECK(http_auth_handler_factory);
-
-  // A connection-based authentication scheme must continue to use the
-  // existing handler object in |*handler|.
-  if (handler->get() && (*handler)->is_connection_based() &&
-      (disabled_schemes.find((*handler)->scheme()) == disabled_schemes.end())) {
-    const std::string header_name = GetChallengeHeaderName(target);
-    std::string challenge;
-    void* iter = NULL;
-    while (headers->EnumerateHeader(&iter, header_name, &challenge)) {
-      ChallengeTokenizer props(challenge.begin(), challenge.end());
-      if (LowerCaseEqualsASCII(props.scheme(), (*handler)->scheme().c_str()) &&
-          (*handler)->InitFromChallenge(&props, target, origin, net_log))
-        return;
-    }
-  }
+  DCHECK(handler->get() == NULL);
 
   // Choose the challenge whose authentication handler gives the maximum score.
   scoped_ptr<HttpAuthHandler> best;
@@ -54,8 +42,8 @@ void HttpAuth::ChooseBestChallenge(
     int rv = http_auth_handler_factory->CreateAuthHandlerFromString(
         cur_challenge, target, origin, net_log, &cur);
     if (rv != OK) {
-      LOG(WARNING) << "Unable to create AuthHandler. Status: "
-                   << ErrorToString(rv) << " Challenge: " << cur_challenge;
+      LOG(INFO) << "Unable to create AuthHandler. Status: "
+                << ErrorToString(rv) << " Challenge: " << cur_challenge;
       continue;
     }
     if (cur.get() && (!best.get() || best->score() < cur->score()) &&
@@ -65,6 +53,36 @@ void HttpAuth::ChooseBestChallenge(
   handler->swap(best);
 }
 
+// static
+HttpAuth::AuthorizationResult HttpAuth::HandleChallengeResponse(
+    HttpAuthHandler* handler,
+    const HttpResponseHeaders* headers,
+    Target target,
+    const std::set<std::string>& disabled_schemes,
+    std::string* challenge_used) {
+  DCHECK(challenge_used);
+  const std::string& current_scheme = handler->scheme();
+  if (disabled_schemes.find(current_scheme) != disabled_schemes.end())
+    return HttpAuth::AUTHORIZATION_RESULT_REJECT;
+  const std::string header_name = GetChallengeHeaderName(target);
+  void* iter = NULL;
+  std::string challenge;
+  HttpAuth::AuthorizationResult authorization_result =
+      HttpAuth::AUTHORIZATION_RESULT_INVALID;
+  while (headers->EnumerateHeader(&iter, header_name, &challenge)) {
+    HttpAuth::ChallengeTokenizer props(challenge.begin(), challenge.end());
+    if (!LowerCaseEqualsASCII(props.scheme(), current_scheme.c_str()))
+      continue;
+    authorization_result = handler->HandleAnotherChallenge(&props);
+    if (authorization_result != HttpAuth::AUTHORIZATION_RESULT_INVALID) {
+      *challenge_used = challenge;
+      return authorization_result;
+    }
+  }
+  // Finding no matches is equivalent to rejection.
+  return HttpAuth::AUTHORIZATION_RESULT_REJECT;
+}
+
 void HttpAuth::ChallengeTokenizer::Init(std::string::const_iterator begin,
                                         std::string::const_iterator end) {
   // The first space-separated token is the auth-scheme.
@@ -72,7 +90,7 @@ void HttpAuth::ChallengeTokenizer::Init(std::string::const_iterator begin,
   // is separated by 1*SP.
   StringTokenizer tok(begin, end, HTTP_LWS);
   if (!tok.GetNext()) {
-    valid_ = false;
+    // Default param and scheme iterators provide empty strings
     return;
   }
 
@@ -80,70 +98,27 @@ void HttpAuth::ChallengeTokenizer::Init(std::string::const_iterator begin,
   scheme_begin_ = tok.token_begin();
   scheme_end_ = tok.token_end();
 
-  // Everything past scheme_end_ is a (comma separated) value list.
-  props_ = HttpUtil::ValuesIterator(scheme_end_, end, ',');
+  params_begin_ = scheme_end_;
+  params_end_ = end;
+  HttpUtil::TrimLWS(&params_begin_, &params_end_);
 }
 
-// We expect properties to be formatted as one of:
-//   name="value"
-//   name=value
-//   name=
-// Due to buggy implementations found in some embedded devices, we also
-// accept values with missing close quotemark (http://crbug.com/39836):
-//   name="value
-bool HttpAuth::ChallengeTokenizer::GetNext() {
-  if (!props_.GetNext())
-    return false;
-
-  // Set the value as everything. Next we will split out the name.
-  value_begin_ = props_.value_begin();
-  value_end_ = props_.value_end();
-  name_begin_ = name_end_ = value_end_;
-
-  if (expect_base64_token_) {
-    expect_base64_token_ = false;
-    // Strip off any padding.
-    // (See https://bugzilla.mozilla.org/show_bug.cgi?id=230351.)
-    //
-    // Our base64 decoder requires that the length be a multiple of 4.
-    int encoded_length = value_end_ - value_begin_;
-    while (encoded_length > 0 && encoded_length % 4 != 0 &&
-           value_begin_[encoded_length - 1] == '=') {
-      --encoded_length;
-      --value_end_;
-    }
-    return true;
-  }
-
-  // Scan for the equals sign.
-  std::string::const_iterator equals = std::find(value_begin_, value_end_, '=');
-  if (equals == value_end_ || equals == value_begin_)
-    return valid_ = false;  // Malformed
-
-  // Verify that the equals sign we found wasn't inside of quote marks.
-  for (std::string::const_iterator it = value_begin_; it != equals; ++it) {
-    if (HttpUtil::IsQuote(*it))
-      return valid_ = false;  // Malformed
-  }
-
-  name_begin_ = value_begin_;
-  name_end_ = equals;
-  value_begin_ = equals + 1;
-
-  value_is_quoted_ = false;
-  if (value_begin_ != value_end_ && HttpUtil::IsQuote(*value_begin_)) {
-    // Trim surrounding quotemarks off the value
-    if (*value_begin_ != *(value_end_ - 1) || value_begin_ + 1 == value_end_)
-      value_begin_ = equals + 2;  // Gracefully recover from mismatching quotes.
-    else
-      value_is_quoted_ = true;
-  }
-  return true;
+HttpUtil::NameValuePairsIterator HttpAuth::ChallengeTokenizer::param_pairs()
+    const {
+  return HttpUtil::NameValuePairsIterator(params_begin_, params_end_, ',');
 }
 
-// If value() has quotemarks, unquote it.
-std::string HttpAuth::ChallengeTokenizer::unquoted_value() const {
-  return HttpUtil::Unquote(value_begin_, value_end_);
+std::string HttpAuth::ChallengeTokenizer::base64_param() const {
+  // Strip off any padding.
+  // (See https://bugzilla.mozilla.org/show_bug.cgi?id=230351.)
+  //
+  // Our base64 decoder requires that the length be a multiple of 4.
+  int encoded_length = params_end_ - params_begin_;
+  while (encoded_length > 0 && encoded_length % 4 != 0 &&
+         params_begin_[encoded_length - 1] == '=') {
+    --encoded_length;
+  }
+  return std::string(params_begin_, params_begin_ + encoded_length);
 }
 
 // static

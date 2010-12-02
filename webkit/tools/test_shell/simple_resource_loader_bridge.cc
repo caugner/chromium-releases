@@ -33,8 +33,10 @@
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 
 #include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #if defined(OS_MACOSX) || defined(OS_WIN)
 #include "base/nss_util.h"
 #endif
@@ -44,6 +46,7 @@
 #include "base/thread.h"
 #include "base/waitable_event.h"
 #include "net/base/cookie_store.h"
+#include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -58,8 +61,11 @@
 #include "net/socket/ssl_client_socket_nss_factory.h"
 #endif
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_job.h"
 #include "webkit/appcache/appcache_interfaces.h"
 #include "webkit/blob/blob_storage_controller.h"
+#include "webkit/blob/blob_url_request_job.h"
+#include "webkit/blob/deletable_file_reference.h"
 #include "webkit/glue/resource_loader_bridge.h"
 #include "webkit/tools/test_shell/simple_appcache_system.h"
 #include "webkit/tools/test_shell/simple_socket_stream_bridge.h"
@@ -67,8 +73,10 @@
 #include "webkit/tools/test_shell/test_shell_webblobregistry_impl.h"
 
 using webkit_glue::ResourceLoaderBridge;
+using webkit_glue::ResourceResponseInfo;
 using net::StaticCookiePolicy;
 using net::HttpResponseHeaders;
+using webkit_blob::DeletableFileReference;
 
 namespace {
 
@@ -87,6 +95,17 @@ struct TestShellRequestContextParams {
   bool no_proxy;
   bool accept_all_cookies;
 };
+
+static URLRequestJob* BlobURLRequestJobFactory(URLRequest* request,
+                                               const std::string& scheme) {
+  webkit_blob::BlobStorageController* blob_storage_controller =
+      static_cast<TestShellRequestContext*>(request->context())->
+          blob_storage_controller();
+  return new webkit_blob::BlobURLRequestJob(
+      request,
+      blob_storage_controller->GetBlobDataFromUrl(request->url()),
+      NULL);
+}
 
 TestShellRequestContextParams* g_request_context_params = NULL;
 URLRequestContext* g_request_context = NULL;
@@ -123,9 +142,11 @@ class IOThread : public base::Thread {
 
     SimpleAppCacheSystem::InitializeOnIOThread(g_request_context);
     SimpleSocketStreamBridge::InitializeOnIOThread(g_request_context);
+
     TestShellWebBlobRegistryImpl::InitializeOnIOThread(
         static_cast<TestShellRequestContext*>(g_request_context)->
             blob_storage_controller());
+    URLRequest::RegisterProtocolFactory("blob", &BlobURLRequestJobFactory);
   }
 
   virtual void CleanUp() {
@@ -159,6 +180,7 @@ struct RequestParams {
   int load_flags;
   ResourceType::Type request_type;
   int appcache_host_id;
+  bool download_to_file;
   scoped_refptr<net::UploadData> upload;
 };
 
@@ -173,7 +195,8 @@ class RequestProxy : public URLRequest::Delegate,
  public:
   // Takes ownership of the params.
   RequestProxy()
-      : buf_(new net::IOBuffer(kDataSize)),
+      : download_to_file_(false),
+        buf_(new net::IOBuffer(kDataSize)),
         last_upload_position_(0) {
   }
 
@@ -211,7 +234,7 @@ class RequestProxy : public URLRequest::Delegate,
   // these methods asynchronously.
 
   void NotifyReceivedRedirect(const GURL& new_url,
-                              const ResourceLoaderBridge::ResponseInfo& info) {
+                              const ResourceResponseInfo& info) {
     bool has_new_first_party_for_cookies = false;
     GURL new_first_party_for_cookies;
     if (peer_ && peer_->OnReceivedRedirect(new_url, info,
@@ -225,7 +248,7 @@ class RequestProxy : public URLRequest::Delegate,
     }
   }
 
-  void NotifyReceivedResponse(const ResourceLoaderBridge::ResponseInfo& info,
+  void NotifyReceivedResponse(const ResourceResponseInfo& info,
                               bool content_filtered) {
     if (peer_)
       peer_->OnReceivedResponse(info, content_filtered);
@@ -252,10 +275,22 @@ class RequestProxy : public URLRequest::Delegate,
     peer_->OnReceivedData(buf_copy.get(), bytes_read);
   }
 
+  void NotifyDownloadedData(int bytes_read) {
+    if (!peer_)
+      return;
+
+    // Continue reading more data, see the comment in NotifyReceivedData.
+    g_io_thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+        this, &RequestProxy::AsyncReadData));
+
+    peer_->OnDownloadedData(bytes_read);
+  }
+
   void NotifyCompletedRequest(const URLRequestStatus& status,
-                              const std::string& security_info) {
+                              const std::string& security_info,
+                              const base::Time& complete_time) {
     if (peer_) {
-      peer_->OnCompletedRequest(status, security_info);
+      peer_->OnCompletedRequest(status, security_info, complete_time);
       DropPeer();  // ensure no further notifications
     }
   }
@@ -289,6 +324,17 @@ class RequestProxy : public URLRequest::Delegate,
     request_->set_context(g_request_context);
     SimpleAppCacheSystem::SetExtraRequestInfo(
         request_.get(), params->appcache_host_id, params->request_type);
+
+    download_to_file_ = params->download_to_file;
+    if (download_to_file_) {
+      FilePath path;
+      if (file_util::CreateTemporaryFile(&path)) {
+        downloaded_file_ = DeletableFileReference::GetOrCreate(
+            path, base::MessageLoopProxy::CreateForCurrentThread());
+        file_stream_.Open(
+            path, base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_WRITE);
+      }
+    }
 
     request_->Start();
 
@@ -346,7 +392,7 @@ class RequestProxy : public URLRequest::Delegate,
 
   virtual void OnReceivedRedirect(
       const GURL& new_url,
-      const ResourceLoaderBridge::ResponseInfo& info,
+      const ResourceResponseInfo& info,
       bool* defer_redirect) {
     *defer_redirect = true;  // See AsyncFollowDeferredRedirect
     owner_loop_->PostTask(FROM_HERE, NewRunnableMethod(
@@ -354,21 +400,35 @@ class RequestProxy : public URLRequest::Delegate,
   }
 
   virtual void OnReceivedResponse(
-      const ResourceLoaderBridge::ResponseInfo& info,
+      const ResourceResponseInfo& info,
       bool content_filtered) {
     owner_loop_->PostTask(FROM_HERE, NewRunnableMethod(
         this, &RequestProxy::NotifyReceivedResponse, info, content_filtered));
   }
 
   virtual void OnReceivedData(int bytes_read) {
+    if (download_to_file_) {
+      file_stream_.Write(buf_->data(), bytes_read, NULL);
+      owner_loop_->PostTask(FROM_HERE, NewRunnableMethod(
+          this, &RequestProxy::NotifyDownloadedData, bytes_read));
+      return;
+    }
+
     owner_loop_->PostTask(FROM_HERE, NewRunnableMethod(
         this, &RequestProxy::NotifyReceivedData, bytes_read));
   }
 
   virtual void OnCompletedRequest(const URLRequestStatus& status,
-                                  const std::string& security_info) {
+                                  const std::string& security_info,
+                                  const base::Time& complete_time) {
+    if (download_to_file_)
+      file_stream_.Close();
     owner_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &RequestProxy::NotifyCompletedRequest, status, security_info));
+        this,
+        &RequestProxy::NotifyCompletedRequest,
+        status,
+        security_info,
+        complete_time));
   }
 
   // --------------------------------------------------------------------------
@@ -378,14 +438,14 @@ class RequestProxy : public URLRequest::Delegate,
                                   const GURL& new_url,
                                   bool* defer_redirect) {
     DCHECK(request->status().is_success());
-    ResourceLoaderBridge::ResponseInfo info;
+    ResourceResponseInfo info;
     PopulateResponseInfo(request, &info);
     OnReceivedRedirect(new_url, info, defer_redirect);
   }
 
   virtual void OnResponseStarted(URLRequest* request) {
     if (request->status().is_success()) {
-      ResourceLoaderBridge::ResponseInfo info;
+      ResourceResponseInfo info;
       PopulateResponseInfo(request, &info);
       OnReceivedResponse(info, false);
       AsyncReadData();  // start reading
@@ -418,7 +478,7 @@ class RequestProxy : public URLRequest::Delegate,
       upload_progress_timer_.Stop();
     }
     DCHECK(request_.get());
-    OnCompletedRequest(request_->status(), std::string());
+    OnCompletedRequest(request_->status(), std::string(), base::Time());
     request_.reset();  // destroy on the io thread
   }
 
@@ -458,13 +518,15 @@ class RequestProxy : public URLRequest::Delegate,
   }
 
   void PopulateResponseInfo(URLRequest* request,
-                            ResourceLoaderBridge::ResponseInfo* info) const {
+                            ResourceResponseInfo* info) const {
     info->request_time = request->request_time();
     info->response_time = request->response_time();
     info->headers = request->response_headers();
     request->GetMimeType(&info->mime_type);
     request->GetCharset(&info->charset);
     info->content_length = request->GetExpectedContentSize();
+    if (downloaded_file_)
+      info->download_file_path = downloaded_file_->path();
     SimpleAppCacheSystem::GetExtraResponseInfo(
         request,
         &info->appcache_id,
@@ -472,6 +534,11 @@ class RequestProxy : public URLRequest::Delegate,
   }
 
   scoped_ptr<URLRequest> request_;
+
+  // Support for request.download_to_file behavior.
+  bool download_to_file_;
+  net::FileStream file_stream_;
+  scoped_refptr<DeletableFileReference> downloaded_file_;
 
   // Size of our async IO data buffers
   static const int kDataSize = 16*1024;
@@ -512,7 +579,7 @@ class SyncRequestProxy : public RequestProxy {
 
   virtual void OnReceivedRedirect(
       const GURL& new_url,
-      const ResourceLoaderBridge::ResponseInfo& info,
+      const ResourceResponseInfo& info,
       bool* defer_redirect) {
     // TODO(darin): It would be much better if this could live in WebCore, but
     // doing so requires API changes at all levels.  Similar code exists in
@@ -526,18 +593,24 @@ class SyncRequestProxy : public RequestProxy {
   }
 
   virtual void OnReceivedResponse(
-      const ResourceLoaderBridge::ResponseInfo& info,
+      const ResourceResponseInfo& info,
       bool content_filtered) {
-    *static_cast<ResourceLoaderBridge::ResponseInfo*>(result_) = info;
+    *static_cast<ResourceResponseInfo*>(result_) = info;
   }
 
   virtual void OnReceivedData(int bytes_read) {
-    result_->data.append(buf_->data(), bytes_read);
+    if (download_to_file_)
+      file_stream_.Write(buf_->data(), bytes_read, NULL);
+    else
+      result_->data.append(buf_->data(), bytes_read);
     AsyncReadData();  // read more (may recurse)
   }
 
   virtual void OnCompletedRequest(const URLRequestStatus& status,
-                                  const std::string& security_info) {
+                                  const std::string& security_info,
+                                  const base::Time& complete_time) {
+    if (download_to_file_)
+      file_stream_.Close();
     result_->status = status;
     event_.Signal();
   }
@@ -555,7 +628,6 @@ class ResourceLoaderBridgeImpl : public ResourceLoaderBridge {
       const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info)
       : params_(new RequestParams),
         proxy_(NULL) {
-    DCHECK(!request_info.download_to_file);  // Not implemented yet!
     params_->method = request_info.method;
     params_->url = request_info.url;
     params_->first_party_for_cookies = request_info.first_party_for_cookies;
@@ -564,6 +636,7 @@ class ResourceLoaderBridgeImpl : public ResourceLoaderBridge {
     params_->load_flags = request_info.load_flags;
     params_->request_type = request_info.request_type;
     params_->appcache_host_id = request_info.appcache_host_id;
+    params_->download_to_file = request_info.download_to_file;
   }
 
   virtual ~ResourceLoaderBridgeImpl() {

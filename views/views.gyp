@@ -31,6 +31,9 @@
         ['include', '/win/'],
         ['include', '/win_[^/]*\\.cc$'],
       ]}],
+      ['touchui==0', {'sources/': [
+        ['exclude', 'touchui/'],
+      ]}],
     ],
   },
   'targets': [
@@ -143,6 +146,8 @@
         'controls/menu/native_menu_gtk.h',
         'controls/menu/native_menu_win.cc',
         'controls/menu/native_menu_win.h',
+        'controls/menu/radio_button_image_gtk.cc',
+        'controls/menu/radio_button_image_gtk.h',
         'controls/menu/submenu_view.cc',
         'controls/menu/submenu_view.h',
         'controls/menu/view_menu_delegate.h',
@@ -260,6 +265,8 @@
         'screen_gtk.cc',
         'screen_win.cc',
         'standard_layout.h',
+        'touchui/gesture_manager.h',
+        'touchui/gesture_manager.cc',
         'view.cc',
         'view.h',
         'view_constants.cc',
@@ -358,6 +365,9 @@
             'window/native_frame_view.cc',
             'widget/widget_win.cc',
           ],
+        }],
+        ['touchui==1', {
+          'defines': ['TOUCH_UI=1'],
         }],
         ['OS=="win"', {
           'sources!': [
@@ -466,6 +476,8 @@
         'examples/slider_example.h',
         'examples/tabbed_pane_example.h',
         'examples/textfield_example.h',
+        'examples/throbber_example.cc',
+        'examples/throbber_example.h',
         'examples/widget_example.h',
 
         '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.rc',

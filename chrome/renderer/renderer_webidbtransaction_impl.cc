@@ -28,9 +28,10 @@ RendererWebIDBTransactionImpl::~RendererWebIDBTransactionImpl() {
 
 int RendererWebIDBTransactionImpl::mode() const
 {
-  // TODO: implement
-  DCHECK(false);
-  return 0;
+  int mode;
+  RenderThread::current()->Send(new ViewHostMsg_IDBTransactionMode(
+      idb_transaction_id_, &mode));
+  return mode;
 }
 
 WebIDBObjectStore* RendererWebIDBTransactionImpl::objectStore(
@@ -40,18 +41,22 @@ WebIDBObjectStore* RendererWebIDBTransactionImpl::objectStore(
   RenderThread::current()->Send(
       new ViewHostMsg_IDBTransactionObjectStore(
           idb_transaction_id_, name, &object_store_id));
+  if (!object_store_id)
+    return NULL;
   return new RendererWebIDBObjectStoreImpl(object_store_id);
 }
 
 void RendererWebIDBTransactionImpl::abort()
 {
-  // TODO: implement
-  DCHECK(false);
+  RenderThread::current()->Send(new ViewHostMsg_IDBTransactionAbort(
+      idb_transaction_id_));
 }
 
-int RendererWebIDBTransactionImpl::id() const
+void RendererWebIDBTransactionImpl::didCompleteTaskEvents()
 {
-  return idb_transaction_id_;
+  RenderThread::current()->Send(
+      new ViewHostMsg_IDBTransactionDidCompleteTaskEvents(
+          idb_transaction_id_));
 }
 
 void RendererWebIDBTransactionImpl::setCallbacks(
@@ -59,5 +64,6 @@ void RendererWebIDBTransactionImpl::setCallbacks(
 {
   IndexedDBDispatcher* dispatcher =
       RenderThread::current()->indexed_db_dispatcher();
-  dispatcher->RequestIDBTransactionSetCallbacks(callbacks);
+  dispatcher->RegisterWebIDBTransactionCallbacks(callbacks,
+                                                 idb_transaction_id_);
 }

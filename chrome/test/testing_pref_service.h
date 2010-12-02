@@ -22,7 +22,8 @@ class TestingPrefService : public PrefService {
                           PrefStore* extension_prefs,
                           PrefStore* command_line_prefs,
                           PrefStore* user_prefs,
-                          PrefStore* recommended_prefs);
+                          PrefStore* recommended_prefs,
+                          PrefStore* default_prefs);
   };
 
   // Create an empty instance.
@@ -39,6 +40,18 @@ class TestingPrefService : public PrefService {
   // Clear the preference on the managed layer and fire observers if the
   // preference has been defined previously.
   void RemoveManagedPref(const char* path);
+
+  // Set a preference on the managed layer.  Assumes ownership of |value|.
+  // We don't fire observers for each change because in the real code, the
+  // notification is sent after all the prefs have been loaded.  See
+  // ConfigurationPolicyPrefStore::ReadPrefs().
+  void SetManagedPrefWithoutNotification(const char* path, Value* value);
+
+  // Clear the preference on the managed layer.
+  // We don't fire observers for each change because in the real code, the
+  // notification is sent after all the prefs have been loaded.  See
+  // ConfigurationPolicyPrefStore::ReadPrefs().
+  void RemoveManagedPrefWithoutNotification(const char* path);
 
   // Similar to the above, but for user preferences.
   const Value* GetUserPref(const char* path);
@@ -59,6 +72,7 @@ class TestingPrefService : public PrefService {
   // Pointers to the pref stores our value store uses.
   PrefStore* managed_prefs_;
   PrefStore* user_prefs_;
+  PrefStore* default_prefs_;
 
   DISALLOW_COPY_AND_ASSIGN(TestingPrefService);
 };

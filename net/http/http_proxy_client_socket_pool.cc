@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/time.h"
+#include "base/values.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -15,8 +16,9 @@
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/client_socket_pool_base.h"
-#include "net/socket/tcp_client_socket_pool.h"
 #include "net/socket/ssl_client_socket.h"
+#include "net/socket/ssl_client_socket_pool.h"
+#include "net/socket/tcp_client_socket_pool.h"
 
 namespace net {
 
@@ -26,14 +28,16 @@ HttpProxySocketParams::HttpProxySocketParams(
     const GURL& request_url,
     const std::string& user_agent,
     HostPortPair endpoint,
-    scoped_refptr<HttpNetworkSession> session,
+    HttpAuthCache* http_auth_cache,
+    HttpAuthHandlerFactory* http_auth_handler_factory,
     bool tunnel)
     : tcp_params_(tcp_params),
       ssl_params_(ssl_params),
       request_url_(request_url),
       user_agent_(user_agent),
       endpoint_(endpoint),
-      session_(tunnel ? session : NULL),
+      http_auth_cache_(tunnel ? http_auth_cache : NULL),
+      http_auth_handler_factory_(tunnel ? http_auth_handler_factory : NULL),
       tunnel_(tunnel) {
   DCHECK((tcp_params == NULL && ssl_params != NULL) ||
          (tcp_params != NULL && ssl_params == NULL));
@@ -56,9 +60,9 @@ HttpProxyConnectJob::HttpProxyConnectJob(
     const std::string& group_name,
     const scoped_refptr<HttpProxySocketParams>& params,
     const base::TimeDelta& timeout_duration,
-    const scoped_refptr<TCPClientSocketPool>& tcp_pool,
-    const scoped_refptr<SSLClientSocketPool>& ssl_pool,
-    const scoped_refptr<HostResolver>& host_resolver,
+    TCPClientSocketPool* tcp_pool,
+    SSLClientSocketPool* ssl_pool,
+    HostResolver* host_resolver,
     Delegate* delegate,
     NetLog* net_log)
     : ConnectJob(group_name, timeout_duration, delegate,
@@ -76,13 +80,13 @@ HttpProxyConnectJob::~HttpProxyConnectJob() {}
 
 LoadState HttpProxyConnectJob::GetLoadState() const {
   switch (next_state_) {
-    case kStateTCPConnect:
-    case kStateTCPConnectComplete:
-    case kStateSSLConnect:
-    case kStateSSLConnectComplete:
+    case STATE_TCP_CONNECT:
+    case STATE_TCP_CONNECT_COMPLETE:
+    case STATE_SSL_CONNECT:
+    case STATE_SSL_CONNECT_COMPLETE:
       return transport_socket_handle_->GetLoadState();
-    case kStateHttpProxyConnect:
-    case kStateHttpProxyConnectComplete:
+    case STATE_HTTP_PROXY_CONNECT:
+    case STATE_HTTP_PROXY_CONNECT_COMPLETE:
       return LOAD_STATE_ESTABLISHING_PROXY_TUNNEL;
     default:
       NOTREACHED();
@@ -92,9 +96,9 @@ LoadState HttpProxyConnectJob::GetLoadState() const {
 
 int HttpProxyConnectJob::ConnectInternal() {
   if (params_->tcp_params())
-    next_state_ = kStateTCPConnect;
+    next_state_ = STATE_TCP_CONNECT;
   else
-    next_state_ = kStateSSLConnect;
+    next_state_ = STATE_SSL_CONNECT;
   return DoLoop(OK);
 }
 
@@ -105,32 +109,32 @@ void HttpProxyConnectJob::OnIOComplete(int result) {
 }
 
 int HttpProxyConnectJob::DoLoop(int result) {
-  DCHECK_NE(next_state_, kStateNone);
+  DCHECK_NE(next_state_, STATE_NONE);
 
   int rv = result;
   do {
     State state = next_state_;
-    next_state_ = kStateNone;
+    next_state_ = STATE_NONE;
     switch (state) {
-      case kStateTCPConnect:
+      case STATE_TCP_CONNECT:
         DCHECK_EQ(OK, rv);
         rv = DoTCPConnect();
         break;
-      case kStateTCPConnectComplete:
+      case STATE_TCP_CONNECT_COMPLETE:
         rv = DoTCPConnectComplete(rv);
         break;
-      case kStateSSLConnect:
+      case STATE_SSL_CONNECT:
         DCHECK_EQ(OK, rv);
         rv = DoSSLConnect();
         break;
-      case kStateSSLConnectComplete:
+      case STATE_SSL_CONNECT_COMPLETE:
         rv = DoSSLConnectComplete(rv);
         break;
-      case kStateHttpProxyConnect:
+      case STATE_HTTP_PROXY_CONNECT:
         DCHECK_EQ(OK, rv);
         rv = DoHttpProxyConnect();
         break;
-      case kStateHttpProxyConnectComplete:
+      case STATE_HTTP_PROXY_CONNECT_COMPLETE:
         rv = DoHttpProxyConnectComplete(rv);
         break;
       default:
@@ -138,13 +142,13 @@ int HttpProxyConnectJob::DoLoop(int result) {
         rv = ERR_FAILED;
         break;
     }
-  } while (rv != ERR_IO_PENDING && next_state_ != kStateNone);
+  } while (rv != ERR_IO_PENDING && next_state_ != STATE_NONE);
 
   return rv;
 }
 
 int HttpProxyConnectJob::DoTCPConnect() {
-  next_state_ = kStateTCPConnectComplete;
+  next_state_ = STATE_TCP_CONNECT_COMPLETE;
   transport_socket_handle_.reset(new ClientSocketHandle());
   return transport_socket_handle_->Init(
       group_name(), params_->tcp_params(),
@@ -154,19 +158,19 @@ int HttpProxyConnectJob::DoTCPConnect() {
 
 int HttpProxyConnectJob::DoTCPConnectComplete(int result) {
   if (result != OK)
-    return result;
+    return ERR_PROXY_CONNECTION_FAILED;
 
   // Reset the timer to just the length of time allowed for HttpProxy handshake
   // so that a fast TCP connection plus a slow HttpProxy failure doesn't take
   // longer to timeout than it should.
   ResetTimer(base::TimeDelta::FromSeconds(
       kHttpProxyConnectJobTimeoutInSeconds));
-  next_state_ = kStateHttpProxyConnect;
+  next_state_ = STATE_HTTP_PROXY_CONNECT;
   return result;
 }
 
 int HttpProxyConnectJob::DoSSLConnect() {
-  next_state_ = kStateSSLConnectComplete;
+  next_state_ = STATE_SSL_CONNECT_COMPLETE;
   transport_socket_handle_.reset(new ClientSocketHandle());
   return transport_socket_handle_->Init(
       group_name(), params_->ssl_params(),
@@ -179,6 +183,8 @@ int HttpProxyConnectJob::DoSSLConnectComplete(int result) {
       params_->ssl_params()->load_flags() & LOAD_IGNORE_ALL_CERT_ERRORS)
     result = OK;
   if (result < 0) {
+    // TODO(eroman): return ERR_PROXY_CONNECTION_FAILED if failed with the
+    //               TCP connection.
     if (transport_socket_handle_->socket())
       transport_socket_handle_->socket()->Disconnect();
     return result;
@@ -193,15 +199,14 @@ int HttpProxyConnectJob::DoSSLConnectComplete(int result) {
   // longer to timeout than it should.
   ResetTimer(base::TimeDelta::FromSeconds(
       kHttpProxyConnectJobTimeoutInSeconds));
-  next_state_ = kStateHttpProxyConnect;
+  next_state_ = STATE_HTTP_PROXY_CONNECT;
   return result;
 }
 
 int HttpProxyConnectJob::DoHttpProxyConnect() {
-  next_state_ = kStateHttpProxyConnectComplete;
+  next_state_ = STATE_HTTP_PROXY_CONNECT_COMPLETE;
   const HostResolver::RequestInfo& tcp_destination = params_->destination();
-  HostPortPair proxy_server(tcp_destination.hostname(),
-                            tcp_destination.port());
+  const HostPortPair& proxy_server = tcp_destination.host_port_pair();
 
   // Add a HttpProxy connection on top of the tcp socket.
   transport_socket_.reset(
@@ -209,7 +214,9 @@ int HttpProxyConnectJob::DoHttpProxyConnect() {
                                 params_->request_url(),
                                 params_->user_agent(),
                                 params_->endpoint(),
-                                proxy_server, params_->session(),
+                                proxy_server,
+                                params_->http_auth_cache(),
+                                params_->http_auth_handler_factory(),
                                 params_->tunnel(),
                                 using_spdy_));
   int result = transport_socket_->Connect(&callback_);
@@ -231,8 +238,8 @@ int HttpProxyConnectJob::DoHttpProxyConnectComplete(int result) {
 
 HttpProxyClientSocketPool::
 HttpProxyConnectJobFactory::HttpProxyConnectJobFactory(
-    const scoped_refptr<TCPClientSocketPool>& tcp_pool,
-    const scoped_refptr<SSLClientSocketPool>& ssl_pool,
+    TCPClientSocketPool* tcp_pool,
+    SSLClientSocketPool* ssl_pool,
     HostResolver* host_resolver,
     NetLog* net_log)
     : tcp_pool_(tcp_pool),
@@ -263,12 +270,14 @@ HttpProxyClientSocketPool::HttpProxyConnectJobFactory::NewConnectJob(
 HttpProxyClientSocketPool::HttpProxyClientSocketPool(
     int max_sockets,
     int max_sockets_per_group,
-    const scoped_refptr<ClientSocketPoolHistograms>& histograms,
-    const scoped_refptr<HostResolver>& host_resolver,
-    const scoped_refptr<TCPClientSocketPool>& tcp_pool,
-    const scoped_refptr<SSLClientSocketPool>& ssl_pool,
+    ClientSocketPoolHistograms* histograms,
+    HostResolver* host_resolver,
+    TCPClientSocketPool* tcp_pool,
+    SSLClientSocketPool* ssl_pool,
     NetLog* net_log)
-    : base_(max_sockets, max_sockets_per_group, histograms,
+    : tcp_pool_(tcp_pool),
+      ssl_pool_(ssl_pool),
+      base_(max_sockets, max_sockets_per_group, histograms,
             base::TimeDelta::FromSeconds(
                 ClientSocketPool::unused_idle_socket_timeout()),
             base::TimeDelta::FromSeconds(kUsedIdleSocketTimeout),
@@ -317,6 +326,28 @@ int HttpProxyClientSocketPool::IdleSocketCountInGroup(
 LoadState HttpProxyClientSocketPool::GetLoadState(
     const std::string& group_name, const ClientSocketHandle* handle) const {
   return base_.GetLoadState(group_name, handle);
+}
+
+DictionaryValue* HttpProxyClientSocketPool::GetInfoAsValue(
+    const std::string& name,
+    const std::string& type,
+    bool include_nested_pools) const {
+  DictionaryValue* dict = base_.GetInfoAsValue(name, type);
+  if (include_nested_pools) {
+    ListValue* list = new ListValue();
+    if (tcp_pool_) {
+      list->Append(tcp_pool_->GetInfoAsValue("tcp_socket_pool",
+                                             "tcp_socket_pool",
+                                             true));
+    }
+    if (ssl_pool_) {
+      list->Append(ssl_pool_->GetInfoAsValue("ssl_socket_pool",
+                                             "ssl_socket_pool",
+                                             true));
+    }
+    dict->Set("nested_pools", list);
+  }
+  return dict;
 }
 
 }  // namespace net

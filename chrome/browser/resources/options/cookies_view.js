@@ -31,10 +31,10 @@ cr.define('options', function() {
 
       options.CookiesTree.decorate(cookiesTree);
       cookiesTree.addEventListener('change',
-          cr.bind(this.handleCookieTreeChange_, this));
+          this.handleCookieTreeChange_.bind(this));
 
       $('cookiesSearchBox').addEventListener('keydown',
-          cr.bind(this.handleQueryEditKeyDown_, this));
+          this.handleQueryEditKeyDown_.bind(this));
 
       var self = this;
       $('clearCookieSearchButton').onclick = function(e) {
@@ -62,7 +62,11 @@ cr.define('options', function() {
      */
     updateVisibleDetailedInfo: function(name) {
       const infoPaneNames = [
-          'cookiesInfo', 'appCacheInfo', 'webDbInfo', 'localStorageInfo'];
+          'cookiesInfo',
+          'appCacheInfo',
+          'webDbInfo',
+          'localStorageInfo',
+          'indexedDBInfo'];
 
       for (var i = 0 ; i < infoPaneNames.length; ++i) {
         var paneName = infoPaneNames[i];
@@ -140,6 +144,16 @@ cr.define('options', function() {
       $('localStorageLastModified').textContent = localStorage.modified;
     },
 
+    /**
+     * Sets IndexedDB info to display.
+     */
+    setIndexedDBInfo: function(indexedDB) {
+      $('indexedDBName').textContent = indexedDB.name;
+      $('indexedDBOrigin').textContent = indexedDB.origin;
+      $('indexedDBSize').textContent = indexedDB.size;
+      $('indexedDBLastModified').textContent = indexedDB.modified;
+    },
+
     lastQuery_ : null,
 
     /**
@@ -180,6 +194,9 @@ cr.define('options', function() {
       } else if (data && data.type == 'app_cache') {
         this.setAppCacheInfo(data);
         this.updateVisibleDetailedInfo('appCacheInfo');
+      } else if (data && data.type == 'indexed_db') {
+        this.setIndexedDBInfo(data);
+        this.updateVisibleDetailedInfo('indexedDBInfo');
       } else {
         this.clearCookieInfo();
         this.updateVisibleDetailedInfo('cookiesInfo');
@@ -199,7 +216,7 @@ cr.define('options', function() {
       }
 
       this.queryDelayTimerId_ = window.setTimeout(
-          cr.bind(this.searchCookie, this), 500);
+          this.searchCookie.bind(this), 500);
     },
 
     initalized_: false,
@@ -224,6 +241,10 @@ cr.define('options', function() {
 
   CookiesView.onTreeItemRemoved = function(args) {
     $('cookiesTree').removeByParentId(args[0], args[1], args[2]);
+  };
+
+  CookiesView.loadChildren = function(args) {
+    $('cookiesTree').loadChildren(args[0], args[1]);
   };
 
   // Export

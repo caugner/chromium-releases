@@ -23,6 +23,11 @@ namespace gfx {
 typedef GLXContext GLContextHandle;
 typedef GLXPbuffer PbufferHandle;
 
+class BaseLinuxGLContext : public GLContext {
+ public:
+  virtual std::string GetExtensions();
+};
+
 // This class is a wrapper around a GL context that renders directly to a
 // window.
 class ViewGLContext : public GLContext {
@@ -40,9 +45,10 @@ class ViewGLContext : public GLContext {
   virtual bool MakeCurrent();
   virtual bool IsCurrent();
   virtual bool IsOffscreen();
-  virtual void SwapBuffers();
+  virtual bool SwapBuffers();
   virtual gfx::Size GetSize();
   virtual void* GetHandle();
+  virtual void SetSwapInterval(int interval);
 
  private:
   gfx::PluginWindowHandle window_;
@@ -70,9 +76,10 @@ class OSMesaViewGLContext : public GLContext {
   virtual bool MakeCurrent();
   virtual bool IsCurrent();
   virtual bool IsOffscreen();
-  virtual void SwapBuffers();
+  virtual bool SwapBuffers();
   virtual gfx::Size GetSize();
   virtual void* GetHandle();
+  virtual void SetSwapInterval(int interval);
 
  private:
   bool UpdateSize();
@@ -103,9 +110,10 @@ class PbufferGLContext : public GLContext {
   virtual bool MakeCurrent();
   virtual bool IsCurrent();
   virtual bool IsOffscreen();
-  virtual void SwapBuffers();
+  virtual bool SwapBuffers();
   virtual gfx::Size GetSize();
   virtual void* GetHandle();
+  virtual void SetSwapInterval(int interval);
 
  private:
   GLContextHandle context_;
@@ -130,9 +138,10 @@ class PixmapGLContext : public GLContext {
   virtual bool MakeCurrent();
   virtual bool IsCurrent();
   virtual bool IsOffscreen();
-  virtual void SwapBuffers();
+  virtual bool SwapBuffers();
   virtual gfx::Size GetSize();
   virtual void* GetHandle();
+  virtual void SetSwapInterval(int interval);
 
  private:
   GLContextHandle context_;
@@ -166,26 +175,49 @@ bool GLContext::InitializeOneOff() {
   if (!InitializeBestGLBindings(
            kAllowedGLImplementations,
            kAllowedGLImplementations + arraysize(kAllowedGLImplementations))) {
+    LOG(ERROR) << "InitializeBestGLBindings failed.";
     return false;
   }
 
-  // Only check the GLX version if we are in fact using GLX. We might actually
-  // be using the mock GL implementation.
-  if (GetGLImplementation() == kGLImplementationDesktopGL) {
-    Display* display = x11_util::GetXDisplay();
-    int major, minor;
-    if (!glXQueryVersion(display, &major, &minor)) {
-      LOG(ERROR) << "glxQueryVersion failed";
-      return false;
-    }
+  switch (GetGLImplementation()) {
+    case kGLImplementationDesktopGL: {
+      // Only check the GLX version if we are in fact using GLX. We might
+      // actually be using the mock GL implementation.
+      Display* display = x11_util::GetXDisplay();
+      int major, minor;
+      if (!glXQueryVersion(display, &major, &minor)) {
+        LOG(ERROR) << "glxQueryVersion failed";
+        return false;
+      }
 
-    if (major == 1 && minor < 3) {
-      LOG(WARNING) << "GLX 1.3 or later is recommended.";
+      if (major == 1 && minor < 3) {
+        LOG(WARNING) << "GLX 1.3 or later is recommended.";
+      }
+
+      break;
     }
+    case kGLImplementationEGLGLES2:
+      if (!BaseEGLContext::InitializeOneOff()) {
+        LOG(ERROR) << "BaseEGLContext::InitializeOneOff failed.";
+        return false;
+      }
+      break;
+    default:
+      break;
   }
 
   initialized = true;
   return true;
+}
+
+std::string BaseLinuxGLContext::GetExtensions() {
+  Display* display = x11_util::GetXDisplay();
+  const char* extensions = glXQueryExtensionsString(display, 0);
+  if (extensions) {
+    return GLContext::GetExtensions() + " " + extensions;
+  }
+
+  return GLContext::GetExtensions();
 }
 
 bool ViewGLContext::Initialize(bool multisampled) {
@@ -223,6 +255,7 @@ bool ViewGLContext::Initialize(bool multisampled) {
   }
 
   if (!InitializeCommon()) {
+    LOG(ERROR) << "GLContext::InitlializeCommon failed.";
     Destroy();
     return false;
   }
@@ -269,9 +302,10 @@ bool ViewGLContext::IsOffscreen() {
   return false;
 }
 
-void ViewGLContext::SwapBuffers() {
+bool ViewGLContext::SwapBuffers() {
   Display* display = x11_util::GetXDisplay();
   glXSwapBuffers(display, window_);
+  return true;
 }
 
 gfx::Size ViewGLContext::GetSize() {
@@ -285,8 +319,17 @@ void* ViewGLContext::GetHandle() {
   return context_;
 }
 
+void ViewGLContext::SetSwapInterval(int interval) {
+  DCHECK(IsCurrent());
+  if (HasExtension("GLX_EXT_swap_control") && glXSwapIntervalEXT) {
+    Display* display = x11_util::GetXDisplay();
+    glXSwapIntervalEXT(display, window_, interval);
+  }
+}
+
 bool OSMesaViewGLContext::Initialize() {
   if (!osmesa_context_.Initialize(OSMESA_BGRA, NULL)) {
+    LOG(ERROR) << "OSMesaGLContext::Initialize failed.";
     Destroy();
     return false;
   }
@@ -343,11 +386,13 @@ bool OSMesaViewGLContext::IsOffscreen() {
   return false;
 }
 
-void OSMesaViewGLContext::SwapBuffers() {
+bool OSMesaViewGLContext::SwapBuffers() {
   // Update the size before blitting so that the blit size is exactly the same
   // as the window.
-  if (!UpdateSize())
-    return;
+  if (!UpdateSize()) {
+    LOG(ERROR) << "Failed to update size of OSMesaGLContext.";
+    return false;
+  }
 
   gfx::Size size = osmesa_context_.GetSize();
 
@@ -373,6 +418,8 @@ void OSMesaViewGLContext::SwapBuffers() {
             0, 0,
             size.width(), size.height(),
             0, 0);
+
+  return true;
 }
 
 gfx::Size OSMesaViewGLContext::GetSize() {
@@ -381,6 +428,12 @@ gfx::Size OSMesaViewGLContext::GetSize() {
 
 void* OSMesaViewGLContext::GetHandle() {
   return osmesa_context_.GetHandle();
+}
+
+void OSMesaViewGLContext::SetSwapInterval(int interval) {
+  DCHECK(IsCurrent());
+  // Fail silently. It is legitimate to set the swap interval on a view context
+  // but XLib does not have those semantics.
 }
 
 bool OSMesaViewGLContext::UpdateSize() {
@@ -526,6 +579,7 @@ bool PbufferGLContext::Initialize(GLContext* shared_context) {
   }
 
   if (!InitializeCommon()) {
+    LOG(ERROR) << "GLContext::InitializeCommon failed.";
     Destroy();
     return false;
   }
@@ -575,8 +629,9 @@ bool PbufferGLContext::IsOffscreen() {
   return true;
 }
 
-void PbufferGLContext::SwapBuffers() {
+bool PbufferGLContext::SwapBuffers() {
   NOTREACHED() << "Attempted to call SwapBuffers on a pbuffer.";
+  return false;
 }
 
 gfx::Size PbufferGLContext::GetSize() {
@@ -586,6 +641,11 @@ gfx::Size PbufferGLContext::GetSize() {
 
 void* PbufferGLContext::GetHandle() {
   return context_;
+}
+
+void PbufferGLContext::SetSwapInterval(int interval) {
+  DCHECK(IsCurrent());
+  NOTREACHED();
 }
 
 bool PixmapGLContext::Initialize(GLContext* shared_context) {
@@ -637,6 +697,7 @@ bool PixmapGLContext::Initialize(GLContext* shared_context) {
   }
 
   if (!InitializeCommon()) {
+    LOG(ERROR) << "GLContext::InitializeCommon failed.";
     Destroy();
     return false;
   }
@@ -691,8 +752,9 @@ bool PixmapGLContext::IsOffscreen() {
   return true;
 }
 
-void PixmapGLContext::SwapBuffers() {
+bool PixmapGLContext::SwapBuffers() {
   NOTREACHED() << "Attempted to call SwapBuffers on a pixmap.";
+  return false;
 }
 
 gfx::Size PixmapGLContext::GetSize() {
@@ -702,6 +764,11 @@ gfx::Size PixmapGLContext::GetSize() {
 
 void* PixmapGLContext::GetHandle() {
   return context_;
+}
+
+void PixmapGLContext::SetSwapInterval(int interval) {
+  DCHECK(IsCurrent());
+  NOTREACHED();
 }
 
 GLContext* GLContext::CreateOffscreenGLContext(GLContext* shared_context) {

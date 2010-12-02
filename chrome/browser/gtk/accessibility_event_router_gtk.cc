@@ -12,6 +12,12 @@
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/notification_type.h"
+#include "views/controls/textfield/native_textfield_gtk.h"
+
+#if defined(TOOLKIT_VIEWS)
+#include "views/controls/textfield/gtk_views_textview.h"
+#include "views/controls/textfield/gtk_views_entry.h"
+#endif
 
 namespace {
 
@@ -210,6 +216,20 @@ void AccessibilityEventRouterGtk::InstallEventListener(
   installed_hooks_.push_back(InstalledHook(signal_id, hook_id));
 }
 
+bool AccessibilityEventRouterGtk::IsPassword(GtkWidget* widget) {
+  bool is_password = false;
+#if defined (TOOLKIT_VIEWS)
+  is_password = (GTK_IS_ENTRY(widget) &&
+                 GTK_VIEWS_ENTRY(widget)->host != NULL &&
+                 GTK_VIEWS_ENTRY(widget)->host->IsPassword()) ||
+                (GTK_IS_TEXT_VIEW(widget) &&
+                 GTK_VIEWS_TEXTVIEW(widget)->host != NULL &&
+                 GTK_VIEWS_TEXTVIEW(widget)->host->IsPassword());
+#endif
+  return is_password;
+}
+
+
 void AccessibilityEventRouterGtk::InstallEventListeners() {
   // Create and destroy each type of widget we need signals for,
   // to ensure their modules are loaded, otherwise g_signal_lookup
@@ -254,54 +274,47 @@ void AccessibilityEventRouterGtk::RemoveEventListeners() {
 
 void AccessibilityEventRouterGtk::AddRootWidget(
     GtkWidget* root_widget, Profile* profile) {
-  root_widget_profile_map_[root_widget] = profile;
+  root_widget_info_map_[root_widget].refcount++;
+  root_widget_info_map_[root_widget].profile = profile;
 }
 
 void AccessibilityEventRouterGtk::RemoveRootWidget(GtkWidget* root_widget) {
-  DCHECK(root_widget_profile_map_.find(root_widget) !=
-         root_widget_profile_map_.end());
-  root_widget_profile_map_.erase(root_widget);
+  DCHECK(root_widget_info_map_.find(root_widget) !=
+         root_widget_info_map_.end());
+  root_widget_info_map_[root_widget].refcount--;
+  if (root_widget_info_map_[root_widget].refcount == 0) {
+    root_widget_info_map_.erase(root_widget);
+  }
 }
 
-void AccessibilityEventRouterGtk::IgnoreWidget(GtkWidget* widget) {
-  widget_info_map_[widget].ignore = true;
-}
-
-void AccessibilityEventRouterGtk::SetWidgetName(
+void AccessibilityEventRouterGtk::AddWidgetNameOverride(
     GtkWidget* widget, std::string name) {
   widget_info_map_[widget].name = name;
+  widget_info_map_[widget].refcount++;
 }
 
-void AccessibilityEventRouterGtk::RemoveWidget(GtkWidget* widget) {
+void AccessibilityEventRouterGtk::RemoveWidgetNameOverride(GtkWidget* widget) {
   DCHECK(widget_info_map_.find(widget) != widget_info_map_.end());
-  widget_info_map_.erase(widget);
+  widget_info_map_[widget].refcount--;
+  if (widget_info_map_[widget].refcount == 0) {
+    widget_info_map_.erase(widget);
+  }
 }
 
 void AccessibilityEventRouterGtk::FindWidget(
     GtkWidget* widget, Profile** profile, bool* is_accessible) {
   *is_accessible = false;
 
-  // First see if it's a descendant of a root widget.
-  for (base::hash_map<GtkWidget*, Profile*>::const_iterator iter =
-           root_widget_profile_map_.begin();
-       iter != root_widget_profile_map_.end();
+  for (base::hash_map<GtkWidget*, RootWidgetInfo>::const_iterator iter =
+           root_widget_info_map_.begin();
+       iter != root_widget_info_map_.end();
        ++iter) {
-    if (gtk_widget_is_ancestor(widget, iter->first)) {
+    if (widget == iter->first || gtk_widget_is_ancestor(widget, iter->first)) {
       *is_accessible = true;
       if (profile)
-        *profile = iter->second;
+        *profile = iter->second.profile;
       break;
     }
-  }
-  if (!*is_accessible)
-    return;
-
-  // Now make sure it's not marked as a widget to be ignored.
-  base::hash_map<GtkWidget*, WidgetInfo>::const_iterator iter =
-      widget_info_map_.find(widget);
-  if (iter != widget_info_map_.end() && iter->second.ignore) {
-    *is_accessible = false;
-    return;
   }
 }
 
@@ -476,7 +489,7 @@ void AccessibilityEventRouterGtk::SendEntryNotification(
   gint start_pos;
   gint end_pos;
   gtk_editable_get_selection_bounds(GTK_EDITABLE(widget), &start_pos, &end_pos);
-  AccessibilityTextBoxInfo info(profile, name, false);
+  AccessibilityTextBoxInfo info(profile, name, IsPassword(widget));
   info.SetValue(value, start_pos, end_pos);
   SendAccessibilityNotification(type, &info);
 }
@@ -494,7 +507,7 @@ void AccessibilityEventRouterGtk::SendTextViewNotification(
   gtk_text_buffer_get_selection_bounds(buffer, &sel_start, &sel_end);
   int start_pos = gtk_text_iter_get_offset(&sel_start);
   int end_pos = gtk_text_iter_get_offset(&sel_end);
-  AccessibilityTextBoxInfo info(profile, name, false);
+  AccessibilityTextBoxInfo info(profile, name, IsPassword(widget));
   info.SetValue(value, start_pos, end_pos);
   SendAccessibilityNotification(type, &info);
 }

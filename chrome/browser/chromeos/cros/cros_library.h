@@ -8,8 +8,10 @@
 
 #include <string>
 #include "base/basictypes.h"
+#include "base/command_line.h"
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
+#include "chrome/common/chrome_switches.h"
 namespace chromeos {
 
 class BurnLibrary;
@@ -23,9 +25,9 @@ class NetworkLibrary;
 class PowerLibrary;
 class ScreenLockLibrary;
 class SpeechSynthesisLibrary;
-class SynapticsLibrary;
 class SyslogsLibrary;
 class SystemLibrary;
+class TouchpadLibrary;
 class UpdateLibrary;
 
 // This class handles access to sub-parts of ChromeOS library. it provides
@@ -41,6 +43,9 @@ class CrosLibrary {
     // Use the stub implementations of the library. This is mainly for
     // running the chromeos build of chrome on the desktop.
     void SetUseStubImpl();
+    // Reset the stub implementations of the library, called after
+    // SetUseStubImp is called.
+    void ResetUseStubImpl();
     // Passing true for own for these setters will cause them to be deleted
     // when the CrosLibrary is deleted (or other mocks are set).
     // Setter for LibraryLoader.
@@ -65,12 +70,12 @@ class CrosLibrary {
     void SetScreenLockLibrary(ScreenLockLibrary* library, bool own);
     // Setter for SpeechSynthesisLibrary.
     void SetSpeechSynthesisLibrary(SpeechSynthesisLibrary* library, bool own);
-    // Setter for SynapticsLibrary.
-    void SetSynapticsLibrary(SynapticsLibrary* library, bool own);
     // Setter for SyslogsLibrary.
     void SetSyslogsLibrary(SyslogsLibrary* library, bool own);
     // Setter for SystemLibrary.
     void SetSystemLibrary(SystemLibrary* library, bool own);
+    // Setter for TouchpadLibrary.
+    void SetTouchpadLibrary(TouchpadLibrary* library, bool own);
     // Setter for UpdateLibrary.
     void SetUpdateLibrary(UpdateLibrary* library, bool own);
 
@@ -113,14 +118,14 @@ class CrosLibrary {
   // This gets the singleton SpeechSynthesisLibrary.
   SpeechSynthesisLibrary* GetSpeechSynthesisLibrary();
 
-  // This gets the singleton SynapticsLibrary.
-  SynapticsLibrary* GetSynapticsLibrary();
-
   // This gets the singleton SyslogsLibrary.
   SyslogsLibrary* GetSyslogsLibrary();
 
   // This gets the singleton SystemLibrary.
   SystemLibrary* GetSystemLibrary();
+
+  // This gets the singleton TouchpadLibrary.
+  TouchpadLibrary* GetTouchpadLibrary();
 
   // This gets the singleton UpdateLibrary.
   UpdateLibrary* GetUpdateLibrary();
@@ -163,6 +168,9 @@ class CrosLibrary {
     L* GetDefaultImpl(bool use_stub_impl) {
       if (!library_) {
         own_ = true;
+        if (CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kForceStubLibcros))
+          use_stub_impl = true;
         library_ = L::GetImpl(use_stub_impl);
       }
       return library_;
@@ -192,9 +200,9 @@ class CrosLibrary {
   Library<PowerLibrary> power_lib_;
   Library<ScreenLockLibrary> screen_lock_lib_;
   Library<SpeechSynthesisLibrary> speech_synthesis_lib_;
-  Library<SynapticsLibrary> synaptics_lib_;
   Library<SyslogsLibrary> syslogs_lib_;
   Library<SystemLibrary> system_lib_;
+  Library<TouchpadLibrary> touchpad_lib_;
   Library<UpdateLibrary> update_lib_;
 
   // Stub implementations of the libraries should be used.

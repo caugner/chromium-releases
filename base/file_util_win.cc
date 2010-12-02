@@ -13,6 +13,7 @@
 #include <string>
 
 #include "base/file_path.h"
+#include "base/histogram.h"
 #include "base/logging.h"
 #include "base/pe_image.h"
 #include "base/scoped_comptr_win.h"
@@ -593,31 +594,18 @@ bool CreateNewTempDirectory(const FilePath::StringType& prefix,
 }
 
 bool CreateDirectory(const FilePath& full_path) {
-  return file_util::CreateDirectoryExtraLogging(full_path, LOG(INFO));
-}
-
-// TODO(skerner): Extra logging has been added to understand crbug/35198 .
-// Remove it once we get a log from a user who can reproduce the issue.
-bool CreateDirectoryExtraLogging(const FilePath& full_path,
-                                 std::ostream& log) {
-  log << "Enter CreateDirectory: full_path = " << full_path.value()
-      << std::endl;
   // If the path exists, we've succeeded if it's a directory, failed otherwise.
   const wchar_t* full_path_str = full_path.value().c_str();
   DWORD fileattr = ::GetFileAttributes(full_path_str);
-  log << "::GetFileAttributes() returned " << fileattr << std::endl;
-  if (fileattr == INVALID_FILE_ATTRIBUTES) {
-    DWORD fileattr_error = GetLastError();
-    log << "::GetFileAttributes() failed.  GetLastError() = "
-        << fileattr_error << std::endl;
-  } else {
+  if (fileattr != INVALID_FILE_ATTRIBUTES) {
     if ((fileattr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-      log << "CreateDirectory(" << full_path_str << "), "
-          << "directory already exists." << std::endl;
+      DLOG(INFO) << "CreateDirectory(" << full_path_str << "), "
+                 << "directory already exists.";
       return true;
     } else {
-      log << "CreateDirectory(" << full_path_str << "), "
-          << "conflicts with existing file." << std::endl;
+      LOG(WARNING) << "CreateDirectory(" << full_path_str << "), "
+                   << "conflicts with existing file.";
+      return false;
     }
   }
 
@@ -628,49 +616,26 @@ bool CreateDirectoryExtraLogging(const FilePath& full_path,
   // directories starting with the highest-level missing parent.
   FilePath parent_path(full_path.DirName());
   if (parent_path.value() == full_path.value()) {
-    log << "Can't create directory: parent_path " << parent_path.value()
-        << " should not equal full_path " << full_path.value()
-        << std::endl;
     return false;
   }
   if (!CreateDirectory(parent_path)) {
-    log << "Failed to create one of the parent directories: "
-        << parent_path.value() << std::endl;
+    DLOG(WARNING) << "Failed to create one of the parent directories.";
     return false;
   }
 
-  log << "About to call ::CreateDirectory() with full_path_str = "
-      << full_path_str << std::endl;
   if (!::CreateDirectory(full_path_str, NULL)) {
     DWORD error_code = ::GetLastError();
-    log << "CreateDirectory() gave last error " << error_code << std::endl;
-
-    DWORD fileattr = GetFileAttributes(full_path.value().c_str());
-    if (fileattr == INVALID_FILE_ATTRIBUTES) {
-      DWORD fileattr_error = ::GetLastError();
-      log << "GetFileAttributes() failed, GetLastError() = "
-          << fileattr_error << std::endl;
-    } else {
-      log << "GetFileAttributes() returned " << fileattr << std::endl;
-      log << "Is the path a directory: "
-          << ((fileattr & FILE_ATTRIBUTE_DIRECTORY) != 0) << std::endl;
-    }
     if (error_code == ERROR_ALREADY_EXISTS && DirectoryExists(full_path)) {
       // This error code doesn't indicate whether we were racing with someone
       // creating the same directory, or a file with the same path, therefore
       // we check.
-      log << "Race condition? Directory already exists: "
-          << full_path.value() << std::endl;
       return true;
     } else {
-      DWORD dir_exists_error = ::GetLastError();
-      log << "Failed to create directory " << full_path_str << std::endl;
-      log << "GetLastError() for DirectoryExists() is "
-          << dir_exists_error << std::endl;
+      LOG(WARNING) << "Failed to create directory " << full_path_str
+                   << ", last error is " << error_code << ".";
       return false;
     }
   } else {
-    log << "::CreateDirectory() succeeded." << std::endl;
     return true;
   }
 }
@@ -694,15 +659,6 @@ bool GetFileInfo(const FilePath& file_path, base::PlatformFileInfo* results) {
   results->creation_time = base::Time::FromFileTime(attr.ftCreationTime);
 
   return true;
-}
-
-bool SetLastModifiedTime(const FilePath& file_path, base::Time last_modified) {
-  FILETIME timestamp(last_modified.ToFileTime());
-  ScopedHandle file_handle(
-      CreateFile(file_path.value().c_str(), FILE_WRITE_ATTRIBUTES,
-                 kFileShareAll, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL));
-  BOOL ret = SetFileTime(file_handle.Get(), NULL, &timestamp, &timestamp);
-  return ret != 0;
 }
 
 FILE* OpenFile(const FilePath& filename, const char* mode) {
@@ -942,11 +898,24 @@ bool MemoryMappedFile::MapFileToMemoryInternal() {
   // therefore the cast here is safe.
   file_mapping_ = ::CreateFileMapping(file_, NULL, PAGE_READONLY,
                                       0, static_cast<DWORD>(length_), NULL);
-  if (file_mapping_ == INVALID_HANDLE_VALUE)
+  if (file_mapping_ == INVALID_HANDLE_VALUE) {
+    // According to msdn, system error codes are only reserved up to 15999.
+    // http://msdn.microsoft.com/en-us/library/ms681381(v=VS.85).aspx.
+    UMA_HISTOGRAM_ENUMERATION("MemoryMappedFile.CreateFileMapping",
+        std::min(logging::GetLastSystemErrorCode(),
+                 static_cast<logging::SystemErrorCode>(15999)),
+        16000);
     return false;
+  }
 
   data_ = static_cast<uint8*>(
       ::MapViewOfFile(file_mapping_, FILE_MAP_READ, 0, 0, length_));
+  if (!data_) {
+    UMA_HISTOGRAM_ENUMERATION("MemoryMappedFile.MapViewOfFile",
+        std::min(logging::GetLastSystemErrorCode(),
+                 static_cast<logging::SystemErrorCode>(15999)),
+        16000);
+  }
   return data_ != NULL;
 }
 

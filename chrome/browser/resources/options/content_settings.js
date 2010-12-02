@@ -32,9 +32,17 @@ cr.define('options', function() {
       // Exceptions lists. -----------------------------------------------------
       function handleExceptionsLinkClickEvent(event) {
         var exceptionsArea = event.target.parentNode.
-            querySelector('div[contentType]');
+            querySelector('div[contentType][mode=normal]');
         exceptionsArea.classList.toggle('hidden');
         exceptionsArea.querySelector('list').redraw();
+
+        var otrExceptionsArea = event.target.parentNode.
+            querySelector('div[contentType][mode=otr]');
+        if (otrExceptionsArea && otrExceptionsArea.otrProfileExists) {
+          otrExceptionsArea.classList.toggle('hidden');
+          otrExceptionsArea.querySelector('list').redraw();
+        }
+
         return false;
       }
       var exceptionsLinks =
@@ -58,32 +66,34 @@ cr.define('options', function() {
         chrome.send('coreOptionsUserMetricsAction', ['Options_ShowCookies']);
         OptionsPage.showPageByName('cookiesView');
       };
+
+      $('plugins-tab').onclick = function(event) {
+        chrome.send('openPluginsTab');
+      };
+    },
+
+    /**
+     * Handles a hash value in the URL (such as bar in
+     * chrome://options/foo#bar). Overrides the default action of showing an
+     * overlay by instead navigating to a particular subtab.
+     * @param {string} hash The hash value.
+     */
+    handleHash: function(hash) {
+      OptionsPage.showTab($(hash + '-nav-tab'));
     },
   };
 
   /**
-   * Sets the initial values for all the content settings radios.
+   * Sets the values for all the content settings radios.
    * @param {Object} dict A mapping from radio groups to the checked value for
    *     that group.
    */
-  ContentSettings.setInitialContentFilterSettingsValue = function(dict) {
+  ContentSettings.setContentFilterSettingsValue = function(dict) {
     for (var group in dict) {
       document.querySelector('input[type=radio][name=' + group +
                              '][value=' + dict[group] + ']').checked = true;
     }
   };
-
-  /**
-   * Called to set whether we show certain UI related to the cookies prompt.
-   * @param {boolean} enabled The value --enable-cookies-prompt.
-   *     that group.
-   */
-  ContentSettings.setCookiesPromptEnabled = function(enabled) {
-    cookiesExceptionsList.enableAskOption = enabled;
-
-    if (!enabled)
-      $('cookiesAskRadio').classList.add('hidden');
-  }
 
   /**
    * Initializes an exceptions list.
@@ -93,7 +103,20 @@ cr.define('options', function() {
    */
   ContentSettings.setExceptions = function(type, list) {
     var exceptionsList =
-        document.querySelector('div[contentType=' + type + '] list');
+        document.querySelector('div[contentType=' + type + ']' +
+                               '[mode=normal] list');
+    exceptionsList.clear();
+    for (var i = 0; i < list.length; i++) {
+      exceptionsList.addException(list[i]);
+    }
+  };
+
+  ContentSettings.setOTRExceptions = function(type, list) {
+    var exceptionsArea =
+        document.querySelector('div[contentType=' + type + '][mode=otr]');
+    exceptionsArea.otrProfileExists = true;
+
+    var exceptionsList = exceptionsArea.querySelector('list');
     exceptionsList.clear();
     for (var i = 0; i < list.length; i++) {
       exceptionsList.addException(list[i]);
@@ -111,14 +134,17 @@ cr.define('options', function() {
   /**
    * The browser's response to a request to check the validity of a given URL
    * pattern.
+   * @param {string} type The content type.
+   * @param {string} mode The browser mode.
    * @param {string} pattern The pattern.
    * @param {bool} valid Whether said pattern is valid in the context of
    *     a content exception setting.
    */
   ContentSettings.patternValidityCheckComplete =
-      function(type, pattern, valid) {
+      function(type, mode, pattern, valid) {
     var exceptionsList =
-        document.querySelector('div[contentType=' + type + '] list');
+        document.querySelector('div[contentType=' + type + '][mode=' + mode +
+                               '] list');
     exceptionsList.patternValidityCheckComplete(pattern, valid);
   };
 

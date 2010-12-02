@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#define SYS_SEGMENTNAME "syscalls"  // For linux_syscall_support.h
+// For linux_syscall_support.h. This makes it safe to call embedded system
+// calls when in seccomp mode.
+#define SYS_SYSCALL_ENTRYPOINT "playground$syscallEntryPoint"
 
 #include "chrome/app/breakpad_linux.h"
 
@@ -28,14 +30,14 @@
 #include "breakpad/src/client/linux/handler/exception_handler.h"
 #include "breakpad/src/client/linux/minidump_writer/directory_reader.h"
 #include "breakpad/src/common/linux/linux_libc_support.h"
-#include "breakpad/src/common/linux/linux_syscall_support.h"
-#include "breakpad/src/common/linux/memory.h"
+#include "breakpad/src/common/memory.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_descriptors.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info_posix.h"
 #include "chrome/common/env_vars.h"
+#include "seccompsandbox/linux_syscall_support.h"
 
 // Some versions of gcc are prone to warn about unused return values. In cases
 // where we either a) know the call cannot fail, or b) there is nothing we
@@ -518,7 +520,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
       while (reader.GetNextEntry(&name)) {
         int i;
         if (my_strtoui(&i, name) && i > 2 && i != fd)
-          IGNORE_RET(sys_close(fd));
+          IGNORE_RET(sys_close(i));
         reader.PopEntry();
       }
 

@@ -29,6 +29,7 @@
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_service.h"
@@ -214,6 +215,9 @@ void SessionService::SetPinnedState(const SessionID& window_id,
 void SessionService::TabClosed(const SessionID& window_id,
                                const SessionID& tab_id,
                                bool closed_by_user_gesture) {
+  if (!tab_id.id())
+    return;  // Hapens when the tab is replaced.
+
   if (!ShouldTrackChangesToWindow(window_id))
     return;
 

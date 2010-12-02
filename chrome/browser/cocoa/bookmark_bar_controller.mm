@@ -506,6 +506,15 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
   [self closeAllBookmarkFolders];
 }
 
+- (BOOL)canEditBookmark:(const BookmarkNode*)node {
+  // Don't allow edit/delete of the bar node, or of "Other Bookmarks"
+  if ((node == nil) ||
+      (node == bookmarkModel_->other_node()) ||
+      (node == bookmarkModel_->GetBookmarkBarNode()))
+    return NO;
+  return YES;
+}
+
 #pragma mark Actions
 
 - (IBAction)openBookmark:(id)sender {
@@ -519,10 +528,14 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
 
 // Redirect to our logic shared with BookmarkBarFolderController.
 - (IBAction)openBookmarkFolderFromButton:(id)sender {
-  DCHECK(sender != offTheSideButton_);
-  // Toggle presentation of bar folder menus.
-  showFolderMenus_ = !showFolderMenus_;
-  [folderTarget_ openBookmarkFolderFromButton:sender];
+  if (sender != offTheSideButton_) {
+    // Toggle presentation of bar folder menus.
+    showFolderMenus_ = !showFolderMenus_;
+    [folderTarget_ openBookmarkFolderFromButton:sender];
+  } else {
+    // Off-the-side requires special handling.
+    [self openOffTheSideFolderFromButton:sender];
+  }
 }
 
 // The button that sends this one is special; the "off the side"
@@ -865,7 +878,12 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
 
 // Enable or disable items.  We are the menu delegate for both the bar
 // and for bookmark folder buttons.
-- (BOOL)validateUserInterfaceItem:(id)item {
+- (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)anItem {
+  // NSUserInterfaceValidations says that the passed-in object has type
+  // |id<NSValidatedUserInterfaceItem>|, but this function needs to call the
+  // NSObject method -isKindOfClass: on the parameter. In theory, this is not
+  // correct, but this is probably a bug in the method signature.
+  NSMenuItem* item = static_cast<NSMenuItem*>(anItem);
   // Yes for everything we don't explicitly deny.
   if (![item isKindOfClass:[NSMenuItem class]])
     return YES;
@@ -905,10 +923,7 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
       (action == @selector(deleteBookmark:)) ||
       (action == @selector(cutBookmark:)) ||
       (action == @selector(copyBookmark:))) {
-    // Don't allow edit/delete of the bar node, or of "Other Bookmarks"
-    if ((node == nil) ||
-        (node == bookmarkModel_->other_node()) ||
-        (node == bookmarkModel_->GetBookmarkBarNode())) {
+    if (![self canEditBookmark:node]) {
       return NO;
     }
   }
@@ -1422,7 +1437,7 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
   return [offTheSideButton_ isHidden];
 }
 
-- (NSButton*)otherBookmarksButton {
+- (BookmarkButton*)otherBookmarksButton {
   return otherBookmarksButton_.get();
 }
 
@@ -1614,6 +1629,13 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
     case NSKeyDown:
     case NSKeyUp:
       // Any key press ends things.
+      return YES;
+    case NSLeftMouseDragged:
+      // We can get here with the following sequence:
+      // - open a bookmark folder
+      // - right-click (and unclick) on it to open context menu
+      // - move mouse to window titlebar then click-drag it by the titlebar
+      // http://crbug.com/49333
       return YES;
     default:
       break;
@@ -1867,7 +1889,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   for (BookmarkButton* button in buttons_.get()) {
     const BookmarkNode* cellnode = [button bookmarkNode];
     if (cellnode == node) {
-      [[button cell] setBookmarkCellText:nil
+      [[button cell] setBookmarkCellText:[button title]
                                    image:[self favIconForNode:node]];
       // Adding an image means we might need more room for the
       // bookmark.  Test for it by growing the button (if needed)
@@ -2002,6 +2024,21 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 
 - (NSWindow*)browserWindow {
   return [[self view] window];
+}
+
+- (BOOL)canDragBookmarkButtonToTrash:(BookmarkButton*)button {
+  return [self canEditBookmark:[button bookmarkNode]];
+}
+
+- (void)didDragBookmarkToTrash:(BookmarkButton*)button {
+  // TODO(mrossetti): Refactor BookmarkBarFolder common code.
+  // http://crbug.com/35966
+  const BookmarkNode* node = [button bookmarkNode];
+  if (node) {
+    const BookmarkNode* parent = node->GetParent();
+    bookmarkModel_->Remove(parent,
+                           parent->IndexOfChild(node));
+  }
 }
 
 #pragma mark BookmarkButtonControllerProtocol
@@ -2197,6 +2234,17 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 
 // Add a new folder controller as triggered by the given folder button.
 - (void)addNewFolderControllerWithParentButton:(BookmarkButton*)parentButton {
+
+  // If doing a close/open, make sure the fullscreen chrome doesn't
+  // have a chance to begin animating away in the middle of things.
+  BrowserWindowController* browserController =
+      [BrowserWindowController browserWindowControllerForView:[self view]];
+  // Confirm we're not re-locking with ourself as an owner before locking.
+  DCHECK([browserController isBarVisibilityLockedForOwner:self] == NO);
+  [browserController lockBarVisibilityForOwner:self
+                                 withAnimation:NO
+                                         delay:NO];
+
   if (folderController_)
     [self closeAllBookmarkFolders];
 
@@ -2210,6 +2258,11 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   // Only BookmarkBarController has this; the
   // BookmarkBarFolderController does not.
   [self watchForExitEvent:YES];
+
+  // No longer need to hold the lock; the folderController_ now owns it.
+  [browserController releaseBarVisibilityForOwner:self
+                                    withAnimation:NO
+                                            delay:NO];
 }
 
 - (void)openAll:(const BookmarkNode*)node
@@ -2378,10 +2431,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
       // If we are deleting a button whose folder is currently open, close it!
       [self closeAllBookmarkFolders];
     }
-    NSRect poofFrame = [oldButton bounds];
-    NSPoint poofPoint = NSMakePoint(NSMidX(poofFrame), NSMidY(poofFrame));
-    poofPoint = [oldButton convertPoint:poofPoint toView:nil];
-    poofPoint = [[oldButton window] convertBaseToScreen:poofPoint];
+    NSPoint poofPoint = [oldButton screenLocationForRemoveAnimation];
     NSRect oldFrame = [oldButton frame];
     [oldButton setDelegate:nil];
     [oldButton removeFromSuperview];
@@ -2402,7 +2452,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     }
     --displayedButtonCount_;
     [self reconfigureBookmarkBar];
-  } else if (folderController_) {
+  } else if (folderController_ &&
+             [folderController_ parentButton] == offTheSideButton_) {
     // The button being removed is in the OTS (off-the-side) and the OTS
     // menu is showing so we need to remove the button.
     NSInteger index = buttonIndex - displayedButtonCount_;

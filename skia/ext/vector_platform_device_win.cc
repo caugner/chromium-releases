@@ -140,7 +140,7 @@ void VectorPlatformDevice::drawRect(const SkDraw& draw,
 
     // Removes the path effect from the temporary SkPaint object.
     SkPaint paint_no_effet(paint);
-    paint_no_effet.setPathEffect(NULL)->safeUnref();
+    SkSafeUnref(paint_no_effet.setPathEffect(NULL));
 
     // Draw the calculated path.
     drawPath(draw, path_modified, paint_no_effet);
@@ -170,7 +170,7 @@ void VectorPlatformDevice::drawPath(const SkDraw& draw,
 
     // Removes the path effect from the temporary SkPaint object.
     SkPaint paint_no_effet(paint);
-    paint_no_effet.setPathEffect(NULL)->safeUnref();
+    SkSafeUnref(paint_no_effet.setPathEffect(NULL));
 
     // Draw the calculated path.
     drawPath(draw, path_modified, paint_no_effet);
@@ -491,8 +491,6 @@ HGDIOBJ VectorPlatformDevice::SelectObject(HGDIOBJ object) {
 bool VectorPlatformDevice::CreateBrush(bool use_brush, const SkPaint& paint) {
   // Make sure that for transparent color, no brush is used.
   if (paint.getAlpha() == 0) {
-    // Test if it ever happen.
-    SkASSERT(false);
     use_brush = false;
   }
 
@@ -502,8 +500,6 @@ bool VectorPlatformDevice::CreateBrush(bool use_brush, const SkPaint& paint) {
 bool VectorPlatformDevice::CreatePen(bool use_pen, const SkPaint& paint) {
   // Make sure that for transparent color, no pen is used.
   if (paint.getAlpha() == 0) {
-    // Test if it ever happen.
-    SkASSERT(false);
     use_pen = false;
   }
 

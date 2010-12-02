@@ -143,6 +143,15 @@ void TestRenderWidgetHostView::SetActive(bool active) {
   // <viettrungluu@gmail.com>: Do I need to do anything here?
 }
 
+void TestRenderWidgetHostView::SetPluginImeEnabled(bool enabled,
+                                                   int plugin_id) {
+}
+
+bool TestRenderWidgetHostView::PostProcessEventForPluginIme(
+    const NativeWebKeyboardEvent& event) {
+  return false;
+}
+
 gfx::PluginWindowHandle
 TestRenderWidgetHostView::AllocateFakePluginWindowHandle(
     bool opaque,
@@ -236,6 +245,8 @@ TestingProfile* RenderViewHostTestHarness::profile() {
 }
 
 MockRenderProcessHost* RenderViewHostTestHarness::process() {
+  if (pending_rvh())
+    return static_cast<MockRenderProcessHost*>(pending_rvh()->process());
   return static_cast<MockRenderProcessHost*>(rvh()->process());
 }
 

@@ -11,7 +11,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/extensions/extension_bookmark_manager_api.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
@@ -24,6 +24,7 @@
 #include "chrome/common/page_transition_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/url_constants.h"
 #include "gfx/codec/png_codec.h"
@@ -71,7 +72,8 @@ class ExtensionDOMUIImageLoadingTracker : public ImageLoadingTracker::Observer {
   void Init() {
     if (extension_) {
       ExtensionResource icon_resource =
-          extension_->GetIconResource(Extension::EXTENSION_ICON_BITTY);
+          extension_->GetIconResource(Extension::EXTENSION_ICON_BITTY,
+                                      ExtensionIconSet::MATCH_EXACTLY);
 
       tracker_.LoadImage(extension_, icon_resource,
                          gfx::Size(kFavIconSize, kFavIconSize),
@@ -129,7 +131,7 @@ ExtensionDOMUI::ExtensionDOMUI(TabContents* tab_contents, GURL url)
   DCHECK(extension);
   // Only hide the url for internal pages (e.g. chrome-extension or packaged
   // component apps like bookmark manager.
-  should_hide_url_ = !extension->is_app();
+  should_hide_url_ = !extension->is_hosted_app();
 
   bindings_ = BindingsPolicy::EXTENSION;
   // Bind externalHost to Extension DOMUI loaded in Chrome Frame.

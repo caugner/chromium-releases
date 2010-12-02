@@ -38,13 +38,12 @@ class AsyncResourceHandler : public ResourceHandler {
                            const URLRequestStatus& status,
                            const std::string& security_info);
   void OnRequestClosed();
+  void OnDataDownloaded(int request_id, int bytes_downloaded);
 
   static void GlobalCleanup();
 
  private:
   ~AsyncResourceHandler();
-
-  void PopulateTimingInfo(URLRequest* request, ResourceResponse* response);
 
   scoped_refptr<SharedIOBuffer> read_buffer_;
   ResourceDispatcherHost::Receiver* receiver_;

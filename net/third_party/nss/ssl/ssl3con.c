@@ -72,7 +72,8 @@
 #endif
 
 static void      ssl3_CleanupPeerCerts(sslSocket *ss);
-static void      ssl3_CopyPeerCertsFromSID(sslSocket *ss, sslSessionID *sid);
+static void      ssl3_CopyPeerCertsToSID(ssl3CertNode *certs,
+                                         sslSessionID *sid);
 static PK11SymKey *ssl3_GenerateRSAPMS(sslSocket *ss, ssl3CipherSpec *spec,
                                        PK11SlotInfo * serverKeySlot);
 static SECStatus ssl3_DeriveMasterSecret(sslSocket *ss, PK11SymKey *pms);
@@ -82,7 +83,6 @@ static SECStatus ssl3_InitState(             sslSocket *ss);
 static SECStatus ssl3_SendCertificate(       sslSocket *ss);
 static SECStatus ssl3_SendEmptyCertificate(  sslSocket *ss);
 static SECStatus ssl3_SendCertificateRequest(sslSocket *ss);
-static SECStatus ssl3_SendNextProto(         sslSocket *ss);
 static SECStatus ssl3_SendServerHello(       sslSocket *ss);
 static SECStatus ssl3_SendServerHelloDone(   sslSocket *ss);
 static SECStatus ssl3_SendServerKeyExchange( sslSocket *ss);
@@ -2791,16 +2791,6 @@ ssl3_HandleChangeCipherSpecs(sslSocket *ss, sslBuffer *buf)
     SSL_TRC(3, ("%d: SSL3[%d] Set Current Read Cipher Suite to Pending",
 		SSL_GETPID(), ss->fd ));
 
-    if (ss->ssl3.hs.snapStartType == snap_start_resume) {
-	/* If the server sent us a ChangeCipherSpec message then our Snap Start
-         * resume handshake was successful and we need to switch our current
-         * write cipher spec to reflect the ChangeCipherSpec message embedded
-         * in the ClientHello that the server has now processed. */
-	ssl3_DestroyCipherSpec(ss->ssl3.cwSpec, PR_TRUE/*freeSrvName*/);
-	ss->ssl3.cwSpec = ss->ssl3.pwSpec;
-	ss->ssl3.pwSpec = NULL;
-    }
-
     /* If we are really through with the old cipher prSpec
      * (Both the read and write sides have changed) destroy it.
      */
@@ -5018,6 +5008,12 @@ ssl3_HandleServerHello(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	if (SECITEM_AllocItem(NULL, &ss->ssl3.serverHelloPredictionData,
 			      length))
 	    memcpy(ss->ssl3.serverHelloPredictionData.data, b, length);
+	/* ss->ssl3.serverHelloPredictionDataValid is still false at this
+	 * point. We have to record the contents of the ServerHello here
+	 * because we don't have a pointer to the whole message when handling
+	 * the extensions. However, we wait until the Snap Start extenion
+	 * handler to recognise that the server supports Snap Start and to set
+	 * serverHelloPredictionDataValid. */
     }
 
     temp = ssl3_ConsumeHandshakeNumber(ss, 2, &b, &length);
@@ -7597,15 +7593,6 @@ ssl3_HandleNewSessionTicket(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	return SECFailure;
     }
 
-    if (ss->ssl3.hs.snapStartType == snap_start_full) {
-	/* Snap Start handshake was successful. Switch the cipher spec. */
-	ssl_GetSpecWriteLock(ss);
-	ssl3_DestroyCipherSpec(ss->ssl3.cwSpec, PR_TRUE/*freeSrvName*/);
-	ss->ssl3.cwSpec = ss->ssl3.pwSpec;
-	ss->ssl3.pwSpec = NULL;
-	ssl_ReleaseSpecWriteLock(ss);
-    }
-
     session_ticket.received_timestamp = ssl_Time();
     if (length < 4) {
 	(void)SSL3_SendAlert(ss, alert_fatal, decode_error);
@@ -7621,6 +7608,12 @@ ssl3_HandleNewSessionTicket(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	(void)SSL3_SendAlert(ss, alert_fatal, decode_error);
 	PORT_SetError(SSL_ERROR_RX_MALFORMED_NEW_SESSION_TICKET);
 	return SECFailure;  /* malformed */
+    }
+
+    if (ss->sec.ci.sid->peerCert == NULL) {
+	ss->sec.ci.sid->peerCert = CERT_DupCertificate(ss->sec.peerCert);
+	ssl3_CopyPeerCertsToSID((ssl3CertNode *)ss->ssl3.peerCertChain,
+				ss->sec.ci.sid);
     }
 
     rv = ssl3_SetSIDSessionTicket(ss->sec.ci.sid, &session_ticket);
@@ -7814,7 +7807,7 @@ ssl3_CleanupPeerCerts(sslSocket *ss)
     ss->ssl3.peerCertChain = NULL;
 }
 
-static void
+void
 ssl3_CopyPeerCertsFromSID(sslSocket *ss, sslSessionID *sid)
 {
     PRArenaPool *arena;
@@ -8265,7 +8258,7 @@ ssl3_ComputeTLSFinished(ssl3CipherSpec *spec,
 
 /* called from ssl3_HandleServerHelloDone
  */
-static SECStatus
+SECStatus
 ssl3_SendNextProto(sslSocket *ss)
 {
     SECStatus rv;
@@ -8491,6 +8484,16 @@ ssl3_HandleFinished(sslSocket *ss, SSL3Opaque *b, PRUint32 length,
 	return SECFailure;
     }
 
+    if (ss->ssl3.hs.snapStartType == snap_start_full ||
+        ss->ssl3.hs.snapStartType == snap_start_resume) {
+	/* Snap Start handshake was successful. Switch the cipher spec. */
+	ssl_GetSpecWriteLock(ss);
+	ssl3_DestroyCipherSpec(ss->ssl3.cwSpec, PR_TRUE/*freeSrvName*/);
+	ss->ssl3.cwSpec = ss->ssl3.pwSpec;
+	ss->ssl3.pwSpec = NULL;
+	ssl_ReleaseSpecWriteLock(ss);
+    }
+
     isTLS = (PRBool)(ss->ssl3.crSpec->version > SSL_LIBRARY_VERSION_3_0);
     if (isTLS) {
 	TLSFinished tlsFinished;
@@ -8663,7 +8666,10 @@ xmit_loser:
     ss->ssl3.hs.ws = idle_handshake;
 
     /* Do the handshake callback for sslv3 here, if we cannot false start. */
-    if (ss->handshakeCallback != NULL && !ssl3_CanFalseStart(ss)) {
+    if (ss->handshakeCallback != NULL &&
+        (!ssl3_CanFalseStart(ss) ||
+         ss->ssl3.hs.snapStartType == snap_start_full ||
+         ss->ssl3.hs.snapStartType == snap_start_resume)) {
 	(ss->handshakeCallback)(ss->fd, ss->handshakeCallbackData);
     }
 

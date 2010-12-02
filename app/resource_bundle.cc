@@ -207,11 +207,25 @@ const gfx::Font& ResourceBundle::GetFont(FontStyle style) {
   }
 }
 
+gfx::NativeImage ResourceBundle::GetNativeImageNamed(int resource_id) {
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+#if defined(OS_MACOSX)
+  return rb.GetNSImageNamed(resource_id);
+#elif defined(USE_X11) && !defined(TOOLKIT_VIEWS)
+  return rb.GetPixbufNamed(resource_id);
+#else
+  return rb.GetBitmapNamed(resource_id);
+#endif
+}
+
 // LoadedDataPack implementation
 ResourceBundle::LoadedDataPack::LoadedDataPack(const FilePath& path)
     : path_(path) {
   // Always preload the data packs so we can maintain constness.
   Load();
+}
+
+ResourceBundle::LoadedDataPack::~LoadedDataPack() {
 }
 
 void ResourceBundle::LoadedDataPack::Load() {

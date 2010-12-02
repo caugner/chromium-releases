@@ -200,11 +200,18 @@ class LayoutTestController : public CppBoundClass {
   void grantDesktopNotificationPermission(const CppArgumentList& args,
                                           CppVariant* result);
 
+  void setDomainRelaxationForbiddenForURLScheme(
+      const CppArgumentList& args, CppVariant* result);
+  void sampleSVGAnimationForElementAtTime(const CppArgumentList& args,
+                                          CppVariant* result);
+  void setEditingBehavior(const CppArgumentList&, CppVariant*);
+
   // The following are only stubs.  TODO(pamg): Implement any of these that
   // are needed to pass the layout tests.
   void dumpAsWebArchive(const CppArgumentList& args, CppVariant* result);
   void dumpTitleChanges(const CppArgumentList& args, CppVariant* result);
   void dumpResourceLoadCallbacks(const CppArgumentList& args, CppVariant* result);
+  void dumpResourceResponseMIMETypes(const CppArgumentList& args, CppVariant* result);
   void setMainFrameIsFirstResponder(const CppArgumentList& args, CppVariant* result);
   void display(const CppArgumentList& args, CppVariant* result);
   void testRepaint(const CppArgumentList& args, CppVariant* result);
@@ -225,6 +232,7 @@ class LayoutTestController : public CppBoundClass {
   void overridePreference(const CppArgumentList& args, CppVariant* result);
   void setAllowUniversalAccessFromFileURLs(const CppArgumentList& args, CppVariant* result);
   void setAllowFileAccessFromFileURLs(const CppArgumentList& args, CppVariant* result);
+  void setMockSpeechInputResult(const CppArgumentList& args, CppVariant* result);
 
   // The fallback method is called when a nonexistent method is called on
   // the layout test controller object.
@@ -289,6 +297,9 @@ class LayoutTestController : public CppBoundClass {
   void markerTextForListItem(const CppArgumentList& args,
                              CppVariant* result);
 
+  void setMockDeviceOrientation(const CppArgumentList& args,
+                                CppVariant* result);
+
  public:
   // The following methods are not exposed to JavaScript.
   void SetWorkQueueFrozen(bool frozen) { work_queue_.set_frozen(frozen); }
@@ -302,6 +313,9 @@ class LayoutTestController : public CppBoundClass {
   }
   bool ShouldDumpResourceLoadCallbacks() {
     return dump_resource_load_callbacks_;
+  }
+  bool ShouldDumpResourceResponseMIMETypes() {
+    return dump_resource_response_mime_types_;
   }
   bool ShouldDumpStatusCallbacks() {
     return dump_window_status_changes_;
@@ -415,6 +429,10 @@ class LayoutTestController : public CppBoundClass {
   // If true, the test_shell will output a descriptive line for each resource
   // load callback.
   static bool dump_resource_load_callbacks_;
+
+  // If true, the test_shell will output a line with the MIME type for each
+  // resource that is loaded.
+  static bool dump_resource_response_mime_types_;
 
   // If true, the test_shell will produce a dump of the back forward list as
   // well.

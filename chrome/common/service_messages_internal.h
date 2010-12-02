@@ -29,6 +29,10 @@ IPC_BEGIN_MESSAGES(Service)
   // Tell the service process to disable the cloud proxy.
   IPC_MESSAGE_CONTROL0(ServiceMsg_DisableCloudPrintProxy)
 
+  // Requests a message back on whether the cloud print proxy is
+  // enabled.
+  IPC_MESSAGE_CONTROL0(ServiceMsg_IsCloudPrintProxyEnabled)
+
   // This message is for testing purpose.
   IPC_MESSAGE_CONTROL0(ServiceMsg_Hello)
 
@@ -41,6 +45,9 @@ IPC_BEGIN_MESSAGES(Service)
   // Tell the service process to shutdown.
   IPC_MESSAGE_CONTROL0(ServiceMsg_Shutdown)
 
+  // Tell the service process that an update is available.
+  IPC_MESSAGE_CONTROL0(ServiceMsg_UpdateAvailable)
+
 IPC_END_MESSAGES(Service)
 
 //------------------------------------------------------------------------------
@@ -50,6 +57,11 @@ IPC_BEGIN_MESSAGES(ServiceHost)
 
   // Sent when the cloud print proxy has an authentication error.
   IPC_MESSAGE_CONTROL0(ServiceHostMsg_CloudPrintProxy_AuthError)
+
+  // Sent as a response to a request for enablement status.
+  IPC_MESSAGE_CONTROL2(ServiceHostMsg_CloudPrintProxy_IsEnabled,
+                       bool,       /* Is the proxy enabled? */
+                       std::string /* Email address of account */)
 
   // Sent from the service process in response to a Hello message.
   IPC_MESSAGE_CONTROL0(ServiceHostMsg_GoodDay)

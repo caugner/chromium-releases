@@ -38,6 +38,7 @@
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/user_script.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/jstemplate_builder.h"
@@ -111,15 +112,17 @@ void ExtensionsUIHTMLSource::StartDataRequest(const std::string& path,
   localized_strings.SetString("suggestGallery",
       l10n_util::GetStringFUTF16(IDS_EXTENSIONS_NONE_INSTALLED_SUGGEST_GALLERY,
           ASCIIToUTF16("<a href='") +
-          ASCIIToUTF16(google_util::AppendGoogleLocaleParam(
-              GURL(Extension::ChromeStoreURL())).spec()) + ASCIIToUTF16("'>"),
+              ASCIIToUTF16(google_util::AppendGoogleLocaleParam(
+                  GURL(Extension::ChromeStoreLaunchURL())).spec()) +
+              ASCIIToUTF16("'>"),
           ASCIIToUTF16("</a>")));
   localized_strings.SetString("getMoreExtensions",
       ASCIIToUTF16("<a href='") +
-          ASCIIToUTF16(google_util::AppendGoogleLocaleParam(
-              GURL(Extension::ChromeStoreURL())).spec()) + ASCIIToUTF16("'>") +
-          l10n_util::GetStringUTF16(IDS_GET_MORE_EXTENSIONS) +
-          ASCIIToUTF16("</a>"));
+      ASCIIToUTF16(google_util::AppendGoogleLocaleParam(
+          GURL(Extension::ChromeStoreLaunchURL())).spec()) +
+      ASCIIToUTF16("'>") +
+      l10n_util::GetStringUTF16(IDS_GET_MORE_EXTENSIONS) +
+      ASCIIToUTF16("</a>"));
   localized_strings.SetString("extensionDisabled",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_DISABLED_EXTENSION));
   localized_strings.SetString("inDevelopment",
@@ -197,8 +200,8 @@ ExtensionsDOMHandler::IconLoader::IconLoader(ExtensionsDOMHandler* handler)
 
 void ExtensionsDOMHandler::IconLoader::LoadIcons(
     std::vector<ExtensionResource>* icons, DictionaryValue* json) {
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(this,
           &IconLoader::LoadIconsOnFileThread, icons, json));
 }
@@ -264,8 +267,8 @@ void ExtensionsDOMHandler::IconLoader::LoadIconsOnFileThread(
     extension->SetString("icon", icon_url.spec());
   }
 
-  ChromeThread::PostTask(
-      ChromeThread::UI, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
       NewRunnableMethod(this, &IconLoader::ReportResultOnUIThread,
                         json_deleter.release()));
 }
@@ -404,16 +407,8 @@ void ExtensionsDOMHandler::OnIconsLoaded(DictionaryValue* json) {
 
 ExtensionResource ExtensionsDOMHandler::PickExtensionIcon(
     Extension* extension) {
-  // Try to fetch the medium sized icon, then (if missing) go for the large one.
-  const std::map<int, std::string>& icons = extension->icons();
-  std::map<int, std::string>::const_iterator iter =
-      icons.find(Extension::EXTENSION_ICON_MEDIUM);
-  if (iter == icons.end())
-    iter = icons.find(Extension::EXTENSION_ICON_LARGE);
-  if (iter != icons.end())
-    return extension->GetResource(iter->second);
-  else
-    return ExtensionResource();
+  return extension->GetIconResource(Extension::EXTENSION_ICON_MEDIUM,
+                                    ExtensionIconSet::MATCH_BIGGER);
 }
 
 ExtensionInstallUI* ExtensionsDOMHandler::GetExtensionInstallUI() {
@@ -446,9 +441,7 @@ void ExtensionsDOMHandler::HandleInspectMessage(const ListValue* args) {
     return;
   }
 
-  DevToolsManager::GetInstance()->ToggleDevToolsWindow(
-      host,
-      DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE);
+  DevToolsManager::GetInstance()->OpenDevToolsWindow(host);
 }
 
 void ExtensionsDOMHandler::HandleReloadMessage(const ListValue* args) {
@@ -528,11 +521,7 @@ void ExtensionsDOMHandler::HandleUninstallMessage(const ListValue* args) {
   GetExtensionInstallUI()->ConfirmUninstall(this, extension);
 }
 
-void ExtensionsDOMHandler::InstallUIProceed(bool create_app_shortcut) {
-  // We only ever use ExtensionInstallUI for uninstalling, which should never
-  // result in it telling us to create a shortcut.
-  DCHECK(!create_app_shortcut);
-
+void ExtensionsDOMHandler::InstallUIProceed() {
   DCHECK(!extension_id_prompting_.empty());
 
   // The extension can be uninstalled in another window while the UI was
@@ -933,8 +922,8 @@ ExtensionsUI::ExtensionsUI(TabContents* contents) : DOMUI(contents) {
   ExtensionsUIHTMLSource* html_source = new ExtensionsUIHTMLSource();
 
   // Set up the chrome://extensions/ source.
-  ChromeThread::PostTask(
-      ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
           Singleton<ChromeURLDataManager>::get(),
           &ChromeURLDataManager::AddDataSource,

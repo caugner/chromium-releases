@@ -216,7 +216,9 @@ TEST_F(BookmarkBarFolderControllerTest, InitCreateAndDelete) {
   Class cellClass = [BookmarkBarFolderButtonCell class];
   for (BookmarkButton* button in buttons) {
     NSRect r = [[bbfc mainView] convertRect:[button frame] fromView:button];
-    EXPECT_TRUE(NSContainsRect([[bbfc mainView] frame], r));
+    // TODO(jrg): remove this adjustment.
+    NSRect bigger = NSInsetRect([[bbfc mainView] frame], -2, 0);
+    EXPECT_TRUE(NSContainsRect(bigger, r));
     EXPECT_TRUE([[button cell] isKindOfClass:cellClass]);
   }
 
@@ -260,8 +262,10 @@ TEST_F(BookmarkBarFolderControllerTest, BasicPosition) {
         convertBaseToScreen:[parentButton
                               convertRectToBase:[parentButton frame]].origin];
   // Within margin
-  EXPECT_LE(abs(pt.x - buttonOriginInScreen.x), 2);
-  EXPECT_LE(abs(pt.y - buttonOriginInScreen.y), 2);
+  EXPECT_LE(abs(pt.x - buttonOriginInScreen.x),
+            bookmarks::kBookmarkMenuOverlap+1);
+  EXPECT_LE(abs(pt.y - buttonOriginInScreen.y),
+            bookmarks::kBookmarkMenuOverlap+1);
 
   // Make sure we see the window shift left if it spills off the screen
   pt = [bbfc windowTopLeftForWidth:0];
@@ -699,10 +703,10 @@ TEST_F(BookmarkBarFolderControllerMenuTest, DragMoveBarBookmarkToFolder) {
   // and grown vertically.
   NSRect expectedToWindowFrame = oldToWindowFrame;
   expectedToWindowFrame.origin.x -= horizontalShift;
-  expectedToWindowFrame.origin.y -=
-      bookmarks::kBookmarkBarHeight + bookmarks::kVisualHeightOffset;
-  expectedToWindowFrame.size.height +=
-      bookmarks::kBookmarkBarHeight + bookmarks::kVisualHeightOffset;
+  CGFloat diff = (bookmarks::kBookmarkBarHeight +
+                  2*bookmarks::kBookmarkVerticalPadding);
+  expectedToWindowFrame.origin.y -= diff;
+  expectedToWindowFrame.size.height += diff;
   EXPECT_NSRECT_EQ(expectedToWindowFrame, newToWindowFrame);
 
   // Move the button back to the bar at the beginning.
@@ -763,10 +767,10 @@ TEST_F(BookmarkBarFolderControllerMenuTest, DragCopyBarBookmarkToFolder) {
   EXPECT_NSRECT_EQ(oldToFolderFrame, newToFolderFrame);
   // The toWindow should have shifted down vertically and grown vertically.
   NSRect expectedToWindowFrame = oldToWindowFrame;
-  expectedToWindowFrame.origin.y -=
-      bookmarks::kBookmarkBarHeight + bookmarks::kVisualHeightOffset;
-  expectedToWindowFrame.size.height +=
-      bookmarks::kBookmarkBarHeight + bookmarks::kVisualHeightOffset;
+  CGFloat diff = (bookmarks::kBookmarkBarHeight +
+                  2*bookmarks::kBookmarkVerticalPadding);
+  expectedToWindowFrame.origin.y -= diff;
+  expectedToWindowFrame.size.height += diff;
   EXPECT_NSRECT_EQ(expectedToWindowFrame, newToWindowFrame);
 
   // Copy the button back to the bar after "3b".
@@ -1134,7 +1138,7 @@ TEST_F(BookmarkBarFolderControllerMenuTest, MenuSizingAndScrollArrows) {
   NSWindow* folderMenu = [folderController window];
   EXPECT_TRUE(folderMenu);
   CGFloat expectedHeight = (CGFloat)bookmarks::kBookmarkButtonHeight +
-      bookmarks::kBookmarkVerticalPadding;
+      (2*bookmarks::kBookmarkVerticalPadding);
   NSRect menuFrame = [folderMenu frame];
   CGFloat menuHeight = NSHeight(menuFrame);
   EXPECT_CGFLOAT_EQ(expectedHeight, menuHeight);
@@ -1154,8 +1158,7 @@ TEST_F(BookmarkBarFolderControllerMenuTest, MenuSizingAndScrollArrows) {
   button = [folderController buttonWithTitleEqualTo:@"a"];
   CGFloat buttonWidth = NSWidth([button frame]);
   CGFloat expectedWidth =
-      buttonWidth + (2 * bookmarks::kBookmarkVerticalPadding) +
-      bookmarks::kScrollViewContentWidthMargin;
+      buttonWidth + (2 * bookmarks::kBookmarkSubMenuHorizontalPadding);
   EXPECT_CGFLOAT_EQ(expectedWidth, menuWidth);
 
   // Add a wider bookmark and make sure the button widths match.
@@ -1289,7 +1292,6 @@ TEST_F(BookmarkBarFolderControllerMenuTest, DragBookmarkData) {
                           initWithParentButton:button
                               parentController:nil
                                  barController:bar_]);
-  [folderController window];
   BookmarkButton* targetButton =
       [folderController buttonWithTitleEqualTo:@"2f1b"];
   ASSERT_TRUE(targetButton);
@@ -1322,6 +1324,45 @@ TEST_F(BookmarkBarFolderControllerMenuTest, DragBookmarkData) {
                                "2f3b ] 3b 4b ");
   actual = model_test_utils::ModelStringFromNode(root);
   EXPECT_EQ(expectedA, actual);
+}
+
+TEST_F(BookmarkBarFolderControllerMenuTest, DragBookmarkDataToTrash) {
+  BookmarkModel& model(*helper_.profile()->GetBookmarkModel());
+  const BookmarkNode* root = model.GetBookmarkBarNode();
+  const std::string model_string("1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
+                                 "2f3b ] 3b 4b ");
+  model_test_utils::AddNodesFromModelString(model, root, model_string);
+
+  // Validate initial model.
+  std::string actual = model_test_utils::ModelStringFromNode(root);
+  EXPECT_EQ(model_string, actual);
+
+  const BookmarkNode* folderNode = root->GetChild(1);
+  int oldFolderChildCount = folderNode->GetChildCount();
+
+  // Pop open a folder.
+  BookmarkButton* button = [bar_ buttonWithTitleEqualTo:@"2f"];
+  scoped_nsobject<BookmarkBarFolderControllerDragData> folderController;
+  folderController.reset([[BookmarkBarFolderControllerDragData alloc]
+                          initWithParentButton:button
+                              parentController:nil
+                                 barController:bar_]);
+
+  // Drag a button to the trash.
+  BookmarkButton* buttonToDelete =
+      [folderController buttonWithTitleEqualTo:@"2f1b"];
+  ASSERT_TRUE(buttonToDelete);
+  EXPECT_TRUE([folderController canDragBookmarkButtonToTrash:buttonToDelete]);
+  [folderController didDragBookmarkToTrash:buttonToDelete];
+
+  // There should be one less button in the folder.
+  int newFolderChildCount = folderNode->GetChildCount();
+  EXPECT_EQ(oldFolderChildCount - 1, newFolderChildCount);
+  // Verify the model.
+  const std::string expected("1b 2f:[ 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
+                             "2f3b ] 3b 4b ");
+  actual = model_test_utils::ModelStringFromNode(root);
+  EXPECT_EQ(expected, actual);
 }
 
 TEST_F(BookmarkBarFolderControllerMenuTest, AddURLs) {

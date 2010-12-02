@@ -4,8 +4,10 @@
 
 #include "printing/printed_document.h"
 
+#include "app/win_util.h"
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "gfx/font.h"
 #include "printing/page_number.h"
 #include "printing/page_overlays.h"
@@ -14,7 +16,6 @@
 #include "printing/units.h"
 #include "skia/ext/platform_device.h"
 
-#if defined(OS_WIN)
 namespace {
 
 void SimpleModifyWorldTransform(HDC context,
@@ -34,7 +35,6 @@ void DrawRect(HDC context, gfx::Rect rect) {
 }
 
 }  // namespace
-#endif  // OS_WIN
 
 namespace printing {
 
@@ -47,6 +47,8 @@ void PrintedDocument::RenderPrintedPage(
     DCHECK(&page == mutable_.pages_.find(page.page_number() - 1)->second.get());
   }
 #endif
+
+  DCHECK(context);
 
   const printing::PageSetup& page_setup(
       immutable_.settings_.page_setup_device_units());
@@ -62,32 +64,6 @@ void PrintedDocument::RenderPrintedPage(
     // Save the state (again) to apply the necessary world transformation.
     int saved_state = SaveDC(context);
     DCHECK_NE(saved_state, 0);
-
-#if 0
-    // Debug code to visually verify margins (leaks GDI handles).
-    XFORM debug_xform = { 0 };
-    ModifyWorldTransform(context, &debug_xform, MWT_IDENTITY);
-    // Printable area:
-    SelectObject(context, CreatePen(PS_SOLID, 1, RGB(0, 0, 0)));
-    SelectObject(context, CreateSolidBrush(RGB(0x90, 0x90, 0x90)));
-    Rectangle(context,
-              0,
-              0,
-              page_setup.printable_area().width(),
-              page_setup.printable_area().height());
-    // Overlay area:
-    gfx::Rect debug_overlay_area(page_setup.overlay_area());
-    debug_overlay_area.Offset(-page_setup.printable_area().x(),
-                              -page_setup.printable_area().y());
-    SelectObject(context, CreateSolidBrush(RGB(0xb0, 0xb0, 0xb0)));
-    DrawRect(context, debug_overlay_area);
-    // Content area:
-    gfx::Rect debug_content_area(content_area());
-    debug_content_area.Offset(-page_setup.printable_area().x(),
-                              -page_setup.printable_area().y());
-    SelectObject(context, CreateSolidBrush(RGB(0xd0, 0xd0, 0xd0)));
-    DrawRect(context, debug_content_area);
-#endif
 
     // Setup the matrix to translate and scale to the right place. Take in
     // account the actual shrinking factor.
@@ -136,6 +112,34 @@ void PrintedDocument::RenderPrintedPage(
                     font);
   PrintHeaderFooter(context, page, PageOverlays::RIGHT, PageOverlays::BOTTOM,
                     font);
+  int res = RestoreDC(context, saved_state);
+  DCHECK_NE(res, 0);
+}
+
+void PrintedDocument::Immutable::SetDocumentDate() {
+  // Use the native time formatting for printing on Windows.
+  SYSTEMTIME systemtime;
+  GetLocalTime(&systemtime);
+  date_ =
+      WideToUTF16Hack(win_util::FormatSystemDate(systemtime, std::wstring()));
+  time_ =
+      WideToUTF16Hack(win_util::FormatSystemTime(systemtime, std::wstring()));
+}
+
+void PrintedDocument::DrawHeaderFooter(gfx::NativeDrawingContext context,
+                                       std::wstring text,
+                                       gfx::Rect bounds) const {
+  // Save the state for the clipping region.
+  int saved_state = SaveDC(context);
+  DCHECK_NE(saved_state, 0);
+
+  int result = IntersectClipRect(context, bounds.x(), bounds.y(),
+                                 bounds.right() + 1, bounds.bottom() + 1);
+  DCHECK(result == SIMPLEREGION || result == COMPLEXREGION);
+  TextOut(context,
+          bounds.x(), bounds.y(),
+          text.c_str(),
+          static_cast<int>(text.size()));
   int res = RestoreDC(context, saved_state);
   DCHECK_NE(res, 0);
 }

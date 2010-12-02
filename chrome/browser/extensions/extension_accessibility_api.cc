@@ -64,6 +64,12 @@ void ExtensionAccessibilityEventRouter::ObserveProfile(Profile* profile) {
     registrar_.Add(this,
                    NotificationType::ACCESSIBILITY_TEXT_CHANGED,
                    NotificationService::AllSources());
+    registrar_.Add(this,
+                   NotificationType::ACCESSIBILITY_MENU_OPENED,
+                   NotificationService::AllSources());
+    registrar_.Add(this,
+                   NotificationType::ACCESSIBILITY_MENU_CLOSED,
+                   NotificationService::AllSources());
   }
 }
 
@@ -177,7 +183,7 @@ void ExtensionAccessibilityEventRouter::DispatchEvent(
     const std::string& json_args) {
   if (enabled_ && profile && profile->GetExtensionMessageService()) {
     profile->GetExtensionMessageService()->DispatchEventToRenderers(
-        event_name, json_args, profile, GURL());
+        event_name, json_args, NULL, GURL());
   }
 }
 

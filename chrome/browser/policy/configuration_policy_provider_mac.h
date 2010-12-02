@@ -11,13 +11,17 @@
 #include "chrome/browser/policy/configuration_policy_provider.h"
 #include "chrome/browser/preferences_mac.h"
 
+namespace policy {
+
 // An implementation of |ConfigurationPolicyProvider| using the mechanism
 // provided by Mac OS X's managed preferences.
 class ConfigurationPolicyProviderMac : public ConfigurationPolicyProvider {
  public:
-  ConfigurationPolicyProviderMac();
+  explicit ConfigurationPolicyProviderMac(
+      const StaticPolicyValueMap& policy_map);
   // For testing; takes ownership of |preferences|.
-  explicit ConfigurationPolicyProviderMac(MacPreferences* preferences);
+  ConfigurationPolicyProviderMac(const StaticPolicyValueMap& policy_map,
+                                 MacPreferences* preferences);
   virtual ~ConfigurationPolicyProviderMac() { }
 
   // ConfigurationPolicyProvider method overrides:
@@ -27,5 +31,6 @@ class ConfigurationPolicyProviderMac : public ConfigurationPolicyProvider {
   scoped_ptr<MacPreferences> preferences_;
 };
 
-#endif  // CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_PROVIDER_MAC_H_
+}  // namespace policy
 
+#endif  // CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_PROVIDER_MAC_H_

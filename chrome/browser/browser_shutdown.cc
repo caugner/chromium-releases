@@ -18,8 +18,9 @@
 #include "base/thread.h"
 #include "base/time.h"
 #include "build/build_config.h"
+#include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/jankometer.h"
@@ -29,10 +30,12 @@
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
+#include "chrome/browser/service/service_process_control_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/chrome_plugin_lib.h"
+#include "chrome/common/switch_utils.h"
 #include "net/predictor_api.h"
 
 #if defined(OS_WIN)
@@ -98,9 +101,12 @@ FilePath GetShutdownMsPath() {
 
 void Shutdown() {
   // Unload plugins. This needs to happen on the IO thread.
-  ChromeThread::PostTask(
-        ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
         NewRunnableFunction(&ChromePluginLib::UnloadAllPlugins));
+
+  // Shutdown all IPC channels to service processes.
+  ServiceProcessControlManager::instance()->Shutdown();
 
   // WARNING: During logoff/shutdown (WM_ENDSESSION) we may not have enough
   // time to get here. If you have something that *must* happen on end session,
@@ -176,6 +182,9 @@ void Shutdown() {
     scoped_ptr<CommandLine> new_cl(new CommandLine(old_cl.GetProgram()));
     std::map<std::string, CommandLine::StringType> switches =
         old_cl.GetSwitches();
+    // Remove the switches that shouldn't persist across restart.
+    about_flags::RemoveFlagsSwitches(&switches);
+    switches::RemoveSwitchesForAutostart(&switches);
     // Append the old switches to the new command line.
     for (std::map<std::string, CommandLine::StringType>::const_iterator i =
         switches.begin(); i != switches.end(); ++i) {
@@ -222,7 +231,7 @@ void ReadLastShutdownFile(
     ShutdownType type,
     int num_procs,
     int num_procs_slow) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   FilePath shutdown_ms_file = GetShutdownMsPath();
   std::string shutdown_ms_str;
@@ -275,8 +284,8 @@ void ReadLastShutdownInfo() {
   prefs->SetInteger(prefs::kShutdownNumProcessesSlow, 0);
 
   // Read and delete the file on the file thread.
-  ChromeThread::PostTask(
-      ChromeThread::FILE, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
       NewRunnableFunction(
           &ReadLastShutdownFile, type, num_procs, num_procs_slow));
 }
@@ -287,6 +296,14 @@ void SetTryingToQuit(bool quitting) {
 
 bool IsTryingToQuit() {
   return g_trying_to_quit;
+}
+
+bool ShuttingDownWithoutClosingBrowsers() {
+#if defined(USE_X11)
+  if (GetShutdownType() == browser_shutdown::END_SESSION)
+    return true;
+#endif
+  return false;
 }
 
 }  // namespace browser_shutdown

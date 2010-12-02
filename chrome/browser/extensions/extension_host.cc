@@ -9,6 +9,7 @@
 #include "app/keyboard_codes.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/histogram.h"
 #include "base/message_loop.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
@@ -22,6 +23,7 @@
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/message_box_handler.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -193,7 +195,6 @@ bool ExtensionHost::IsRenderViewLive() const {
 }
 
 void ExtensionHost::CreateRenderViewSoon(RenderWidgetHostView* host_view) {
-  LOG(INFO) << "Creating RenderView for " + extension_->name();
   render_view_host_->set_view(host_view);
   if (render_view_host_->process()->HasConnection()) {
     // If the process is already started, go ahead and initialize the RenderView
@@ -209,11 +210,20 @@ void ExtensionHost::CreateRenderViewNow() {
   render_view_host_->CreateRenderView(string16());
   NavigateToURL(url_);
   DCHECK(IsRenderViewLive());
+  if (is_background_page())
+    profile_->GetExtensionsService()->DidCreateRenderViewForBackgroundPage(
+        this);
+}
+
+Browser* ExtensionHost::GetBrowser() const {
+  return view() ? view()->browser() : NULL;
+}
+
+gfx::NativeView ExtensionHost::GetNativeViewOfHost() {
+  return view() ? view()->native_view() : NULL;
 }
 
 void ExtensionHost::NavigateToURL(const GURL& url) {
-  LOG(INFO) << "Request to NavigateToURL " << url.spec() << " for "
-      << extension_->name();
   // Prevent explicit navigation to another extension id's pages.
   // This method is only called by some APIs, so we still need to protect
   // DidNavigate below (location = "").
@@ -226,14 +236,12 @@ void ExtensionHost::NavigateToURL(const GURL& url) {
   url_ = url;
 
   if (!is_background_page() && !extension_->GetBackgroundPageReady()) {
-    LOG(INFO) << "...Waiting on EXTENSION_BACKGROUND_PAGE_READY";
     // Make sure the background page loads before any others.
     registrar_.Add(this, NotificationType::EXTENSION_BACKGROUND_PAGE_READY,
                    Source<Extension>(extension_));
     return;
   }
 
-  LOG(INFO) << "Navigating to " << url_.spec();
   render_view_host_->NavigateToURL(url_);
 }
 
@@ -246,7 +254,6 @@ void ExtensionHost::Observe(NotificationType type,
       NavigateToURL(url_);
       break;
     case NotificationType::RENDERER_PROCESS_CREATED:
-      LOG(INFO) << "Sending EXTENSION_PROCESS_CREATED";
       NotificationService::current()->Notify(
           NotificationType::EXTENSION_PROCESS_CREATED,
           Source<Profile>(profile_),
@@ -287,7 +294,6 @@ void ExtensionHost::RenderViewGone(RenderViewHost* render_view_host) {
   if (!extension_)
     return;
 
-  LOG(INFO) << "Sending EXTENSION_PROCESS_TERMINATED for " + extension_->name();
   DCHECK_EQ(render_view_host_, render_view_host);
   NotificationService::current()->Notify(
       NotificationType::EXTENSION_PROCESS_TERMINATED,
@@ -321,8 +327,6 @@ void ExtensionHost::DidNavigate(RenderViewHost* render_view_host,
     return;
   }
 
-  LOG(INFO) << "(DidNavigate) Resetting EFD to " << url_.spec() << " for "
-      << extension_->name();
   url_ = params.url;
   extension_function_dispatcher_.reset(
       ExtensionFunctionDispatcher::Create(render_view_host_, this, url_));
@@ -356,7 +360,6 @@ void ExtensionHost::DidStopLoading() {
 #endif
   }
   if (notify) {
-    LOG(INFO) << "Sending EXTENSION_HOST_DID_STOP_LOADING";
     NotificationService::current()->Notify(
         NotificationType::EXTENSION_HOST_DID_STOP_LOADING,
         Source<Profile>(profile_),
@@ -394,7 +397,8 @@ void ExtensionHost::DocumentAvailableInMainFrame(RenderViewHost* rvh) {
   }
 }
 
-void ExtensionHost::DocumentOnLoadCompletedInMainFrame(RenderViewHost* rvh) {
+void ExtensionHost::DocumentOnLoadCompletedInMainFrame(RenderViewHost* rvh,
+                                                       int32 page_id) {
   if (ViewType::EXTENSION_POPUP == GetRenderViewType()) {
     NotificationService::current()->Notify(
         NotificationType::EXTENSION_POPUP_VIEW_READY,
@@ -452,6 +456,13 @@ void ExtensionHost::Close(RenderViewHost* render_view_host) {
 
 RendererPreferences ExtensionHost::GetRendererPrefs(Profile* profile) const {
   RendererPreferences preferences;
+
+  TabContents* associated_contents = associated_tab_contents();
+  if (associated_contents)
+    preferences =
+        static_cast<RenderViewHostDelegate*>(associated_contents)->
+            GetRendererPrefs(profile);
+
   renderer_preferences_util::UpdateFromSystemSettings(&preferences, profile);
   return preferences;
 }
@@ -496,7 +507,7 @@ void ExtensionHost::CreateNewWindow(
     const string16& frame_name) {
   // TODO(aa): Use the browser's profile if the extension is split mode
   // incognito.
-  delegate_view_helper_.CreateNewWindow(
+  TabContents* new_contents = delegate_view_helper_.CreateNewWindow(
       route_id,
       render_view_host()->process()->profile(),
       site_instance(),
@@ -505,6 +516,10 @@ void ExtensionHost::CreateNewWindow(
       this,
       window_container_type,
       frame_name);
+
+  TabContents* associated_contents = associated_tab_contents();
+  if (associated_contents && associated_contents->delegate())
+    associated_contents->delegate()->TabContentsCreated(new_contents);
 }
 
 void ExtensionHost::CreateNewWidget(int route_id,
@@ -532,16 +547,41 @@ void ExtensionHost::ShowCreatedWindow(int route_id,
   if (!contents)
     return;
 
-  Browser* browser = BrowserList::FindBrowserWithType(
-      contents->profile(),
-      Browser::TYPE_NORMAL,
-      false);  // Match incognito exactly.
-  if (!browser) {
-    browser = Browser::Create(contents->profile());
+  if (disposition == NEW_POPUP) {
+    // Create a new Browser window of type TYPE_APP_POPUP.
+    // (AddTabContents would otherwise create a window of type TYPE_POPUP).
+    Browser* browser = Browser::CreateForPopup(Browser::TYPE_APP_POPUP,
+                                               contents->profile(),
+                                               contents,
+                                               initial_pos);
     browser->window()->Show();
-  }
+  } else {
+    Browser* browser = BrowserList::FindBrowserWithType(
+        contents->profile(),
+        Browser::TYPE_NORMAL,
+        false);  // Match incognito exactly.
+    if (!browser) {
+      // If no browser is associated with the created TabContents, then the
+      // created TabContents may be an intermediate struct used during topmost
+      // url navigation from within an experimental extension popup view.
+      //
+      // If the ExtensionHost has an associated TabContents, then register the
+      // new contents with this contents.  This will allow top-level link
+      // navigation within the new contents to function just as navigation
+      // within the current host.
+      TabContents* associated_contents = associated_tab_contents();
+      if (associated_contents) {
+        associated_contents->AddNewContents(contents, disposition, initial_pos,
+                                            user_gesture);
+      } else {
+        browser = Browser::Create(contents->profile());
+        browser->window()->Show();
+      }
+    }
 
-  browser->AddTabContents(contents, disposition, initial_pos, user_gesture);
+    if (browser)
+      browser->AddTabContents(contents, disposition, initial_pos, user_gesture);
+  }
 }
 
 void ExtensionHost::ShowCreatedWidget(int route_id,
@@ -601,6 +641,9 @@ void ExtensionHost::GotFocus() {
 void ExtensionHost::TakeFocus(bool reverse) {
 }
 
+void ExtensionHost::LostCapture() {
+}
+
 void ExtensionHost::Activate() {
 }
 
@@ -649,6 +692,12 @@ void ExtensionHost::HandleMouseLeave() {
 #endif
 }
 
+void ExtensionHost::HandleMouseUp() {
+}
+
+void ExtensionHost::HandleMouseActivate() {
+}
+
 ViewType::Type ExtensionHost::GetRenderViewType() const {
   return extension_host_type_;
 }
@@ -661,8 +710,6 @@ void ExtensionHost::RenderViewCreated(RenderViewHost* render_view_host) {
   // we'll create 2 EFDs for the first navigation. We should try to find a
   // better way to unify them.
   // See http://code.google.com/p/chromium/issues/detail?id=18240
-  LOG(INFO) << "(RenderViewCreated) Resetting EFD to " << url_.spec() << " for "
-      << extension_->name();
   extension_function_dispatcher_.reset(
       ExtensionFunctionDispatcher::Create(render_view_host, this, url_));
 
@@ -671,6 +718,12 @@ void ExtensionHost::RenderViewCreated(RenderViewHost* render_view_host) {
     render_view_host->EnablePreferredSizeChangedMode(
         kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow);
   }
+}
+
+RenderViewHostDelegate::FileSelect* ExtensionHost::GetFileSelectDelegate() {
+  if (file_select_helper_.get() == NULL)
+    file_select_helper_.reset(new FileSelectHelper(profile()));
+  return file_select_helper_.get();
 }
 
 int ExtensionHost::GetBrowserWindowID() const {

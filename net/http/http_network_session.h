@@ -7,6 +7,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
@@ -18,22 +19,26 @@
 #include "net/http/http_auth_cache.h"
 #include "net/http/http_network_delegate.h"
 #include "net/http/http_network_transaction.h"
-#include "net/http/http_proxy_client_socket_pool.h"
 #include "net/http/http_stream_factory.h"
 #include "net/proxy/proxy_service.h"
-#include "net/socket/client_socket_pool_histograms.h"
-#include "net/socket/socks_client_socket_pool.h"
-#include "net/socket/ssl_client_socket_pool.h"
-#include "net/socket/tcp_client_socket_pool.h"
+#include "net/socket/client_socket_pool_manager.h"
 #include "net/spdy/spdy_settings_storage.h"
+
+class Value;
 
 namespace net {
 
 class ClientSocketFactory;
+class DnsRRResolver;
 class HttpAuthHandlerFactory;
 class HttpNetworkDelegate;
 class HttpNetworkSessionPeer;
+class HttpProxyClientSocketPool;
+class HttpResponseBodyDrainer;
 class SpdySessionPool;
+class SOCKSClientSocketPool;
+class SSLClientSocketPool;
+class TCPClientSocketPool;
 
 // This class holds session objects used by HttpNetworkTransaction objects.
 class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
@@ -41,6 +46,7 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
  public:
   HttpNetworkSession(
       HostResolver* host_resolver,
+      DnsRRResolver* dnsrr_resolver,
       ProxyService* proxy_service,
       ClientSocketFactory* client_socket_factory,
       SSLConfigService* ssl_config_service,
@@ -53,6 +59,10 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
   SSLClientAuthCache* ssl_client_auth_cache() {
     return &ssl_client_auth_cache_;
   }
+
+  void AddResponseDrainer(HttpResponseBodyDrainer* drainer);
+
+  void RemoveResponseDrainer(HttpResponseBodyDrainer* drainer);
 
   const HttpAlternateProtocols& alternate_protocols() const {
     return alternate_protocols_;
@@ -69,32 +79,36 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
     return &spdy_settings_;
   }
 
-  // TCP sockets come from the tcp_socket_pool().
-  const scoped_refptr<TCPClientSocketPool>& tcp_socket_pool() {
-    return tcp_socket_pool_;
+  TCPClientSocketPool* tcp_socket_pool() {
+    return socket_pool_manager_.tcp_socket_pool();
   }
 
-  const scoped_refptr<SSLClientSocketPool>& ssl_socket_pool() {
-    return ssl_socket_pool_;
+  SSLClientSocketPool* ssl_socket_pool() {
+    return socket_pool_manager_.ssl_socket_pool();
   }
 
-  const scoped_refptr<SOCKSClientSocketPool>& GetSocketPoolForSOCKSProxy(
-      const HostPortPair& socks_proxy);
+  SOCKSClientSocketPool* GetSocketPoolForSOCKSProxy(
+      const HostPortPair& socks_proxy) {
+    return socket_pool_manager_.GetSocketPoolForSOCKSProxy(socks_proxy);
+  }
 
-  const scoped_refptr<HttpProxyClientSocketPool>& GetSocketPoolForHTTPProxy(
-      const HostPortPair& http_proxy);
+  HttpProxyClientSocketPool* GetSocketPoolForHTTPProxy(
+      const HostPortPair& http_proxy) {
+    return socket_pool_manager_.GetSocketPoolForHTTPProxy(http_proxy);
+  }
 
-  const scoped_refptr<SSLClientSocketPool>& GetSocketPoolForSSLWithProxy(
-      const HostPortPair& proxy_server);
+  SSLClientSocketPool* GetSocketPoolForSSLWithProxy(
+      const HostPortPair& proxy_server) {
+    return socket_pool_manager_.GetSocketPoolForSSLWithProxy(proxy_server);
+  }
 
   // SSL sockets come from the socket_factory().
   ClientSocketFactory* socket_factory() { return socket_factory_; }
   HostResolver* host_resolver() { return host_resolver_; }
+  DnsRRResolver* dnsrr_resolver() { return dnsrr_resolver_; }
   ProxyService* proxy_service() { return proxy_service_; }
   SSLConfigService* ssl_config_service() { return ssl_config_service_; }
-  const scoped_refptr<SpdySessionPool>& spdy_session_pool() {
-    return spdy_session_pool_;
-  }
+  SpdySessionPool* spdy_session_pool() { return spdy_session_pool_.get(); }
   HttpAuthHandlerFactory* http_auth_handler_factory() {
     return http_auth_handler_factory_;
   }
@@ -108,80 +122,38 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
 
   // Creates a Value summary of the state of the socket pools. The caller is
   // responsible for deleting the returned value.
-  Value* SocketPoolInfoToValue() const;
-
-  static int max_sockets_per_group();
-  static void set_max_sockets_per_group(int socket_count);
-  static void set_max_sockets_per_proxy_server(int socket_count);
-
-#ifdef UNIT_TEST
-  void FlushSocketPools() {
-    if (ssl_socket_pool_.get())
-      ssl_socket_pool_->Flush();
-    if (tcp_socket_pool_.get())
-      tcp_socket_pool_->Flush();
-
-    for (SSLSocketPoolMap::const_iterator it =
-        ssl_socket_pools_for_proxies_.begin();
-        it != ssl_socket_pools_for_proxies_.end();
-        it++)
-      it->second->Flush();
-
-    for (SOCKSSocketPoolMap::const_iterator it =
-        socks_socket_pools_.begin();
-        it != socks_socket_pools_.end();
-        it++)
-      it->second->Flush();
-
-    for (HTTPProxySocketPoolMap::const_iterator it =
-        http_proxy_socket_pools_.begin();
-        it != http_proxy_socket_pools_.end();
-        it++)
-      it->second->Flush();
+  Value* SocketPoolInfoToValue() const {
+    return socket_pool_manager_.SocketPoolInfoToValue();
   }
-#endif
+
+  void FlushSocketPools() {
+    socket_pool_manager_.FlushSocketPools();
+  }
 
  private:
-  typedef std::map<HostPortPair, scoped_refptr<HttpProxyClientSocketPool> >
-      HTTPProxySocketPoolMap;
-  typedef std::map<HostPortPair, scoped_refptr<SOCKSClientSocketPool> >
-      SOCKSSocketPoolMap;
-  typedef std::map<HostPortPair, scoped_refptr<SSLClientSocketPool> >
-      SSLSocketPoolMap;
-
   friend class base::RefCounted<HttpNetworkSession>;
   friend class HttpNetworkSessionPeer;
 
   ~HttpNetworkSession();
 
+  ClientSocketFactory* const socket_factory_;
   HttpAuthCache auth_cache_;
   SSLClientAuthCache ssl_client_auth_cache_;
   HttpAlternateProtocols alternate_protocols_;
-  scoped_refptr<ClientSocketPoolHistograms> tcp_pool_histograms_;
-  scoped_refptr<ClientSocketPoolHistograms> tcp_for_http_proxy_pool_histograms_;
-  scoped_refptr<ClientSocketPoolHistograms> http_proxy_pool_histograms_;
-  scoped_refptr<ClientSocketPoolHistograms>
-    tcp_for_https_proxy_pool_histograms_;
-  scoped_refptr<ClientSocketPoolHistograms>
-    ssl_for_https_proxy_pool_histograms_;
-  scoped_refptr<ClientSocketPoolHistograms> tcp_for_socks_pool_histograms_;
-  scoped_refptr<ClientSocketPoolHistograms> socks_pool_histograms_;
-  scoped_refptr<ClientSocketPoolHistograms> ssl_pool_histograms_;
-  scoped_refptr<TCPClientSocketPool> tcp_socket_pool_;
-  scoped_refptr<SSLClientSocketPool> ssl_socket_pool_;
-  HTTPProxySocketPoolMap http_proxy_socket_pools_;
-  SOCKSSocketPoolMap socks_socket_pools_;
-  SSLSocketPoolMap ssl_socket_pools_for_proxies_;
-  ClientSocketFactory* socket_factory_;
-  scoped_refptr<HostResolver> host_resolver_;
+  HostResolver* const host_resolver_;
+  DnsRRResolver* dnsrr_resolver_;
   scoped_refptr<ProxyService> proxy_service_;
   scoped_refptr<SSLConfigService> ssl_config_service_;
-  scoped_refptr<SpdySessionPool> spdy_session_pool_;
+  ClientSocketPoolManager socket_pool_manager_;
+  // TODO(willchan): Move this out to IOThread so it can be shared across
+  // URLRequestContexts.
+  scoped_ptr<SpdySessionPool> spdy_session_pool_;
   scoped_refptr<HttpStreamFactory> http_stream_factory_;
   HttpAuthHandlerFactory* http_auth_handler_factory_;
   HttpNetworkDelegate* const network_delegate_;
   NetLog* net_log_;
   SpdySettingsStorage spdy_settings_;
+  std::set<HttpResponseBodyDrainer*> response_drainers_;
 };
 
 }  // namespace net

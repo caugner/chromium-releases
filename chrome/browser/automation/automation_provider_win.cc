@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,7 @@
 #include "chrome/browser/views/bookmark_bar_view.h"
 #include "chrome/common/page_zoom.h"
 #include "chrome/test/automation/automation_messages.h"
+#include "views/focus/accelerator_handler.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_win.h"
 #include "views/window/window.h"
@@ -199,15 +200,23 @@ void AutomationProvider::WindowSimulateDrag(int handle,
     MoveMouse(end);
 
     if (press_escape_en_route) {
-      // Press Escape.
-      ui_controls::SendKeyPress(window, app::VKEY_ESCAPE,
-                               ((flags & views::Event::EF_CONTROL_DOWN)
-                                == views::Event::EF_CONTROL_DOWN),
-                               ((flags & views::Event::EF_SHIFT_DOWN) ==
-                                views::Event::EF_SHIFT_DOWN),
-                               ((flags & views::Event::EF_ALT_DOWN) ==
-                                views::Event::EF_ALT_DOWN),
-                                false);
+      // Press Escape, making sure we wait until chrome processes the escape.
+      // TODO(phajdan.jr): make this use ui_test_utils::SendKeyPressSync.
+      ui_controls::SendKeyPressNotifyWhenDone(
+          window, app::VKEY_ESCAPE,
+          ((flags & views::Event::EF_CONTROL_DOWN) ==
+           views::Event::EF_CONTROL_DOWN),
+          ((flags & views::Event::EF_SHIFT_DOWN) ==
+           views::Event::EF_SHIFT_DOWN),
+          ((flags & views::Event::EF_ALT_DOWN) == views::Event::EF_ALT_DOWN),
+          false,
+          new MessageLoop::QuitTask());
+      MessageLoopForUI* loop = MessageLoopForUI::current();
+      bool did_allow_task_nesting = loop->NestableTasksAllowed();
+      loop->SetNestableTasksAllowed(true);
+      views::AcceleratorHandler handler;
+      loop->Run(&handler);
+      loop->SetNestableTasksAllowed(did_allow_task_nesting);
     }
     SendMessage(top_level_hwnd, up_message, wparam_flags,
                 MAKELPARAM(end.x, end.y));
@@ -249,7 +258,8 @@ void AutomationProvider::CreateExternalTab(
   external_tab_container->Init(profile, settings.parent, settings.dimensions,
       settings.style, settings.load_requests_via_automation,
       settings.handle_top_level_requests, NULL, settings.initial_url,
-      settings.referrer, settings.infobars_enabled);
+      settings.referrer, settings.infobars_enabled,
+      settings.route_all_top_level_navigations);
 
   if (AddExternalTab(external_tab_container)) {
     TabContents* tab_contents = external_tab_container->tab_contents();
@@ -518,11 +528,10 @@ void AutomationProvider::NavigateExternalTabAtIndex(
 }
 
 void AutomationProvider::OnRunUnloadHandlers(
-    int handle, gfx::NativeWindow notification_window,
-    int notification_message) {
+    int handle, IPC::Message* reply_message) {
   ExternalTabContainer* external_tab = GetExternalTabForHandle(handle);
   if (external_tab) {
-    external_tab->RunUnloadHandlers(notification_window, notification_message);
+    external_tab->RunUnloadHandlers(reply_message);
   }
 }
 

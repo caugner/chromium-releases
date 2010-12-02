@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,12 +18,14 @@
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/password_manager/password_store.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/search_engines/template_url_model_observer.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/test/automation/automation_messages.h"
 
+class AutocompleteEditModel;
 class AutomationProvider;
 class Browser;
 class Extension;
@@ -189,6 +191,37 @@ class TabClosedNotificationObserver : public TabStripNotificationObserver {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TabClosedNotificationObserver);
+};
+
+// Notifies when the tab count reaches the target number.
+class TabCountChangeObserver : public TabStripModelObserver {
+ public:
+  TabCountChangeObserver(AutomationProvider* automation,
+                         Browser* browser,
+                         IPC::Message* reply_message,
+                         int target_tab_count);
+  // Implementation of TabStripModelObserver.
+  virtual void TabInsertedAt(TabContents* contents,
+                             int index,
+                             bool foreground);
+  virtual void TabDetachedAt(TabContents* contents, int index);
+  virtual void TabStripModelDeleted();
+
+ private:
+  ~TabCountChangeObserver();
+
+  // Checks if the current tab count matches our target, and if so,
+  // sends the reply message and deletes self.
+  void CheckTabCount();
+
+  AutomationProvider* automation_;
+  IPC::Message* reply_message_;
+
+  TabStripModel* tab_strip_model_;
+
+  const int target_tab_count_;
+
+  DISALLOW_COPY_AND_ASSIGN(TabCountChangeObserver);
 };
 
 // Observes when an extension has finished installing or possible install
@@ -407,6 +440,7 @@ class FindInPageNotificationObserver : public NotificationObserver {
  public:
   FindInPageNotificationObserver(AutomationProvider* automation,
                                  TabContents* parent_tab,
+                                 bool reply_with_json,
                                  IPC::Message* reply_message);
   ~FindInPageNotificationObserver();
 
@@ -429,6 +463,8 @@ class FindInPageNotificationObserver : public NotificationObserver {
   // We will at some point (before final update) be notified of the ordinal and
   // we need to preserve it so we can send it later.
   int active_match_ordinal_;
+  // Send reply using json automation interface.
+  bool reply_with_json_;
   IPC::Message* reply_message_;
 
   DISALLOW_COPY_AND_ASSIGN(FindInPageNotificationObserver);
@@ -528,6 +564,33 @@ class TabLanguageDeterminedObserver : public NotificationObserver {
   TranslateInfoBarDelegate* translate_bar_;
 
   DISALLOW_COPY_AND_ASSIGN(TabLanguageDeterminedObserver);
+};
+
+class InfoBarCountObserver : public NotificationObserver {
+ public:
+  InfoBarCountObserver(AutomationProvider* automation,
+                       IPC::Message* reply_message,
+                       TabContents* tab_contents,
+                       int target_count);
+
+  // NotificationObserver interface.
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
+ private:
+  // Checks whether the infobar count matches our target, and if so
+  // sends the reply message and deletes itself.
+  void CheckCount();
+
+  NotificationRegistrar registrar_;
+  AutomationProvider* automation_;
+  IPC::Message* reply_message_;
+  TabContents* tab_contents_;
+
+  const int target_count_;
+
+  DISALLOW_COPY_AND_ASSIGN(InfoBarCountObserver);
 };
 
 #if defined(OS_CHROMEOS)
@@ -670,6 +733,26 @@ class AutomationProviderDownloadModelChangedObserver
   DISALLOW_COPY_AND_ASSIGN(AutomationProviderDownloadModelChangedObserver);
 };
 
+// Allows automation provider to wait until TemplateURLModel has loaded
+// before looking up/returning search engine info.
+class AutomationProviderSearchEngineObserver
+    : public TemplateURLModelObserver {
+ public:
+  AutomationProviderSearchEngineObserver(
+      AutomationProvider* provider,
+      IPC::Message* reply_message)
+    : provider_(provider),
+      reply_message_(reply_message) {}
+
+  void OnTemplateURLModelChanged();
+
+ private:
+  AutomationProvider* provider_;
+  IPC::Message* reply_message_;
+
+  DISALLOW_COPY_AND_ASSIGN(AutomationProviderSearchEngineObserver);
+};
+
 // Allows the automation provider to wait for history queries to finish.
 class AutomationProviderHistoryObserver {
  public:
@@ -780,6 +863,27 @@ class SavePackageNotificationObserver : public NotificationObserver {
   IPC::Message* reply_message_;
 
   DISALLOW_COPY_AND_ASSIGN(SavePackageNotificationObserver);
+};
+
+// Allows automation provider to wait until the autocomplete edit
+// has received focus
+class AutocompleteEditFocusedObserver : public NotificationObserver {
+ public:
+  AutocompleteEditFocusedObserver(AutomationProvider* automation,
+                                  AutocompleteEditModel* autocomplete_edit,
+                                  IPC::Message* reply_message);
+
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
+ private:
+  NotificationRegistrar registrar_;
+  AutomationProvider* automation_;
+  IPC::Message* reply_message_;
+  AutocompleteEditModel* autocomplete_edit_model_;
+
+  DISALLOW_COPY_AND_ASSIGN(AutocompleteEditFocusedObserver);
 };
 
 #endif  // CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_OBSERVERS_H_

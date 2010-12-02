@@ -12,6 +12,7 @@
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/trace_event.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -21,12 +22,15 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityObject.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebContextMenuData.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDeviceOrientationClientMock.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCString.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebData.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDragData.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebHistoryItem.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebImage.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFileError.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFileSystemCallbacks.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKitClient.h"
@@ -37,6 +41,9 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebPopupMenu.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRange.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebScreenInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSpeechInputController.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSpeechInputControllerMock.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSpeechInputListener.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebStorageNamespace.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
@@ -86,6 +93,8 @@ using WebKit::WebDataSource;
 using WebKit::WebDragData;
 using WebKit::WebDragOperationsMask;
 using WebKit::WebEditingAction;
+using WebKit::WebFileSystem;
+using WebKit::WebFileSystemCallbacks;
 using WebKit::WebFormElement;
 using WebKit::WebFrame;
 using WebKit::WebHistoryItem;
@@ -168,7 +177,7 @@ std::string DescriptionSuitableForTestResult(const std::string& url) {
 // Adds a file called "DRTFakeFile" to |data_object| (CF_HDROP).  Use to fake
 // dragging a file.
 void AddDRTFakeFileToDataObject(WebDragData* drag_data) {
-  drag_data->appendToFileNames(WebString::fromUTF8("DRTFakeFile"));
+  drag_data->appendToFilenames(WebString::fromUTF8("DRTFakeFile"));
 }
 
 // Get a debugging string from a WebNavigationType.
@@ -202,9 +211,9 @@ std::string GetResponseDescription(const WebURLResponse& response) {
     return "(null)";
 
   const std::string url = GURL(response.url()).possibly_invalid_spec();
-  return StringPrintf("<NSURLResponse %s, http status code %d>",
-                      DescriptionSuitableForTestResult(url).c_str(),
-                      response.httpStatusCode());
+  return base::StringPrintf("<NSURLResponse %s, http status code %d>",
+                            DescriptionSuitableForTestResult(url).c_str(),
+                            response.httpStatusCode());
 }
 
 std::string GetErrorDescription(const WebURLError& error) {
@@ -232,7 +241,7 @@ std::string GetErrorDescription(const WebURLError& error) {
     DLOG(WARNING) << "Unknown error domain";
   }
 
-  return StringPrintf("<NSError domain %s, code %d, failing URL \"%s\">",
+  return base::StringPrintf("<NSError domain %s, code %d, failing URL \"%s\">",
       domain.c_str(), code, error.unreachableURL.spec().data());
 }
 
@@ -639,6 +648,16 @@ WebKit::WebGeolocationService* TestWebViewDelegate::geolocationService() {
   return GetTestGeolocationService();
 }
 
+WebKit::WebDeviceOrientationClient*
+TestWebViewDelegate::deviceOrientationClient() {
+  return shell_->device_orientation_client_mock();
+}
+
+WebKit::WebSpeechInputController* TestWebViewDelegate::speechInputController(
+    WebKit::WebSpeechInputListener* listener) {
+  return shell_->CreateSpeechInputControllerMock(listener);
+}
+
 // WebWidgetClient -----------------------------------------------------------
 
 void TestWebViewDelegate::didInvalidateRect(const WebRect& rect) {
@@ -650,6 +669,11 @@ void TestWebViewDelegate::didScrollRect(int dx, int dy,
                                         const WebRect& clip_rect) {
   if (WebWidgetHost* host = GetWidgetHost())
     host->DidScrollRect(dx, dy, clip_rect);
+}
+
+void TestWebViewDelegate::scheduleComposite() {
+  if (WebWidgetHost* host = GetWidgetHost())
+    host->ScheduleComposite();
 }
 
 void TestWebViewDelegate::didFocus() {
@@ -678,12 +702,8 @@ WebPlugin* TestWebViewDelegate::createPlugin(
   std::string actual_mime_type;
   if (!NPAPI::PluginList::Singleton()->GetPluginInfo(
           params.url, params.mimeType.utf8(), allow_wildcard, &info,
-          &actual_mime_type) || !info.enabled) {
+          &actual_mime_type) || !info.enabled)
     return NULL;
-  }
-
-  if (actual_mime_type.empty())
-    actual_mime_type = params.mimeType.utf8();
 
   return new webkit_glue::WebPluginImpl(
       frame, params, info.path, actual_mime_type, AsWeakPtr());
@@ -706,7 +726,7 @@ WebMediaPlayer* TestWebViewDelegate::createMediaPlayer(
   // should be grouped together.
   webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory =
       new webkit_glue::MediaResourceLoaderBridgeFactory(
-          GURL(),  // referrer
+          GURL(frame->url()),  // referrer
           "null",  // frame origin
           "null",  // main_frame_origin
           base::GetCurrentProcId(),
@@ -889,7 +909,7 @@ void TestWebViewDelegate::didFailProvisionalLoad(
   bool replace = extra_data && extra_data->pending_page_id != -1;
 
   const std::string& error_text =
-      StringPrintf("Error %d when loading url %s", error.reason,
+      base::StringPrintf("Error %d when loading url %s", error.reason,
       failed_ds->request().url().spec().data());
 
   // Make sure we never show errors in view source mode.
@@ -1051,6 +1071,16 @@ void TestWebViewDelegate::didReceiveResponse(
            GetResourceDescription(identifier).c_str(),
            GetResponseDescription(response).c_str());
   }
+  if (shell_->ShouldDumpResourceResponseMIMETypes()) {
+    GURL url = response.url();
+    WebString mimeType = response.mimeType();
+    printf("%s has MIME type %s\n",
+        url.ExtractFileName().c_str(),
+        // Simulate NSURLResponse's mapping of empty/unknown MIME types to
+        // application/octet-stream.
+        mimeType.isEmpty() ?
+            "application/octet-stream" : mimeType.utf8().data());
+  }
 }
 
 void TestWebViewDelegate::didFinishResourceLoad(
@@ -1087,6 +1117,19 @@ void TestWebViewDelegate::didRunInsecureContent(
 bool TestWebViewDelegate::allowScript(WebFrame* frame,
                                       bool enabled_per_settings) {
   return enabled_per_settings && shell_->allow_scripts();
+}
+
+void TestWebViewDelegate::openFileSystem(
+    WebFrame* frame, WebFileSystem::Type type, long long size,
+    WebFileSystemCallbacks* callbacks) {
+  if (shell_->file_system_root().empty()) {
+    // The FileSystem temp directory was not initialized successfully.
+    callbacks->didFail(WebKit::WebFileErrorSecurity);
+  } else {
+    callbacks->didOpenFileSystem(
+        "TestShellFileSystem",
+        webkit_glue::FilePathToWebString(shell_->file_system_root()));
+  }
 }
 
 // WebPluginPageDelegate -----------------------------------------------------

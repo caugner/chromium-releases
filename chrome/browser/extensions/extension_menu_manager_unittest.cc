@@ -9,7 +9,7 @@
 #include "base/scoped_temp_dir.h"
 #include "base/scoped_vector.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/test_extension_prefs.h"
@@ -390,7 +390,7 @@ TEST_F(ExtensionMenuManagerTest, RemoveAll) {
 
 TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
   MessageLoopForUI message_loop;
-  ChromeThread ui_thread(ChromeThread::UI, &message_loop);
+  BrowserThread ui_thread(BrowserThread::UI, &message_loop);
 
   MockTestingProfile profile;
 

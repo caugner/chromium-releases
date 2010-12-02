@@ -19,7 +19,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/json_pref_store.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/service_process_type.h"
 #include "chrome/common/service_process_util.h"
 #include "chrome/service/cloud_print/cloud_print_proxy.h"
 #include "chrome/service/service_ipc_server.h"
@@ -46,15 +45,21 @@
 
 ServiceProcess* g_service_process = NULL;
 
+// Delay in millseconds after the last service is disabled before we attempt
+// a shutdown.
+static const int64 kShutdownDelay = 60000;
+
 ServiceProcess::ServiceProcess()
   : shutdown_event_(true, false),
     main_message_loop_(NULL),
-    enabled_services_(0) {
+    enabled_services_(0),
+    update_available_(false) {
   DCHECK(!g_service_process);
   g_service_process = this;
 }
 
-bool ServiceProcess::Initialize(MessageLoop* message_loop) {
+bool ServiceProcess::Initialize(MessageLoop* message_loop,
+                                const CommandLine& command_line) {
   main_message_loop_ = message_loop;
   network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
   base::Thread::Options options;
@@ -67,6 +72,12 @@ bool ServiceProcess::Initialize(MessageLoop* message_loop) {
     Teardown();
     return false;
   }
+
+  // See if we have been suppiled an LSID in the command line. This LSID will
+  // override the credentials we use for Cloud Print.
+  std::string lsid = command_line.GetSwitchValueASCII(
+          switches::kServiceAccountLsid);
+
   FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   FilePath pref_path = user_data_dir.Append(chrome::kServiceStateFileName);
@@ -83,14 +94,17 @@ bool ServiceProcess::Initialize(MessageLoop* message_loop) {
     // If true then we start the host.
     StartChromotingHost();
   }
+  // Enable Cloud Print if needed. First check the command-line.
+  bool cloud_print_proxy_enabled =
+      command_line.HasSwitch(switches::kEnableCloudPrintProxy);
+  if (!cloud_print_proxy_enabled) {
+    // Then check if the cloud print proxy was previously enabled.
+    values->GetBoolean(prefs::kCloudPrintProxyEnabled,
+                       &cloud_print_proxy_enabled);
+  }
 
-  bool cloud_print_proxy_enabled = false;
-
-  // Check if the cloud print proxy is already enabled.
-  if (values->GetBoolean(prefs::kCloudPrintProxyEnabled,
-                         &cloud_print_proxy_enabled) &&
-      cloud_print_proxy_enabled) {
-    GetCloudPrintProxy()->EnableForUser(std::string());
+  if (cloud_print_proxy_enabled) {
+    GetCloudPrintProxy()->EnableForUser(lsid);
   }
 
   LOG(INFO) << "Starting Service Process IPC Server";
@@ -98,16 +112,17 @@ bool ServiceProcess::Initialize(MessageLoop* message_loop) {
   ipc_server_->Init();
 
   // After the IPC server has started we signal that the service process is
-  // running.
-  SignalServiceProcessRunning(kServiceProcessCloudPrint);
+  // ready.
+  SignalServiceProcessReady(
+      NewRunnableMethod(this, &ServiceProcess::Shutdown));
+
+  // See if we need to stay running.
+  ScheduleShutdownCheck();
   return true;
 }
 
 bool ServiceProcess::Teardown() {
-  if (service_prefs_.get()) {
-    service_prefs_->WritePrefs();
-    service_prefs_.reset();
-  }
+  service_prefs_.reset();
   cloud_print_proxy_.reset();
 
 #if defined(ENABLE_REMOTING)
@@ -125,13 +140,24 @@ bool ServiceProcess::Teardown() {
   network_change_notifier_.reset();
 
   // Delete the service process lock file when it shuts down.
-  SignalServiceProcessStopped(kServiceProcessCloudPrint);
+  SignalServiceProcessStopped();
   return true;
 }
 
 void ServiceProcess::Shutdown() {
   // Quit the main message loop.
   main_message_loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+}
+
+bool ServiceProcess::HandleClientDisconnect() {
+  // If there are no enabled services or if there is an update available
+  // we want to shutdown right away. Else we want to keep listening for
+  // new connections.
+  if (!enabled_services_ || update_available()) {
+    Shutdown();
+    return false;
+  }
+  return true;
 }
 
 CloudPrintProxy* ServiceProcess::GetCloudPrintProxy() {
@@ -164,11 +190,33 @@ void ServiceProcess::OnServiceEnabled() {
 }
 
 void ServiceProcess::OnServiceDisabled() {
-  DCHECK(0 != enabled_services_);
+  DCHECK_NE(enabled_services_, 0);
   enabled_services_--;
   if (0 == enabled_services_) {
     RemoveServiceProcessFromAutoStart();
-    Shutdown();
+    // We will wait for some time to respond to IPCs before shutting down.
+    ScheduleShutdownCheck();
+  }
+}
+
+void ServiceProcess::ScheduleShutdownCheck() {
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      NewRunnableMethod(this, &ServiceProcess::ShutdownIfNeeded),
+      kShutdownDelay);
+}
+
+void ServiceProcess::ShutdownIfNeeded() {
+  if (0 == enabled_services_) {
+    if (ipc_server_->is_client_connected()) {
+      // If there is a client connected, we need to try again later.
+      // Note that there is still a timing window here because a client may
+      // decide to connect at this point.
+      // TODO(sanjeevr): Fix this timing window.
+      ScheduleShutdownCheck();
+    } else {
+      Shutdown();
+    }
   }
 }
 
@@ -184,7 +232,7 @@ bool ServiceProcess::AddServiceProcessToAutoStart() {
     // We need a unique name for the command per user-date-dir. Just use the
     // channel name.
     return win_util::AddCommandToAutoRun(
-        HKEY_CURRENT_USER, UTF8ToWide(GetServiceProcessChannelName()),
+        HKEY_CURRENT_USER, UTF8ToWide(GetServiceProcessAutoRunKey()),
         cmd_line.command_line_string());
   }
 #endif  // defined(OS_WIN)
@@ -196,7 +244,7 @@ bool ServiceProcess::RemoveServiceProcessFromAutoStart() {
 // chrome/common and implementation for non-Windows platforms needs to be added.
 #if defined(OS_WIN)
   return win_util::RemoveCommandFromAutoRun(
-      HKEY_CURRENT_USER, UTF8ToWide(GetServiceProcessChannelName()));
+      HKEY_CURRENT_USER, UTF8ToWide(GetServiceProcessAutoRunKey()));
 #endif  // defined(OS_WIN)
   return false;
 }

@@ -5,15 +5,6 @@
 function debug(msg) {
   document.getElementById('debug').textContent = msg;
 }
-
-function bodyClicked() {
-  var group = templateData.pluginGroup;
-  if (group) {
-    plugin.update(group.update_url);
-  } else {
-    plugin.load();
-  }
-}
 </script>
 <style>
 body {
@@ -81,11 +72,10 @@ FIXME: This causes flickering on hover.
 </head>
 
 <body id="t" onSelectStart="return false;">
-<div id="outer" onclick="bodyClicked()">
+<div id="outer" onclick="plugin.load()">
 <div id="inner">
 <div><img id="plugin_icon" src="plugin_blocked.png" /></div>
-<h1 jsdisplay="!hasOwnProperty('pluginGroup') || !pluginGroup.critical"  i18n-content="loadPlugin">PLUGIN_LOAD</h1>
-<h1 jsdisplay="hasOwnProperty('pluginGroup')" i18n-content="updatePlugin">UPDATE_PLUGIN</h1>
+<h1 i18n-content="message">PLUGIN_LOAD</h1>
 <p id="debug"> </p>
 </div>
 </div>

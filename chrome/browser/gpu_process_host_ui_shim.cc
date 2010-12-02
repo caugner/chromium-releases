@@ -44,9 +44,9 @@ int32 GpuProcessHostUIShim::NewRenderWidgetHostView(
 }
 
 bool GpuProcessHostUIShim::Send(IPC::Message* msg) {
-  ChromeThread::PostTask(ChromeThread::IO,
-                         FROM_HERE,
-                         new SendOnIOThreadTask(msg));
+  BrowserThread::PostTask(BrowserThread::IO,
+                          FROM_HERE,
+                          new SendOnIOThreadTask(msg));
   return true;
 }
 
@@ -65,4 +65,12 @@ void GpuProcessHostUIShim::RemoveRoute(int32 routing_id) {
 
 void GpuProcessHostUIShim::OnMessageReceived(const IPC::Message& message) {
   router_.RouteMessage(message);
+}
+
+void GpuProcessHostUIShim::CollectGraphicsInfoAsynchronously() {
+  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::IO));
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      new SendOnIOThreadTask(new GpuMsg_CollectGraphicsInfo()));
 }

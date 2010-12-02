@@ -1,11 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/renderer/mock_printer.h"
 
 #include "base/file_util.h"
-#include "base/logging.h"
 #include "base/shared_memory.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
@@ -120,7 +119,7 @@ void MockPrinter::PrintPage(const ViewHostMsg_DidPrintPage_Params& params) {
 #endif
   metafile_data.Map(params.data_size);
   printing::NativeMetafile metafile;
-  metafile.CreateFromData(metafile_data.memory(), params.data_size);
+  metafile.Init(metafile_data.memory(), params.data_size);
   printing::Image image(metafile);
   MockPrinterPage* page_data = new MockPrinterPage(metafile_data.memory(),
                                                    params.data_size,

@@ -9,12 +9,11 @@
 #include <vector>
 
 #include "base/string16.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityObject.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityRole.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
 
 namespace WebKit {
 class WebAccessibilityCache;
+class WebAccessibilityObject;
 }
 
 namespace webkit_glue {
@@ -133,17 +132,24 @@ struct WebAccessibility {
   //   int mask = (1 << STATE_CHECKED) | (1 << STATE_FOCUSED);
   enum State {
     STATE_CHECKED,
+    STATE_COLLAPSED,
+    STATE_EXPANDED,
     STATE_FOCUSABLE,
     STATE_FOCUSED,
+    STATE_HASPOPUP,
     STATE_HOTTRACKED,
     STATE_INDETERMINATE,
+    STATE_INVISIBLE,
     STATE_LINKED,
     STATE_MULTISELECTABLE,
     STATE_OFFSCREEN,
     STATE_PRESSED,
     STATE_PROTECTED,
     STATE_READONLY,
+    STATE_SELECTABLE,
+    STATE_SELECTED,
     STATE_TRAVERSED,
+    STATE_BUSY,
     STATE_UNAVAILABLE
   };
 
@@ -156,6 +162,10 @@ struct WebAccessibility {
     ATTR_DOC_TITLE,
     ATTR_DOC_MIMETYPE,
     ATTR_DOC_DOCTYPE,
+
+    // Editable text attributes
+    ATTR_TEXT_SEL_START,
+    ATTR_TEXT_SEL_END,
 
     // Attributes that could apply to any node.
     ATTR_ACTION,

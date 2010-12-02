@@ -66,15 +66,17 @@ void TestShellRequestContext::Init(
                                              false, 0, NULL, NULL, NULL);
   ssl_config_service_ = net::SSLConfigService::CreateSystemSSLConfigService();
 
-  http_auth_handler_factory_ = net::HttpAuthHandlerFactory::CreateDefault();
+  http_auth_handler_factory_ = net::HttpAuthHandlerFactory::CreateDefault(
+      host_resolver_);
 
   net::HttpCache::DefaultBackend* backend = new net::HttpCache::DefaultBackend(
       cache_path.empty() ? net::MEMORY_CACHE : net::DISK_CACHE,
       cache_path, 0, SimpleResourceLoaderBridge::GetCacheThread());
 
   net::HttpCache* cache =
-      new net::HttpCache(host_resolver_, proxy_service_, ssl_config_service_,
-                         http_auth_handler_factory_, NULL, NULL, backend);
+      new net::HttpCache(host_resolver_, NULL, proxy_service_,
+                         ssl_config_service_, http_auth_handler_factory_, NULL,
+                         NULL, backend);
 
   cache->set_mode(cache_mode);
   http_transaction_factory_ = cache;
@@ -89,6 +91,7 @@ TestShellRequestContext::~TestShellRequestContext() {
   delete http_transaction_factory_;
   delete http_auth_handler_factory_;
   delete static_cast<net::StaticCookiePolicy*>(cookie_policy_);
+  delete host_resolver_;
 }
 
 const std::string& TestShellRequestContext::GetUserAgent(

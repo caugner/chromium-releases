@@ -91,15 +91,21 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
    public:
      virtual void OnPrinterJobHandlerShutdown(
         PrinterJobHandler* job_handler, const std::string& printer_id) = 0;
+     virtual void OnAuthError() = 0;
 
    protected:
      virtual ~Delegate() {}
   };
 
+  struct PrinterInfoFromCloud {
+    std::string printer_id;
+    std::string caps_hash;
+    std::string tags_hash;
+  };
+
   // Begin public interface
   PrinterJobHandler(const cloud_print::PrinterBasicInfo& printer_info,
-                    const std::string& printer_id,
-                    const std::string& caps_hash,
+                    const PrinterInfoFromCloud& printer_info_from_server,
                     const std::string& auth_token,
                     const GURL& cloud_print_server_url,
                     cloud_print::PrintSystem* print_system,
@@ -122,6 +128,8 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
                                   const std::string& data);
   // JobStatusUpdater::Delegate implementation
   virtual bool OnJobCompleted(JobStatusUpdater* updater);
+  virtual void OnAuthError();
+
   // cloud_print::PrinterWatcherDelegate implementation
   virtual void OnPrinterDeleted();
   virtual void OnPrinterChanged();
@@ -225,9 +233,8 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
   scoped_ptr<URLFetcher> request_;
   scoped_refptr<cloud_print::PrintSystem> print_system_;
   cloud_print::PrinterBasicInfo printer_info_;
-  std::string printer_id_;
+  PrinterInfoFromCloud printer_info_cloud_;
   std::string auth_token_;
-  std::string last_caps_hash_;
   GURL cloud_print_server_url_;
   std::string print_data_url_;
   JobDetails job_details_;

@@ -33,7 +33,7 @@ bool Paint(PP_Resource resource, const PP_Rect* rect, PP_Resource image_id) {
   return widget->Paint(rect, image);
 }
 
-bool HandleEvent(PP_Resource resource, const PP_Event* event) {
+bool HandleEvent(PP_Resource resource, const PP_InputEvent* event) {
   scoped_refptr<Widget> widget(Resource::GetAs<Widget>(resource));
   return widget && widget->HandleEvent(event);
 }
@@ -88,7 +88,7 @@ void Widget::Invalidate(const PP_Rect* dirty) {
   if (!widget)
     return;
   ScopedResourceId resource(this);
-  widget->Invalidate(instance_->GetPPInstance(), resource.id, dirty);
+  widget->Invalidate(instance_->pp_instance(), resource.id, dirty);
 }
 
 }  // namespace pepper

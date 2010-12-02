@@ -11,9 +11,9 @@
 #include "base/basictypes.h"
 #include "base/crypto/rsa_private_key.h"
 #include "base/ref_counted.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/login/owner_key_utils.h"
-#include "chrome/browser/chrome_thread.h"
 
 class FilePath;
 class NotificationDetails;
@@ -25,7 +25,7 @@ namespace chromeos {
 // It handles generating the appropriate keys and storing them in the
 // appropriate locations.
 class OwnerManager : public base::RefCountedThreadSafe<OwnerManager>,
-                     public LoginLibrary::Delegate<bool> {
+                     public LoginLibrary::Delegate {
  public:
   // Return codes for public/private key operations.
   enum KeyOpCode {
@@ -65,7 +65,7 @@ class OwnerManager : public base::RefCountedThreadSafe<OwnerManager>,
   void ExportKey();
 
   // Overridden from LoginLibrary::Delegate
-  void Run(bool value);
+  void OnComplete(bool value);
 
   bool EnsurePublicKey();
   bool EnsurePrivateKey();
@@ -77,7 +77,7 @@ class OwnerManager : public base::RefCountedThreadSafe<OwnerManager>,
   // successful return code, passing the signaure blob in |payload|.
   // On failure, calls d->OnKeyOpComplete() on |thread_id| with an appropriate
   // error and passes an empty string for |payload|.
-  void Sign(const ChromeThread::ID thread_id,
+  void Sign(const BrowserThread::ID thread_id,
             const std::string& data,
             Delegate* d);
 
@@ -89,7 +89,7 @@ class OwnerManager : public base::RefCountedThreadSafe<OwnerManager>,
   // successful return code, passing an empty string for |payload|.
   // On failure, calls d->OnKeyOpComplete() on |thread_id| with an appropriate
   // error code, passing an empty string for |payload|.
-  void Verify(const ChromeThread::ID thread_id,
+  void Verify(const BrowserThread::ID thread_id,
               const std::string& data,
               const std::vector<uint8>& signature,
               Delegate* d);

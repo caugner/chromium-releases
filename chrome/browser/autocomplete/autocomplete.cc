@@ -679,6 +679,8 @@ AutocompleteResult::AutocompleteResult() {
   default_match_ = end();
 }
 
+AutocompleteResult::~AutocompleteResult() {}
+
 void AutocompleteResult::CopyFrom(const AutocompleteResult& rhs) {
   if (this == &rhs)
     return;
@@ -748,6 +750,11 @@ void AutocompleteResult::SortAndCull(const AutocompleteInput& input) {
       (default_match_->transition != PageTransition::KEYWORD) &&
       (input.canonicalized_url() != default_match_->destination_url))
     alternate_nav_url_ = input.canonicalized_url();
+}
+
+void AutocompleteResult::Reset() {
+  matches_.clear();
+  default_match_ = end();
 }
 
 #ifndef NDEBUG

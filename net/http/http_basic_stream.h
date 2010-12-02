@@ -63,16 +63,20 @@ class HttpBasicStream : public HttpStream {
 
   virtual void SetConnectionReused();
 
+  virtual ClientSocketHandle* DetachConnection();
+
   virtual void GetSSLInfo(SSLInfo* ssl_info);
 
   virtual void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info);
 
  private:
+  bool IsDetached() const;
+
   scoped_refptr<GrowableIOBuffer> read_buf_;
 
   scoped_ptr<HttpStreamParser> parser_;
 
-  ClientSocketHandle* connection_;
+  scoped_ptr<ClientSocketHandle> connection_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpBasicStream);
 };

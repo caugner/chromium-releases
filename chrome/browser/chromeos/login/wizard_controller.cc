@@ -13,8 +13,8 @@
 
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
-#include "base/logging.h"
 #include "base/file_util.h"
+#include "base/logging.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/input_method_library.h"
@@ -22,6 +22,7 @@
 #include "chrome/browser/chromeos/cros/system_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
+#include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/login/account_screen.h"
 #include "chrome/browser/chromeos/login/apply_services_customization.h"
 #include "chrome/browser/chromeos/login/background_view.h"
@@ -39,7 +40,6 @@
 #include "chrome/browser/chromeos/login/user_image_screen.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
-#include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile_manager.h"
@@ -66,10 +66,6 @@ const char kStartupCustomizationManifestPath[] =
 const char kOobeCompleteFlagFilePath[] =
     "/home/chronos/.oobe_completed";
 
-// Default size of the OOBE screen.
-const int kWizardScreenWidth = 700;
-const int kWizardScreenHeight = 416;
-
 // Upadate window will be behind the curtain at most |kMaximalCurtainTimeSec|.
 const int kMaximalCurtainTimeSec = 15;
 
@@ -81,27 +77,25 @@ const int kWaitForRebootTimeSec = 3;
 // WizardController.
 class ContentView : public views::View {
  public:
-  ContentView(int window_x, int window_y, int screen_w, int screen_h)
-      : window_x_(window_x),
-        window_y_(window_y),
-        screen_w_(screen_w),
-        screen_h_(screen_h),
-        accel_account_screen_(views::Accelerator(app::VKEY_A,
-                                                 false, true, true)),
-        accel_login_screen_(views::Accelerator(app::VKEY_L,
-                                               false, true, true)),
-        accel_network_screen_(views::Accelerator(app::VKEY_N,
-                                                 false, true, true)),
-        accel_update_screen_(views::Accelerator(app::VKEY_U,
-                                                false, true, true)),
-        accel_image_screen_(views::Accelerator(app::VKEY_I,
-                                               false, true, true)),
-        accel_eula_screen_(views::Accelerator(app::VKEY_E,
-                                              false, true, true)),
-        accel_register_screen_(views::Accelerator(app::VKEY_R,
-                                                  false, true, true)),
-        accel_enable_accessibility_(views::Accelerator(
-            WizardAccessibilityHelper::accelerator, false, true, true)) {
+  ContentView()
+      : accel_enable_accessibility_(
+            chromeos::WizardAccessibilityHelper::GetAccelerator()) {
+    AddAccelerator(accel_enable_accessibility_);
+#if !defined(OFFICIAL_BUILD)
+    accel_account_screen_ = views::Accelerator(app::VKEY_A,
+                                               false, true, true);
+    accel_login_screen_ = views::Accelerator(app::VKEY_L,
+                                             false, true, true);
+    accel_network_screen_ = views::Accelerator(app::VKEY_N,
+                                               false, true, true);
+    accel_update_screen_ = views::Accelerator(app::VKEY_U,
+                                              false, true, true);
+    accel_image_screen_ = views::Accelerator(app::VKEY_I,
+                                             false, true, true);
+    accel_eula_screen_ = views::Accelerator(app::VKEY_E,
+                                            false, true, true);
+    accel_register_screen_ = views::Accelerator(app::VKEY_R,
+                                                false, true, true);
     AddAccelerator(accel_account_screen_);
     AddAccelerator(accel_login_screen_);
     AddAccelerator(accel_network_screen_);
@@ -109,7 +103,7 @@ class ContentView : public views::View {
     AddAccelerator(accel_image_screen_);
     AddAccelerator(accel_eula_screen_);
     AddAccelerator(accel_register_screen_);
-    AddAccelerator(accel_enable_accessibility_);
+#endif
   }
 
   ~ContentView() {
@@ -124,7 +118,11 @@ class ContentView : public views::View {
     if (!controller)
       return false;
 
-    if (accel == accel_account_screen_) {
+    if (accel == accel_enable_accessibility_) {
+      chromeos::WizardAccessibilityHelper::GetInstance()->EnableAccessibility(
+          controller->contents());
+#if !defined(OFFICIAL_BUILD)
+    } else if (accel == accel_account_screen_) {
       controller->ShowAccountScreen();
     } else if (accel == accel_login_screen_) {
       controller->ShowLoginScreen();
@@ -138,24 +136,12 @@ class ContentView : public views::View {
       controller->ShowEulaScreen();
     } else if (accel == accel_register_screen_) {
       controller->ShowRegistrationScreen();
-    } else if (accel == accel_enable_accessibility_) {
-      WizardAccessibilityHelper::GetInstance()->EnableAccessibility(
-          controller->contents(), ProfileManager::GetDefaultProfile());
+#endif
     } else {
       return false;
     }
 
     return true;
-  }
-
-  void PaintBackground(gfx::Canvas* canvas) {
-    if (painter_.get()) {
-      // TODO(sky): nuke this once new login manager is in place. This needs to
-      // exist because with no window manager transparency isn't really
-      // supported.
-      canvas->TranslateInt(-window_x_, -window_y_);
-      painter_->Paint(screen_w_, screen_h_, canvas);
-    }
   }
 
   virtual void Layout() {
@@ -169,11 +155,7 @@ class ContentView : public views::View {
  private:
   scoped_ptr<views::Painter> painter_;
 
-  const int window_x_;
-  const int window_y_;
-  const int screen_w_;
-  const int screen_h_;
-
+#if !defined(OFFICIAL_BUILD)
   views::Accelerator accel_account_screen_;
   views::Accelerator accel_login_screen_;
   views::Accelerator accel_network_screen_;
@@ -181,6 +163,7 @@ class ContentView : public views::View {
   views::Accelerator accel_image_screen_;
   views::Accelerator accel_eula_screen_;
   views::Accelerator accel_register_screen_;
+#endif
   views::Accelerator accel_enable_accessibility_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentView);
@@ -190,8 +173,8 @@ void DeleteWizardControllerAndLaunchBrowser(WizardController* controller) {
   delete controller;
   // Launch browser after controller is deleted and its windows are closed.
   chromeos::LoginUtils::Get()->EnableBrowserLaunch(true);
-  ChromeThread::PostTask(
-      ChromeThread::UI,
+  BrowserThread::PostTask(
+      BrowserThread::UI,
       FROM_HERE,
       NewRunnableFunction(&chromeos::LoginUtils::DoBrowserLaunch,
                           ProfileManager::GetDefaultProfile()));
@@ -215,6 +198,13 @@ const chromeos::StartupCustomizationDocument* LoadStartupManifest() {
   }
 
   return NULL;
+}
+
+// Returns true if startup manifest defines valid registration URL.
+bool IsRegistrationScreenValid(
+    const chromeos::StartupCustomizationDocument* startup_manifest) {
+  return startup_manifest != NULL &&
+         GURL(startup_manifest->registration_url()).is_valid();
 }
 
 }  // namespace
@@ -268,12 +258,15 @@ WizardController::~WizardController() {
     widget_->Close();
 
   default_controller_ = NULL;
+  chromeos::WizardAccessibilityHelper::GetInstance()->
+      UnregisterNotifications();
 }
 
 void WizardController::Init(const std::string& first_screen_name,
                             const gfx::Rect& screen_bounds) {
   LOG(INFO) << "Starting OOBE wizard with screen: " << first_screen_name;
   DCHECK(!contents_);
+  first_screen_name_ = first_screen_name;
 
   // When device is not registered yet we need to load startup manifest as well.
   // In case of OOBE (network-EULA-update) manifest has been loaded in
@@ -281,52 +274,31 @@ void WizardController::Init(const std::string& first_screen_name,
   if (IsOobeCompleted() && !IsDeviceRegistered())
     SetCustomization(LoadStartupManifest());
 
-  int offset_x = (screen_bounds.width() - kWizardScreenWidth) / 2;
-  int offset_y = (screen_bounds.height() - kWizardScreenHeight) / 2;
-  int window_x = screen_bounds.x() + offset_x;
-  int window_y = screen_bounds.y() + offset_y;
-
-  contents_ = new ContentView(offset_x, offset_y,
-                              screen_bounds.width(), screen_bounds.height());
-
-  views::WidgetGtk* window =
-      new views::WidgetGtk(views::WidgetGtk::TYPE_WINDOW);
-  widget_ = window;
-  window->MakeTransparent();
-  // Window transparency makes background flicker through controls that
-  // are constantly updating its contents (like image view with video
-  // stream). Hence enabling double buffer.
-  window->EnableDoubleBuffer(true);
-  window->Init(NULL, gfx::Rect(window_x, window_y, kWizardScreenWidth,
-                               kWizardScreenHeight));
-  chromeos::WmIpc::instance()->SetWindowType(
-      window->GetNativeView(),
-      chromeos::WM_IPC_WINDOW_LOGIN_GUEST,
-      NULL);
-  window->SetContentsView(contents_);
+  screen_bounds_ = screen_bounds;
+  contents_ = new ContentView();
 
   bool oobe_complete = IsOobeCompleted();
-
   if (!oobe_complete || first_screen_name == kOutOfBoxScreenName) {
     is_out_of_box_ = true;
   }
 
   ShowFirstScreen(first_screen_name);
-
-  // This keeps the window from flashing at startup.
-  GdkWindow* gdk_window = window->GetNativeView()->window;
-  gdk_window_set_back_pixmap(gdk_window, NULL, false);
 }
 
 void WizardController::Show() {
-  DCHECK(widget_);
-  widget_->Show();
+  // In tests we might startup without initial screen
+  // so widget_ hasn't been created yet.
+  if (first_screen_name_ != kTestNoScreenName)
+    DCHECK(widget_);
+  if (widget_)
+    widget_->Show();
 }
 
 void WizardController::ShowBackground(const gfx::Rect& bounds) {
   DCHECK(!background_widget_);
   background_widget_ =
       chromeos::BackgroundView::CreateWindowContainingView(bounds,
+                                                           GURL(),
                                                            &background_view_);
   background_view_->SetOobeProgressBarVisible(true);
   background_widget_->Show();
@@ -338,11 +310,12 @@ void WizardController::OwnBackground(
   DCHECK(!background_widget_);
   background_widget_ = background_widget;
   background_view_ = background_view;
+  background_view_->OnOwnerChanged();
 }
 
 chromeos::NetworkScreen* WizardController::GetNetworkScreen() {
   if (!network_screen_.get())
-    network_screen_.reset(new chromeos::NetworkScreen(this, is_out_of_box_));
+    network_screen_.reset(new chromeos::NetworkScreen(this));
   return network_screen_.get();
 }
 
@@ -461,7 +434,7 @@ void WizardController::ShowUpdateScreen() {
 
 void WizardController::ShowUserImageScreen() {
   LOG(INFO) << "Showing user image screen.";
-  SetStatusAreaVisible(true);
+  SetStatusAreaVisible(false);
   SetCurrentScreen(GetUserImageScreen());
   background_view_->SetOobeProgress(chromeos::BackgroundView::PICTURE);
 }
@@ -476,6 +449,12 @@ void WizardController::ShowEulaScreen() {
 }
 
 void WizardController::ShowRegistrationScreen() {
+  if (!IsRegistrationScreenValid(GetCustomization())) {
+    LOG(INFO) <<
+        "Skipping registration screen: manifest not defined or invalid URL.";
+    OnRegistrationSkipped();
+    return;
+  }
   LOG(INFO) << "Showing registration screen.";
   SetStatusAreaVisible(true);
   SetCurrentScreen(GetRegistrationScreen());
@@ -491,14 +470,6 @@ void WizardController::ShowHTMLPageScreen() {
   SetCurrentScreen(GetHTMLPageScreen());
 }
 
-void WizardController::SetStatusAreaVisible(bool visible) {
-  // When ExistingUserController passes background ownership
-  // to WizardController it happens after screen is shown.
-  if (background_view_) {
-    background_view_->SetStatusAreaVisible(visible);
-  }
-}
-
 void WizardController::SetCustomization(
     const chromeos::StartupCustomizationDocument* customization) {
   customization_.reset(customization);
@@ -509,10 +480,21 @@ const chromeos::StartupCustomizationDocument*
   return customization_.get();
 }
 
+void WizardController::SkipRegistration() {
+  if (current_screen_ == GetRegistrationScreen())
+    OnRegistrationSkipped();
+  else
+    LOG(ERROR) << "Registration screen is not active.";
+}
+
 // static
 void WizardController::RegisterPrefs(PrefService* local_state) {
   local_state->RegisterBooleanPref(kOobeComplete, false);
-  local_state->RegisterBooleanPref(prefs::kAccessibilityEnabled, false);
+  // Check if the pref is already registered in case
+  // Preferences::RegisterUserPrefs runs before this code in the future.
+  if (local_state->FindPreference(prefs::kAccessibilityEnabled) == NULL) {
+    local_state->RegisterBooleanPref(prefs::kAccessibilityEnabled, false);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -569,19 +551,6 @@ void WizardController::OnAccountCreated() {
   password_.clear();
 }
 
-void WizardController::Login(const std::string& username,
-                             const std::string& password) {
-  chromeos::LoginScreen* login = GetLoginScreen();
-  if (username.empty())
-    return;
-  login->view()->SetUsername(username);
-
-  if (password.empty())
-    return;
-  login->view()->SetPassword(password);
-  login->view()->Login();
-}
-
 void WizardController::OnConnectionFailed() {
   // TODO(dpolukhin): show error message after login screen is displayed.
   ShowLoginScreen();
@@ -618,8 +587,8 @@ void WizardController::OnUserImageSelected() {
   // We're on the stack, so don't try and delete us now.
   // We should launch browser only after we delete the controller and close
   // its windows.
-  ChromeThread::PostTask(
-      ChromeThread::UI,
+  BrowserThread::PostTask(
+      BrowserThread::UI,
       FROM_HERE,
       NewRunnableFunction(&DeleteWizardControllerAndLaunchBrowser,
                           this));
@@ -652,23 +621,84 @@ void WizardController::OnOOBECompleted() {
 ///////////////////////////////////////////////////////////////////////////////
 // WizardController, private:
 
-void WizardController::SetCurrentScreen(WizardScreen* new_current) {
-  if (current_screen_ == new_current)
-    return;
-  if (current_screen_)
-    current_screen_->Hide();
-  current_screen_ = new_current;
-  if (current_screen_) {
-    current_screen_->Show();
-    contents_->Layout();
-  }
-  contents_->SchedulePaint();
+views::WidgetGtk* WizardController::CreateScreenWindow(
+    const gfx::Rect& bounds, bool initial_show) {
+  views::WidgetGtk* window =
+      new views::WidgetGtk(views::WidgetGtk::TYPE_WINDOW);
+  widget_ = window;
+  window->MakeTransparent();
+  // Window transparency makes background flicker through controls that
+  // are constantly updating its contents (like image view with video
+  // stream). Hence enabling double buffer.
+  window->EnableDoubleBuffer(true);
+  window->Init(NULL, bounds);
+  std::vector<int> params;
+  // For initial show WM would animate background window.
+  // Otherwise it stays unchaged.
+  params.push_back(initial_show);
+  chromeos::WmIpc::instance()->SetWindowType(
+      window->GetNativeView(),
+      chromeos::WM_IPC_WINDOW_LOGIN_GUEST,
+      &params);
+  window->SetContentsView(contents_);
+  return window;
 }
 
-void WizardController::OnSetUserNamePassword(const std::string& username,
-                                             const std::string& password) {
-  username_ = username;
-  password_ = password;
+gfx::Rect WizardController::GetWizardScreenBounds(int screen_width,
+                                                  int screen_height) const {
+  int offset_x = (screen_bounds_.width() - screen_width) / 2;
+  int offset_y = (screen_bounds_.height() - screen_height) / 2;
+  int window_x = screen_bounds_.x() + offset_x;
+  int window_y = screen_bounds_.y() + offset_y;
+  return gfx::Rect(window_x, window_y, screen_width, screen_height);
+}
+
+
+void WizardController::SetCurrentScreen(WizardScreen* new_current) {
+  if (current_screen_ == new_current ||
+      new_current == NULL)
+    return;
+
+  bool initial_show = true;
+  if (current_screen_) {
+    initial_show = false;
+    current_screen_->Hide();
+  }
+
+  current_screen_ = new_current;
+  bool force_widget_show = false;
+  views::WidgetGtk* window = NULL;
+
+  gfx::Rect current_bounds;
+  if (widget_)
+    widget_->GetBounds(&current_bounds, false);
+  gfx::Size new_screen_size = current_screen_->GetScreenSize();
+  gfx::Rect new_bounds = GetWizardScreenBounds(new_screen_size.width(),
+                                               new_screen_size.height());
+  if (new_bounds != current_bounds) {
+    if (widget_)
+      widget_->Close();
+    force_widget_show = true;
+    window = CreateScreenWindow(new_bounds, initial_show);
+  }
+  current_screen_->Show();
+  contents_->Layout();
+  contents_->SchedulePaint();
+  if (force_widget_show) {
+    // This keeps the window from flashing at startup.
+    GdkWindow* gdk_window = window->GetNativeView()->window;
+    gdk_window_set_back_pixmap(gdk_window, NULL, false);
+    if (widget_)
+      widget_->Show();
+  }
+}
+
+void WizardController::SetStatusAreaVisible(bool visible) {
+  // When ExistingUserController passes background ownership
+  // to WizardController it happens after screen is shown.
+  if (background_view_) {
+    background_view_->SetStatusAreaVisible(visible);
+  }
 }
 
 void WizardController::ShowFirstScreen(const std::string& first_screen_name) {
@@ -705,6 +735,19 @@ void WizardController::ShowFirstScreen(const std::string& first_screen_name) {
   }
 }
 
+void WizardController::Login(const std::string& username,
+                             const std::string& password) {
+  chromeos::LoginScreen* login = GetLoginScreen();
+  if (username.empty())
+    return;
+  login->view()->SetUsername(username);
+
+  if (password.empty())
+    return;
+  login->view()->SetPassword(password);
+  login->view()->Login();
+}
+
 // static
 bool WizardController::IsOobeCompleted() {
   return g_browser_process->local_state()->GetBoolean(kOobeComplete);
@@ -722,6 +765,18 @@ void WizardController::MarkOobeCompleted() {
 bool WizardController::IsDeviceRegistered() {
   FilePath oobe_complete_flag_file_path(kOobeCompleteFlagFilePath);
   return file_util::PathExists(oobe_complete_flag_file_path);
+}
+
+// static
+bool WizardController::IsRegisterScreenDefined() {
+  const chromeos::StartupCustomizationDocument* manifest = NULL;
+  // This method will be called from ExistingUserController too
+  // when Wizard instance doesn't exist.
+  if (default_controller())
+    manifest = default_controller()->GetCustomization();
+  else
+    manifest = LoadStartupManifest();
+  return IsRegistrationScreenValid(manifest);
 }
 
 // static
@@ -782,6 +837,9 @@ void WizardController::OnExit(ExitCodes exit_code) {
     case EULA_ACCEPTED:
       OnEulaAccepted();
       break;
+    case EULA_BACK:
+      ShowNetworkScreen();
+      break;
     case REGISTRATION_SUCCESS:
       OnRegistrationSuccess();
       break;
@@ -791,6 +849,12 @@ void WizardController::OnExit(ExitCodes exit_code) {
     default:
       NOTREACHED();
   }
+}
+
+void WizardController::OnSetUserNamePassword(const std::string& username,
+                                             const std::string& password) {
+  username_ = username;
+  password_ = password;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -73,15 +73,33 @@
         'library%': 'static_library',
       },
 
-      # Set default value of toolkit_views on for Windows, Chrome OS
-      # and the touch UI.
-      # We set it at this level of nesting so the value is available for
+      # We set those at this level of nesting so the values are available for
       # other conditionals below.
       'conditions': [
+        # Set default value of toolkit_views on for Windows, Chrome OS
+        # and the touch UI.
         ['OS=="win" or chromeos==1 or touchui==1', {
           'toolkit_views%': 1,
         }, {
           'toolkit_views%': 0,
+        }],
+
+        # A flag to enable or disable our compile-time dependency
+        # on gnome-keyring. If that dependency is disabled, no gnome-keyring
+        # support will be available. This option is useful
+        # for Linux distributions.
+        ['chromeos==1', {
+          'use_gnome_keyring%': 0,
+        }, {
+          'use_gnome_keyring%': 1,
+        }],
+
+        # Set to 1 compile with -fPIC cflag on linux. This is a must for shared
+        # libraries on linux x86-64 and arm.
+        ['host_arch=="ia32"', {
+          'linux_fpic%': 0,
+        }, {
+          'linux_fpic%': 1,
         }],
       ],
 
@@ -91,7 +109,7 @@
       # building on.
       'target_arch%': '<(host_arch)',
 
-      # Copy conditionally-set chromeos and touchui variables out one scope.
+      # Copy conditionally-set variables out one scope.
       'chromeos%': '<(chromeos)',
       'touchui%': '<(touchui)',
 
@@ -103,10 +121,6 @@
       # Set to 1 to enable fast builds. It disables debug info for fastest
       # compilation.
       'fastbuild%': 0,
-
-      # Set to 1 compile with -fPIC cflag on linux. This is a must for shared
-      # libraries on linux x86-64 and arm.
-      'linux_fpic%': 0,
 
       # Python version.
       'python_ver%': '2.5',
@@ -143,11 +157,12 @@
     'target_arch%': '<(target_arch)',
     'host_arch%': '<(host_arch)',
     'toolkit_views%': '<(toolkit_views)',
+    'use_gnome_keyring%': '<(use_gnome_keyring)',
+    'linux_fpic%': '<(linux_fpic)',
     'chromeos%': '<(chromeos)',
     'touchui%': '<(touchui)',
     'inside_chromium_build%': '<(inside_chromium_build)',
     'fastbuild%': '<(fastbuild)',
-    'linux_fpic%': '<(linux_fpic)',
     'python_ver%': '<(python_ver)',
     'armv7%': '<(armv7)',
     'arm_neon%': '<(arm_neon)',
@@ -240,12 +255,20 @@
     # Set this to true to enable SELinux support.
     'selinux%': 0,
 
+    # Set this to true when building with Clang.
+    # See http://code.google.com/p/chromium/wiki/Clang for details.
+    # TODO: eventually clang should behave identically to gcc, and this
+    # won't be necessary.
+    'clang%': 0,
+
     # Override whether we should use Breakpad on Linux. I.e. for Chrome bot.
     'linux_breakpad%': 0,
     # And if we want to dump symbols for Breakpad-enabled builds.
     'linux_dump_symbols%': 0,
     # And if we want to strip the binary after dumping symbols.
     'linux_strip_binary%': 0,
+    # Strip the test binaries needed for Linux reliability tests.
+    'linux_strip_reliability_tests%': 0,
 
     # Enable TCMalloc.
     'linux_use_tcmalloc%': 1,
@@ -290,6 +313,9 @@
     # Enable a variable used elsewhere throughout the GYP files to determine
     # whether to compile in the sources for the GPU plugin / process.
     'enable_gpu%': 1,
+
+    # Use OpenSSL instead of NSS. Currently in development.
+    'use_openssl%': 0,
 
     'conditions': [
       ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
@@ -372,7 +398,7 @@
     # so Cocoa is happy (http://crbug.com/20441).
     'locales': [
       'am', 'ar', 'bg', 'bn', 'ca', 'cs', 'da', 'de', 'el', 'en-GB',
-      'en-US', 'es-419', 'es', 'et', 'fi', 'fil', 'fr', 'gu', 'he',
+      'en-US', 'es-419', 'es', 'et', 'fa', 'fi', 'fil', 'fr', 'gu', 'he',
       'hi', 'hr', 'hu', 'id', 'it', 'ja', 'kn', 'ko', 'lt', 'lv',
       'ml', 'mr', 'nb', 'nl', 'pl', 'pt-BR', 'pt-PT', 'ro', 'ru',
       'sk', 'sl', 'sr', 'sv', 'sw', 'ta', 'te', 'th', 'tr', 'uk',
@@ -473,6 +499,11 @@
       ['enable_gpu==1', {
         'defines': [
           'ENABLE_GPU=1',
+        ],
+      }],
+      ['use_openssl==1', {
+        'defines': [
+          'USE_OPENSSL=1',
         ],
       }],
       ['enable_eglimage==1', {
@@ -835,6 +866,7 @@
           # Don't export any symbols (for example, to plugins we dlopen()).
           # Note: this is *required* to make some plugins work.
           '-fvisibility=hidden',
+          '-pipe',
         ],
         'cflags_cc': [
           '-fno-rtti',
@@ -1100,6 +1132,27 @@
                 ],
               }]]
           }],
+          ['clang==1', {
+            'cflags': [
+              # Don't warn about unused variables, due to a common pattern:
+              #   scoped_deleter unused_variable(&thing_to_delete);
+              '-Wno-unused-variable',
+              # Clang spots more unused functions.
+              '-Wno-unused-function',
+              # gtest confuses clang.
+              '-Wno-bool-conversions',
+              # Don't die on dtoa code that uses a char as an array index.
+              '-Wno-char-subscripts',
+              # Survive EXPECT_EQ(unnamed_enum, unsigned int) -- see
+              # http://code.google.com/p/googletest/source/detail?r=446 .
+              # TODO(thakis): Use -isystem instead (http://crbug.com/58751 ).
+              '-Wno-unnamed-type-template-args',
+            ],
+            'cflags!': [
+              # Clang doesn't seem to know know this flag.
+              '-mfpmath=sse',
+            ],
+          }],
           ['no_strict_aliasing==1', {
             'cflags': [
               '-fno-strict-aliasing',
@@ -1197,6 +1250,17 @@
             ['chromium_mac_pch', {'GCC_PRECOMPILE_PREFIX_HEADER': 'YES'},
                                  {'GCC_PRECOMPILE_PREFIX_HEADER': 'NO'}
             ],
+            ['clang==1', {
+              'WARNING_CFLAGS': [
+                # Don't die on dtoa code that uses a char as an array index.
+                # This is required solely for base/third_party/dmg_fp/dtoa.cc.
+                '-Wno-char-subscripts',
+                # Survive EXPECT_EQ(unnamed_enum, unsigned int) -- see
+                # http://code.google.com/p/googletest/source/detail?r=446 .
+                # TODO(thakis): Use -isystem instead (http://crbug.com/58751 ).
+                '-Wno-unnamed-type-template-args',
+              ],
+            }],
           ],
         },
         'target_conditions': [

@@ -6,6 +6,8 @@
 #define CHROME_SERVICE_SERVICE_PROCESS_H_
 #pragma once
 
+#include <string>
+
 #include "base/gtest_prod_util.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
@@ -28,6 +30,8 @@ class HostKeyPair;
 class JsonHostConfig;
 }
 
+class CommandLine;
+
 // The ServiceProcess does not inherit from ChildProcess because this
 // process can live independently of the browser process.
 class ServiceProcess : public RemotingDirectoryService::Client,
@@ -37,7 +41,7 @@ class ServiceProcess : public RemotingDirectoryService::Client,
   ~ServiceProcess();
 
   // Initialize the ServiceProcess with the message loop that it should run on.
-  bool Initialize(MessageLoop* message_loop);
+  bool Initialize(MessageLoop* message_loop, const CommandLine& command_line);
   bool Teardown();
   // TODO(sanjeevr): Change various parts of the code such as
   // net::ProxyService::CreateSystemProxyConfigService to take in
@@ -72,6 +76,16 @@ class ServiceProcess : public RemotingDirectoryService::Client,
   // Shutdown the service process. This is likely triggered by a IPC message.
   void Shutdown();
 
+  void SetUpdateAvailable() {
+    update_available_ = true;
+  }
+  bool update_available() const { return update_available_; }
+
+  // Called by the IPC server when a client disconnects. A return value of
+  // true indicates that the IPC server should continue listening for new
+  // connections.
+  bool HandleClientDisconnect();
+
   CloudPrintProxy* GetCloudPrintProxy();
 
   // CloudPrintProxy::Client implementation.
@@ -102,6 +116,11 @@ class ServiceProcess : public RemotingDirectoryService::Client,
 #endif
 
  private:
+  // Schedule a call to ShutdownIfNeeded.
+  void ScheduleShutdownCheck();
+  // Shuts down the process if no services are enabled and no clients are
+  // connected.
+  void ShutdownIfNeeded();
   // Called exactly ONCE per process instance for each service that gets
   // enabled in this process.
   void OnServiceEnabled();
@@ -160,6 +179,9 @@ class ServiceProcess : public RemotingDirectoryService::Client,
 
   // Count of currently enabled services in this process.
   int enabled_services_;
+
+  // Speficies whether a product update is available.
+  bool update_available_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceProcess);
 };

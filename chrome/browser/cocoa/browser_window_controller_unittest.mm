@@ -50,6 +50,14 @@
   return [findBarCocoaController_ view];
 }
 
+- (NSSplitView*)devToolsView {
+  return static_cast<NSSplitView*>([devToolsController_ view]);
+}
+
+- (NSView*)sidebarView {
+  return [sidebarController_ view];
+}
+
 - (BOOL)bookmarkBarVisible {
   return [bookmarkBarController_ isVisible];
 }
@@ -109,7 +117,8 @@ TEST_F(BrowserWindowControllerTest, TestNormal) {
 
   // And make sure a controller for a pop-up window is not normal.
   // popup_browser will be owned by its window.
-  Browser *popup_browser(Browser::CreateForPopup(browser_helper_.profile()));
+  Browser *popup_browser(Browser::CreateForType(Browser::TYPE_POPUP,
+                                                browser_helper_.profile()));
   NSWindow *cocoaWindow = popup_browser->window()->GetNativeHandle();
   BrowserWindowController* controller =
       static_cast<BrowserWindowController*>([cocoaWindow windowController]);
@@ -545,6 +554,38 @@ TEST_F(BrowserWindowControllerTest, TestFindBarOnTop) {
 
   EXPECT_GT(findBar_index, toolbar_index);
   EXPECT_GT(findBar_index, bookmark_index);
+}
+
+// Tests that the sidebar view and devtools view are both non-opaque.
+TEST_F(BrowserWindowControllerTest, TestSplitViewsAreNotOpaque) {
+  // Add a subview to the sidebar view to mimic what happens when a tab is added
+  // to the window.  NSSplitView only marks itself as non-opaque when one of its
+  // subviews is non-opaque, so the test will not pass without this subview.
+  scoped_nsobject<NSView> view(
+      [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)]);
+  [[controller_ sidebarView] addSubview:view];
+
+  EXPECT_FALSE([[controller_ tabContentArea] isOpaque]);
+  EXPECT_FALSE([[controller_ devToolsView] isOpaque]);
+  EXPECT_FALSE([[controller_ sidebarView] isOpaque]);
+}
+
+// Tests that status bubble's base frame does move when devTools are docked.
+TEST_F(BrowserWindowControllerTest, TestStatusBubblePositioning) {
+  ASSERT_EQ(1U, [[[controller_ devToolsView] subviews] count]);
+
+  NSPoint bubbleOrigin = [controller_ statusBubbleBaseFrame].origin;
+
+  // Add a fake subview to devToolsView to emulate docked devTools.
+  scoped_nsobject<NSView> view(
+      [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)]);
+  [[controller_ devToolsView] addSubview:view];
+  [[controller_ devToolsView] adjustSubviews];
+
+  NSPoint bubbleOriginWithDevTools = [controller_ statusBubbleBaseFrame].origin;
+
+  // Make sure that status bubble frame is moved.
+  EXPECT_FALSE(NSEqualPoints(bubbleOrigin, bubbleOriginWithDevTools));
 }
 
 @interface BrowserWindowControllerFakeFullscreen : BrowserWindowController {

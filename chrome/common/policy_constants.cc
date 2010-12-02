@@ -20,6 +20,17 @@ const char kHomepageLocation[] = "HomepageLocation";
 const char kHomepageIsNewTabPage[] = "HomepageIsNewTabPage";
 const char kRestoreOnStartup[] = "RestoreOnStartup";
 const char kURLsToRestoreOnStartup[] = "RestoreOnStartupURLs";
+const char kDefaultSearchProviderEnabled[] = "DefaultSearchProviderEnabled";
+const char kDefaultSearchProviderName[] = "DefaultSearchProviderName";
+const char kDefaultSearchProviderKeyword[] = "DefaultSearchProviderKeyword";
+const char kDefaultSearchProviderSearchURL[] =
+    "DefaultSearchProviderSearchURL";
+const char kDefaultSearchProviderSuggestURL[] =
+    "DefaultSearchProviderSuggestURL";
+const char kDefaultSearchProviderIconURL[] =
+    "DefaultSearchProviderIconURL";
+const char kDefaultSearchProviderEncodings[] =
+    "DefaultSearchProviderEncodings";
 const char kProxyServerMode[] = "ProxyServerMode";
 const char kProxyServer[] = "ProxyServer";
 const char kProxyPacUrl[] = "ProxyPacUrl";
@@ -30,6 +41,8 @@ const char kDnsPrefetchingEnabled[] = "DnsPrefetchingEnabled";
 const char kSafeBrowsingEnabled[] = "SafeBrowsingEnabled";
 const char kMetricsReportingEnabled[] = "MetricsReportingEnabled";
 const char kPasswordManagerEnabled[] = "PasswordManagerEnabled";
+const char kPasswordManagerAllowShowPasswords[] =
+    "PasswordManagerAllowShowPasswords";
 const char kDisabledPlugins[] = "DisabledPlugins";
 const char kAutoFillEnabled[] = "AutoFillEnabled";
 const char kApplicationLocaleValue[] = "ApplicationLocaleValue";
@@ -37,6 +50,15 @@ const char kSyncDisabled[] = "SyncDisabled";
 const char kExtensionInstallAllowList[] = "ExtensionInstallWhitelist";
 const char kExtensionInstallDenyList[] = "ExtensionInstallBlacklist";
 const char kShowHomeButton[] = "ShowHomeButton";
+const char kPrintingEnabled[] = "PrintingEnabled";
+const char kJavascriptEnabled[] = "JavascriptEnabled";
+const char kSavingBrowserHistoryDisabled[] = "SavingBrowserHistoryDisabled";
+
+// Chrome Frame specific policy constants
+const char kChromeFrameRendererSettings[] = "ChromeFrameRendererSettings";
+const char kRenderInChromeFrameList[] = "RenderInChromeFrameList";
+const char kRenderInHostList[] = "RenderInHostList";
+const char kChromeFrameContentTypes[] = "ChromeFrameContentTypes";
 
 }  // namespace key
 

@@ -23,6 +23,7 @@ each locale. -->
     <output filename="generated_resources_es.rc" type="rc_all" lang="es" />
     <output filename="generated_resources_es-419.rc" type="rc_all" lang="es-419" />
     <output filename="generated_resources_et.rc" type="rc_all" lang="et" />
+    <output filename="generated_resources_fa.rc" type="rc_all" lang="fa" />
     <output filename="generated_resources_fi.rc" type="rc_all" lang="fi" />
     <output filename="generated_resources_fil.rc" type="rc_all" lang="fil" />
     <output filename="generated_resources_fr.rc" type="rc_all" lang="fr" />
@@ -77,6 +78,7 @@ each locale. -->
     <output filename="generated_resources_es.pak" type="data_package" lang="es" />
     <output filename="generated_resources_es-419.pak" type="data_package" lang="es-419" />
     <output filename="generated_resources_et.pak" type="data_package" lang="et" />
+    <output filename="generated_resources_fa.pak" type="data_package" lang="fa" />
     <output filename="generated_resources_fi.pak" type="data_package" lang="fi" />
     <output filename="generated_resources_fil.pak" type="data_package" lang="fil" />
     <output filename="generated_resources_fr.pak" type="data_package" lang="fr" />
@@ -131,6 +133,7 @@ each locale. -->
     <file path="resources/generated_resources_es.xtb" lang="es" />
     <file path="resources/generated_resources_es-419.xtb" lang="es-419" />
     <file path="resources/generated_resources_et.xtb" lang="et" />
+    <file path="resources/generated_resources_fa.xtb" lang="fa" />
     <file path="resources/generated_resources_fi.xtb" lang="fi" />
     <file path="resources/generated_resources_fil.xtb" lang="fil" />
     <file path="resources/generated_resources_fr.xtb" lang="fr" />
@@ -293,6 +296,9 @@ each locale. -->
       </message>
       <message name="IDS_DONE" desc="A generic term for Done on buttons and menus.">
         Done
+      </message>
+      <message name="IDS_SKIP" desc="A generic term for Skip on buttons and menus.">
+        Skip
       </message>
 
       <!-- content area context menus -->
@@ -995,6 +1001,9 @@ each locale. -->
         <message name="IDS_SHOW_EXTENSIONS" desc="The show extensions menu in the app menu">
           &amp;Extensions
         </message>
+        <message name="IDS_SETTINGS" desc="The text label of the Settings menu item">
+          &amp;Settings
+        </message>
         <message name="IDS_OPTIONS" desc="The text label of the Options menu item">
           &amp;Options
         </message>
@@ -1030,6 +1039,9 @@ each locale. -->
         <message name="IDS_SHOW_EXTENSIONS" desc="In Title Case: The show extensions menu in the app menu">
           &amp;Extensions
         </message>
+        <message name="IDS_SETTINGS" desc="In Title Case: The text label of the Settings menu item">
+          &amp;Settings
+        </message>
         <message name="IDS_OPTIONS" desc="In Title Case: The text label of the Options menu item">
           &amp;Options
         </message>
@@ -1048,7 +1060,10 @@ each locale. -->
       </if>
       <if expr="pp_ifdef('chromeos')">
         <message name="IDS_SIGN_OUT" desc="The text label of the Sign Out menu item">
-          Sign Out
+          Sign out
+        </message>
+        <message name="IDS_EXIT_GUEST_MODE" desc="The text label of the Exit guest mode menu item">
+          Exit guest mode
         </message>
       </if>
 
@@ -1162,6 +1177,17 @@ each locale. -->
       <message name="IDS_SEARCH_ENGINES_EDITOR_DEFAULT_ENGINE"
                desc="Engine name displayed for the engine in the list that is currently marked as default">
         <ph name="ENGINE_NAME">$1<ex>Google</ex></ph> (Default)
+      </message>
+
+      <message name="IDS_DEFAULT_SEARCH_PROMPT_TITLE" desc="The title of the default search engine dialog. This dialog asks if the user would like a new default search engine.">
+        Change Default Search Engine
+      </message>
+
+      <message name="IDS_DEFAULT_SEARCH_PROMPT_OK" desc="The button which accepts a new default search engine. Displayed in the default search engine message box.">
+        Change it
+      </message>
+      <message name="IDS_DEFAULT_SEARCH_PROMPT_CANCEL" desc="The button which rejects a new default search engine. Displayed in the default search engine message box.">
+        No, thanks
       </message>
 
       <message name="IDS_TIME_SECS_DEFAULT"
@@ -2620,8 +2646,8 @@ each locale. -->
         certificate that is verified for encrypting email">
         Email Encryption Certificate
       </message>
-      <message name="IDS_CERT_USAGE_OBJECT_SIGNER" desc="The description of a certificate that is verified for signing objects">
-        Object Signer
+      <message name="IDS_CERT_USAGE_OBJECT_SIGNER" desc="The description of a certificate that is verified for signing executable code">
+        Code Signer
       </message>
       <message name="IDS_CERT_USAGE_SSL_CA" desc="The description of a certificate that is verified for use by an SSL certification authority">
         SSL Certification Authority
@@ -2819,8 +2845,8 @@ each locale. -->
       <message name="IDS_CERT_EXT_NS_CERT_TYPE_EMAIL" desc="description of a certificate type for email">
         Email Certificate
       </message>
-      <message name="IDS_CERT_EXT_NS_CERT_TYPE_EMAIL_CA" desc="description of a certificate type for email certificate authority">
-        Email Certificate Authority
+      <message name="IDS_CERT_EXT_NS_CERT_TYPE_EMAIL_CA" desc="description of a certificate type for email certification authority">
+        Email Certification Authority
       </message>
       <message name="IDS_CERT_EXT_NS_CERT_BASE_URL" desc="description of extension Netscape Certificate Base URL">
         Netscape Certificate Base URL
@@ -2828,14 +2854,14 @@ each locale. -->
       <message name="IDS_CERT_EXT_NS_CERT_REVOCATION_URL" desc="description of extension Netscape Certificate Revocation URL">
         Netscape Certificate Revocation URL
       </message>
-      <message name="IDS_CERT_EXT_NS_CA_REVOCATION_URL" desc="description of extension Netscape Certificate Authority Revocation URL">
-        Netscape Certificate Authority Revocation URL
+      <message name="IDS_CERT_EXT_NS_CA_REVOCATION_URL" desc="description of extension Netscape Certification Authority Revocation URL">
+        Netscape Certification Authority Revocation URL
       </message>
       <message name="IDS_CERT_EXT_NS_CERT_RENEWAL_URL" desc="description of extension Netscape Certificate Renewal URL">
         Netscape Certificate Renewal URL
       </message>
-      <message name="IDS_CERT_EXT_NS_CA_POLICY_URL" desc="description of extension Netscape Certificate Authority Policy URL">
-        Netscape Certificate Authority Policy URL
+      <message name="IDS_CERT_EXT_NS_CA_POLICY_URL" desc="description of extension Netscape Certification Authority Policy URL">
+        Netscape Certification Authority Policy URL
       </message>
       <message name="IDS_CERT_EXT_NS_SSL_SERVER_NAME" desc="description of extension Netscape Certificate SSL Server Name">
         Netscape Certificate SSL Server Name
@@ -2891,8 +2917,8 @@ each locale. -->
       <message name="IDS_CERT_X509_POLICY_CONSTRAINTS" desc="description of extension Certificate Policy Constraints">
         Certificate Policy Constraints
       </message>
-      <message name="IDS_CERT_X509_AUTH_KEYID" desc="description of extension Certificate Authority Key Identifier">
-        Certificate Authority Key ID
+      <message name="IDS_CERT_X509_AUTH_KEYID" desc="description of extension Certification Authority Key Identifier">
+        Certification Authority Key ID
       </message>
       <message name="IDS_CERT_X509_EXT_KEY_USAGE" desc="description of extension Extended Key Usage">
         Extended Key Usage
@@ -2924,11 +2950,11 @@ each locale. -->
       <message name="IDS_CERT_X509_KEY_USAGE_ENCIPHER_ONLY" desc="description of certificate usage Encipher Only">
         Encipher Only
       </message>
-      <message name="IDS_CERT_X509_BASIC_CONSTRAINT_IS_CA" desc="description of certificate constraint Is a Certificate Authority">
-        Is a Certificate Authority
+      <message name="IDS_CERT_X509_BASIC_CONSTRAINT_IS_CA" desc="description of certificate constraint Is a Certification Authority">
+        Is a Certification Authority
       </message>
-      <message name="IDS_CERT_X509_BASIC_CONSTRAINT_IS_NOT_CA" desc="description of certificate constraint Is not a Certificate Authority">
-        Is not a Certificate Authority
+      <message name="IDS_CERT_X509_BASIC_CONSTRAINT_IS_NOT_CA" desc="description of certificate constraint Is not a Certification Authority">
+        Is not a Certification Authority
       </message>
       <message name="IDS_CERT_X509_BASIC_CONSTRAINT_PATH_LEN" desc="description of certificate constraint Maximum number of intermediate CAs: %S">
         Maximum number of intermediate CAs: <ph name="NUM_INTERMEDIATE_CA">$1<ex>5</ex></ph>
@@ -2936,7 +2962,7 @@ each locale. -->
       <message name="IDS_CERT_X509_BASIC_CONSTRAINT_PATH_LEN_UNLIMITED" desc="value NUM_INTERMEDIATE_CA when there is no limit">
         unlimited
       </message>
-      <message name="IDS_CERT_PKIX_CPS_POINTER_QUALIFIER" desc="description of pointer (URI) to Certification Practice Statement published by Certificate Authority">
+      <message name="IDS_CERT_PKIX_CPS_POINTER_QUALIFIER" desc="description of pointer (URI) to Certification Practice Statement published by Certification Authority">
         Certification Practice Statement Pointer
       </message>
       <message name="IDS_CERT_PKIX_USER_NOTICE_QUALIFIER" desc="description of User Notice certificate policy qualifier">
@@ -3124,8 +3150,8 @@ each locale. -->
       <message name="IDS_CERT_MANAGER_NAME_COLUMN_LABEL" desc="Label for the certificate name column of the certificate tree in the certificate manager">
         Certificate Name
       </message>
-      <message name="IDS_CERT_MANAGER_DEVICE_COLUMN_LABEL" desc="Label for the security device column of the certificate tree in the certificate manager">
-        Security Device
+      <message name="IDS_CERT_MANAGER_DEVICE_COLUMN_LABEL" desc="Label for the certificate store column of the certificate tree in the certificate manager">
+        Certificate Store
       </message>
       <message name="IDS_CERT_MANAGER_SERIAL_NUMBER_COLUMN_LABEL" desc="Label for the serial number column of the certificate tree in the certificate manager">
         Serial Number
@@ -3137,7 +3163,151 @@ each locale. -->
         Email Address
       </message>
       <message name="IDS_CERT_MANAGER_VIEW_CERT_BUTTON" desc="Label for the button in the certificate manager which launches the certificate viewer for the selected certificate">
-        &amp;View
+        View
+      </message>
+      <message name="IDS_CERT_MANAGER_IMPORT_BUTTON" desc="Label for the button in the certificate manager which allows you to import certificates">
+        Import...
+      </message>
+      <message name="IDS_CERT_MANAGER_EXPORT_BUTTON" desc="Label for the button in the certificate manager which allows you to export certificates">
+        Export...
+      </message>
+      <message name="IDS_CERT_MANAGER_EXPORT_ALL_BUTTON" desc="Label for the button in the certificate manager which saves all personal certificates and their private keys">
+        Export All...
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_BUTTON" desc="Label for the button in the certificate manager which allows you to edit certificate trust">
+        Edit...
+      </message>
+      <message name="IDS_CERT_MANAGER_DELETE_BUTTON" desc="Label for the button in the certificate manager which allows you to delete certificates">
+        Delete...
+      </message>
+      <message name="IDS_CERT_MANAGER_DELETE_USER_FORMAT" desc="Confirmation in certificate manager dialog for deleting a user certificate">
+        Delete certificate "<ph name="CERTIFICATE_NAME">$1<ex>VeriSign Browser Certificate</ex></ph>"?
+      </message>
+      <message name="IDS_CERT_MANAGER_DELETE_USER_DESCRIPTION" desc="Description of impact of deleting a user certificate">
+        If you delete one of your own certificates, you can no longer use it to identify yourself.
+      </message>
+      <message name="IDS_CERT_MANAGER_DELETE_SERVER_FORMAT" desc="Confirmation in certificate manager dialog for deleting a server certificate">
+        Delete server certificate "<ph name="CERTIFICATE_NAME">$1<ex>www.example.com</ex></ph>"?
+      </message>
+      <message name="IDS_CERT_MANAGER_DELETE_SERVER_DESCRIPTION" desc="Description of impact of deleting a server certificate">
+        If you delete a server certificate, you restore the usual security checks for that server and require it uses a valid certificate.
+      </message>
+      <message name="IDS_CERT_MANAGER_DELETE_CA_FORMAT" desc="Confirmation in certificate manager dialog for deleting a certification authority certificate">
+        Delete CA certificate "<ph name="CERTIFICATE_NAME">$1<ex>Verisign Class 1 Public Primary Certification Authority</ex></ph>"?
+      </message>
+      <message name="IDS_CERT_MANAGER_DELETE_CA_DESCRIPTION" desc="Description of impact of deleting a certification authority certificate">
+        If you delete a Certification Authority (CA) certificate, your browser will no longer trust any certificates issued by that CA.
+      </message>
+      <message name="IDS_CERT_MANAGER_DELETE_UNKNOWN_FORMAT" desc="Confirmation in certificate manager dialog for deleting a certificate of other type">
+        Delete certificate "<ph name="CERTIFICATE_NAME">$1<ex>Example Certificate</ex></ph>"?
+      </message>
+      <message name="IDS_CERT_MANAGER_EXPORT_PASSWORD_DESC" desc="Description of password prompt in certificate manager for exporting a personal certificate">
+        Please enter a password to encrypt this certificate file.
+      </message>
+      <message name="IDS_CERT_MANAGER_EXPORT_PASSWORD_HELP" desc="Text in password prompt of certificate manager for exporting a personal certificate, reminding user that if they forget the password they're screwed.">
+        The password you choose will be required to restore this file later.  Please record it in a safe location.
+      </message>
+      <message name="IDS_CERT_MANAGER_RESTORE_PASSWORD_DESC" desc="Description of password prompt in certificate manager for restoring a personal certificate">
+        Please enter the password that was used to encrypt this certificate file.
+      </message>
+      <message name="IDS_CERT_MANAGER_PASSWORD_LABEL" desc="The label of the password field in the certificate manager for restoring or exporting a personal certificate">
+        Password:
+      </message>
+      <message name="IDS_CERT_MANAGER_CONFIRM_PASSWORD_LABEL" desc="The label of the field in the certificate manager for re-entering the password when creating a export.">
+        Confirm Password:
+      </message>
+      <message name="IDS_CERT_MANAGER_PKCS12_FILES" desc="The label in the file selector dialog for PKCS #12 file type.">
+        PKCS #12 Files
+      </message>
+      <message name="IDS_CERT_MANAGER_PKCS12_EXPORT_ERROR_TITLE" desc="The title in the error dialog for PKCS #12 file export errors.">
+        PKCS #12 Export Error
+      </message>
+      <message name="IDS_CERT_MANAGER_WRITE_ERROR_FORMAT" desc="The text in the error dialog for PKCS #12 file write errors.">
+        There was an error while trying to write the file: <ph name="ERROR_TEXT">$1<ex>Permission denied.</ex></ph>.
+      </message>
+      <message name="IDS_CERT_MANAGER_PKCS12_IMPORT_ERROR_TITLE" desc="The title in the error dialog for PKCS #12 file import errors.">
+        PKCS #12 Import Error
+      </message>
+      <message name="IDS_CERT_MANAGER_READ_ERROR_FORMAT" desc="The text in the error dialog for PKCS #12 file read errors.">
+        There was an error while trying to read the file: <ph name="ERROR_TEXT">$1<ex>File not found.</ex></ph>.
+      </message>
+      <message name="IDS_CERT_MANAGER_BAD_PASSWORD" desc="The text in the error dialog for entering an incorrect password when importing an encrypted certificate file.">
+        Incorrect password.
+      </message>
+      <message name="IDS_CERT_MANAGER_CERT_PARSE_ERROR" desc="The message in the certificate manager error dialog for importing invalid certificate files.">
+        Unable to parse file.
+      </message>
+      <message name="IDS_CERT_MANAGER_UNKNOWN_ERROR" desc="The text in the error dialog when an unknown error occurs during an operation on the certificate database.">
+        Unknown error.
+      </message>
+      <message name="IDS_CERT_MANAGER_ERROR_NOT_CA" desc="The error message when trying to import certificate authorities and a certificate is not a certification authority">
+        Not a Certification Authority.
+      </message>
+      <message name="IDS_CERT_MANAGER_DELETE_CERT_ERROR_TITLE" desc="The title in the error dialog for certificate delete errors.">
+        Certificate Deletion Error
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_TRUST_LABEL" desc="Line displayed in certificate manager edit trust dialog before the checkboxes for setting certificate trust flags">
+        Edit trust settings:
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_CA_TRUST_DESCRIPTION_FORMAT" desc="Description in dialog for editing Certification Authority trust flags">
+        The certificate "<ph name="CERTIFICATE_NAME">$1<ex>Verisign Class 1 Public Primary Certification Authority</ex></ph>" represents a Certification Authority.
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_CA_TRUST_SSL_LABEL" desc="Description in Certification Authority trust dialog for the SSL trust checkbox.">
+        Trust this certificate for identifying web sites.
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_CA_TRUST_EMAIL_LABEL" desc="Description in Certification Authority trust dialog for the Email trust checkbox.">
+        Trust this certificate for identifying email users.
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_CA_TRUST_OBJSIGN_LABEL" desc="Description in Certification Authority trust dialog for the Code Signing trust checkbox.">
+        Trust this certificate for identifying software makers.
+      </message>
+      <message name="IDS_CERT_MANAGER_SET_TRUST_ERROR_TITLE" desc="The title in the error dialog for certificate trust editing errors.">
+        Error Setting Certificate Trust
+      </message>
+      <message name="IDS_CERT_MANAGER_IMPORT_CA_DESCRIPTION_FORMAT" desc="Description in dialog for importing a Certification Authority and setting its trust flags">
+        Do you want to trust "<ph name="CERTIFICATE_NAME">$1<ex>Verisign Class 1 Public Primary Certification Authority</ex></ph>" as a Certification Authority?
+      </message>
+      <message name="IDS_CERT_MANAGER_CA_IMPORT_ERROR_TITLE" desc="The title in the error dialog for Certification Authority file import errors.">
+        Certification Authority Import Error
+      </message>
+      <message name="IDS_CERT_MANAGER_IMPORT_ERROR_FORMAT" desc="The format of per-certificate error messages in import failure dialog">
+        <ph name="CERTIFICATE_NAME">$1<ex>www.example.com</ex></ph>: <ph name="ERROR">$2<ex>Not a Certification Authority</ex></ph>
+      </message>
+      <message name="IDS_CERT_MANAGER_IMPORT_SINGLE_NOT_IMPORTED" desc="The header in certificate manager error dialog for single certificates that could not be imported.">
+        The file contained one certificate, which was not imported:
+      </message>
+      <message name="IDS_CERT_MANAGER_IMPORT_ALL_NOT_IMPORTED" desc="The header in certificate manager error dialog for list of certificates that could not be imported, when none were successfully imported.">
+        The file contained multiple certificates, none of which were imported:
+      </message>
+      <message name="IDS_CERT_MANAGER_IMPORT_SOME_NOT_IMPORTED" desc="The header in certificate manager error dialog for list of certificates that could not be imported, even though others were.">
+        The file contained multiple certificates, some of which were not imported:
+      </message>
+      <message name="IDS_CERT_MANAGER_SERVER_IMPORT_ERROR_TITLE" desc="The title in the error dialog for Certification Authority file import errors.">
+        Server Certificate Import Error
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_SERVER_TRUST_DESCRIPTION_FORMAT" desc="Description in dialog for editing server certificate trust flags.  The following line will contain information about the issuer.">
+        The certificate "<ph name="CERTIFICATE_NAME">$1<ex>www.example.com</ex></ph>" was issued by:
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_SERVER_TRUST_UNKNOWN_CA" desc="Message displayed in dialog for editing server certificate trust flags, when the server certificate is issued by a certification authority that is not known.">
+        Because you do not know the Certification Authority that issued this certificate, you do not trust the authenticity of this certificate unless otherwise indicated here.
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_SERVER_TRUST_UNTRUSTED_CA" desc="Message displayed in dialog for editing server certificate trust flags, when the server certificate is issued by a certification authority that is known, but not trusted.">
+        Because you do not trust the Certification Authority that issued this certificate, you do not trust the authenticity of this certificate unless otherwise indicated here.
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_SERVER_TRUST_TRUSTED_CA" desc="Message displayed in dialog for editing server certificate trust flags, when the server certificate is issued by a certification authority that is known and trusted.">
+        Because you trust the Certification Authority that issued this certificate, you implicitly trust the authenticity of this certificate.
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_SERVER_TRUST_SELF_SIGNED" desc="Message displayed in dialog for editing server certificate trust flags, when the certificate is self-signed">
+        This certificate is self-signed, you will not trust its authenticity unless indicated here.
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_SERVER_TRUST_YES" desc="Description of option to trust the certificate, in the dialog for editing server certificate trust flags.">
+        Trust the authenticity of this certificate.
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_SERVER_TRUST_NO" desc="Description of option to not trust the certificate, in the dialog for editing server certificate trust flags.">
+        Do not trust the authenticity of this certificate.
+      </message>
+      <message name="IDS_CERT_MANAGER_EDIT_CA_TRUST_BUTTON" desc="Label of button in the dialog for editing server certificate trust flags, which allows you to open the dialog for editing the trust of the issuing Certification Authority.">
+        Edit Issuer Trust...
       </message>
 
       <!-- Add Client Certificate Dialog -->
@@ -3205,7 +3375,7 @@ each locale. -->
       </message>
       <!-- User Image Selection Dialog -->
       <message name="IDS_USER_IMAGE_SCREEN_TITLE" desc="String to be displayed in the title bar of the user image selection dialog">
-        Set your profile image
+        Smile! Take a picture of yourself and set it as your account profile.
       </message>
       <message name="IDS_USER_IMAGE_SELECTED_TOOLTIP" desc="Tooltip for preview of selected user image">
         Currently selected image
@@ -3353,7 +3523,7 @@ each locale. -->
         Native Client module: <ph name="NEXE_NAME">$1<ex>Unknown Native Client module</ex></ph>
       </message>
       <message name="IDS_TASK_MANAGER_NACL_BROKER_PREFIX" desc="Task Manager row for Native Client broker, which acts as the sanbox manager for NaCl processes">
-        <ph name="Native_Client">Native Client</ph> security manager
+        Native Client security manager
       </message>
       <message name="IDS_TASK_MANAGER_GPU_PREFIX" desc="Task Manager row for the GPU process, which is the process doing all accelerated graphics rendering">
         GPU Process
@@ -3466,13 +3636,16 @@ each locale. -->
       <message name="IDS_EXTENSION_PROMPT2_WARNING_GEOLOCATION" desc="Permisson string for access to geolocation.">
         Your physical location
       </message>
+      <message name="IDS_EXTENSION_PROMPT2_WARNING_MANAGEMENT" desc="Permisson string for access to extension management.">
+        Manage themes, extensions, and apps
+      </message>
 
       <!-- Extension error messages -->
       <message name="IDS_EXTENSION_DIRECTORY_NO_EXISTS" desc="Warning displayed in pack dialog when the extension directory does not exist.">
         Input directory must exist.
       </message>
-      <message name="IDS_EXTENSION_DISALLOW_NON_DOWNLOADED_GALLERY_INSTALLS" desc="Error displayed when an extension that has an update URL used by the gallery is installed when not directly downloaded from the gallery.">
-        This package can only be installed from the <ph name="CHROME_WEB_STORE">$1<ex>Chrome Web Store</ex></ph>.
+      <message name="IDS_EXTENSION_DISALLOW_NON_DOWNLOADED_GALLERY_INSTALLS" desc="Error displayed when an app or extension that has an update URL used by the gallery is installed when not directly downloaded from the gallery.">
+        This can only be installed from the <ph name="CHROME_WEB_STORE">$1<ex>Web Store</ex></ph>.
       </message>
       <message name="IDS_EXTENSION_PRIVATE_KEY_INVALID_PATH" desc="Warning displayed in pack dialog when the private key must be a valid path.">
         Input value for private key must be a valid path.
@@ -3734,8 +3907,23 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_EXTENSION_PROMPT_ENABLE_INCOGNITO_BUTTON" desc="Text for the allow button on the extension run-in-incognito prompt">
         Allow
       </message>
-      <message name="IDS_EXTENSION_WEB_STORE_TITLE" desc="Text for the Chrome Web Store">
+      <message name="IDS_EXTENSION_GET_MORE_APPS" desc="Promo text for button to the Web Store">
         Get More Apps
+      </message>
+      <message name="IDS_EXTENSION_WEB_STORE_TITLE" desc="Text for the Chrome Web Store">
+        Web Store
+      </message>
+      <message name="IDS_APPS_PROMO_HEADER" desc="Header for the apps promo">
+        New! Discover a world of apps &amp; games
+      </message>
+      <message name="IDS_APPS_PROMO_TEXT_1" desc="First paragraph of text on the apps promo">
+        Visit the &lt;a&gt; Chrome Web Store&lt;/a&gt; to add great apps and games to your startpage
+      </message>
+      <message name="IDS_APPS_PROMO_TEXT_2" desc="Second paragraph of text on the apps promo">
+        What's an app? Try one of these:
+      </message>
+      <message name="IDS_APPS_PROMO_HIDE" desc="Text on the button that hides the apps promo">
+        Hide this message
       </message>
 
       <!-- Plugins -->
@@ -3800,45 +3988,125 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Priority:
       </message>
 
-      <!-- Labs -->
-      <message name="IDS_LABS_TITLE" desc="Title for the chrome://labs page. Should be translated like 'Labs' is at googlelabs.com.">
-        Labs
+      <!-- about:flags -->
+      <message name="IDS_FLAGS_LONG_TITLE" desc="Long version of the title for the about:flags page.">
+        Careful, these experiments may bite
       </message>
-      <message name="IDS_LABS_LONG_TITLE" desc="Long version of the title for the chrome://labs page.">
-        Labs: Some crazy experimental stuff.
+      <message name="IDS_FLAGS_TABLE_TITLE" desc="Title for the experiments table on the about:flags page.">
+        Experiments
       </message>
-      <message name="IDS_LABS_TABLE_TITLE" desc="Title for the experiments table on the chrome://labs page.">
-        Labs Experiments
+      <message name="IDS_FLAGS_WARNING_HEADER" desc="Text right before the warning body text.">
+        WARNING
       </message>
-      <message name="IDS_LABS_BLURB" desc="Text at the top of the about:labs page, warning users that the about:labs contents are volatile.">
-        <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> Labs is a testing ground for experimental features that aren't quite ready for primetime. They may change, break or disappear at any time.
+      <message name="IDS_FLAGS_WARNING_TEXT" desc="Text at the top of the about:flags page, warning users that the about:flags contents are volatile.">
+        These experimental features may change, break, or disappear at any time. We make absolutely no guarantees about what may happen if you turn one of these experiments on, and your browser may even spontaneously combust. Jokes aside, your browser may delete all your data, or your security and privacy could be compromised in unexpected ways. Please proceed with caution.
       </message>
-      <message name="IDS_LABS_NO_EXPERIMENTS_AVAILABLE" desc="Shown if no labs experiments are available">
+      <message name="IDS_FLAGS_NO_EXPERIMENTS_AVAILABLE" desc="Shown if no experiments are available">
         Aww, it looks like there are currently no experiments available.
       </message>
-      <message name="IDS_LABS_RESTART_NOTICE" desc="Notifies the user that he needs to restart chrome. Shown next to a button that says 'Restart Now'.">
+      <message name="IDS_FLAGS_RESTART_NOTICE" desc="Notifies the user that he needs to restart chrome. Shown next to a button that says 'Restart Now'.">
         Your changes will take effect the next time you restart <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
       </message>
-      <message name="IDS_LABS_RESTART_BUTTON" desc="Text on a button that restarts chrome when clicked. ">
+      <message name="IDS_FLAGS_RESTART_BUTTON" desc="Text on a button that restarts chrome when clicked. ">
         Restart Now
       </message>
-      <message name="IDS_LABS_DISABLE" desc="The link for disabling a labs experiment.">
+      <message name="IDS_FLAGS_DISABLE" desc="The link for disabling a labs experiment.">
         Disable
       </message>
-      <message name="IDS_LABS_ENABLE" desc="The link for enabling a labs experiment.">
+      <message name="IDS_FLAGS_ENABLE" desc="The link for enabling a labs experiment.">
         Enable
       </message>
-      <message name="IDS_LABS_TABPOSE_NAME" desc="Name of the 'Tab Overview' lab.">
+      <message name="IDS_FLAGS_TABPOSE_NAME" desc="Name of the 'Tab Overview' lab.">
         Tab Overview
       </message>
-      <message name="IDS_LABS_TABPOSE_DESCRIPTION" desc="Description of the 'Tab Overview' lab.">
+      <message name="IDS_FLAGS_TABPOSE_DESCRIPTION" desc="Description of the 'Tab Overview' lab.">
         Swipe down with three fingers on your trackpad to see an overview of all your tabs. Click on a thumbnail to select it. Works great in fullscreen mode.
       </message>
-      <message name="IDS_LABS_SIDE_TABS_NAME" desc="Name of the 'Left Tabs' lab.">
+      <message name="IDS_FLAGS_SIDE_TABS_NAME" desc="Name of the 'Left Tabs' lab.">
         Side Tabs
       </message>
-      <message name="IDS_LABS_SIDE_TABS_DESCRIPTION" desc="Description of the 'Left Tabs' lab.">
+      <message name="IDS_FLAGS_SIDE_TABS_DESCRIPTION" desc="Description of the 'Left Tabs' lab.">
         Adds a "Use Side Tabs" entry to the tabstrip's context menu. Use this to toggle between tabs on top (default) and tabs on the side. Useful on widescreen monitors.
+      </message>
+      <message name="IDS_FLAGS_TABBED_OPTIONS_NAME" desc="Description of the 'Tabbed Settings' lab.">
+        Tabbed Settings
+      </message>
+      <message name="IDS_FLAGS_TABBED_OPTIONS_DESCRIPTION" desc="Description of the 'Tabbed Settings' lab.">
+        Uses an in-tab UI for the Settings (Options/Preferences) dialog instead of a stand-alone window.
+      </message>
+      <message name="IDS_FLAGS_INSTANT_NAME" desc="Description of the 'Instant' lab.">
+        Instant
+      </message>
+      <message name="IDS_FLAGS_INSTANT_DESCRIPTION" desc="Description of the 'Instant' lab.">
+        Makes the address bar load urls as you type.
+      </message>
+      <message name="IDS_FLAGS_REMOTING_NAME" desc="Description of the 'Remoting' lab.">
+        Remoting
+      </message>
+      <message name="IDS_FLAGS_REMOTING_CLIENT_DESCRIPTION" desc="Description of the 'Remoting' client lab.">
+        Enable Remoting Client support.
+      </message>
+      <message name="IDS_FLAGS_REMOTING_HOST_DESCRIPTION" desc="Description of the 'Remoting' host lab.">
+        Enable Remoting Host support.
+      </message>
+      <message name="IDS_FLAGS_DISABLE_OUTDATED_PLUGINS_NAME" desc="Name of the 'Disable outdated plug-ins' lab">
+        Disable outdated plug-ins
+      </message>
+      <message name="IDS_FLAGS_DISABLE_OUTDATED_PLUGINS_DESCRIPTION" desc="Description of the 'Disable outdated plug-ins' lab">
+        Automatically disables plug-ins with known security vulnerabilities and offers update links for them.
+      </message>
+      <message name="IDS_FLAGS_XSS_AUDITOR_NAME" desc="Description of the 'XSS Auditor' lab.">
+        XSS Auditor
+      </message>
+      <message name="IDS_FLAGS_XSS_AUDITOR_DESCRIPTION" desc="Description of the 'XSS Auditor' lab.">
+        Enables WebKit's XSS Auditor (cross-site scripting protection). This feature aims to protect you from certain attacks of malicious web sites. It improves your security, but it might not be compatible with all web sites.
+      </message>
+      <message name="IDS_FLAGS_BACKGROUND_WEBAPPS_NAME" desc="Name of the 'Background WebApps' lab.">
+        Background WebApps
+      </message>
+      <message name="IDS_FLAGS_BACKGROUND_WEBAPPS_DESCRIPTION" desc="Description of the 'Background WebApps' lab.">
+        Allows installed web apps to run in the background at system startup and continue running after all windows are closed.
+      </message>
+      <message name="IDS_FLAGS_CLOUD_PRINT_PROXY_NAME" desc="Title of the Cloud Print Proxy lab">
+        Cloud Print Proxy
+      </message>
+      <message name="IDS_FLAGS_CLOUD_PRINT_PROXY_DESCRIPTION" desc="Description of the Cloud Print Proxy lab">
+        Enables a background service that connects the <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph> service to any printers installed on this computer. Once this lab is enabled, you can turn <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph> on by logging in with your Google account in the Options/Preferences in the Under the Hood section.
+      </message>
+      <message name="IDS_FLAGS_ACCELERATED_COMPOSITING_NAME" desc="Name of the 'GPU Accelerated Compositing' lab.">
+        GPU Accelerated Compositing
+      </message>
+      <message name="IDS_FLAGS_ACCELERATED_COMPOSITING_DESCRIPTION" desc="Description of the 'GPU Accelerated Compositing' lab.">
+        Enables 3D CSS and higher performance compositing of web pages using Graphics Processor Unit (GPU) hardware.
+      </message>
+      <message name="IDS_FLAGS_ACCELERATED_CANVAS_2D_NAME" desc="Name of the 'GPU Accelerated Canvas 2D' lab.">
+        GPU Accelerated Canvas 2D
+      </message>
+      <message name="IDS_FLAGS_ACCELERATED_CANVAS_2D_DESCRIPTION" desc="Description of the 'GPU Accelerated Canvas 2D' lab.">
+        Enables higher performance of canvas tags with a 2D context by rendering using Graphics Processor Unit (GPU) hardware.
+      </message>
+      <message name="IDS_FLAGS_WEBGL_NAME" desc="Name of the 'WebGL' lab.">
+        WebGL
+      </message>
+      <message name="IDS_FLAGS_WEBGL_DESCRIPTION" desc="Description of the 'WebGL' lab.">
+        Enables canvas elements to use 3D graphics via the WebGL API.
+      </message>
+
+      <!-- Instant -->
+      <message name="IDS_INSTANT_OPT_IN_ENABLE" desc="Button shown in the omnibox dropdown for enabling instant">
+        Enable...
+      </message>
+      <message name="IDS_INSTANT_OPT_IN_NO_THANKS" desc="Button shown in the omnibox dropdodown for not enabling instant">
+        No thanks
+      </message>
+      <message name="IDS_INSTANT_OPT_IN_LABEL" desc="Label shown in the omnibox dropdown for enabling instant">
+        Enable Instant for faster searching and browsing?
+      </message>
+      <message name="IDS_INSTANT_OPT_IN_TITLE" desc="Title of the instant opt-in dialog">
+        Instant
+      </message>
+      <message name="IDS_INSTANT_OPT_IN_MESSAGE" desc="Message shown in the instant opt-in dialog">
+        Instant lets you view web pages and search results faster than ever!\n\nWith Instant enabled, most web pages begin loading as soon as you type a URL in the omnibox, before you hit Enter. In addition, if supported by your default search engine, search results appear instantly as you type queries in the omnibox, and in-line predictions help guide your search.\n\nBecause new search results are requested each time you press a key, anything you type into the omnibox may be logged as a search query by your default search engine.\n\n
       </message>
 
       <!-- Click-to-load -->
@@ -3851,6 +4119,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_PLUGIN_UPDATE" desc="The link for updating an outdated plug-in.">
         Update plug-in...
       </message>
+      <message name="IDS_PLUGIN_BLOCKED" desc="The placeholder text for an outdated disabled plug-in.">
+        Plug-in not allowed.
+      </message>
+      <message name="IDS_PLUGIN_OUTDATED" desc="The placeholder text for an outdated disabled plug-in.">
+        The <ph name="PLUGIN_NAME">$1<ex>Flash</ex></ph> plug-in is out of date.
+      </message>
 
       <!-- Session Crashed Info Bar-->
       <message name="IDS_SESSION_CRASHED_VIEW_RESTORE_BUTTON" desc="Title of the restore button in the session crashed view.">
@@ -3861,9 +4135,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_BAD_FLAGS_WARNING_MESSAGE" desc="Message shown when an unsupported command-line flag is used. [Keep it short so it fits in the infobar.]">
         You are using an unsupported command-line flag: <ph name="BAD_FLAG">$1<ex>--no-sandbox</ex></ph>. Stability and security will suffer.
       </message>
-      
-      <!-- about:system strings -->
+
       <if expr="pp_ifdef('chromeos')">
+        <!-- about:system strings -->
         <message name="IDS_ABOUT_SYS_TITLE" desc="about:system page title">
           About System
         </message>
@@ -3884,6 +4158,26 @@ Keep your key file in a safe place. You will need it to create new versions of y
         </message>
         <message name="IDS_ABOUT_SYS_COLLAPSE" desc="name of a button that hides (collapses) specific system details">
           Collapse...
+        </message>
+
+        <!-- chrome://mobilesetup strings -->
+        <message name="IDS_MOBILE_SETUP_TITLE" desc="ChromeOS mobile device activation page title">
+          Cellular data service management
+        </message>
+        <message name="IDS_MOBILE_CONNECTING_HEADER" desc="Mobile connection page header while connecting to the provider">
+          Connecting to <ph name="PROVIDER_NAME">$1<ex>Acme Mobile</ex></ph>
+        </message>
+        <message name="IDS_MOBILE_ERROR_HEADER" desc="Mobile connection page header when connection error occur">
+          Connection error:
+        </message>
+        <message name="IDS_MOBILE_ACTIVATING_HEADER" desc="Message header when data service is being activated">
+          Activating your data service
+        </message>
+        <message name="IDS_MOBILE_COMPLETED_HEADER" desc="Message header when data service is completed">
+          Activation complete
+        </message>
+        <message name="IDS_MOBILE_COMPLETED_TEXT" desc="Message when cellular data service activation or payment is completed">
+          Your data service is activated and ready to use
         </message>
       </if>
 
@@ -4025,8 +4319,14 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_TOOLTIP_BACK" desc="The tooltip for back button">
         Click to go back, hold to see history
       </message>
+      <message name="IDS_ACCNAME_TOOLTIP_BACK" desc="The tooltip for back button suited for non-mouse users">
+        Press enter to go back, context menu key to see history
+      </message>
       <message name="IDS_TOOLTIP_FORWARD" desc="The tooltip for forward button">
         Click to go forward, hold to see history
+      </message>
+      <message name="IDS_ACCNAME_TOOLTIP_FORWARD" desc="The tooltip for forward button  suited for non-mouse users">
+        Press enter to go forward, context menu key to see history
       </message>
       <message name="IDS_TOOLTIP_HOME" desc="The tooltip for the home button">
         Open the home page
@@ -4048,6 +4348,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
 
       <!--Accessible name/action strings-->
+      <message name="IDS_ACCESSIBLE_INCOGNITO_WINDOW_TITLE_FORMAT" desc="The format for the accessible title of an incognito window">
+        <ph name="WINDOW_TITLE">$1</ph> (Incognito)
+      </message>
       <message name="IDS_ACCACTION_PRESS" desc="The accessible default action for a button.">
         Press
       </message>
@@ -4441,7 +4744,7 @@ Keep your key file in a safe place. You will need it to create new versions of y
           Network connection
         </message>
         <message name="IDS_BUGREPORT_STANDBY_RESUME" desc="In Title Case: Report a bug/problem type: Standby or Resume">
-          Network connection
+          Standby or Resume
         </message>
         <message name="IDS_BUGREPORT_SYNC" desc="In Title Case: Report a bug/problem type: Synced preferences">
           Synced preferences
@@ -4526,10 +4829,19 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_DEL_PASSWORDS_CHKBOX" desc="Checkbox for deleting Passwords">
         Clear saved passwords
       </message>
-      <message name="IDS_DEL_FORM_DATA_CHKBOX" desc="Checkbox for deleting form data saved for AutoFill">
+      <message name="IDS_DEL_FORM_DATA_CHKBOX" desc="Checkbox for deleting form data saved for Autofill">
         Clear saved form data
       </message>
-      <message name="IDS_CLEAR_BROWSING_DATA_COMMIT" desc="Text for OK button on dialog">
+      <message name="IDS_CLEAR_CHROME_DATA_TAB_LABEL" desc="Tab label for controls for clearing browser data">
+        Chrome data
+      </message>
+      <message name="IDS_CLEAR_OTHER_DATA_TAB_LABEL" desc="Tab label for controls for clearing other data (including server data)">
+        Other data
+      </message>
+       <message name="IDS_CLEAR_BROWSING_DATA_BUTTON" desc="Button for initiating clearing of browsing data">
+        Clear browsing data
+      </message>
+       <message name="IDS_CLEAR_BROWSING_DATA_COMMIT" desc="Text for OK button on dialog">
         Clear browsing data
       </message>
       <message name="IDS_FLASH_STORAGE_SETTINGS" desc="Link for opening Adobe Flash Player storage settings">
@@ -4553,6 +4865,37 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_CLEAR_DATA_DELETING" desc="The progress message">
         Clearing...
       </message>
+      <message name="IDS_CLEAR_DATA_ADOBE_FLASH_TITLE" desc="Title of Adobe flash section">
+        Adobe Flash Player
+      </message>
+      <message name="IDS_CLEAR_DATA_ADOBE_FLASH_DESCRIPTION" desc="Description of Adobe flash section">
+        Adobe Flash Player enables websites you visit to store data on your computer. You can manage this data using a website provided by Adobe:
+      </message>
+      <message name="IDS_CLEAR_DATA_CHROME_SYNC_TITLE" desc="Title of Chrome Sync section">
+        Chrome Sync
+      </message>
+      <message name="IDS_CLEAR_DATA_CLEAR_SERVER_DATA_DESCRIPTION" desc="Description of clearing server data">
+        Chrome stores information on Google servers when it syncs. If you're absolutely sure you do not want to use sync anymore you can stop all syncing and delete the data from Google.
+      </message>
+      <message name="IDS_CLEAR_DATA_CLEAR_BUTTON" desc="Button used to clear server data">
+        Stop sync and delete data from Google
+     </message>
+     <message name="IDS_CLEAR_DATA_SENDING" desc="Label text indicating that we are sending a clear to the server">
+        Sending
+     </message>
+     <message name="IDS_CLEAR_DATA_ERROR" desc="Label text indicating that an error occurred in sending a clear to the server">
+        Error
+     </message>
+     <message name="IDS_CLEAR_DASHBOARD_DESCRIPTION" desc="Description of Google dashboard">
+        The Google Dashboard has more details about what Google is storing when Chrome syncs your data.
+     </message>
+     <message name="IDS_CONFIRM_CLEAR_DESCRIPTION" desc="Clear confirmation dialog text">
+        You're about to stop sync on all your computers where you use Chrome. Your data will also be deleted from Google, but will remain within Chrome. Are you sure?
+     </message>
+     <message name="IDS_CONFIRM_CLEAR_TITLE" desc="Clear confirmation dialog title">
+        Clear Browsing Data
+     </message>
+
 
       <!-- Content Settings dialog data -->
       <message name="IDS_CONTENT_SETTINGS_TITLE" desc="Title for content settings dialog">
@@ -4565,7 +4908,7 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Cookies
       </message>
       <message name="IDS_MODIFY_COOKIE_STORING_LABEL" desc="Label at the top of Cookies tab of Content Settings dialog">
-        Modify how cookies and other site data are saved on your computer
+        Cookie Settings:
       </message>
       <message name="IDS_COOKIES_ALLOW_RADIO" desc="A radio button in the Content Settings dialog for allowing cookies and other site data to be stored on your computer.">
         Allow local data to be set (recommended)
@@ -4626,13 +4969,16 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Plug-ins
       </message>
       <message name="IDS_PLUGIN_SETTING_LABEL" desc="A label on top of Plug-Ins tab on Content Settings dialog">
-        Plug-in Settings:
+        When I encounter plug-ins on a site:
       </message>
       <message name="IDS_PLUGIN_LOAD_RADIO" desc="A radio button in the Content Settings dialog for allowing plug-ins use on any site.">
-        Allow all sites to run all plug-ins (recommended)
+        Run automatically (recommended)
+      </message>
+      <message name="IDS_PLUGIN_ASK_RADIO" desc="A radio button in the Content Settings dialog for allowing plug-ins use on any site.">
+        Click to play
       </message>
       <message name="IDS_PLUGIN_NOLOAD_RADIO" desc="A radio button in the Content Settings dialog for preventing plug-ins use on any site.">
-        Do not allow any site to run plug-ins
+        Block all
       </message>
       <message name="IDS_PLUGIN_SELECTIVE_DISABLE" desc="Link to selectively disable plug-ins">
         Disable individual plug-ins...
@@ -4748,6 +5094,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_EXCEPTIONS_OTR_IN_ITALICS" desc="A label informing the user that incognito-only exceptions are displayed in italics">
         Exceptions displayed in italics only apply to this incognito session.
       </message>
+      <message name="IDS_EXCEPTIONS_OTR_LABEL" desc="A label informing the user that the table below the label shows incognito-only exceptions">
+        Exceptions below only apply to the current incognito session.
+      </message>
+      <message translateable="false" name="IDS_EXCEPTIONS_PATTERN_EXAMPLE" desc="Placeholder text when the user adds a new exception" >
+        [*.]example.com
+      </message>
       <message name="IDS_EXCEPTIONS_NOT_SET_BUTTON" desc="A label to display in the exception page's action column when a site's content setting has not yet been set for a given domain.">
         Not set
       </message>
@@ -4857,9 +5209,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
         <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> has been updated
       </message>
       <message name="IDS_UPGRADE_SUCCESSFUL_RESTART" desc="Status label: Successfully updated">
-        Restart <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> to finish updating to <ph name="VERSION">$2<ex>0.1.131</ex></ph>
-      </message>
-      <message name="IDS_UPGRADE_SUCCESSFUL_NOVERSION_RESTART" desc="Status label: Successfully updated">
         Restart <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> to finish updating
       </message>
       <if expr="pp_ifdef('chromeos')">
@@ -4890,6 +5239,19 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <!-- Cloud Print dialog messages -->
       <message name="IDS_CLOUD_PRINT_TITLE" desc="Title for the print dialog">
         Print
+      </message>
+
+      <!-- Cloud Print proxy strings -->
+      <message name="IDS_CLOUD_PRINT_SETUP_DIALOG_TITLE" desc="Title of the cloud print setup dialog.">
+        Set up <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph>
+      </message>
+      <message name="IDS_CLOUD_PRINT_SETUP_DONE" desc="Message on completed set up of cloud print.">
+        You have successfully enabled <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph>!
+      </message>
+
+      <!-- Print Preview -->
+      <message name="IDS_PRINT_PREVIEW_TITLE" desc="Title for print preview page ">
+        Print Preview
       </message>
 
       <!-- Load State -->
@@ -5263,20 +5625,44 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_ERRORPAGES_TITLE_NOT_AVAILABLE" desc="Title of the error page when we can't connect to a site.">
         <ph name="SITE">$1<ex>google.xom</ex></ph> is not available
       </message>
-      <message name="IDS_ERRORPAGES_TITLE_NOT_FOUND" desc="Title of the error page when the server returns a 404.">
+      <message name="IDS_ERRORPAGES_TITLE_ACCESS_DENIED" desc="Title in the error page when a server returns a 403.  Also suitable for similar error codes.">
+        Access to <ph name="URL">$1<ex>http://www.google.com/foo/bar</ex></ph> denied.
+      </message>
+      <message name="IDS_ERRORPAGES_TITLE_NOT_FOUND" desc="Title of the error page when the server returns a 404 or 410.">
         <ph name="URL">$1<ex>http://www.google.com/foo/bar</ex></ph> is not found
       </message>
       <message name="IDS_ERRORPAGES_TITLE_LOAD_FAILED" desc="Title of the error page when we can't load a page.">
         <ph name="URL">$1<ex>http://some-unreliable-site.com/</ex></ph> failed to load
       </message>
+      <message name="IDS_ERRORPAGES_TITLE_PROXY_CONNECTION_FAILED" desc="Title of the error page when we can't connect to the proxy server.">
+        Could not connect to the proxy server
+      </message>
+      <message name="IDS_ERRORPAGES_TITLE_INTERNET_DISCONNECTED" desc="Title of the error page when the network connection failed.">
+        Could not connect to the internet
+      </message>
       <message name="IDS_ERRORPAGES_HEADING_NOT_AVAILABLE" desc="Heading in the error page when we can't connect to a site.">
         This webpage is not available.
       </message>
-      <message name="IDS_ERRORPAGES_HEADING_NOT_FOUND" desc="Heading in the error page when the server returns a 404.">
+      <message name="IDS_ERRORPAGES_HEADING_NOT_FOUND" desc="Heading in the error page when the server returns a 404 or 410.">
         This webpage is not found.
       </message>
       <message name="IDS_ERRORPAGES_HEADING_TOO_MANY_REDIRECTS" desc="Heading in the error page when there are too many URL redirects.">
         This webpage has a redirect loop.
+      </message>
+      <message name="IDS_ERRORPAGES_HEADING_PROXY_CONNECTION_FAILED" desc="Heading in the error page when the proxy server connection failed.">
+        Unable to connect to the proxy server.
+      </message>
+      <message name="IDS_ERRORPAGES_HEADING_WEAK_SERVER_EPHEMERAL_DH_KEY" desc="Heading of the error page when the server has a weak Diffie-Hellman public key. Diffie-Hellman is a technical term and the conjuction of two names so may be best left untranslated. 'key' here is used as the technical name for a large number with certain mathematical properties that allow it to be used to encrypt and decrypt data. 'weak' here means that the number is too small to resist an exhaustive attempt to find certain mathematical structures in it, the secrecy of which is critical.">
+        Server has a weak ephemeral Diffie-Hellman public key
+      </message>
+      <message name="IDS_ERRORPAGES_HEADING_ESET_ANTI_VIRUS_SSL_INTERCEPTION" desc="Heading of the error page when we detect that ESET anti-virus is running and intercepting our HTTPS connections. 'ESET' is a product name and may be best left untranslated.">
+        Cannot make secure connection because of ESET anti-virus
+      </message>
+      <message name="IDS_ERRORPAGES_HEADING_NETNANNY_SSL_INTERCEPTION" desc="Heading of the error page when we detect that NetNanny is running and intercepting our HTTPS connections. 'NetNanny' is a product name and may be best left untranslated.">
+        Cannot make secure connection because of NetNanny
+      </message>
+      <message name="IDS_ERRORPAGES_HEADING_INTERNET_DISCONNECTED" desc="Heading of the error page when the network connection failed.">
+        Unable to connect to the internet.
       </message>
       <message name="IDS_ERRORPAGES_SUMMARY_NOT_AVAILABLE" desc="Summary in the error page when we can't connect to a site.">
         The webpage at <ph name="URL">&lt;strong jscontent="failedUrl"&gt;&lt;/strong&gt;</ph> might be temporarily down or it may have moved permanently to a new web address.
@@ -5290,9 +5676,123 @@ Keep your key file in a safe place. You will need it to create new versions of y
         not, it is possibly a server configuration issue and not a problem with your
         computer.
       </message>
+      <message name="IDS_ERRORPAGES_SUMMARY_PROXY_CONNECTION_FAILED" desc="Summary in the error page when the proxy server connection failed.">
+        A proxy server is a server that acts as an intermediary between your computer and other servers.  Right now, your system is configured to use a proxy, but
+        <ph name="PRODUCT_NAME">&lt;span jscontent="productName"&gt;&lt;/span&gt;<ex>Google Chrome</ex></ph>
+        can't connect to it.
+        <ph name="LINE_BREAK">&lt;br /&gt;&lt;br /&gt;</ph>
+        If you use a proxy server, check your proxy settings or check with your network administrator to make sure the proxy server is working.
+        <ph name="LINE_BREAK">&lt;br /&gt;&lt;br /&gt;</ph>
+        If you don't believe you should be using a proxy server, try the following steps:
+        <ph name="LINE_BREAK">&lt;br /&gt;&lt;br /&gt;</ph>
+        <ph name="PLATFORM_TEXT">$1<ex>Goto the wrench menu and choose Fix It</ex></ph>
+      </message>
+
+      <if expr="os == 'darwin'">
+        <message name="IDS_ERRORPAGES_SUMMARY_PROXY_CONNECTION_FAILED_PLATFORM" desc="Summary (platform dependent section) in the error page when the proxy server connection failed.  Describes the system configuration method used for setting proxy servers under Mac OSX.">
+          Go to
+          <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>
+          Applications &gt; System Preferences &gt; Network &gt; Advanced &gt; Proxies
+          <ph name="END_BOLD">&lt;/strong&gt;</ph>
+          and uncheck any proxies that have been selected.
+        </message>
+      </if>
+      <if expr="os == 'linux2'">
+        <message name="IDS_ERRORPAGES_SUMMARY_PROXY_CONNECTION_FAILED_PLATFORM" desc="Summary (platform dependent section) in the error page when the proxy server connection failed.  Describes the Chromium configuration method used for setting proxy servers under Linux.">
+          Go to the
+          <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>
+          Wrench menu &gt; Options &gt; Under the Hood &gt; Change proxy settings
+          <ph name="END_BOLD">&lt;/strong&gt;</ph>
+          and make sure your configuration is set to &quot;no proxy&quot; or &quot;direct.&quot;
+        </message>
+      </if>
+      <if expr="os != 'darwin' and os != 'linux2'">
+        <message name="IDS_ERRORPAGES_SUMMARY_PROXY_CONNECTION_FAILED_PLATFORM" desc="Summary (platform dependent section) in the error page when the proxy server connection failed.  Describes the Chromium configuration method used for setting proxy servers under Windows.  Note that the localized version of the quoted text ('Use a proxy server for your LAN') can also be found at control panel > Internet Options > Connections > LAN Settings.">
+          Go to the
+          <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>
+          Wrench menu &gt; Options &gt; Under the Hood &gt; Change proxy settings &gt; LAN Settings
+          <ph name="END_BOLD">&lt;/strong&gt;</ph>
+          and uncheck &quot;Use a proxy server for your LAN.&quot;
+        </message>
+      </if>
+      <message name="IDS_ERRORPAGES_SUMMARY_WEAK_SERVER_EPHEMERAL_DH_KEY" desc="Summary in the error page when the server has a weak Diffie-Hellman public key">
+        This error can occur when connecting to a secure (HTTPS) server. It
+        means that the server is trying to setup a secure connection but, due to
+        a disastrous misconfiguration, the connection wouldn’t be secure at all!
+        <ph name="LINE_BREAK">&lt;br /&gt;&lt;br /&gt;</ph> In this case the
+        server needs to be fixed. Chrome won’t use insecure connections in order
+        to protect your privacy.
+      </message>
+
+      <message name="IDS_ERRORPAGES_SUMMARY_ESET_ANTI_VIRUS_SSL_INTERCEPTION" desc="Summary in the error page when we detect that ESET anti-virus is running and intercepting our HTTPS connections. 'ESET' is a product name and may be best left untranslated. 'Learn more' should be the contents of IDS_OPTIONS_LEARN_MORE_LABEL.">
+        <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> has detected that
+        an ESET product is intercepting secure connections. This is typically
+        not a security issue as the ESET software is usually running on the same
+        computer. However, due to an intolerance to specific aspects of Chrome's
+        secure connections, ESET products have to be configured to not perform
+        this interception. Click the 'Learn more' link for instructions.
+      </message>
+
+      <message name="IDS_ERRORPAGES_SUMMARY_NETNANNY_SSL_INTERCEPTION" desc="Summary in the error page when we detect that NetNanny is running and intercepting our HTTPS connections. 'NetNanny' is a product name and may be best left untranslated. 'Learn more' should be the contents of IDS_OPTIONS_LEARN_MORE_LABEL.">
+        <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> has detected that
+        NetNanny is intercepting secure connections. This is typically
+        not a security issue as the NetNanny software is usually running on the
+        same computer. However, due to an intolerance to specific aspects of
+        Chrome's secure connections, NetNanny has to be configured to not
+        perform this interception. Click the 'Learn more' link for instructions.
+      </message>
+
+      <message name="IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED" desc="Summary of the error page when the network connection failed, before platform dependent instructions.">
+        <ph name="PRODUCT_NAME">&lt;span jscontent="productName"&gt;&lt;/span&gt;<ex>Google Chrome</ex></ph>
+        can’t display the webpage because your computer isn’t connected to the internet.
+        <ph name="LINE_BREAK">&lt;br /&gt;&lt;br /&gt;</ph>
+        You can try to diagnose the problem by taking the following steps:
+        <ph name="LINE_BREAK">&lt;br /&gt;&lt;br /&gt;</ph>
+        <ph name="PLATFORM_TEXT">
+          $1<ex>Goto the wrench menu and choose Fix It.</ex>
+        </ph>
+      </message>
+
+      <if expr="os == 'darwin'">
+        <message name="IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED_PLATFORM" desc="Summary (platform dependent section) in the error page when the network connection failed.  Describes how to get to the network Diagnostics screen under Mac OSX.">
+          Go to
+          <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>
+          Applications &gt; System Preferences &gt; Network &gt; Assist me
+          <ph name="END_BOLD">&lt;/strong&gt;</ph>
+          to test your connection.
+        </message>
+      </if>
+      <!-- TODO(mmenke): Add Linux instructions -->
+      <if expr="os != 'darwin' and os != 'linux2'">
+        <message name="IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED_PLATFORM" desc="Summary (platform dependent section) in the error page when the network connection failed.  Describes how to get to the network Diagnostics screen under Windows 7 and later.">
+          Go to
+          <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>
+          Start &gt; Control Panel &gt; Network and Internet &gt; Network and Sharing Center &gt; Troubleshoot Problems (at the bottom) &gt; Internet Connections.
+          <ph name="END_BOLD">&lt;/strong&gt;</ph>
+        </message>
+        <message name="IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED_PLATFORM_VISTA" desc="Summary (platform dependent section) in the error page when the network connection failed.  Describes how to get to the network Diagnostics screen under Windows Vista.">
+          Go to
+          <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>
+          Start &gt; Control Panel &gt; Network Connections &gt; New Connection Wizard
+          <ph name="END_BOLD">&lt;/strong&gt;</ph>
+          to test your connection.
+        </message>
+        <message name="IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED_PLATFORM_XP" desc="Summary (platform dependent section) in the error page when the network connection failed.  Describes how to get to the network Diagnostics screen under Windows XP.">
+          Click
+          <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>Start<ph name="END_BOLD">&lt;/strong&gt;</ph>,
+          click
+          <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>Run<ph name="END_BOLD">&lt;/strong&gt;</ph>,
+          type
+          <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>%windir%\\network diagnostic\\xpnetdiag.exe<ph name="END_BOLD">&lt;/strong&gt;</ph>,
+          and then click OK.
+        </message>
+      </if>
 
       <message name="IDS_ERRORPAGES_DETAILS_TEMPLATE" desc="On the bottom of the error page text, there is a box that includes extra information for tech savvy users.">
         Error <ph name="ERROR_NUMBER">$1<ex>5</ex></ph> (<ph name="ERROR_NAME">$2<ex>net::ERR_FILE_NOT_FOUND</ex></ph>): <ph name="ERROR_TEXT">$3<ex>The requested file is not found.</ex></ph>
+      </message>
+      <message name="IDS_ERRORPAGES_HTTP_DETAILS_TEMPLATE" desc="On the bottom of the error page text for http errors, there is a box that includes extra information for tech savvy users.">
+        HTTP Error <ph name="ERROR_NUMBER">$1<ex>500</ex></ph> (<ph name="ERROR_NAME">$2<ex>Internal Server Error</ex></ph>): <ph name="ERROR_TEXT">$3<ex>The server encountered an internal error.</ex></ph>
       </message>
 
       <message name="IDS_ERRORPAGES_DETAILS_TIMED_OUT" desc="The error message displayed when a page takes too long to load.">
@@ -5304,17 +5804,81 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_ERRORPAGES_DETAILS_NAME_NOT_RESOLVED" desc="The error message displayed when a dns look up fails.">
         The server could not be found.
       </message>
-      <message name="IDS_ERRORPAGES_DETAILS_DISCONNECTED" desc="The error message displayed when we have no internet access.">
-        The Internet connection has been lost.
-      </message>
       <message name="IDS_ERRORPAGES_DETAILS_FILE_NOT_FOUND" desc="The error message displayed when a local file can not be found.">
         The file or directory could not be found.
       </message>
       <message name="IDS_ERRORPAGES_DETAILS_TOO_MANY_REDIRECTS" desc="The error message displayed when there are too many redirects.">
         There were too many redirects.
       </message>
+      <message name="IDS_ERRORPAGES_DETAILS_PROXY_CONNECTION_FAILED" desc="The error message displayed when the proxy server connection failed.">
+        Proxy server connection failed.
+      </message>
+      <message name="IDS_ERRORPAGES_DETAILS_INTERNET_DISCONNECTED" desc="The error message displayed when we have no internet access.">
+        The internet connection has been lost.
+      </message>
       <message name="IDS_ERRORPAGES_DETAILS_UNKNOWN" desc="The default error message displayed if we don't have a more specific error message.">
         Unknown error.
+      </message>
+
+      <message name="IDS_ERRORPAGES_HEADING_ACCESS_DENIED" desc="Heading in the error page when a server returns a 403.  Also suitable for similar error codes.">
+        Access to the webpage was denied.
+      </message>
+      <message name="IDS_ERRORPAGES_SUMMARY_FORBIDDEN" desc="Summary in the error page when a server returns a 403.">
+        You are not authorized to access the webpage at <ph name="URL">&lt;strong jscontent="failedUrl"&gt;&lt;/strong&gt;</ph>.  You may need to log in.
+      </message>
+      <message name="IDS_ERRORPAGES_DETAILS_FORBIDDEN" desc="Details in the error page when a server returns a 403.">
+        The server refused to fulfill the request.
+      </message>
+
+      <message name="IDS_ERRORPAGES_SUMMARY_GONE" desc="Summary of the error page when the server returns a 410.">
+        The webpage at <ph name="URL">&lt;strong jscontent="failedUrl"&gt;&lt;/strong&gt;</ph> no longer exists.
+      </message>
+      <message name="IDS_ERRORPAGES_DETAILS_GONE" desc="Details in the error page when a server returns a 403.">
+        The requested resource no longer exists, and there is forwarding address.  This is expected to be a permanent condition.
+      </message>
+
+      <message name="IDS_ERRORPAGES_HEADING_HTTP_SERVER_ERROR" desc="Heading in the error page for 5xx errors.">
+        Server error.
+      </message>
+
+      <message name="IDS_ERRORPAGES_SUMMARY_INTERNAL_SERVER_ERROR" desc="Summary in the error page when the server returns a 500.">
+        The website encountered an error while retrieving <ph name="URL">&lt;strong jscontent="failedUrl"&gt;&lt;/strong&gt;</ph>.
+        It may be down for maintenance or configured incorrectly.
+      </message>
+      <message name="IDS_ERRORPAGES_DETAILS_INTERNAL_SERVER_ERROR" desc="The error message displayed when the server returns a 500.">
+        As unexpected condition was encountered while the server was attempting to fulfill the request.
+      </message>
+
+      <message name="IDS_ERRORPAGES_SUMMARY_WEBSITE_CANNOT_HANDLE" desc="Summary in the error page when the server returns a 501 or 505.">
+        The website is unable to handle the request for <ph name="URL">&lt;strong jscontent="failedUrl"&gt;&lt;/strong&gt;</ph>.
+      </message>
+      <message name="IDS_ERRORPAGES_DETAILS_NOT_IMPLEMENTED" desc="The error message displayed when the server returns a 502.">
+        The server does have the functionality needed to fulfill the request.
+      </message>
+      <message name="IDS_ERRORPAGES_DETAILS_HTTP_VERSION_NOT_SUPPORTED" desc="The error message displayed when the server returns a 505.">
+        The server does not support the HTTP version used in the request.
+      </message>
+
+      <message name="IDS_ERRORPAGES_SUMMARY_BAD_GATEWAY" desc="Summary in the error page when the server returns a 502.">
+        An invalid response was received while attempting to load <ph name="URL">&lt;strong jscontent="failedUrl"&gt;&lt;/strong&gt;</ph>.
+        The server may be down for maintenance or configured incorrectly.
+      </message>
+      <message name="IDS_ERRORPAGES_DETAILS_BAD_GATEWAY" desc="The error message displayed when the server returns a 502.">
+        The gateway or proxy server received an invalid response from an upstream server.
+      </message>
+
+      <message name="IDS_ERRORPAGES_SUMMARY_SERVICE_UNAVAILABLE" desc="Summary in the error page when the server returns a 503.">
+        The webpage at <ph name="URL">&lt;strong jscontent="failedUrl"&gt;&lt;/strong&gt;</ph> is currently unavailable.  It may be overloaded or down for maintenance.
+      </message>
+      <message name="IDS_ERRORPAGES_DETAILS_SERVICE_UNAVAILABLE" desc="The error message displayed when the server returns a 503.">
+        The server is currently unable to handle the request.  This code indicates this is a temporary condition, and the server will be up again after a delay.
+      </message>
+
+      <message name="IDS_ERRORPAGES_SUMMARY_GATEWAY_TIMEOUT" desc="Summary in the error page when the server returns a 504.">
+        The server for <ph name="URL">&lt;strong jscontent="failedUrl"&gt;&lt;/strong&gt;</ph> took too long to respond.  It may be overloaded.
+      </message>
+      <message name="IDS_ERRORPAGES_DETAILS_GATEWAY_TIMEOUT" desc="The error message displayed when the server returns a 504.">
+        The gateway or proxy server timed out while waiting for a response from an upstream server.
       </message>
 
       <message name="IDS_ERRORPAGES_HEADING_SSL_PROTOCOL_ERROR" desc="Heading in the error page for SSL protocol errors.">
@@ -5405,13 +5969,23 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY_EV" desc="The text of the identity section when the page is secured with an EV cert.">
         The identity of <ph name="ORGANIZATION">$1<ex>Google</ex></ph> at <ph name="LOCALITY">$2<ex>Mountain View, CA US</ex></ph> has been verified by <ph name="ISSUER">$3<ex>VeriSign</ex></ph>.
       </message>
-
       <message name="IDS_PAGE_INFO_SECURITY_TAB_UNKNOWN_PARTY" desc="The default name used when we did not find a principal name.">
         unknown name
       </message>
       <message name="IDS_PAGE_INFO_SECURITY_TAB_INSECURE_IDENTITY" desc="The text of the identity section when the page is not secure.">
         The identity of this website has not been verified.
       </message>
+      <message name="IDS_PAGE_INFO_SECURITY_TAB_NON_UNIQUE_NAME" desc="The text of the identity section when the host is not unique (such as with Intranet host names).">
+        The identity of the server you are connected to cannot be fully validated. You are connected to a server using a name only valid within your network, which an external certificate authority has no way to validate ownership of. As some certificate authorities will issue certificates for these names regardless, there is no way to ensure you are connected to the intended website and not an attacker.
+      </message>
+
+      <message name="IDS_PAGE_INFO_SECURITY_TAB_UNABLE_TO_CHECK_REVOCATION" desc="The text of the identity section when we were unable to check if the certificate has been revoked.">
+        Unable to check whether the certificate has been revoked.
+      </message>
+      <message name="IDS_PAGE_INFO_SECURITY_TAB_NO_REVOCATION_MECHANISM" desc="The text of the identity section when there is no certificate revocation mechanism.">
+        The certificate does not specify a mechanism to check whether it has been revoked.
+      </message>
+
       <message name="IDS_PAGE_INFO_SECURITY_TAB_CONNECTION_TITLE" desc="The name of the connection section.">
         Connection
       </message>
@@ -5447,6 +6021,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_PAGE_INFO_SECURITY_TAB_RENEGOTIATION_MESSAGE" desc="This message is displayed when the server hasn't been updated to fix a recent security issues. TLS here is an acronym and need not be translated. 'renegotiation' is a technical term describing a process of agreeing on a new set of security parameters and secrets. 'extension' here should be taken to mean 'amendment' rather than elongation.">
         The server does not support the TLS renegotiation extension.
+      </message>
+      <message name="IDS_PAGE_INFO_SITE_INFO_TITLE" desc="The name of the site information section.">
+        Site information
       </message>
 
       <!-- SSL Blocking Page -->
@@ -5686,6 +6263,10 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <!-- Default Browser related messages -->
       <message name="IDS_HIDE_ICONS_NOT_SUPPORTED" desc="Message to explain we only support uninstall and not hide-icons.">
         To hide access to this program, you need to uninstall it by using\n<ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Programs</ex></ph> in Control Panel.\n\nWould you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Programs</ex></ph>?
+      </message>
+
+      <message name="IDS_SETTINGS_TITLE" desc="Title for the settings tab.">
+        Settings
       </message>
 
       <!-- Options Window -->
@@ -5938,87 +6519,93 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
 
       <if expr="not pp_ifdef('use_titlecase') or os != 'linux2'">
-        <message name="IDS_AUTOFILL_SETTING_WINDOWS_GROUP_NAME" desc="The title of the form AutoFill group">
+        <message name="IDS_AUTOFILL_SETTING_WINDOWS_GROUP_NAME" desc="The title of the form Autofill group">
           Form autofill:
         </message>
       </if>
       <if expr="pp_ifdef('use_titlecase') and os == 'linux2'">
-        <message name="IDS_AUTOFILL_SETTING_WINDOWS_GROUP_NAME" desc="In Title Case and without trailing colon: The title of the form autofill group">
-          Form AutoFill
+        <message name="IDS_AUTOFILL_SETTING_WINDOWS_GROUP_NAME" desc="In Title Case and without trailing colon: The title of the form Autofill group">
+          Form Autofill
         </message>
       </if>
-      <message name="IDS_AUTOFILL_CC_INFOBAR_TEXT" desc="Text to show in the AutoFill credit card request infobar.">
+      <message name="IDS_AUTOFILL_CC_INFOBAR_TEXT" desc="Text to show in the Autofill credit card request infobar.">
         Do you want Chrome to save this credit card information for completing web forms?
       </message>
-      <message name="IDS_OPTIONS_AUTOFILL_ENABLE" desc="The label of the 'Ask me to enable AutoFill' radio button">
-        Enable AutoFill to fill out web forms in a single click
+      <message name="IDS_OPTIONS_AUTOFILL_ENABLE" desc="The label of the 'Ask me to enable Autofill' radio button">
+        Enable Autofill to fill out web forms in a single click
       </message>
-      <message name="IDS_OPTIONS_AUTOFILL_DISABLE" desc="The label of the 'Disable AutoFill' radio button">
-        Disable AutoFill
+      <message name="IDS_OPTIONS_AUTOFILL_DISABLE" desc="The label of the 'Disable Autofill' radio button">
+        Disable Autofill
       </message>
-      <message name="IDS_AUTOFILL_CC_INFOBAR_ACCEPT" desc="Text to show for the AutoFill credit card request infobar accept button.">
+      <message name="IDS_AUTOFILL_CC_INFOBAR_ACCEPT" desc="Text to show for the Autofill credit card request infobar accept button.">
         Save info
       </message>
-      <message name="IDS_AUTOFILL_CC_INFOBAR_DENY" desc="Text to show for the AutoFill credit card request infobar deny button.">
+      <message name="IDS_AUTOFILL_CC_INFOBAR_DENY" desc="Text to show for the Autofill credit card request infobar deny button.">
         Don't save
       </message>
-      <message name="IDS_AUTOFILL_LEARN_MORE" desc="Text to show for the AutoFill Learn more link.">
+      <message name="IDS_AUTOFILL_LEARN_MORE" desc="Text to show for the Autofill Learn more link.">
         Learn more
       </message>
-      <message name="IDS_AUTOFILL_CC_LEARN_MORE" desc="Text to show for the AutoFill credit card request infobar Learn more link.">
+      <message name="IDS_AUTOFILL_CC_LEARN_MORE" desc="Text to show for the Autofill credit card request infobar Learn more link.">
         Learn more
       </message>
       <message name="IDS_AUTOFILL_CLEAR_FORM_MENU_ITEM" desc="The entry in the suggestions dropdown that clears an auto-filled form.">
         Clear form
       </message>
       <if expr="os != 'darwin'">
-        <message name="IDS_AUTOFILL_OPTIONS_TITLE" desc="The title of the AutoFill dialog.">
-          AutoFill Options
+        <message name="IDS_AUTOFILL_OPTIONS_TITLE" desc="The title of the Autofill dialog.">
+          Autofill Options
         </message>
-        <message name="IDS_AUTOFILL_OPTIONS" desc="The value of the AutoFill options menu entry and button.">
-          AutoFill options
+        <message name="IDS_AUTOFILL_OPTIONS" desc="The value of the Autofill options button.">
+          Autofill options
+        </message>
+        <message name="IDS_AUTOFILL_OPTIONS_POPUP" desc="The value of the Autofill options menu entry.">
+          Chrome Autofill options
         </message>
       </if>
       <if expr="os == 'darwin'">
-        <message name="IDS_AUTOFILL_OPTIONS_TITLE" desc="The title of the AutoFill dialog.">
-          AutoFill Preferences
+        <message name="IDS_AUTOFILL_OPTIONS_TITLE" desc="The title of the Autofill dialog.">
+          Autofill Preferences
         </message>
-        <message name="IDS_AUTOFILL_OPTIONS" desc="The value of the AutoFill options menu entry and button.">
-          AutoFill preferences
+        <message name="IDS_AUTOFILL_OPTIONS" desc="The value of the Autofill options button.">
+          Autofill preferences
+        </message>
+        <message name="IDS_AUTOFILL_OPTIONS_POPUP" desc="The value of the Autofill options menu entry.">
+          Chrome Autofill preferences
         </message>
       </if>
-      <message name="IDS_AUTOFILL_LOADING" desc="The indicator that AutoFill data is being loaded.">
+      <message name="IDS_AUTOFILL_LOADING" desc="The indicator that Autofill data is being loaded.">
         Loading...
       </message>
       <message name="IDS_AUTOFILL_USE_MAC_ADDRESS_BOOK" desc="Checkbox label to enable Address Book on Mac.">
         Include addresses from my Address Book card
       </message>
-      <message name="IDS_AUTOFILL_ADDRESSES_GROUP_NAME" desc="The name of the Addresses group of the AutoFill dialog.">
+      <message name="IDS_AUTOFILL_ADDRESSES_GROUP_NAME" desc="The name of the Addresses group of the Autofill dialog.">
         Addresses
       </message>
-      <message name="IDS_AUTOFILL_CREDITCARDS_GROUP_NAME" desc="The name of the Credit Cards group of the AutoFill dialog.">
+      <message name="IDS_AUTOFILL_CREDITCARDS_GROUP_NAME" desc="The name of the Credit Cards group of the Autofill dialog.">
         Credit Cards
       </message>
-      <message name="IDS_AUTOFILL_ADD_ADDRESS_BUTTON" desc="The label of the button that adds a new AutoFill address.">
+      <message name="IDS_AUTOFILL_ADD_ADDRESS_BUTTON" desc="The label of the button that adds a new Autofill address.">
         Add address...
       </message>
-      <message name="IDS_AUTOFILL_ADD_CREDITCARD_BUTTON" desc="The label of the button that adds a new AutoFill credit card.">
+      <message name="IDS_AUTOFILL_ADD_CREDITCARD_BUTTON" desc="The label of the button that adds a new Autofill credit card.">
         Add credit card...
       </message>
       <message name="IDS_AUTOFILL_EDIT_BUTTON"
-               desc="Text of the edit button in the autofill editor">
+               desc="Text of the edit button in the Autofill editor">
         Edit...
       </message>
-      <message name="IDS_AUTOFILL_EDIT_ADDRESS_CAPTION" desc="The caption on the edit AutoFill address dialog.">
+      <message name="IDS_AUTOFILL_EDIT_ADDRESS_CAPTION" desc="The caption on the edit Autofill address dialog.">
         Edit address
       </message>
-      <message name="IDS_AUTOFILL_ADD_ADDRESS_CAPTION" desc="The caption on the edit AutoFill address dialog for the new entry.">
+      <message name="IDS_AUTOFILL_ADD_ADDRESS_CAPTION" desc="The caption on the edit Autofill address dialog for the new entry.">
         Add an address
       </message>
-      <message name="IDS_AUTOFILL_EDIT_CREDITCARD_CAPTION" desc="The caption on the edit AutoFill credit card dialog.">
+      <message name="IDS_AUTOFILL_EDIT_CREDITCARD_CAPTION" desc="The caption on the edit Autofill credit card dialog.">
         Edit credit card
       </message>
-      <message name="IDS_AUTOFILL_ADD_CREDITCARD_CAPTION" desc="The caption on the edit AutoFill credit card dialog the new entry.">
+      <message name="IDS_AUTOFILL_ADD_CREDITCARD_CAPTION" desc="The caption on the edit Autofill credit card dialog the new entry.">
         Add a credit card
       </message>
       <message name="IDS_AUTOFILL_LIST_HEADER_LABEL" desc="The text on the list view header over the label.">
@@ -6027,7 +6614,7 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_AUTOFILL_LIST_HEADER_SUMMARY" desc="The text on the list view header over the summary.">
         Summary
       </message>
-      <message name="IDS_AUTOFILL_DELETE_BUTTON" desc="The label of the button that deletes an AutoFill profile.">
+      <message name="IDS_AUTOFILL_DELETE_BUTTON" desc="The label of the button that deletes an Autofill profile.">
         Remove
       </message>
       <message name="IDS_AUTOFILL_BAD_LABEL_TOOLTIP" desc="Tooltip that appears over the wrong label.">
@@ -6193,14 +6780,14 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_AUTOFILL_DIALOG_SAME_AS_BILLING" desc="The label of the same as billing entry.">
         same as billing
       </message>
-      <message name="IDS_AUTOFILL_DIALOG_SAVE" desc="The label of the Save button on the AutoFill dialog.">
+      <message name="IDS_AUTOFILL_DIALOG_SAVE" desc="The label of the Save button on the Autofill dialog.">
         Save
       </message>
-      <message name="IDS_AUTOFILL_HELP_LABEL" desc="The label of the Help link on the AutoFill dialog.">
-        About AutoFill
+      <message name="IDS_AUTOFILL_HELP_LABEL" desc="The label of the Help link on the Autofill dialog.">
+        About Autofill
       </message>
-      <message name="IDS_AUTOFILL_HELP_URL" desc="The url of the Help link on the AutoFill dialog.">
-        http://www.google.com/support/chrome/bin/answer.py?answer=142893
+      <message name="IDS_AUTOFILL_HELP_URL" desc="The url of the Help link on the Autofill dialog.">
+        http://www.google.com/support/chrome/bin/answer.py?answer=142893&amp;hl=[GRITLANGCODE]
       </message>
 
       <message name="IDS_THEMES_GROUP_NAME" desc="The title of the themes group">
@@ -6248,6 +6835,25 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON" desc="The label of the 'Configure proxy settings' button">
         Change proxy settings
+      </message>
+
+      <message name="IDS_OPTIONS_CLOUD_PRINT_PROXY_DISABLED_LABEL" desc="The label of the cloud print setup button when it hasn't been set up yet.">
+        <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph> lets you access this computer's printers from anywhere. Sign in to enable.
+      </message>
+      <message name="IDS_OPTIONS_CLOUD_PRINT_PROXY_DISABLED_BUTTON" desc="The label of the cloud proxy configure button when it hasn't been set up yet.">
+        Sign in to <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph>
+      </message>
+      <message name="IDS_OPTIONS_CLOUD_PRINT_PROXY_ENABLED_LABEL" desc="The label of the cloud print setup button when it has been set up.">
+        You have registered your printers with <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph> using the account <ph name="EMAIL">$1<ex>foo@bar.com</ex></ph>
+      </message>
+      <message name="IDS_OPTIONS_CLOUD_PRINT_PROXY_ENABLED_BUTTON" desc="The label of the cloud proxy configure button when it has been set up.">
+        Disable <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph>
+      </message>
+      <message name="IDS_OPTIONS_CLOUD_PRINT_PROXY_ENABLED_MANAGE_BUTTON" desc="The label of the link item for the cloud print management URL.">
+        Manage Print Settings...
+      </message>
+      <message name="IDS_OPTIONS_CLOUD_PRINT_PROXY_ENABLING_BUTTON" desc="The label of the cloud proxy configure button while it is being set up.">
+        Signing in...
       </message>
 
       <message name="IDS_OPTIONS_COOKIES_ACCEPT_LABEL" desc="The documentation string of the 'accept cookies' preference">
@@ -6500,6 +7106,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_COOKIES_SESSION_STORAGE" desc="Label for session storage (name of a HTML standard)">
         Session Storage
+      </message>
+      <message name="IDS_COOKIES_INDEXED_DB" desc="Label for Indexed Databases (name of a HTML standard)">
+        Indexed Databases
       </message>
       <message name="IDS_COOKIES_LAST_ACCESSED_LABEL" desc="The last access date label">
         Last accessed:
@@ -6943,11 +7552,11 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
 
       <message name="IDS_OPTIONS_LINKDOCTOR_PREF" desc="The documentation string of the 'Use Link Doctor' preference">
-        Show suggestions for navigation errors
+        Use a web service to help resolve navigation errors
       </message>
 
       <message name="IDS_OPTIONS_SUGGEST_PREF" desc="The documentation string of the 'Use Suggest' preference">
-        Use a suggestion service to help complete searches and URLs typed in the address bar
+        Use a prediction service to help complete searches and URLs typed in the address bar
       </message>
 
       <message name="IDS_OPTIONS_TABS_TO_LINKS_PREF" desc="The documentation string of the 'Tabs to Links' preference">
@@ -7028,6 +7637,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_OPTIONS_ADVANCED_SECTION_TITLE_TRANSLATE">
         Translate
+      </message>
+      <message name="IDS_OPTIONS_ADVANCED_SECTION_TITLE_CLOUD_PRINT">
+        <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph>
       </message>
 
       <!-- Script Timeout Dialog -->
@@ -7203,6 +7815,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <!-- Sync strings -->
 
       <!-- Sync options dialog strings -->
+      <message name="IDS_SYNC_IS_DISABLED_INFO">
+        Sync is disabled in this mode.
+      </message>
       <if expr="not pp_ifdef('use_titlecase') or os != 'linux2'">
         <message name="IDS_SYNC_OPTIONS_GROUP_NAME" desc="The name of the sync group in the options dialog.">
           Sync:
@@ -7322,7 +7937,15 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Synced to <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph>
       </message>
 
-      <!-- Customize Sync (data type choice) dialog strings -->
+      <!-- Customize Sync dialog, tab labels -->
+      <message name="IDS_SYNC_DATA_TYPES_TAB_NAME" desc="The title of the Data Types tab in the customize sync dialog.">
+        Data Types
+      </message>
+      <message name="IDS_SYNC_ENCRYPTION_TAB_NAME" desc="The title of the Encryption tab in the customize sync dialog.">
+        Encryption
+      </message>
+
+      <!-- Choose data types dialog strings -->
       <message name="IDS_CUSTOMIZE_SYNC_WINDOW_TITLE" desc="The title of the Customize Sync dialog box.">
         Customize Sync
       </message>
@@ -7350,8 +7973,8 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_SYNC_DATATYPE_PREFERENCES" desc="Preferences, one of the data types that we allow syncing.">
         Preferences
       </message>
-      <message name="IDS_SYNC_DATATYPE_AUTOFILL" desc="Form AutoFill items, one of the data types that we allow syncing.">
-        AutoFill
+      <message name="IDS_SYNC_DATATYPE_AUTOFILL" desc="Form Autofill items, one of the data types that we allow syncing.">
+        Autofill
       </message>
       <message name="IDS_SYNC_DATATYPE_THEMES" desc="Themes, one of the data types that we allow syncing.">
         Themes
@@ -7367,6 +7990,43 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_SYNC_DATATYPE_APPS" desc="Apps, one of the data types that we allow syncing.">
         Apps
+      </message>
+
+      <!-- Encryption tab of the configure sync dialog -->
+      <message name="IDS_SYNC_ENCRYPTION_INSTRUCTIONS" desc="Instructions for the encryption settings tab.">
+	<ph name="PRODUCT_NAME">$1<ex>Chrome</ex></ph> always encrypts your data when it's tramsmitted to Google.  Additionally, passwords are stored encrypted on Google servers.
+      </message>
+      <message name="IDS_SYNC_ENCRYPT_ALL_LABEL" desc="Label for the checkbox that enables encryption of everything.">
+	Encrypt all my data
+      </message>
+      <message name="IDS_SYNC_PASSPHRASE_CHECKBOX_LABEL" desc="Label for the checkbox that enables a passphrase for sync.">
+	Use a sync passphrase to encrypt my data
+      </message>
+      <message name="IDS_SYNC_PASSPHRASE_WARNING" desc="Warning message about using a passphrase for sync.">
+	Once you start using a passphrase, you cannot remove the passphrase without clearing your sync data. The passphrase does not leave this computer, and if you lose this passphrase, you may not be able to sync this data on other computers.
+      </message>
+
+      <!-- Passphrase dialog strings -->
+      <message name="IDS_SYNC_NEW_PASSPHRASE_TITLE" desc="Title for the dialog where the user creates a new passphrase.">
+	Create a passphrase
+      </message>
+      <message name="IDS_SYNC_NEW_PASSPHRASE_BODY" desc="Instructions for the dialog where the user creates a new passphrase.">
+	Choose a passphrase to encrypt your sync data.  This passphrase will not leave this computer, and if you lose it you may not be able to sync your data.
+      </message>
+      <message name="IDS_SYNC_ENTER_PASSPHRASE_TITLE" desc="Title for the dialog where the user enters the passphrase.">
+	Enter your passphrase
+      </message>
+      <message name="IDS_SYNC_ENTER_PASSPHRASE_BODY" desc="Instructions for the dialog where the user enters the passphrase.">
+	Your sync data has been encrypted using a passphrase.  Please enter your passphrase to decrypt the data.
+      </message>
+      <message name="IDS_SYNC_GAIA_PASSPHRASE_TITLE" desc="Title for the dialog where the user enters their password as passphrase.">
+	Enter your Google account password
+      </message>
+      <message name="IDS_SYNC_GAIA_PASSPHRASE_BODY" desc="Instructions for the dialog where the user enters their password as passphrase.">
+      	Your sync data has been encrypted.  Please re-enter your password to decrypt the data.
+      </message>
+      <message name="IDS_SYNC_PASSPHRASE_LABEL" desc="Label for the passphrase field.">
+	Passphrase
       </message>
 
 
@@ -7419,6 +8079,23 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_SYNC_LOGIN_ACCOUNT_MISMATCH" desc="A warning message shown at sync login when the user is signed in to the web store already.">
         Your web store account is <ph name="EMAIL_ADDRESS">$1<ex>user@gmail.com</ex></ph> - signing in to sync with a different account will result in incompatibilities.
+      </message>
+      <message name="IDS_SYNC_ENTER_ACCESS_CODE_LABEL" desc="A message asking the user to enter a second factor access code.">
+        Please enter your access code:
+      </message>
+      <message name="IDS_SYNC_ACCESS_CODE_HELP_LABEL" desc="A help link message for users who don't know what an access code is">
+        What's this?
+      </message>
+      <message name="IDS_SYNC_INVALID_ACCESS_CODE_LABEL" desc="A message telling the user the access code they entered is invalid.">
+        Invalid access code.
+      </message>
+
+      <!-- Web Store login dialog strings -->
+      <message name="IDS_WEB_STORE_LOGIN_INTRODUCTION_1" desc="The first message to display in the Web Store login dialog.">
+        To use the Chrome Web Store, you must sign in with a Google Account.
+      </message>
+      <message name="IDS_WEB_STORE_LOGIN_INTRODUCTION_2" desc="The second message to display in the Web Store login dialog.">
+        <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will sync any apps you install, so you will be able to access them from any <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> browser you sign in to.
       </message>
 
       <!-- Sync app menu item strings -->
@@ -8113,6 +8790,30 @@ Keep your key file in a safe place. You will need it to create new versions of y
     </if>
     <!-- Chrome OS Strings -->
     <if expr="pp_ifdef('chromeos')">
+      <message name="IDS_NETWORK_PURCHASE_MORE_MESSAGE" desc="Message for purchase more link">
+        Purchase more...
+      </message>
+      <message name="IDS_NETWORK_LOW_DATA_TITLE" desc="Title for network low data notification">
+        Low <ph name="network">$1<ex>YBH</ex></ph> data
+      </message>
+      <message name="IDS_NETWORK_OUT_OF_DATA_TITLE" desc="Title for network out of data notification">
+        Out of <ph name="network">$1<ex>YBH</ex></ph> data
+      </message>
+      <message name="IDS_NETWORK_DATA_REMAINING_MESSAGE" desc="Message for network data remaining notification">
+        <ph name="megabytes">$1<ex>50</ex></ph> MB remaining
+      </message>
+      <message name="IDS_NETWORK_NEARING_EXPIRATION_TITLE" desc="Title for network nearing expiration notification">
+        Nearing <ph name="network">$1<ex>YBH</ex></ph> expiration
+      </message>
+      <message name="IDS_NETWORK_DATA_EXPIRED_TITLE" desc="Title for network data expired notification">
+        <ph name="network">$1<ex>YBH</ex></ph> data expired
+      </message>
+      <message name="IDS_NETWORK_MINUTES_UNTIL_EXPIRATION_MESSAGE" desc="Message for network minutes until expirations notification">
+        <ph name="minues">$1<ex>30</ex></ph> minutes until expiration
+      </message>
+      <message name="IDS_NETWORK_MINUTES_REMAINING_MESSAGE" desc="Message for network minutes remaining notification">
+        <ph name="minues">$1<ex>30</ex></ph> minutes remaining
+      </message>
       <message name="IDS_NETWORK_CONNECTION_ERROR_TITLE" desc="Title for network connection error notification">
         Network Connection Error
       </message>
@@ -8161,6 +8862,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_LANGUAGE_SELECTION_SELECT" desc="Label for language selection dropdown">
         Select your language:
       </message>
+      <message name="IDS_KEYBOARD_SELECTION_SELECT" desc="Label for keyboard selection dropdown">
+        Select your keyboard:
+      </message>
       <message name="IDS_NETWORK_SELECTION_NONE" desc="Text shown in combobox when no network are selected">
         No selection
       </message>
@@ -8173,8 +8877,17 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_NETWORK_SELECTION_CONTINUE_BUTTON" desc="Text shown on continue button">
         Continue »
       </message>
-      <message name="IDS_LOGIN_TITLE">
-        Sign in with your Google account
+      <message name="IDS_NETWORK_SELECTION_ERROR" desc="Error shown when connection to network failed or timed out.">
+        <ph name="PRODUCT_NAME">$1<ex>Chrome OS</ex></ph> was unable to connect to <ph name="NETWORK_ID">$2<ex>Public Wifi</ex></ph>. Please select another network or try again.
+      </message>
+      <message name="IDS_NETWORK_SELECTION_ERROR_HELP" desc="Help link that is shown when connection to network failed or timed out.">
+        Fix network issues
+      </message>
+      <message name="IDS_LOGIN_TITLE" desc="Title of sign in box">
+        Sign in to <ph name="PRODUCT_NAME">$1<ex>Chrome OS</ex></ph>
+      </message>
+      <message name="IDS_LOGIN_TITLE_HINT" desc="Hint under title 'Sign in to Chrome OS'">
+        with your Google Account
       </message>
       <message name="IDS_LOGIN_USERNAME">
         Email
@@ -8210,7 +8923,7 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Previous password
       </message>
       <message name="IDS_SCREEN_LOCK_ACTIVE_USER">
-        Active user
+        Currently signed in
       </message>
       <message name="IDS_SCREEN_LOCK_SIGN_OUT">
         Sign out
@@ -8240,7 +8953,7 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Type the characters you see in the picture below.
       </message>
       <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_DATETIME">
-        Date and Time
+        Date and time
       </message>
       <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_WIRED_NETWORK">
         Wired network
@@ -8270,34 +8983,40 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Advanced Options
       </message>
       <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_MEDIAPLAYER">
-        Mediaplayer
+        Media Player
       </message>
       <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_ADVANCEDFS">
-        Advanced Filesystem
+        Enable Advanced File System, including USB and SD card support
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_TALK">
+        Talk
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_SIDE_TABS">
+        Side tabs
       </message>
       <message name="IDS_OPTIONS_SETTINGS_TIMEZONE_DESCRIPTION" desc="In the settings tab, the text next to the timezone combobox.">
-        Timezone:
+        Time zone:
       </message>
       <message name="IDS_OPTIONS_SETTINGS_TAP_TO_CLICK_ENABLED_DESCRIPTION" desc="In the settings tab, the text next to the checkbox that enables tap-to-click.">
         Enable tap-to-click
       </message>
-      <message name="IDS_OPTIONS_SETTINGS_VERT_EDGE_SCROLL_ENABLED_DESCRIPTION" desc="In the settings tab, the text next to the checkbox that enables vertical edge scrolling.">
-        Enable vertical edge scrolling
-      </message>
       <message name="IDS_OPTIONS_SETTINGS_SENSITIVITY_DESCRIPTION" desc="In the settings tab, the text next to the slider for the touchpad touch sensitivity.">
-        Touch Sensitivity:
-      </message>
-      <message name="IDS_OPTIONS_SETTINGS_SPEED_FACTOR_DESCRIPTION" desc="In the settings tab, the text next to the slider for the touchpad speed factor.">
-        Speed Sensitivity:
+        Sensitivity:
       </message>
       <message name="IDS_OPTIONS_SETTINGS_MEDIAPLAYER_DESCRIPTION" desc="In the settings tab, the text next to the checkbox to turn on the mediaplayer">
-        Turn on the Mediaplayer
+        Enable Media Player
       </message>
       <message name="IDS_OPTIONS_SETTINGS_ADVANCEDFS_DESCRIPTION" desc="In the settings tab, the text next to the checkbox for the filesystem.">
         Advanced Filesystem including USB/SD card support.
       </message>
+      <message name="IDS_OPTIONS_SETTINGS_TALK_DESCRIPTION" desc="In the settings tab, the text next to the checkbox to turn on Talk.">
+        Use Google Talk to chat across browser tabs.
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_SIDE_TABS_DESCRIPTION" desc="In the settings tab, the text next to the checkbox to turn on side tabs.">
+        Show tabs on the left side.
+      </message>
       <message name="IDS_OPTIONS_SETTINGS_ACCESSIBILITY_DESCRIPTION" desc="In the settings tab, the text next to the checkbox for accessbility.">
-        Enable Accessibility
+        Enable accessibility features
       </message>
       <message name="IDS_OPTIONS_SETTINGS_KEYBOARD_LAYOUT_TEXT" desc="In the settings tab, the text of the keyboard layouti label.">
         Keyboard Layout:
@@ -8315,7 +9034,7 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Options...
       </message>
       <message name="IDS_OPTIONS_SETTINGS_OTHER_NETWORKS" desc="In the settings tab, the text on the button to display other networks.">
-        Other...
+        Add network...
       </message>
       <message name="IDS_OPTIONS_ACCOUNTS_ALLOW_BWSI_DESCRIPTION" desc="In the Accounts settings tab, the text on the checkbox to allow browse without signing in.">
         Allow browse without signing in.
@@ -8324,7 +9043,7 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Allow anyone to sign in.
       </message>
       <message name="IDS_OPTIONS_ACCOUNTS_SHOW_USER_NAMES_ON_SINGIN_DESCRIPTION" desc="In the Accounts settings tab, the text on the checkbox to show user names and pictures on signin screen.">
-        Show user names and pictures on sign-in screen.
+        Show usernames and pictures on sign-in page.
       </message>
       <message name="IDS_OPTIONS_ACCOUNTS_USERNAME_EDIT_HINT" desc="In the Accounts settings tab, the instruction text on an empty username edit.">
         Enter names or addresses.
@@ -8335,8 +9054,29 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_OPTIONS_ACCOUNTS_ADD_USERS" desc="In the Accounts settings tab, the label text above the user name edit box.">
         Add users
       </message>
+      <message name="IDS_OPTIONS_PERSONAL_ACCOUNT_GROUP_NAME" desc="In the Personal Stuff settings tab, the title text for Account section.">
+        Account
+      </message>
+      <message name="IDS_OPTIONS_ENABLE_SCREENLOCKER_CHECKBOX" desc="In the Personal Stuff settings tab, the text on the checkbox to enable screenlocker for current user.">
+        Require password to wake from sleep
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_TAB_WIFI" desc="In settings internet options, the title for buy cellular data plan button.">
+        Wi-Fi
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_TAB_PLAN" desc="In settings internet options, the title for buy cellular data plan button.">
+        Plan
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_TAB_CONNECTION" desc="In settings internet options, the title for buy cellular data plan button.">
+        Connection
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_TAB_DEVICE" desc="In settings internet options, the title for buy cellular data plan button.">
+        Device
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_TAB_NETWORK" desc="In settings internet options, the title for buy cellular data plan button.">
+        Network
+      </message>
       <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_ID" desc="In settings internet options, the label for the network id.">
-        Network id:
+        Network SSID:
       </message>
       <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_IDENTITY" desc="In settings internet options, the user identity for authentication.">
         Identity:
@@ -8360,13 +9100,19 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Network key format is incorrect.
       </message>
       <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_AUTO_CONNECT" desc="In settings internet options, the label for the auto-connect checkbox.">
-        Auto-connect to this network
+        Automatically connect to this network
       </message>
       <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_USAGE" desc="In settings internet options, the tab header for mobile plan usage tab.">
         Usage
       </message>
-      <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PURCHASE_MORE" desc="In settings internet options, the title for purchase more button.">
-        Purchase more...
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PURCHASE_MORE" desc="In settings internet options, the title for buy cellular data plan button.">
+        Buy data plan...
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_MORE_INFO" desc="In settings internet options, the title for button for getting more information about the current cellular data plan.">
+        More info...
+      </message>
+        <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_LOADING_PLAN" desc="In settings internet options, the message displayed while cellular data plan information is being loaded.">
+        Loading cellular data plan information, please wait...
       </message>
       <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_DATA_REMAINING" desc="In settings internet options, the label for mobile plan remaining data info.">
         Data remaining:
@@ -8387,13 +9133,10 @@ Keep your key file in a safe place. You will need it to create new versions of y
         You purchased <ph name="DATA_AMOUNT">$1<ex>3GB</ex></ph> of data on <ph name="DATE">$2<ex>January 1, 2011</ex></ph>
       </message>
       <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PURCHASE_UNLIMITED_DATA" desc="In settings internet options, the label that shows user has purchased an unliminted mobile data plan.">
-        You purchased unlimited data on <ph name="DATE">$2<ex>January 1, 2011</ex></ph>
+        You purchased unlimited data on <ph name="DATE">$1<ex>January 1, 2011</ex></ph>
       </message>
       <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CUSTOMER_SUPPORT" desc="In settings internet options, the text for customer support hyper link.">
         Customer support
-      </message>
-      <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_DONE" desc="In settings internet options, the label for the button done.">
-        Done
       </message>
       <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_LOGIN" desc="In settings internet options, the label for the button login.">
         Login
@@ -8401,7 +9144,10 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CONFIGURE" desc="In settings internet options, the label for to configure the type of connection.">
         Configure:
       </message>
-      <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ADDRESS" desc="In settings internet options, the label for address.">
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CONNECTION_STATE" desc="In settings internet options, the label for connection status.">
+        Connection Status:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ADDRESS" desc="In settings internet options, the label for IP address.">
         Address:
       </message>
       <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_SUBNETMASK" desc="In settings internet options, the label for subnet mask.">
@@ -8411,10 +9157,84 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Gateway:
       </message>
       <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_DNSSERVER" desc="In settings internet options, the label dns server.">
-        DNS Server:
+        DNS server:
       </message>
       <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_INSTALLED" desc="In settings internet options, a string telling the user where the network certificate is installed to.">
-        Installed.
+        Installed
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PASSWORD" desc="In settings internet options, a string telling the user where the network certificate is installed to.">
+        Password
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_SSID" desc="In settings internet options, a string telling the user where the network certificate is installed to.">
+        SSID
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_SHOWPASSWORD" desc="In settings internet options, a string telling the user where the network certificate is installed to.">
+        Show password
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_STATUS_TITLE" desc="In settings internet options, Title of the overlay when the user is connected.">
+        Connection Details
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CONNECT_TITLE" desc="In settings internet options, Title of the overlay when the user is not connected and can.">
+        Connect to network
+      </message>
+      <message name="IDS_NETWORK_RECONNECT_TITLE" desc="In network menu, title of the reconnect button that allows user to retry connection on error.">
+        Reconnect
+      </message>
+      <message name="IDS_NETWORK_REMEMBER_THIS_NETWORK_TITLE" desc="In network menu, title of checkbox that remembers the network when checked.">
+        Remember this network
+      </message>
+      <message name="IDS_NETWORK_SSID_HINT" desc="In network menu, hint text for network name field.">
+        network name
+      </message>
+      <message name="IDS_NETWORK_PASSWORD_HINT" desc="In network menu, hint text for network password field.">
+        network password
+      </message>
+
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_SERVICE_NAME" desc="Cellular service name under network details in chrome:settings/internet.">
+        Service name:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_NETWORK_TECHNOLOGY" desc="Cellular network technology label under network details in chrome:settings/internet.">
+        Network technology:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_OPERATOR" desc="Cellular network operator name label under network details in chrome:settings/internet.">
+        Operator:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_OPERATOR_CODE" desc="Cellular network operator code label under network details in chrome:settings/internet.">
+        Operator code:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_ACTIVATION_STATE" desc="Cellular network activation status label under network details in chrome:settings/internet.">
+        Activation:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_ROAMING_STATE" desc="Cellular network roaming status label under network details in chrome:settings/internet.">
+        Roaming:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_RESTRICTED_POOL" desc="Cellular network restricted network status label under network details in chrome:settings/internet.">
+        Restricted pool:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_ERROR_STATE" desc="Cellular network error status label under network details in chrome:settings/internet.">
+        Error info:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_MANUFACTURER" desc="Cellular device manufacturer label under network details in chrome:settings/internet.">
+        Manufacturer:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_MODEL_ID" desc="Cellular device model ID label under network details in chrome:settings/internet.">
+        Model:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_FIRMWARE_REVISION" desc="Cellular device firmware revision label under network details in chrome:settings/internet.">
+        Firmware:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_HARDWARE_REVISION" desc="Cellular device hardware revision label under network details in chrome:settings/internet.">
+        Hardware:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_LAST_UPDATE" desc="Cellular device last updated label under network details in chrome:settings/internet.">
+        Last updated:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_PRL_VERSION" desc="Cellular device PRL version label under network details in chrome:settings/internet.">
+        PRL version:
+      </message>
+
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CONTROL_TITLE" desc="In settings internet options, Title of the section which houses the enable/disable buttons.">
+        General
       </message>
       <message name="IDS_OPTIONS_SETTINGS_LANGUAGES_CUSTOMIZE" desc="In settings system options, the label for the customize button for languages and input">
         Customize languages and input...
@@ -8428,11 +9248,29 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_OPTIONS_SETTINGS_LANGUAGES_LANGUAGES" desc="The label for the list of languages">
         Languages
       </message>
-      <message name="IDS_EULA_ACCEPT_AND_CONTINUE_BUTTON" desc="Accept button text below EULA terms of service">
-	Accept and continue »
+      <message name="IDS_EULA_BACK_BUTTON" desc="Back button shown on EULA screen.">
+        « Back
       </message>
-      <message name="IDS_EULA_SYSTEM_SECURITY_SETTINGS_LINK" desc="Link from the EULA wizard screen">
-	System security settings
+      <message name="IDS_EULA_ACCEPT_AND_CONTINUE_BUTTON" desc="Accept button text below EULA terms of service">
+        Accept and continue »
+      </message>
+      <message name="IDS_EULA_SYSTEM_SECURITY_SETTING" desc="Link from the EULA wizard screen and title of the according dialog box">
+        System security setting
+      </message>
+      <message name="IDS_EULA_SYSTEM_SECURITY_SETTING_DESCRIPTION" desc="Dialog box text">
+        Your computer contains a Trusted Platform Module (TPM) security device, which is used to implement many critical security features in Chrome OS.
+      </message>
+      <message name="IDS_EULA_SYSTEM_SECURITY_SETTING_DESCRIPTION_KEY" desc="Dialog box text">
+        Below is the randomly generated TPM password that has been assigned to your computer:
+      </message>
+      <message name="IDS_EULA_SYSTEM_SECURITY_SETTING_WAIT" desc="Dialog box text">
+       The TPM is being set up. Please be patient; this may take a few minutes.
+      </message>
+      <message name="IDS_EULA_TPM_BUSY" desc="Message bubble text">
+        TPM is not ready yet, try later.
+      </message>
+      <message name="IDS_EULA_TPM_DISABLED" desc="Tooltip text describing why 'System security setting' link is disabled.">
+        Trusted Platform Module (TPM) chip is disabled or absent.
       </message>
       <message name="IDS_OPTION_DISABLED_BY_POLICY" desc="Tooltip for options managed by centrally-administered policy">
 	This option is controlled by an enterprise policy. Please contact your administrator for more information.
@@ -8960,11 +9798,11 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_OPTIONS_SETTINGS_LANGUAGES_SWITCH_INPUT_METHODS_HINT"
                desc="Explanatory message about how to switch input methods">
-        Hit <ph name="HOTKEY_NAME">$1<ex>alt-shift</ex></ph> to switch between input methods.
+        Press <ph name="HOTKEY_NAME">$1<ex>alt-shift</ex></ph> to switch between input methods.
       </message>
       <message name="IDS_OPTIONS_SETTINGS_LANGUAGES_SELECT_PREVIOUS_INPUT_METHOD_HINT"
                desc="Explanatory message about how to select the previous input method">
-        Hit <ph name="HOTKEY_NAME">$1<ex>ctrl-space</ex></ph> to select the previous input method.
+        Press <ph name="HOTKEY_NAME">$1<ex>ctrl-space</ex></ph> to select the previous input method.
       </message>
       <message name="IDS_OPTIONS_SETTINGS_LANGUAGES_DISPLAY_IN_THIS_LANGUAGE"
                desc="The label is used for a button that changes the UI
@@ -8978,6 +9816,18 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_OPTIONS_SETTINGS_LANGUAGES_CANNOT_BE_DISPLAYED_IN_THIS_LANGUAGE"
                desc="The label for a language that cannot be used for UI">
         <ph name="PRODUCT_NAME">$1<ex>Chrome OS</ex></ph> cannot be displayed in this language
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_USE_THIS_FOR_SPELL_CHECKING"
+               desc="The label for a language a button that changes the spell check language of Chrome OS">
+        Use this language for spell checking
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_CANNOT_BE_USED_FOR_SPELL_CHECKING"
+               desc="The label for a language that cannot be used for spell checking">
+        This language cannot be used for spell checking
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_IS_USED_FOR_SPELL_CHECKING"
+               desc="The label for a language that is currently used for spell checking">
+        This language is used for spell checking
       </message>
       <message name="IDS_OPTIONS_SETTINGS_LANGUAGES_M17N_STANDARD_INPUT_METHOD"
                desc="The label for a input method">
@@ -9115,7 +9965,7 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Ethernet
       </message>
       <message name="IDS_STATUSBAR_NETWORK_DEVICE_WIFI" desc="The wifi network device.">
-        Wifi
+        Wi-Fi
       </message>
       <message name="IDS_STATUSBAR_NETWORK_DEVICE_CELLULAR" desc="The cellular network device.">
         Cellular
@@ -9234,6 +10084,233 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_PROXY_PORT" desc="Label for the Port box.">
         Port
       </message>
+
+      <!-- Accessibility strings, to be spoken -->
+      <message name="IDS_CHROMEOS_ACC_BUTTON" desc="Label indicating that a control is a pushbutton.">
+        Button
+      </message>
+      <message name="IDS_CHROMEOS_ACC_CHECKBOX_UNCHECKED" desc="Label indicating that a control is an unchecked check box.">
+        Unchecked check box
+      </message>
+      <message name="IDS_CHROMEOS_ACC_CHECKBOX_CHECKED" desc="Label indicating that a control is a checked check box.">
+        Checked check box
+      </message>
+      <message name="IDS_CHROMEOS_ACC_RADIO_UNSELECTED" desc="Label indicating that a control is an unselected radio button.">
+        Unselected radio button
+      </message>
+      <message name="IDS_CHROMEOS_ACC_RADIO_SELECTED" desc="Label indicating that a control is a selected radio button.">
+        Selected radio button
+      </message>
+      <message name="IDS_CHROMEOS_ACC_COMBOBOX" desc="Label indicating that a control is a combo box, a control that pops down a list of options to choose from.">
+        Combo box
+      </message>
+      <message name="IDS_CHROMEOS_ACC_LISTBOX" desc="Label indicating that a control is a list box, a control that shows a fixed list of options to choose from.">
+        List box
+      </message>
+      <message name="IDS_CHROMEOS_ACC_LINK" desc="Label indicating that a control is a clickable link.">
+        Link
+      </message>
+      <message name="IDS_CHROMEOS_ACC_MENU" desc="Label indicating that a control is a menu that will drop down to reveal options if you click on it.">
+        Menu
+      </message>
+      <message name="IDS_CHROMEOS_ACC_TAB" desc="Label indicating that a control is one tab in a tabbed dialog or window.">
+        Tab
+      </message>
+      <message name="IDS_CHROMEOS_ACC_TEXTBOX" desc="Label indicating that a control is an editable text box.">
+        Text box
+      </message>
+      <message name="IDS_CHROMEOS_ACC_PASSWORDBOX" desc="Label indicating that a control is a secure editable text box for a password, where the keys you type will be obscured.">
+        Password text box
+      </message>
+      <message name="IDS_CHROMEOS_ACC_INDEX_OF_COUNT" desc="Phrase indicating that the current selected item is number INDEX out of a list of COUNT choices, for example if the list is A, B, C, D, E and the user has selected C the phrase would be '3 of 5'.">
+        <ph name="INDEX">$1<ex>3</ex></ph> of <ph name="COUNT">$2<ex>5</ex></ph>
+      </message>
+      <message name="IDS_CHROMEOS_ACC_HAS_SUBMENU" desc="Phrase indicating that a menu item has a submenu.">
+        Has submenu
+      </message>
+      <message name="IDS_CHROMEOS_ACC_SELECTED" desc="Phrase indicating that a control was selected or activated.">
+        Selected
+      </message>
+      <message name="IDS_CHROMEOS_ACC_EXCLAMATION_POINT" desc="The name of the exclamation point character.">
+        Exclamation point
+      </message>
+      <message name="IDS_CHROMEOS_ACC_LEFT_PAREN" desc="The name of the left parenthesis character, abbreviated or shortened if possible.">
+        Left paren
+      </message>
+      <message name="IDS_CHROMEOS_ACC_RIGHT_PAREN" desc="The name of the left parenthesis character, abbreviated or shortened if possible.">
+        Right paren
+      </message>
+      <message name="IDS_CHROMEOS_ACC_SEMICOLON" desc="The name of the semicolon character.">
+        Semicolon
+      </message>
+      <message name="IDS_CHROMEOS_ACC_COLON" desc="The name of the colon character.">
+        Colon
+      </message>
+      <message name="IDS_CHROMEOS_ACC_QUOTE" desc="The name of the quotation mark character, abbreviated or shortened if possible.">
+        Quote
+      </message>
+      <message name="IDS_CHROMEOS_ACC_COMMA" desc="The name of the comma character.">
+        Comma
+      </message>
+      <message name="IDS_CHROMEOS_ACC_PERIOD" desc="The name of the period character.">
+        Period
+      </message>
+      <message name="IDS_CHROMEOS_ACC_SPACE" desc="The name of a space character.">
+        Space
+      </message>
+      <message name="IDS_CHROMEOS_ACC_TEXT_UNSELECTED" desc="A phrase to indicate to the user that text has been unselected.">
+        Unselected
+      </message>
+
+      <!-- Network state strings for ChromeOS -->
+      <message name="IDS_CHROMEOS_NETWORK_STATE_UNKNOWN" desc="Network state in about:network: UNKNOWN">
+        Unknown
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_STATE_IDLE" desc="Network state in about:network: IDLE">
+        Idle
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_STATE_CARRIER" desc="Network state in about:network: CARRIER">
+        Carrier
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_STATE_ASSOCIATION" desc="Network state in about:network: ASSOCIATION">
+        Association
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_STATE_CONFIGURATION" desc="Network state in about:network: CONFIGURATION">
+        Configuration
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_STATE_READY" desc="Network state in about:network: READY">
+        Connected
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_STATE_DISCONNECT" desc="Network state in about:network: DISCONNECT">
+        Disconnect
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_STATE_FAILURE" desc="Network state in about:network: FAILURE">
+        Failure
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_STATE_ACTIVATION_FAILURE" desc="Network state in about:network: ACTIVATION_FAILURE">
+        Activation failure
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_STATE_UNRECOGNIZED" desc="Network state in about:network: Unrecognized">
+        Unrecognized state
+      </message>
+
+      <!-- Network error strings for ChromeOS -->
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_UNKNOWN" desc="Network error in about:network: UNKNOWN">
+        Unknown
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_OUT_OF_RANGE" desc="Network error in about:network: OUT_OF_RANGE">
+        Out of range
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_PIN_MISSING" desc="Network error in about:network: PIN_MISSING">
+        PIN missing
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_DHCP_FAILED" desc="Network error in about:network: DHCP_FAILED">
+        DHCP lookup failed
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_CONNECT_FAILED" desc="Network error in about:network: CONNECT_FAILED">
+        Connect failed
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_BAD_PASSPHRASE" desc="Network error in about:network: BAD_PASSPHRASE">
+        Bad passphrase
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_BAD_WEPKEY" desc="Network error in about:network: BAD_WEPKEY">
+        Bad WEP key
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_ACTIVATION_FAILED" desc="Network error in about:network: ACTIVATION_FAILED">
+        Activation failed
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_NEED_EVDO" desc="Network error in about:network: NEED_EVDO">
+        Need EVDO
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_NEED_HOME_NETWORK" desc="Network error in about:network: NEED_HOME_NETWORK">
+        Need home network
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_OTASP_FAILED" desc="Network error in about:network: OTASP_FAILED">
+        OTASP failed
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_AAA_FAILED" desc="Network error in about:network: AAA_FAILED">
+        AAA check failed
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ERROR_UNRECOGNIZED" desc="Network error in about:network: Unrecognized">
+        Unrecognized error
+      </message>
+
+      <!-- Cellular network technology description strings for ChromeOS -->
+      <message name="IDS_CHROMEOS_NETWORK_CELLULAR_TECHNOLOGY_UNKNOWN" desc="Description of unknown cellular network technology. Shown under details on chrome:stettings/internet page.">
+        Unknown
+      </message>
+
+      <!-- Cellular network activation state description strings for ChromeOS -->
+      <message name="IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_ACTIVATED" desc="Description of state of activated cellular data plan. Shown under details on chrome:stettings/internet page.">
+        Activated
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_ACTIVATING" desc="Description of state of currently activating cellular data plan. Shown under details on chrome:stettings/internet page.">
+        Activating
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_NOT_ACTIVATED" desc="Description of state of unactivated cellular data plan. Shown under details on chrome:stettings/internet page.">
+        Not activated
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_PARTIALLY_ACTIVATED" desc="Description of state of partially activated cellular data plan state. Shown under details on chrome:stettings/internet page.">
+        Partially activated
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ACTIVATION_STATE_UNKNOWN" desc="Description of cellular data plan with unknown status. Shown under details on chrome:stettings/internet page.">
+        Unknown
+      </message>
+
+      <!-- Cellular network roaming status description strings for ChromeOS -->
+      <message name="IDS_CHROMEOS_NETWORK_ROAMING_STATE_HOME" desc="Description of cellular roaming status while connected to home network. Shown under details on chrome:stettings/internet page.">
+        Home network, not roaming
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ROAMING_STATE_ROAMING" desc="Description of cellular roaming status while roaming. Shown under details on chrome:stettings/internet page.">
+        Roaming
+      </message>
+      <message name="IDS_CHROMEOS_NETWORK_ROAMING_STATE_UNKNOWN" desc="Description of unknown cellular roaming status. Shown under details on chrome:stettings/internet page.">
+        Unknown
+      </message>
+
+      <!-- Cellular network details -->
+      <message name="IDS_CHROMEOS_NETWORK_STATE" desc="Label for network state field under in chrome://options/internet">
+        Network status:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_OPERATOR" desc="Label for cellular network operator name under chrome://options/internet">
+        Operator:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_OPERATOR_CODE" desc="Label for cellular network operator code under chrome://options/internet">
+        Operator code:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_NETWORK_TECHNOLOGY" desc="Label for cellular network technology type under chrome://options/internet">
+        Technology:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_ACTIVATION_STATE" desc="Label for cellular network activation status under chrome://options/internet">
+        Activation status:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_ROAMING_STATE" desc="Label for cellular network roaming status under chrome://options/internet">
+        Roaming status:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_RESTRICTED_POOL" desc="Label for cellular network restricted network access under chrome://options/internet">
+        Restricted IP:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_ERROR_STATE" desc="Label for cellular network error details under chrome://options/internet">
+        Error details:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_MANUFACTURER" desc="Label for cellular network modem manufacturer under chrome://options/internet">
+        Device manufacturer:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_MODEL_ID" desc="Label for cellular network modem model under chrome://options/internet">
+        Device model:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_FIRMWARE_REVISION" desc="Label for cellular network modem firmware revision under chrome://options/internet">
+        Firmware revision:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_HARDWARE_REVISION" desc="Label for cellular network modem hardware revision under chrome://options/internet">
+        Hardware revision:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_LAST_UPDATE" desc="Label for cellular network modem last update time under chrome://options/internet">
+        Last update:
+      </message>
+      <message name="IDS_OPTIONS_SETTINGS_INTERNET_CELLULAR_PRL_VERSION" desc="Label for cellular network modem PRL (Preferred Roaming List) version under chrome://options/internet">
+        PRL version:
+      </message>
     </if>
     <if expr="pp_ifdef('chromeos') and lang == 'ja'">
       <message name="IDS_STATUSBAR_IME_JAPANESE_IME_STATUS_HIRAGANA" desc="In the language menu button, this shows a character set in use is set to Hiragana.">
@@ -9336,7 +10413,7 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Romanian
       </message>
       <message name="IDS_STATUSBAR_LAYOUT_USA" desc="In the language menu button, this shows the input mode.">
-        English (USA)
+        English (United States)
       </message>
       <message name="IDS_STATUSBAR_LAYOUT_USA_INTERNATIONAL" desc="In the language menu button, this shows the input mode.">
         English (USA international)
@@ -9416,7 +10493,13 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_STATUSBAR_LAYOUT_ISRAEL" desc="In the language menu button, this shows the input mode.">
         Hebrew
       </message>
+      <message name="IDS_STATUSBAR_LAYOUT_KOREA_104" desc="In the language menu button, this shows the input mode.">
+        Korean keyboard layout
+      </message>
 
+      <message name="IDS_LOGIN_ERROR_WHITELIST" desc="Couldn't log in because user is not whitelisted.">
+        Sorry, you are not allowed to login on this device.
+      </message>
       <message name="IDS_LOGIN_ERROR_AUTHENTICATING" desc="Couldn't log in because password is invalid">
         Sorry, your password could not be verified. Please try again.
       </message>
@@ -9435,14 +10518,20 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_NOTIFICATION_PANEL_TITLE" desc="Text for the title of the notification panel.">
         Notifications
       </message>
-      <message name="IDS_GUEST" desc="Shown in login panel for guest user">
-        New user
+      <message name="IDS_GUEST" desc="Shown in login panel for users that would like to browse without signin.">
+        Guest
+      </message>
+      <message name="IDS_ADD_USER" desc="Shown in login panel for adding new user to login screen.">
+        Add a user
       </message>
       <message name="IDS_LANGUAGES_MORE" desc="Main language list 'more' link. Expands all possible languages, not only the main ones.">
         More...
       </message>
       <message name="IDS_LOGIN_EMPTY_PASSWORD_TEXT" desc="Text to display in the password field when no password has been entered.">
         Password
+      </message>
+      <message name="IDS_LOGIN_POD_EMPTY_PASSWORD_TEXT" desc="Text to display in the password field for user pod when no password has been entered.">
+        Enter password
       </message>
     </if>
     <message name="IDS_BOOKMARK_BAR_IMPORT_LINK" desc="text shown for importing ">
@@ -9497,10 +10586,37 @@ Keep your key file in a safe place. You will need it to create new versions of y
       Speak now
     </message>
     <message name="IDS_SPEECH_INPUT_ERROR" desc="Message shown when audio recording failed with an error during speech recognition.">
-      There was an error in recording audio. Please check if a microphone properly connected before trying again.
+      Audio recording device returned an error.
     </message>
     <message name="IDS_SPEECH_INPUT_NO_MIC" desc="Message shown when speech recognizer could not find a suitable microphone or other audio input device.">
-      No audio recording devices found. Please check if you have a microphone properly connected before trying again.
+      No audio recording devices found.
+    </message>
+    <message name="IDS_SPEECH_INPUT_NO_SPEECH" desc="Message shown when speech recognizer detected no speech in the recorded audio.">
+      No speech heard.
+    </message>
+    <message name="IDS_SPEECH_INPUT_NO_RESULTS" desc="Message shown when speech recognizer returned zero results.">
+      No matches found.
+    </message>
+    <message name="IDS_SPEECH_INPUT_TRY_AGAIN" desc="Text shown on a button to retry speech recognition">
+      Try again
+    </message>
+
+    <message name="IDS_IMAGE_FILES" desc="The description of the image file extensions in the select file dialog.">
+      Image Files
+    </message>
+    <message name="IDS_AUDIO_FILES" desc="The description of the audio file extensions in the select file dialog.">
+      Audio Files
+    </message>
+    <message name="IDS_VIDEO_FILES" desc="The description of the video file extensions in the select file dialog.">
+      Video Files
+    </message>
+    <message name="IDS_CUSTOM_FILES" desc="The description of the custom file extensions in the select file dialog.">
+      Custom Files
+    </message>
+
+    <!-- Cloud Print Strings -->
+    <message name="IDS_CLOUD_PRINT_TOKEN_EXPIRED_MESSAGE" desc="The message to display when the cloud print token has expired.">
+      The credentials used to share your printers have expired. Please click here to re-enter your username and password.
     </message>
 
     </messages>

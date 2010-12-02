@@ -10,17 +10,24 @@
 #include "base/basictypes.h"
 #include "base/json/json_writer.h"
 #include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/extensions/extension_event_names.h"
 #include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
+#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 
 using base::IntToString;
 namespace events = extension_event_names;
+
+namespace {
 
 const char kAppLaunchUrlKey[] = "appLaunchUrl";
 const char kEnabledKey[] = "enabled";
@@ -31,8 +38,11 @@ const char kNameKey[] = "name";
 const char kOptionsUrlKey[] = "optionsUrl";
 const char kSizeKey[] = "size";
 const char kUrlKey[] = "url";
+const char kVersionKey[] = "version";
 
 const char kNoExtensionError[] = "No extension with id *";
+const char kNotAnAppError[] = "Extension * is not an App";
+}
 
 ExtensionsService* ExtensionManagementFunction::service() {
   return profile()->GetExtensionsService();
@@ -45,6 +55,7 @@ static DictionaryValue* CreateExtensionInfo(const Extension& extension,
   info->SetBoolean(kIsAppKey, extension.is_app());
   info->SetString(kNameKey, extension.name());
   info->SetBoolean(kEnabledKey, enabled);
+  info->SetString(kVersionKey, extension.VersionString());
   if (!extension.options_url().is_empty())
     info->SetString(kOptionsUrlKey,
                     extension.options_url().possibly_invalid_spec());
@@ -52,7 +63,7 @@ static DictionaryValue* CreateExtensionInfo(const Extension& extension,
     info->SetString(kAppLaunchUrlKey,
                     extension.GetFullLaunchURL().possibly_invalid_spec());
 
-  const std::map<int, std::string>& icons = extension.icons();
+  const ExtensionIconSet::IconMap& icons = extension.icons().map();
   if (!icons.empty()) {
     ListValue* icon_list = new ListValue();
     std::map<int, std::string>::const_iterator icon_iter;
@@ -93,6 +104,27 @@ bool GetAllExtensionsFunction::RunImpl() {
   return true;
 }
 
+bool LaunchAppFunction::RunImpl() {
+  std::string extension_id;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &extension_id));
+  Extension* extension = service()->GetExtensionById(extension_id, true);
+  if (!extension) {
+    error_ = ExtensionErrorUtils::FormatErrorMessage(kNoExtensionError,
+                                                     extension_id);
+    return false;
+  }
+  if (!extension->is_app()) {
+    error_ = ExtensionErrorUtils::FormatErrorMessage(kNotAnAppError,
+                                                     extension_id);
+    return false;
+  }
+
+  extension_misc::LaunchContainer container = extension->launch_container();
+  Browser::OpenApplication(profile(), extension, container, NULL);
+
+  return true;
+}
+
 bool SetEnabledFunction::RunImpl() {
   std::string extension_id;
   bool enable;
@@ -117,11 +149,6 @@ bool SetEnabledFunction::RunImpl() {
   return true;
 }
 
-bool InstallFunction::RunImpl() {
-  NOTIMPLEMENTED();
-  return false;
-}
-
 bool UninstallFunction::RunImpl() {
   std::string extension_id;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &extension_id));
@@ -135,7 +162,6 @@ bool UninstallFunction::RunImpl() {
   service()->UninstallExtension(extension_id, false /* external_uninstall */);
   return true;
 }
-
 
 // static
 ExtensionManagementEventRouter* ExtensionManagementEventRouter::GetInstance() {
@@ -185,14 +211,20 @@ void ExtensionManagementEventRouter::Observe(
   }
 
   Profile* profile = Source<Profile>(source).ptr();
-  Extension* extension = Details<Extension>(details).ptr();
   CHECK(profile);
-  CHECK(extension);
 
-  ExtensionsService* service = profile->GetExtensionsService();
-  bool enabled = service->GetExtensionById(extension->id(), false) != NULL;
   ListValue args;
-  args.Append(CreateExtensionInfo(*extension, enabled));
+  if (event_name == events::kOnExtensionUninstalled) {
+    const std::string& extension_id =
+        Details<UninstalledExtensionInfo>(details).ptr()->extension_id;
+    args.Append(Value::CreateStringValue(extension_id));
+  } else {
+    Extension* extension = Details<Extension>(details).ptr();
+    CHECK(extension);
+    ExtensionsService* service = profile->GetExtensionsService();
+    bool enabled = service->GetExtensionById(extension->id(), false) != NULL;
+    args.Append(CreateExtensionInfo(*extension, enabled));
+  }
 
   std::string args_json;
   base::JSONWriter::Write(&args, false /* pretty_print */, &args_json);
@@ -201,6 +233,6 @@ void ExtensionManagementEventRouter::Observe(
       profile->GetExtensionMessageService();
   message_service->DispatchEventToRenderers(event_name,
                                             args_json,
-                                            profile,
+                                            NULL,
                                             GURL());
 }

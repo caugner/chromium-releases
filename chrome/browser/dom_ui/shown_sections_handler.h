@@ -8,27 +8,33 @@
 
 #include "chrome/browser/dom_ui/dom_ui.h"
 #include "chrome/common/notification_observer.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 
 class DOMUI;
 class Value;
 class PrefService;
 
 // Use for the shown sections bitmask.
+// Currently, only the THUMB and APPS sections can be toggled by the user. Other
+// sections are shown automatically if they have data, and hidden otherwise.
 enum Section {
-  THUMB = 1,
-  LIST = 2,
-  RECENT = 4,
-  TIPS = 8,
-  SYNC = 16,
-  DEBUG = 32,
-  APPS = 64
+  // If one of these is set, the corresponding section shows large thumbnails,
+  // else it shows only a small overview list.
+  THUMB = 1 << 0,
+  APPS = 1 << 6,
+
+  // If one of these is set, then the corresponding section is shown minimized
+  // at the bottom of the NTP and no data is directly visible on the NTP.
+  MINIMIZED_THUMB = 1 << (0 + 16),
+  MINIMIZED_RECENT = 1 << (2 + 16),
+  MINIMIZED_APPS = 1 << (6 + 16),
 };
 
 class ShownSectionsHandler : public DOMMessageHandler,
                              public NotificationObserver {
  public:
   explicit ShownSectionsHandler(PrefService* pref_service);
-  virtual ~ShownSectionsHandler();
+  virtual ~ShownSectionsHandler() {}
 
   // Helper to get the current shown sections.
   static int GetShownSections(PrefService* pref_service);
@@ -55,6 +61,7 @@ class ShownSectionsHandler : public DOMMessageHandler,
 
  private:
   PrefService* pref_service_;
+  PrefChangeRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ShownSectionsHandler);
 };

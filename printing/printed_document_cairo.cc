@@ -22,6 +22,14 @@ void PrintedDocument::RenderPrintedPage(
   }
 #endif
 
+  DCHECK(context);
+
+  NOTIMPLEMENTED();
+}
+
+void PrintedDocument::DrawHeaderFooter(gfx::NativeDrawingContext context,
+                                       std::wstring text,
+                                       gfx::Rect bounds) const {
   NOTIMPLEMENTED();
 }
 

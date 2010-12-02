@@ -947,33 +947,173 @@
    fun:MessageLoop::RunTask
 }
 {
-   bug_53936_a
+   bug_54689
+   Heapcheck:Leak
+   fun:WTF::fastMalloc
+   fun:WTF::StringImpl::createUninitialized
+   fun:WTF::String::fromUTF8
+   fun:WebKit::WebString::fromUTF8
+   fun:WebKit::WebString::fromUTF8
+   fun:RenderViewTest::GetElementBounds
+   fun:RenderViewTest::SimulateElementClick
+   fun:RenderViewTest_PageClickTracker_Test::TestBody
+}
+{
+   bug_54689_b
+   Heapcheck:Leak
+   fun:WTF::fastMalloc
+   fun:WTF::FastAllocBase::operator new
+   fun:WebCore::MouseEvent::create
+   fun:WebCore::Node::dispatchMouseEvent
+   fun:WebCore::Node::dispatchMouseEvent
+   fun:WebCore::EventHandler::dispatchMouseEvent
+   fun:WebCore::EventHandler::handleMousePressEvent
+   fun:WebKit::WebViewImpl::mouseDown
+   fun:WebKit::WebViewImpl::handleInputEvent
+   fun:RenderWidget::OnHandleInputEvent
+   fun:RenderViewTest::SimulateElementClick
+   fun:RenderViewTest_PageClickTracker_Test::TestBody
+}
+{
+   bug_56676_a
+   Heapcheck:Leak
+   fun:__gnu_cxx::new_allocator::allocate
+   fun:std::_Vector_base::_M_allocate
+   fun:std::vector::_M_allocate_and_copy
+   fun:std::vector::operator=
+   fun:MockDispatcher::DidReadDirectory
+   fun:fileapi::FileSystemOperation::DidReadDirectory
+}
+{
+   bug_56676_b
    Heapcheck:Leak
    fun:__gnu_cxx::new_allocator::allocate
    fun:std::string::_Rep::_S_create
-   fun:std::string::_Rep::_M_clone
-   fun:std::string::reserve
-   fun:std::string::append
-   fun:FilePath::Append
-   fun:chrome::GetUserDownloadsDirectory
-   fun:chrome::PathProvider
-   fun:PathService::Get
-   fun:DefaultDownloadDirectory
-   fun:DefaultSingletonTraits::New
-   fun:Singleton::get
-   fun:download_util::GetDefaultDownloadDirectory
-   fun:DownloadPrefs::RegisterUserPrefs
-   fun:browser::RegisterUserPrefs
-   fun:browser::RegisterAllPrefs
+   fun:std::string::_S_construct
+   fun:std::string::_S_construct_aux
+   fun:std::string::_S_construct
+   fun:basic_string
+   fun:file_util::FileEnumerator::ReadDirectory
+   fun:file_util::FileEnumerator::Next
+   fun:::RelayReadDirectory::RunWork
+   fun:::MessageLoopRelay::ProcessOnTargetThread
 }
 {
-   bug_53936_b
+   bug_57456
    Heapcheck:Leak
-   fun:CancelableTask* NewRunnableFunction
-   fun:DownloadPrefs::RegisterUserPrefs
-   fun:browser::RegisterUserPrefs
-   fun:browser::RegisterAllPrefs
-   fun:TestingProfile::GetPrefs
-   fun:Browser
-   fun:BookmarkBarGtkUnittest
+   fun:net::DnsRRResolver::Resolve
+   fun:net::DnsRRResolverTest_Resolve_Test::TestBody
+   fun:testing::Test::Run
+}
+{
+   bug_57683
+   Heapcheck:Leak
+   ...
+   fun:logging::MakeCheckOpString
+   fun:logging::CheckNEImpl
+   fun:logging::::LoggingTest_ChecksAreNotLazy_Test::TestBody
+}
+{
+   bug_57799
+   Heapcheck:Leak
+   fun:cricket::Transport::OnRemoteCandidate
+   fun:cricket::Transport::OnRemoteCandidates
+   fun:cricket::Session::OnTransportInfoMessage
+   fun:cricket::Session::OnIncomingMessage
+   fun:cricket::SessionManager::OnIncomingMessage
+   fun:remoting::SessionManagerPair::DeliverMessage
+   fun:remoting::SessionManagerPair::DoProcessMessage
+}
+{
+   bug_57910
+   Heapcheck:Leak
+   fun:inflateInit2_
+   fun:remoting::DecompressorZlib::InitStream
+   fun:remoting::DecompressorZlib::Reset
+   fun:~DecompressorZlib
+}
+{
+   bug_57966a
+   Heapcheck:Leak
+   ...
+   fun:cricket::AllocationSequence::CreateUDPPorts
+   fun:cricket::AllocationSequence::OnMessage
+   fun:AllocationSequence
+   fun:cricket::BasicPortAllocatorSession::OnAllocate
+   fun:cricket::BasicPortAllocatorSession::OnMessage
+}
+{
+   bug_57966b
+   Heapcheck:Leak
+   ...
+   fun:talk_base::NetworkManager::CreateNetworks
+   fun:talk_base::NetworkManager::EnumNetworks
+   fun:talk_base::NetworkManager::GetNetworks
+   fun:cricket::BasicPortAllocatorSession::OnAllocate
+   fun:cricket::BasicPortAllocatorSession::OnMessage
+}
+{
+   bug_57966c
+   Heapcheck:Leak
+   ...
+   fun:remoting::JingleChromotingConnection::OnAccept
+   fun:remoting::JingleChromotingConnection::OnSessionState
+   fun:sigslot::_connection2::emit
+   fun:sigslot::signal2::operator
+   fun:cricket::BaseSession::SetState
+   fun:cricket::Session::Accept
+}
+{
+   bug_58094
+   Heapcheck:Leak
+   fun:__gnu_cxx::new_allocator::allocate
+   fun:std::string::_Rep::_S_create
+   fun:std::string::_S_construct
+   fun:std::string::_S_construct_aux
+   fun:std::string::_S_construct
+   fun:basic_string
+   fun:std::basic_stringbuf::str
+   fun:std::basic_ostringstream::str
+   fun:talk_base::SocketAddress::IPToString
+   fun:talk_base::SocketAddress::IPAsString
+   fun:cricket::P2PTransportParser::WriteCandidate
+   fun:cricket::P2PTransportParser::WriteCandidates
+   fun:cricket::WriteCandidates
+   fun:cricket::WriteJingleTransportInfo
+   fun:cricket::WriteJingleTransportInfos
+   fun:cricket::WriteTransportInfos
+   fun:cricket::Session::WriteSessionAction
+   fun:cricket::Session::WriteActionMessage
+   fun:cricket::Session::WriteActionMessage
+   fun:cricket::Session::SendMessage
+   fun:cricket::Session::SendTransportInfoMessage
+   fun:cricket::Session::OnTransportCandidatesReady
+}
+{
+   bug_58474_a
+   Heapcheck:Leak
+   ...
+   fun:FileSystemHostContextTest_CheckValidPath_Test::TestBody
+   fun:testing::Test::Run
+   fun:testing::internal::TestInfoImpl::Run
+   fun:testing::TestCase::Run
+   fun:testing::internal::UnitTestImpl::RunAllTests
+   fun:testing::UnitTest::Run
+   fun:base::TestSuite::Run
+   fun:main
+   fun:__libc_start_main
+}
+{
+   bug_58474_b
+   Heapcheck:Leak
+   ...
+   fun:FileSystemHostContextTest_GetRootPath_Test::TestBody
+   fun:testing::Test::Run
+   fun:testing::internal::TestInfoImpl::Run
+   fun:testing::TestCase::Run
+   fun:testing::internal::UnitTestImpl::RunAllTests
+   fun:testing::UnitTest::Run
+   fun:base::TestSuite::Run
+   fun:main
+   fun:__libc_start_main
 }

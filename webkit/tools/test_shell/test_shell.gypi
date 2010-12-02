@@ -281,7 +281,7 @@
         ['OS=="mac"', {
           'product_name': 'TestShell',
           'dependencies': [
-            'layout_test_helper',
+            'layout_test_helper', 'copy_mesa',
           ],
           'variables': {
             'repack_path': '../../../tools/data_pack/repack.py',
@@ -370,10 +370,14 @@
         '../../appcache/mock_appcache_storage_unittest.cc',
         '../../blob/blob_storage_controller_unittest.cc',
         '../../blob/blob_url_request_job_unittest.cc',
+        '../../blob/deletable_file_reference_unittest.cc',
         '../../database/databases_table_unittest.cc',
         '../../database/database_tracker_unittest.cc',
         '../../database/database_util_unittest.cc',
         '../../database/quota_table_unittest.cc',
+        '../../fileapi/file_system_operation_unittest.cc',
+        '../../fileapi/file_system_path_manager_unittest.cc',
+        '../../fileapi/file_system_quota_unittest.cc',
         '../../glue/bookmarklet_unittest.cc',
         '../../glue/context_menu_unittest.cc',
         '../../glue/cpp_bound_class_unittest.cc',
@@ -389,6 +393,7 @@
         '../../glue/mimetype_unittest.cc',
         '../../glue/mock_resource_loader_bridge.h',
         '../../glue/multipart_response_delegate_unittest.cc',
+        '../../glue/plugins/plugin_group_unittest.cc',
         '../../glue/plugins/plugin_lib_unittest.cc',
         '../../glue/plugins/webplugin_impl_unittest.cc',
         '../../glue/regular_expression_unittest.cc',
@@ -421,6 +426,15 @@
             '<(SHARED_INTERMEDIATE_DIR)/webkit',
           ],
           'sources': [ '<@(test_shell_windows_resource_files)' ],
+          'configurations': {
+            'Debug_Base': {
+              'msvs_settings': {
+                'VCLinkerTool': {
+                  'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
+                },
+              },
+            },
+          },
         }],
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
           'dependencies': [
@@ -637,6 +651,9 @@
             '../npapi_pepper_test_plugin/plugin.rc',
             '../npapi_pepper_test_plugin/test_factory.cc',
           ],
+          'include_dirs': [
+            '../../..',
+          ],
           'conditions': [
             ['OS!="win"', {
               # windows-specific resources
@@ -754,6 +771,15 @@
               '$(SDKROOT)/System/Library/Frameworks/AppKit.framework',
             ],
           },
+        },
+        {
+          'target_name': 'copy_mesa',
+          'type': 'none',
+          'dependencies': ['<(DEPTH)/third_party/mesa/mesa.gyp:osmesa'],
+          'copies': [{
+            'destination': '<(PRODUCT_DIR)/TestShell.app/Contents/MacOS/',
+            'files': ['<(PRODUCT_DIR)/osmesa.so'],
+          }],
         },
       ],
     }],

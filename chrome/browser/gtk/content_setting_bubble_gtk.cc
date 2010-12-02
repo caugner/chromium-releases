@@ -7,7 +7,7 @@
 #include "app/l10n_util.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/blocked_popup_container.h"
+#include "chrome/browser/blocked_content_container.h"
 #include "chrome/browser/content_setting_bubble_model.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
@@ -87,14 +87,13 @@ void ContentSettingBubbleGtk::BuildBubble() {
 
     for (std::set<std::string>::const_iterator it = plugins.begin();
         it != plugins.end(); ++it) {
-      WebPluginInfo plugin;
       std::string name;
-      if (NPAPI::PluginList::Singleton()->GetPluginInfoByPath(FilePath(*it),
-                                                              &plugin)) {
-        name = UTF16ToUTF8(plugin.name);
-      } else {
+      NPAPI::PluginList::PluginMap groups;
+      NPAPI::PluginList::Singleton()->GetPluginGroups(false, &groups);
+      if (groups.find(*it) != groups.end())
+        name = UTF16ToUTF8(groups[*it]->GetGroupName());
+      else
         name = *it;
-      }
 
       GtkWidget* label = gtk_label_new(name.c_str());
       GtkWidget* label_box = gtk_hbox_new(FALSE, 0);

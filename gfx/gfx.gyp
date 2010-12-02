@@ -50,6 +50,10 @@
           ],
           'msvs_settings': {
             'VCLinkerTool': {
+              'DelayLoadDLLs': [
+                'd2d1.dll',
+                'd3d10_1.dll',
+              ],
               'AdditionalDependencies': [
                 'd2d1.lib',
                 'd3d10_1.lib',
@@ -78,6 +82,7 @@
         '../third_party/libpng/libpng.gyp:libpng',
         '../third_party/sqlite/sqlite.gyp:sqlite',
         '../third_party/zlib/zlib.gyp:zlib',
+        'gfx_resources',
       ],
       'sources': [
         'blit.cc',
@@ -142,7 +147,9 @@
             'native_theme_win.cc',
             'native_theme_win.h',
             'window_impl.cc',
-            'window_impl.h'
+            'window_impl.h',
+            'win_util.cc',
+            'win_util.h',
           ],
           'include_dirs': [
             '..',
@@ -161,6 +168,8 @@
             'gtk_native_view_id_manager.h',
             'gtk_util.cc',
             'gtk_util.h',
+            'native_theme_linux.cc',
+            'native_theme_linux.h',
             'native_widget_types_gtk.cc',
           ],
         }],

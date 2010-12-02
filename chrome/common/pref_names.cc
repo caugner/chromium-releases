@@ -9,6 +9,13 @@ namespace prefs {
 // *************** PROFILE PREFS ***************
 // These are attached to the user profile
 
+// A counter that controls whether the apps promo is shown in the app launcher
+// or not.
+const char kAppsPromoCounter[] = "apps_promo_counter";
+
+// Whether we have installed default apps yet in this profile.
+const char kDefaultAppsInstalled[] = "default_apps_installed";
+
 // A boolean specifying whether the New Tab page is the home page or not.
 const char kHomePageIsNewTabPage[] = "homepage_is_newtabpage";
 
@@ -98,6 +105,11 @@ const char kShowBookmarkBar[] = "bookmark_bar.show_on_all_tabs";
 // passwords and fill in known passwords).
 const char kPasswordManagerEnabled[] = "profile.password_manager_enabled";
 
+// Boolean controlling whether the password manager allows to retrieve passwords
+// in clear text.
+const char kPasswordManagerAllowShowPasswords[] =
+    "profile.password_manager_allow_show_passwords";
+
 // OBSOLETE.  Boolean that is true if the form AutoFill is on (will record
 // values entered in text inputs in forms and shows them in a popup when user
 // type in a text input with the same name later on).  This has been superseded
@@ -118,6 +130,10 @@ const char kSearchSuggestEnabled[] = "search.suggest_enabled";
 // 2 - block all cookies
 const char kCookieBehavior[] = "security.cookie_behavior";
 
+// Whether having a default search provider is enabled.
+const char kDefaultSearchProviderEnabled[] =
+    "default_search_provider.enabled";
+
 // The URL (as understood by TemplateURLRef) the default search provider uses
 // for searches.
 const char kDefaultSearchProviderSearchURL[] =
@@ -128,8 +144,26 @@ const char kDefaultSearchProviderSearchURL[] =
 const char kDefaultSearchProviderSuggestURL[] =
     "default_search_provider.suggest_url";
 
+// The URL (as understood by TemplateURLRef) the default search provider uses
+// for instant results.
+const char kDefaultSearchProviderInstantURL[] =
+    "default_search_provider.instant_url";
+
+// The Fav Icon URL (as understood by TemplateURLRef) of the default search
+// provider.
+const char kDefaultSearchProviderIconURL[] =
+    "default_search_provider.icon_url";
+
+// The input encoding (as understood by TemplateURLRef) supported by the default
+// search provider.  The various encodings are separated by ';'
+const char kDefaultSearchProviderEncodings[] =
+    "default_search_provider.encodings";
+
 // The name of the default search provider.
 const char kDefaultSearchProviderName[] = "default_search_provider.name";
+
+// The keyword of the default search provider.
+const char kDefaultSearchProviderKeyword[] = "default_search_provider.keyword";
 
 // The id of the default search provider.
 const char kDefaultSearchProviderID[] = "default_search_provider.id";
@@ -169,6 +203,12 @@ const char kDnsHostReferralList[] = "HostReferralList";
 // Is the cookie prompt expanded?
 const char kCookiePromptExpanded[] = "cookieprompt.expanded";
 
+// Boolean pref indicating whether the instant confirm dialog has been shown.
+const char kInstantConfirmDialogShown[] = "instant.confirm_dialog_shown";
+
+// Boolean pref indicating if instant is enabled.
+const char kInstantEnabled[] = "instant.enabled";
+
 #if defined(USE_NSS)
 // Prefs for SSLConfigServicePref.  Currently, these are only present on
 // and used by NSS-using OSes.
@@ -182,15 +222,8 @@ const char kTLS1Enabled[] = "ssl.tls1.enabled";
 // A boolean pref set to true if TapToClick is being done in browser.
 const char kTapToClickEnabled[] = "settings.touchpad.enable_tap_to_click";
 
-// A boolean pref set to true if VertEdgeScroll is being done in browser.
-const char kVertEdgeScrollEnabled[] =
-    "settings.touchpad.enable_vert_edge_scroll";
-
-// A integer pref for the touchpad speed factor.
-const char kTouchpadSpeedFactor[] = "settings.touchpad.speed_factor";
-
 // A integer pref for the touchpad sensitivity.
-const char kTouchpadSensitivity[] = "settings.touchpad.sensitivity";
+const char kTouchpadSensitivity[] = "settings.touchpad.sensitivity2";
 
 // A string pref set to the current input method.
 const char kLanguageCurrentInputMethod[] =
@@ -361,6 +394,13 @@ const char kLabsAdvancedFilesystemEnabled[] =
 // A boolean pref which turns on the mediaplayer.
 const char kLabsMediaplayerEnabled[] = "settings.labs.mediaplayer";
 
+// An integer pref which maps to the extension state for Talk.
+const char kLabsTalkEnabled[] =
+    "extensions.settings.ggnioahjipcehijkhpdjekioddnjoben.state";
+
+// A boolean pref that turns on screen locker.
+const char kEnableScreenLock[] = "settings.enable_screen_lock";
+
 #endif  // defined(OS_CHROMEOS)
 
 // The disabled messages in IPC logging.
@@ -396,6 +436,12 @@ const char kEnabledLabsExperiments[] = "browser.enabled_labs_experiments";
 
 // Boolean pref to define the default values for using auto spell correct.
 const char kEnableAutoSpellCorrect[] = "browser.enable_autospellcorrect";
+
+// Boolean controlling whether history saving is disabled.
+const char kSavingBrowserHistoryDisabled[] = "history.saving_disabled";
+
+// Boolean controlling whether printing is enabled.
+const char kPrintingEnabled[] = "printing.enabled";
 
 // String pref to define the default values for print overlays.
 const char kPrintingPageHeaderLeft[] = "printing.page.header.left";
@@ -435,7 +481,7 @@ const char kPluginsPluginsBlacklist[] = "plugins.plugins_blacklist";
 
 // When first shipped, the pdf plugin will be disabled by default.  When we
 // enable it by default, we'll want to do so only once.
-const char kPluginsEnabledInternalPDF[] = "plugins.enabled_internal_pdf";
+const char kPluginsEnabledInternalPDF[] = "plugins.enabled_internal_pdf2";
 
 // Boolean that indicates whether we should check if we are the default browser
 // on start-up.
@@ -485,6 +531,9 @@ const char kContentSettingsPatterns[] = "profile.content_settings.patterns";
 // regardless of other content settings.
 const char kBlockThirdPartyCookies[] = "profile.block_third_party_cookies";
 
+// Boolean that is true if non-sandboxed plug-ins should be blocked.
+const char kBlockNonsandboxedPlugins[] = "profile.block_nonsandboxed_plugins";
+
 // Boolean that is true when all locally stored site data (e.g. cookies, local
 // storage, etc..) should be deleted on exit.
 const char kClearSiteDataOnExit[] = "profile.clear_site_data_on_exit";
@@ -509,6 +558,9 @@ const char kAutoFillPositiveUploadRate[] = "autofill.positive_upload_rate";
 
 // Double that indicates negative (for not matched forms) upload rate.
 const char kAutoFillNegativeUploadRate[] = "autofill.negative_upload_rate";
+
+// Boolean option set to true on the first run. Non-persistent.
+const char kAutoFillPersonalDataManagerFirstRun[] = "autofill.pdm.first_run";
 
 // Boolean that is true when the tabstrip is to be laid out vertically down the
 // side of the browser window.
@@ -857,26 +909,34 @@ const char kNTPMostVisitedURLsBlacklist[] = "ntp.most_visited_blacklist";
 // Page.
 const char kNTPMostVisitedPinnedURLs[] = "ntp.pinned_urls";
 
-// Data downloaded from resource pages (JSON, RSS) to be displayed in the
-// recommendations portion of the NTP.
-const char kNTPTipsCache[] = "ntp.tips_cache";
+// Data downloaded from resource pages (JSON, RSS) to be used to dynamically
+// deliver data for the new tab page.
+const char kNTPWebResourceCache[] = "ntp.web_resource_cache";
 
-// Last time of update of tips_cache.
-const char kNTPTipsCacheUpdate[] = "ntp.tips_cache_update";
+// Last time of update of web_resource_cache.
+const char kNTPWebResourceCacheUpdate[] = "ntp.web_resource_cache_update";
 
-// Last server used to fill tips_cache.
-const char kNTPTipsServer[] = "ntp.tips_server";
+// Last server used to fill tips.
+const char kNTPTipsResourceServer[] = "ntp.tips_resource_server";
+
+// Last server used to fill logo_resource_cache.
+const char kNTPLogoResourceServer[] = "ntp.alt_logo_resource_server";
 
 // Which sections should be visible on the new tab page
 // 1 - Show the most visited sites in a grid
 // 2 - Show the most visited sites as a list
 // 4 - Show the recent section
-// 8 - Show tips
-// 16 - show sync status
+// 8 - (Show tips -- DEPRECATED)
+// 16 - Show sync status
 const char kNTPShownSections[] = "ntp.shown_sections";
 
 // This pref is used for migrating the prefs for the NTP
 const char kNTPPrefVersion[] = "ntp.pref_version";
+
+// Dates between which the NTP should show a custom logo rather than the
+// standard one.
+const char kNTPCustomLogoStart[] = "ntp.alt_logo_start";
+const char kNTPCustomLogoEnd[] = "ntp.alt_logo_end";
 
 // A boolean specifying whether dev tools window should be opened docked.
 const char kDevToolsOpenDocked[] = "devtools.open_docked";
@@ -915,9 +975,20 @@ const char kSyncManaged[] = "sync.managed";
 // used when sync is disabled by the user via the privacy dashboard.
 const char kSyncSuppressStart[] = "sync.suppress_start";
 
+// Boolean to reperesent if sync credentials have been migrated from the
+// user settings DB to the token service.
+const char kSyncCredentialsMigrated[] = "sync.credentials_migrated";
+
 // A string that can be used to restore sync encryption infrastructure on
 // startup so that the user doesn't need to provide credentials on each start.
 const char kEncryptionBootstrapToken[] = "sync.encryption_bootstrap_token";
+
+// Boolean tracking whether the user chose to specify a secondary encryption
+// passphrase.
+const char kSyncUsingSecondaryPassphrase[] = "sync.using_secondary_passphrase";
+
+// String that identifies the user logged into sync and other google services.
+const char kGoogleServicesUsername[] = "google.services.username";
 
 // Create web application shortcut dialog preferences.
 const char kWebAppCreateOnDesktop[] = "browser.web_app.create_on_desktop";

@@ -4,6 +4,9 @@
 
 #include "webkit/glue/webaccessibility.h"
 
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityCache.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityObject.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityRole.h"
@@ -11,7 +14,9 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDocumentType.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFormControlElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebNamedNodeMap.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
@@ -226,11 +231,21 @@ uint32 ConvertState(const WebAccessibilityObject& o) {
   if (o.isChecked())
     state |= (1 << WebAccessibility::STATE_CHECKED);
 
+  if (o.isCollapsed())
+    state |= (1 << WebAccessibility::STATE_COLLAPSED);
+
   if (o.canSetFocusAttribute())
     state |= (1 << WebAccessibility::STATE_FOCUSABLE);
 
   if (o.isFocused())
     state |= (1 << WebAccessibility::STATE_FOCUSED);
+
+  if (o.roleValue() == WebKit::WebAccessibilityRolePopUpButton) {
+    state |= (1 << WebAccessibility::STATE_HASPOPUP);
+
+    if (!o.isCollapsed())
+      state |= (1 << WebAccessibility::STATE_EXPANDED);
+  }
 
   if (o.isHovered())
     state |= (1 << WebAccessibility::STATE_HOTTRACKED);
@@ -238,7 +253,10 @@ uint32 ConvertState(const WebAccessibilityObject& o) {
   if (o.isIndeterminate())
     state |= (1 << WebAccessibility::STATE_INDETERMINATE);
 
-  if (o.isAnchor())
+  if (!o.isVisible())
+    state |= (1 << WebAccessibility::STATE_INVISIBLE);
+
+  if (o.isLinked())
     state |= (1 << WebAccessibility::STATE_LINKED);
 
   if (o.isMultiSelectable())
@@ -255,6 +273,12 @@ uint32 ConvertState(const WebAccessibilityObject& o) {
 
   if (o.isReadOnly())
     state |= (1 << WebAccessibility::STATE_READONLY);
+
+  if (o.canSetSelectedAttribute())
+    state |= (1 << WebAccessibility::STATE_SELECTABLE);
+
+  if (o.isSelected())
+    state |= (1 << WebAccessibility::STATE_SELECTED);
 
   if (o.isVisited())
     state |= (1 << WebAccessibility::STATE_TRAVERSED);
@@ -302,18 +326,36 @@ void WebAccessibility::Init(const WebKit::WebAccessibilityObject& src,
 
   if (!node.isNull() && node.isElementNode()) {
     WebKit::WebElement element = node.to<WebKit::WebElement>();
-    attributes[ATTR_HTML_TAG] = element.tagName();
+    // TODO(ctguil): The tagName in WebKit is lower cased but
+    // HTMLElement::nodeName calls localNameUpper. Consider adding
+    // a WebElement method that returns the original lower cased tagName.
+    attributes[ATTR_HTML_TAG] = StringToLowerASCII(string16(element.tagName()));
     for (unsigned i = 0; i < element.attributes().length(); i++) {
       html_attributes.push_back(
           std::pair<string16, string16>(
               element.attributes().attributeItem(i).localName(),
               element.attributes().attributeItem(i).value()));
     }
+
+    if (element.isFormControlElement()) {
+      WebKit::WebFormControlElement form_element =
+          element.to<WebKit::WebFormControlElement>();
+      if (form_element.formControlType() == ASCIIToUTF16("text")) {
+        WebKit::WebInputElement input_element =
+            form_element.to<WebKit::WebInputElement>();
+        attributes[ATTR_TEXT_SEL_START] = base::IntToString16(
+            input_element.selectionStart());
+        attributes[ATTR_TEXT_SEL_END] = base::IntToString16(
+            input_element.selectionEnd());
+      }
+    }
   }
 
   if (role == WebAccessibility::ROLE_DOCUMENT ||
       role == WebAccessibility::ROLE_WEB_AREA) {
-    WebKit::WebDocument document = src.document();
+    const WebKit::WebDocument& document = src.document();
+    if (name.empty())
+      name = document.title();
     attributes[ATTR_DOC_TITLE] = document.title();
     attributes[ATTR_DOC_URL] = document.frame()->url().spec().utf16();
     if (document.isXHTMLDocument())
@@ -321,7 +363,7 @@ void WebAccessibility::Init(const WebKit::WebAccessibilityObject& src,
     else
       attributes[ATTR_DOC_MIMETYPE] = WebKit::WebString("text/html");
 
-    WebKit::WebDocumentType doctype = document.doctype();
+    const WebKit::WebDocumentType& doctype = document.doctype();
     if (!doctype.isNull())
       attributes[ATTR_DOC_DOCTYPE] = doctype.name();
   }
@@ -331,9 +373,15 @@ void WebAccessibility::Init(const WebKit::WebAccessibilityObject& src,
 
   // Recursively create children.
   int child_count = src.childCount();
-  children.resize(child_count);
   for (int i = 0; i < child_count; i++) {
-    children[i].Init(src.childAt(i), cache);
+    WebAccessibilityObject child = src.childAt(i);
+
+    // The child may be invalid due to issues in webkit accessibility code.
+    // Don't add children are invalid thus preventing a crash.
+    // https://bugs.webkit.org/show_bug.cgi?id=44149
+    // TODO(ctguil): We may want to remove this check as webkit stabilizes.
+    if (child.isValid())
+      children.push_back(WebAccessibility(child, cache));
   }
 }
 

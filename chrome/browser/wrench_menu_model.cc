@@ -19,12 +19,12 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/encoding_menu_controller.h"
-#include "chrome/browser/host_zoom_map.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
@@ -51,6 +51,9 @@ EncodingMenuModel::EncodingMenuModel(Browser* browser)
     : ALLOW_THIS_IN_INITIALIZER_LIST(menus::SimpleMenuModel(this)),
       browser_(browser) {
   Build();
+}
+
+EncodingMenuModel::~EncodingMenuModel() {
 }
 
 void EncodingMenuModel::Build() {
@@ -118,6 +121,9 @@ ZoomMenuModel::ZoomMenuModel(menus::SimpleMenuModel::Delegate* delegate)
   Build();
 }
 
+ZoomMenuModel::~ZoomMenuModel() {
+}
+
 void ZoomMenuModel::Build() {
   AddItemWithStringId(IDC_ZOOM_PLUS, IDS_ZOOM_PLUS);
   AddItemWithStringId(IDC_ZOOM_NORMAL, IDS_ZOOM_NORMAL);
@@ -154,8 +160,10 @@ void ToolsMenuModel::Build(Browser* browser) {
   AddItemWithStringId(IDC_CLEAR_BROWSING_DATA, IDS_CLEAR_BROWSING_DATA);
 
   AddSeparator();
+#if defined(OS_CHROMEOS)
   AddItemWithStringId(IDC_REPORT_BUG, IDS_REPORT_BUG);
   AddSeparator();
+#endif
 
   encoding_menu_model_.reset(new EncodingMenuModel(browser));
   AddSubMenuWithStringId(IDC_ENCODING_MENU, IDS_ENCODING_MENU,
@@ -192,6 +200,10 @@ WrenchMenuModel::~WrenchMenuModel() {
     tabstrip_model_->RemoveObserver(this);
 }
 
+bool WrenchMenuModel::DoesCommandIdDismissMenu(int command_id) const {
+  return command_id != IDC_ZOOM_MINUS && command_id != IDC_ZOOM_PLUS;
+}
+
 bool WrenchMenuModel::IsLabelForCommandIdDynamic(int command_id) const {
   return command_id == IDC_ZOOM_PERCENT_DISPLAY ||
 #if defined(OS_MACOSX)
@@ -226,12 +238,6 @@ void WrenchMenuModel::ExecuteCommand(int command_id) {
 }
 
 bool WrenchMenuModel::IsCommandIdChecked(int command_id) const {
-#if defined(OS_CHROMEOS)
-  if (command_id == IDC_TOGGLE_VERTICAL_TABS) {
-    return browser_->UseVerticalTabs();
-  }
-#endif
-
   if (command_id == IDC_SHOW_BOOKMARK_BAR) {
     return browser_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
   }
@@ -240,6 +246,14 @@ bool WrenchMenuModel::IsCommandIdChecked(int command_id) const {
 }
 
 bool WrenchMenuModel::IsCommandIdEnabled(int command_id) const {
+#if defined(OS_CHROMEOS)
+  // Special case because IDC_NEW_WINDOW item should be disabled in BWSI mode,
+  // but accelerator should work.
+  if (command_id == IDC_NEW_WINDOW &&
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kBWSI))
+    return false;
+#endif
+
   return browser_->command_updater()->IsCommandEnabled(command_id);
 }
 
@@ -352,22 +366,22 @@ void WrenchMenuModel::Build() {
   AddItemWithStringId(IDC_SHOW_DOWNLOADS, IDS_SHOW_DOWNLOADS);
   AddSeparator();
 
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableTabbedOptions)) {
+    AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
+  } else {
 #if defined(OS_MACOSX)
-  AddItemWithStringId(IDC_OPTIONS, IDS_PREFERENCES_MAC);
+    AddItemWithStringId(IDC_OPTIONS, IDS_PREFERENCES_MAC);
 #elif defined(OS_LINUX)
-  string16 preferences = gtk_util::GetStockPreferencesMenuLabel();
-  if (!preferences.empty())
-    AddItem(IDC_OPTIONS, preferences);
-  else
-    AddItemWithStringId(IDC_OPTIONS, IDS_OPTIONS);
+    string16 preferences = gtk_util::GetStockPreferencesMenuLabel();
+    if (!preferences.empty())
+      AddItem(IDC_OPTIONS, preferences);
+    else
+      AddItemWithStringId(IDC_OPTIONS, IDS_OPTIONS);
 #else
-  AddItemWithStringId(IDC_OPTIONS, IDS_OPTIONS);
+    AddItemWithStringId(IDC_OPTIONS, IDS_OPTIONS);
 #endif
-
-#if defined(OS_CHROMEOS)
-  AddCheckItemWithStringId(IDC_TOGGLE_VERTICAL_TABS,
-                           IDS_TAB_CXMENU_USE_VERTICAL_TABS);
-#endif
+  }
 
   // On Mac, there is no About item.
   if (browser_defaults::kShowAboutMenuItem) {
@@ -385,7 +399,11 @@ void WrenchMenuModel::Build() {
   if (browser_defaults::kShowExitMenuItem) {
     AddSeparator();
 #if defined(OS_CHROMEOS)
-    AddItemWithStringId(IDC_EXIT, IDS_SIGN_OUT);
+    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kBWSI)) {
+      AddItemWithStringId(IDC_EXIT, IDS_EXIT_GUEST_MODE);
+    } else {
+      AddItemWithStringId(IDC_EXIT, IDS_SIGN_OUT);
+    }
 #else
     AddItemWithStringId(IDC_EXIT, IDS_EXIT);
 #endif
@@ -409,31 +427,15 @@ void WrenchMenuModel::CreateZoomFullscreen() {
 }
 
 void WrenchMenuModel::UpdateZoomControls() {
-  bool enable_increment, enable_decrement;
-  int zoom_percent =
-      static_cast<int>(GetZoom(&enable_increment, &enable_decrement) * 100);
+  bool enable_increment = false;
+  bool enable_decrement = false;
+  int zoom_percent = 100;
+  if (browser_->GetSelectedTabContents()) {
+    zoom_percent = browser_->GetSelectedTabContents()->GetZoomPercent(
+        &enable_increment, &enable_decrement);
+  }
   zoom_label_ = l10n_util::GetStringFUTF16(
       IDS_ZOOM_PERCENT, base::IntToString16(zoom_percent));
-}
-
-double WrenchMenuModel::GetZoom(bool* enable_increment,
-                                bool* enable_decrement) {
-  TabContents* selected_tab = browser_->GetSelectedTabContents();
-  *enable_decrement = *enable_increment = false;
-  if (!selected_tab)
-    return 1;
-
-  HostZoomMap* zoom_map = selected_tab->profile()->GetHostZoomMap();
-  if (!zoom_map)
-    return 1;
-
-  // This code comes from  WebViewImpl::setZoomLevel.
-  int zoom_level = zoom_map->GetZoomLevel(selected_tab->GetURL());
-  double value = static_cast<double>(
-      std::max(std::min(std::pow(1.2, zoom_level), 3.0), .5));
-  *enable_decrement = (value != .5);
-  *enable_increment = (value != 3.0);
-  return value;
 }
 
 string16 WrenchMenuModel::GetSyncMenuLabel() const {

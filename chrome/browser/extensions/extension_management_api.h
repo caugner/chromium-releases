@@ -21,25 +21,25 @@ class ExtensionManagementFunction : public SyncExtensionFunction {
 class GetAllExtensionsFunction : public ExtensionManagementFunction {
   ~GetAllExtensionsFunction() {}
   virtual bool RunImpl();
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.management.getAll");
+  DECLARE_EXTENSION_FUNCTION_NAME("management.getAll");
+};
+
+class LaunchAppFunction : public ExtensionManagementFunction {
+  ~LaunchAppFunction() {}
+  virtual bool RunImpl();
+  DECLARE_EXTENSION_FUNCTION_NAME("management.launchApp");
 };
 
 class SetEnabledFunction : public ExtensionManagementFunction {
   ~SetEnabledFunction() {}
   virtual bool RunImpl();
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.management.setEnabled");
-};
-
-class InstallFunction : public ExtensionManagementFunction {
-  ~InstallFunction() {}
-  virtual bool RunImpl();
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.management.install");
+  DECLARE_EXTENSION_FUNCTION_NAME("management.setEnabled");
 };
 
 class UninstallFunction : public ExtensionManagementFunction {
   ~UninstallFunction() {}
   virtual bool RunImpl();
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.management.uninstall");
+  DECLARE_EXTENSION_FUNCTION_NAME("management.uninstall");
 };
 
 class ExtensionManagementEventRouter : public NotificationObserver {

@@ -11,8 +11,8 @@
 #include "base/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
-#include "chrome/browser/chromeos/login/google_authenticator.h"
+#include "chrome/browser/browser_thread.h"
+#include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/image_downloader.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/profile_manager.h"
@@ -41,7 +41,7 @@ UserImageDownloader::UserImageDownloader(const std::string& username,
                                          const std::string& auth_token)
     : username_(username),
       auth_token_(auth_token) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (auth_token_.empty())
     return;
 
@@ -64,7 +64,7 @@ void UserImageDownloader::OnURLFetchComplete(const URLFetcher* source,
                                              int response_code,
                                              const ResponseCookies& cookies,
                                              const std::string& data) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (response_code != 200) {
     LOG(ERROR) << "Response code is " << response_code;
     LOG(ERROR) << "Url is " << url.spec();
@@ -158,7 +158,7 @@ bool UserImageDownloader::IsUserEntry(ListValue* email_list) const {
     if (!email_dictionary->GetStringASCII("address", &email))
       continue;
 
-    if (GoogleAuthenticator::Canonicalize(email) == username_)
+    if (Authenticator::Canonicalize(email) == username_)
       return true;
   }
   return false;

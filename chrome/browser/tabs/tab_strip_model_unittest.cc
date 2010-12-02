@@ -22,6 +22,7 @@
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/tabs/tab_strip_model_order_controller.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_observer_mock.h"
@@ -83,6 +84,7 @@ class TabStripDummyDelegate : public TabStripModelDelegate {
   virtual bool CanCloseContentsAt(int index) { return can_close_ ; }
   virtual bool CanBookmarkAllTabs() const { return false; }
   virtual void BookmarkAllTabs() {}
+  virtual bool CanCloseTab() const { return true; }
   virtual bool UseVerticalTabs() const { return false; }
   virtual void ToggleUseVerticalTabs() {}
   virtual bool LargeIconsPermitted() const { return true; }
@@ -161,9 +163,6 @@ class TabStripModelTest : public RenderViewHostTestHarness {
 
       if (model.IsTabPinned(i))
         actual += "p";
-
-      if (model.IsPhantomTab(i))
-        actual += "h";
     }
     return actual;
   }
@@ -816,7 +815,6 @@ TEST_F(TabStripModelTest, TestSelectOnClose) {
   EXPECT_EQ(1, tabstrip.selected_index());
   tabstrip.CloseTabContentsAt(1, TabStripModel::CLOSE_NONE);
   EXPECT_EQ(0, tabstrip.selected_index());
-
   // Finally test that when a tab has no "siblings" that the opener is
   // selected.
   TabContents* other_contents = CreateTabContents();
@@ -1778,163 +1776,53 @@ TEST_F(TabStripModelTest, Pinning) {
   tabstrip.CloseAllTabs();
 }
 
-// Tests various permutations of making a tab phantom.
-TEST_F(TabStripModelTest, Phantom) {
-  if (!browser_defaults::kPhantomTabsEnabled)
-    return;
-
-  TabStripDummyDelegate delegate(NULL);
-  TabStripModel tabstrip(&delegate, profile());
-  MockTabStripModelObserver observer;
-  tabstrip.AddObserver(&observer);
-
-  EXPECT_TRUE(tabstrip.empty());
-
+// Makes sure the TabStripModel calls the right observer methods during a
+// replace.
+TEST_F(TabStripModelTest, ReplaceSendsSelected) {
   typedef MockTabStripModelObserver::State State;
 
-  TabContents* contents1 = CreateTabContents();
-  TabContents* contents2 = CreateTabContents();
-  TabContents* contents3 = CreateTabContents();
-
-  SetID(contents1, 1);
-  SetID(contents2, 2);
-  SetID(contents3, 3);
-
-  // Note! The ordering of these tests is important, each subsequent test
-  // builds on the state established in the previous. This is important if you
-  // ever insert tests rather than append.
-
-  // Initial state, three tabs, first selected.
-  tabstrip.AppendTabContents(contents1, true);
-  tabstrip.AppendTabContents(contents2, false);
-  tabstrip.AppendTabContents(contents3, false);
-
-  observer.ClearStates();
-
-  // Pin the first tab, and make it phantom.
-  {
-    tabstrip.SetTabPinned(0, true);
-
-    observer.ClearStates();
-
-    tabstrip.CloseTabContentsAt(0, TabStripModel::CLOSE_NONE);
-
-    // The tabcontents should have changed.
-    TabContents* old_contents1 = contents1;
-    TabContents* new_contents1 = tabstrip.GetTabContentsAt(0);
-    ASSERT_TRUE(new_contents1 != contents1);
-    contents1 = new_contents1;
-    SetID(contents1, 1);
-
-    // Verify the state.
-    EXPECT_EQ("1ph 2 3", GetPinnedState(tabstrip));
-
-    // We should have gotten notification of the following:
-    // . tab closing.
-    // . selection changed.
-    // . tab replaced.
-    ASSERT_EQ(3, observer.GetStateCount());
-    State state(old_contents1, 0, MockTabStripModelObserver::CLOSE);
-    EXPECT_TRUE(observer.StateEquals(0, state));
-    state = State(contents1, 0, MockTabStripModelObserver::REPLACED);
-    state.src_contents = old_contents1;
-    EXPECT_TRUE(observer.StateEquals(1, state));
-    state = State(contents2, 1, MockTabStripModelObserver::SELECT);
-    state.src_contents = contents1;
-    state.user_gesture = true;
-    EXPECT_TRUE(observer.StateEquals(2, state));
-
-    observer.ClearStates();
-  }
-
-  {
-    tabstrip.SetTabPinned(1, true);
-    observer.ClearStates();
-
-    // Close the second tab, which should make it phantom.
-    tabstrip.CloseTabContentsAt(1, TabStripModel::CLOSE_NONE);
-
-    // The tabcontents should have changed.
-    TabContents* new_contents2 = tabstrip.GetTabContentsAt(1);
-    ASSERT_TRUE(new_contents2 != contents2);
-    contents2 = new_contents2;
-    SetID(contents2, 2);
-
-    EXPECT_EQ("1ph 2ph 3", GetPinnedState(tabstrip));
-
-    EXPECT_EQ(2, tabstrip.selected_index());
-
-    contents2 = tabstrip.GetTabContentsAt(1);
-
-    observer.ClearStates();
-  }
-
-  {
-    tabstrip.SetTabPinned(2, true);
-    observer.ClearStates();
-
-    // Close the last tab, we should get a tabstrip empty notification.
-    tabstrip.CloseTabContentsAt(2, TabStripModel::CLOSE_NONE);
-
-    // The tabcontents should have changed.
-    TabContents* old_contents3 = contents3;
-    TabContents* new_contents3 = tabstrip.GetTabContentsAt(2);
-    ASSERT_TRUE(new_contents3 != contents3);
-    contents3 = new_contents3;
-    SetID(contents3, 3);
-
-    EXPECT_EQ("1ph 2ph 3ph", GetPinnedState(tabstrip));
-
-    // We should have gotten notification of the following:
-    // . tab closing.
-    // . tab replaced.
-    // . tabstrip empty.
-    ASSERT_EQ(2, observer.GetStateCount());
-    State state(old_contents3, 2, MockTabStripModelObserver::CLOSE);
-    EXPECT_TRUE(observer.StateEquals(0, state));
-    state = State(contents3, 2, MockTabStripModelObserver::REPLACED);
-    state.src_contents = old_contents3;
-    EXPECT_TRUE(observer.StateEquals(1, state));
-    EXPECT_TRUE(observer.empty());
-
-    observer.ClearStates();
-  }
-
-  // Clean up the phantom tabs.
-  tabstrip.CloseAllTabs();
-}
-
-// Makes sure the TabStripModel deletes phantom TabContents from its destructor.
-TEST_F(TabStripModelTest, DeletePhantomTabContents) {
-  if (!browser_defaults::kPhantomTabsEnabled)
-    return;
-
   TabStripDummyDelegate delegate(NULL);
-  scoped_ptr<TabStripModel> strip(new TabStripModel(&delegate, profile()));
+  TabStripModel strip(&delegate, profile());
 
-  strip->AddTabContents(CreateTabContents(), -1, PageTransition::TYPED,
-                        TabStripModel::ADD_PINNED);
+  TabContents* first_contents = CreateTabContents();
+  strip.AddTabContents(first_contents, -1, PageTransition::TYPED,
+                       TabStripModel::ADD_SELECTED);
 
-  // This will make the tab go phantom.
-  delete strip->GetTabContentsAt(0);
-
-  ASSERT_TRUE(strip->IsPhantomTab(0));
-
-  NotificationRegistrar registrar;
-  NotificationObserverMock notification_observer;
   MockTabStripModelObserver tabstrip_observer;
-  registrar.Add(&notification_observer,
-                NotificationType::TAB_CONTENTS_DESTROYED,
-                NotificationService::AllSources());
-  strip->AddObserver(&tabstrip_observer);
+  strip.AddObserver(&tabstrip_observer);
 
-  // Deleting the strip should delete the phanton tabcontents and result in one
-  // TAB_CONTENTS_DESTROYED.
-  EXPECT_CALL(notification_observer, Observe(_, _, _)).Times(1);
+  TabContents* new_contents = CreateTabContents();
+  strip.ReplaceTabContentsAt(0, new_contents);
 
-  // Delete the tabstrip.
-  strip.reset();
+  ASSERT_EQ(2, tabstrip_observer.GetStateCount());
 
-  // And there should have been no methods sent to the TabStripModelObserver.
-  EXPECT_EQ(0, tabstrip_observer.GetStateCount());
+  // First event should be for replaced.
+  State state(new_contents, 0, MockTabStripModelObserver::REPLACED);
+  state.src_contents = first_contents;
+  EXPECT_TRUE(tabstrip_observer.StateEquals(0, state));
+
+  // And the second for selected.
+  state = State(new_contents, 0, MockTabStripModelObserver::SELECT);
+  state.src_contents = first_contents;
+  EXPECT_TRUE(tabstrip_observer.StateEquals(1, state));
+
+  // Now add another tab and replace it, making sure we don't get a selected
+  // event this time.
+  TabContents* third_contents = CreateTabContents();
+  strip.AddTabContents(third_contents, 1, PageTransition::TYPED,
+                       TabStripModel::ADD_NONE);
+
+  tabstrip_observer.ClearStates();
+
+  // And replace it.
+  new_contents = CreateTabContents();
+  strip.ReplaceTabContentsAt(1, new_contents);
+
+  ASSERT_EQ(1, tabstrip_observer.GetStateCount());
+
+  state = State(new_contents, 1, MockTabStripModelObserver::REPLACED);
+  state.src_contents = third_contents;
+  EXPECT_TRUE(tabstrip_observer.StateEquals(0, state));
+
+  strip.CloseAllTabs();
 }

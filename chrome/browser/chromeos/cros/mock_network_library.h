@@ -22,15 +22,13 @@ class MockNetworkLibrary : public NetworkLibrary {
   MOCK_CONST_METHOD0(ethernet_network, const EthernetNetwork&(void));
   MOCK_CONST_METHOD0(ethernet_connecting, bool(void));
   MOCK_CONST_METHOD0(ethernet_connected, bool(void));
-  MOCK_CONST_METHOD0(wifi_name, const std::string&(void));
+  MOCK_CONST_METHOD0(wifi_network, const WifiNetwork&(void));
   MOCK_CONST_METHOD0(wifi_connecting, bool(void));
   MOCK_CONST_METHOD0(wifi_connected, bool(void));
-  MOCK_CONST_METHOD0(wifi_strength, int(void));
 
-  MOCK_CONST_METHOD0(cellular_name, const std::string&(void));
+  MOCK_CONST_METHOD0(cellular_network, const CellularNetwork&(void));
   MOCK_CONST_METHOD0(cellular_connecting, bool(void));
   MOCK_CONST_METHOD0(cellular_connected, bool(void));
-  MOCK_CONST_METHOD0(cellular_strength, int(void));
 
   MOCK_CONST_METHOD0(Connected, bool(void));
   MOCK_CONST_METHOD0(Connecting, bool(void));
@@ -50,9 +48,6 @@ class MockNetworkLibrary : public NetworkLibrary {
   MOCK_METHOD0(RequestWifiScan, void(void));
   MOCK_METHOD0(UpdateSystemInfo, void(void));
   MOCK_METHOD1(GetWifiAccessPoints, bool(WifiAccessPointVector*));
-  MOCK_METHOD0(ConnectToPreferredNetworkIfAvailable, bool(void));
-  MOCK_METHOD0(PreferredNetworkConnected, bool(void));
-  MOCK_METHOD0(PreferredNetworkFailed, bool(void));
   MOCK_METHOD4(ConnectToWifiNetwork, void(WifiNetwork,
                                           const std::string&,
                                           const std::string&,
@@ -63,6 +58,8 @@ class MockNetworkLibrary : public NetworkLibrary {
                                           const std::string&,
                                           bool));
   MOCK_METHOD1(ConnectToCellularNetwork, void(CellularNetwork));
+  MOCK_METHOD1(RefreshCellularDataPlans, void(const CellularNetwork& network));
+
   MOCK_METHOD1(DisconnectFromWirelessNetwork, void(const WirelessNetwork&));
   MOCK_METHOD1(SaveCellularNetwork, void(const CellularNetwork&));
   MOCK_METHOD1(SaveWifiNetwork, void(const WifiNetwork&));

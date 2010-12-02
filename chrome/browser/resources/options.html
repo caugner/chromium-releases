@@ -1,11 +1,13 @@
 <!DOCTYPE HTML>
-<html i18n-values="dir:textdirection;" id="t">
+<html
+    i18n-values="dir:textdirection;
+                 enable-background-mode:enable-background-mode"
+    id="t">
 <head>
 <meta charset="utf-8">
 <title i18n-content="title"></title>
 
-<!-- TODO(zelidrag) need a better icon here -->
-<link rel="icon" href="../../app/theme/history_favicon.png">
+<link rel="icon" href="../../app/theme/settings_favicon.png">
 <link rel="stylesheet" href="chrome://resources/css/list.css">
 <link rel="stylesheet" href="chrome://resources/css/tree.css">
 <link rel="stylesheet" href="dom_ui.css">
@@ -22,6 +24,7 @@
 <link rel="stylesheet" href="options/cookies_view.css">
 <link rel="stylesheet" href="options/edit_search_engine_overlay.css">
 <link rel="stylesheet" href="options/passwords_exceptions_list.css">
+<link rel="stylesheet" href="options/personal_options.css">
 <link rel="stylesheet" href="options/import_data_overlay.css">
 <link rel="stylesheet" href="options/search_engine_manager.css">
 <link rel="stylesheet" href="options/subpages_tab_controls.css">
@@ -32,10 +35,14 @@
   <link rel="stylesheet" href="options/chromeos_language_options.css">
 </if>
 
+<if expr="not pp_ifdef('win32') and not pp_ifdef('darwin')">
+  <link rel="stylesheet" href="options/certificate_manager.css">
+</if>
+
 <script src="chrome://resources/css/tree.css.js"></script>
 
-<script src="chrome://resources/js/class_list.js"></script>
 <script src="chrome://resources/js/cr.js"></script>
+<script src="chrome://resources/js/cr/command_line.js"></script>
 <script src="chrome://resources/js/cr/event_target.js"></script>
 <script src="chrome://resources/js/cr/ui.js"></script>
 <script src="chrome://resources/js/cr/ui/array_data_model.js"></script>
@@ -73,6 +80,21 @@
     var SystemOptions = options.SystemOptions;
   </script>
 </if>
+<if expr="not pp_ifdef('win32') and not pp_ifdef('darwin')">
+  <script src="options/certificate_tree.js"></script>
+  <script src="options/certificate_manager.js"></script>
+  <script src="options/certificate_restore_overlay.js"></script>
+  <script src="options/certificate_backup_overlay.js"></script>
+  <script src="options/certificate_edit_ca_trust_overlay.js"></script>
+  <script src="options/certificate_import_error_overlay.js"></script>
+  <script>
+    var CertificateManager = options.CertificateManager;
+    var CertificateRestoreOverlay = options.CertificateRestoreOverlay;
+    var CertificateBackupOverlay = options.CertificateBackupOverlay;
+    var CertificateEditCaTrustOverlay = options.CertificateEditCaTrustOverlay;
+    var CertificateImportErrorOverlay = options.CertificateImportErrorOverlay;
+  </script>
+</if>
 <script src="options/add_startup_page_overlay.js"></script>
 <script src="options/add_startup_page_recent_pages_list.js"></script>
 <script src="options/advanced_options.js"></script>
@@ -89,15 +111,14 @@
 <script src="options/cookies_tree.js"></script>
 <script src="options/cookies_view.js"></script>
 <script src="options/edit_search_engine_overlay.js"></script>
-<script src="options/font_settings_overlay.js"></script>
+<script src="options/font_settings.js"></script>
 <script src="options/import_data_overlay.js"></script>
 <script src="options/passwords_exceptions.js"></script>
 <script src="options/passwords_exceptions_list.js"></script>
-<script src="options/passwords_remove_all_overlay.js"></script>
 <script src="options/personal_options.js"></script>
 <script src="options/search_engine_manager.js"></script>
 <script src="options/search_engine_manager_engine_list.js"></script>
-<script src="options/stop_syncing_overlay.js"></script>
+<script src="options/sync_options.js"></script>
 <script>
 
 var AddStartupPageOverlay = options.AddStartupPageOverlay;
@@ -111,22 +132,25 @@ var ClearBrowserDataOverlay = options.ClearBrowserDataOverlay;
 var ContentSettings = options.ContentSettings;
 var CookiesView = options.CookiesView;
 var EditSearchEngineOverlay = options.EditSearchEngineOverlay;
-var FontSettingsOverlay = options.FontSettingsOverlay;
+var FontSettings = options.FontSettings;
 var ImportDataOverlay = options.ImportDataOverlay;
 var OptionsPage = options.OptionsPage;
 var PasswordsExceptions = options.PasswordsExceptions;
 var PersonalOptions = options.PersonalOptions;
 var Preferences = options.Preferences;
 var SearchEngineManager = options.SearchEngineManager;
-var StopSyncingOverlay = options.StopSyncingOverlay;
 var ProxyOptions = options.ProxyOptions;
-var PasswordsRemoveAllOverlay = options.PasswordsRemoveAllOverlay;
+var SyncOptions = options.SyncOptions;
 
 /**
  * Window onload handler, sets up the page.
  */
 function load() {
   var start = new Date();
+
+  var menuOffPattern = /(^\?|&)menu=off($|&)/;
+  var menuDisabled = menuOffPattern.test(window.location.search);
+  document.documentElement.setAttribute('hide-menu', menuDisabled);
 
   localStrings = new LocalStrings();
 
@@ -142,18 +166,24 @@ function load() {
   OptionsPage.registerSubPage(AutoFillOptions.getInstance());
   OptionsPage.registerSubPage(ContentSettings.getInstance());
   OptionsPage.registerSubPage(CookiesView.getInstance());
+  OptionsPage.registerSubPage(FontSettings.getInstance());
   OptionsPage.registerSubPage(PasswordsExceptions.getInstance());
   OptionsPage.registerSubPage(SearchEngineManager.getInstance());
+  OptionsPage.registerSubPage(SyncOptions.getInstance());
+  if (!cr.isWindows && !cr.isMac) {
+    OptionsPage.registerSubPage(CertificateManager.getInstance());
+    OptionsPage.registerOverlay(CertificateRestoreOverlay.getInstance());
+    OptionsPage.registerOverlay(CertificateBackupOverlay.getInstance());
+    OptionsPage.registerOverlay(CertificateEditCaTrustOverlay.getInstance());
+    OptionsPage.registerOverlay(CertificateImportErrorOverlay.getInstance());
+  }
   OptionsPage.registerOverlay(AddStartupPageOverlay.getInstance());
   OptionsPage.registerOverlay(AlertOverlay.getInstance());
   OptionsPage.registerOverlay(AutoFillEditAddressOverlay.getInstance());
   OptionsPage.registerOverlay(AutoFillEditCreditCardOverlay.getInstance());
   OptionsPage.registerOverlay(ClearBrowserDataOverlay.getInstance());
   OptionsPage.registerOverlay(EditSearchEngineOverlay.getInstance());
-  OptionsPage.registerOverlay(FontSettingsOverlay.getInstance());
   OptionsPage.registerOverlay(ImportDataOverlay.getInstance());
-  OptionsPage.registerOverlay(StopSyncingOverlay.getInstance());
-  OptionsPage.registerOverlay(PasswordsRemoveAllOverlay.getInstance());
 
   if (cr.isChromeOS) {
     OptionsPage.register(AccountsOptions.getInstance());
@@ -179,12 +209,12 @@ function load() {
         localStrings.getString('languagePinyinPage'),
         'languagePinyinPage'));
     OptionsPage.registerSubPage(ProxyOptions.getInstance());
+    OptionsPage.registerOverlay(new OptionsPage(
+        'detailsInternetPage',
+        'detailsInternetPage',
+        'detailsInternetPage'));
   }
 
-  var syncSettings = new OptionsPage('sync',
-                                     localStrings.getString('syncPage'),
-                                     'syncPage');
-  OptionsPage.registerSubPage(syncSettings);
   var languageModifierKeysOverlay = new OptionsPage(
       'languageCustomizeModifierKeysOverlay',
       localStrings.getString('languageCustomizeModifierKeysOverlay'),
@@ -195,9 +225,13 @@ function load() {
   OptionsPage.initialize();
 
   var path = document.location.pathname;
+  var hash = document.location.hash;
 
   if (path.length > 1) {
-    OptionsPage.showPageByName(path.slice(1));
+    var pageName = path.slice(1);
+    OptionsPage.showPageByName(pageName);
+    if (hash.length > 1)
+      OptionsPage.handleHashForPage(pageName, hash.slice(1));
   } else {
     // TODO(csilv): Save/restore last selected page.
     if (cr.isChromeOS) {
@@ -213,6 +247,11 @@ function load() {
       OptionsPage.showTab(event.srcElement);
     }
   }
+
+  // Allow platform specific CSS rules.
+  if (cr.isMac)
+    document.documentElement.setAttribute('os', 'mac');
+
   var end = new Date();
   var total = end - start;
   console.log('time took to run load():'+ total);
@@ -236,14 +275,18 @@ window.onpopstate = function(e) {
   <include src="options/autofill_edit_creditcard_overlay.html">
   <include src="options/clear_browser_data_overlay.html">
   <include src="options/edit_search_engine_overlay.html">
-  <include src="options/font_settings_overlay.html">
   <include src="options/import_data_overlay.html">
-  <include src="options/stop_syncing_overlay.html">
-  <include src="options/passwords_remove_all_overlay.html">
   <if expr="pp_ifdef('chromeos')">
      <include src="options/chromeos_language_add_language_overlay.html">
      <include
          src="options/chromeos_language_customize_modifier_keys_overlay.html">
+     <include src="options/chromeos_internet_detail.html">
+  </if>
+  <if expr="not pp_ifdef('win32') and not pp_ifdef('darwin')">
+    <include src="options/certificate_restore_overlay.html">
+    <include src="options/certificate_backup_overlay.html">
+    <include src="options/certificate_edit_ca_trust_overlay.html">
+    <include src="options/certificate_import_error_overlay.html">
   </if>
 </div>
 <div id="main-content">
@@ -274,11 +317,15 @@ window.onpopstate = function(e) {
          <include src="options/chromeos_accounts_options.html">
          <include src="options/chromeos_proxy.html">
        </if>
+       <if expr="not pp_ifdef('win32') and not pp_ifdef('darwin')">
+         <include src="options/certificate_manager.html">
+       </if>
        <include src="options/advanced_options.html">
        <include src="options/autofill_options.html">
        <include src="options/browser_options.html">
        <include src="options/content_settings.html">
        <include src="options/cookies_view.html">
+       <include src="options/font_settings.html">
        <include src="options/passwords_exceptions.html">
        <include src="options/personal_options.html">
        <include src="options/search_engine_manager.html">
@@ -294,6 +341,7 @@ cr.ui.decorate('input[pref][type=number]', options.PrefNumber);
 cr.ui.decorate('input[pref][type=radio]', options.PrefRadio);
 cr.ui.decorate('input[pref][type=range]', options.PrefRange);
 cr.ui.decorate('select[pref]', options.PrefSelect);
+cr.ui.decorate('input[pref][type=text]', options.PrefTextField);
 cr.ui.decorate('input[pref][type=url]', options.PrefTextField);
 cr.ui.decorate('#contentSettingsPage input[type=radio]',
     options.ContentSettingsRadio);

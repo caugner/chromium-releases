@@ -123,7 +123,9 @@ ClientSocketPoolBaseHelper::Request::Request(
     CompletionCallback* callback,
     RequestPriority priority,
     const BoundNetLog& net_log)
-    : handle_(handle), callback_(callback), priority_(priority),
+    : handle_(handle),
+      callback_(callback),
+      priority_(priority),
       net_log_(net_log) {}
 
 ClientSocketPoolBaseHelper::Request::~Request() {}
@@ -144,7 +146,7 @@ ClientSocketPoolBaseHelper::ClientSocketPoolBaseHelper(
       connect_job_factory_(connect_job_factory),
       connect_backup_jobs_enabled_(false),
       pool_generation_number_(0),
-      in_destructor_(false) {
+      method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   DCHECK_LE(0, max_sockets_per_group);
   DCHECK_LE(max_sockets_per_group, max_sockets);
 
@@ -152,14 +154,11 @@ ClientSocketPoolBaseHelper::ClientSocketPoolBaseHelper(
 }
 
 ClientSocketPoolBaseHelper::~ClientSocketPoolBaseHelper() {
-  in_destructor_ = true;
-  CancelAllConnectJobs();
-
-  // Clean up any idle sockets.  Assert that we have no remaining active
-  // sockets or pending requests.  They should have all been cleaned up prior
-  // to the manager being destroyed.
-  CloseIdleSockets();
-  CHECK(group_map_.empty());
+  // Clean up any idle sockets and pending connect jobs.  Assert that we have no
+  // remaining active sockets or pending requests.  They should have all been
+  // cleaned up prior to |this| being destroyed.
+  Flush();
+  DCHECK(group_map_.empty());
   DCHECK(pending_callback_map_.empty());
   DCHECK_EQ(0, connecting_socket_count_);
 
@@ -182,9 +181,12 @@ void ClientSocketPoolBaseHelper::InsertRequestIntoQueue(
 // static
 const ClientSocketPoolBaseHelper::Request*
 ClientSocketPoolBaseHelper::RemoveRequestFromQueue(
-    RequestQueue::iterator it, RequestQueue* pending_requests) {
+    RequestQueue::iterator it, Group* group) {
   const Request* req = *it;
-  pending_requests->erase(it);
+  group->mutable_pending_requests()->erase(it);
+  // If there are no more requests, we kill the backup timer.
+  if (group->pending_requests().empty())
+    group->CleanupBackupJob();
   return req;
 }
 
@@ -275,23 +277,52 @@ int ClientSocketPoolBaseHelper::RequestSocketInternal(
 
 bool ClientSocketPoolBaseHelper::AssignIdleSocketToGroup(
     const Request* request, Group* group) {
-  // Iterate through the list of idle sockets until we find one or exhaust
-  // the list.
-  while (!group->idle_sockets().empty()) {
-    IdleSocket idle_socket = group->idle_sockets().back();
-    group->mutable_idle_sockets()->pop_back();
-    DecrementIdleCount();
-    if (idle_socket.socket->IsConnectedAndIdle()) {
-      // We found one we can reuse!
-      base::TimeDelta idle_time =
-          base::TimeTicks::Now() - idle_socket.start_time;
-      HandOutSocket(
-          idle_socket.socket, idle_socket.socket->WasEverUsed(),
-          request->handle(), idle_time, group, request->net_log());
-      return true;
+  std::list<IdleSocket>* idle_sockets = group->mutable_idle_sockets();
+  std::list<IdleSocket>::iterator idle_socket_it = idle_sockets->end();
+
+  // Iterate through the idle sockets forwards (oldest to newest)
+  //   * Delete any disconnected ones.
+  //   * If we find a used idle socket, assign to |idle_socket|.  At the end,
+  //   the |idle_socket_it| will be set to the newest used idle socket.
+  for (std::list<IdleSocket>::iterator it = idle_sockets->begin();
+       it != idle_sockets->end();) {
+    if (!it->socket->IsConnectedAndIdle()) {
+      DecrementIdleCount();
+      delete it->socket;
+      it = idle_sockets->erase(it);
+      continue;
     }
-    delete idle_socket.socket;
+
+    if (it->socket->WasEverUsed()) {
+      // We found one we can reuse!
+      idle_socket_it = it;
+    }
+
+    ++it;
   }
+
+  // If we haven't found an idle socket, that means there are no used idle
+  // sockets.  Pick the oldest (first) idle socket (FIFO).
+
+  if (idle_socket_it == idle_sockets->end() && !idle_sockets->empty())
+    idle_socket_it = idle_sockets->begin();
+
+  if (idle_socket_it != idle_sockets->end()) {
+    DecrementIdleCount();
+    base::TimeDelta idle_time =
+        base::TimeTicks::Now() - idle_socket_it->start_time;
+    IdleSocket idle_socket = *idle_socket_it;
+    idle_sockets->erase(idle_socket_it);
+    HandOutSocket(
+        idle_socket.socket,
+        idle_socket.socket->WasEverUsed(),
+        request->handle(),
+        idle_time,
+        group,
+        request->net_log());
+    return true;
+  }
+
   return false;
 }
 
@@ -326,8 +357,7 @@ void ClientSocketPoolBaseHelper::CancelRequest(
   RequestQueue::iterator it = group->mutable_pending_requests()->begin();
   for (; it != group->pending_requests().end(); ++it) {
     if ((*it)->handle() == handle) {
-      const Request* req =
-          RemoveRequestFromQueue(it, group->mutable_pending_requests());
+      const Request* req = RemoveRequestFromQueue(it, group);
       req->net_log().AddEvent(NetLog::TYPE_CANCELLED, NULL);
       req->net_log().EndEvent(NetLog::TYPE_SOCKET_POOL, NULL);
       delete req;
@@ -337,10 +367,6 @@ void ClientSocketPoolBaseHelper::CancelRequest(
         RemoveConnectJob(*group->jobs().begin(), group);
         CheckForStalledSocketGroups();
       }
-
-      // If there are no more requests, we kill the backup timer.
-      if (group->pending_requests().empty())
-        group->CleanupBackupJob();
       break;
     }
   }
@@ -401,7 +427,7 @@ LoadState ClientSocketPoolBaseHelper::GetLoadState(
   return LOAD_STATE_IDLE;
 }
 
-Value* ClientSocketPoolBaseHelper::GetInfoAsValue(
+DictionaryValue* ClientSocketPoolBaseHelper::GetInfoAsValue(
     const std::string& name, const std::string& type) const {
   DictionaryValue* dict = new DictionaryValue();
   dict->SetString("name", name);
@@ -430,8 +456,24 @@ Value* ClientSocketPoolBaseHelper::GetInfoAsValue(
     }
 
     group_dict->SetInteger("active_socket_count", group->active_socket_count());
-    group_dict->SetInteger("idle_socket_count", group->idle_sockets().size());
-    group_dict->SetInteger("connect_job_count", group->jobs().size());
+
+    ListValue* idle_socket_list = new ListValue();
+    std::list<IdleSocket>::const_iterator idle_socket;
+    for (idle_socket = group->idle_sockets().begin();
+         idle_socket != group->idle_sockets().end();
+         idle_socket++) {
+      int source_id = idle_socket->socket->NetLog().source().id;
+      idle_socket_list->Append(Value::CreateIntegerValue(source_id));
+    }
+    group_dict->Set("idle_sockets", idle_socket_list);
+
+    ListValue* connect_jobs_list = new ListValue();
+    std::set<const ConnectJob*>::const_iterator job = group->jobs().begin();
+    for (job = group->jobs().begin(); job != group->jobs().end(); job++) {
+      int source_id = (*job)->net_log().source().id;
+      connect_jobs_list->Append(Value::CreateIntegerValue(source_id));
+    }
+    group_dict->Set("connect_jobs", connect_jobs_list);
 
     group_dict->SetBoolean("is_stalled",
                            group->IsStalled(max_sockets_per_group_));
@@ -458,14 +500,6 @@ void ClientSocketPoolBaseHelper::CleanupIdleSockets(bool force) {
   if (idle_socket_count_ == 0)
     return;
 
-  // Deleting an SSL socket may remove the last reference to an
-  // HttpNetworkSession (in an incognito session), triggering the destruction
-  // of pools, potentially causing a recursive call to this function.  Hold a
-  // reference to |this| to prevent that.
-  scoped_refptr<ClientSocketPoolBaseHelper> protect_this;
-  if (!in_destructor_)
-    protect_this = this;
-
   // Current time value. Retrieving it once at the function start rather than
   // inside the inner loop, since it shouldn't change by any meaningful amount.
   base::TimeTicks now = base::TimeTicks::Now();
@@ -474,7 +508,7 @@ void ClientSocketPoolBaseHelper::CleanupIdleSockets(bool force) {
   while (i != group_map_.end()) {
     Group* group = i->second;
 
-    std::deque<IdleSocket>::iterator j = group->mutable_idle_sockets()->begin();
+    std::list<IdleSocket>::iterator j = group->mutable_idle_sockets()->begin();
     while (j != group->idle_sockets().end()) {
       base::TimeDelta timeout =
           j->socket->WasEverUsed() ?
@@ -635,19 +669,12 @@ void ClientSocketPoolBaseHelper::OnConnectJobComplete(
 
   BoundNetLog job_log = job->net_log();
 
-  // ConnectJobs may hold references to pools which may hold references back to
-  // this pool, so RemoveConnectJob() may eventually lead to something calling
-  // Release() on |this| which deletes it in the middle of this function.  Hold
-  // a self-reference to prevent deletion of |this|.
-  const scoped_refptr<ClientSocketPoolBaseHelper> self(this);
-
   if (result == OK) {
     DCHECK(socket.get());
     RemoveConnectJob(job, group);
     if (!group->pending_requests().empty()) {
       scoped_ptr<const Request> r(RemoveRequestFromQueue(
-          group->mutable_pending_requests()->begin(),
-          group->mutable_pending_requests()));
+          group->mutable_pending_requests()->begin(), group));
       LogBoundConnectJobToRequest(job_log.source(), r.get());
       HandOutSocket(
           socket.release(), false /* unused socket */, r->handle(),
@@ -665,8 +692,7 @@ void ClientSocketPoolBaseHelper::OnConnectJobComplete(
     bool handed_out_socket = false;
     if (!group->pending_requests().empty()) {
       scoped_ptr<const Request> r(RemoveRequestFromQueue(
-          group->mutable_pending_requests()->begin(),
-          group->mutable_pending_requests()));
+          group->mutable_pending_requests()->begin(), group));
       LogBoundConnectJobToRequest(job_log.source(), r.get());
       job->GetAdditionalErrorState(r->handle());
       RemoveConnectJob(job, group);
@@ -732,8 +758,7 @@ void ClientSocketPoolBaseHelper::ProcessPendingRequest(
                                  *group->pending_requests().begin());
   if (rv != ERR_IO_PENDING) {
     scoped_ptr<const Request> request(RemoveRequestFromQueue(
-          group->mutable_pending_requests()->begin(),
-          group->mutable_pending_requests()));
+          group->mutable_pending_requests()->begin(), group));
     if (group->IsEmpty())
       RemoveGroup(group_name);
 
@@ -837,7 +862,6 @@ bool ClientSocketPoolBaseHelper::ReachedMaxSocketsLimit() const {
   DCHECK_LE(total, max_sockets_);
   if (total < max_sockets_)
     return false;
-  LOG(WARNING) << "ReachedMaxSocketsLimit: " << total << "/" << max_sockets_;
   return true;
 }
 
@@ -846,12 +870,11 @@ void ClientSocketPoolBaseHelper::CloseOneIdleSocket() {
 
   for (GroupMap::iterator i = group_map_.begin(); i != group_map_.end(); ++i) {
     Group* group = i->second;
+    std::list<IdleSocket>* idle_sockets = group->mutable_idle_sockets();
 
-    if (!group->idle_sockets().empty()) {
-      std::deque<IdleSocket>::iterator j =
-          group->mutable_idle_sockets()->begin();
-      delete j->socket;
-      group->mutable_idle_sockets()->erase(j);
+    if (!idle_sockets->empty()) {
+      delete idle_sockets->front().socket;
+      idle_sockets->pop_front();
       DecrementIdleCount();
       if (group->IsEmpty())
         RemoveGroup(i);
@@ -869,8 +892,7 @@ void ClientSocketPoolBaseHelper::InvokeUserCallbackLater(
   pending_callback_map_[handle] = CallbackResultPair(callback, rv);
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(
-          this,
+      method_factory_.NewRunnableMethod(
           &ClientSocketPoolBaseHelper::InvokeUserCallback,
           handle));
 }

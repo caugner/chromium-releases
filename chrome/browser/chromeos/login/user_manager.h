@@ -69,6 +69,9 @@ class UserManager : public UserImageLoader::Delegate,
   // Remove user from persistent list. NOTE: user's data won't be removed.
   void RemoveUser(const std::string& email);
 
+  // Returns true if given user has logged into the device before.
+  bool IsKnownUser(const std::string& email);
+
   // Returns the logged-in user.
   const User& logged_in_user() {
     return logged_in_user_;
@@ -81,6 +84,10 @@ class UserManager : public UserImageLoader::Delegate,
   // Saves image to file and saves image path in local state preferences.
   void SaveUserImage(const std::string& username,
                      const SkBitmap& image);
+
+  // Sets one of the default images to the specified user and saves this
+  // setting in local state.
+  void SetDefaultUserImage(const std::string& username);
 
   // chromeos::UserImageLoader::Delegate implementation.
   virtual void OnImageLoaded(const std::string& username,

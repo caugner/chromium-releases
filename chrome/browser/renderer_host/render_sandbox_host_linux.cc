@@ -343,8 +343,9 @@ class SandboxIPCProcess  {
       base::StringToInt(inode_output, &pid);
 
     if (!pid) {
+      // Even though the pid is invalid, we still need to reply to the zygote
+      // and not just return here.
       LOG(ERROR) << "Could not get pid";
-      return;
     }
 
     Pickle reply;
@@ -359,7 +360,7 @@ class SandboxIPCProcess  {
       return;
     int shm_fd = -1;
     base::SharedMemory shm;
-    if (shm.Create(L"", false, false, shm_size))
+    if (shm.Create("", false, false, shm_size))
       shm_fd = shm.handle().fd;
     Pickle reply;
     SendRendererReply(fds, reply, shm_fd);
@@ -496,8 +497,10 @@ class SandboxIPCProcess  {
     Pickle reply;
     SendRendererReply(fds, reply, font_fd);
 
-    if (font_fd >= 0)
-      HANDLE_EINTR(close(font_fd));
+    if (font_fd >= 0) {
+      if (HANDLE_EINTR(close(font_fd)) < 0)
+        PLOG(ERROR) << "close";
+    }
   }
 
   // MSCharSetToFontconfig translates a Microsoft charset identifier to a

@@ -14,7 +14,7 @@
 #include "base/scoped_ptr.h"
 #include "remoting/client/client_context.h"
 #include "remoting/client/host_connection.h"
-#include "third_party/ppapi/c/pp_event.h"
+#include "remoting/client/plugin/chromoting_scriptable_object.h"
 #include "third_party/ppapi/c/pp_instance.h"
 #include "third_party/ppapi/c/pp_rect.h"
 #include "third_party/ppapi/c/pp_resource.h"
@@ -22,6 +22,7 @@
 #include "third_party/ppapi/cpp/var.h"
 
 class MessageLoop;
+struct PP_InputEvent;
 
 namespace base {
 class Thread;
@@ -39,6 +40,7 @@ class HostConnection;
 class InputHandler;
 class JingleThread;
 class PepperView;
+class RectangleUpdateDecoder;
 
 class ChromotingInstance : public pp::Instance {
  public:
@@ -50,11 +52,15 @@ class ChromotingInstance : public pp::Instance {
 
   virtual bool Init(uint32_t argc, const char* argn[], const char* argv[]);
   virtual void Connect(const ClientConfig& config);
-  virtual bool HandleEvent(const PP_Event& event);
+  virtual bool HandleInputEvent(const PP_InputEvent& event);
+  virtual void Disconnect();
   virtual pp::Var GetInstanceObject();
   virtual void ViewChanged(const pp::Rect& position, const pp::Rect& clip);
 
   virtual bool CurrentlyOnPluginThread() const;
+
+  // Convenience wrapper to get the ChromotingScriptableObject.
+  ChromotingScriptableObject* GetScriptableObject();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ChromotingInstanceTest, TestCaseSetup);
@@ -70,9 +76,13 @@ class ChromotingInstance : public pp::Instance {
   ClientContext context_;
   scoped_ptr<HostConnection> host_connection_;
   scoped_ptr<PepperView> view_;
+  scoped_ptr<RectangleUpdateDecoder> rectangle_decoder_;
   scoped_ptr<InputHandler> input_handler_;
   scoped_ptr<ChromotingClient> client_;
-  pp::Var instance_object_;  // JavaScript interface to control this instance.
+
+  // JavaScript interface to control this instance.
+  // This wraps a ChromotingScriptableObject in a pp::Var.
+  pp::Var instance_object_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingInstance);
 };

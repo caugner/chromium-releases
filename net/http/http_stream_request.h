@@ -42,6 +42,7 @@ class HttpStreamRequest : public StreamFactory::StreamRequestJob {
   virtual void Start(const HttpRequestInfo* request_info,
                      SSLConfig* ssl_config,
                      ProxyInfo* proxy_info,
+                     ClientSocketHandle* connection,
                      StreamFactory::StreamRequestDelegate* delegate,
                      const BoundNetLog& net_log);
   virtual void Cancel();
@@ -83,7 +84,7 @@ class HttpStreamRequest : public StreamFactory::StreamRequestJob {
   SSLConfig* ssl_config() const;
 
   // Callbacks to the delegate.
-  void OnStreamReadyCallback(HttpStreamHandle* stream);
+  void OnStreamReadyCallback(HttpStream* stream);
   void OnStreamFailedCallback(int result);
   void OnCertificateErrorCallback(int result, const SSLInfo& ssl_info);
   void OnNeedsProxyAuthCallback(const HttpResponseInfo& response_info,
@@ -118,6 +119,7 @@ class HttpStreamRequest : public StreamFactory::StreamRequestJob {
       scoped_refptr<HttpProxySocketParams> http_proxy_params,
       scoped_refptr<SOCKSSocketParams> socks_params,
       ProxyServer::Scheme proxy_scheme,
+      std::string hostname,
       bool want_spdy_over_npn);
 
   // AlternateProtocol API
@@ -196,7 +198,7 @@ class HttpStreamRequest : public StreamFactory::StreamRequestJob {
   // read from the socket until the tunnel is done.
   bool establishing_tunnel_;
 
-  scoped_ptr<HttpStreamHandle> stream_;
+  scoped_ptr<HttpStream> stream_;
 
   // True if finding the connection for this request found an alternate
   // protocol was available.

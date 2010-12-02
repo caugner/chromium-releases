@@ -67,7 +67,7 @@ void SecurityFilterPeer::OnUploadProgress(uint64 position, uint64 size) {
 
 bool SecurityFilterPeer::OnReceivedRedirect(
     const GURL& new_url,
-    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+    const webkit_glue::ResourceResponseInfo& info,
     bool* has_new_first_party_for_cookies,
     GURL* new_first_party_for_cookies) {
   NOTREACHED();
@@ -75,7 +75,7 @@ bool SecurityFilterPeer::OnReceivedRedirect(
 }
 
 void SecurityFilterPeer::OnReceivedResponse(
-    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+    const webkit_glue::ResourceResponseInfo& info,
     bool content_filtered) {
   NOTREACHED();
 }
@@ -85,7 +85,8 @@ void SecurityFilterPeer::OnReceivedData(const char* data, int len) {
 }
 
 void SecurityFilterPeer::OnCompletedRequest(const URLRequestStatus& status,
-                                            const std::string& security_info) {
+                                            const std::string& security_info,
+                                            const base::Time& completion_time) {
   NOTREACHED();
 }
 
@@ -95,8 +96,8 @@ GURL SecurityFilterPeer::GetURLForDebugging() const {
 
 // static
 void ProcessResponseInfo(
-    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info_in,
-    webkit_glue::ResourceLoaderBridge::ResponseInfo* info_out,
+    const webkit_glue::ResourceResponseInfo& info_in,
+    webkit_glue::ResourceResponseInfo* info_out,
     const std::string& mime_type) {
   DCHECK(info_out);
   *info_out = info_in;
@@ -137,7 +138,7 @@ BufferedPeer::~BufferedPeer() {
 }
 
 void BufferedPeer::OnReceivedResponse(
-    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+    const webkit_glue::ResourceResponseInfo& info,
     bool response_filtered) {
   ProcessResponseInfo(info, &response_info_, mime_type_);
 }
@@ -147,7 +148,8 @@ void BufferedPeer::OnReceivedData(const char* data, int len) {
 }
 
 void BufferedPeer::OnCompletedRequest(const URLRequestStatus& status,
-                                      const std::string& security_info) {
+                                      const std::string& security_info,
+                                      const base::Time& completion_time) {
   // Make sure we delete ourselves at the end of this call.
   scoped_ptr<BufferedPeer> this_deleter(this);
 
@@ -156,7 +158,7 @@ void BufferedPeer::OnCompletedRequest(const URLRequestStatus& status,
     // Pretend we failed to load the resource.
     original_peer_->OnReceivedResponse(response_info_, true);
     URLRequestStatus status(URLRequestStatus::CANCELED, net::ERR_ABORTED);
-    original_peer_->OnCompletedRequest(status, security_info);
+    original_peer_->OnCompletedRequest(status, security_info, completion_time);
     return;
   }
 
@@ -164,7 +166,7 @@ void BufferedPeer::OnCompletedRequest(const URLRequestStatus& status,
   if (!data_.empty())
     original_peer_->OnReceivedData(data_.data(),
                                    static_cast<int>(data_.size()));
-  original_peer_->OnCompletedRequest(status, security_info);
+  original_peer_->OnCompletedRequest(status, security_info, completion_time);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -184,7 +186,7 @@ ReplaceContentPeer::~ReplaceContentPeer() {
 }
 
 void ReplaceContentPeer::OnReceivedResponse(
-    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+    const webkit_glue::ResourceResponseInfo& info,
     bool content_filtered) {
   // Ignore this, we'll serve some alternate content in OnCompletedRequest.
 }
@@ -193,9 +195,11 @@ void ReplaceContentPeer::OnReceivedData(const char* data, int len) {
   // Ignore this, we'll serve some alternate content in OnCompletedRequest.
 }
 
-void ReplaceContentPeer::OnCompletedRequest(const URLRequestStatus& status,
-                                            const std::string& security_info) {
-  webkit_glue::ResourceLoaderBridge::ResponseInfo info;
+void ReplaceContentPeer::OnCompletedRequest(
+    const URLRequestStatus& status,
+    const std::string& security_info,
+    const base::Time& completion_time) {
+  webkit_glue::ResourceResponseInfo info;
   ProcessResponseInfo(info, &info, mime_type_);
   info.security_info = security_info;
   info.content_length = static_cast<int>(data_.size());
@@ -203,7 +207,9 @@ void ReplaceContentPeer::OnCompletedRequest(const URLRequestStatus& status,
   if (!data_.empty())
     original_peer_->OnReceivedData(data_.data(),
                                    static_cast<int>(data_.size()));
-  original_peer_->OnCompletedRequest(URLRequestStatus(), security_info);
+  original_peer_->OnCompletedRequest(URLRequestStatus(),
+                                     security_info,
+                                     completion_time);
 
   // The request processing is complete, we must delete ourselves.
   delete this;

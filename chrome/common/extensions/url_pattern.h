@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #ifndef CHROME_COMMON_EXTENSIONS_URL_PATTERN_H_
@@ -77,12 +77,22 @@ class URLPattern {
  public:
   // A collection of scheme bitmasks for use with valid_schemes.
   enum SchemeMasks {
-    SCHEME_HTTP = 1<<0,
-    SCHEME_HTTPS = 1<<1,
-    SCHEME_FILE = 1<<2,
-    SCHEME_FTP = 1<<3,
-    SCHEME_CHROMEUI = 1<<4,
+    SCHEME_NONE     = 0,
+    SCHEME_HTTP     = 1 << 0,
+    SCHEME_HTTPS    = 1 << 1,
+    SCHEME_FILE     = 1 << 2,
+    SCHEME_FTP      = 1 << 3,
+    SCHEME_CHROMEUI = 1 << 4,
+    // SCHEME_ALL will match every scheme, including chrome://, chrome-
+    // extension://, about:, etc. Because this has lots of security
+    // implications, third-party extensions should never be able to get access
+    // to URL patterns initialized this way. It should only be used for internal
+    // Chrome code.
+    SCHEME_ALL      = -1,
   };
+
+  // The <all_urls> string pattern.
+  static const char kAllUrlsPattern[];
 
   // Note: don't use this directly. This exists so URLPattern can be used
   // with STL containers.
@@ -161,8 +171,8 @@ class URLPattern {
   // would result in the same answer.
   bool OverlapsWith(const URLPattern& other) const;
 
-  // Conver this URLPattern into an equivalent set of URLPatterns that don't use
-  // a wildcard in the scheme component. If this URLPattern doesn't use a
+  // Convert this URLPattern into an equivalent set of URLPatterns that don't
+  // use a wildcard in the scheme component. If this URLPattern doesn't use a
   // wildcard scheme, then the returned set will contain one element that is
   // equivalent to this instance.
   std::vector<URLPattern> ConvertToExplicitSchemes() const;
@@ -174,9 +184,8 @@ class URLPattern {
   };
 
   // Used for origin comparisons in a std::set.
-  class EffectiveHostCompareFunctor :
-      public std::binary_function<URLPattern, URLPattern, bool> {
-  public:
+  class EffectiveHostCompareFunctor {
+   public:
     bool operator()(const URLPattern& a, const URLPattern& b) const {
       return EffectiveHostCompare(a, b);
     };
@@ -207,9 +216,11 @@ class URLPattern {
   std::string path_;
 
   // The path with "?" and "\" characters escaped for use with the
-  // MatchPatternASCII() function. This is populated lazily, the first time it
-  // is needed.
+  // MatchPattern() function. This is populated lazily, the first time it is
+  // needed.
   mutable std::string path_escaped_;
 };
+
+typedef std::vector<URLPattern> URLPatternList;
 
 #endif  // CHROME_COMMON_EXTENSIONS_URL_PATTERN_H_

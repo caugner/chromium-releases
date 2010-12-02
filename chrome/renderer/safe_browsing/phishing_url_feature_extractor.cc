@@ -7,9 +7,11 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+
 #include "base/histogram.h"
 #include "base/logging.h"
 #include "base/perftimer.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "chrome/renderer/safe_browsing/features.h"
 #include "googleurl/src/gurl.h"
@@ -40,7 +42,7 @@ bool PhishingUrlFeatureExtractor::ExtractFeatures(const GURL& url,
             true /* allow_unknown_registries */);
 
     if (registry_length == 0 || registry_length == std::string::npos) {
-      LOG(ERROR) << "Could not find TLD for host: " << host;
+      DLOG(INFO) << "Could not find TLD for host: " << host;
       return false;
     }
     DCHECK_LT(registry_length, host.size())
@@ -54,13 +56,13 @@ bool PhishingUrlFeatureExtractor::ExtractFeatures(const GURL& url,
     // Pull off the TLD and the preceeding dot.
     host.erase(tld_start - 1);
     std::vector<std::string> host_tokens;
-    SplitStringDontTrim(host, '.', &host_tokens);
+    base::SplitStringDontTrim(host, '.', &host_tokens);
     // Get rid of any empty components.
     std::vector<std::string>::iterator new_end =
         std::remove(host_tokens.begin(), host_tokens.end(), "");
     host_tokens.erase(new_end, host_tokens.end());
     if (host_tokens.empty()) {
-      LOG(ERROR) << "Could not find domain for host: " << host;
+      DLOG(INFO) << "Could not find domain for host: " << host;
       return false;
     }
     if (!features->AddBooleanFeature(features::kUrlDomainToken +

@@ -9,13 +9,13 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/mock_authenticator.h"
-#include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/screen_lock_view.h"
+#include "chrome/browser/chromeos/login/screen_locker.h"
 #include "views/controls/button/button.h"
 #include "views/controls/label.h"
 #include "views/controls/textfield/textfield.h"
-#include "views/widget/widget_gtk.h"
 #include "views/widget/root_view.h"
+#include "views/widget/widget_gtk.h"
 
 namespace chromeos {
 
@@ -26,8 +26,8 @@ test::ScreenLockerTester* ScreenLocker::GetTester() {
 namespace test {
 
 bool ScreenLockerTester::IsLocked() {
-  return ScreenLocker::screen_locker_ != NULL &&
-      ScreenLocker::screen_locker_->lock_widget_->GetRootView()->IsVisible();
+  return ScreenLocker::screen_locker_ &&
+      ScreenLocker::screen_locker_->locked_;
 }
 
 void ScreenLockerTester::InjectMockAuthenticator(

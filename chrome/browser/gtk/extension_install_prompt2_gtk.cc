@@ -4,6 +4,7 @@
 
 #include <gtk/gtk.h>
 
+#include "app/gtk_util.h"
 #include "app/l10n_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -44,7 +45,7 @@ GtkWidget* MakeMarkupLabel(const char* format, const std::string& str) {
 void OnDialogResponse(GtkDialog* dialog, int response_id,
                       ExtensionInstallUI::Delegate* delegate) {
   if (response_id == GTK_RESPONSE_ACCEPT) {
-    delegate->InstallUIProceed(false);
+    delegate->InstallUIProceed();
   } else {
     delegate->InstallUIAbort();
   }
@@ -112,20 +113,11 @@ void ShowInstallPromptDialog2(GtkWindow* parent, SkBitmap* skia_icon,
                 IDS_EXTENSION_PROMPT2_WILL_HAVE_ACCESS_TO;
     GtkWidget* warning_label = gtk_label_new(l10n_util::GetStringUTF8(
         label).c_str());
-    gtk_label_set_line_wrap(GTK_LABEL(warning_label), TRUE);
     gtk_misc_set_alignment(GTK_MISC(warning_label), 0.0, 0.5);
+    gtk_util::SetLabelWidth(warning_label, kRightColumnMinWidth);
 
-    // We set the size request for the right column width here so that it will
-    // be overridden by the title if the title is long. We use the bin because
-    // if we set a size request on the label itself, GTK+ uses that when
-    // justifying the label. Older versions of GTK+ use the label's allocation,
-    // but newer versions use the size request. This can lead to alignment
-    // problems in RTL locales. See http://crbug.com/52857
-    GtkWidget* bin = gtk_event_box_new();
-    gtk_container_add(GTK_CONTAINER(bin), warning_label);
-    gtk_widget_set_size_request(bin, kRightColumnMinWidth, -1);
-
-    gtk_box_pack_start(GTK_BOX(right_column_area), bin, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(right_column_area), warning_label,
+                       FALSE, FALSE, 0);
 
     GtkWidget* frame = gtk_frame_new(NULL);
     gtk_box_pack_start(GTK_BOX(right_column_area), frame, FALSE, FALSE, 0);

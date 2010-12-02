@@ -82,8 +82,8 @@ const SkColor kDefaultColorNTPBackground = SK_ColorWHITE;
 const SkColor kDefaultColorNTPText = SK_ColorBLACK;
 const SkColor kDefaultColorNTPLink = SkColorSetRGB(6, 55, 116);
 #endif
-const SkColor kDefaultColorNTPHeader = SkColorSetRGB(75, 140, 220);
-const SkColor kDefaultColorNTPSection = SkColorSetRGB(229, 239, 254);
+const SkColor kDefaultColorNTPHeader = SkColorSetRGB(150, 150, 150);
+const SkColor kDefaultColorNTPSection = SkColorSetRGB(229, 229, 229);
 const SkColor kDefaultColorNTPSectionText = SK_ColorBLACK;
 const SkColor kDefaultColorNTPSectionLink = SkColorSetRGB(6, 55, 116);
 const SkColor kDefaultColorControlBackground = SkColorSetARGB(0, 0, 0, 0);
@@ -238,6 +238,8 @@ SkColor BrowserThemeProvider::GetColor(int id) const {
       return IncreaseLightness(GetColor(COLOR_NTP_TEXT), 0.70);
     case COLOR_NTP_SECTION_HEADER_RULE_LIGHT:
       return IncreaseLightness(GetColor(COLOR_NTP_TEXT), 0.86);
+    case COLOR_NTP_TEXT_LIGHT:
+      return IncreaseLightness(GetColor(COLOR_NTP_TEXT), 0.40);
   }
 
   return GetDefaultColor(id);
@@ -610,8 +612,8 @@ void BrowserThemeProvider::BuildFromExtension(Extension* extension) {
 
   // Write the packed file to disk.
   FilePath pack_path = extension->path().Append(chrome::kThemePackFilename);
-  ChromeThread::PostTask(ChromeThread::FILE, FROM_HERE,
-                         new WritePackToDiskTask(pack, pack_path));
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                          new WritePackToDiskTask(pack, pack_path));
 
   SavePackName(pack_path);
   theme_pack_ = pack;

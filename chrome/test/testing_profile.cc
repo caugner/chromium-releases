@@ -16,6 +16,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/ntp_resource_cache.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/favicon_service.h"
 #include "chrome/browser/find_bar_state.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/prefs/browser_prefs.h"
+#include "chrome/browser/search_engines/template_url_fetcher.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
@@ -39,6 +41,7 @@
 #include "chrome/test/testing_pref_service.h"
 #include "net/base/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_unittest.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "webkit/database/database_tracker.h"
 
@@ -107,19 +110,9 @@ class BookmarkLoadObserver : public BookmarkModelObserver {
   DISALLOW_COPY_AND_ASSIGN(BookmarkLoadObserver);
 };
 
-// This context is used to assist testing the CookieMonster by providing a
-// valid CookieStore. This can probably be expanded to test other aspects of
-// the context as well.
-class TestURLRequestContext : public URLRequestContext {
- public:
-  TestURLRequestContext() {
-    cookie_store_ = new net::CookieMonster(NULL, NULL);
-  }
-};
-
 // Used to return a dummy context (normally the context is on the IO thread).
 // The one here can be run on the main test thread. Note that this can lead to
-// a leak if your test does not have a ChromeThread::IO in it because
+// a leak if your test does not have a BrowserThread::IO in it because
 // URLRequestContextGetter is defined as a ReferenceCounted object with a
 // special trait that deletes it on the IO thread.
 class TestURLRequestContextGetter : public URLRequestContextGetter {
@@ -130,7 +123,7 @@ class TestURLRequestContextGetter : public URLRequestContextGetter {
     return context_.get();
   }
   virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() {
-    return ChromeThread::GetMessageLoopProxyForThread(ChromeThread::IO);
+    return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
   }
 
  private:
@@ -155,7 +148,7 @@ class TestExtensionURLRequestContextGetter : public URLRequestContextGetter {
     return context_.get();
   }
   virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() {
-    return ChromeThread::GetMessageLoopProxyForThread(ChromeThread::IO);
+    return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
   }
 
  private:
@@ -166,6 +159,7 @@ class TestExtensionURLRequestContextGetter : public URLRequestContextGetter {
 
 TestingProfile::TestingProfile()
     : start_time_(Time::Now()),
+      testing_prefs_(NULL),
       created_theme_provider_(false),
       has_history_service_(false),
       off_the_record_(false),
@@ -207,6 +201,10 @@ TestingProfile::~TestingProfile() {
   if (top_sites_.get())
     top_sites_->ClearProfile();
   history::TopSites::DeleteTopSites(top_sites_);
+  if (extensions_service_.get()) {
+    extensions_service_->DestroyingProfile();
+    extensions_service_ = NULL;
+  }
 }
 
 void TestingProfile::CreateFaviconService() {
@@ -305,8 +303,16 @@ void TestingProfile::BlockUntilBookmarkModelLoaded() {
   DCHECK(bookmark_bar_model_->IsLoaded());
 }
 
+void TestingProfile::CreateTemplateURLFetcher() {
+  template_url_fetcher_.reset(new TemplateURLFetcher(this));
+}
+
 void TestingProfile::CreateTemplateURLModel() {
-  template_url_model_.reset(new TemplateURLModel(this));
+  SetTemplateURLModel(new TemplateURLModel(this));
+}
+
+void TestingProfile::SetTemplateURLModel(TemplateURLModel* model) {
+  template_url_model_.reset(model);
 }
 
 void TestingProfile::UseThemeProvider(BrowserThemeProvider* theme_provider) {
@@ -315,19 +321,36 @@ void TestingProfile::UseThemeProvider(BrowserThemeProvider* theme_provider) {
   theme_provider_.reset(theme_provider);
 }
 
+scoped_refptr<ExtensionsService> TestingProfile::CreateExtensionsService(
+    const CommandLine* command_line,
+    const FilePath& install_directory) {
+  extensions_service_ = new ExtensionsService(this,
+                                              command_line,
+                                              install_directory,
+                                              false);
+  return extensions_service_;
+}
+
 FilePath TestingProfile::GetPath() {
   DCHECK(temp_dir_.IsValid());  // TODO(phajdan.jr): do it better.
   return temp_dir_.path();
 }
 
 TestingPrefService* TestingProfile::GetTestingPrefService() {
-  return static_cast<TestingPrefService*>(GetPrefs());
+  if (!prefs_.get())
+    CreateTestingPrefService();
+  DCHECK(testing_prefs_);
+  return testing_prefs_;
 }
 
 webkit_database::DatabaseTracker* TestingProfile::GetDatabaseTracker() {
   if (!db_tracker_)
     db_tracker_ = new webkit_database::DatabaseTracker(GetPath(), false);
   return db_tracker_;
+}
+
+ExtensionsService* TestingProfile::GetExtensionsService() {
+  return extensions_service_.get();
 }
 
 net::CookieMonster* TestingProfile::GetCookieMonster() {
@@ -348,11 +371,22 @@ void TestingProfile::InitThemes() {
   }
 }
 
+void TestingProfile::SetPrefService(PrefService* prefs) {
+  DCHECK(!prefs_.get());
+  prefs_.reset(prefs);
+}
+
+void TestingProfile::CreateTestingPrefService() {
+  DCHECK(!prefs_.get());
+  testing_prefs_ = new TestingPrefService();
+  prefs_.reset(testing_prefs_);
+  Profile::RegisterUserPrefs(prefs_.get());
+  browser::RegisterAllPrefs(prefs_.get(), prefs_.get());
+}
+
 PrefService* TestingProfile::GetPrefs() {
   if (!prefs_.get()) {
-    prefs_.reset(new TestingPrefService());
-    Profile::RegisterUserPrefs(prefs_.get());
-    browser::RegisterAllPrefs(prefs_.get(), prefs_.get());
+    CreateTestingPrefService();
   }
   return prefs_.get();
 }
@@ -373,6 +407,10 @@ URLRequestContextGetter* TestingProfile::GetRequestContext() {
 void TestingProfile::CreateRequestContext() {
   if (!request_context_)
     request_context_ = new TestURLRequestContextGetter();
+}
+
+void TestingProfile::ResetRequestContext() {
+  request_context_ = NULL;
 }
 
 URLRequestContextGetter* TestingProfile::GetRequestContextForExtensions() {
@@ -428,7 +466,7 @@ NTPResourceCache* TestingProfile::GetNTPResourceCache() {
 }
 
 DesktopNotificationService* TestingProfile::GetDesktopNotificationService() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!desktop_notification_service_.get()) {
     desktop_notification_service_.reset(new DesktopNotificationService(
         this, NULL));
@@ -453,6 +491,11 @@ TokenService* TestingProfile::GetTokenService() {
 }
 
 ProfileSyncService* TestingProfile::GetProfileSyncService() {
+  return GetProfileSyncService("");
+}
+
+ProfileSyncService* TestingProfile::GetProfileSyncService(
+    const std::string& cros_user) {
   if (!profile_sync_service_.get()) {
     // Use a NiceMock here since we are really using the mock as a
     // fake.  Test cases that want to set expectations on a

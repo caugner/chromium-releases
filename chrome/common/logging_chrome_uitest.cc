@@ -130,9 +130,6 @@ class CheckFalseTest : public UITest {
 #elif defined(OS_MACOSX)
 // Crash service doesn't exist for the Mac yet: http://crbug.com/45243
 #define CheckFails DISABLED_CheckFails
-#elif defined(OS_LINUX)
-// TODO(phajdan) Fix this - http://crbug.com/49838
-#define CheckFails FAILS_CheckFails
 #endif
 // Launch the app in assertion test mode, then close the app.
 TEST_F(CheckFalseTest, CheckFails) {
@@ -183,7 +180,7 @@ TEST_F(RendererCrashTest, Crash) {
   } else {
     scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
     ASSERT_TRUE(browser.get());
-    ASSERT_TRUE(browser->WaitForTabCountToBecome(1, action_max_timeout_ms()));
+    ASSERT_TRUE(browser->WaitForTabCountToBecome(1));
     expected_crashes_ = EXPECTED_CRASH_CRASHES;
   }
 }

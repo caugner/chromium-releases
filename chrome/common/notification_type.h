@@ -86,6 +86,10 @@ class NotificationType {
 
     // Other load-related (not from NavigationController) ----------------------
 
+    // Corresponds to ViewHostMsg_DocumentOnLoadCompletedInMainFrame. The source
+    // is the TabContents and the details the page_id.
+    LOAD_COMPLETED_MAIN_FRAME,
+
     // A content load is starting.  The source will be a
     // Source<NavigationController> corresponding to the tab in which the load
     // is occurring.  No details are expected for this notification.
@@ -99,9 +103,16 @@ class NotificationType {
 
     // A frame is staring a provisional load.  The source is a
     // Source<NavigationController> corresponding to the tab in which the load
-    // occurs.  Details is a bool specifying if the load occurs in the main
-    // frame (or a sub-frame if false).
+    // occurs.  Details is a ProvisionalLoadDetails object.
     FRAME_PROVISIONAL_LOAD_START,
+
+    // The provisional load for a frame was committed. The source is a
+    // NavigationController corresponding to the tab in which the load occured.
+    // Details is a ProvisionalLoadDetails object. In contrast to
+    // NAV_ENTRY_COMMITTED, this notification is sent when the load was
+    // committed, even if no navigation entry was committed (such as
+    // AUTO_SUBFRAME navigations).
+    FRAME_PROVISIONAL_LOAD_COMMITTED,
 
     // Content was loaded from an in-memory cache.  The source will be a
     // Source<NavigationController> corresponding to the tab in which the load
@@ -283,10 +294,6 @@ class NotificationType {
     // is the dialog.
     APP_MODAL_DIALOG_SHOWN,
 
-    // Sent after an application-modal dialog has been closed. The source
-    // is the dialog.
-    APP_MODAL_DIALOG_CLOSED,
-
     // Tabs --------------------------------------------------------------------
 
     // Sent when a tab is added to a TabContentsDelegate. The source is the
@@ -393,10 +400,6 @@ class NotificationType {
     // pointer.
     RENDER_VIEW_HOST_CREATED_FOR_TAB,
 
-    // Sent when MatchPreview creates the preview TabContents. The source is the
-    // TabContents the MatchPreview is associated with.
-    MATCH_PREVIEW_TAB_CONTENTS_CREATED,
-
     // Stuff inside the tabs ---------------------------------------------------
 
     // This message is sent after a constrained window has been closed.  The
@@ -491,6 +494,14 @@ class NotificationType {
     // view host for the page, there are no details.
     FOCUS_CHANGED_IN_PAGE,
 
+    // Notification posted from ExecuteJavascriptInWebFrameNotifyResult. The
+    // source is the RenderViewHost ExecuteJavascriptInWebFrameNotifyResult was
+    // invoked on. The details are a std::pair<int, Value*> with the int giving
+    // the id returned from ExecuteJavascriptInWebFrameNotifyResult and the
+    // Value the results of the javascript expression. The Value is owned by
+    // RenderViewHost.
+    EXECUTE_JAVASCRIPT_RESULT,
+
     // BackgroundContents ------------------------------------------------------
 
     // A new background contents was opened by script. The source is the parent
@@ -551,6 +562,10 @@ class NotificationType {
     // This is sent in the RenderView when previously blocked plugins on a page
     // should be loaded. The source is the RenderView. No details are expected.
     SHOULD_LOAD_PLUGINS,
+
+    // Sent by the PluginUpdater when there is a change of plugin
+    // enable/disable status.
+    PLUGIN_ENABLE_STATUS_CHANGED,
 
     // This is sent when a login prompt is shown.  The source is the
     // Source<NavigationController> for the tab in which the prompt is shown.
@@ -691,6 +706,10 @@ class NotificationType {
     // should be the UI thread.
     DEFAULT_REQUEST_CONTEXT_AVAILABLE,
 
+    // A new web resource has been made available. Source is the
+    // WebResourceService, and the details are NoDetails.
+    WEB_RESOURCE_AVAILABLE,
+
     // Autocomplete ------------------------------------------------------------
 
     // Sent by the autocomplete controller at least once per query, each time
@@ -712,6 +731,9 @@ class NotificationType {
 
     // Sent by the autocomplete edit when it is destroyed.
     AUTOCOMPLETE_EDIT_DESTROYED,
+
+    // Sent by the autocomplete edit when it is focused.
+    AUTOCOMPLETE_EDIT_FOCUSED,
 
     // Sent when the main Google URL has been updated.  Some services cache
     // this value and need to update themselves when it changes.  See
@@ -787,11 +809,8 @@ class NotificationType {
     // details about why the install failed.
     EXTENSION_INSTALL_ERROR,
 
-    // Sent when a new extension is being uninstalled. When this notification
-    // is sent, the ExtensionsService still is tracking this extension (it has
-    // not been unloaded yet). This will be followed by an EXTENSION_UNLOADED
-    // or EXTENSION_UNLOADED_DISABLED when the extension is actually unloaded.
-    // The details are an Extension and the source is a Profile.
+    // Sent when an extension has been uninstalled.  The details are
+    // an UninstalledExtensionInfo struct and the source is a Profile.
     EXTENSION_UNINSTALLED,
 
     // Sent when an extension is unloaded. This happens when an extension is
@@ -999,6 +1018,16 @@ class NotificationType {
     // TabSpecificContentSettings object, there are no details.
     COLLECTED_COOKIES_SHOWN,
 
+    // Sent when a non-default setting in the the geolocation content settings
+    // map has changed. The source is the GeolocationContentSettingsMap, the
+    // details are None.
+    GEOLOCATION_SETTINGS_CHANGED,
+
+    // Sent when a non-default setting in the the notification content settings
+    // map has changed. The source is the DesktopNotificationService, the
+    // details are None.
+    DESKTOP_NOTIFICATION_SETTINGS_CHANGED,
+
     // Sync --------------------------------------------------------------------
 
     // Sent when the sync backend has been paused.
@@ -1031,19 +1060,33 @@ class NotificationType {
     // The syncer requires a passphrase to decrypt sensitive updates. This
     // notification is sent when the first sensitive data type is setup by the
     // user as well as anytime any the passphrase is changed in another synced
-    // client.
+    // client.  The source is the SyncBackendHost wanting a passphrase.  No
+    // details.
     SYNC_PASSPHRASE_REQUIRED,
 
     // Sent when the passphrase provided by the user is accepted. After this
     // notification is sent, updates to sensitive nodes are encrypted using the
-    // accepted passphrase.
+    // accepted passphrase.  The source is the SyncBackendHost that accepted
+    // the passphrase.  No details.
     SYNC_PASSPHRASE_ACCEPTED,
+
+    // Sent when the set of data types that should be synced has been modified
+    // externally (eg. by the dom_ui options screen).
+    // The source is the Profile, there are no details.
+    SYNC_DATA_TYPES_UPDATED,
 
     // Cookies -----------------------------------------------------------------
 
     // Sent when a cookie changes. The source is a Profile object, the details
     // are a ChromeCookieDetails object.
     COOKIE_CHANGED,
+
+    // Sidebar -----------------------------------------------------------------
+
+    // Sent when the sidebar state is changed.
+    // The source is a SidebarManager instance, the details are the changed
+    // SidebarContainer object.
+    SIDEBAR_CHANGED,
 
     // Token Service -----------------------------------------------------------
 
@@ -1053,15 +1096,41 @@ class NotificationType {
     // TokenAvailableDetails object.
     TOKEN_AVAILABLE,
 
-    // Sent when the sidebar state is changed.
-    // The source is a SidebarManager instance, the details are the changed
-    // SidebarContainer object.
-    SIDEBAR_CHANGED,
+    // When there aren't any additional tokens left to load, this notification
+    // is sent.
+    // The source is a TokenService on the profile. There are no details.
+    TOKEN_LOADING_FINISHED,
 
     // If a token request failed, one of these is issued per failed request.
     // The source is a TokenService on the Profile. The details are a
     // TokenRequestFailedDetails object.
     TOKEN_REQUEST_FAILED,
+
+    // When a service has a new token they got from a frontend that the
+    // TokenService should know about, fire this notification. The details
+    // are a TokenAvailableDetails object.
+    TOKEN_UPDATED,
+
+    // Sent when a user signs into Google services such as sync.
+    // The source is the SigninManager instance. The details are a
+    // GoogleServiceSignin object.
+    GOOGLE_SIGNIN_SUCCESSFUL,
+
+    // Sent when a user fails to sign into Google services such as sync.
+    // The source is the SigninManager instance. The details are a
+    // GoogleServiceAuthError object.
+    GOOGLE_SIGNIN_FAILED,
+
+    // AutoFill Notifications --------------------------------------------------
+
+    // Sent when a popup with AutoFill suggestions is shown in the renderer.
+    // The source is the corresponding RenderViewHost. There are not details.
+    AUTOFILL_DID_SHOW_SUGGESTIONS,
+
+    // Sent when a form is previewed or filled with AutoFill suggestions.
+    // The source is the corresponding RenderViewHost. There are not details.
+    AUTOFILL_DID_FILL_FORM_DATA,
+
 
     // Misc --------------------------------------------------------------------
 
@@ -1120,9 +1189,7 @@ class NotificationType {
     BOOKMARK_CONTEXT_MENU_SHOWN,
 #endif
 
-    // Sent when the zoom level changes. The source is the profile, details the
-    // host as a std::string (see HostZoomMap::GetZoomLevel for details on the
-    // host as it not always just the host).
+    // Sent when the zoom level changes. The source is the profile.
     ZOOM_LEVEL_CHANGED,
 
     // Sent when the tab's closeable state has changed due to increase/decrease

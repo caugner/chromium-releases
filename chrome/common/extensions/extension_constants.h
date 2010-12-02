@@ -229,6 +229,14 @@ namespace extension_misc {
     0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
     0xf7, 0x0d, 0x01, 0x01, 0x05, 0x05, 0x00
   };
+
+  // Don't remove items or change the order of this enum.  It's used in
+  // histograms and preferences.
+  enum LaunchContainer {
+    LAUNCH_WINDOW,
+    LAUNCH_PANEL,
+    LAUNCH_TAB
+  };
 }  // extension_misc
 
 #endif  // CHROME_COMMON_EXTENSIONS_EXTENSION_CONSTANTS_H_

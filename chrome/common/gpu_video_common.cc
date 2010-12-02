@@ -4,134 +4,70 @@
 
 #include "chrome/common/gpu_video_common.h"
 
+const int32 kGpuVideoInvalidFrameId = -1;
+
 namespace IPC {
-
-void ParamTraits<GpuVideoServiceInfoParam>::Write(
-    Message* m, const GpuVideoServiceInfoParam& p) {
-  m->WriteInt(p.video_service_route_id_);
-  m->WriteInt(p.video_service_host_route_id_);
-  m->WriteInt(p.service_available_);
-}
-
-bool ParamTraits<GpuVideoServiceInfoParam>::Read(
-    const Message* m, void** iter, GpuVideoServiceInfoParam* r) {
-  if (!m->ReadInt(iter, &r->video_service_route_id_) ||
-      !m->ReadInt(iter, &r->video_service_host_route_id_) ||
-      !m->ReadInt(iter, &r->service_available_))
-    return false;
-  return true;
-}
-
-void ParamTraits<GpuVideoServiceInfoParam>::Log(
-    const GpuVideoServiceInfoParam& p, std::string* l) {
-  l->append(StringPrintf("(%d, %d, %d)",
-            p.video_service_route_id_,
-            p.video_service_host_route_id_,
-            p.service_available_));
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-void ParamTraits<GpuVideoDecoderInfoParam>::Write(
-    Message* m, const GpuVideoDecoderInfoParam& p) {
-  m->WriteInt(p.context_id);
-  m->WriteInt(p.decoder_id);
-  m->WriteInt(p.decoder_route_id);
-  m->WriteInt(p.decoder_host_route_id);
-}
-
-bool ParamTraits<GpuVideoDecoderInfoParam>::Read(
-    const Message* m, void** iter, GpuVideoDecoderInfoParam* r) {
-  if (!m->ReadInt(iter, &r->context_id) ||
-      !m->ReadInt(iter, &r->decoder_id) ||
-      !m->ReadInt(iter, &r->decoder_route_id) ||
-      !m->ReadInt(iter, &r->decoder_host_route_id))
-    return false;
-  return true;
-}
-
-void ParamTraits<GpuVideoDecoderInfoParam>::Log(
-    const GpuVideoDecoderInfoParam& p, std::string* l) {
-  l->append(StringPrintf("(%d, %d, %d)",
-            p.decoder_id,
-            p.decoder_route_id,
-            p.decoder_host_route_id));
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void ParamTraits<GpuVideoDecoderInitParam>::Write(
     Message* m, const GpuVideoDecoderInitParam& p) {
-  m->WriteInt(p.codec_id_);
-  m->WriteInt(p.width_);
-  m->WriteInt(p.height_);
+  WriteParam(m, p.codec_id);
+  WriteParam(m, p.width);
+  WriteParam(m, p.height);
 }
 
 bool ParamTraits<GpuVideoDecoderInitParam>::Read(
     const Message* m, void** iter, GpuVideoDecoderInitParam* r) {
-  if (!m->ReadInt(iter, &r->codec_id_) ||
-      !m->ReadInt(iter, &r->width_) ||
-      !m->ReadInt(iter, &r->height_))
+  if (!ReadParam(m, iter, &r->codec_id) ||
+      !ReadParam(m, iter, &r->width) ||
+      !ReadParam(m, iter, &r->height))
     return false;
   return true;
 }
 
 void ParamTraits<GpuVideoDecoderInitParam>::Log(
     const GpuVideoDecoderInitParam& p, std::string* l) {
-  l->append(StringPrintf("(%d, %d %d)", p.codec_id_, p.width_, p.height_));
+  l->append(StringPrintf("(%d, %d %d)", p.codec_id, p.width, p.height));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void ParamTraits<GpuVideoDecoderInitDoneParam>::Write(
     Message* m, const GpuVideoDecoderInitDoneParam& p) {
-  m->WriteInt(p.success_);
-  m->WriteInt(p.stride_);
-  m->WriteInt(p.format_);
-  m->WriteInt(p.surface_type_);
-  m->WriteInt(p.input_buffer_size_);
-  m->WriteInt(p.output_buffer_size_);
-  IPC::ParamTraits<base::SharedMemoryHandle>::Write(
-      m, p.input_buffer_handle_);
-  IPC::ParamTraits<base::SharedMemoryHandle>::Write(
-      m, p.output_buffer_handle_);
+  WriteParam(m, p.success);
+  WriteParam(m, p.input_buffer_size);
+  WriteParam(m, p.input_buffer_handle);
 }
 
 bool ParamTraits<GpuVideoDecoderInitDoneParam>::Read(
     const Message* m, void** iter, GpuVideoDecoderInitDoneParam* r) {
-  if (!m->ReadInt(iter, &r->success_) ||
-      !m->ReadInt(iter, &r->stride_) ||
-      !m->ReadInt(iter, &r->format_) ||
-      !m->ReadInt(iter, &r->surface_type_) ||
-      !m->ReadInt(iter, &r->input_buffer_size_) ||
-      !m->ReadInt(iter, &r->output_buffer_size_) ||
-      !IPC::ParamTraits<base::SharedMemoryHandle>::Read(
-          m, iter, &r->input_buffer_handle_) ||
-      !IPC::ParamTraits<base::SharedMemoryHandle>::Read(
-          m, iter, &r->output_buffer_handle_))
+  if (!ReadParam(m, iter, &r->success) ||
+      !ReadParam(m, iter, &r->input_buffer_size) ||
+      !ReadParam(m, iter, &r->input_buffer_handle))
     return false;
   return true;
 }
 
 void ParamTraits<GpuVideoDecoderInitDoneParam>::Log(
     const GpuVideoDecoderInitDoneParam& p, std::string* l) {
-  l->append(StringPrintf("(%d)", p.stride_));
+  l->append(StringPrintf("(%d %d)", p.success, p.input_buffer_size));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void ParamTraits<GpuVideoDecoderInputBufferParam>::Write(
     Message* m, const GpuVideoDecoderInputBufferParam& p) {
-  m->WriteInt64(p.timestamp_);
-  m->WriteInt(p.offset_);
-  m->WriteInt(p.size_);
+  WriteParam(m, p.timestamp);
+  WriteParam(m, p.offset);
+  WriteParam(m, p.size);
 }
 
 bool ParamTraits<GpuVideoDecoderInputBufferParam>::Read(
     const Message* m, void** iter, GpuVideoDecoderInputBufferParam* r) {
-  if (!m->ReadInt64(iter, &r->timestamp_) ||
-      !m->ReadInt(iter, &r->offset_) ||
-      !m->ReadInt(iter, &r->size_))
+  if (!ReadParam(m, iter, &r->timestamp) ||
+      !ReadParam(m, iter, &r->offset) ||
+      !ReadParam(m, iter, &r->size))
     return false;
   return true;
 }
@@ -139,46 +75,20 @@ bool ParamTraits<GpuVideoDecoderInputBufferParam>::Read(
 void ParamTraits<GpuVideoDecoderInputBufferParam>::Log(
     const GpuVideoDecoderInputBufferParam& p, std::string* l) {
   l->append(StringPrintf("(%d %d %d)",
-                         static_cast<int>(p.timestamp_),
-                         p.offset_, p.size_));
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-void ParamTraits<GpuVideoDecoderOutputBufferParam>::Write(
-    Message* m, const GpuVideoDecoderOutputBufferParam& p) {
-  m->WriteInt64(p.timestamp_);
-  m->WriteInt64(p.duration_);
-  m->WriteInt(p.flags_);
-}
-
-bool ParamTraits<GpuVideoDecoderOutputBufferParam>::Read(
-    const Message* m, void** iter, GpuVideoDecoderOutputBufferParam* r) {
-  if (!m->ReadInt64(iter, &r->timestamp_) ||
-      !m->ReadInt64(iter, &r->duration_) ||
-      !m->ReadInt(iter, &r->flags_))
-    return false;
-  return true;
-}
-
-void ParamTraits<GpuVideoDecoderOutputBufferParam>::Log(
-    const GpuVideoDecoderOutputBufferParam& p, std::string* l) {
-  l->append(StringPrintf("(%d %d) %x",
-                         static_cast<int>(p.timestamp_),
-                         static_cast<int>(p.duration_),
-                         p.flags_));
+                         static_cast<int>(p.timestamp),
+                         p.offset, p.size));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void ParamTraits<GpuVideoDecoderErrorInfoParam>::Write(
     Message* m, const GpuVideoDecoderErrorInfoParam& p) {
-  m->WriteInt(p.error_id);
+  WriteParam(m, p.error_id);
 }
 
 bool ParamTraits<GpuVideoDecoderErrorInfoParam>::Read(
     const Message* m, void** iter, GpuVideoDecoderErrorInfoParam* r) {
-  if (!m->ReadInt(iter, &r->error_id))
+  if (!ReadParam(m, iter, &r->error_id))
     return false;
   return true;
 }
@@ -192,21 +102,80 @@ void ParamTraits<GpuVideoDecoderErrorInfoParam>::Log(
 
 void ParamTraits<GpuVideoDecoderFormatChangeParam>::Write(
     Message* m, const GpuVideoDecoderFormatChangeParam& p) {
-  m->WriteInt(p.input_buffer_size_);
-  m->WriteInt(p.output_buffer_size_);
+  WriteParam(m, p.input_buffer_size);
 }
 
 bool ParamTraits<GpuVideoDecoderFormatChangeParam>::Read(
     const Message* m, void** iter, GpuVideoDecoderFormatChangeParam* r) {
-  if (!m->ReadInt(iter, &r->input_buffer_size_) ||
-      !m->ReadInt(iter, &r->output_buffer_size_))
+  if (!ReadParam(m, iter, &r->input_buffer_size))
     return false;
   return true;
 }
 
 void ParamTraits<GpuVideoDecoderFormatChangeParam>::Log(
     const GpuVideoDecoderFormatChangeParam& p, std::string* l) {
-  l->append(StringPrintf("(%d %d)", p.input_buffer_size_,
-                         p.output_buffer_size_));
+  l->append(StringPrintf("%d", p.input_buffer_size));
 }
-};
+
+///////////////////////////////////////////////////////////////////////////////
+// Traits for media::VideoFrame::Format
+void ParamTraits<media::VideoFrame::Format>::Write(
+    Message* m, const param_type& p) {
+  m->WriteInt(p);
+}
+
+bool ParamTraits<media::VideoFrame::Format>::Read(
+    const Message* m, void** iter, param_type* p) {
+  int type;
+  if (!m->ReadInt(iter, &type))
+    return false;
+  *p = static_cast<param_type>(type);
+  return true;
+}
+
+void ParamTraits<media::VideoFrame::Format>::Log(
+    const param_type& p, std::string* l) {
+  std::string s;
+  switch (p) {
+    case media::VideoFrame::RGB555:
+      s = "RGB555";
+      break;
+    case media::VideoFrame::RGB565:
+      s = "RGB565";
+      break;
+    case media::VideoFrame::RGB24:
+      s = "RGB24";
+      break;
+    case media::VideoFrame::RGB32:
+      s = "RGB32";
+      break;
+    case media::VideoFrame::RGBA:
+      s = "RGBA";
+      break;
+    case media::VideoFrame::YV12:
+      s = "YV12";
+      break;
+    case media::VideoFrame::YV16:
+      s = "YV16";
+      break;
+    case media::VideoFrame::NV12:
+      s = "NV12";
+      break;
+    case media::VideoFrame::EMPTY:
+      s = "EMPTY";
+      break;
+    case media::VideoFrame::ASCII:
+      s = "ASCII";
+      break;
+    case media::VideoFrame::INVALID:
+      s = "INVALID";
+      break;
+    default:
+      NOTIMPLEMENTED();
+      s = "UNKNOWN";
+      break;
+  }
+  LogParam(s, l);
+}
+
+}  // namespace IPC

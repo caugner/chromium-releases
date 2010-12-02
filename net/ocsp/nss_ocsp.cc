@@ -23,6 +23,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/thread.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
@@ -280,7 +281,7 @@ class OCSPRequestSession
       base::TimeDelta elapsed_time = base::TimeTicks::Now() - last_time;
       timeout -= elapsed_time;
       if (timeout < base::TimeDelta()) {
-        LOG(INFO) << "OCSP Timed out";
+        VLOG(1) << "OCSP Timed out";
         if (!finished_)
           CancelLocked();
         break;
@@ -502,12 +503,12 @@ class OCSPServerSession {
 
     // TODO(ukai): If |host| is an IPv6 literal, we need to quote it with
     //  square brackets [].
-    std::string url_string(StringPrintf("%s://%s:%d%s",
-                                        http_protocol_variant,
-                                        host_.c_str(),
-                                        port_,
-                                        path_and_query_string));
-    LOG(INFO) << "URL [" << url_string << "]";
+    std::string url_string(base::StringPrintf("%s://%s:%d%s",
+                                              http_protocol_variant,
+                                              host_.c_str(),
+                                              port_,
+                                              path_and_query_string));
+    VLOG(1) << "URL [" << url_string << "]";
     GURL url(url_string);
     return new OCSPRequestSession(
         url, http_request_method,
@@ -527,7 +528,7 @@ class OCSPServerSession {
 // Our Http Client functions operate in blocking mode.
 SECStatus OCSPCreateSession(const char* host, PRUint16 portnum,
                             SEC_HTTP_SERVER_SESSION* pSession) {
-  LOG(INFO) << "OCSP create session: host=" << host << " port=" << portnum;
+  VLOG(1) << "OCSP create session: host=" << host << " port=" << portnum;
   DCHECK(!MessageLoop::current());
   pthread_mutex_lock(&g_request_context_lock);
   URLRequestContext* request_context = g_request_context;
@@ -546,7 +547,7 @@ SECStatus OCSPCreateSession(const char* host, PRUint16 portnum,
 
 SECStatus OCSPKeepAliveSession(SEC_HTTP_SERVER_SESSION session,
                                PRPollDesc **pPollDesc) {
-  LOG(INFO) << "OCSP keep alive";
+  VLOG(1) << "OCSP keep alive";
   DCHECK(!MessageLoop::current());
   if (pPollDesc)
     *pPollDesc = NULL;
@@ -554,7 +555,7 @@ SECStatus OCSPKeepAliveSession(SEC_HTTP_SERVER_SESSION session,
 }
 
 SECStatus OCSPFreeSession(SEC_HTTP_SERVER_SESSION session) {
-  LOG(INFO) << "OCSP free session";
+  VLOG(1) << "OCSP free session";
   DCHECK(!MessageLoop::current());
   delete reinterpret_cast<OCSPServerSession*>(session);
   return SECSuccess;
@@ -566,10 +567,10 @@ SECStatus OCSPCreate(SEC_HTTP_SERVER_SESSION session,
                      const char* http_request_method,
                      const PRIntervalTime timeout,
                      SEC_HTTP_REQUEST_SESSION* pRequest) {
-  LOG(INFO) << "OCSP create protocol=" << http_protocol_variant
-            << " path_and_query=" << path_and_query_string
-            << " http_request_method=" << http_request_method
-            << " timeout=" << timeout;
+  VLOG(1) << "OCSP create protocol=" << http_protocol_variant
+          << " path_and_query=" << path_and_query_string
+          << " http_request_method=" << http_request_method
+          << " timeout=" << timeout;
   DCHECK(!MessageLoop::current());
   OCSPServerSession* ocsp_session =
       reinterpret_cast<OCSPServerSession*>(session);
@@ -591,7 +592,7 @@ SECStatus OCSPSetPostData(SEC_HTTP_REQUEST_SESSION request,
                           const char* http_data,
                           const PRUint32 http_data_len,
                           const char* http_content_type) {
-  LOG(INFO) << "OCSP set post data len=" << http_data_len;
+  VLOG(1) << "OCSP set post data len=" << http_data_len;
   DCHECK(!MessageLoop::current());
   OCSPRequestSession* req = reinterpret_cast<OCSPRequestSession*>(request);
 
@@ -602,8 +603,8 @@ SECStatus OCSPSetPostData(SEC_HTTP_REQUEST_SESSION request,
 SECStatus OCSPAddHeader(SEC_HTTP_REQUEST_SESSION request,
                         const char* http_header_name,
                         const char* http_header_value) {
-  LOG(INFO) << "OCSP add header name=" << http_header_name
-            << " value=" << http_header_value;
+  VLOG(1) << "OCSP add header name=" << http_header_name
+          << " value=" << http_header_value;
   DCHECK(!MessageLoop::current());
   OCSPRequestSession* req = reinterpret_cast<OCSPRequestSession*>(request);
 
@@ -632,11 +633,11 @@ SECStatus OCSPSetResponse(OCSPRequestSession* req,
       return SECFailure;
     }
   }
-  LOG(INFO) << "OCSP response "
-            << " response_code=" << req->http_response_code()
-            << " content_type=" << req->http_response_content_type()
-            << " header=" << req->http_response_headers()
-            << " data_len=" << data.size();
+  VLOG(1) << "OCSP response "
+          << " response_code=" << req->http_response_code()
+          << " content_type=" << req->http_response_content_type()
+          << " header=" << req->http_response_headers()
+          << " data_len=" << data.size();
   if (http_response_code)
     *http_response_code = req->http_response_code();
   if (http_response_content_type)
@@ -663,7 +664,7 @@ SECStatus OCSPTrySendAndReceive(SEC_HTTP_REQUEST_SESSION request,
     *http_response_data_len = 0;
   }
 
-  LOG(INFO) << "OCSP try send and receive";
+  VLOG(1) << "OCSP try send and receive";
   DCHECK(!MessageLoop::current());
   OCSPRequestSession* req = reinterpret_cast<OCSPRequestSession*>(request);
   // We support blocking mode only.
@@ -741,7 +742,7 @@ SECStatus OCSPTrySendAndReceive(SEC_HTTP_REQUEST_SESSION request,
 }
 
 SECStatus OCSPFree(SEC_HTTP_REQUEST_SESSION request) {
-  LOG(INFO) << "OCSP free";
+  VLOG(1) << "OCSP free";
   DCHECK(!MessageLoop::current());
   OCSPRequestSession* req = reinterpret_cast<OCSPRequestSession*>(request);
   req->Cancel();
@@ -857,10 +858,12 @@ void EnsureOCSPInit() {
 // This function would be called before NSS initialization.
 void SetURLRequestContextForOCSP(URLRequestContext* request_context) {
   pthread_mutex_lock(&g_request_context_lock);
-  if (request_context)
+  if (request_context) {
+    DCHECK(request_context->is_main());
     DCHECK(!g_request_context);
-  else
+  } else {
     DCHECK(g_request_context);
+  }
   g_request_context = request_context;
   pthread_mutex_unlock(&g_request_context_lock);
 }
@@ -869,6 +872,7 @@ URLRequestContext* GetURLRequestContextForOCSP() {
   pthread_mutex_lock(&g_request_context_lock);
   URLRequestContext* request_context = g_request_context;
   pthread_mutex_unlock(&g_request_context_lock);
+  DCHECK(request_context->is_main());
   return request_context;
 }
 

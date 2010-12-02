@@ -36,6 +36,7 @@ class ContentSettingImageView;
 class EVBubbleView;
 class ExtensionAction;
 class GURL;
+class InstantController;
 class KeywordHintView;
 class LocationIconView;
 class PageActionWithBadgeView;
@@ -46,6 +47,7 @@ class TemplateURLModel;
 
 namespace views {
 class HorizontalPainter;
+class Label;
 };
 
 /////////////////////////////////////////////////////////////////////////////
@@ -70,6 +72,9 @@ class LocationBarView : public LocationBar,
    public:
     // Should return the current tab contents.
     virtual TabContents* GetTabContents() = 0;
+
+    // Returns the InstantController, or NULL if there isn't one.
+    virtual InstantController* GetInstant() = 0;
 
     // Called by the location bar view when the user starts typing in the edit.
     // This forces our security style to be UNKNOWN for the duration of the
@@ -162,6 +167,10 @@ class LocationBarView : public LocationBar,
   // Repaints if necessary.
   virtual void SetShowFocusRect(bool show);
 
+  // Select all of the text. Needed when the user tabs through controls
+  // in the toolbar in full keyboard accessibility mode.
+  virtual void SelectAll();
+
 #if defined(OS_WIN)
   // Event Handlers
   virtual bool OnMousePressed(const views::MouseEvent& event);
@@ -173,6 +182,8 @@ class LocationBarView : public LocationBar,
   virtual void OnAutocompleteWillClosePopup();
   virtual void OnAutocompleteLosingFocus(gfx::NativeView view_gaining_focus);
   virtual void OnAutocompleteWillAccept();
+  virtual bool OnCommitSuggestedText(const std::wstring& typed_text);
+  virtual void OnPopupBoundsChanged(const gfx::Rect& bounds);
   virtual void OnAutocompleteAccept(const GURL& url,
                                     WindowOpenDisposition disposition,
                                     PageTransition::Type transition,
@@ -187,7 +198,7 @@ class LocationBarView : public LocationBar,
   // Overridden from views::View:
   virtual std::string GetClassName() const;
   virtual bool SkipDefaultKeyEventProcessing(const views::KeyEvent& e);
-  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual AccessibilityTypes::Role GetAccessibleRole();
 
   // Overridden from views::DragController:
   virtual void WriteDragData(View* sender,
@@ -200,6 +211,7 @@ class LocationBarView : public LocationBar,
 
   // Overridden from LocationBar:
   virtual void ShowFirstRunBubble(FirstRun::BubbleType bubble_type);
+  virtual void SetSuggestedText(const string16& text);
   virtual std::wstring GetInputString() const;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const;
   virtual PageTransition::Type GetPageTransition() const;
@@ -249,6 +261,18 @@ class LocationBarView : public LocationBar,
  private:
   typedef std::vector<ContentSettingImageView*> ContentSettingViews;
 
+  // Enumeration of what should happen to instant on focus lost.
+  enum InstantCommitType {
+    // The instant preview should be committed immediately.
+    COMMIT_INSTANT_IMMEDIATELY,
+
+    // The instant preview should be committed on mouse up.
+    COMMIT_INSTANT_ON_MOUSE_UP,
+
+    // The instant preview should be reverted.
+    REVERT_INSTANT
+  };
+
   friend class PageActionImageView;
   friend class PageActionWithBadgeView;
   typedef std::vector<PageActionWithBadgeView*> PageActionViews;
@@ -290,6 +314,10 @@ class LocationBarView : public LocationBar,
 
   // Helper to show the first run info bubble.
   void ShowFirstRunBubbleInternal(FirstRun::BubbleType bubble_type);
+
+  // Returns what should happen to the InstantController as a result of focus
+  // being lost.
+  InstantCommitType GetCommitType(gfx::NativeView view_gaining_focus);
 
   // Current profile. Not owned by us.
   Profile* profile_;
@@ -344,6 +372,10 @@ class LocationBarView : public LocationBar,
   // Shown if the user has selected a keyword.
   SelectedKeywordView* selected_keyword_view_;
 
+  // View responsible for showing suggested text. This is NULL when there is no
+  // suggested text.
+  views::Label* suggested_text_view_;
+
   // Shown if the selected url has a corresponding keyword.
   KeywordHintView* keyword_hint_view_;
 
@@ -374,6 +406,12 @@ class LocationBarView : public LocationBar,
 #if defined(OS_LINUX)
   scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;
 #endif
+
+  // Should instant be updated? This is set to false in OnAutocompleteWillAccept
+  // and true in OnAutocompleteAccept. This is needed as prior to accepting an
+  // autocomplete suggestion the model is reverted which triggers resetting
+  // instant.
+  bool update_instant_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(LocationBarView);
 };

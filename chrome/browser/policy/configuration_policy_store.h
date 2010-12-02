@@ -10,6 +10,8 @@
 
 class Value;
 
+namespace policy {
+
 // An abstract super class for policy stores that provides a method that can be
 // called by a |ConfigurationPolicyProvider| to specify a policy.
 class ConfigurationPolicyStore {
@@ -22,6 +24,13 @@ class ConfigurationPolicyStore {
     kPolicyHomepageIsNewTabPage,
     kPolicyRestoreOnStartup,
     kPolicyURLsToRestoreOnStartup,
+    kPolicyDefaultSearchProviderEnabled,
+    kPolicyDefaultSearchProviderName,
+    kPolicyDefaultSearchProviderKeyword,
+    kPolicyDefaultSearchProviderSearchURL,
+    kPolicyDefaultSearchProviderSuggestURL,
+    kPolicyDefaultSearchProviderIconURL,
+    kPolicyDefaultSearchProviderEncodings,
     kPolicyProxyServerMode,
     kPolicyProxyServer,
     kPolicyProxyPacUrl,
@@ -32,13 +41,20 @@ class ConfigurationPolicyStore {
     kPolicySafeBrowsingEnabled,
     kPolicyMetricsReportingEnabled,
     kPolicyPasswordManagerEnabled,
+    kPolicyPasswordManagerAllowShowPasswords,
     kPolicyAutoFillEnabled,
     kPolicySyncDisabled,
     kPolicyApplicationLocale,
     kPolicyExtensionInstallAllowList,
     kPolicyExtensionInstallDenyList,
     kPolicyShowHomeButton,
-    kPolicyDisabledPlugins
+    kPolicyDisabledPlugins,
+    kPolicyPrintingEnabled,
+    kPolicyChromeFrameRendererSettings,
+    kPolicyRenderInChromeFrameList,
+    kPolicyRenderInHostList,
+    kPolicyJavascriptEnabled,
+    kPolicySavingBrowserHistoryDisabled,
   };
 
   static const int kPolicyNoProxyServerMode = 0;
@@ -54,5 +70,7 @@ class ConfigurationPolicyStore {
  private:
   DISALLOW_COPY_AND_ASSIGN(ConfigurationPolicyStore);
 };
+
+}  // namespace policy
 
 #endif  // CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_STORE_H_

@@ -13,7 +13,7 @@ namespace net {
 // TODO(ukai): factor out common part with spdy_http_stream_unittest.cc
 class SpdySessionPoolPeer {
  public:
-  explicit SpdySessionPoolPeer(const scoped_refptr<SpdySessionPool>& pool)
+  explicit SpdySessionPoolPeer(SpdySessionPool* pool)
       : pool_(pool) {}
 
   void RemoveSpdySession(const scoped_refptr<SpdySession>& session) {
@@ -21,17 +21,12 @@ class SpdySessionPoolPeer {
   }
 
  private:
-  const scoped_refptr<SpdySessionPool> pool_;
+  SpdySessionPool* const pool_;
 
   DISALLOW_COPY_AND_ASSIGN(SpdySessionPoolPeer);
 };
 
 namespace {
-
-// Create a proxy service which fails on all requests (falls back to direct).
-ProxyService* CreateNullProxyService() {
-  return ProxyService::CreateNull();
-}
 
 class TestSpdyStreamDelegate : public SpdyStream::Delegate {
  public:
@@ -121,7 +116,9 @@ class SpdyStreamTest : public testing::Test {
     HostPortPair host_port_pair("www.google.com", 80);
     HostPortProxyPair pair(host_port_pair, ProxyServer::Direct());
     scoped_refptr<SpdySession> session(
-        session_->spdy_session_pool()->Get(pair, session_, BoundNetLog()));
+        session_->spdy_session_pool()->Get(pair,
+                                           session_->mutable_spdy_settings(),
+                                           BoundNetLog()));
     return session;
   }
 
@@ -197,8 +194,12 @@ TEST_F(SpdyStreamTest, SendDataAfterOpen) {
   HostPortPair host_port_pair("www.google.com", 80);
   scoped_refptr<TCPSocketParams> tcp_params =
       new TCPSocketParams(host_port_pair, LOWEST, GURL(), false);
-  EXPECT_EQ(OK, session->Connect("spdy.www.google.com", tcp_params,
-                                 LOWEST));
+
+  scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
+  EXPECT_EQ(OK,
+            connection->Init(host_port_pair.ToString(), tcp_params, LOWEST,
+                             NULL, session_->tcp_socket_pool(), BoundNetLog()));
+  session->InitializeWithSocket(connection.release(), false, OK);
 
   scoped_refptr<SpdyStream> stream;
   ASSERT_EQ(

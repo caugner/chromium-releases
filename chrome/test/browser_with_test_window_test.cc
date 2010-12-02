@@ -12,11 +12,12 @@
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/test/testing_profile.h"
 
 BrowserWithTestWindowTest::BrowserWithTestWindowTest()
-    : ui_thread_(ChromeThread::UI, message_loop()),
+    : ui_thread_(BrowserThread::UI, message_loop()),
       rph_factory_(),
       rvh_factory_(&rph_factory_) {
 #if defined(OS_WIN)
@@ -59,10 +60,10 @@ TestRenderViewHost* BrowserWithTestWindowTest::TestRenderViewHostForTab(
 }
 
 void BrowserWithTestWindowTest::AddTab(Browser* browser, const GURL& url) {
-  TabContents* new_tab = browser->AddTabWithURL(
-      url, GURL(), PageTransition::TYPED, 0, TabStripModel::ADD_SELECTED, NULL,
-      std::string(), NULL);
-  CommitPendingLoad(&new_tab->controller());
+  Browser::AddTabWithURLParams params(url, PageTransition::TYPED);
+  params.index = 0;
+  TabContents* contents = browser->AddTabWithURL(&params);
+  CommitPendingLoad(&contents->controller());
 }
 
 void BrowserWithTestWindowTest::CommitPendingLoad(

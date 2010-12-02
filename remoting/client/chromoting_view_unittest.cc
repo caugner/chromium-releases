@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/scoped_ptr.h"
+#include "remoting/base/decoder.h"
 #include "remoting/base/protocol/chromotocol.pb.h"
 #include "remoting/client/chromoting_view.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -41,6 +42,7 @@ class FakeView : public ChromotingView {
   void Paint() {}
   void SetSolidFill(uint32 color) {}
   void UnsetSolidFill() {}
+  void SetConnectionState(ConnectionState s) {}
   void SetViewport(int x, int y, int width, int height) {
     frame_width_ = width;
     frame_height_ = height;
@@ -107,7 +109,7 @@ TEST(ChromotingViewTest, DecodeSimple) {
   Decoder* decoder = view->get_decoder();
   ASSERT_TRUE(decoder != NULL);
   EXPECT_EQ(EncodingZlib, decoder->Encoding());
-  EXPECT_EQ(false, decoder->IsStarted());
+  EXPECT_FALSE(decoder->IsStarted());
 
   // Overwrite |decoder_| with MockDecoder.
   MockDecoder* mock_decoder = new MockDecoder();
@@ -176,7 +178,7 @@ TEST(ChromotingViewTest, DecodeThreePackets) {
   Decoder* decoder = view->get_decoder();
   ASSERT_TRUE(decoder != NULL);
   EXPECT_EQ(EncodingZlib, decoder->Encoding());
-  EXPECT_EQ(false, decoder->IsStarted());
+  EXPECT_FALSE(decoder->IsStarted());
 
   // Overwrite |decoder_| with MockDecoder.
   MockDecoder* mock_decoder = new MockDecoder();
@@ -265,7 +267,7 @@ TEST(ChromotingViewTest, DecodeTwoStreams) {
   Decoder* decoder = view->get_decoder();
   ASSERT_TRUE(decoder != NULL);
   EXPECT_EQ(EncodingZlib, decoder->Encoding());
-  EXPECT_EQ(false, decoder->IsStarted());
+  EXPECT_FALSE(decoder->IsStarted());
 
   // Overwrite |decoder_| with MockDecoder.
   MockDecoder* mock_decoder = new MockDecoder();
@@ -373,7 +375,7 @@ TEST(ChromotingViewTest, DecodeTwoStreamsDifferentEncodings) {
   Decoder* decoder = view->get_decoder();
   ASSERT_TRUE(decoder != NULL);
   EXPECT_EQ(EncodingZlib, decoder->Encoding());
-  EXPECT_EQ(false, decoder->IsStarted());
+  EXPECT_FALSE(decoder->IsStarted());
 
   // Overwrite |decoder_| with MockDecoder.
   MockDecoder* mock_decoder1 = new MockDecoder();
@@ -489,7 +491,7 @@ TEST(ChromotingViewTest, MismatchedEncodings) {
   Decoder* decoder = view->get_decoder();
   ASSERT_TRUE(decoder != NULL);
   EXPECT_EQ(EncodingZlib, decoder->Encoding());
-  EXPECT_EQ(false, decoder->IsStarted());
+  EXPECT_FALSE(decoder->IsStarted());
 
   // Overwrite |decoder_| with MockDecoder.
   MockDecoder* mock_decoder = new MockDecoder();

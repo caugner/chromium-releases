@@ -127,12 +127,12 @@ class TestURLRequestContext : public URLRequestContext {
     host_resolver_ =
         net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
                                       NULL);
-    proxy_service_ = net::ProxyService::CreateNull();
+    proxy_service_ = net::ProxyService::CreateDirect();
     Init();
   }
 
   explicit TestURLRequestContext(const std::string& proxy) {
-    host_resolver_ =
+    host_resolver_  =
         net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
                                       NULL);
     net::ProxyConfig proxy_config;
@@ -150,15 +150,18 @@ class TestURLRequestContext : public URLRequestContext {
     delete ftp_transaction_factory_;
     delete http_transaction_factory_;
     delete http_auth_handler_factory_;
+    delete host_resolver_;
   }
 
  private:
   void Init() {
     ftp_transaction_factory_ = new net::FtpNetworkLayer(host_resolver_);
     ssl_config_service_ = new net::SSLConfigServiceDefaults;
-    http_auth_handler_factory_ = net::HttpAuthHandlerFactory::CreateDefault();
+    http_auth_handler_factory_ = net::HttpAuthHandlerFactory::CreateDefault(
+        host_resolver_);
     http_transaction_factory_ = new net::HttpCache(
         net::HttpNetworkLayer::CreateFactory(host_resolver_,
+                                             NULL,
                                              proxy_service_,
                                              ssl_config_service_,
                                              http_auth_handler_factory_,

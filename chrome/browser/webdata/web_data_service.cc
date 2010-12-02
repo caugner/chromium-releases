@@ -82,7 +82,7 @@ bool WebDataService::IsDatabaseLoaded() {
 }
 
 WebDatabase* WebDataService::GetDatabase() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   return db_;
 }
 
@@ -549,13 +549,13 @@ void WebDataService::InitializeDatabaseIfNecessary() {
     return;
 
   // In the rare case where the db fails to initialize a dialog may get shown
-  // the blocks the caller, yet allows other messages through. For this reason
+  // that blocks the caller, yet allows other messages through. For this reason
   // we only set db_ to the created database if creation is successful. That
   // way other methods won't do anything as db_ is still NULL.
   WebDatabase* db = new WebDatabase();
   sql::InitStatus init_status = db->Init(path_);
   if (init_status != sql::INIT_OK) {
-    NOTREACHED() << "Cannot initialize the web database";
+    LOG(ERROR) << "Cannot initialize the web database: " << init_status;
     failed_init_ = true;
     delete db;
     if (main_loop_) {
@@ -565,8 +565,8 @@ void WebDataService::InitializeDatabaseIfNecessary() {
     return;
   }
 
-  ChromeThread::PostTask(
-      ChromeThread::UI, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
       NewRunnableMethod(this, &WebDataService::NotifyDatabaseLoadedOnUIThread));
 
   db_ = db;
@@ -603,7 +603,7 @@ void WebDataService::Commit() {
 
 void WebDataService::ScheduleTask(Task* t) {
   if (is_running_)
-    ChromeThread::PostTask(ChromeThread::DB, FROM_HERE, t);
+    BrowserThread::PostTask(BrowserThread::DB, FROM_HERE, t);
   else
     NOTREACHED() << "Task scheduled after Shutdown()";
 }

@@ -33,6 +33,7 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/scoped_temp_dir.h"
 #if defined(OS_MACOSX)
 #include "base/lazy_instance.h"
 #endif
@@ -61,6 +62,12 @@ class TestWebViewDelegate;
 
 namespace base {
 class StringPiece;
+}
+
+namespace WebKit {
+class WebDeviceOrientationClientMock;
+class WebSpeechInputControllerMock;
+class WebSpeechInputListener;
 }
 
 class TestShell : public base::SupportsWeakPtr<TestShell>  {
@@ -92,7 +99,7 @@ public:
     static void CleanupLogging();
 
     // Initialization and clean up of a static member variable.
-    static void InitializeTestShell(bool layout_test_mode, 
+    static void InitializeTestShell(bool layout_test_mode,
                                     bool allow_external_pages);
     static void ShutdownTestShell();
 
@@ -187,6 +194,10 @@ public:
       return layout_test_mode_ && (test_is_preparing_ || test_is_pending_) &&
              layout_test_controller_->ShouldDumpResourceLoadCallbacks();
     }
+    bool ShouldDumpResourceResponseMIMETypes() {
+      return layout_test_mode_ && (test_is_preparing_ || test_is_pending_) &&
+             layout_test_controller_->ShouldDumpResourceResponseMIMETypes();
+    }
     bool ShouldDumpTitleChanges() {
       return layout_test_mode_ &&
              layout_test_controller_->ShouldDumpTitleChanges();
@@ -269,6 +280,9 @@ public:
 
     static void SetAllowScriptsToCloseWindows();
 
+    static void SetAccelerated2dCanvasEnabled(bool enabled);
+    static void SetAcceleratedCompositingEnabled(bool enabled);
+
     WebPreferences* GetWebPreferences() { return web_prefs_; }
 
     // Some layout tests hardcode a file:///tmp/LayoutTests URL.  We get around
@@ -309,6 +323,10 @@ public:
       test_params_ = test_params;
     }
 
+    const FilePath& file_system_root() const {
+      return file_system_root_.path();
+    }
+
 #if defined(OS_MACOSX)
     // handle cleaning up a shell given the associated window
     static void DestroyAssociatedShell(gfx::NativeWindow handle);
@@ -323,6 +341,12 @@ public:
     TestShellDevToolsAgent* dev_tools_agent() {
       return dev_tools_agent_.get();
     }
+
+    WebKit::WebDeviceOrientationClientMock* device_orientation_client_mock();
+
+    WebKit::WebSpeechInputControllerMock* CreateSpeechInputControllerMock(
+        WebKit::WebSpeechInputListener* listener);
+    WebKit::WebSpeechInputControllerMock* speech_input_controller_mock();
 
 protected:
     void CreateDevToolsClient(TestShellDevToolsAgent* agent);
@@ -380,9 +404,9 @@ private:
 
     // True when the app is being run using the --layout-tests switch.
     static bool layout_test_mode_;
-  
+
     // True when we wish to allow test shell to load external pages like
-    // www.google.com even when in --layout-test mode (used for QA to 
+    // www.google.com even when in --layout-test mode (used for QA to
     // produce images of the rendered page)
     static bool allow_external_pages_;
 
@@ -403,6 +427,13 @@ private:
     base::WeakPtr<TestShell> devtools_shell_;
     scoped_ptr<TestShellDevToolsAgent> dev_tools_agent_;
     scoped_ptr<TestShellDevToolsClient> dev_tools_client_;
+    scoped_ptr<WebKit::WebDeviceOrientationClientMock>
+        device_orientation_client_mock_;
+    scoped_ptr<WebKit::WebSpeechInputControllerMock>
+        speech_input_controller_mock_;
+
+    // A temporary directory for FileSystem API.
+    ScopedTempDir file_system_root_;
 
     const TestParams* test_params_;
 
@@ -411,6 +442,12 @@ private:
 
     // True while a test is running
     static bool test_is_pending_;
+
+    // True if we're testing the accelerated canvas 2d path.
+    static bool accelerated_2d_canvas_enabled_;
+
+    // True if we're testing the accelerated compositing.
+    static bool accelerated_compositing_enabled_;
 
     // True if driven from a nested message loop.
     bool is_modal_;

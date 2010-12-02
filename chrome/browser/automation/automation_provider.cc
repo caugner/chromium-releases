@@ -38,15 +38,15 @@
 #include "chrome/browser/automation/automation_window_tracker.h"
 #include "chrome/browser/automation/extension_port_container.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
-#include "chrome/browser/blocked_popup_container.h"
+#include "chrome/browser/blocked_content_container.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_storage.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/character_encoding.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/download/download_item.h"
@@ -328,8 +328,6 @@ void AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_SetProxyConfig, SetProxyConfig);
     IPC_MESSAGE_HANDLER(AutomationMsg_PrintAsync, PrintAsync)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_Find, HandleFindRequest)
-    IPC_MESSAGE_HANDLER(AutomationMsg_GetPageCurrentEncoding,
-                        GetPageCurrentEncoding)
     IPC_MESSAGE_HANDLER(AutomationMsg_OverrideEncoding, OverrideEncoding)
     IPC_MESSAGE_HANDLER(AutomationMsg_SelectAll, SelectAll)
     IPC_MESSAGE_HANDLER(AutomationMsg_Cut, Cut)
@@ -362,12 +360,8 @@ void AutomationProvider::OnMessageReceived(const IPC::Message& message) {
                         MoveExtensionBrowserAction)
     IPC_MESSAGE_HANDLER(AutomationMsg_GetExtensionProperty,
                         GetExtensionProperty)
-    IPC_MESSAGE_HANDLER(AutomationMsg_ShutdownSessionService,
-                        ShutdownSessionService)
     IPC_MESSAGE_HANDLER(AutomationMsg_SaveAsAsync, SaveAsAsync)
-    IPC_MESSAGE_HANDLER(AutomationMsg_SetContentSetting, SetContentSetting)
     IPC_MESSAGE_HANDLER(AutomationMsg_RemoveBrowsingData, RemoveBrowsingData)
-    IPC_MESSAGE_HANDLER(AutomationMsg_ResetToDefaultTheme, ResetToDefaultTheme)
 #if defined(OS_WIN)
     // These are for use with external tabs.
     IPC_MESSAGE_HANDLER(AutomationMsg_CreateExternalTab, CreateExternalTab)
@@ -387,24 +381,29 @@ void AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_HandleMessageFromExternalHost,
                         OnMessageFromExternalHost)
     IPC_MESSAGE_HANDLER(AutomationMsg_BrowserMove, OnBrowserMoved)
-    IPC_MESSAGE_HANDLER(AutomationMsg_RunUnloadHandlers, OnRunUnloadHandlers)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_RunUnloadHandlers,
+                                    OnRunUnloadHandlers)
     IPC_MESSAGE_HANDLER(AutomationMsg_SetZoomLevel, OnSetZoomLevel)
 #endif  // defined(OS_WIN)
 #if defined(OS_CHROMEOS)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_LoginWithUserAndPass,
                                     LoginWithUserAndPass)
 #endif  // defined(OS_CHROMEOS)
+    IPC_MESSAGE_UNHANDLED(OnUnhandledMessage())
   IPC_END_MESSAGE_MAP()
 }
 
-void AutomationProvider::ShutdownSessionService(int handle, bool* result) {
-  if (browser_tracker_->ContainsHandle(handle)) {
-    Browser* browser = browser_tracker_->GetResource(handle);
-    browser->profile()->ShutdownSessionService();
-    *result = true;
-  } else {
-    *result = false;
-  }
+void AutomationProvider::OnUnhandledMessage() {
+  // We should not hang here. Print a message to indicate what's going on,
+  // and disconnect the channel to notify the caller about the error
+  // in a way it can't ignore, and make any further attempts to send
+  // messages fail fast.
+  LOG(ERROR) << "AutomationProvider received a message it can't handle. "
+             << "Please make sure that you use switches::kTestingChannelID "
+             << "for test code (TestingAutomationProvider), and "
+             << "switches::kAutomationClientChannelID for everything else "
+             << "(like ChromeFrame). Closing the automation channel.";
+  channel_->Close();
 }
 
 // This task just adds another task to the event queue.  This is useful if
@@ -456,7 +455,7 @@ void AutomationProvider::HandleFindRequest(
     const AutomationMsg_Find_Params& params,
     IPC::Message* reply_message) {
   if (!tab_tracker_->ContainsHandle(handle)) {
-    AutomationMsg_FindInPage::WriteReplyParams(reply_message, -1, -1);
+    AutomationMsg_Find::WriteReplyParams(reply_message, -1, -1);
     Send(reply_message);
     return;
   }
@@ -464,15 +463,36 @@ void AutomationProvider::HandleFindRequest(
   NavigationController* nav = tab_tracker_->GetResource(handle);
   TabContents* tab_contents = nav->tab_contents();
 
-  find_in_page_observer_.reset(new
-      FindInPageNotificationObserver(this, tab_contents, reply_message));
+  SendFindRequest(tab_contents,
+                  false,
+                  params.search_string,
+                  params.forward,
+                  params.match_case,
+                  params.find_next,
+                  reply_message);
+}
 
-  tab_contents->set_current_find_request_id(
-      FindInPageNotificationObserver::kFindInPageRequestId);
+void AutomationProvider::SendFindRequest(
+    TabContents* tab_contents,
+    bool with_json,
+    const string16& search_string,
+    bool forward,
+    bool match_case,
+    bool find_next,
+    IPC::Message* reply_message) {
+  int request_id = FindInPageNotificationObserver::kFindInPageRequestId;
+  find_in_page_observer_.reset(
+      new FindInPageNotificationObserver(this,
+                                         tab_contents,
+                                         with_json,
+                                         reply_message));
+  tab_contents->set_current_find_request_id(request_id);
   tab_contents->render_view_host()->StartFinding(
       FindInPageNotificationObserver::kFindInPageRequestId,
-      params.search_string, params.forward, params.match_case,
-      params.find_next);
+      search_string,
+      forward,
+      match_case,
+      find_next);
 }
 
 class SetProxyConfigTask : public Task {
@@ -550,8 +570,8 @@ void AutomationProvider::SetProxyConfig(const std::string& new_proxy_config) {
   }
   DCHECK(context_getter);
 
-  ChromeThread::PostTask(
-      ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       new SetProxyConfigTask(context_getter, new_proxy_config));
 }
 
@@ -564,19 +584,6 @@ TabContents* AutomationProvider::GetTabContentsForHandle(
     return nav_controller->tab_contents();
   }
   return NULL;
-}
-
-// Gets the current used encoding name of the page in the specified tab.
-void AutomationProvider::GetPageCurrentEncoding(
-    int tab_handle, std::string* current_encoding) {
-  if (tab_tracker_->ContainsHandle(tab_handle)) {
-    NavigationController* nav = tab_tracker_->GetResource(tab_handle);
-    Browser* browser = FindAndActivateTab(nav);
-    DCHECK(browser);
-
-    if (browser->command_updater()->IsCommandEnabled(IDC_ENCODING_MENU))
-      *current_encoding = nav->tab_contents()->encoding();
-  }
 }
 
 // Gets the current used encoding name of the page in the specified tab.
@@ -976,29 +983,4 @@ void AutomationProvider::SaveAsAsync(int tab_handle) {
   TabContents* tab_contents = GetTabContentsForHandle(tab_handle, &tab);
   if (tab_contents)
     tab_contents->OnSavePage();
-}
-
-void AutomationProvider::SetContentSetting(
-    int handle,
-    const std::string& host,
-    ContentSettingsType content_type,
-    ContentSetting setting,
-    bool* success) {
-  *success = false;
-  if (browser_tracker_->ContainsHandle(handle)) {
-    Browser* browser = browser_tracker_->GetResource(handle);
-    HostContentSettingsMap* map =
-        browser->profile()->GetHostContentSettingsMap();
-    if (host.empty()) {
-      map->SetDefaultContentSetting(content_type, setting);
-    } else {
-      map->SetContentSetting(HostContentSettingsMap::Pattern(host),
-                             content_type, "", setting);
-    }
-    *success = true;
-  }
-}
-
-void AutomationProvider::ResetToDefaultTheme() {
-  profile_->ClearTheme();
 }

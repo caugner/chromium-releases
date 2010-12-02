@@ -77,7 +77,7 @@ struct ViewHostMsg_Audio_CreateStream_Params;
 
 class AudioRendererHost : public base::RefCountedThreadSafe<
                               AudioRendererHost,
-                              ChromeThread::DeleteOnIOThread>,
+                              BrowserThread::DeleteOnIOThread>,
                           public media::AudioOutputController::EventHandler {
  public:
   typedef std::pair<int32, int> AudioEntryId;
@@ -86,7 +86,8 @@ class AudioRendererHost : public base::RefCountedThreadSafe<
     AudioEntry()
         : render_view_id(0),
           stream_id(0),
-          pending_buffer_request(false) {
+          pending_buffer_request(false),
+          pending_close(false) {
     }
 
     // The AudioOutputController that manages the audio stream.
@@ -106,6 +107,9 @@ class AudioRendererHost : public base::RefCountedThreadSafe<
     scoped_ptr<media::AudioOutputController::SyncReader> reader;
 
     bool pending_buffer_request;
+
+    // Set to true after we called Close() for the controller.
+    bool pending_close;
   };
 
   typedef std::map<AudioEntryId, AudioEntry*> AudioEntryMap;
@@ -140,8 +144,7 @@ class AudioRendererHost : public base::RefCountedThreadSafe<
   virtual void OnError(media::AudioOutputController* controller,
                        int error_code);
   virtual void OnMoreData(media::AudioOutputController* controller,
-                          base::Time timestamp,
-                          uint32 pending_bytes);
+                          AudioBuffersState buffers_state);
 
  private:
   friend class AudioRendererHostTest;
@@ -203,8 +206,7 @@ class AudioRendererHost : public base::RefCountedThreadSafe<
   // Request more data from the renderer. This method is used only in normal
   // latency mode.
   void DoRequestMoreData(media::AudioOutputController* controller,
-                         base::Time timestamp,
-                         uint32 pending_bytes);
+                         AudioBuffersState buffers_state);
 
   // Handle error coming from audio stream.
   void DoHandleError(media::AudioOutputController* controller, int error_code);
@@ -218,6 +220,13 @@ class AudioRendererHost : public base::RefCountedThreadSafe<
 
   // Delete all audio entry and all audio streams
   void DeleteEntries();
+
+  // Closes the stream. The stream is then deleted in DeleteEntry() after it
+  // is closed.
+  void CloseAndDeleteStream(AudioEntry* entry);
+
+  // Called on the audio thread after the audio stream is closed.
+  void OnStreamClosed(AudioEntry* entry);
 
   // Delete an audio entry and close the related audio stream.
   void DeleteEntry(AudioEntry* entry);

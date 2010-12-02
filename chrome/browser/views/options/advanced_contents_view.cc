@@ -19,6 +19,7 @@
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/scoped_callback_factory.h"
 #include "base/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser.h"
@@ -27,15 +28,18 @@
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/gears_integration.h"
-#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/options_util.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/pref_set_observer.h"
+#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
+#include "chrome/browser/printing/cloud_print/cloud_print_setup_flow.h"
+#include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/shell_dialogs.h"
+#include "chrome/browser/show_options_url.h"
 #include "chrome/browser/views/browser_dialogs.h"
 #include "chrome/browser/views/clear_browsing_data.h"
 #include "chrome/browser/views/list_background.h"
@@ -503,7 +507,6 @@ void PrivacySection::ButtonPressed(
                                 "Options_DnsPrefetchCheckbox_Disable"),
                             profile()->GetPrefs());
     dns_prefetch_enabled_.SetValue(enabled);
-    chrome_browser_net::EnablePredictor(enabled);
   } else if (sender == enable_safe_browsing_checkbox_) {
     bool enabled = enable_safe_browsing_checkbox_->checked();
     UserMetricsRecordAction(UserMetricsAction(enabled ?
@@ -540,13 +543,10 @@ void PrivacySection::ButtonPressed(
 }
 
 void PrivacySection::LinkActivated(views::Link* source, int event_flags) {
-  if (source == learn_more_link_) {
-    // We open a new browser window so the Options dialog doesn't get lost
-    // behind other windows.
-    Browser* browser = Browser::Create(profile());
-    browser->OpenURL(GURL(l10n_util::GetString(IDS_LEARN_MORE_PRIVACY_URL)),
-                     GURL(), NEW_WINDOW, PageTransition::LINK);
-  }
+  DCHECK(source == learn_more_link_);
+  browser::ShowOptionsURL(
+      profile(),
+      GURL(l10n_util::GetString(IDS_LEARN_MORE_PRIVACY_URL)));
 }
 
 void PrivacySection::InitControlLayout() {
@@ -652,7 +652,6 @@ void PrivacySection::NotifyPrefChanged(const std::string* pref_name) {
         !dns_prefetch_enabled_.IsManaged());
     bool enabled = dns_prefetch_enabled_.GetValue();
     enable_dns_prefetching_checkbox_->SetChecked(enabled);
-    chrome_browser_net::EnablePredictor(enabled);
   }
   if (!pref_name || *pref_name == prefs::kSafeBrowsingEnabled) {
     enable_safe_browsing_checkbox_->SetEnabled(!safe_browsing_.IsManaged());
@@ -1329,9 +1328,9 @@ void ChromeAppsSection::ButtonPressed(
 
 void ChromeAppsSection::LinkActivated(views::Link* source, int event_flags) {
   DCHECK(source == learn_more_link_);
-  Browser::Create(profile())->OpenURL(
-      GURL(l10n_util::GetString(IDS_LEARN_MORE_BACKGROUND_MODE_URL)), GURL(),
-      NEW_WINDOW, PageTransition::LINK);
+  browser::ShowOptionsURL(
+      profile(),
+      GURL(l10n_util::GetString(IDS_LEARN_MORE_BACKGROUND_MODE_URL)));
 }
 
 void ChromeAppsSection::InitControlLayout() {
@@ -1362,6 +1361,189 @@ void ChromeAppsSection::NotifyPrefChanged(const std::string* pref_name) {
     enable_background_mode_checkbox_->SetChecked(
         enable_background_mode_.GetValue());
   }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// CloudPrintProxySection
+
+class CloudPrintProxySection : public AdvancedSection,
+                               public views::ButtonListener,
+                               public CloudPrintSetupFlow::Delegate {
+ public:
+  explicit CloudPrintProxySection(Profile* profile);
+  virtual ~CloudPrintProxySection() {}
+
+  // Overridden from views::ButtonListener:
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
+
+  // CloudPrintSetupFlow::Delegate implementation.
+  virtual void OnDialogClosed();
+
+ protected:
+  // OptionsPageView overrides:
+  virtual void InitControlLayout();
+  virtual void NotifyPrefChanged(const std::string* pref_name);
+
+ private:
+  bool Enabled() const;
+
+  // Controls for this section:
+  views::Label* section_description_label_;
+  views::NativeButton* enable_disable_button_;
+  views::NativeButton* manage_printer_button_;
+
+  // Preferences we tie things to.
+  StringPrefMember cloud_print_proxy_email_;
+
+  base::ScopedCallbackFactory<CloudPrintProxySection> factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(CloudPrintProxySection);
+};
+
+CloudPrintProxySection::CloudPrintProxySection(Profile* profile)
+    : section_description_label_(NULL),
+      enable_disable_button_(NULL),
+      manage_printer_button_(NULL),
+      factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      AdvancedSection(profile,
+                      l10n_util::GetString(
+                          IDS_OPTIONS_ADVANCED_SECTION_TITLE_CLOUD_PRINT)) {
+}
+
+void CloudPrintProxySection::ButtonPressed(views::Button* sender,
+                                           const views::Event& event) {
+  if (sender == enable_disable_button_) {
+    if (Enabled()) {
+      // Enabled, we must be the disable button.
+      UserMetricsRecordAction(
+          UserMetricsAction("Options_DisableCloudPrintProxy"), NULL);
+      profile()->GetCloudPrintProxyService()->DisableForUser();
+    } else {
+      UserMetricsRecordAction(
+          UserMetricsAction("Options_EnableCloudPrintProxy"), NULL);
+      // We open a new browser window so the Options dialog doesn't
+      // get lost behind other windows.
+      enable_disable_button_->SetEnabled(false);
+      enable_disable_button_->SetLabel(
+          l10n_util::GetString(IDS_OPTIONS_CLOUD_PRINT_PROXY_ENABLING_BUTTON));
+      enable_disable_button_->InvalidateLayout();
+      Layout();
+      CloudPrintSetupFlow::OpenDialog(profile(), this,
+                                      GetWindow()->GetNativeWindow());
+    }
+  } else if (sender == manage_printer_button_) {
+    UserMetricsRecordAction(
+        UserMetricsAction("Options_ManageCloudPrinters"), NULL);
+    browser::ShowOptionsURL(
+        profile(),
+        CloudPrintURL(profile()).GetCloudPrintServiceManageURL());
+  }
+}
+
+void CloudPrintProxySection::OnDialogClosed() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  enable_disable_button_->SetEnabled(true);
+  // If the dialog is canceled, the preference won't change, and so we
+  // have to revert the button text back to the disabled state.
+  if (!Enabled()) {
+    enable_disable_button_->SetLabel(
+        l10n_util::GetString(IDS_OPTIONS_CLOUD_PRINT_PROXY_DISABLED_BUTTON));
+    enable_disable_button_->InvalidateLayout();
+    Layout();
+  }
+}
+
+void CloudPrintProxySection::InitControlLayout() {
+  AdvancedSection::InitControlLayout();
+
+  section_description_label_ = new views::Label(
+      l10n_util::GetString(IDS_OPTIONS_CLOUD_PRINT_PROXY_DISABLED_LABEL));
+  enable_disable_button_ = new views::NativeButton(this,
+      l10n_util::GetString(IDS_OPTIONS_CLOUD_PRINT_PROXY_DISABLED_BUTTON));
+  manage_printer_button_ = new views::NativeButton(this,
+      l10n_util::GetString(
+          IDS_OPTIONS_CLOUD_PRINT_PROXY_ENABLED_MANAGE_BUTTON));
+
+  GridLayout* layout = new GridLayout(contents_);
+  contents_->SetLayoutManager(layout);
+
+  const int single_column_view_set_id = 0;
+  AddWrappingColumnSet(layout, single_column_view_set_id);
+  const int control_view_set_id = 1;
+  AddDependentTwoColumnSet(layout, control_view_set_id);
+
+  // The description label at the top and label.
+  section_description_label_->SetMultiLine(true);
+  AddWrappingLabelRow(layout, section_description_label_,
+                       single_column_view_set_id, true);
+
+  // The enable / disable button and manage button.
+  AddTwoColumnRow(layout, enable_disable_button_, manage_printer_button_, false,
+                  control_view_set_id, kRelatedControlVerticalSpacing);
+
+  // Attach the preferences so we can flip things appropriately.
+  cloud_print_proxy_email_.Init(prefs::kCloudPrintEmail,
+                                profile()->GetPrefs(), this);
+
+  // Start the UI off in the state we think it should be in.
+  std::string pref_string(prefs::kCloudPrintEmail);
+  NotifyPrefChanged(&pref_string);
+
+  // Kick off a task to ask the background service what the real
+  // answer is.
+  profile()->GetCloudPrintProxyService()->RefreshStatusFromService();
+}
+
+void CloudPrintProxySection::NotifyPrefChanged(const std::string* pref_name) {
+  if (pref_name == NULL)
+    return;
+
+  if (*pref_name == prefs::kCloudPrintEmail) {
+    if (Enabled()) {
+      std::string email;
+      if (profile()->GetPrefs()->HasPrefPath(prefs::kCloudPrintEmail))
+        email = profile()->GetPrefs()->GetString(prefs::kCloudPrintEmail);
+
+      section_description_label_->SetText(
+          l10n_util::GetStringF(IDS_OPTIONS_CLOUD_PRINT_PROXY_ENABLED_LABEL,
+                                UTF8ToWide(email)));
+      enable_disable_button_->SetLabel(
+          l10n_util::GetString(IDS_OPTIONS_CLOUD_PRINT_PROXY_ENABLED_BUTTON));
+      enable_disable_button_->InvalidateLayout();
+      manage_printer_button_->SetVisible(true);
+      manage_printer_button_->InvalidateLayout();
+    } else {
+      section_description_label_->SetText(
+          l10n_util::GetString(IDS_OPTIONS_CLOUD_PRINT_PROXY_DISABLED_LABEL));
+      enable_disable_button_->SetLabel(
+          l10n_util::GetString(IDS_OPTIONS_CLOUD_PRINT_PROXY_DISABLED_BUTTON));
+      enable_disable_button_->InvalidateLayout();
+      manage_printer_button_->SetVisible(false);
+    }
+
+    // Find the parent ScrollView, and ask it to re-layout since it's
+    // possible that the section_description_label_ has changed
+    // heights.  And scroll us back to being visible in that case, to
+    // be nice to the user.
+    views::View* view = section_description_label_->GetParent();
+    while (view && view->GetClassName() != views::ScrollView::kViewClassName)
+      view = view->GetParent();
+    if (view) {
+      gfx::Rect visible_bounds = GetVisibleBounds();
+      bool was_all_visible = (visible_bounds.size() == bounds().size());
+      // Our bounds can change across this call, so we have to use the
+      // new bounds if we want to stay completely visible.
+      view->Layout();
+      ScrollRectToVisible(was_all_visible ? bounds() : visible_bounds);
+    } else {
+      Layout();
+    }
+  }
+}
+
+bool CloudPrintProxySection::Enabled() const {
+  return profile()->GetPrefs()->HasPrefPath(prefs::kCloudPrintEmail) &&
+      !profile()->GetPrefs()->GetString(prefs::kCloudPrintEmail).empty();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1461,6 +1643,11 @@ void AdvancedContentsView::InitControlLayout() {
   layout->AddView(new WebContentSection(profile()));
   layout->StartRow(0, single_column_view_set_id);
   layout->AddView(new SecuritySection(profile()));
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableCloudPrintProxy)) {
+    layout->StartRow(0, single_column_view_set_id);
+    layout->AddView(new CloudPrintProxySection(profile()));
+  }
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableBackgroundMode)) {
     layout->StartRow(0, single_column_view_set_id);

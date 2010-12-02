@@ -9,12 +9,13 @@
 #include "base/process.h"
 #include "base/shared_memory.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/net/chrome_net_log.h"
+#include "chrome/browser/debugger/devtools_netlog_observer.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/load_timing_observer.h"
 #include "chrome/browser/renderer_host/global_request_id.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/resource_response.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_log.h"
@@ -47,11 +48,10 @@ class SharedIOBuffer : public net::IOBuffer {
         buffer_size_(buffer_size) {}
 
   bool Init() {
-    if (shared_memory_.Create(std::wstring(), false, false, buffer_size_) &&
+    if (shared_memory_.Create(std::string(), false, false, buffer_size_) &&
         shared_memory_.Map(buffer_size_)) {
       data_ = reinterpret_cast<char*>(shared_memory_.memory());
-      // TODO(hawk): Remove after debugging bug 16371.
-      CHECK(data_);
+      DCHECK(data_);
       ok_ = true;
     }
     return ok_;
@@ -63,8 +63,7 @@ class SharedIOBuffer : public net::IOBuffer {
 
  private:
   ~SharedIOBuffer() {
-    // TODO(willchan): Remove after debugging bug 16371.
-    CHECK(g_spare_read_buffer != this);
+    DCHECK(g_spare_read_buffer != this);
     data_ = NULL;
   }
 
@@ -91,27 +90,6 @@ AsyncResourceHandler::AsyncResourceHandler(
 AsyncResourceHandler::~AsyncResourceHandler() {
 }
 
-void AsyncResourceHandler::PopulateTimingInfo(URLRequest* request,
-                                              ResourceResponse* response) {
-  if (!(request->load_flags() & net::LOAD_ENABLE_LOAD_TIMING))
-    return;
-
-  ChromeNetLog* chrome_net_log = static_cast<ChromeNetLog*>(
-      request->net_log().net_log());
-  if (chrome_net_log == NULL)
-    return;
-
-  uint32 source_id = request->net_log().source().id;
-  LoadTimingObserver* observer = chrome_net_log->load_timing_observer();
-  LoadTimingObserver::URLRequestRecord* record =
-      observer->GetURLRequestRecord(source_id);
-  if (record) {
-    response->response_head.connection_id = record->socket_log_id;
-    response->response_head.connection_reused = record->socket_reused;
-    response->response_head.load_timing = record->timing;
-  }
-}
-
 bool AsyncResourceHandler::OnUploadProgress(int request_id,
                                             uint64 position,
                                             uint64 size) {
@@ -127,7 +105,8 @@ bool AsyncResourceHandler::OnRequestRedirected(int request_id,
   *defer = true;
   URLRequest* request = rdh_->GetURLRequest(
       GlobalRequestID(process_id_, request_id));
-  PopulateTimingInfo(request, response);
+  LoadTimingObserver::PopulateTimingInfo(request, response);
+  DevToolsNetLogObserver::PopulateResponseInfo(request, response);
   return receiver_->Send(new ViewMsg_Resource_ReceivedRedirect(
       routing_id_, request_id, new_url, response->response_head));
 }
@@ -142,7 +121,8 @@ bool AsyncResourceHandler::OnResponseStarted(int request_id,
   URLRequest* request = rdh_->GetURLRequest(
       GlobalRequestID(process_id_, request_id));
 
-  PopulateTimingInfo(request, response);
+  LoadTimingObserver::PopulateTimingInfo(request, response);
+  DevToolsNetLogObserver::PopulateResponseInfo(request, response);
 
   ResourceDispatcherHostRequestInfo* info = rdh_->InfoForRequest(request);
   if (info->resource_type() == ResourceType::MAIN_FRAME) {
@@ -181,13 +161,12 @@ bool AsyncResourceHandler::OnWillStart(int request_id,
 
 bool AsyncResourceHandler::OnWillRead(int request_id, net::IOBuffer** buf,
                                       int* buf_size, int min_size) {
-  DCHECK(min_size == -1);
+  DCHECK_EQ(-1, min_size);
 
   if (g_spare_read_buffer) {
     DCHECK(!read_buffer_);
     read_buffer_.swap(&g_spare_read_buffer);
-    // TODO(willchan): Remove after debugging bug 16371.
-    CHECK(read_buffer_->data());
+    DCHECK(read_buffer_->data());
 
     *buf = read_buffer_.get();
     *buf_size = read_buffer_->buffer_size();
@@ -198,8 +177,7 @@ bool AsyncResourceHandler::OnWillRead(int request_id, net::IOBuffer** buf,
       read_buffer_ = NULL;
       return false;
     }
-    // TODO(willchan): Remove after debugging bug 16371.
-    CHECK(read_buffer_->data());
+    DCHECK(read_buffer_->data());
     *buf = read_buffer_.get();
     *buf_size = next_buffer_size_;
   }
@@ -244,21 +222,30 @@ bool AsyncResourceHandler::OnReadCompleted(int request_id, int* bytes_read) {
   return true;
 }
 
+void AsyncResourceHandler::OnDataDownloaded(
+    int request_id, int bytes_downloaded) {
+  receiver_->Send(new ViewMsg_Resource_DataDownloaded(
+      routing_id_, request_id, bytes_downloaded));
+}
+
 bool AsyncResourceHandler::OnResponseCompleted(
     int request_id,
     const URLRequestStatus& status,
     const std::string& security_info) {
+  Time completion_time = Time::Now();
   receiver_->Send(new ViewMsg_Resource_RequestComplete(routing_id_,
                                                        request_id,
                                                        status,
-                                                       security_info));
+                                                       security_info,
+                                                       completion_time));
 
   // If we still have a read buffer, then see about caching it for later...
-  if (g_spare_read_buffer) {
+  // Note that we have to make sure the buffer is not still being used, so we
+  // have to perform an explicit check on the status code.
+  if (g_spare_read_buffer || URLRequestStatus::SUCCESS != status.status()) {
     read_buffer_ = NULL;
   } else if (read_buffer_.get()) {
-    // TODO(willchan): Remove after debugging bug 16371.
-    CHECK(read_buffer_->data());
+    DCHECK(read_buffer_->data());
     read_buffer_.swap(&g_spare_read_buffer);
   }
   return true;

@@ -34,10 +34,13 @@ bool OSMesaGLContext::Initialize(GLuint format, GLContext* shared_context) {
                                     8,  // stencil bits
                                     0,  // accum bits
                                     shared_handle);
-  if (!context_)
+  if (!context_) {
+    LOG(ERROR) << "OSMesaCreateContextExt failed.";
     return false;
+  }
 
   if (!MakeCurrent()) {
+    LOG(ERROR) << "MakeCurrent failed.";
     Destroy();
     return false;
   }
@@ -46,6 +49,7 @@ bool OSMesaGLContext::Initialize(GLuint format, GLContext* shared_context) {
   OSMesaPixelStore(OSMESA_Y_UP, 0);
 
   if (!InitializeCommon()) {
+    LOG(ERROR) << "GLContext::InitializeCommon failed.";
     Destroy();
     return false;
   }
@@ -80,8 +84,9 @@ bool OSMesaGLContext::IsOffscreen() {
   return true;
 }
 
-void OSMesaGLContext::SwapBuffers() {
+bool OSMesaGLContext::SwapBuffers() {
   NOTREACHED() << "Should not call SwapBuffers on an OSMesaGLContext.";
+  return false;
 }
 
 gfx::Size OSMesaGLContext::GetSize() {
@@ -90,6 +95,11 @@ gfx::Size OSMesaGLContext::GetSize() {
 
 void* OSMesaGLContext::GetHandle() {
   return context_;
+}
+
+void OSMesaGLContext::SetSwapInterval(int interval) {
+  DCHECK(IsCurrent());
+  NOTREACHED() << "Attempt to call SetSwapInterval on an OSMesaGLContext.";
 }
 
 void OSMesaGLContext::Resize(const gfx::Size& new_size) {

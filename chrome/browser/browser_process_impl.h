@@ -19,6 +19,8 @@
 #include "base/timer.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/download/download_status_updater.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "ipc/ipc_message.h"
 
@@ -64,6 +66,7 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   virtual IntranetRedirectDetector* intranet_redirect_detector();
   virtual const std::string& GetApplicationLocale();
   virtual void SetApplicationLocale(const std::string& locale);
+  virtual DownloadStatusUpdater* download_status_updater();
   virtual base::WaitableEvent* shutdown_event();
   virtual TabCloseableStateWatcher* tab_closeable_state_watcher();
   virtual void CheckForInspectorFiles();
@@ -181,9 +184,14 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   bool checked_for_new_frames_;
   bool using_new_frames_;
 
-  // This service just sits around and makes thumanails for tabs. It does
-  // nothing in the cosntructor so we don't have to worry about lazy init.
+  // This service just sits around and makes thumbnails for tabs. It does
+  // nothing in the constructor so we don't have to worry about lazy init.
   ThumbnailGenerator thumbnail_generator_;
+
+  // Download status updates (like a changing application icon on dock/taskbar)
+  // are global per-application. DownloadStatusUpdater does no work in the ctor
+  // so we don't have to worry about lazy initialization.
+  DownloadStatusUpdater download_status_updater_;
 
   // An event that notifies when we are shutting-down.
   scoped_ptr<base::WaitableEvent> shutdown_event_;
@@ -193,6 +201,10 @@ class BrowserProcessImpl : public BrowserProcess, public NonThreadSafe {
   void DoInspectorFilesCheck();
   // Our best estimate about the existence of the inspector directory.
   bool have_inspector_files_;
+
+  // Ensures that the observers of plugin/print disable/enable state
+  // notifications are properly added and removed.
+  PrefChangeRegistrar pref_change_registrar_;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   base::RepeatingTimer<BrowserProcessImpl> autoupdate_timer_;

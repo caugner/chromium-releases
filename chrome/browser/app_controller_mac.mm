@@ -19,8 +19,8 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/chrome_thread.h"
 #import "chrome/browser/cocoa/about_window_controller.h"
 #import "chrome/browser/cocoa/bookmark_menu_bridge.h"
 #import "chrome/browser/cocoa/browser_window_cocoa.h"
@@ -39,6 +39,7 @@
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/options_window.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -133,8 +134,8 @@ void RecordLastRunAppBundlePath() {
                            app_mode::kAppPrefsID);
 
   // Sync after a delay avoid I/O contention on startup; 1500 ms is plenty.
-  ChromeThread::PostDelayedTask(ChromeThread::FILE, FROM_HERE,
-                                new PrefsSyncTask(), 1500);
+  BrowserThread::PostDelayedTask(BrowserThread::FILE, FROM_HERE,
+                                 new PrefsSyncTask(), 1500);
 }
 
 }  // anonymous namespace
@@ -243,10 +244,14 @@ void RecordLastRunAppBundlePath() {
 
   size_t num_browsers = BrowserList::size();
 
+  // Give any print jobs in progress time to finish.
+  if (!browser_shutdown::IsTryingToQuit())
+    g_browser_process->print_job_manager()->StopJobs(true);
+
   // Initiate a shutdown (via BrowserList::CloseAllBrowsers()) if we aren't
   // already shutting down.
   if (!browser_shutdown::IsTryingToQuit())
-    BrowserList::CloseAllBrowsers(true);
+    BrowserList::CloseAllBrowsers();
 
   return num_browsers == 0 ? YES : NO;
 }
@@ -850,6 +855,23 @@ void RecordLastRunAppBundlePath() {
   if (flag)
     return YES;
 
+  // If launched as a hidden login item (due to installation of a persistent app
+  // or by the user, for example in System Preferenecs->Accounts->Login Items),
+  // allow session to be restored first time the user clicks on a Dock icon.
+  // Normally, it'd just open a new empty page.
+  {
+      static BOOL doneOnce = NO;
+      if (!doneOnce) {
+        doneOnce = YES;
+        if (mac_util::WasLaunchedAsHiddenLoginItem()) {
+          SessionService* sessionService =
+              [self defaultProfile]->GetSessionService();
+          if (sessionService &&
+              sessionService->RestoreIfNecessary(std::vector<GURL>()))
+            return NO;
+        }
+      }
+  }
   // Otherwise open a new window.
   {
     AutoReset<bool> auto_reset_in_run(&g_is_opening_new_window, true);

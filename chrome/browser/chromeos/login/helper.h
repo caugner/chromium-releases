@@ -63,6 +63,15 @@ const SkColor kBackgroundColor = SK_ColorWHITE;
 // Text color on the login controls.
 const SkColor kTextColor = SK_ColorWHITE;
 
+// Default size of the OOBE screen. Includes 10px shadow from each side.
+// See rounded_rect_painter.cc for border definitions.
+const int kWizardScreenWidth = 800;
+const int kWizardScreenHeight = 450;
+
+const int kScreenCornerRadius = 10;
+const int kUserCornerRadius = 5;
+
+
 }  // namespace login
 
 }  // namespace chromeos

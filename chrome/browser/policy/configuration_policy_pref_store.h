@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_PREF_STORE_H_
 #pragma once
 
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/scoped_ptr.h"
@@ -15,6 +17,8 @@
 #include "chrome/common/pref_store.h"
 
 class CommandLine;
+
+namespace policy {
 
 // An implementation of the |PrefStore| that holds a Dictionary
 // created through applied policy.
@@ -31,16 +35,20 @@ class ConfigurationPolicyPrefStore : public PrefStore,
   virtual PrefReadError ReadPrefs();
   virtual DictionaryValue* prefs() { return prefs_.get(); }
 
+  // ConfigurationPolicyStore methods:
+  virtual void Apply(PolicyType setting, Value* value);
+
   // Creates a ConfigurationPolicyPrefStore that reads managed policy.
   static ConfigurationPolicyPrefStore* CreateManagedPolicyPrefStore();
 
   // Creates a ConfigurationPolicyPrefStore that reads recommended policy.
   static ConfigurationPolicyPrefStore* CreateRecommendedPolicyPrefStore();
 
- private:
-  // For unit tests.
-  friend class ConfigurationPolicyPrefStoreTest;
+  // Returns the default policy value map for Chrome.
+  static ConfigurationPolicyProvider::StaticPolicyValueMap
+      GetChromePolicyValueMap();
 
+ private:
   // Policies that map to a single preference are handled
   // by an automated converter. Each one of these policies
   // has an entry in |simple_policy_map_| with the following type.
@@ -52,6 +60,9 @@ class ConfigurationPolicyPrefStore : public PrefStore,
 
   static const PolicyToPreferenceMapEntry simple_policy_map_[];
   static const PolicyToPreferenceMapEntry proxy_policy_map_[];
+  static const PolicyToPreferenceMapEntry default_search_policy_map_[];
+  static const ConfigurationPolicyProvider::StaticPolicyValueMap
+      policy_value_map_;
 
   const CommandLine* command_line_;
   ConfigurationPolicyProvider* provider_;
@@ -75,15 +86,21 @@ class ConfigurationPolicyPrefStore : public PrefStore,
   // to use the system proxy.
   bool use_system_proxy_;
 
-  // ConfigurationPolicyStore methods:
-  virtual void Apply(PolicyType setting, Value* value);
+  // Returns the map entry that corresponds to |policy| in the map.
+  const PolicyToPreferenceMapEntry* FindPolicyInMap(PolicyType policy,
+      const PolicyToPreferenceMapEntry* map, int size);
+
+  // Remove the preferences found in the map from |prefs_|.  Returns true if
+  // any such preferences were found and removed.
+  bool RemovePreferencesOfMap(const PolicyToPreferenceMapEntry* map,
+                              int table_size);
+
+  bool ApplyPolicyFromMap(PolicyType policy, Value* value,
+                          const PolicyToPreferenceMapEntry map[], int size);
 
   // Initializes default preference values from proxy-related command-line
   // switches in |command_line_|.
   void ApplyProxySwitches();
-
-  bool ApplyPolicyFromMap(PolicyType policy, Value* value,
-                          const PolicyToPreferenceMapEntry map[], int size);
 
   // Processes proxy-specific policies. Returns true if the specified policy
   // is a proxy-related policy. ApplyProxyPolicy assumes the ownership
@@ -98,7 +115,19 @@ class ConfigurationPolicyPrefStore : public PrefStore,
   // handled and assumes ownership of |value| in that case.
   bool ApplyAutoFillPolicy(PolicyType policy, Value* value);
 
+  // Make sure that the |path| if present in |prefs_|.  If not, set it to
+  // a blank string.
+  void EnsureStringPrefExists(const std::string& path);
+
+  // If the required entries for default search are specified and valid,
+  // finalizes the policy-specified configuration by initializing the
+  // unspecified map entries.  Otherwise wipes all default search related
+  // map entries from |prefs_|.
+  void FinalizeDefaultSearchPolicySettings();
+
   DISALLOW_COPY_AND_ASSIGN(ConfigurationPolicyPrefStore);
 };
+
+}  // namespace policy
 
 #endif  // CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_PREF_STORE_H_

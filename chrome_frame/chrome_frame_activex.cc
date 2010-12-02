@@ -17,7 +17,9 @@
 #include "base/process_util.h"
 #include "base/scoped_bstr_win.h"
 #include "base/singleton.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/trace_event.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
@@ -329,10 +331,11 @@ STDMETHODIMP ChromeFrameActivex::Load(IPropertyBag* bag, IErrorLog* error_log) {
           FAILED(hr = CreateScriptBlockForEvent(element, object_id,
                                                 V_BSTR(&value), prop))) {
         DLOG(ERROR) << "Failed to create script block for " << prop
-                    << StringPrintf(L"hr=0x%08X, vt=%i", hr, value.type());
+                    << base::StringPrintf(L"hr=0x%08X, vt=%i", hr,
+                                         value.type());
       } else {
         DLOG(INFO) << "script block created for event " << prop <<
-            StringPrintf(" (0x%08X)", hr) << " connections: " <<
+            base::StringPrintf(" (0x%08X)", hr) << " connections: " <<
             ProxyDIChromeFrameEvents<ChromeFrameActivex>::m_vec.GetSize();
       }
     } else {
@@ -361,7 +364,7 @@ STDMETHODIMP ChromeFrameActivex::Load(IPropertyBag* bag, IErrorLog* error_log) {
   }
 
   DLOG_IF(ERROR, FAILED(hr))
-      << StringPrintf("Failed to load property bag: 0x%08X", hr);
+      << base::StringPrintf("Failed to load property bag: 0x%08X", hr);
 
   return hr;
 }
@@ -459,14 +462,19 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
       WideToUTF8(url_, url_.Length(), &utf8_url);
     }
 
+    InitializeAutomationSettings();
+
     url_fetcher_->set_frame_busting(!is_privileged_);
     automation_client_->SetUrlFetcher(url_fetcher_.get());
     if (!InitializeAutomation(profile_name, chrome_extra_arguments,
                               IsIEInPrivate(), true, GURL(utf8_url),
-                              GURL())) {
+                              GURL(), false)) {
       DLOG(ERROR) << "Failed to navigate to url:" << utf8_url;
       return E_FAIL;
     }
+
+    // Log a metric that Chrome Frame is being used in Widget mode
+    THREAD_SAFE_UMA_LAUNCH_TYPE_COUNT(RENDERER_TYPE_CHROME_WIDGET);
   }
 
   return hr;
@@ -568,7 +576,7 @@ void ChromeFrameActivex::FireEvent(const EventHandlers& handlers,
     // 0x80020101 == SCRIPT_E_REPORTED.
     // When the script we're invoking has an error, we get this error back.
     DLOG_IF(ERROR, FAILED(hr) && hr != 0x80020101)
-        << StringPrintf(L"Failed to invoke script: 0x%08X", hr);
+        << base::StringPrintf(L"Failed to invoke script: 0x%08X", hr);
   }
 }
 
@@ -589,7 +597,7 @@ void ChromeFrameActivex::FireEvent(const EventHandlers& handlers,
     // 0x80020101 == SCRIPT_E_REPORTED.
     // When the script we're invoking has an error, we get this error back.
     DLOG_IF(ERROR, FAILED(hr) && hr != 0x80020101)
-        << StringPrintf(L"Failed to invoke script: 0x%08X", hr);
+        << base::StringPrintf(L"Failed to invoke script: 0x%08X", hr);
   }
 }
 
@@ -630,7 +638,7 @@ HRESULT ChromeFrameActivex::registerBhoIfNeeded() {
                               web_browser2.Receive());
   if (FAILED(hr) || web_browser2.get() == NULL) {
     DLOG(WARNING) << "Failed to get IWebBrowser2 from client site. Error:"
-                  << StringPrintf(" 0x%08X", hr);
+                  << base::StringPrintf(" 0x%08X", hr);
     return hr;
   }
 
@@ -642,14 +650,14 @@ HRESULT ChromeFrameActivex::registerBhoIfNeeded() {
   hr = bho.CreateInstance(CLSID_ChromeFrameBHO, NULL, CLSCTX_INPROC_SERVER);
   if (FAILED(hr)) {
     NOTREACHED() << "Failed to register ChromeFrame BHO. Error:"
-                 << StringPrintf(" 0x%08X", hr);
+                 << base::StringPrintf(" 0x%08X", hr);
     return hr;
   }
 
   hr = bho->SetSite(web_browser2);
   if (FAILED(hr)) {
     NOTREACHED() << "ChromeFrame BHO SetSite failed. Error:"
-                 << StringPrintf(" 0x%08X", hr);
+                 << base::StringPrintf(" 0x%08X", hr);
     return hr;
   }
 

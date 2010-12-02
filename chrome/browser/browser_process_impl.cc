@@ -11,6 +11,7 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/task.h"
 #include "base/thread.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/appcache/chrome_appcache_service.h"
@@ -19,8 +20,8 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_main.h"
 #include "chrome/browser/browser_process_sub_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_trial.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/debugger/debugger_wrapper.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/download/download_file_manager.h"
@@ -37,6 +38,7 @@
 #include "chrome/browser/net/sqlite_persistent_cookie_store.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/plugin_service.h"
+#include "chrome/browser/plugin_updater.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/profile_manager.h"
@@ -54,6 +56,7 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/switch_utils.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "ipc/ipc_logging.h"
 #include "webkit/database/database_tracker.h"
@@ -71,6 +74,13 @@
 // How often to check if the persistent instance of Chrome needs to restart
 // to install an update.
 static const int kUpdateCheckIntervalHours = 6;
+#endif
+
+#if defined(USE_X11)
+// How long to wait for the File thread to complete during EndSession, on
+// Linux. We have a timeout here because we're unable to run the UI messageloop
+// and there's some deadlock risk. Our only option is to exit anyway.
+static const int kEndSessionTimeoutSeconds = 10;
 #endif
 
 BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
@@ -134,12 +144,13 @@ BrowserProcessImpl::~BrowserProcessImpl() {
   google_url_tracker_.reset();
   intranet_redirect_detector_.reset();
 
+  // Need to clear the desktop notification balloons before the io_thread_ and
+  // before the profiles, since if there are any still showing we will access
+  // those things during teardown.
+  notification_ui_manager_.reset();
+
   // Need to clear profiles (download managers) before the io_thread_.
   profile_manager_.reset();
-
-  // Need to clear the desktop notification balloons before the io_thread_,
-  // since if there are any left showing we will post tasks.
-  notification_ui_manager_.reset();
 
   // Debugger must be cleaned up before IO thread and NotificationService.
   debugger_wrapper_ = NULL;
@@ -214,10 +225,16 @@ BrowserProcessImpl::~BrowserProcessImpl() {
   g_browser_process = NULL;
 }
 
+#if defined(OS_WIN)
 // Send a QuitTask to the given MessageLoop.
 static void PostQuit(MessageLoop* message_loop) {
   message_loop->PostTask(FROM_HERE, new MessageLoop::QuitTask());
 }
+#elif defined(USE_X11)
+static void Signal(base::WaitableEvent* event) {
+  event->Signal();
+}
+#endif
 
 unsigned int BrowserProcessImpl::AddRefModule() {
   DCHECK(CalledOnValidThread());
@@ -239,9 +256,9 @@ unsigned int BrowserProcessImpl::ReleaseModule() {
 }
 
 void BrowserProcessImpl::EndSession() {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(USE_X11)
   // Notify we are going away.
-  ::SetEvent(shutdown_event_->handle());
+  shutdown_event_->Signal();
 #endif
 
   // Mark all the profiles as clean.
@@ -263,9 +280,20 @@ void BrowserProcessImpl::EndSession() {
   // We must write that the profile and metrics service shutdown cleanly,
   // otherwise on startup we'll think we crashed. So we block until done and
   // then proceed with normal shutdown.
-  g_browser_process->file_thread()->message_loop()->PostTask(FROM_HERE,
+#if defined(USE_X11)
+  //  Can't run a local loop on linux. Instead create a waitable event.
+  base::WaitableEvent done_writing(false, false);
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+      NewRunnableFunction(Signal, &done_writing));
+  done_writing.TimedWait(
+      base::TimeDelta::FromSeconds(kEndSessionTimeoutSeconds));
+#elif defined(OS_WIN)
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
       NewRunnableFunction(PostQuit, MessageLoop::current()));
   MessageLoop::current()->Run();
+#else
+  NOTIMPLEMENTED();
+#endif
 }
 
 ResourceDispatcherHost* BrowserProcessImpl::resource_dispatcher_host() {
@@ -430,6 +458,10 @@ void BrowserProcessImpl::SetApplicationLocale(const std::string& locale) {
   extension_l10n_util::SetProcessLocale(locale);
 }
 
+DownloadStatusUpdater* BrowserProcessImpl::download_status_updater() {
+  return &download_status_updater_;
+}
+
 base::WaitableEvent* BrowserProcessImpl::shutdown_event() {
   return shutdown_event_.get();
 }
@@ -517,7 +549,7 @@ void BrowserProcessImpl::CreateIOThread() {
   // The lifetime of the BACKGROUND_X11 thread is a subset of the IO thread so
   // we start it now.
   scoped_ptr<base::Thread> background_x11_thread(
-      new BrowserProcessSubThread(ChromeThread::BACKGROUND_X11));
+      new BrowserProcessSubThread(BrowserThread::BACKGROUND_X11));
   if (!background_x11_thread->Start())
     return;
   background_x11_thread_.swap(background_x11_thread);
@@ -536,7 +568,7 @@ void BrowserProcessImpl::CreateFileThread() {
   created_file_thread_ = true;
 
   scoped_ptr<base::Thread> thread(
-      new BrowserProcessSubThread(ChromeThread::FILE));
+      new BrowserProcessSubThread(BrowserThread::FILE));
   base::Thread::Options options;
 #if defined(OS_WIN)
   // On Windows, the FILE thread needs to be have a UI message loop which pumps
@@ -561,7 +593,7 @@ void BrowserProcessImpl::CreateDBThread() {
   created_db_thread_ = true;
 
   scoped_ptr<base::Thread> thread(
-      new BrowserProcessSubThread(ChromeThread::DB));
+      new BrowserProcessSubThread(BrowserThread::DB));
   if (!thread->Start())
     return;
   db_thread_.swap(thread);
@@ -572,7 +604,7 @@ void BrowserProcessImpl::CreateProcessLauncherThread() {
   created_process_launcher_thread_ = true;
 
   scoped_ptr<base::Thread> thread(
-      new BrowserProcessSubThread(ChromeThread::PROCESS_LAUNCHER));
+      new BrowserProcessSubThread(BrowserThread::PROCESS_LAUNCHER));
   if (!thread->Start())
     return;
   process_launcher_thread_.swap(thread);
@@ -583,7 +615,7 @@ void BrowserProcessImpl::CreateCacheThread() {
   created_cache_thread_ = true;
 
   scoped_ptr<base::Thread> thread(
-      new BrowserProcessSubThread(ChromeThread::CACHE));
+      new BrowserProcessSubThread(BrowserThread::CACHE));
   base::Thread::Options options;
   options.message_loop_type = MessageLoop::TYPE_IO;
   if (!thread->StartWithOptions(options))
@@ -605,6 +637,23 @@ void BrowserProcessImpl::CreateLocalState() {
   FilePath local_state_path;
   PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path);
   local_state_.reset(PrefService::CreatePrefService(local_state_path, NULL));
+
+  pref_change_registrar_.Init(local_state_.get());
+
+  // Make sure the the plugin updater gets notifications of changes
+  // in the plugin blacklist.
+  local_state_->RegisterListPref(prefs::kPluginsPluginsBlacklist);
+  pref_change_registrar_.Add(prefs::kPluginsPluginsBlacklist,
+                             PluginUpdater::GetPluginUpdater());
+
+  // Initialize and set up notifications for the printing enabled
+  // preference.
+  local_state_->RegisterBooleanPref(prefs::kPrintingEnabled, true);
+  bool printing_enabled =
+      local_state_->GetBoolean(prefs::kPrintingEnabled);
+  print_job_manager_->set_printing_enabled(printing_enabled);
+  pref_change_registrar_.Add(prefs::kPrintingEnabled,
+                             print_job_manager_.get());
 }
 
 void BrowserProcessImpl::CreateIconManager() {
@@ -687,7 +736,7 @@ void BrowserProcessImpl::SetIPCLoggingEnabled(bool enable) {
 
 // Helper for SetIPCLoggingEnabled.
 void BrowserProcessImpl::SetIPCLoggingEnabledForChildProcesses(bool enabled) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   BrowserChildProcessHost::Iterator i;  // default constr references a singleton
   while (!i.Done()) {
@@ -721,18 +770,7 @@ bool BrowserProcessImpl::CanAutorestartForUpdate() const {
          Upgrade::IsUpdatePendingRestart();
 }
 
-// Switches enumerated here will be removed when a background instance of
-// Chrome restarts itself. If your key is designed to only be used once,
-// or if it does not make sense when restarting a background instance to
-// pick up an automatic update, be sure to add it to this list.
-const char* const kSwitchesToRemoveOnAutorestart[] = {
-  switches::kApp,
-  switches::kFirstRun,
-  switches::kImport,
-  switches::kImportFromFile,
-  switches::kMakeDefaultBrowser
-};
-
+// Switches to add when auto-restarting Chrome.
 const char* const kSwitchesToAddOnAutorestart[] = {
   switches::kNoStartupWindow
 };
@@ -744,10 +782,7 @@ void BrowserProcessImpl::RestartPersistentInstance() {
   std::map<std::string, CommandLine::StringType> switches =
       old_cl->GetSwitches();
 
-  // Remove the keys that we shouldn't pass through during restart.
-  for (size_t i = 0; i < arraysize(kSwitchesToRemoveOnAutorestart); i++) {
-    switches.erase(kSwitchesToRemoveOnAutorestart[i]);
-  }
+  switches::RemoveSwitchesForAutostart(&switches);
 
   // Append the rest of the switches (along with their values, if any)
   // to the new command line
@@ -762,7 +797,7 @@ void BrowserProcessImpl::RestartPersistentInstance() {
   }
 
   // Ensure that our desired switches are set on the new process.
-  for (size_t i = 0; i < arraysize(kSwitchesToAddOnAutorestart); i++) {
+  for (size_t i = 0; i < arraysize(kSwitchesToAddOnAutorestart); ++i) {
     if (!new_cl->HasSwitch(kSwitchesToAddOnAutorestart[i]))
       new_cl->AppendSwitch(kSwitchesToAddOnAutorestart[i]);
   }

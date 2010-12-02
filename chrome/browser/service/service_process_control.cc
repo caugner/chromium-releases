@@ -11,8 +11,10 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/child_process_host.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/common/service_messages.h"
 #include "chrome/common/service_process_util.h"
 
@@ -25,16 +27,17 @@ class ServiceProcessControl::Launcher
   Launcher(ServiceProcessControl* process, CommandLine* cmd_line)
       : process_(process),
         cmd_line_(cmd_line),
-        launched_(false) {
+        launched_(false),
+        retry_count_(0) {
   }
 
   // Execute the command line to start the process asynchronously.
   // After the comamnd is executed |task| is called with the process handle on
   // the UI thread.
   void Run(Task* task) {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-    ChromeThread::PostTask(ChromeThread::PROCESS_LAUNCHER, FROM_HERE,
+    BrowserThread::PostTask(BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
                            NewRunnableMethod(this, &Launcher::DoRun, task));
   }
 
@@ -42,24 +45,26 @@ class ServiceProcessControl::Launcher
 
  private:
   void DoRun(Task* task) {
-    launched_ = base::LaunchApp(*cmd_line_.get(), false, true, NULL);
-
-    ChromeThread::PostTask(
-        ChromeThread::IO, FROM_HERE,
+    base::LaunchApp(*cmd_line_.get(), false, true, NULL);
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
         NewRunnableMethod(this, &Launcher::DoDetectLaunched, task));
   }
 
   void DoDetectLaunched(Task* task) {
-    if (CheckServiceProcessRunning(kServiceProcessCloudPrint)) {
-      ChromeThread::PostTask(ChromeThread::UI, FROM_HERE,
+    const uint32 kMaxLaunchDetectRetries = 10;
+
+    launched_ = CheckServiceProcessReady();
+    if (launched_ || (retry_count_ >= kMaxLaunchDetectRetries)) {
+      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
           NewRunnableMethod(this, &Launcher::Notify, task));
       return;
     }
-
+    retry_count_++;
     // If the service process is not launched yet then check again in 2 seconds.
     const int kDetectLaunchRetry = 2000;
-    ChromeThread::PostDelayedTask(
-        ChromeThread::IO, FROM_HERE,
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
         NewRunnableMethod(this, &Launcher::DoDetectLaunched, task),
         kDetectLaunchRetry);
   }
@@ -72,13 +77,12 @@ class ServiceProcessControl::Launcher
   ServiceProcessControl* process_;
   scoped_ptr<CommandLine> cmd_line_;
   bool launched_;
+  uint32 retry_count_;
 };
 
 // ServiceProcessControl implementation.
-ServiceProcessControl::ServiceProcessControl(Profile* profile,
-                                             ServiceProcessType type)
+ServiceProcessControl::ServiceProcessControl(Profile* profile)
     : profile_(profile),
-      type_(type),
       message_handler_(NULL) {
 }
 
@@ -110,14 +114,32 @@ void ServiceProcessControl::ConnectInternal(Task* task) {
                            io_thread->message_loop(), true,
                            g_browser_process->shutdown_event()));
   channel_->set_sync_messages_with_no_timeout_allowed(false);
+
+  // We just established a channel with the service process. Notify it if an
+  // upgrade is available.
+  if (Singleton<UpgradeDetector>::get()->notify_upgrade()) {
+    Send(new ServiceMsg_UpdateAvailable);
+  } else {
+    if (registrar_.IsEmpty())
+      registrar_.Add(this, NotificationType::UPGRADE_RECOMMENDED,
+                     NotificationService::AllSources());
+  }
 }
 
 void ServiceProcessControl::Launch(Task* task) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // If the service process is already running then connects to it.
-  if (CheckServiceProcessRunning(kServiceProcessCloudPrint)) {
+  if (CheckServiceProcessReady()) {
     ConnectInternal(task);
+    return;
+  }
+
+  // Prevent quick calls to Launch in succession from causing a crash.
+  // TODO(scottbyer) - ServiceProcessControl launch task callback code needs to
+  // be enhanced to deal with this properly.  See
+  // http://code.google.com/p/chromium/issues/detail?id=58802
+  if (launcher_) {
     return;
   }
 
@@ -154,7 +176,7 @@ void ServiceProcessControl::Launch(Task* task) {
 }
 
 void ServiceProcessControl::OnProcessLaunched(Task* task) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (launcher_->launched()) {
     // After we have successfully created the service process we try to connect
     // to it. The launch task is transfered to a connect task.
@@ -171,15 +193,15 @@ void ServiceProcessControl::OnProcessLaunched(Task* task) {
 }
 
 void ServiceProcessControl::OnMessageReceived(const IPC::Message& message) {
-  if (!message_handler_)
-    return;
-
-  if (message.type() == ServiceHostMsg_GoodDay::ID)
-    message_handler_->OnGoodDay();
+  IPC_BEGIN_MESSAGE_MAP(ServiceProcessControl, message)
+      IPC_MESSAGE_HANDLER(ServiceHostMsg_GoodDay, OnGoodDay)
+      IPC_MESSAGE_HANDLER(ServiceHostMsg_CloudPrintProxy_IsEnabled,
+                          OnCloudPrintProxyIsEnabled)
+  IPC_END_MESSAGE_MAP()
 }
 
 void ServiceProcessControl::OnChannelConnected(int32 peer_pid) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!connect_done_task_.get())
     return;
   connect_done_task_->Run();
@@ -187,7 +209,7 @@ void ServiceProcessControl::OnChannelConnected(int32 peer_pid) {
 }
 
 void ServiceProcessControl::OnChannelError() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   channel_.reset();
   if (!connect_done_task_.get())
     return;
@@ -196,10 +218,36 @@ void ServiceProcessControl::OnChannelError() {
 }
 
 bool ServiceProcessControl::Send(IPC::Message* message) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!channel_.get())
     return false;
   return channel_->Send(message);
+}
+
+// NotificationObserver implementation.
+void ServiceProcessControl::Observe(NotificationType type,
+                                    const NotificationSource& source,
+                                    const NotificationDetails& details) {
+  if (type == NotificationType::UPGRADE_RECOMMENDED) {
+    Send(new ServiceMsg_UpdateAvailable);
+  }
+}
+
+
+void ServiceProcessControl::OnGoodDay() {
+  if (!message_handler_)
+    return;
+
+  message_handler_->OnGoodDay();
+}
+
+void ServiceProcessControl::OnCloudPrintProxyIsEnabled(bool enabled,
+                                                       std::string email) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (cloud_print_status_callback_ != NULL) {
+    cloud_print_status_callback_->Run(enabled, email);
+    cloud_print_status_callback_.reset();
+  }
 }
 
 bool ServiceProcessControl::SendHello() {
@@ -219,6 +267,13 @@ bool ServiceProcessControl::EnableRemotingWithTokens(
   return Send(
       new ServiceMsg_EnableRemotingWithTokens(user, remoting_token,
                                               talk_token));
+}
+
+bool ServiceProcessControl::GetCloudPrintProxyStatus(
+    Callback2<bool, std::string>::Type* cloud_print_status_callback) {
+  DCHECK(cloud_print_status_callback);
+  cloud_print_status_callback_.reset(cloud_print_status_callback);
+  return Send(new ServiceMsg_IsCloudPrintProxyEnabled);
 }
 
 DISABLE_RUNNABLE_METHOD_REFCOUNT(ServiceProcessControl);

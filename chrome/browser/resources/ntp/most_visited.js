@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 // Dependencies that we should remove/formalize:
-// ../shared/js/class_list.js
 // util.js
 //
 // afterTransition
@@ -41,34 +40,35 @@ var MostVisited = (function() {
     return Array.prototype.indexOf.call(nodes, el);
   }
 
-  function MostVisited(el, miniview, useSmallGrid, visible) {
+  function MostVisited(el, miniview, menu, useSmallGrid, visible) {
     this.element = el;
     this.miniview = miniview;
+    this.menu = menu;
     this.useSmallGrid_ = useSmallGrid;
     this.visible_ = visible;
 
     this.createThumbnails_();
     this.applyMostVisitedRects_();
 
-    el.addEventListener('click', bind(this.handleClick_, this));
-    el.addEventListener('keydown', bind(this.handleKeyDown_, this));
+    el.addEventListener('click', this.handleClick_.bind(this));
+    el.addEventListener('keydown', this.handleKeyDown_.bind(this));
 
     document.addEventListener('DOMContentLoaded',
-                              bind(this.ensureSmallGridCorrect, this));
+                              this.ensureSmallGridCorrect.bind(this));
 
     // Commands
-    document.addEventListener('command', bind(this.handleCommand_, this));
-    document.addEventListener('canExecute', bind(this.handleCanExecute_, this));
+    document.addEventListener('command', this.handleCommand_.bind(this));
+    document.addEventListener('canExecute', this.handleCanExecute_.bind(this));
 
     // DND
-    el.addEventListener('dragstart', bind(this.handleDragStart_, this));
-    el.addEventListener('dragenter', bind(this.handleDragEnter_, this));
-    el.addEventListener('dragover', bind(this.handleDragOver_, this));
-    el.addEventListener('dragleave', bind(this.handleDragLeave_, this));
-    el.addEventListener('drop', bind(this.handleDrop_, this));
-    el.addEventListener('dragend', bind(this.handleDragEnd_, this));
-    el.addEventListener('drag', bind(this.handleDrag_, this));
-    el.addEventListener('mousedown', bind(this.handleMouseDown_, this));
+    el.addEventListener('dragstart', this.handleDragStart_.bind(this));
+    el.addEventListener('dragenter', this.handleDragEnter_.bind(this));
+    el.addEventListener('dragover', this.handleDragOver_.bind(this));
+    el.addEventListener('dragleave', this.handleDragLeave_.bind(this));
+    el.addEventListener('drop', this.handleDrop_.bind(this));
+    el.addEventListener('dragend', this.handleDragEnd_.bind(this));
+    el.addEventListener('drag', this.handleDrag_.bind(this));
+    el.addEventListener('mousedown', this.handleMouseDown_.bind(this));
   }
 
   MostVisited.prototype = {
@@ -429,10 +429,10 @@ var MostVisited = (function() {
         // The timeout below is to allow WebKit to see that we turned off
         // pointer-event before moving the thumbnails so that we can get out of
         // hover mode.
-        window.setTimeout(bind(function() {
+        window.setTimeout((function() {
           this.invalidate_();
           this.layout();
-        }, this), 10);
+        }).bind(this), 10);
         e.preventDefault();
         if (this.dragEndTimer_) {
           window.clearTimeout(this.dragEndTimer_);
@@ -536,6 +536,7 @@ var MostVisited = (function() {
       this.data_ = data;
       this.updateMostVisited_();
       this.updateMiniview_();
+      this.updateMenu_();
     },
 
     updateMostVisited_: function() {
@@ -605,13 +606,21 @@ var MostVisited = (function() {
         a.style.backgroundImage = url('chrome://favicon/' + item.url);
         a.className = 'item';
         this.miniview.appendChild(span);
-
-        if ((a.offsetLeft + a.offsetWidth) > this.miniview.offsetWidth) {
-          this.miniview.removeChild(span);
-          return;
-        }
       }
       updateMiniviewClipping(this.miniview);
+    },
+
+    updateMenu_: function() {
+      clearClosedMenu(this.menu);
+      var data = this.data.slice(0, MAX_MINIVIEW_ITEMS);
+      for (var i = 0, item; item = data[i]; i++) {
+        if (!item.filler) {
+          addClosedMenuEntry(
+              this.menu, item.url, item.title, 'chrome://favicon/' + item.url);
+        }
+      }
+      addClosedMenuFooter(
+          this.menu, 'most-visited', MINIMIZED_THUMB, Section.THUMB);
     },
 
     handleClick_: function(e) {

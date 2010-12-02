@@ -42,7 +42,9 @@ void GLES2DecoderTestBase::InitDecoder(const char* extensions) {
 
   InSequence sequence;
 
-  TestHelper::SetupContextGroupInitExpectations(gl_.get(), "");
+  TestHelper::SetupContextGroupInitExpectations(gl_.get(), extensions);
+
+  EXPECT_TRUE(group_.Initialize(extensions));
 
   EXPECT_CALL(*gl_, EnableVertexAttribArray(0))
       .Times(1)
@@ -85,6 +87,10 @@ void GLES2DecoderTestBase::InitDecoder(const char* extensions) {
       .Times(1)
       .RetiresOnSaturation();
 
+  EXPECT_CALL(*gl_, Enable(GL_POINT_SPRITE))
+      .Times(1)
+      .RetiresOnSaturation();
+
   engine_.reset(new StrictMock<MockCommandBufferEngine>());
   Buffer buffer = engine_->GetSharedMemoryBuffer(kSharedMemoryId);
   shared_memory_offset_ = kSharedMemoryOffset;
@@ -95,7 +101,7 @@ void GLES2DecoderTestBase::InitDecoder(const char* extensions) {
   context_ = new gfx::StubGLContext;
 
   decoder_.reset(GLES2Decoder::Create(&group_));
-  decoder_->Initialize(context_, gfx::Size(), NULL, 0);
+  decoder_->Initialize(context_, gfx::Size(), std::vector<int32>(), NULL, 0);
   decoder_->set_engine(engine_.get());
 
   EXPECT_CALL(*gl_, GenBuffersARB(_, _))
@@ -701,5 +707,3 @@ const char* GLES2DecoderWithShaderTestBase::kUniform3Name = "uniform3[0]";
 
 }  // namespace gles2
 }  // namespace gpu
-
-

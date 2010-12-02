@@ -65,6 +65,7 @@
 #include "chrome/renderer/renderer_histogram_snapshots.h"
 #include "chrome/renderer/renderer_webidbfactory_impl.h"
 #include "chrome/renderer/renderer_webkitclient_impl.h"
+#include "chrome/renderer/search_extension.h"
 #include "chrome/renderer/spellchecker/spellcheck.h"
 #include "chrome/renderer/user_script_slave.h"
 #include "ipc/ipc_channel_handle.h"
@@ -77,6 +78,7 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebColor.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCrossOriginPreflightResultCache.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDatabase.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFontCache.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
@@ -187,13 +189,19 @@ class RenderViewContentSettingsSetter : public RenderViewVisitor {
 
 class RenderViewZoomer : public RenderViewVisitor {
  public:
-  RenderViewZoomer(const GURL& url, int zoom_level)
+  RenderViewZoomer(const GURL& url, double zoom_level)
       : zoom_level_(zoom_level) {
     host_ = net::GetHostOrSpecFromURL(url);
   }
 
   virtual bool Visit(RenderView* render_view) {
     WebView* webview = render_view->webview();  // Guaranteed non-NULL.
+
+    // Don't set zoom level for full-page plugin since they don't use the same
+    // zoom settings.
+    if (webview->mainFrame()->document().isPluginDocument())
+      return true;
+
     if (net::GetHostOrSpecFromURL(GURL(webview->mainFrame()->url())) == host_)
       webview->setZoomLevel(false, zoom_level_);
     return true;
@@ -201,10 +209,14 @@ class RenderViewZoomer : public RenderViewVisitor {
 
  private:
   std::string host_;
-  int zoom_level_;
+  double zoom_level_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewZoomer);
 };
+
+bool IsSpeechInputEnabled(const CommandLine& command_line) {
+  return !command_line.HasSwitch(switches::kDisableSpeechInput);
+}
 }  // namespace
 
 // When we run plugins in process, we actually run them on the render thread,
@@ -283,8 +295,6 @@ void RenderThread::Init() {
                                         &RenderThread::EstablishGpuChannel),
                                     kPrelauchGpuProcessDelayMS);
   }
-
-  GpuVideoServiceHost::get()->OnRendererThreadInit(MessageLoop::current());
 
   TRACE_EVENT_END("RenderThread::Init", 0, "");
 }
@@ -497,7 +507,7 @@ void RenderThread::OnSetContentSettingsForCurrentURL(
 }
 
 void RenderThread::OnSetZoomLevelForCurrentURL(const GURL& url,
-                                               int zoom_level) {
+                                               double zoom_level) {
   RenderViewZoomer zoomer(url, zoom_level);
   RenderView::ForEach(&zoomer);
 }
@@ -526,7 +536,7 @@ void RenderThread::OnPageActionsUpdated(
 
 void RenderThread::OnExtensionSetAPIPermissions(
     const std::string& extension_id,
-    const std::vector<std::string>& permissions) {
+    const std::set<std::string>& permissions) {
   ExtensionProcessBindings::SetAPIPermissions(extension_id, permissions);
 
   // This is called when starting a new extension page, so start the idle
@@ -578,6 +588,7 @@ void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
     // is there a new non-windows message I should add here?
     IPC_MESSAGE_HANDLER(ViewMsg_New, OnCreateNewView)
     IPC_MESSAGE_HANDLER(ViewMsg_SetCacheCapacities, OnSetCacheCapacities)
+    IPC_MESSAGE_HANDLER(ViewMsg_ClearCache, OnClearCache)
     IPC_MESSAGE_HANDLER(ViewMsg_GetRendererHistograms,
                         OnGetRendererHistograms)
 #if defined(USE_TCMALLOC)
@@ -621,6 +632,7 @@ void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewMsg_SpellChecker_EnableAutoSpellCorrect,
                         OnSpellCheckEnableAutoSpellCorrect)
     IPC_MESSAGE_HANDLER(ViewMsg_GpuChannelEstablished, OnGpuChannelEstablished)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetPhishingModel, OnSetPhishingModel)
   IPC_END_MESSAGE_MAP()
 }
 
@@ -672,6 +684,11 @@ void RenderThread::OnSetCacheCapacities(size_t min_dead_capacity,
   EnsureWebKitInitialized();
   WebCache::setCapacities(
       min_dead_capacity, max_dead_capacity, capacity);
+}
+
+void RenderThread::OnClearCache() {
+  EnsureWebKitInitialized();
+  WebCache::clear();
 }
 
 void RenderThread::OnGetCacheResourceStats() {
@@ -839,76 +856,40 @@ void RenderThread::EnsureWebKitInitialized() {
 
 #if defined(OS_WIN)
   // We don't yet support Gears on non-Windows, so don't tell pages that we do.
-  WebScriptController::registerExtension(extensions_v8::GearsExtension::Get());
+  RegisterExtension(extensions_v8::GearsExtension::Get(), false);
 #endif
-  WebScriptController::registerExtension(
-      extensions_v8::LoadTimesExtension::Get());
-  WebScriptController::registerExtension(
-      extensions_v8::ChromeAppExtension::Get());
-  WebScriptController::registerExtension(
-      extensions_v8::ExternalExtension::Get());
-
-  // TODO(rafaelw). Note that extension-related v8 extensions are being
-  // bound currently based on is_extension_process_. This means that
-  // non-extension renderers that slip into an extension process (for example,
-  // an extension page opening an iframe) will be extension bindings setup.
-  // This should be relatively rare, and the offending page won't be able to
-  // make extension API requests because it'll be denied on both sides of
-  // the renderer by a permission check. However, this is still fairly lame
-  // and we should consider implementing a V8Proxy delegate that calls out
-  // to the render thread and makes a decision as to whether to bind these
-  // extensions based on the frame's url.
-  // See: crbug.com/53610.
-
-  if (is_extension_process_)
-    WebScriptController::registerExtension(ExtensionProcessBindings::Get());
-
-  WebScriptController::registerExtension(
-      BaseJsV8Extension::Get(), EXTENSION_GROUP_CONTENT_SCRIPTS);
-  if (is_extension_process_)
-    WebScriptController::registerExtension(BaseJsV8Extension::Get());
-
-  WebScriptController::registerExtension(
-      JsonSchemaJsV8Extension::Get(), EXTENSION_GROUP_CONTENT_SCRIPTS);
-  if (is_extension_process_)
-    WebScriptController::registerExtension(JsonSchemaJsV8Extension::Get());
-
-  WebScriptController::registerExtension(
-      EventBindings::Get(), EXTENSION_GROUP_CONTENT_SCRIPTS);
-  if (is_extension_process_)
-    WebScriptController::registerExtension(EventBindings::Get());
-
-  WebScriptController::registerExtension(
-      RendererExtensionBindings::Get(), EXTENSION_GROUP_CONTENT_SCRIPTS);
-  if (is_extension_process_)
-    WebScriptController::registerExtension(RendererExtensionBindings::Get());
-
-  WebScriptController::registerExtension(
-      ExtensionApiTestV8Extension::Get(), EXTENSION_GROUP_CONTENT_SCRIPTS);
-  if (is_extension_process_)
-      WebScriptController::registerExtension(
-          ExtensionApiTestV8Extension::Get());
-
-  web_database_observer_impl_.reset(new WebDatabaseObserverImpl(this));
-  WebKit::WebDatabase::setObserver(web_database_observer_impl_.get());
+  RegisterExtension(extensions_v8::LoadTimesExtension::Get(), false);
+  RegisterExtension(extensions_v8::ChromeAppExtension::Get(), false);
+  RegisterExtension(extensions_v8::ExternalExtension::Get(), false);
+  v8::Extension* search_extension = extensions_v8::SearchExtension::Get();
+  // search_extension is null if not enabled.
+  if (search_extension)
+    RegisterExtension(search_extension, false);
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
-  if (command_line.HasSwitch(switches::kEnableBenchmarking)) {
-    WebScriptController::registerExtension(
-        extensions_v8::BenchmarkingExtension::Get());
-  }
+  if (command_line.HasSwitch(switches::kEnableBenchmarking))
+    RegisterExtension(extensions_v8::BenchmarkingExtension::Get(), false);
 
   if (command_line.HasSwitch(switches::kPlaybackMode) ||
       command_line.HasSwitch(switches::kRecordMode) ||
       command_line.HasSwitch(switches::kNoJsRandomness)) {
-    WebScriptController::registerExtension(
-        extensions_v8::PlaybackExtension::Get());
+    RegisterExtension(extensions_v8::PlaybackExtension::Get(), false);
   }
 
-  if (command_line.HasSwitch(switches::kDomAutomationController)) {
-    WebScriptController::registerExtension(DomAutomationV8Extension::Get());
-  }
+  if (command_line.HasSwitch(switches::kDomAutomationController))
+    RegisterExtension(DomAutomationV8Extension::Get(), false);
+
+  // Add v8 extensions related to chrome extensions.
+  RegisterExtension(ExtensionProcessBindings::Get(), true);
+  RegisterExtension(BaseJsV8Extension::Get(), true);
+  RegisterExtension(JsonSchemaJsV8Extension::Get(), true);
+  RegisterExtension(EventBindings::Get(), true);
+  RegisterExtension(RendererExtensionBindings::Get(), true);
+  RegisterExtension(ExtensionApiTestV8Extension::Get(), true);
+
+  web_database_observer_impl_.reset(new WebDatabaseObserverImpl(this));
+  WebKit::WebDatabase::setObserver(web_database_observer_impl_.get());
 
   WebRuntimeFeatures::enableMediaPlayer(
       RenderProcess::current()->HasInitializedMediaLibrary());
@@ -931,13 +912,13 @@ void RenderThread::EnsureWebKitInitialized() {
       !command_line.HasSwitch(switches::kDisableSessionStorage));
 
   WebRuntimeFeatures::enableIndexedDatabase(
-      command_line.HasSwitch(switches::kEnableIndexedDatabase));
+      !command_line.HasSwitch(switches::kDisableIndexedDatabase));
 
   WebRuntimeFeatures::enableGeolocation(
       !command_line.HasSwitch(switches::kDisableGeolocation));
 
   WebRuntimeFeatures::enableWebGL(
-      command_line.HasSwitch(switches::kEnableExperimentalWebGL));
+      !command_line.HasSwitch(switches::kDisableExperimentalWebGL));
 
   WebRuntimeFeatures::enablePushState(true);
 
@@ -950,11 +931,10 @@ void RenderThread::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableDeviceOrientation(
       !command_line.HasSwitch(switches::kDisableDeviceOrientation));
 
-  WebRuntimeFeatures::enableSpeechInput(
-      command_line.HasSwitch(switches::kEnableSpeechInput));
+  WebRuntimeFeatures::enableSpeechInput(IsSpeechInputEnabled(command_line));
 
   WebRuntimeFeatures::enableFileSystem(
-      command_line.HasSwitch(switches::kEnableFileSystem));
+      !command_line.HasSwitch(switches::kDisableFileSystem));
 }
 
 void RenderThread::IdleHandler() {
@@ -996,10 +976,10 @@ void RenderThread::ScheduleIdleHandler(double initial_delay_s) {
 
 void RenderThread::OnExtensionMessageInvoke(const std::string& function_name,
                                             const ListValue& args,
-                                            bool requires_incognito_access,
+                                            bool cross_incognito,
                                             const GURL& event_url) {
   RendererExtensionBindings::Invoke(
-      function_name, args, NULL, requires_incognito_access, event_url);
+      function_name, args, NULL, cross_incognito, event_url);
 
   // Reset the idle handler each time there's any activity like event or message
   // dispatch, for which Invoke is the chokepoint.
@@ -1074,12 +1054,14 @@ void RenderThread::OnSetIsIncognitoProcess(bool is_incognito_process) {
 }
 
 void RenderThread::OnGpuChannelEstablished(
-    const IPC::ChannelHandle& channel_handle) {
+    const IPC::ChannelHandle& channel_handle, const GPUInfo& gpu_info) {
 #if defined(OS_POSIX)
   // If we received a ChannelHandle, register it now.
   if (channel_handle.socket.fd >= 0)
     IPC::AddChannelSocket(channel_handle.name, channel_handle.socket.fd);
 #endif
+
+  gpu_channel_->set_gpu_info(gpu_info);
 
   if (channel_handle.name.size() != 0) {
     // Connect to the GPU process if a channel name was received.
@@ -1090,6 +1072,11 @@ void RenderThread::OnGpuChannelEstablished(
   }
 }
 
+void RenderThread::OnSetPhishingModel(IPC::PlatformFileForTransit model_file) {
+  // TODO(bryner): create a Scorer from the model file, and propagate it to the
+  // RenderViews so that they can create PhishingClassifiers.
+}
+
 scoped_refptr<base::MessageLoopProxy>
 RenderThread::GetFileThreadMessageLoopProxy() {
   DCHECK(message_loop() == MessageLoop::current());
@@ -1098,4 +1085,32 @@ RenderThread::GetFileThreadMessageLoopProxy() {
     file_thread_->Start();
   }
   return file_thread_->message_loop_proxy();
+}
+
+bool RenderThread::AllowScriptExtension(const std::string& v8_extension_name,
+                                        const GURL& url,
+                                        int extension_group) {
+  // If we don't know about it, it was added by WebCore, so we should allow it.
+  if (v8_extensions_.find(v8_extension_name) == v8_extensions_.end())
+    return true;
+
+  // If the V8 extension is not restricted, allow it to run anywhere.
+  bool restrict_to_extensions = v8_extensions_[v8_extension_name];
+  if (!restrict_to_extensions)
+    return true;
+
+  // Extension-only bindings should be restricted to content scripts and
+  // extension-blessed URLs.
+  if (extension_group == EXTENSION_GROUP_CONTENT_SCRIPTS ||
+      ExtensionRendererInfo::ExtensionBindingsAllowed(url)) {
+    return true;
+  }
+
+  return false;
+}
+
+void RenderThread::RegisterExtension(v8::Extension* extension,
+                                     bool restrict_to_extensions) {
+  WebScriptController::registerExtension(extension);
+  v8_extensions_[extension->name()] = restrict_to_extensions;
 }

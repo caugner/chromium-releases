@@ -20,11 +20,12 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/renderer/gpu_channel_host.h"
 #include "chrome/renderer/render_thread.h"
-#include "chrome/renderer/webgles2context_impl.h"
+#include "chrome/renderer/render_view.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 
 WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl()
     : context_(NULL),
+      web_view_(NULL),
       cached_width_(0),
       cached_height_(0),
       bound_fbo_(0) {
@@ -32,6 +33,19 @@ WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl()
 
 WebGraphicsContext3DCommandBufferImpl::
     ~WebGraphicsContext3DCommandBufferImpl() {
+#if defined(OS_MACOSX)
+  if (web_view_) {
+    DCHECK(plugin_handle_ != gfx::kNullPluginWindow);
+    RenderView* renderview = RenderView::FromWebView(web_view_);
+    // The RenderView might already have been freed, but in its
+    // destructor it destroys all fake plugin window handles it
+    // allocated.
+    if (renderview) {
+      renderview->DestroyFakePluginWindowHandle(plugin_handle_);
+    }
+    plugin_handle_ = gfx::kNullPluginWindow;
+  }
+#endif
   if (context_) {
     ggl::DestroyContext(context_);
   }
@@ -39,24 +53,8 @@ WebGraphicsContext3DCommandBufferImpl::
 
 bool WebGraphicsContext3DCommandBufferImpl::initialize(
     WebGraphicsContext3D::Attributes attributes,
-    WebKit::WebView* web_view) {
-  bool compositing_enabled = CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kEnableAcceleratedCompositing);
-  ggl::Context* parent_context = NULL;
-  // If GPU compositing is enabled we need to create a GL context that shares
-  // resources with the compositor's context.
-  if (compositing_enabled) {
-    // Asking for the GLES2Context on the WebView will force one to be created
-    // if it doesn't already exist. When the compositor is created for the view
-    // it will use the same context.
-    WebKit::WebGLES2Context* view_gles2_context = web_view->gles2Context();
-    if (!view_gles2_context)
-      return false;
-    WebGLES2ContextImpl* context_impl =
-        static_cast<WebGLES2ContextImpl*>(view_gles2_context);
-    parent_context = context_impl->context();
-  }
-
+    WebKit::WebView* web_view,
+    bool render_directly_to_web_view) {
   RenderThread* render_thread = RenderThread::current();
   if (!render_thread)
     return false;
@@ -64,7 +62,64 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
   if (!host)
     return false;
   DCHECK(host->state() == GpuChannelHost::CONNECTED);
-  context_ = ggl::CreateOffscreenContext(host, parent_context, gfx::Size(1, 1));
+
+  // Convert WebGL context creation attributes into GGL/EGL size requests.
+  const int alpha_size = attributes.alpha ? 8 : 0;
+  const int depth_size = attributes.depth ? 24 : 0;
+  const int stencil_size = attributes.stencil ? 8 : 0;
+  const int samples = attributes.antialias ? 4 : 0;
+  const int sample_buffers = attributes.antialias ? 1 : 0;
+  const int32 attribs[] = {
+    ggl::GGL_ALPHA_SIZE, alpha_size,
+    ggl::GGL_DEPTH_SIZE, depth_size,
+    ggl::GGL_STENCIL_SIZE, stencil_size,
+    ggl::GGL_SAMPLES, samples,
+    ggl::GGL_SAMPLE_BUFFERS, sample_buffers,
+    ggl::GGL_NONE,
+  };
+
+  if (render_directly_to_web_view) {
+    RenderView* renderview = RenderView::FromWebView(web_view);
+    if (!renderview)
+      return false;
+    gfx::NativeViewId view_id;
+#if !defined(OS_MACOSX)
+    view_id = renderview->host_window();
+#else
+    plugin_handle_ = renderview->AllocateFakePluginWindowHandle(
+        /*opaque=*/true, /*root=*/true);
+    view_id = static_cast<gfx::NativeViewId>(plugin_handle_);
+#endif
+    web_view_ = web_view;
+    context_ = ggl::CreateViewContext(
+        host,
+        view_id,
+        renderview->routing_id(),
+        attribs);
+  } else {
+    bool compositing_enabled = !CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kDisableAcceleratedCompositing);
+    ggl::Context* parent_context = NULL;
+    // If GPU compositing is enabled we need to create a GL context that shares
+    // resources with the compositor's context.
+    if (compositing_enabled) {
+      // Asking for the WebGraphicsContext3D on the WebView will force one to
+      // be created if it doesn't already exist. When the compositor is created
+      // for the view it will use the same context.
+      WebKit::WebGraphicsContext3D* view_context =
+          web_view->graphicsContext3D();
+      if (view_context) {
+        WebGraphicsContext3DCommandBufferImpl* context_impl =
+            static_cast<WebGraphicsContext3DCommandBufferImpl*>(view_context);
+        parent_context = context_impl->context_;
+      }
+    }
+    context_ = ggl::CreateOffscreenContext(host,
+                                           parent_context,
+                                           gfx::Size(1, 1),
+                                           attribs);
+    web_view_ = NULL;
+  }
   if (!context_)
     return false;
   // TODO(gman): Remove this.
@@ -72,6 +127,24 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
   if (command_line.HasSwitch(switches::kDisableGLSLTranslator)) {
     DisableShaderTranslation(context_);
   }
+
+  // Set attributes_ from created offscreen context.
+  {
+    attributes_ = attributes;
+    GLint alpha_bits = 0;
+    getIntegerv(GL_ALPHA_BITS, &alpha_bits);
+    attributes_.alpha = alpha_bits > 0;
+    GLint depth_bits = 0;
+    getIntegerv(GL_DEPTH_BITS, &depth_bits);
+    attributes_.depth = depth_bits > 0;
+    GLint stencil_bits = 0;
+    getIntegerv(GL_STENCIL_BITS, &stencil_bits);
+    attributes_.stencil = stencil_bits > 0;
+    GLint samples = 0;
+    getIntegerv(GL_SAMPLES, &samples);
+    attributes_.antialias = samples > 0;
+  }
+
   return true;
 }
 
@@ -119,7 +192,8 @@ bool WebGraphicsContext3DCommandBufferImpl::isGLES2NPOTStrict() {
   return false;
 }
 
-bool WebGraphicsContext3DCommandBufferImpl::isErrorGeneratedOnOutOfBoundsAccesses() {
+bool WebGraphicsContext3DCommandBufferImpl::
+    isErrorGeneratedOnOutOfBoundsAccesses() {
   return false;
 }
 
@@ -139,11 +213,15 @@ void WebGraphicsContext3DCommandBufferImpl::reshape(int width, int height) {
   cached_height_ = height;
   makeContextCurrent();
 
-  ggl::ResizeOffscreenContext(context_, gfx::Size(width, height));
-
-  // Force a SwapBuffers to get the framebuffer to resize, even though
-  // we aren't directly rendering from the back buffer yet.
-  ggl::SwapBuffers(context_);
+  if (web_view_) {
+#if defined(OS_MACOSX)
+    ggl::ResizeOnscreenContext(context_, gfx::Size(width, height));
+#endif
+  } else {
+    ggl::ResizeOffscreenContext(context_, gfx::Size(width, height));
+    // Force a SwapBuffers to get the framebuffer to resize.
+    ggl::SwapBuffers(context_);
+  }
 
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
   scanline_.reset(new uint8[width * 4]);
@@ -252,6 +330,53 @@ bool WebGraphicsContext3DCommandBufferImpl::supportsBGRA() {
     supports_extension("GL_EXT_texture_format_BGRA8888") &&
     supports_extension("GL_EXT_read_format_bgra");
   return is_supported;
+}
+
+bool WebGraphicsContext3DCommandBufferImpl::supportsMapSubCHROMIUM() {
+  static bool is_supported = supports_extension("GL_CHROMIUM_map_sub");
+  return is_supported;
+}
+
+void* WebGraphicsContext3DCommandBufferImpl::mapBufferSubDataCHROMIUM(
+    unsigned target,
+    int offset,
+    int size,
+    unsigned access) {
+  return glMapBufferSubData(target, offset, size, access);
+}
+
+void WebGraphicsContext3DCommandBufferImpl::unmapBufferSubDataCHROMIUM(
+    const void* mem) {
+  return glUnmapBufferSubData(mem);
+}
+
+void* WebGraphicsContext3DCommandBufferImpl::mapTexSubImage2DCHROMIUM(
+    unsigned target,
+    int level,
+    int xoffset,
+    int yoffset,
+    int width,
+    int height,
+    unsigned format,
+    unsigned type,
+    unsigned access) {
+  return glMapTexSubImage2D(
+      target, level, xoffset, yoffset, width, height, format, type, access);
+}
+
+void WebGraphicsContext3DCommandBufferImpl::unmapTexSubImage2DCHROMIUM(
+    const void* mem) {
+  glUnmapTexSubImage2D(mem);
+}
+
+bool WebGraphicsContext3DCommandBufferImpl::
+    supportsCopyTextureToParentTextureCHROMIUM() {
+  return true;
+}
+
+void WebGraphicsContext3DCommandBufferImpl::copyTextureToParentTextureCHROMIUM(
+    unsigned texture, unsigned parentTexture) {
+  copyTextureToCompositor(texture, parentTexture);
 }
 
 // Helper macros to reduce the amount of code.
@@ -895,4 +1020,3 @@ void WebGraphicsContext3DCommandBufferImpl::copyTextureToCompositor(
 }
 
 #endif  // defined(ENABLE_GPU)
-

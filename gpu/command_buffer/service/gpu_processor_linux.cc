@@ -11,6 +11,7 @@ namespace gpu {
 
 bool GPUProcessor::Initialize(gfx::PluginWindowHandle window,
                               const gfx::Size& size,
+                              const std::vector<int32>& attribs,
                               GPUProcessor* parent,
                               uint32 parent_texture_id) {
   // Get the parent decoder and the GLContext to share IDs with, if any.
@@ -36,11 +37,14 @@ bool GPUProcessor::Initialize(gfx::PluginWindowHandle window,
     context.reset(gfx::GLContext::CreateOffscreenGLContext(parent_context));
   }
 
-  if (!context.get())
+  if (!context.get()) {
+    LOG(ERROR) << "GPUProcessor::Initialize failed";
     return false;
+  }
 
   return InitializeCommon(context.release(),
                           size,
+                          attribs,
                           parent_decoder,
                           parent_texture_id);
 }

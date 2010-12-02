@@ -14,6 +14,7 @@
 #include "chrome/browser/extensions/extension_page_actions_module_constants.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/notification_service.h"
@@ -171,6 +172,14 @@ void ExtensionBrowserEventRouter::RegisterForTabNotifications(
                  Source<TabContents>(contents));
 }
 
+void ExtensionBrowserEventRouter::UnregisterForTabNotifications(
+    TabContents* contents) {
+  registrar_.Remove(this, NotificationType::NAV_ENTRY_COMMITTED,
+      Source<NavigationController>(&contents->controller()));
+  registrar_.Remove(this, NotificationType::TAB_CONTENTS_DESTROYED,
+      Source<TabContents>(contents));
+}
+
 void ExtensionBrowserEventRouter::OnBrowserWindowReady(const Browser* browser) {
   ListValue args;
 
@@ -305,10 +314,7 @@ void ExtensionBrowserEventRouter::TabClosingAt(TabContents* contents,
   int removed_count = tab_entries_.erase(tab_id);
   DCHECK_GT(removed_count, 0);
 
-  registrar_.Remove(this, NotificationType::NAV_ENTRY_COMMITTED,
-      Source<NavigationController>(&contents->controller()));
-  registrar_.Remove(this, NotificationType::TAB_CONTENTS_DESTROYED,
-      Source<TabContents>(contents));
+  UnregisterForTabNotifications(contents);
 }
 
 void ExtensionBrowserEventRouter::TabSelectedAt(TabContents* old_contents,
@@ -421,8 +427,8 @@ void ExtensionBrowserEventRouter::TabChangedAt(TabContents* contents,
 void ExtensionBrowserEventRouter::TabReplacedAt(TabContents* old_contents,
                                                 TabContents* new_contents,
                                                 int index) {
-  // TODO: 32913, consider adding better notification for this event.
-  TabInsertedAt(new_contents, index, false);
+  UnregisterForTabNotifications(old_contents);
+  RegisterForTabNotifications(new_contents);
 }
 
 void ExtensionBrowserEventRouter::TabStripEmpty() {}

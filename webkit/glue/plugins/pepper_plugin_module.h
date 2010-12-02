@@ -5,24 +5,35 @@
 #ifndef WEBKIT_GLUE_PLUGINS_PEPPER_PLUGIN_MODULE_H_
 #define WEBKIT_GLUE_PLUGINS_PEPPER_PLUGIN_MODULE_H_
 
+#include <map>
 #include <set>
 
 #include "base/basictypes.h"
 #include "base/native_library.h"
 #include "base/ref_counted.h"
+#include "base/weak_ptr.h"
 #include "third_party/ppapi/c/pp_module.h"
 #include "third_party/ppapi/c/ppb.h"
 
 class FilePath;
-
+typedef struct NPObject NPObject;
 struct PPB_Core;
+typedef void* NPIdentifier;
 
 namespace pepper {
 
+class ObjectVar;
 class PluginDelegate;
 class PluginInstance;
+class PluginObject;
 
-class PluginModule : public base::RefCounted<PluginModule> {
+// Represents one plugin library loaded into one renderer. This library may
+// have multiple instances.
+//
+// Note: to get from a PP_Instance to a PluginInstance*, use the
+// ResourceTracker.
+class PluginModule : public base::RefCounted<PluginModule>,
+                     public base::SupportsWeakPtr<PluginModule> {
  public:
   typedef const void* (*PPP_GetInterfaceFunc)(const char*);
   typedef int (*PPP_InitializeModuleFunc)(PP_Module, PPB_GetInterface);
@@ -46,13 +57,9 @@ class PluginModule : public base::RefCounted<PluginModule> {
   static scoped_refptr<PluginModule> CreateInternalModule(
       EntryPoints entry_points);
 
-  // Converts the given module ID to an actual module object. Will return NULL
-  // if the module is invalid.
-  static PluginModule* FromPPModule(PP_Module module);
-
   static const PPB_Core* GetCore();
 
-  PP_Module GetPPModule() const;
+  PP_Module pp_module() const { return pp_module_; }
 
   PluginInstance* CreateInstance(PluginDelegate* delegate);
 
@@ -70,6 +77,22 @@ class PluginModule : public base::RefCounted<PluginModule> {
   void InstanceCreated(PluginInstance* instance);
   void InstanceDeleted(PluginInstance* instance);
 
+  // Tracks all live ObjectVar. This is so we can map between PluginModule +
+  // NPObject and get the ObjectVar corresponding to it. This Add/Remove
+  // function should be called by the ObjectVar when it is created and
+  // destroyed.
+  void AddNPObjectVar(ObjectVar* object_var);
+  void RemoveNPObjectVar(ObjectVar* object_var);
+
+  // Looks up a previously registered ObjectVar for the given NPObject and
+  // module. Returns NULL if there is no ObjectVar corresponding to the given
+  // NPObject for the given module. See AddNPObjectVar above.
+  ObjectVar* ObjectVarForNPObject(NPObject* np_object) const;
+
+  // Tracks all live PluginObjects.
+  void AddPluginObject(PluginObject* plugin_object);
+  void RemovePluginObject(PluginObject* plugin_object);
+
  private:
   PluginModule();
 
@@ -77,6 +100,8 @@ class PluginModule : public base::RefCounted<PluginModule> {
   bool InitFromFile(const FilePath& path);
   static bool LoadEntryPoints(const base::NativeLibrary& library,
                               EntryPoints* entry_points);
+
+  PP_Module pp_module_;
 
   bool initialized_;
 
@@ -94,6 +119,14 @@ class PluginModule : public base::RefCounted<PluginModule> {
   // there are no more instances, this object should be deleted.
   typedef std::set<PluginInstance*> PluginInstanceSet;
   PluginInstanceSet instances_;
+
+  // Tracks all live ObjectVars used by this module so we can map NPObjects to
+  // the corresponding object. These are non-owning references.
+  typedef std::map<NPObject*, ObjectVar*> NPObjectToObjectVarMap;;
+  NPObjectToObjectVarMap np_object_to_object_var_;
+
+  typedef std::set<PluginObject*> PluginObjectSet;
+  PluginObjectSet live_plugin_objects_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginModule);
 };

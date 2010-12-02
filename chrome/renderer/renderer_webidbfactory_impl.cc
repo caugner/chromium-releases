@@ -24,21 +24,17 @@ RendererWebIDBFactoryImpl::~RendererWebIDBFactoryImpl() {
 }
 
 void RendererWebIDBFactoryImpl::open(
-    const WebString& name, const WebString& description,
-    WebIDBCallbacks* callbacks, const WebSecurityOrigin& origin,
-    WebFrame* web_frame) {
+    const WebString& name,
+    const WebString& description,
+    WebIDBCallbacks* callbacks,
+    const WebSecurityOrigin& origin,
+    WebFrame* web_frame,
+    const WebString& dataDir,
+    unsigned long long maximum_size) {
+  // Don't send the dataDir. We know what we want on the Browser side of things.
   IndexedDBDispatcher* dispatcher =
       RenderThread::current()->indexed_db_dispatcher();
   dispatcher->RequestIDBFactoryOpen(
-      name, description, callbacks, origin.databaseIdentifier(), web_frame);
-}
-
-void RendererWebIDBFactoryImpl::abortPendingTransactions(
-    const WebKit::WebVector<int>& pendingIDs) {
-  std::vector<int> ids;
-  for (size_t i = 0; i < pendingIDs.size(); ++i) {
-    ids.push_back(pendingIDs[i]);
-  }
-  RenderThread::current()->Send(
-      new ViewHostMsg_IDBFactoryAbortPendingTransactions(ids));
+      name, description, callbacks, origin.databaseIdentifier(), web_frame,
+      maximum_size);
 }

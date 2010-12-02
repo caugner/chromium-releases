@@ -21,7 +21,6 @@ const char* const kDefaultSpeechRecognitionUrl =
     "http://www.google.com/speech-api/v1/recognize?lang=en-us&client=chromium";
 const char* const kContentTypeSpeex =
     "audio/x-speex-with-header-byte; rate=16000";
-const int kAudioSampleRate = 16000;
 const int kSpeexEncodingQuality = 8;
 const int kMaxSpeexFrameLength = 110;  // (44kbps rate sampled at 32kHz).
 
@@ -29,12 +28,24 @@ const int kMaxSpeexFrameLength = 110;  // (44kbps rate sampled at 32kHz).
 // make sure it is within the byte range.
 COMPILE_ASSERT(kMaxSpeexFrameLength <= 0xFF, invalidLength);
 
-const int kAudioPacketIntervalMs = 100;  // Record 100ms long audio packets.
-const int kNumAudioChannels = 1;  // Speech is recorded as mono.
-const int kNumBitsPerAudioSample = 16;
+// The following constants are related to the volume level indicator shown in
+// the UI for recorded audio.
+// Multiplier used when new volume is greater than previous level.
+const float kUpSmoothingFactor = 0.9f;
+// Multiplier used when new volume is lesser than previous level.
+const float kDownSmoothingFactor = 0.4f;
+const float kAudioMeterMinDb = 10.0f;  // Lower bar for volume meter.
+const float kAudioMeterDbRange = 25.0f;
 }  // namespace
 
 namespace speech_input {
+
+const int SpeechRecognizer::kAudioSampleRate = 16000;
+const int SpeechRecognizer::kAudioPacketIntervalMs = 100;
+const int SpeechRecognizer::kNumAudioChannels = 1;
+const int SpeechRecognizer::kNumBitsPerAudioSample = 16;
+const int SpeechRecognizer::kNoSpeechTimeoutSec = 8;
+const int SpeechRecognizer::kEndpointerEstimationTimeMs = 300;
 
 // Provides a simple interface to encode raw audio using the Speex codec.
 class SpeexEncoder {
@@ -99,7 +110,9 @@ SpeechRecognizer::SpeechRecognizer(Delegate* delegate, int caller_id)
     : delegate_(delegate),
       caller_id_(caller_id),
       encoder_(new SpeexEncoder()),
-      endpointer_(kAudioSampleRate) {
+      endpointer_(kAudioSampleRate),
+      num_samples_recorded_(0),
+      audio_level_(0.0f) {
   endpointer_.set_speech_input_complete_silence_length(
       base::Time::kMicrosecondsPerSecond / 2);
   endpointer_.set_long_speech_input_complete_silence_length(
@@ -118,19 +131,14 @@ SpeechRecognizer::~SpeechRecognizer() {
 }
 
 bool SpeechRecognizer::StartRecording() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(!audio_controller_.get());
   DCHECK(!request_.get() || !request_->HasPendingRequest());
 
-  // TODO(satish): Normally for a short time (even 0.5s) the endpointer needs to
-  // estimate the environment/background noise before starting to treat the
-  // audio as user input. Once we have implemented a popup UI to notify the user
-  // that recording has started, we should perhaps have a short interval where
-  // we record background audio and then show the popup UI so that the user can
-  // start speaking after that. For now we just do these together so there isn't
-  // any background noise for the end pointer (still works ok).
+  // The endpointer needs to estimate the environment/background noise before
+  // starting to treat the audio as user input. In |HandleOnData| we wait until
+  // such time has passed before switching to user input mode.
   endpointer_.SetEnvironmentEstimationMode();
-  endpointer_.SetUserInputMode();
 
   int samples_per_packet = (kAudioSampleRate * kAudioPacketIntervalMs) / 1000;
   DCHECK((samples_per_packet % encoder_->samples_per_frame()) == 0);
@@ -140,13 +148,14 @@ bool SpeechRecognizer::StartRecording() {
       AudioInputController::Create(this, params, samples_per_packet);
   DCHECK(audio_controller_.get());
   LOG(INFO) << "SpeechRecognizer starting record.";
+  num_samples_recorded_ = 0;
   audio_controller_->Record();
 
   return true;
 }
 
 void SpeechRecognizer::CancelRecognition() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(audio_controller_.get() || request_.get());
 
   // Stop recording if required.
@@ -162,7 +171,7 @@ void SpeechRecognizer::CancelRecognition() {
 }
 
 void SpeechRecognizer::StopRecording() {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   // If audio recording has already stopped and we are in recognition phase,
   // silently ignore any more calls to stop recording.
@@ -216,7 +225,7 @@ void SpeechRecognizer::ReleaseAudioBuffers() {
 // Invoked in the audio thread.
 void SpeechRecognizer::OnError(AudioInputController* controller,
                                int error_code) {
-  ChromeThread::PostTask(ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                          NewRunnableMethod(this,
                                            &SpeechRecognizer::HandleOnError,
                                            error_code));
@@ -231,10 +240,7 @@ void SpeechRecognizer::HandleOnError(int error_code) {
   if (!audio_controller_.get())
     return;
 
-  delegate_->OnRecognizerError(caller_id_);
-  CancelRecognition();
-  delegate_->DidCompleteRecording(caller_id_);
-  delegate_->DidCompleteRecognition(caller_id_);
+  InformErrorAndCancelRecognition(RECOGNIZER_ERROR_CAPTURE);
 }
 
 void SpeechRecognizer::OnData(AudioInputController* controller,
@@ -243,7 +249,7 @@ void SpeechRecognizer::OnData(AudioInputController* controller,
     return;
 
   string* str_data = new string(reinterpret_cast<const char*>(data), size);
-  ChromeThread::PostTask(ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                          NewRunnableMethod(this,
                                            &SpeechRecognizer::HandleOnData,
                                            str_data));
@@ -263,8 +269,39 @@ void SpeechRecognizer::HandleOnData(string* data) {
   int num_samples = data->length() / sizeof(short);
 
   encoder_->Encode(samples, num_samples, &audio_buffers_);
-  endpointer_.ProcessAudio(samples, num_samples);
+  float rms;
+  endpointer_.ProcessAudio(samples, num_samples, &rms);
   delete data;
+  num_samples_recorded_ += num_samples;
+
+  if (endpointer_.IsEstimatingEnvironment()) {
+    // Check if we have gathered enough audio for the endpointer to do
+    // environment estimation and should move on to detect speech/end of speech.
+    if (num_samples_recorded_ >= (kEndpointerEstimationTimeMs *
+                                  kAudioSampleRate) / 1000) {
+      endpointer_.SetUserInputMode();
+      delegate_->DidCompleteEnvironmentEstimation(caller_id_);
+    }
+    return;  // No more processing since we are still estimating environment.
+  }
+
+  // Check if we have waited too long without hearing any speech.
+  if (!endpointer_.DidStartReceivingSpeech() &&
+      num_samples_recorded_ >= kNoSpeechTimeoutSec * kAudioSampleRate) {
+    InformErrorAndCancelRecognition(RECOGNIZER_ERROR_NO_SPEECH);
+    return;
+  }
+
+  // Calculate the input volume to display in the UI, smoothing towards the
+  // new level.
+  float level = (rms - kAudioMeterMinDb) / kAudioMeterDbRange;
+  level = std::min(std::max(0.0f, level), 1.0f);
+  if (level > audio_level_) {
+    audio_level_ += (level - audio_level_) * kUpSmoothingFactor;
+  } else {
+    audio_level_ += (level - audio_level_) * kDownSmoothingFactor;
+  }
+  delegate_->SetInputVolume(caller_id_, audio_level_);
 
   if (endpointer_.speech_input_complete()) {
     StopRecording();
@@ -275,11 +312,24 @@ void SpeechRecognizer::HandleOnData(string* data) {
 }
 
 void SpeechRecognizer::SetRecognitionResult(bool error, const string16& value) {
+  if (value.empty()) {
+    InformErrorAndCancelRecognition(RECOGNIZER_ERROR_NO_RESULTS);
+    return;
+  }
+
   delegate_->SetRecognitionResult(caller_id_, error, value);
 
   // Guard against the delegate freeing us until we finish our job.
   scoped_refptr<SpeechRecognizer> me(this);
   delegate_->DidCompleteRecognition(caller_id_);
+}
+
+void SpeechRecognizer::InformErrorAndCancelRecognition(ErrorCode error) {
+  CancelRecognition();
+
+  // Guard against the delegate freeing us until we finish our job.
+  scoped_refptr<SpeechRecognizer> me(this);
+  delegate_->OnRecognizerError(caller_id_, error);
 }
 
 }  // namespace speech_input

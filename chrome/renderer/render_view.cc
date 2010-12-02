@@ -5,9 +5,11 @@
 #include "chrome/renderer/render_view.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <vector>
 
+#include "app/l10n_util.h"
 #include "app/message_box_flags.h"
 #include "app/resource_bundle.h"
 #include "base/callback.h"
@@ -20,8 +22,8 @@
 #include "base/singleton.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
-#include "base/time.h"
 #include "base/sys_string_conversions.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/common/appcache/appcache_dispatcher.h"
@@ -31,11 +33,12 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/file_system/file_system_dispatcher.h"
+#include "chrome/common/file_system/webfilesystem_callback_dispatcher.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/page_zoom.h"
 #include "chrome/common/pepper_plugin_registry.h"
-#include "chrome/common/plugin_group.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
 #include "chrome/common/renderer_preferences.h"
@@ -45,16 +48,21 @@
 #include "chrome/renderer/about_handler.h"
 #include "chrome/renderer/audio_message_filter.h"
 #include "chrome/renderer/autofill_helper.h"
+#include "chrome/renderer/automation/dom_automation_controller.h"
 #include "chrome/renderer/blocked_plugin.h"
 #include "chrome/renderer/device_orientation_dispatcher.h"
 #include "chrome/renderer/devtools_agent.h"
 #include "chrome/renderer/devtools_client.h"
+#include "chrome/renderer/dom_ui_bindings.h"
 #include "chrome/renderer/extension_groups.h"
-#include "chrome/renderer/extensions/extension_renderer_info.h"
+#include "chrome/renderer/extensions/bindings_utils.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
+#include "chrome/renderer/extensions/extension_renderer_info.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
+#include "chrome/renderer/external_host_bindings.h"
 #include "chrome/renderer/geolocation_dispatcher.h"
+#include "chrome/renderer/ggl/ggl.h"
 #include "chrome/renderer/localized_error.h"
 #include "chrome/renderer/media/audio_renderer_impl.h"
 #include "chrome/renderer/media/ipc_video_decoder.h"
@@ -69,13 +77,13 @@
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view_visitor.h"
 #include "chrome/renderer/render_widget_fullscreen.h"
+#include "chrome/renderer/render_widget_fullscreen_pepper.h"
 #include "chrome/renderer/renderer_webapplicationcachehost_impl.h"
 #include "chrome/renderer/renderer_webstoragenamespace_impl.h"
 #include "chrome/renderer/speech_input_dispatcher.h"
 #include "chrome/renderer/spellchecker/spellcheck.h"
 #include "chrome/renderer/user_script_slave.h"
 #include "chrome/renderer/visitedlink_slave.h"
-#include "chrome/renderer/webgles2context_impl.h"
 #include "chrome/renderer/webplugin_delegate_pepper.h"
 #include "chrome/renderer/webplugin_delegate_proxy.h"
 #include "chrome/renderer/websharedworker_proxy.h"
@@ -93,8 +101,6 @@
 #include "net/base/net_errors.h"
 #include "skia/ext/bitmap_platform_device.h"
 #include "skia/ext/image_operations.h"
-#include "third_party/cld/encodings/compact_lang_det/win/cld_unicodetext.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityCache.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebAccessibilityObject.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCString.h"
@@ -103,12 +109,13 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDragData.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFileChooserParams.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFindOptions.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFileSystem.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFileSystemCallbacks.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFindOptions.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFormControlElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFormElement.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebHistoryItem.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebImage.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebInputElement.h"
@@ -117,8 +124,8 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebPageSerializer.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPlugin.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPluginContainer.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPluginParams.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPluginDocument.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPluginParams.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPoint.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRange.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
@@ -136,6 +143,9 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebWindowFeatures.h"
+#include "third_party/cld/encodings/compact_lang_det/win/cld_unicodetext.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "v8/include/v8.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/glue/context_menu.h"
 #include "webkit/glue/dom_operations.h"
@@ -166,32 +176,23 @@
 //   * theming
 #include "gfx/native_theme_win.h"
 #elif defined(USE_X11)
+#include "gfx/native_theme_linux.h"
 #include "third_party/WebKit/WebKit/chromium/public/linux/WebRenderTheme.h"
 #elif defined(OS_MACOSX)
 #include "skia/ext/skia_utils_mac.h"
 #endif
 
-using appcache::WebApplicationCacheHostImpl;
-using base::Time;
-using base::TimeDelta;
-using webkit_glue::AltErrorPageResourceFetcher;
-using webkit_glue::FormData;
-using webkit_glue::FormField;
-using webkit_glue::ImageResourceFetcher;
-using webkit_glue::PasswordForm;
-using webkit_glue::PasswordFormDomManager;
-using webkit_glue::SiteIsolationMetrics;
-using webkit_glue::WebAccessibility;
 using WebKit::WebAccessibilityCache;
+using WebKit::WebAccessibilityNotification;
 using WebKit::WebAccessibilityObject;
 using WebKit::WebApplicationCacheHost;
 using WebKit::WebApplicationCacheHostClient;
+using WebKit::WebCString;
 using WebKit::WebColor;
 using WebKit::WebColorName;
 using WebKit::WebConsoleMessage;
 using WebKit::WebContextMenuData;
 using WebKit::WebCookieJar;
-using WebKit::WebCString;
 using WebKit::WebData;
 using WebKit::WebDataSource;
 using WebKit::WebDevToolsAgent;
@@ -243,9 +244,20 @@ using WebKit::WebURLResponse;
 using WebKit::WebVector;
 using WebKit::WebView;
 using WebKit::WebWidget;
+using WebKit::WebWindowFeatures;
 using WebKit::WebWorker;
 using WebKit::WebWorkerClient;
-using WebKit::WebWindowFeatures;
+using appcache::WebApplicationCacheHostImpl;
+using base::Time;
+using base::TimeDelta;
+using webkit_glue::AltErrorPageResourceFetcher;
+using webkit_glue::FormData;
+using webkit_glue::FormField;
+using webkit_glue::ImageResourceFetcher;
+using webkit_glue::PasswordForm;
+using webkit_glue::PasswordFormDomManager;
+using webkit_glue::SiteIsolationMetrics;
+using webkit_glue::WebAccessibility;
 
 //-----------------------------------------------------------------------------
 
@@ -287,10 +299,8 @@ static const int kDelaySecondsForContentStateSync = 1;
 // The maximum number of popups that can be spawned from one page.
 static const int kMaximumNumberOfUnacknowledgedPopups = 25;
 
-static const char* const kUnreachableWebDataURL =
-    "chrome://chromewebdata/";
-
-static const char* const kBackForwardNavigationScheme = "history";
+static const char kUnreachableWebDataURL[] = "chrome://chromewebdata/";
+static const char kBackForwardNavigationScheme[] = "history";
 
 static void GetRedirectChain(WebDataSource* ds, std::vector<GURL>* result) {
   WebVector<WebURL> urls;
@@ -298,16 +308,6 @@ static void GetRedirectChain(WebDataSource* ds, std::vector<GURL>* result) {
   result->reserve(urls.size());
   for (size_t i = 0; i < urls.size(); ++i)
     result->push_back(urls[i]);
-}
-
-static bool UrlMatchesPermissions(
-    const GURL& url, const std::vector<URLPattern>& host_permissions) {
-  for (size_t i = 0; i < host_permissions.size(); ++i) {
-    if (host_permissions[i].MatchesUrl(url))
-      return true;
-  }
-
-  return false;
 }
 
 static bool PaintViewIntoCanvas(WebView* view,
@@ -403,17 +403,6 @@ static std::string DetermineTextLanguage(const string16& text) {
   return language;
 }
 
-// Holds pending openFileSystem callbacks.
-struct RenderView::PendingOpenFileSystem {
-  explicit PendingOpenFileSystem(WebFileSystemCallbacks* c) : callbacks(c) {
-  }
-  ~PendingOpenFileSystem() {
-    if (callbacks)
-      callbacks->didFail(WebKit::WebFileErrorAbort);
-  }
-  WebFileSystemCallbacks* callbacks;
-};
-
 ///////////////////////////////////////////////////////////////////////////////
 
 int32 RenderView::next_page_id_ = 1;
@@ -500,6 +489,14 @@ RenderView::~RenderView() {
   // Tell the spellchecker that the document is closed.
   if (has_document_tag_)
     Send(new ViewHostMsg_DocumentWithTagClosed(routing_id_, document_tag_));
+
+  // Destroy all fake plugin window handles on the browser side.
+  while (!fake_plugin_window_handles_.empty()) {
+    // Make sure no NULL plugin window handles were inserted into this list.
+    DCHECK(*fake_plugin_window_handles_.begin());
+    // DestroyFakePluginWindowHandle modifies fake_plugin_window_handles_.
+    DestroyFakePluginWindowHandle(*fake_plugin_window_handles_.begin());
+  }
 #endif
 
   render_thread_->RemoveFilter(audio_message_filter_);
@@ -591,23 +588,25 @@ WebPlugin* RenderView::CreatePluginNoCheck(WebFrame* frame,
     return CreateNPAPIPlugin(frame, params, info.path, mime_type);
 }
 
-#if defined(OS_MACOSX)
 void RenderView::RegisterPluginDelegate(WebPluginDelegateProxy* delegate) {
   plugin_delegates_.insert(delegate);
   // If the renderer is visible, set initial visibility and focus state.
   if (!is_hidden()) {
+#if defined(OS_MACOSX)
     delegate->SetContainerVisibility(true);
     if (webview() && webview()->isActive())
       delegate->SetWindowFocus(true);
-    if (has_focus())
-      delegate->SetContentAreaFocus(true);
+#endif
   }
+  // Plugins start assuming the content has focus (so that they work in
+  // environments where RenderView isn't hosting them), so we always have to
+  // set the initial state. See webplugin_delegate_impl.h for details.
+  delegate->SetContentAreaFocus(has_focus());
 }
 
 void RenderView::UnregisterPluginDelegate(WebPluginDelegateProxy* delegate) {
   plugin_delegates_.erase(delegate);
 }
-#endif
 
 void RenderView::Init(gfx::NativeViewId parent_hwnd,
                       int32 opener_id,
@@ -658,6 +657,8 @@ void RenderView::Init(gfx::NativeViewId parent_hwnd,
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kDomAutomationController))
     enabled_bindings_ |= BindingsPolicy::DOM_AUTOMATION;
+  if (command_line.HasSwitch(switches::kEnableAccessibility))
+    WebAccessibilityCache::enableAccessibility();
 
   audio_message_filter_ = new AudioMessageFilter(routing_id_);
   render_thread_->AddFilter(audio_message_filter_);
@@ -788,6 +789,8 @@ void RenderView::OnMessageReceived(const IPC::Message& message) {
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(ViewMsg_SetWindowVisibility, OnSetWindowVisibility)
     IPC_MESSAGE_HANDLER(ViewMsg_WindowFrameChanged, OnWindowFrameChanged)
+    IPC_MESSAGE_HANDLER(ViewMsg_PluginImeCompositionConfirmed,
+                        OnPluginImeCompositionConfirmed)
 #endif
     IPC_MESSAGE_HANDLER(ViewMsg_SetEditCommandsForNextKeyEvent,
                         OnSetEditCommandsForNextKeyEvent)
@@ -797,14 +800,13 @@ void RenderView::OnMessageReceived(const IPC::Message& message) {
                         OnCustomContextMenuAction)
     IPC_MESSAGE_HANDLER(ViewMsg_TranslatePage, OnTranslatePage)
     IPC_MESSAGE_HANDLER(ViewMsg_RevertTranslation, OnRevertTranslation)
-    IPC_MESSAGE_HANDLER(ViewMsg_GetAccessibilityTree, OnGetAccessibilityTree)
+    IPC_MESSAGE_HANDLER(ViewMsg_EnableAccessibility, OnEnableAccessibility)
     IPC_MESSAGE_HANDLER(ViewMsg_SetAccessibilityFocus, OnSetAccessibilityFocus)
     IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityDoDefaultAction,
                         OnAccessibilityDoDefaultAction)
-    IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityObjectChildrenChange_ACK,
-                        OnAccessibilityObjectChildrenChangeAck)
-    IPC_MESSAGE_HANDLER(ViewMsg_OpenFileSystemRequest_Complete,
-                        OnOpenFileSystemRequestComplete)
+    IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityNotifications_ACK,
+                        OnAccessibilityNotificationsAck)
+    IPC_MESSAGE_HANDLER(ViewMsg_AsyncOpenFile_ACK, OnAsyncFileOpened)
 
     // Have the super handle all other messages.
     IPC_MESSAGE_UNHANDLED(RenderWidget::OnMessageReceived(message))
@@ -1320,6 +1322,7 @@ void RenderView::UpdateURL(WebFrame* frame) {
   params.http_status_code = response.httpStatusCode();
   params.is_post = false;
   params.page_id = page_id_;
+  params.frame_id = frame->identifier();
   params.is_content_filtered = response.isContentFiltered();
   params.was_within_same_page = navigation_state->was_within_same_page();
   if (!navigation_state->security_info().empty()) {
@@ -1385,16 +1388,31 @@ void RenderView::UpdateURL(WebFrame* frame) {
       }
     }
 
-    // Set zoom level.
+    // Set zoom level, but don't do it for full-page plugin since they don't use
+    // the same zoom settings.
     HostZoomLevels::iterator host_zoom =
         host_zoom_levels_.find(GURL(request.url()));
+    if (webview()->mainFrame()->document().isPluginDocument()) {
+      // Reset the zoom levels for plugins.
+      webview()->setZoomLevel(false, 0);
+    } else {
+      if (host_zoom != host_zoom_levels_.end())
+        webview()->setZoomLevel(false, host_zoom->second);
+    }
+
     if (host_zoom != host_zoom_levels_.end()) {
-      webview()->setZoomLevel(false, host_zoom->second);
       // This zoom level was merely recorded transiently for this load.  We can
       // erase it now.  If at some point we reload this page, the browser will
       // send us a new, up-to-date zoom level.
       host_zoom_levels_.erase(host_zoom);
     }
+
+    // Reset the zoom limits in case a plugin had changed them previously. This
+    // will also call us back which will cause us to send a message to
+    // update TabContents.
+    webview()->zoomLimitsChanged(
+        WebView::zoomFactorToZoomLevel(WebView::minTextSizeMultiplier),
+        WebView::zoomFactorToZoomLevel(WebView::maxTextSizeMultiplier));
 
     // Update contents MIME type for main frame.
     params.contents_mime_type = ds->response().mimeType().utf8();
@@ -1468,10 +1486,9 @@ void RenderView::UpdateURL(WebFrame* frame) {
   // Check if the navigation was within the same page, in which case we don't
   // want to clear the accessibility cache.
   if (accessibility_.get() && !navigation_state->was_within_same_page()) {
-    accessibility_->clear();
     accessibility_.reset();
+    pending_accessibility_notifications_.clear();
   }
-  accessibility_changes_.clear();
 }
 
 // Tell the embedding application that the title of the active page has changed
@@ -1538,21 +1555,23 @@ void RenderView::LoadNavigationErrorPage(WebFrame* frame,
     int resource_id;
     DictionaryValue error_strings;
 
-    if (failed_url.is_valid())
+    if (failed_url.is_valid() && !failed_url.SchemeIs(chrome::kExtensionScheme))
       extension = ExtensionRendererInfo::GetByURL(failed_url);
     if (extension) {
-      GetAppErrorValues(error, failed_url, extension, &error_strings);
+      LocalizedError::GetAppErrorStrings(error, failed_url, extension,
+                                         &error_strings);
 
       // TODO(erikkay): Should we use a different template for different
       // error messages?
       resource_id = IDR_ERROR_APP_HTML;
     } else {
-      if (error.reason == net::ERR_CACHE_MISS &&
+      if (error.domain == WebString::fromUTF8(net::kErrorDomain) &&
+          error.reason == net::ERR_CACHE_MISS &&
           EqualsASCII(failed_request.httpMethod(), "POST")) {
-        GetFormRepostErrorValues(failed_url, &error_strings);
+        LocalizedError::GetFormRepostStrings(failed_url, &error_strings);
         resource_id = IDR_ERROR_NO_DETAILS_HTML;
       } else {
-        GetLocalizedErrorValues(error, &error_strings);
+        LocalizedError::GetStrings(error, &error_strings);
         resource_id = IDR_NET_ERROR_HTML;
       }
     }
@@ -1569,10 +1588,13 @@ void RenderView::LoadNavigationErrorPage(WebFrame* frame,
 }
 
 void RenderView::BindDOMAutomationController(WebFrame* frame) {
-  dom_automation_controller_.set_message_sender(this);
-  dom_automation_controller_.set_routing_id(routing_id_);
-  dom_automation_controller_.BindToJavascript(frame,
-                                              L"domAutomationController");
+  if (!dom_automation_controller_.get()) {
+    dom_automation_controller_.reset(new DomAutomationController());
+  }
+  dom_automation_controller_->set_message_sender(this);
+  dom_automation_controller_->set_routing_id(routing_id_);
+  dom_automation_controller_->BindToJavascript(frame,
+                                               L"domAutomationController");
 }
 
 bool RenderView::RunJavaScriptMessage(int type,
@@ -1602,10 +1624,12 @@ bool RenderView::SendAndRunNestedMessageLoop(IPC::SyncMessage* message) {
   return Send(message);
 }
 
-void RenderView::AddGURLSearchProvider(const GURL& osd_url, bool autodetected) {
+void RenderView::AddGURLSearchProvider(
+    const GURL& osd_url,
+    const ViewHostMsg_PageHasOSDD_Type& provider_type) {
   if (!osd_url.is_empty())
     Send(new ViewHostMsg_PageHasOSDD(routing_id_, page_id_, osd_url,
-                                     autodetected));
+                                     provider_type));
 }
 
 void RenderView::OnAutoFillSuggestionsReturned(
@@ -1633,9 +1657,15 @@ uint32 RenderView::GetCPBrowsingContext() {
   return context;
 }
 
-void RenderView::AddSearchProvider(const std::string& url) {
-  AddGURLSearchProvider(GURL(url),
-                        false);  // not autodetected
+void RenderView::AddSearchProvider(
+    const std::string& url,
+    const ViewHostMsg_PageHasOSDD_Type& provider_type) {
+  if (provider_type.type ==
+      ViewHostMsg_PageHasOSDD_Type::EXPLICIT_DEFAULT_PROVIDER &&
+      !webview()->mainFrame()->isProcessingUserGesture())
+    return;
+
+  AddGURLSearchProvider(GURL(url), provider_type);
 }
 
 ViewHostMsg_GetSearchProviderInstallState_Params
@@ -1759,6 +1789,14 @@ WebWidget* RenderView::createFullscreenWindow(WebKit::WebPopupType popup_type) {
   return widget->webwidget();
 }
 
+pepper::FullscreenContainer* RenderView::CreatePepperFullscreenContainer(
+    pepper::PluginInstance* plugin) {
+  RenderWidgetFullscreenPepper* widget =
+      RenderWidgetFullscreenPepper::Create(routing_id_, render_thread_, plugin);
+  widget->show(WebKit::WebNavigationPolicyIgnore);
+  return widget->container();
+}
+
 WebStorageNamespace* RenderView::createSessionStorageNamespace(unsigned quota) {
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return WebStorageNamespace::createSessionStorageNamespace(quota);
@@ -1817,7 +1855,7 @@ void RenderView::didStopLoading() {
     Send(new ViewHostMsg_UpdateFavIconURL(routing_id_, page_id_, favicon_url));
 
   AddGURLSearchProvider(webview()->mainFrame()->openSearchDescriptionURL(),
-                        true);  // autodetected
+                        ViewHostMsg_PageHasOSDD_Type::Autodetected());
 
   Send(new ViewHostMsg_DidStopLoading(routing_id_));
 
@@ -2007,6 +2045,7 @@ bool RenderView::runFileChooser(
   ipc_params.title = params.title;
   ipc_params.default_file_name =
       webkit_glue::WebStringToFilePath(params.initialValue);
+  ipc_params.accept_types = params.acceptTypes;
 
   return ScheduleFileChooser(ipc_params, chooser_completion);
 }
@@ -2183,6 +2222,14 @@ void RenderView::focusPrevious() {
 
 void RenderView::focusedNodeChanged(const WebNode& node) {
   Send(new ViewHostMsg_FocusedNodeChanged(routing_id_));
+
+  if (WebAccessibilityCache::accessibilityEnabled() && node.isNull()) {
+    // TODO(ctguil): Make WebKit send this notification.
+    // When focus is cleared notify accessibility that the document is focused.
+    postAccessibilityNotification(
+        webview()->accessibilityObject(),
+        WebKit::WebAccessibilityNotificationFocusedUIElementChanged);
+  }
 }
 
 void RenderView::navigateBackForwardSoon(int offset) {
@@ -2207,7 +2254,7 @@ void RenderView::didUpdateInspectorSetting(const WebString& key,
 void RenderView::queryAutofillSuggestions(const WebNode& node,
                                           const WebString& name,
                                           const WebString& value) {
-  autofill_helper_->QueryAutoFillSuggestions(node, name, value);
+  autofill_helper_->QueryAutoFillSuggestions(node);
 }
 
 void RenderView::removeAutofillSuggestions(const WebString& name,
@@ -2220,15 +2267,14 @@ void RenderView::didAcceptAutoFillSuggestion(const WebKit::WebNode& node,
                                              const WebKit::WebString& label,
                                              int unique_id,
                                              unsigned index) {
-  autofill_helper_->DidAcceptAutoFillSuggestion(node, value, label, unique_id,
-                                                index);
+  autofill_helper_->DidAcceptAutoFillSuggestion(node, value, unique_id, index);
 }
 
 void RenderView::didSelectAutoFillSuggestion(const WebKit::WebNode& node,
                                              const WebKit::WebString& value,
                                              const WebKit::WebString& label,
                                              int unique_id) {
-  autofill_helper_->DidSelectAutoFillSuggestion(node, value, label, unique_id);
+  autofill_helper_->DidSelectAutoFillSuggestion(node, unique_id);
 }
 
 void RenderView::didClearAutoFillSelection(const WebKit::WebNode& node) {
@@ -2279,6 +2325,13 @@ void RenderView::show(WebNavigationPolicy policy) {
   if (did_show_)
     return;
   did_show_ = true;
+
+  // Extensions and apps always allowed to create unrequested popups. The second
+  // check is necessary to include content scripts.
+  if (ExtensionRendererInfo::GetByURL(creator_url_) ||
+      bindings_utils::GetInfoForCurrentContext()) {
+    opened_by_user_gesture_ = true;
+  }
 
   // Force new windows to a popup if they were not opened with a user gesture.
   if (!opened_by_user_gesture_) {
@@ -2343,8 +2396,9 @@ WebPlugin* RenderView::createPlugin(WebFrame* frame,
 
   if (!found)
     return NULL;
+  DCHECK(setting != CONTENT_SETTING_DEFAULT);
 
-  scoped_ptr<PluginGroup> group(PluginGroup::FindHardcodedPluginGroup(info));
+  scoped_ptr<PluginGroup> group(PluginGroup::CopyOrCreatePluginGroup(info));
   group->AddPlugin(info, 0);
 
   if (!info.enabled) {
@@ -2353,39 +2407,46 @@ WebPlugin* RenderView::createPlugin(WebFrame* frame,
       Send(new ViewHostMsg_DisabledOutdatedPlugin(routing_id_,
                                                   group->GetGroupName(),
                                                   GURL(group->GetUpdateURL())));
-      return CreatePluginPlaceholder(frame, params, group.get());
+      return CreateOutdatedPluginPlaceholder(frame, params, group.get());
     }
     return NULL;
   }
 
-  if (info.path.value() != kDefaultPluginLibraryName) {
-    std::string resource;
-    if (cmd->HasSwitch(switches::kEnableResourceContentSettings)) {
-#if defined(OS_POSIX)
-      resource = info.path.value();
-#elif defined(OS_WIN)
-      resource = base::SysWideToUTF8(info.path.value());
-#endif
-    }
-    if (setting == CONTENT_SETTING_BLOCK) {
-      DCHECK(!cmd->HasSwitch(switches::kDisableClickToPlay));
-      DidBlockContentType(CONTENT_SETTINGS_TYPE_PLUGINS, resource);
-      return CreatePluginPlaceholder(frame, params, NULL);
-    }
+  if (info.path.value() == kDefaultPluginLibraryName ||
+      setting == CONTENT_SETTING_ALLOW) {
     scoped_refptr<pepper::PluginModule> pepper_module =
-        PepperPluginRegistry::GetInstance()->GetModule(info.path);
-    if (pepper_module)
-      return CreatePepperPlugin(frame, params, info.path, pepper_module.get());
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kBlockNonSandboxedPlugins) &&
-        setting != CONTENT_SETTING_ALLOW) {
-      Send(new ViewHostMsg_NonSandboxedPluginBlocked(routing_id_,
-                                                     resource,
-                                                     group->GetGroupName()));
-      return CreatePluginPlaceholder(frame, params, NULL);
+    PepperPluginRegistry::GetInstance()->GetModule(info.path);
+    if (pepper_module) {
+      return CreatePepperPlugin(frame,
+                                params,
+                                info.path,
+                                pepper_module.get());
     }
+    return CreateNPAPIPlugin(frame, params, info.path, actual_mime_type);
   }
-  return CreateNPAPIPlugin(frame, params, info.path, actual_mime_type);
+  std::string resource;
+  if (cmd->HasSwitch(switches::kEnableResourceContentSettings))
+    resource = group->identifier();
+  DidBlockContentType(CONTENT_SETTINGS_TYPE_PLUGINS, resource);
+  int resource_id;
+  int message_id;
+  if (setting == CONTENT_SETTING_ASK) {
+    resource_id = IDR_BLOCKED_PLUGIN_HTML;
+    message_id = IDS_PLUGIN_LOAD;
+  } else {
+    resource_id = IDR_OUTDATED_PLUGIN_HTML;
+    message_id = IDS_PLUGIN_BLOCKED;
+  }
+  // |blocked_plugin| will delete itself when the WebViewPlugin
+  // is destroyed.
+  BlockedPlugin* blocked_plugin =
+      new BlockedPlugin(this,
+                        frame,
+                        params,
+                        webkit_preferences_,
+                        resource_id,
+                        l10n_util::GetStringUTF16(message_id));
+  return blocked_plugin->plugin();
 }
 
 WebWorker* RenderView::createWorker(WebFrame* frame, WebWorkerClient* client) {
@@ -2438,12 +2499,15 @@ WebMediaPlayer* RenderView::createMediaPlayer(
   }
 
   if (cmd_line->HasSwitch(switches::kEnableAcceleratedDecoding) &&
-      cmd_line->HasSwitch(switches::kEnableAcceleratedCompositing)) {
+      !cmd_line->HasSwitch(switches::kDisableAcceleratedCompositing)) {
     // Add the hardware video decoder factory.
+    // TODO(hclam): This assumes that ggl::Context is set to current
+    // internally. I need to make it more explicit to get the context.
+    bool ret = frame->view()->graphicsContext3D()->makeContextCurrent();
+    CHECK(ret) << "Failed to switch context";
+
     factory->AddFactory(IpcVideoDecoder::CreateFactory(
-        MessageLoop::current(),
-        reinterpret_cast<WebGLES2ContextImpl*>(
-            webview()->gles2Context())->context()));
+        MessageLoop::current(), ggl::GetCurrentContext()));
   }
 
   WebApplicationCacheHostImpl* appcache_host =
@@ -2452,7 +2516,7 @@ WebMediaPlayer* RenderView::createMediaPlayer(
   // TODO(hclam): obtain the following parameters from |client|.
   webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory =
       new webkit_glue::MediaResourceLoaderBridgeFactory(
-          GURL(),  // referrer
+          GURL(frame->url()),  // referrer
           "null",  // frame origin
           "null",  // main_frame_origin
           base::GetCurrentProcId(),
@@ -2574,7 +2638,6 @@ WebNavigationPolicy RenderView::decidePolicyForNavigation(
     // Reset these counters as the RenderView could be reused for the next
     // navigation.
     page_id_ = -1;
-    next_page_id_ = 1;
     last_page_id_sent_to_browser_ = -1;
     OpenURL(url, referrer, default_policy);
     return WebKit::WebNavigationPolicyIgnore;  // Suppress the load here.
@@ -2770,7 +2833,7 @@ void RenderView::willSubmitForm(WebFrame* frame, const WebFormElement& form) {
 
   FormData form_data;
   if (FormManager::WebFormElementToFormData(
-          form, FormManager::REQUIRE_AUTOCOMPLETE, true, &form_data))
+          form, FormManager::REQUIRE_AUTOCOMPLETE, true, false, &form_data))
     Send(new ViewHostMsg_FormSubmitted(routing_id_, form_data));
 }
 
@@ -2875,7 +2938,7 @@ void RenderView::didStartProvisionalLoad(WebFrame* frame) {
   }
 
   Send(new ViewHostMsg_DidStartProvisionalLoadForFrame(
-       routing_id_, is_top_most, ds->request().url()));
+       routing_id_, frame->identifier(), is_top_most, ds->request().url()));
 }
 
 void RenderView::didReceiveServerRedirectForProvisionalLoad(WebFrame* frame) {
@@ -2913,8 +2976,8 @@ void RenderView::didFailProvisionalLoad(WebFrame* frame,
       (error.reason == net::ERR_CACHE_MISS &&
        EqualsASCII(failed_request.httpMethod(), "POST"));
   Send(new ViewHostMsg_DidFailProvisionalLoadWithError(
-      routing_id_, !frame->parent(), error.reason, error.unreachableURL,
-      show_repost_interstitial));
+      routing_id_, frame->identifier(), !frame->parent(), error.reason,
+      error.unreachableURL, show_repost_interstitial));
 
   // Don't display an error page if this is simply a cancelled load.  Aside
   // from being dumb, WebCore doesn't expect it and it will cause a crash.
@@ -2953,8 +3016,7 @@ void RenderView::didFailProvisionalLoad(WebFrame* frame,
     return;
 
   // Fallback to a local error page.
-  LoadNavigationErrorPage(frame, failed_request, error, std::string(),
-                          replace);
+  LoadNavigationErrorPage(frame, failed_request, error, std::string(), replace);
 }
 
 void RenderView::didReceiveDocumentData(
@@ -2968,10 +3030,12 @@ void RenderView::didReceiveDocumentData(
   // We're going to call commitDocumentData ourselves...
   prevent_default = true;
 
-  // Continue buffering the response data for the original 404 page.  If it
-  // grows too large, then we'll just let it through.
+  // Continue buffering the response data for the original error page.  If it
+  // grows too large, then we'll just let it through.  For any error other than
+  // a 404, "too large" means any data at all.
   navigation_state->append_postponed_data(data, data_len);
-  if (navigation_state->postponed_data().size() >= 512) {
+  if (navigation_state->postponed_data().size() >= 512 ||
+      navigation_state->http_status_code() != 404) {
     navigation_state->set_postpone_loading_data(false);
     frame->commitDocumentData(navigation_state->postponed_data().data(),
                               navigation_state->postponed_data().size());
@@ -3050,15 +3114,19 @@ void RenderView::didCommitProvisionalLoad(WebFrame* frame,
 void RenderView::didClearWindowObject(WebFrame* frame) {
   if (BindingsPolicy::is_dom_automation_enabled(enabled_bindings_))
     BindDOMAutomationController(frame);
-  if (BindingsPolicy::is_dom_ui_enabled(enabled_bindings_)) {
-    dom_ui_bindings_.set_message_sender(this);
-    dom_ui_bindings_.set_routing_id(routing_id_);
-    dom_ui_bindings_.BindToJavascript(frame, L"chrome");
+  GURL frame_url = frame->url();
+  if (BindingsPolicy::is_dom_ui_enabled(enabled_bindings_) &&
+      (frame_url.SchemeIs(chrome::kChromeUIScheme) ||
+      frame_url.SchemeIs(chrome::kGearsScheme) ||
+      frame_url.SchemeIs(chrome::kDataScheme))) {
+    GetDOMUIBindings()->set_message_sender(this);
+    GetDOMUIBindings()->set_routing_id(routing_id_);
+    GetDOMUIBindings()->BindToJavascript(frame, L"chrome");
   }
   if (BindingsPolicy::is_external_host_enabled(enabled_bindings_)) {
-    external_host_bindings_.set_message_sender(this);
-    external_host_bindings_.set_routing_id(routing_id_);
-    external_host_bindings_.BindToJavascript(frame, L"externalHost");
+    GetExternalHostBindings()->set_message_sender(this);
+    GetExternalHostBindings()->set_routing_id(routing_id_);
+    GetExternalHostBindings()->BindToJavascript(frame, L"externalHost");
   }
 }
 
@@ -3135,8 +3203,10 @@ void RenderView::OnUserScriptIdleTriggered(WebFrame* frame) {
 }
 
 void RenderView::didHandleOnloadEvents(WebFrame* frame) {
-  if (webview()->mainFrame() == frame)
-    Send(new ViewHostMsg_DocumentOnLoadCompletedInMainFrame(routing_id_));
+  if (webview()->mainFrame() == frame) {
+    Send(new ViewHostMsg_DocumentOnLoadCompletedInMainFrame(routing_id_,
+                                                            page_id_));
+  }
 }
 
 void RenderView::didFailLoad(WebFrame* frame, const WebURLError& error) {
@@ -3239,13 +3309,14 @@ void RenderView::didReceiveResponse(
     return;
 
   // If we are in view source mode, then just let the user see the source of
-  // the server's 404 error page.
+  // the server's error page.
   if (frame->isViewSourceModeEnabled())
     return;
 
   NavigationState* navigation_state =
       NavigationState::FromDataSource(frame->provisionalDataSource());
   CHECK(navigation_state);
+  int http_status_code = response.httpStatusCode();
 
   // Record page load flags.
   navigation_state->set_was_fetched_via_spdy(response.wasFetchedViaSPDY());
@@ -3253,14 +3324,20 @@ void RenderView::didReceiveResponse(
   navigation_state->set_was_alternate_protocol_available(
       response.wasAlternateProtocolAvailable());
   navigation_state->set_was_fetched_via_proxy(response.wasFetchedViaProxy());
+  navigation_state->set_http_status_code(http_status_code);
 
   // Consider loading an alternate error page for 404 responses.
-  if (response.httpStatusCode() != 404)
+  if (http_status_code == 404) {
+    // Can we even load an alternate error page for this URL?
+    if (!GetAlternateErrorPageURL(response.url(), HTTP_404).is_valid())
+      return;
+  } else if (!LocalizedError::HasStrings(LocalizedError::kHttpErrorDomain,
+                                         http_status_code)) {
+    // If no corresponding error strings for a particular status code, just
+    // render any received data, regardless of whether or not the status code
+    // indicates an error.
     return;
-
-  // Can we even load an alternate error page for this URL?
-  if (!GetAlternateErrorPageURL(response.url(), HTTP_404).is_valid())
-    return;
+  }
 
   navigation_state->set_postpone_loading_data(true);
   navigation_state->clear_postponed_data();
@@ -3273,21 +3350,33 @@ void RenderView::didFinishResourceLoad(
   if (!navigation_state->postpone_loading_data())
     return;
 
-  // The server returned a 404 and the content was < 512 bytes (which we
+  // The server returned an error and the content was < 512 bytes (which we
   // suppressed).  Go ahead and fetch the alternate page content.
+  int http_status_code = navigation_state->http_status_code();
+  if (http_status_code == 404) {
+    // On 404s, try a remote search page as a fallback.
+    const GURL& frame_url = frame->url();
 
-  const GURL& frame_url = frame->url();
+    const GURL& error_page_url = GetAlternateErrorPageURL(frame_url, HTTP_404);
+    DCHECK(error_page_url.is_valid());
 
-  const GURL& error_page_url = GetAlternateErrorPageURL(frame_url, HTTP_404);
-  DCHECK(error_page_url.is_valid());
+    WebURLError original_error;
+    original_error.unreachableURL = frame_url;
 
-  WebURLError original_error;
-  original_error.unreachableURL = frame_url;
+    navigation_state->set_alt_error_page_fetcher(
+        new AltErrorPageResourceFetcher(
+            error_page_url, frame, original_error,
+            NewCallback(this, &RenderView::AltErrorPageFinished)));
+  } else {
+    // On other errors, use an internal error page.
+    WebURLError error;
+    error.unreachableURL = frame->url();
+    error.domain = WebString::fromUTF8(LocalizedError::kHttpErrorDomain);
+    error.reason = http_status_code;
 
-  navigation_state->set_alt_error_page_fetcher(
-      new AltErrorPageResourceFetcher(
-          error_page_url, frame, original_error,
-          NewCallback(this, &RenderView::AltErrorPageFinished)));
+    LoadNavigationErrorPage(frame, frame->dataSource()->request(), error,
+                            std::string(), true);
+  }
 }
 
 void RenderView::didFailResourceLoad(
@@ -3373,6 +3462,23 @@ void RenderView::didCreateIsolatedScriptContext(WebFrame* frame) {
   EventBindings::HandleContextCreated(frame, true);
 }
 
+bool RenderView::allowScriptExtension(WebFrame* frame,
+                                      const WebString& extension_name,
+                                      int extension_group) {
+  // NULL in unit tests.
+  if (!RenderThread::current())
+    return true;
+
+  // Note: we prefer the provisional URL here instead of the document URL
+  // because we might be currently loading an URL into a blank page.
+  // See http://code.google.com/p/chromium/issues/detail?id=10924
+  WebDataSource* ds = frame->provisionalDataSource();
+  if (!ds)
+    ds = frame->dataSource();
+  return RenderThread::current()->AllowScriptExtension(
+      extension_name.utf8(), ds->request().url(), extension_group);
+}
+
 void RenderView::logCrossFramePropertyAccess(WebFrame* frame,
                                              WebFrame* target,
                                              bool cross_origin,
@@ -3455,21 +3561,18 @@ void RenderView::openFileSystem(
     WebFileSystem::Type type,
     long long size,
     WebFileSystemCallbacks* callbacks) {
-  scoped_ptr<PendingOpenFileSystem> request(
-      new PendingOpenFileSystem(callbacks));
+  DCHECK(callbacks);
 
   WebSecurityOrigin origin = frame->securityOrigin();
-  if (origin.isEmpty())
-    return;  // Uninitialized document?
+  if (origin.isEmpty()) {
+    // Uninitialized document?
+    callbacks->didFail(WebKit::WebFileErrorAbort);
+    return;
+  }
 
-  ViewHostMsg_OpenFileSystemRequest_Params params;
-  params.routing_id = routing_id_;
-  params.request_id = pending_file_system_requests_.Add(request.release());
-  params.origin_url = GURL(origin.toString());
-  params.type = type;
-  params.requested_size = size;
-
-  Send(new ViewHostMsg_OpenFileSystemRequest(params));
+  ChildThread::current()->file_system_dispatcher()->OpenFileSystem(
+      GURL(origin.toString()), static_cast<fileapi::FileSystemType>(type),
+      size, new WebFileSystemCallbackDispatcher(callbacks));
 }
 
 // webkit_glue::WebPluginPageDelegate -----------------------------------------
@@ -3745,6 +3848,20 @@ GURL RenderView::GetAlternateErrorPageURL(const GURL& failed_url,
   return url;
 }
 
+DOMUIBindings* RenderView::GetDOMUIBindings() {
+  if (!dom_ui_bindings_.get()) {
+    dom_ui_bindings_.reset(new DOMUIBindings());
+  }
+  return dom_ui_bindings_.get();
+}
+
+ExternalHostBindings* RenderView::GetExternalHostBindings() {
+  if (!external_host_bindings_.get()) {
+    external_host_bindings_.reset(new ExternalHostBindings());
+  }
+  return external_host_bindings_.get();
+}
+
 WebKit::WebPlugin* RenderView::GetWebPluginFromPluginDocument() {
   return webview()->mainFrame()->document().to<WebPluginDocument>().plugin();
 }
@@ -3942,43 +4059,42 @@ WebPlugin* RenderView::CreatePepperPlugin(WebFrame* frame,
                                           const WebPluginParams& params,
                                           const FilePath& path,
                                           pepper::PluginModule* pepper_module) {
-  WebPlugin* plugin = new pepper::WebPluginImpl(pepper_module, params,
-                                                pepper_delegate_.AsWeakPtr());
-  if (plugin && !frame->parent() && frame->document().isPluginDocument()) {
-    // If this is a full-page plugin hosting the internal PDF plugin, we want
-    // to notify the browser so that it can treat things like zooming
-    // differently.
-    // TODO(sanjeevr): Use a Pepper interface to determine this rather than
-    // hardcode this for the PDF plugin path.
-    FilePath pdf_path;
-    PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf_path);
-    if (path == pdf_path)
-      Send(new ViewHostMsg_SetDisplayingPDFContent(routing_id_));
-  }
-  return plugin;
+  return new pepper::WebPluginImpl(
+      pepper_module, params, pepper_delegate_.AsWeakPtr());
 }
 
 WebPlugin* RenderView::CreateNPAPIPlugin(WebFrame* frame,
                                          const WebPluginParams& params,
                                          const FilePath& path,
                                          const std::string& mime_type) {
-  std::string actual_mime_type(mime_type);
-  if (actual_mime_type.empty())
-    actual_mime_type = params.mimeType.utf8();
-
-  return new webkit_glue::WebPluginImpl(frame, params, path,
-                                        actual_mime_type, AsWeakPtr());
+  return new webkit_glue::WebPluginImpl(
+      frame, params, path, mime_type, AsWeakPtr());
 }
 
-WebPlugin* RenderView::CreatePluginPlaceholder(WebFrame* frame,
-                                               const WebPluginParams& params,
-                                               PluginGroup* group) {
-  // |blocked_plugin| will delete itself when the WebViewPlugin is destroyed.
-  BlockedPlugin* blocked_plugin = new BlockedPlugin(this, frame, params, group);
-  WebViewPlugin* plugin = blocked_plugin->plugin();
-  WebView* web_view = plugin->web_view();
-  webkit_preferences_.Apply(web_view);
-  return plugin;
+WebPlugin* RenderView::CreateOutdatedPluginPlaceholder(
+    WebFrame* frame,
+    const WebPluginParams& params,
+    PluginGroup* group) {
+  int resource_id = IDR_OUTDATED_PLUGIN_HTML;
+  const base::StringPiece template_html(
+      ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id));
+
+  DCHECK(!template_html.empty()) << "unable to load template. ID: "
+                                 << resource_id;
+
+  DictionaryValue values;
+  values.SetString("message",
+      l10n_util::GetStringFUTF8(IDS_PLUGIN_OUTDATED, group->GetGroupName()));
+  values.Set("pluginGroup", group->GetDataForUI());
+
+  // "t" is the id of the templates root node.
+  std::string htmlData = jstemplate_builder::GetTemplatesHtml(
+      template_html, &values, "t");
+
+  return WebViewPlugin::Create(NULL,
+                               webkit_preferences_,
+                               htmlData,
+                               GURL("chrome://outdatedplugin/"));
 }
 
 void RenderView::OnZoom(PageZoom::Function function) {
@@ -3987,13 +4103,29 @@ void RenderView::OnZoom(PageZoom::Function function) {
 
   webview()->hidePopups();
 
-  int zoom_level = webview()->zoomLevel();
-  int new_zoom_level = webview()->setZoomLevel(false,
-      (function == PageZoom::RESET) ? 0 : (zoom_level + function));
+  double old_zoom_level = webview()->zoomLevel();
+  double zoom_level;
+  if (function == PageZoom::RESET) {
+    zoom_level = 0;
+  } else if (static_cast<int>(old_zoom_level) == old_zoom_level) {
+    // Previous zoom level is a whole number, so just increment/decrement.
+    zoom_level = old_zoom_level + function;
+  } else {
+    // Either the user hit the zoom factor limit and thus the zoom level is now
+    // not a whole number, or a plugin changed it to a custom value.  We want
+    // to go to the next whole number so that the user can always get back to
+    // 100% with the keyboard/menu.
+    if ((old_zoom_level > 1 && function > 0) ||
+        (old_zoom_level < 1 && function < 0)) {
+      zoom_level = static_cast<int>(old_zoom_level + function);
+    } else {
+      // We're going towards 100%, so first go to the next whole number.
+      zoom_level = static_cast<int>(old_zoom_level);
+    }
+  }
 
-  // Tell the browser which url got zoomed so it can update the saved values.
-  Send(new ViewHostMsg_DidZoomURL(
-      GURL(webview()->mainFrame()->url()), new_zoom_level));
+  webview()->setZoomLevel(false, zoom_level);
+  zoomLevelChanged();
 }
 
 void RenderView::OnSetContentSettingsForLoadingURL(
@@ -4003,7 +4135,7 @@ void RenderView::OnSetContentSettingsForLoadingURL(
 }
 
 void RenderView::OnSetZoomLevelForLoadingURL(const GURL& url,
-                                             int zoom_level) {
+                                             double zoom_level) {
   host_zoom_levels_[url] = zoom_level;
 }
 
@@ -4057,13 +4189,24 @@ WebFrame* RenderView::GetChildFrame(const std::wstring& xpath) const {
   return frame;
 }
 
-void RenderView::EvaluateScript(const std::wstring& frame_xpath,
-                                const std::wstring& script) {
-  WebFrame* web_frame = GetChildFrame(frame_xpath);
-  if (!web_frame)
-    return;
+void RenderView::SetSuggestResult(const std::string& suggest) {
+  // Explicitly allow empty strings to be sent to the browser.
+  Send(new ViewHostMsg_SetSuggestResult(routing_id_, page_id_, suggest));
+}
 
-  web_frame->executeScript(WebScriptSource(WideToUTF16Hack(script)));
+void RenderView::EvaluateScript(const string16& frame_xpath,
+                                const string16& script,
+                                int id,
+                                bool notify_result) {
+  v8::Handle<v8::Value> result;
+  WebFrame* web_frame = GetChildFrame(UTF16ToWideHack(frame_xpath));
+  if (web_frame)
+    result = web_frame->executeScriptAndReturnValue(WebScriptSource(script));
+  if (notify_result) {
+    bool bool_result = !result.IsEmpty() && result->IsBoolean() ?
+        result->BooleanValue() : false;
+    Send(new ViewHostMsg_ScriptEvalResponse(routing_id_, id, bool_result));
+  }
 }
 
 void RenderView::InsertCSS(const std::wstring& frame_xpath,
@@ -4105,9 +4248,11 @@ void RenderView::OnPepperPluginDestroy(
   }
 }
 
-void RenderView::OnScriptEvalRequest(const std::wstring& frame_xpath,
-                                     const std::wstring& jscript) {
-  EvaluateScript(frame_xpath, jscript);
+void RenderView::OnScriptEvalRequest(const string16& frame_xpath,
+                                     const string16& jscript,
+                                     int id,
+                                     bool notify_result) {
+  EvaluateScript(frame_xpath, jscript, id, notify_result);
 }
 
 void RenderView::OnCSSInsertRequest(const std::wstring& frame_xpath,
@@ -4135,7 +4280,7 @@ void RenderView::OnAllowBindings(int enabled_bindings_flags) {
 void RenderView::OnSetDOMUIProperty(const std::string& name,
                                     const std::string& value) {
   DCHECK(BindingsPolicy::is_dom_ui_enabled(enabled_bindings_));
-  dom_ui_bindings_.SetProperty(name, value);
+  GetDOMUIBindings()->SetProperty(name, value);
 }
 
 void RenderView::OnReservePageIDRange(int size_of_range) {
@@ -4298,6 +4443,10 @@ void RenderView::OnSetRendererPrefs(const RendererPreferences& renderer_prefs) {
   WebColorName name = WebKit::WebColorWebkitFocusRingColor;
   WebKit::setNamedColors(&name, &renderer_prefs.focus_ring_color, 1);
   WebKit::setCaretBlinkInterval(renderer_prefs.caret_blink_interval);
+  gfx::NativeThemeLinux::instance()->SetScrollbarColors(
+      renderer_prefs.thumb_inactive_color,
+      renderer_prefs.thumb_active_color,
+      renderer_prefs.track_color);
 
   if (webview()) {
     webview()->setScrollbarColors(
@@ -4309,7 +4458,7 @@ void RenderView::OnSetRendererPrefs(const RendererPreferences& renderer_prefs) {
         renderer_prefs.active_selection_fg_color,
         renderer_prefs.inactive_selection_bg_color,
         renderer_prefs.inactive_selection_fg_color);
-    didInvalidateRect(gfx::Rect(size_));
+    webview()->themeChanged();
   }
 #endif
 }
@@ -4328,52 +4477,61 @@ void RenderView::OnUpdateBrowserWindowId(int window_id) {
   browser_window_id_ = window_id;
 }
 
-void RenderView::OnGetAccessibilityTree() {
-  if (accessibility_.get())
-    accessibility_->clear();
-    accessibility_.reset(WebAccessibilityCache::create());
-    accessibility_->initialize(webview());
-  accessibility_changes_.clear();
+void RenderView::OnEnableAccessibility() {
+  if (WebAccessibilityCache::accessibilityEnabled())
+    return;
 
-  WebAccessibilityObject src_tree = webview()->accessibilityObject();
-  WebAccessibility dst_tree(src_tree, accessibility_.get());
-  Send(new ViewHostMsg_AccessibilityTree(routing_id_, dst_tree));
+  WebAccessibilityCache::enableAccessibility();
+
+  if (webview()) {
+    // It's possible that the webview has already loaded a webpage without
+    // accessibility being enabled. Initialize the browser's cached
+    // accessibility tree by sending it a 'load complete' notification.
+    postAccessibilityNotification(
+        webview()->accessibilityObject(),
+        WebKit::WebAccessibilityNotificationLoadComplete);
+  }
 }
 
 void RenderView::OnSetAccessibilityFocus(int acc_obj_id) {
   if (!accessibility_.get())
     return;
-  if (accessibility_->isValidId(acc_obj_id)) {
-    // TODO(dmazzoni) fix the cache so that id=1000 is not a magic number.
-    // By convention, calling SetFocus on the root of the tree (id = 1000)
-    // should clear the current focus. Otherwise set the focus to the new
-    // node.
-    if (acc_obj_id == 1000)
-      webview()->clearFocusedNode();
-    else
-      accessibility_->getObjectById(acc_obj_id).setFocused(true);
-  }
+
+  WebAccessibilityObject obj = accessibility_->getObjectById(acc_obj_id);
+  WebAccessibilityObject root = webview()->accessibilityObject();
+  if (!obj.isValid() || !root.isValid())
+    return;
+
+  // By convention, calling SetFocus on the root of the tree should clear the
+  // current focus. Otherwise set the focus to the new node.
+  if (accessibility_->addOrGetId(obj) == accessibility_->addOrGetId(root))
+    webview()->clearFocusedNode();
+  else
+    obj.setFocused(true);
 }
 
 void RenderView::OnAccessibilityDoDefaultAction(int acc_obj_id) {
   if (!accessibility_.get())
     return;
-  if (accessibility_->isValidId(acc_obj_id)) {
-    accessibility_->getObjectById(acc_obj_id).performDefaultAction();
-  }
+
+  WebAccessibilityObject obj = accessibility_->getObjectById(acc_obj_id);
+  if (!obj.isValid())
+    return;
+
+  obj.performDefaultAction();
 }
 
-void RenderView::OnAccessibilityObjectChildrenChangeAck() {
+void RenderView::OnAccessibilityNotificationsAck() {
   if (!accessibility_.get())
     return;
 
-  if (!accessibility_changes_.empty()) {
-    Send(new ViewHostMsg_AccessibilityObjectChildrenChange(
+  if (!pending_accessibility_notifications_.empty()) {
+    Send(new ViewHostMsg_AccessibilityNotifications(
         routing_id_,
-        accessibility_changes_));
+        pending_accessibility_notifications_));
   }
 
-  accessibility_changes_.clear();
+  pending_accessibility_notifications_.clear();
 }
 
 void RenderView::OnGetAllSavableResourceLinksForCurrentPage(
@@ -4478,7 +4636,8 @@ void RenderView::OnClosePage(const ViewMsg_ClosePage_Params& params) {
 void RenderView::OnThemeChanged() {
 #if defined(OS_WIN)
   gfx::NativeTheme::instance()->CloseHandles();
-  didInvalidateRect(gfx::Rect(size_));
+  if (webview())
+    webview()->themeChanged();
 #else  // defined(OS_WIN)
   // TODO(port): we don't support theming on non-Windows platforms yet
   NOTIMPLEMENTED();
@@ -4490,8 +4649,8 @@ void RenderView::OnHandleMessageFromExternalHost(const std::string& message,
                                                  const std::string& target) {
   if (message.empty())
     return;
-  external_host_bindings_.ForwardMessageFromExternalHost(message, origin,
-                                                         target);
+  GetExternalHostBindings()->ForwardMessageFromExternalHost(message, origin,
+                                                            target);
 }
 
 void RenderView::OnDisassociateFromPopupCount() {
@@ -4576,8 +4735,8 @@ void RenderView::AltErrorPageFinished(WebFrame* frame,
         NavigationState::FromDataSource(frame->dataSource());
     html_to_load = &navigation_state->postponed_data();
   }
-  LoadNavigationErrorPage(
-      frame, WebURLRequest(), original_error, *html_to_load, true);
+  LoadNavigationErrorPage(frame, WebURLRequest(), original_error, *html_to_load,
+                          true);
 }
 
 void RenderView::OnMoveOrResizeStarted() {
@@ -4662,6 +4821,15 @@ void RenderView::DidFlushPaint() {
   }
 }
 
+bool RenderView::GetBitmapForOptimizedPluginPaint(
+    const gfx::Rect& paint_bounds,
+    TransportDIB** dib,
+    gfx::Rect* location,
+    gfx::Rect* clip) {
+  return pepper_delegate_.GetBitmapForOptimizedPluginPaint(
+      paint_bounds, dib, location, clip);
+}
+
 void RenderView::OnClearFocusedNode() {
   if (webview())
     webview()->clearFocusedNode();
@@ -4706,6 +4874,17 @@ void RenderView::OnWindowFrameChanged(const gfx::Rect& window_frame,
     (*plugin_it)->WindowFrameChanged(window_frame, view_frame);
   }
 }
+
+void RenderView::OnPluginImeCompositionConfirmed(const string16& text,
+                                                 int plugin_id) {
+  // WebPluginDelegateProxy is responsible for figuring out if this text
+  // applies to it or not, so inform all the delegates.
+  std::set<WebPluginDelegateProxy*>::iterator plugin_it;
+  for (plugin_it = plugin_delegates_.begin();
+       plugin_it != plugin_delegates_.end(); ++plugin_it) {
+    (*plugin_it)->ImeCompositionConfirmed(text, plugin_id);
+  }
+}
 #endif  // OS_MACOSX
 
 void RenderView::SendExtensionRequest(
@@ -4723,10 +4902,10 @@ void RenderView::OnExtensionResponse(int request_id,
 
 void RenderView::OnExtensionMessageInvoke(const std::string& function_name,
                                           const ListValue& args,
-                                          bool requires_incognito_access,
+                                          bool cross_incognito,
                                           const GURL& event_url) {
   RendererExtensionBindings::Invoke(
-      function_name, args, this, requires_incognito_access, event_url);
+      function_name, args, this, cross_incognito, event_url);
 }
 
 // Dump all load time histograms.
@@ -5157,6 +5336,60 @@ void RenderView::DumpLoadHistograms() const {
         "PLT.BeginToFinishDoc_LinkLoad", "CacheSize"), begin_to_finish_doc);
   }
 
+  // Histograms to determine if cache throttling has an impact on PLT.
+  static bool use_cache_histogram2(FieldTrialList::Find("CacheThrottle") &&
+      !FieldTrialList::Find("CacheThrottle")->group_name().empty());
+  if (use_cache_histogram2) {
+    UMA_HISTOGRAM_ENUMERATION(
+        FieldTrial::MakeName("PLT.Abandoned", "CacheThrottle"),
+        abandoned_page ? 1 : 0, 2);
+    switch (load_type) {
+      case NavigationState::RELOAD:
+        PLT_HISTOGRAM(FieldTrial::MakeName(
+            "PLT.BeginToFinish_Reload", "CacheThrottle"),
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::HISTORY_LOAD:
+        PLT_HISTOGRAM(FieldTrial::MakeName(
+            "PLT.BeginToFinish_HistoryLoad", "CacheThrottle"),
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::NORMAL_LOAD:
+        PLT_HISTOGRAM(FieldTrial::MakeName(
+            "PLT.BeginToFinish_NormalLoad", "CacheThrottle"),
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_NORMAL:
+        PLT_HISTOGRAM(FieldTrial::MakeName(
+            "PLT.BeginToFinish_LinkLoadNormal", "CacheThrottle"),
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_RELOAD:
+        PLT_HISTOGRAM(FieldTrial::MakeName(
+            "PLT.BeginToFinish_LinkLoadReload", "CacheThrottle"),
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_CACHE_STALE_OK:
+        PLT_HISTOGRAM(FieldTrial::MakeName(
+            "PLT.BeginToFinish_LinkLoadStaleOk", "CacheThrottle"),
+            begin_to_finish_all_loads);
+        break;
+      case NavigationState::LINK_LOAD_CACHE_ONLY:
+        PLT_HISTOGRAM(FieldTrial::MakeName(
+            "PLT.BeginToFinish_LinkLoadCacheOnly", "CacheThrottle"),
+            begin_to_finish_all_loads);
+        break;
+      default:
+        break;
+    }
+    if (NavigationState::RELOAD <= load_type &&
+        NavigationState::LINK_LOAD_CACHE_ONLY >= load_type) {
+      PLT_HISTOGRAM(FieldTrial::MakeName(
+          "PLT.BeginToFinish", "CacheThrottle"),
+           begin_to_finish_all_loads);
+    }
+  }
+
   // For the SPDY field trials, we need to verify that the page loaded was
   // the type we requested:
   //   if we asked for a SPDY request, we got a SPDY request
@@ -5338,51 +5571,86 @@ void RenderView::LogNavigationState(const NavigationState* state,
             << url.spec();
 }
 
-void RenderView::focusAccessibilityObject(
-    const WebAccessibilityObject& acc_obj) {
-#if defined(OS_WIN)
-  // TODO(dglazkov): Current logic implies that focus change can only be made
-  // after at least one call to RenderView::OnGetAccessibilityInfo, which is
-  // where accessibility is initialized. We should determine whether that's
-  // right.
-  if (!accessibility_.get())
-    return;
+void RenderView::postAccessibilityNotification(
+    const WebAccessibilityObject& obj,
+    WebAccessibilityNotification notification) {
+  if (!accessibility_.get() && webview()) {
+    // Load complete should be our first notification sent.
+    // TODO(ctguil): Investigate if a different notification is a WebCore bug.
+    if (notification != WebKit::WebAccessibilityNotificationLoadComplete)
+      return;
 
-  // Retrieve the accessibility object id of the AccessibilityObject.
-  int acc_obj_id = accessibility_->addOrGetId(acc_obj);
-
-  // If id is valid, alert the browser side that an accessibility focus change
-  // occurred.
-  if (acc_obj_id >= 0)
-    Send(new ViewHostMsg_AccessibilityFocusChange(routing_id_, acc_obj_id));
-
-#else  // defined(OS_WIN)
-  // TODO(port): accessibility not yet implemented
-  NOTIMPLEMENTED();
-#endif
-}
-
-void RenderView::didChangeAccessibilityObjectState(
-    const WebAccessibilityObject& acc_obj) {
-  if (!accessibility_.get() || (accessibility_->addOrGetId(acc_obj) < 0))
-    return;
-
-  Send(new ViewHostMsg_AccessibilityObjectStateChange(
-      routing_id_, WebAccessibility(acc_obj, accessibility_.get())));
-}
-
-void RenderView::didChangeAccessibilityObjectChildren(
-    const WebAccessibilityObject& acc_obj) {
-  if (!accessibility_.get() || (accessibility_->addOrGetId(acc_obj) < 0))
-    return;
-
-  if (accessibility_changes_.empty()) {
-    Send(new ViewHostMsg_AccessibilityObjectChildrenChange(
-        routing_id_, std::vector<WebAccessibility>()));
+    // Create and initialize our accessibility cache
+    accessibility_.reset(WebAccessibilityCache::create());
+    accessibility_->initialize(webview());
   }
 
-  accessibility_changes_.push_back(
-      WebAccessibility(acc_obj, accessibility_.get()));
+  if (!accessibility_->isCached(obj)) {
+    // The browser doesn't know about objects that are not in the cache. Send a
+    // children change for the first accestor that actually is in the cache.
+    WebAccessibilityObject parent = obj;
+    while (parent.isValid() && !accessibility_->isCached(parent))
+      parent = parent.parentObject();
+
+    DCHECK(parent.isValid() && accessibility_->isCached(parent));
+    if (!parent.isValid())
+      return;
+    postAccessibilityNotification(
+        parent, WebKit::WebAccessibilityNotificationChildrenChanged);
+
+    // The parent's children change takes care of the child's children change.
+    if (notification == WebKit::WebAccessibilityNotificationChildrenChanged)
+      return;
+  }
+
+  // Add the accessibility object to our cache and ensure it's valid.
+  if (accessibility_->addOrGetId(obj) < 0)
+    return;
+
+  ViewHostMsg_AccessibilityNotification_Params param;
+  switch (notification) {
+    case WebKit::WebAccessibilityNotificationCheckedStateChanged:
+      param.notification_type =
+          ViewHostMsg_AccessibilityNotification_Params::
+              NOTIFICATION_TYPE_CHECK_STATE_CHANGED;
+      break;
+    case WebKit::WebAccessibilityNotificationChildrenChanged:
+      param.notification_type =
+          ViewHostMsg_AccessibilityNotification_Params::
+              NOTIFICATION_TYPE_CHILDREN_CHANGED;
+      break;
+    case WebKit::WebAccessibilityNotificationFocusedUIElementChanged:
+      param.notification_type =
+          ViewHostMsg_AccessibilityNotification_Params::
+              NOTIFICATION_TYPE_FOCUS_CHANGED;
+      break;
+    case WebKit::WebAccessibilityNotificationLoadComplete:
+      param.notification_type =
+          ViewHostMsg_AccessibilityNotification_Params::
+              NOTIFICATION_TYPE_LOAD_COMPLETE;
+      break;
+    case WebKit::WebAccessibilityNotificationValueChanged:
+      param.notification_type =
+          ViewHostMsg_AccessibilityNotification_Params::
+              NOTIFICATION_TYPE_VALUE_CHANGED;
+      break;
+    case WebKit::WebAccessibilityNotificationSelectedTextChanged:
+      param.notification_type =
+          ViewHostMsg_AccessibilityNotification_Params::
+              NOTIFICATION_TYPE_SELECTED_TEXT_CHANGED;
+      break;
+    default:
+      return;
+  }
+  param.acc_obj = WebAccessibility(obj, accessibility_.get());
+
+  if (pending_accessibility_notifications_.empty()) {
+    Send(new ViewHostMsg_AccessibilityNotifications(
+        routing_id_,
+        pending_accessibility_notifications_));
+  }
+
+  pending_accessibility_notifications_.push_back(param);
 }
 
 void RenderView::Print(WebFrame* frame, bool script_initiated) {
@@ -5420,15 +5688,6 @@ void RenderView::OnExecuteCode(const ViewMsg_ExecuteCode_Params& params) {
 
 void RenderView::ExecuteCodeImpl(WebFrame* frame,
                                  const ViewMsg_ExecuteCode_Params& params) {
-  // Don't execute scripts in gallery pages.
-  GURL frame_url = GURL(frame->url());
-  if (frame_url.host() == GURL(Extension::ChromeStoreURL()).host()
-      && !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAllowScriptingGallery)) {
-    Send(new ViewMsg_ExecuteCodeFinished(routing_id_, params.request_id, true));
-    return;
-  }
-
   std::vector<WebFrame*> frame_vector;
   frame_vector.push_back(frame);
   if (params.all_frames)
@@ -5438,8 +5697,19 @@ void RenderView::ExecuteCodeImpl(WebFrame* frame,
        frame_it != frame_vector.end(); ++frame_it) {
     WebFrame* frame = *frame_it;
     if (params.is_javascript) {
-      if (!UrlMatchesPermissions(frame->url(), params.host_permissions))
+      ExtensionRendererInfo* extension =
+          ExtensionRendererInfo::GetByID(params.extension_id);
+
+      const std::vector<URLPattern> host_permissions =
+          extension->host_permissions();
+      if (!Extension::CanExecuteScriptOnPage(
+              frame->url(),
+              extension->allowed_to_execute_script_everywhere(),
+              &host_permissions,
+              NULL,
+              NULL)) {
         continue;
+      }
 
       std::vector<WebScriptSource> sources;
       sources.push_back(
@@ -5493,23 +5763,29 @@ void RenderView::OnWasRestored(bool needs_repainting) {
     (*plugin_it)->SetContainerVisibility(true);
   }
 }
+#endif  // OS_MACOSX
 
 void RenderView::OnSetFocus(bool enable) {
   RenderWidget::OnSetFocus(enable);
 
   if (webview() && webview()->isActive()) {
+    // Notify all NPAPI plugins.
     std::set<WebPluginDelegateProxy*>::iterator plugin_it;
     for (plugin_it = plugin_delegates_.begin();
          plugin_it != plugin_delegates_.end(); ++plugin_it) {
+#if defined(OS_MACOSX)
       // RenderWidget's call to setFocus can cause the underlying webview's
       // activation state to change just like a call to setIsActive.
       if (enable)
         (*plugin_it)->SetWindowFocus(true);
+#endif
       (*plugin_it)->SetContentAreaFocus(enable);
     }
+
+    // Notify all Pepper plugins.
+    pepper_delegate_.OnSetFocus(enable);
   }
 }
-#endif  // OS_MACOSX
 
 void RenderView::EnsureDocumentTag() {
   // TODO(darin): There's actually no reason for this to be here.  We should
@@ -5524,17 +5800,32 @@ void RenderView::EnsureDocumentTag() {
 }
 
 #if defined(OS_MACOSX)
+void RenderView::SetPluginImeEnabled(bool enabled, int plugin_id) {
+  IPC::Message* msg = new ViewHostMsg_SetPluginImeEnabled(routing_id(),
+                                                          enabled, plugin_id);
+  // This message can be sent during event-handling, and needs to be delivered
+  // within that context.
+  msg->set_unblock(true);
+  Send(msg);
+}
+
 gfx::PluginWindowHandle RenderView::AllocateFakePluginWindowHandle(
     bool opaque, bool root) {
   gfx::PluginWindowHandle window = NULL;
   Send(new ViewHostMsg_AllocateFakePluginWindowHandle(
       routing_id(), opaque, root, &window));
+  if (window) {
+    fake_plugin_window_handles_.insert(window);
+  }
   return window;
 }
 
 void RenderView::DestroyFakePluginWindowHandle(gfx::PluginWindowHandle window) {
-  if (window)
+  if (window && fake_plugin_window_handles_.find(window) !=
+      fake_plugin_window_handles_.end()) {
     Send(new ViewHostMsg_DestroyFakePluginWindowHandle(routing_id(), window));
+    fake_plugin_window_handles_.erase(window);
+  }
 }
 
 void RenderView::AcceleratedSurfaceSetIOSurface(gfx::PluginWindowHandle window,
@@ -5627,6 +5918,31 @@ WebKit::WebDeviceOrientationClient* RenderView::deviceOrientationClient() {
   return device_orientation_dispatcher_.get();
 }
 
+void RenderView::zoomLimitsChanged(double minimum_level, double maximum_level) {
+  // For now, don't remember plugin zoom values.  We don't want to mix them with
+  // normal web content (i.e. a fixed layout plugin would usually want them
+  // different).
+  bool remember = !webview()->mainFrame()->document().isPluginDocument();
+
+  int minimum_percent = static_cast<int>(
+      WebView::zoomLevelToZoomFactor(minimum_level) * 100);
+  int maximum_percent = static_cast<int>(
+      WebView::zoomLevelToZoomFactor(maximum_level) * 100);
+
+  Send(new ViewHostMsg_UpdateZoomLimits(
+      routing_id_, minimum_percent, maximum_percent, remember));
+}
+
+void RenderView::zoomLevelChanged() {
+  bool remember = !webview()->mainFrame()->document().isPluginDocument();
+
+  // Tell the browser which url got zoomed so it can update the menu and the
+  // saved values if necessary
+  Send(new ViewHostMsg_DidZoomURL(
+      routing_id_, webview()->zoomLevel(), remember,
+      GURL(webview()->mainFrame()->url())));
+}
+
 bool RenderView::IsNonLocalTopLevelNavigation(
     const GURL& url, WebKit::WebFrame* frame, WebKit::WebNavigationType type) {
   // Must be a top level frame.
@@ -5673,16 +5989,11 @@ bool RenderView::IsNonLocalTopLevelNavigation(
   return false;
 }
 
-void RenderView::OnOpenFileSystemRequestComplete(
-    int request_id, bool accepted, const string16& name,
-    const string16& root_path) {
-  PendingOpenFileSystem* request = pending_file_system_requests_.Lookup(
-      request_id);
-  DCHECK(request);
-  if (accepted)
-    request->callbacks->didOpenFileSystem(name, root_path);
-  else
-    request->callbacks->didFail(WebKit::WebFileErrorSecurity);
-  request->callbacks = NULL;
-  pending_file_system_requests_.Remove(request_id);
+void RenderView::OnAsyncFileOpened(base::PlatformFileError error_code,
+                                   IPC::PlatformFileForTransit file_for_transit,
+                                   int message_id) {
+  pepper_delegate_.OnAsyncFileOpened(
+      error_code,
+      IPC::PlatformFileForTransitToPlatformFile(file_for_transit),
+      message_id);
 }

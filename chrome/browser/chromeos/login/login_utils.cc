@@ -8,7 +8,6 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/lock.h"
-#include "base/nss_util.h"
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
@@ -17,29 +16,25 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_init.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
-#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/external_cookie_handler.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/cookie_fetcher.h"
 #include "chrome/browser/chromeos/login/google_authenticator.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
+#include "chrome/browser/chromeos/login/parallel_authenticator.h"
 #include "chrome/browser/chromeos/login/user_image_downloader.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
-#include "chrome/common/logging_chrome.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/logging_chrome.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/url_request_context_getter.h"
-#include "chrome/common/notification_observer.h"
-#include "chrome/common/notification_registrar.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/cookie_store.h"
@@ -58,15 +53,10 @@ const char kAuthSuffix[] = "\n";
 
 }  // namespace
 
-class LoginUtilsImpl : public LoginUtils,
-                       public NotificationObserver {
+class LoginUtilsImpl : public LoginUtils {
  public:
   LoginUtilsImpl()
       : browser_launch_enabled_(true) {
-    registrar_.Add(
-        this,
-        NotificationType::LOGIN_USER_CHANGED,
-        NotificationService::AllSources());
   }
 
   // Invoked after the user has successfully logged in. This launches a browser
@@ -92,17 +82,7 @@ class LoginUtilsImpl : public LoginUtils,
   // Returns auth token for 'cp' Contacts service.
   virtual const std::string& GetAuthToken() const { return auth_token_; }
 
-  // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
-
  private:
-  // Attempt to connect to the preferred network if available.
-  void ConnectToPreferredNetwork();
-
-  NotificationRegistrar registrar_;
-
   // Indicates if DoBrowserLaunch will actually launch the browser or not.
   bool browser_launch_enabled_;
 
@@ -143,20 +123,8 @@ void LoginUtilsImpl::CompleteLogin(const std::string& username,
   if (CrosLibrary::Get()->EnsureLoaded())
     CrosLibrary::Get()->GetLoginLibrary()->StartSession(username, "");
 
-  const std::vector<UserManager::User>& users = UserManager::Get()->GetUsers();
-
-  bool first_login = true;
-  for (std::vector<UserManager::User>::const_iterator it = users.begin();
-       it < users.end(); ++it) {
-    std::string user_email = it->email();
-    if (username == user_email) {
-      first_login = false;
-      break;
-    }
-  }
-
+  bool first_login = !UserManager::Get()->IsKnownUser(username);
   UserManager::Get()->UserLoggedIn(username);
-  ConnectToPreferredNetwork();
 
   // Now launch the initial browser window.
   FilePath user_data_dir;
@@ -181,8 +149,24 @@ void LoginUtilsImpl::CompleteLogin(const std::string& username,
     token_service->StartFetchingTokens();
   }
 
+  // Set the CrOS user by getting this constructor run with the
+  // user's email on first retrieval.
+  profile->GetProfileSyncService(username);
+
   // Attempt to take ownership; this will fail if device is already owned.
-  OwnershipService::GetSharedInstance()->StartTakeOwnershipAttempt();
+  OwnershipService::GetSharedInstance()->StartTakeOwnershipAttempt(
+      UserManager::Get()->logged_in_user().email());
+
+  // Own TPM device if, for any reason, it has not been done in EULA
+  // wizard screen.
+  if (chromeos::CryptohomeTpmIsEnabled() &&
+      !chromeos::CryptohomeTpmIsBeingOwned()) {
+    if (chromeos::CryptohomeTpmIsOwned()) {
+      chromeos::CryptohomeTpmClearStoredPassword();
+    } else {
+      chromeos::CryptohomeTpmCanAttemptOwnership();
+    }
+  }
 
   // Take the credentials passed in and try to exchange them for
   // full-fledged Google authentication cookies.  This is
@@ -204,10 +188,10 @@ void LoginUtilsImpl::CompleteLogin(const std::string& username,
     if (locale != kFallbackInputMethodLocale) {
       StringPrefMember language_preload_engines;
       language_preload_engines.Init(prefs::kLanguagePreloadEngines,
-                                    profile->GetPrefs(), this);
+                                    profile->GetPrefs(), NULL);
       StringPrefMember language_preferred_languages;
       language_preferred_languages.Init(prefs::kLanguagePreferredLanguages,
-                                        profile->GetPrefs(), this);
+                                        profile->GetPrefs(), NULL);
 
       std::string preload_engines(language_preload_engines.GetValue());
       std::vector<std::string> input_method_ids;
@@ -233,7 +217,6 @@ void LoginUtilsImpl::CompleteOffTheRecordLogin(const GURL& start_url) {
   LOG(INFO) << "Completing off the record login";
 
   UserManager::Get()->OffTheRecordUserLoggedIn();
-  ConnectToPreferredNetwork();
 
   if (CrosLibrary::Get()->EnsureLoaded()) {
     // For BWSI we ask session manager to restart Chrome with --bwsi flag.
@@ -254,6 +237,7 @@ void LoginUtilsImpl::CompleteOffTheRecordLogin(const GURL& start_url) {
                                   kForwardSwitches,
                                   arraysize(kForwardSwitches));
     command_line.AppendSwitch(switches::kBWSI);
+    command_line.AppendSwitch(switches::kIncognito);
     command_line.AppendSwitch(switches::kEnableTabbedOptions);
     command_line.AppendSwitchASCII(
         switches::kLoginUser,
@@ -268,7 +252,10 @@ void LoginUtilsImpl::CompleteOffTheRecordLogin(const GURL& start_url) {
 
 Authenticator* LoginUtilsImpl::CreateAuthenticator(
     LoginStatusConsumer* consumer) {
-  return new GoogleAuthenticator(consumer);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kParallelAuth))
+    return new ParallelAuthenticator(consumer);
+  else
+    return new GoogleAuthenticator(consumer);
 }
 
 void LoginUtilsImpl::EnableBrowserLaunch(bool enable) {
@@ -277,18 +264,6 @@ void LoginUtilsImpl::EnableBrowserLaunch(bool enable) {
 
 bool LoginUtilsImpl::IsBrowserLaunchEnabled() const {
   return browser_launch_enabled_;
-}
-
-void LoginUtilsImpl::Observe(NotificationType type,
-                             const NotificationSource& source,
-                             const NotificationDetails& details) {
-  if (type == NotificationType::LOGIN_USER_CHANGED)
-    base::OpenPersistentNSSDB();
-}
-
-void LoginUtilsImpl::ConnectToPreferredNetwork() {
-  CrosLibrary::Get()->GetNetworkLibrary()->
-      ConnectToPreferredNetworkIfAvailable();
 }
 
 LoginUtils* LoginUtils::Get() {

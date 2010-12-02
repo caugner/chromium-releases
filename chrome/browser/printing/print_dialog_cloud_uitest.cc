@@ -15,6 +15,7 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
+#include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_paths.h"
@@ -129,8 +130,8 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
     AutoQuitDelegate() {}
 
     virtual void OnResponseCompleted(URLRequest* request) {
-      ChromeThread::PostTask(ChromeThread::UI, FROM_HERE,
-                             new MessageLoop::QuitTask());
+      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                              new MessageLoop::QuitTask());
     }
   };
 
@@ -157,7 +158,7 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
     if (!handler_added_) {
       URLRequestFilter* filter = URLRequestFilter::GetInstance();
       GURL cloud_print_service_url =
-          internal_cloud_print_helpers::CloudPrintService(browser()->profile()).
+          CloudPrintURL(browser()->profile()).
           GetCloudPrintServiceURL();
       scheme_ = cloud_print_service_url.scheme();
       host_name_ = cloud_print_service_url.host();
@@ -166,7 +167,7 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
       handler_added_ = true;
 
       GURL cloud_print_dialog_url =
-          internal_cloud_print_helpers::CloudPrintService(browser()->profile()).
+          CloudPrintURL(browser()->profile()).
           GetCloudPrintServiceDialogURL();
       Singleton<TestController>()->set_expected_url(cloud_print_dialog_url);
       Singleton<TestController>()->set_delegate(&delegate_);
@@ -178,8 +179,8 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
   void CreateDialogForTest() {
     FilePath path_to_pdf =
         test_data_directory_.AppendASCII("printing/cloud_print_uitest.pdf");
-    ChromeThread::PostTask(
-        ChromeThread::UI, FROM_HERE,
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
         NewRunnableFunction(&PrintDialogCloud::CreateDialogImpl, path_to_pdf));
   }
 

@@ -92,11 +92,11 @@ void MockRenderThread::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_CreateWidget, OnMsgCreateWidget)
     IPC_MESSAGE_HANDLER(ViewHostMsg_OpenChannelToExtension,
                         OnMsgOpenChannelToExtension)
-#if defined(OS_WIN) || defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetDefaultPrintSettings,
                         OnGetDefaultPrintSettings)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ScriptedPrint,
                         OnScriptedPrint)
+#if defined(OS_WIN) || defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidGetPrintedPagesCount,
                         OnDidGetPrintedPagesCount)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidPrintPage, OnDidPrintPage)
@@ -147,7 +147,7 @@ void MockRenderThread::OnDuplicateSection(
 void MockRenderThread::OnAllocatePDFTransport(
     uint32 buffer_size, base::SharedMemoryHandle* handle) {
   base::SharedMemory shared_buf;
-  shared_buf.Create(L"", false, false, buffer_size);
+  shared_buf.Create("", false, false, buffer_size);
   if (!shared_buf.Map(buffer_size)) {
     *handle = base::SharedMemory::NULLHandle();
     NOTREACHED() << "Cannot map PDF transport buffer";

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/renderer_host/test/test_render_view_host.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
@@ -13,7 +13,8 @@ class DownloadRequestLimiterTest
     : public RenderViewHostTestHarness,
       public DownloadRequestLimiter::Callback {
  public:
-  DownloadRequestLimiterTest() : io_thread_(ChromeThread::IO, &message_loop_) {}
+  DownloadRequestLimiterTest() : io_thread_(BrowserThread::IO, &message_loop_) {
+  }
 
   virtual void SetUp() {
     RenderViewHostTestHarness::SetUp();
@@ -85,11 +86,10 @@ class DownloadRequestLimiterTest
   // Number of times ShouldAllowDownload was invoked.
   int ask_allow_count_;
 
-  ChromeThread io_thread_;
+  BrowserThread io_thread_;
 };
 
-// http://code.google.com/p/chromium/issues/detail?id=39753
-TEST_F(DownloadRequestLimiterTest, FLAKY_Allow) {
+TEST_F(DownloadRequestLimiterTest, Allow) {
   // All tabs should initially start at ALLOW_ONE_DOWNLOAD.
   ASSERT_EQ(DownloadRequestLimiter::ALLOW_ONE_DOWNLOAD,
             download_request_limiter_->GetDownloadStatus(

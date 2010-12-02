@@ -16,6 +16,8 @@
 
 class RegKey;
 
+namespace policy {
+
 // An implementation of |ConfigurationPolicyProvider| using the
 // mechanism provided by Windows Groups Policy. Policy decisions are
 // stored as values in a special section of the Windows Registry.
@@ -77,7 +79,8 @@ class ConfigurationPolicyProviderWin
     CancelableTask* reload_task_;
   };
 
-  ConfigurationPolicyProviderWin();
+  explicit ConfigurationPolicyProviderWin(
+      const StaticPolicyValueMap& policy_map);
   virtual ~ConfigurationPolicyProviderWin();
 
   // ConfigurationPolicyProvider method overrides:
@@ -105,5 +108,7 @@ class ConfigurationPolicyProviderWin
   bool GetRegistryPolicyBoolean(const string16& value_name, bool* result);
   bool GetRegistryPolicyInteger(const string16& value_name, uint32* result);
 };
+
+}  // namespace policy
 
 #endif  // CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_PROVIDER_WIN_H_

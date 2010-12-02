@@ -8,6 +8,7 @@
 #include "base/scoped_handle.h"
 #include "base/scoped_variant_win.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -138,46 +139,20 @@ void IEEventSink::Uninitialize() {
     }
 
     ScopedHandle process;
-    process.Set(OpenProcess(SYNCHRONIZE, FALSE, ie_process_id_));
-    DLOG_IF(WARNING, !process.IsValid())
-        << StringPrintf("OpenProcess failed: %i", ::GetLastError());
-
+    process.Set(OpenProcess(SYNCHRONIZE, FALSE,
+                            ie_process_id_));
     web_browser2_.Release();
 
+    if (!process.IsValid()) {
+      DLOG_IF(WARNING, !process.IsValid())
+          << base::StringPrintf("OpenProcess failed: %i", ::GetLastError());
+      return;
+    }
     // IE may not have closed yet. Wait here for the process to finish.
     // This is necessary at least on some browser/platform configurations.
-    if (process) {
-      DWORD max_wait = kDefaultWaitForIEToTerminateMs;
-      while (true) {
-        base::Time start = base::Time::Now();
-        HANDLE wait_for = process;
-        DWORD wait = MsgWaitForMultipleObjects(1, &wait_for, FALSE, max_wait,
-                                               QS_ALLINPUT);
-        if (wait == WAIT_OBJECT_0 + 1) {
-          MSG msg;
-          while (PeekMessage(&msg, NULL, 0, 0, TRUE) > 0) {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-          }
-        } else if (wait == WAIT_OBJECT_0) {
-          break;
-        } else {
-          DCHECK(wait == WAIT_TIMEOUT);
-          DLOG(ERROR) << "Wait for IE timed out";
-          break;
-        }
-        base::TimeDelta elapsed = base::Time::Now() - start;
-        ULARGE_INTEGER ms;
-        ms.QuadPart = elapsed.InMilliseconds();
-        DCHECK_EQ(ms.HighPart, 0U);
-        if (ms.LowPart > max_wait) {
-          DLOG(ERROR) << "Wait for IE timed out (2)";
-          break;
-        } else {
-          max_wait -= ms.LowPart;
-        }
-      }
-    }
+    WaitForSingleObject(process, kDefaultWaitForIEToTerminateMs);
+    base::KillProcesses(chrome_frame_test::kIEImageName, 0, NULL);
+    base::KillProcesses(chrome_frame_test::kIEBrokerImageName, 0, NULL);
   }
 }
 
@@ -456,7 +431,7 @@ STDMETHODIMP IEEventSink::OnBeforeNavigate2(
     VARIANT* target_frame_name, VARIANT* post_data, VARIANT* headers,
     VARIANT_BOOL* cancel) {
   DLOG(INFO) << __FUNCTION__
-      << StringPrintf("%ls - 0x%08X", url->bstrVal, this);
+      << base::StringPrintf("%ls - 0x%08X", url->bstrVal, this);
   // Reset any existing reference to chrome frame since this is a new
   // navigation.
   DisconnectFromChromeFrame();
@@ -486,8 +461,8 @@ STDMETHODIMP_(void) IEEventSink::OnDocumentComplete(
 
 STDMETHODIMP_(void) IEEventSink::OnFileDownload(
     VARIANT_BOOL active_doc, VARIANT_BOOL* cancel) {
-  DLOG(INFO) << __FUNCTION__ << StringPrintf(" 0x%08X ad=%i", this,
-                                              active_doc);
+  DLOG(INFO) << __FUNCTION__ << base::StringPrintf(" 0x%08X ad=%i", this,
+                                                   active_doc);
   if (listener_)
     listener_->OnFileDownload(active_doc, cancel);
   // Always cancel file downloads in tests.

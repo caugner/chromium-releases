@@ -9,6 +9,7 @@
 #include "chrome/browser/options_window.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_set_observer.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 
 namespace PreferencesWindowControllerInternal {
 class PrefObserverBridge;
@@ -45,6 +46,7 @@ class ProfileSyncService;
   ProfileSyncService* syncService_;
   scoped_ptr<PreferencesWindowControllerInternal::PrefObserverBridge>
       observer_;  // Watches for pref changes.
+  PrefChangeRegistrar registrar_;  // Manages pref change observer registration.
   scoped_nsobject<WindowSizeAutosaver> sizeSaver_;
   NSView* currentPrefsView_;  // weak ref - current prefs page view.
   scoped_ptr<PreferencesWindowControllerInternal::ManagedPrefsBannerState>
@@ -93,6 +95,7 @@ class ProfileSyncService;
   BOOL restoreButtonsEnabled_;
   BOOL restoreURLsEnabled_;
   BOOL showHomeButtonEnabled_;
+  BOOL defaultSearchEngineEnabled_;
 
   // User Data panel
   BooleanPrefMember askSavePasswords_;
@@ -200,6 +203,7 @@ class ProfileSyncService;
 @property (nonatomic) BOOL restoreButtonsEnabled;
 @property (nonatomic) BOOL restoreURLsEnabled;
 @property (nonatomic) BOOL showHomeButtonEnabled;
+@property (nonatomic) BOOL defaultSearchEngineEnabled;
 @property (nonatomic) BOOL passwordManagerChoiceEnabled;
 @property (nonatomic) BOOL passwordManagerButtonEnabled;
 @property (nonatomic) BOOL autoFillSettingsButtonEnabled;

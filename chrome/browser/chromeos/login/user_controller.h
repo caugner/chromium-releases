@@ -20,14 +20,14 @@
 #include "views/widget/widget_delegate.h"
 
 namespace views {
-class NativeButton;
 class WidgetGtk;
 }
 
 namespace chromeos {
 
-class UserView;
 class ExistingUserView;
+class GuestUserView;
+class UserView;
 
 // UserController manages the set of windows needed to login a single existing
 // user or first time login for a new user. ExistingUserController creates
@@ -57,8 +57,8 @@ class UserController : public views::ButtonListener,
     virtual ~Delegate() {}
   };
 
-  // Creates a UserController representing the guest (other user) login.
-  explicit UserController(Delegate* delegate);
+  // Creates a UserController representing new user or bwsi login.
+  UserController(Delegate* delegate, bool is_bwsi);
 
   // Creates a UserController for the specified user.
   UserController(Delegate* delegate, const UserManager::User& user);
@@ -76,7 +76,8 @@ class UserController : public views::ButtonListener,
 
   int user_index() const { return user_index_; }
   bool is_user_selected() const { return is_user_selected_; }
-  bool is_guest() const { return is_guest_; }
+  bool is_new_user() const { return is_new_user_; }
+  bool is_bwsi() const { return is_bwsi_; }
   NewUserView* new_user_view() const { return new_user_view_; }
 
   const UserManager::User& user() const { return user_; }
@@ -104,7 +105,7 @@ class UserController : public views::ButtonListener,
 
   // Textfield::Controller:
   virtual void ContentsChanged(views::Textfield* sender,
-                               const string16& new_contents) {}
+                               const string16& new_contents);
   virtual bool HandleKeystroke(views::Textfield* sender,
                                const views::Textfield::Keystroke& keystroke);
 
@@ -129,7 +130,6 @@ class UserController : public views::ButtonListener,
 
   // UserView::Delegate implementation:
   virtual void OnRemoveUser();
-  virtual void OnChangePhoto();
 
   // Selects user entry with specified |index|.
   void SelectUser(int index);
@@ -169,20 +169,26 @@ class UserController : public views::ButtonListener,
   // Sets the enabled state of the password field to |enable|.
   void SetPasswordEnabled(bool enable);
 
+  // Returns tooltip text for user name.
+  std::wstring GetNameTooltip() const;
+
   // User index within all the users.
   int user_index_;
 
   // Is this user selected now?
   bool is_user_selected_;
 
-  // Is this the guest user?
-  const bool is_guest_;
+  // Is this the new user pod?
+  const bool is_new_user_;
+
+  // Is this the bwsi pod?
+  const bool is_bwsi_;
 
   // Should we show tooltips above user image and label to help distinguish
   // users with the same display name.
   bool show_name_tooltip_;
 
-  // If is_guest_ is false, this is the user being shown.
+  // If is_new_user_ and is_bwsi_ are false, this is the user being shown.
   UserManager::User user_;
 
   Delegate* delegate_;
@@ -202,6 +208,9 @@ class UserController : public views::ButtonListener,
 
   // View that is used for existing user login.
   ExistingUserView* existing_user_view_;
+
+  // View that is used for guest user login.
+  GuestUserView* guest_user_view_;
 
   // Views that show display name of the user.
   views::Label* label_view_;

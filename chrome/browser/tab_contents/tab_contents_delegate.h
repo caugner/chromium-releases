@@ -36,6 +36,7 @@ class Profile;
 class RenderViewHost;
 class TabContents;
 class TemplateURL;
+class TemplateURLModel;
 struct ContextMenuParams;
 
 // Objects implement this interface to get notified about changes in the
@@ -101,6 +102,12 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // If |source| is constrained, returns the tab containing it.  Otherwise
   // returns |source|.
   virtual TabContents* GetConstrainingContents(TabContents* source);
+
+  // Returns true if constrained windows should be focused. Default is true.
+  virtual bool ShouldFocusConstrainedWindow(TabContents* source);
+
+  // Invoked prior to the TabContents showing a constrained window.
+  virtual void WillShowConstrainedWindow(TabContents* source);
 
   // Notification that some of our content has changed size as
   // part of an animation.
@@ -172,6 +179,10 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // new tab page.
   virtual void SetFocusToLocationBar(bool select_all);
 
+  // Returns whether the page should be focused when transitioning from crashed
+  // to live. Default is true.
+  virtual bool ShouldFocusPageAfterCrash();
+
   // Called when a popup select is about to be displayed. The delegate can use
   // this to disable inactive rendering for the frame in the window the select
   // is opened within if necessary.
@@ -187,6 +198,9 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // controls on the page. Provides a way for TabContentsDelegates to handle
   // this. Returns true if the delegate successfully handled it.
   virtual bool TakeFocus(bool reverse);
+
+  // Invoked when the page loses mouse capture.
+  virtual void LostCapture();
 
   // Changes the blocked state of the tab at |index|. TabContents are
   // considered blocked while displaying a tab modal dialog. During that time
@@ -212,8 +226,15 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // Returns true if the context menu command was handled
   virtual bool ExecuteContextMenuCommand(int command);
 
-  // Shows a confirmation UI that the specified |template_url| is to be added as
-  // a search engine.
+  // Shows a confirmation dialog box for setting the default search engine
+  // described by |template_url|. Takes ownership of |template_url|.
+  virtual void ConfirmSetDefaultSearchProvider(
+      TabContents* tab_contents,
+      TemplateURL* template_url,
+      TemplateURLModel* template_url_model);
+
+  // Shows a confirmation dialog box for adding a search engine described by
+  // |template_url|. Takes ownership of |template_url|.
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile);
 
@@ -236,6 +257,9 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // Allows delegates to handle unhandled keyboard messages coming back from
   // the renderer.
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
+
+  virtual void HandleMouseUp();
+  virtual void HandleMouseActivate();
 
   // Shows the repost form confirmation dialog box.
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents);
@@ -280,15 +304,12 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // Only called if ShouldEnablePreferredSizeNotifications() returns true.
   virtual void UpdatePreferredSize(const gfx::Size& pref_size);
 
-  // Notifies the delegate that something has changed about what content the
-  // TabContents is displaying. Currently this is only fired when displaying
-  // PDF using the internal PDF plugin.
-  virtual void ContentTypeChanged(TabContents* source);
+  // Notifies the delegate that the page has a suggest result.
+  virtual void OnSetSuggestResult(int32 page_id, const std::string& result);
 
-  // Sent when the user does a gesture that results in committing the match
-  // preview. The delegate should replace |source| with the |source|'s match
-  // preview TabContents.
-  virtual void CommitMatchPreview(TabContents* source);
+  // Notifies the delegate that the content restrictions for this tab has
+  // changed.
+  virtual void ContentRestrictionsChanged(TabContents* source);
 
  protected:
   virtual ~TabContentsDelegate();

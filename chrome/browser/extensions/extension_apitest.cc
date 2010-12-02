@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/profile.h"
@@ -42,6 +43,7 @@ bool ExtensionApiTest::ResultCatcher::GetNextResult() {
     return ret;
   }
 
+  LOG(INFO) << "DEBUG: results aren't empty";
   NOTREACHED();
   return false;
 }
@@ -56,7 +58,7 @@ void ExtensionApiTest::ResultCatcher::Observe(
 
   switch (type.value) {
     case NotificationType::EXTENSION_TEST_PASSED:
-      std::cout << "Got EXTENSION_TEST_PASSED notification.\n";
+      LOG(INFO) << "Got EXTENSION_TEST_PASSED notification (" << this << ").";
       results_.push_back(true);
       messages_.push_back("");
       if (waiting_)
@@ -64,7 +66,7 @@ void ExtensionApiTest::ResultCatcher::Observe(
       break;
 
     case NotificationType::EXTENSION_TEST_FAILED:
-      std::cout << "Got EXTENSION_TEST_FAILED notification.\n";
+      LOG(INFO) << "Got EXTENSION_TEST_FAILED notification (" << this << ").";
       results_.push_back(false);
       messages_.push_back(*(Details<std::string>(details).ptr()));
       if (waiting_)
@@ -77,36 +79,63 @@ void ExtensionApiTest::ResultCatcher::Observe(
 }
 
 bool ExtensionApiTest::RunExtensionTest(const char* extension_name) {
-  return RunExtensionTestImpl(extension_name, "");
+  return RunExtensionTestImpl(extension_name, "", false);
+}
+
+bool ExtensionApiTest::RunExtensionTestIncognito(const char* extension_name) {
+  return RunExtensionTestImpl(extension_name, "", true);
 }
 
 bool ExtensionApiTest::RunExtensionSubtest(const char* extension_name,
-                                           const std::string& subtest_page) {
-  DCHECK(!subtest_page.empty()) << "Argument subtest_page is required.";
-  return RunExtensionTestImpl(extension_name, subtest_page);
+                                           const std::string& page_url) {
+  DCHECK(!page_url.empty()) << "Argument page_url is required.";
+  return RunExtensionTestImpl(extension_name, page_url, false);
 }
 
-// Load an extension and wait for it to notify of PASSED or FAILED.
-bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
-                                            const std::string& subtest_page) {
-  ResultCatcher catcher;
-  LOG(INFO) << "Running ExtensionApiTest with: " << extension_name;
+bool ExtensionApiTest::RunPageTest(const std::string& page_url) {
+  return RunExtensionSubtest("", page_url);
+}
 
-  if (!LoadExtension(test_data_dir_.AppendASCII(extension_name))) {
-    message_ = "Failed to load extension.";
-    return false;
+// Load |extension_name| extension and/or |page_url| and wait for
+// PASSED or FAILED notification.
+bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
+                                            const std::string& page_url,
+                                            bool enable_incognito) {
+  ResultCatcher catcher;
+  DCHECK(!std::string(extension_name).empty() || !page_url.empty()) <<
+      "extension_name and page_url cannot both be empty";
+
+  if (!std::string(extension_name).empty()) {
+    bool loaded = enable_incognito ?
+        LoadExtensionIncognito(test_data_dir_.AppendASCII(extension_name)) :
+        LoadExtension(test_data_dir_.AppendASCII(extension_name));
+    if (!loaded) {
+      message_ = "Failed to load extension.";
+      return false;
+    }
   }
 
-  // If there is a subtest to load, navigate to the subtest page.
-  if (!subtest_page.empty()) {
-    ExtensionsService* service = browser()->profile()->GetExtensionsService();
-    Extension* extension =
-        service->GetExtensionById(last_loaded_extension_id_, false);
-    if (!extension)
-      return false;
+  // If there is a page_url to load, navigate it.
+  if (!page_url.empty()) {
+    GURL url = GURL(page_url);
 
-    GURL url = extension->GetResourceURL(subtest_page);
-    LOG(ERROR) << "Loading subtest page url: " << url.spec();
+    // Note: We use is_valid() here in the expectation that the provided url
+    // may lack a scheme & host and thus be a relative url within the loaded
+    // extension.
+    if (!url.is_valid()) {
+      DCHECK(!std::string(extension_name).empty()) <<
+          "Relative page_url given with no extension_name";
+
+      ExtensionsService* service = browser()->profile()->GetExtensionsService();
+      Extension* extension =
+          service->GetExtensionById(last_loaded_extension_id_, false);
+      if (!extension)
+        return false;
+
+      url = extension->GetResourceURL(page_url);
+    }
+
+    LOG(ERROR) << "Loading page url: " << url.spec();
     ui_test_utils::NavigateToURL(browser(), url);
   }
 
@@ -130,7 +159,7 @@ Extension* ExtensionApiTest::GetSingleLoadedExtension() {
       continue;
 
     if (found_extension_index != -1) {
-      message_ = StringPrintf(
+      message_ = base::StringPrintf(
           "Expected only one extension to be present.  Found %u.",
           static_cast<unsigned>(service->extensions()->size()));
       return NULL;

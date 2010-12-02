@@ -39,6 +39,9 @@
     'chromeos_login': {
       'filepath': 'chrome/browser/chromeos/login/.*',
     },
+    'download': {
+      'filepath': 'chrome/browser/download/.*',
+    },
     'history': {
       'filepath': 'chrome/browser/history/.*',
     },
@@ -153,6 +156,15 @@
       'filepath': 'base/i18n/.*|base/*string.*|.*l10n.*|.*icu.*|'\
         '.*locale_settings.*|.*encoding.*',
     },
+    'pyauto': {
+      'filepath': 'chrome/test/pyautolib' \
+                  '|chrome/test/functional' \
+                  '|chrome/browser/automation/automation_provider_json'
+    },
+    'labs': {
+      'filepath': 'chrome/browser/labs' \
+                  '|chrome/browser/dom_ui/labs'
+    },
   },
 
   'WATCHLISTS': {
@@ -167,6 +179,7 @@
     'browser_main': ['brettw-cc@chromium.org'],
     'browser_resources': ['arv@chromium.org'],
     'chromeos_login': ['nkostylev+cc@chromium.org'],
+    'download': ['phajdan.jr@chromium.org'],
     'history': ['brettw-cc@chromium.org'],
     'renderer': ['darin-cc@chromium.org',
                  'brettw-cc@chromium.org'],
@@ -181,12 +194,13 @@
     'net': ['darin-cc@chromium.org', 'cbentzel+watch@chromium.org'],
     'ftp': ['phajdan.jr@chromium.org'],
     'media': ['ajwong@chromium.org', 'fbarchard@chromium.org',
-              'hclam@chromium.org', 'scherkus@chromium.org'],
+              'hclam@chromium.org', 'scherkus@chromium.org',
+              'vrk@chromium.org'],
     'ipc': ['jam@chromium.org', 'darin-cc@chromium.org'],
     'linux-sandboxing': ['agl@chromium.org'],
     'sync': ['tim@chromium.org', 'nick@chromium.org',
              'idana@chromium.org', 'rsimha@chromium.org'],
-    'layout_tests': ['pam+watch@chromium.org', 'dpranke+watch@chromium.org'],
+    'layout_tests': ['pam+watch@chromium.org'],
     'tools': ['pam+watch@chromium.org'],
     'tests': ['phajdan.jr@chromium.org'],
     'automation': ['phajdan.jr@chromium.org'],
@@ -206,5 +220,8 @@
     'autofill': ['dhollowa@chromium.org', 'jhawkins@chromium.org'],
     'webdata': ['dhollowa@chromium.org'],
     'i18n': ['jshin+watch@chromium.org'],
+    'pyauto': ['anantha@chromium.org', 'jrg@chromium.org',
+               'nirnimesh@chromium.org'],
+    'labs': ['thakis@chromium.org'],
   },
 }

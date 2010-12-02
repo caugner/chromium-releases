@@ -34,7 +34,7 @@ class _StackTraceLine(object):
     else:
       return self.raw_line_.replace(self.binary, '%s:%s' % (file, line))
 
-class TsanAnalyzer:
+class TsanAnalyzer(object):
   ''' Given a set of ThreadSanitizer output files, parse all the errors out of
   them, unique them and output the results.'''
 
@@ -56,6 +56,8 @@ class TsanAnalyzer:
   TSAN_WARNING_DESCRIPTION =  ("Unlocking a non-locked lock"
       "|accessing an invalid lock"
       "|which did not acquire this lock")
+  RACE_VERIFIER_LINE = "Confirmed a race|unexpected race"
+
   def __init__(self, source_dir, use_gdb=False):
     '''Reads in a set of files.
 
@@ -95,6 +97,15 @@ class TsanAnalyzer:
     return result
 
   def ParseReportFile(self, filename):
+    '''Parses a report file and returns a list of ThreadSanitizer reports.
+
+
+    Args:
+      filename: report filename.
+    Returns:
+      list of (list of (str iff self._use_gdb, _StackTraceLine otherwise)).
+    '''
+    ret = []
     self.cur_fd_ = open(filename, 'r')
 
     while True:
@@ -104,16 +115,19 @@ class TsanAnalyzer:
         break
 
       tmp = []
+      while re.search(TsanAnalyzer.RACE_VERIFIER_LINE, self.line_):
+        tmp.append(self.line_)
+        self.ReadLine()
       while re.search(TsanAnalyzer.THREAD_CREATION_STR, self.line_):
         tmp.extend(self.ReadSection())
         self.ReadLine()
       if re.search(TsanAnalyzer.TSAN_RACE_DESCRIPTION, self.line_):
         tmp.extend(self.ReadSection())
-        self.reports.append(tmp)
+        ret.append(tmp)
       if (re.search(TsanAnalyzer.TSAN_WARNING_DESCRIPTION, self.line_) and
           not common.IsWindows()): # workaround for http://crbug.com/53198
         tmp.extend(self.ReadSection())
-        self.reports.append(tmp)
+        ret.append(tmp)
 
       match = re.search(" used_suppression:\s+([0-9]+)\s(.*)", self.line_)
       if match:
@@ -124,6 +138,30 @@ class TsanAnalyzer:
         else:
           self.used_suppressions[supp_name] = count
     self.cur_fd_.close()
+    return ret
+
+  def GetReports(self, files):
+    '''Extracts reports from a set of files.
+
+    Reads a set of files and returns a list of all discovered
+    ThreadSanitizer race reports. As a side effect, populates
+    self.used_suppressions with appropriate info.
+    '''
+
+    global TheAddressTable
+    if self._use_gdb:
+      TheAddressTable = gdb_helper.AddressTable()
+    else:
+      TheAddressTable = None
+    reports = []
+    self.used_suppressions = {}
+    for file in files:
+      reports.extend(self.ParseReportFile(file))
+    if self._use_gdb:
+      TheAddressTable.ResolveAll()
+      # Make each line of each report a string.
+      reports = map(lambda(x): map(str, x), reports)
+    return [''.join(report_lines) for report_lines in reports]
 
   def Report(self, files, check_sanity=False):
     '''Reads in a set of files and prints ThreadSanitizer report.
@@ -133,17 +171,7 @@ class TsanAnalyzer:
       check_sanity: if true, search for SANITY_TEST_SUPPRESSIONS
     '''
 
-    global TheAddressTable
-    if self._use_gdb:
-      TheAddressTable = gdb_helper.AddressTable()
-    else:
-      TheAddressTable = None
-    self.reports = []
-    self.used_suppressions = {}
-    for file in files:
-      self.ParseReportFile(file)
-    if self._use_gdb:
-      TheAddressTable.ResolveAll()
+    reports = self.GetReports(files)
 
     is_sane = False
     print "-----------------------------------------------------"
@@ -157,12 +185,9 @@ class TsanAnalyzer:
     sys.stdout.flush()
 
     retcode = 0
-    if len(self.reports) > 0:
-      logging.error("FAIL! Found %i reports" % len(self.reports))
-      for report_list in self.reports:
-        report = ''
-        for line in report_list:
-          report += str(line)
+    if len(reports) > 0:
+      logging.error("FAIL! Found %i report(s)" % len(reports))
+      for report in reports:
         logging.error('\n' + report)
       retcode = -1
 

@@ -41,11 +41,8 @@ class ReadNode;
 
 namespace syncable {
 class Entry;
-}
 
-std::ostream& operator<<(std::ostream& s, const syncable::Entry& e);
-
-namespace syncable {
+std::ostream& operator<<(std::ostream& s, const Entry& e);
 
 class DirectoryBackingStore;
 
@@ -231,7 +228,8 @@ struct EntryKernel {
   std::bitset<BIT_TEMPS_COUNT> bit_temps;
 
  public:
-  EntryKernel() : dirty_(false) {}
+  EntryKernel();
+  ~EntryKernel();
 
   // Set the dirty bit, and optionally add this entry's metahandle to
   // a provided index on dirty bits in |dirty_index|. Parameter may be null,
@@ -342,7 +340,7 @@ struct EntryKernel {
 // A read-only meta entry.
 class Entry {
   friend class Directory;
-  friend std::ostream& ::operator << (std::ostream& s, const Entry& e);
+  friend std::ostream& operator << (std::ostream& s, const Entry& e);
 
  public:
   // After constructing, you must check good() to test whether the Get
@@ -662,6 +660,9 @@ class Directory {
   // Various data that the Directory::Kernel we are backing (persisting data
   // for) needs saved across runs of the application.
   struct PersistedKernelInfo {
+    PersistedKernelInfo();
+    ~PersistedKernelInfo();
+
     // Last sync timestamp fetched from the server.
     int64 last_download_timestamp[MODEL_TYPE_COUNT];
     // true iff we ever reached the end of the changelog.
@@ -671,11 +672,8 @@ class Directory {
     std::string store_birthday;
     // The next local ID that has not been used with this cache-GUID.
     int64 next_id;
-    PersistedKernelInfo() : next_id(0) {
-      for (int i = 0; i < MODEL_TYPE_COUNT; ++i) {
-        last_download_timestamp[i] = 0;
-      }
-    }
+    // The persisted notification state.
+    std::string notification_state;
   };
 
   // What the Directory needs on initialization to create itself and its Kernel.
@@ -700,12 +698,13 @@ class Directory {
   // constructed and forms a consistent snapshot of what needs to be sent to
   // the backing store.
   struct SaveChangesSnapshot {
+    SaveChangesSnapshot();
+    ~SaveChangesSnapshot();
+
     KernelShareInfoStatus kernel_info_status;
     PersistedKernelInfo kernel_info;
     OriginalEntries dirty_metas;
     MetahandleSet metahandles_to_purge;
-    SaveChangesSnapshot() : kernel_info_status(KERNEL_SHARE_INFO_INVALID) {
-    }
   };
 
   Directory();
@@ -763,6 +762,9 @@ class Directory {
   // in case we switch to a binary birthday later.
   std::string store_birthday() const;
   void set_store_birthday(std::string store_birthday);
+
+  std::string GetAndClearNotificationState();
+  void SetNotificationState(const std::string& notification_state);
 
   // Unique to each account / client pair.
   std::string cache_guid() const;
@@ -916,6 +918,7 @@ class Directory {
   // a ScopedKernelLock.
   void set_initial_sync_ended_for_type_unsafe(ModelType type, bool x);
   void set_last_download_timestamp_unsafe(ModelType model_type, int64 x);
+  void SetNotificationStateUnsafe(const std::string& notification_state);
 
   Directory& operator = (const Directory&);
 
@@ -1056,6 +1059,8 @@ class BaseTransaction {
                   const char* source_file, int line, WriterTag writer);
 
   void UnlockAndLog(OriginalEntries* entries);
+  bool NotifyTransactionChangingAndEnding(OriginalEntries* entries);
+  virtual void NotifyTransactionComplete();
 
   Directory* const directory_;
   Directory::Kernel* const dirkernel_;  // for brevity

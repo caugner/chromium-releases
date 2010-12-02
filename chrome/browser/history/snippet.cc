@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "unicode/brkiter.h"
@@ -199,6 +200,12 @@ void Snippet::ConvertMatchPositionsToWide(
   }
 }
 
+Snippet::Snippet() {
+}
+
+Snippet::~Snippet() {
+}
+
 void Snippet::ComputeSnippet(const MatchPositions& match_positions,
                              const std::string& document) {
   // The length of snippets we try to produce.
@@ -282,4 +289,9 @@ void Snippet::ComputeSnippet(const MatchPositions& match_positions,
 
   utext_close(document_utext);
   swap(text_, snippet);
+}
+
+void Snippet::Swap(Snippet* other) {
+  text_.swap(other->text_);
+  matches_.swap(other->matches_);
 }

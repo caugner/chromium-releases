@@ -4,6 +4,8 @@
 
 #include "webkit/glue/plugins/pepper_file_ref.h"
 
+#include "base/base_paths.h"
+#include "base/path_service.h"
 #include "base/string_util.h"
 #include "webkit/glue/plugins/pepper_plugin_instance.h"
 #include "webkit/glue/plugins/pepper_var.h"
@@ -35,7 +37,7 @@ void TrimTrailingSlash(std::string* path) {
 PP_Resource CreateFileRef(PP_Instance instance_id,
                           PP_FileSystemType_Dev fs_type,
                           const char* path) {
-  PluginInstance* instance = PluginInstance::FromPPInstance(instance_id);
+  PluginInstance* instance = ResourceTracker::Get()->GetInstance(instance_id);
   if (!instance)
     return 0;
 
@@ -75,19 +77,19 @@ PP_FileSystemType_Dev GetFileSystemType(PP_Resource file_ref_id) {
 PP_Var GetName(PP_Resource file_ref_id) {
   scoped_refptr<FileRef> file_ref(Resource::GetAs<FileRef>(file_ref_id));
   if (!file_ref)
-    return PP_MakeVoid();
-  return StringToPPVar(file_ref->GetName());
+    return PP_MakeUndefined();
+  return StringVar::StringToPPVar(file_ref->module(), file_ref->GetName());
 }
 
 PP_Var GetPath(PP_Resource file_ref_id) {
   scoped_refptr<FileRef> file_ref(Resource::GetAs<FileRef>(file_ref_id));
   if (!file_ref)
-    return PP_MakeVoid();
+    return PP_MakeUndefined();
 
   if (file_ref->file_system_type() == PP_FILESYSTEMTYPE_EXTERNAL)
-    return PP_MakeVoid();
+    return PP_MakeUndefined();
 
-  return StringToPPVar(file_ref->path());
+  return StringVar::StringToPPVar(file_ref->module(), file_ref->path());
 }
 
 PP_Resource GetParent(PP_Resource file_ref_id) {
@@ -169,6 +171,23 @@ scoped_refptr<FileRef> FileRef::GetParent() {
 
   FileRef* parent_ref = new FileRef(module(), fs_type_, parent_path, origin_);
   return parent_ref;
+}
+
+// static
+FileRef* FileRef::GetInaccessibleFileRef(PluginModule* module) {
+  FilePath inaccessible_path;
+  if (!PathService::Get(base::FILE_MODULE, &inaccessible_path))
+    return NULL;
+  return new FileRef(module, inaccessible_path);
+}
+
+// static
+FileRef* FileRef::GetNonexistentFileRef(PluginModule* module) {
+  FilePath dir_module_path;
+  if (!PathService::Get(base::DIR_MODULE, &dir_module_path))
+    return NULL;
+  return new FileRef(module, dir_module_path.Append(
+      FILE_PATH_LITERAL("nonexistent_file")));
 }
 
 }  // namespace pepper

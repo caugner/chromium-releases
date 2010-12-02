@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,9 @@
 //   NativeEditView: a handle to a native edit-box. The Mac folks wanted this
 //     specific typedef.
 //
+//   NativeImage: The platform-specific image type used for drawing UI elements
+//     in the browser.
+//
 // The name 'View' here meshes with OS X where the UI elements are called
 // 'views' and with our Chrome UI code where the elements are also called
 // 'views'.
@@ -40,11 +43,13 @@ typedef struct HFONT__* HFONT;
 struct CGContext;
 #ifdef __OBJC__
 @class NSFont;
+@class NSImage;
 @class NSView;
 @class NSWindow;
 @class NSTextField;
 #else
 class NSFont;
+class NSImage;
 class NSView;
 class NSWindow;
 class NSTextField;
@@ -52,11 +57,13 @@ class NSTextField;
 #elif defined(TOOLKIT_USES_GTK)
 typedef struct _PangoFontDescription PangoFontDescription;
 typedef struct _GdkCursor GdkCursor;
+typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GdkRegion GdkRegion;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkWindow GtkWindow;
 typedef struct _cairo cairo_t;
 #endif
+class SkBitmap;
 
 namespace gfx {
 
@@ -88,6 +95,14 @@ typedef GtkWidget* NativeMenu;
 typedef GdkRegion* NativeRegion;
 #endif
 
+#if defined(OS_MACOSX)
+typedef NSImage* NativeImage;
+#elif defined(USE_X11) && !defined(TOOLKIT_VIEWS)
+typedef GdkPixbuf* NativeImage;
+#else
+typedef const SkBitmap* NativeImage;
+#endif
+
 // Note: for test_shell we're packing a pointer into the NativeViewId. So, if
 // you make it a type which is smaller than a pointer, you have to fix
 // test_shell.
@@ -104,20 +119,20 @@ static inline NativeView NativeViewFromId(NativeViewId id) {
   return reinterpret_cast<NativeView>(id);
 }
 #define NativeViewFromIdInBrowser(x) NativeViewFromId(x)
-#elif defined(OS_MACOSX)
-// On the Mac, a NativeView is a pointer to an object, and is useless outside
-// the process in which it was created. NativeViewFromId should only be used
-// inside the appropriate platform ifdef outside of the browser.
+#elif defined(OS_MACOSX) || defined(USE_X11)
+// On Mac and Linux, a NativeView is a pointer to an object, and is useless
+// outside the process in which it was created. NativeViewFromId should only be
+// used inside the appropriate platform ifdef outside of the browser.
 // (NativeViewFromIdInBrowser can be used everywhere in the browser.) If your
 // cross-platform design involves a call to NativeViewFromId from outside the
-// browser it will never work on the Mac and is fundamentally broken.
+// browser it will never work on Mac or Linux and is fundamentally broken.
 
 // Please do not call this from outside the browser. It won't work; the name
 // should give you a subtle hint.
 static inline NativeView NativeViewFromIdInBrowser(NativeViewId id) {
   return reinterpret_cast<NativeView>(id);
 }
-#endif
+#endif  // defined(OS_MACOSX) || defined(USE_X11)
 
 // Convert a NativeView to a NativeViewId.  See the comments at the top of
 // this file.

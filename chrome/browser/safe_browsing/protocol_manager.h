@@ -50,7 +50,7 @@ class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
                            TestGetHashBackOffTimes);
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingProtocolManagerTest, TestMacKeyUrl);
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingProtocolManagerTest,
-                           TestMalwareReportUrl);
+                           TestSafeBrowsingReportUrl);
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingProtocolManagerTest, TestNextChunkUrl);
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingProtocolManagerTest, TestUpdateUrl);
   friend class SafeBrowsingServiceTest;
@@ -108,11 +108,15 @@ class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
   // The last time we received an update.
   base::Time last_update() const { return last_update_; }
 
-  // Reports a malware resource to the SafeBrowsing service.
-  void ReportMalware(const GURL& malware_url,
-                     const GURL& page_url,
-                     const GURL& referrer_url,
-                     bool is_subresource);
+  // For UMA users we report to Google when a SafeBrowsing interstitial is shown
+  // to the user.  We assume that the threat type is either URL_MALWARE or
+  // URL_PHISHING.
+  void ReportSafeBrowsingHit(const GURL& malicious_url,
+                             const GURL& page_url,
+                             const GURL& referrer_url,
+                             bool is_subresource,
+                             SafeBrowsingService::UrlCheckResult threat_type);
+
 
   // Setter for additional_query_. To make sure the additional_query_ won't
   // be changed in the middle of an update, caller (e.g.: SafeBrowsingService)
@@ -131,14 +135,15 @@ class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
   // so are handled separately.
   enum SafeBrowsingRequestType {
     NO_REQUEST = 0,     // No requests in progress
-    UPDATE_REQUEST,   // Request for redirect URLs
+    UPDATE_REQUEST,     // Request for redirect URLs
     CHUNK_REQUEST,      // Request for a specific chunk
     GETKEY_REQUEST      // Update the client's MAC key
   };
 
   // Composes a URL using |prefix|, |method| (e.g.: gethash, download,
   // newkey, report), |client_name| and |version|. When not empty,
-  // |additional_query| is appended to the URL.
+  // |additional_query| is appended to the URL with an additional "&"
+  // in the front.
   static std::string ComposeUrl(const std::string& prefix,
                                 const std::string& method,
                                 const std::string& client_name,
@@ -153,9 +158,11 @@ class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
   GURL GetHashUrl(bool use_mac) const;
   // Generates new MAC client key request URL.
   GURL MacKeyUrl() const;
-  // Generates URL for reporting malware pages.
-  GURL MalwareReportUrl(const GURL& malware_url, const GURL& page_url,
-                        const GURL& referrer_url, bool is_subresource) const;
+  // Generates URL for reporting malicious pages.
+  GURL SafeBrowsingReportUrl(
+      const GURL& malicious_url, const GURL& page_url, const GURL& referrer_url,
+      bool is_subresource,
+      SafeBrowsingService::UrlCheckResult threat_type) const;
   // Composes a ChunkUrl based on input string.
   GURL NextChunkUrl(const std::string& input) const;
 
@@ -289,8 +296,8 @@ class SafeBrowsingProtocolManager : public URLFetcher::Delegate {
   // Tracks the size of each update (in bytes).
   int update_size_;
 
-  // Track outstanding malware report fetchers for clean up.
-  std::set<const URLFetcher*> malware_reports_;
+  // Track outstanding SafeBrowsing report fetchers for clean up.
+  std::set<const URLFetcher*> safebrowsing_reports_;
 
   // The safe browsing client name sent in each request.
   std::string client_name_;

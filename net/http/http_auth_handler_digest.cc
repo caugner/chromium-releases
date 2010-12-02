@@ -10,6 +10,7 @@
 #include "base/md5.h"
 #include "base/rand_util.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
@@ -170,11 +171,11 @@ std::string HttpAuthHandlerDigest::AssembleCredentials(
     const std::string& cnonce,
     int nonce_count) const {
   // the nonce-count is an 8 digit hex string.
-  std::string nc = StringPrintf("%08x", nonce_count);
+  std::string nc = base::StringPrintf("%08x", nonce_count);
 
   // TODO(eroman): is this the right encoding?
-  std::string authorization = std::string("Digest username=") +
-                              HttpUtil::Quote(UTF16ToUTF8(username));
+  std::string authorization = (std::string("Digest username=") +
+                               HttpUtil::Quote(UTF16ToUTF8(username)));
   authorization += ", realm=" + HttpUtil::Quote(realm_);
   authorization += ", nonce=" + HttpUtil::Quote(nonce_);
   authorization += ", uri=" + HttpUtil::Quote(path);
@@ -199,6 +200,32 @@ std::string HttpAuthHandlerDigest::AssembleCredentials(
   }
 
   return authorization;
+}
+
+bool HttpAuthHandlerDigest::Init(HttpAuth::ChallengeTokenizer* challenge) {
+  return ParseChallenge(challenge);
+}
+
+HttpAuth::AuthorizationResult HttpAuthHandlerDigest::HandleAnotherChallenge(
+    HttpAuth::ChallengeTokenizer* challenge) {
+  // Even though Digest is not connection based, a "second round" is parsed
+  // to differentiate between stale and rejected responses.
+  // Note that the state of the current handler is not mutated - this way if
+  // there is a rejection the realm hasn't changed.
+  if (!LowerCaseEqualsASCII(challenge->scheme(), "digest"))
+    return HttpAuth::AUTHORIZATION_RESULT_INVALID;
+
+  HttpUtil::NameValuePairsIterator parameters = challenge->param_pairs();
+
+  // Try to find the "stale" value.
+  while (parameters.GetNext()) {
+    if (!LowerCaseEqualsASCII(parameters.name(), "stale"))
+      continue;
+    if (LowerCaseEqualsASCII(parameters.unquoted_value(), "true"))
+      return HttpAuth::AUTHORIZATION_RESULT_STALE;
+  }
+
+  return HttpAuth::AUTHORIZATION_RESULT_REJECT;
 }
 
 // The digest challenge header looks like:
@@ -231,28 +258,32 @@ bool HttpAuthHandlerDigest::ParseChallenge(
   qop_ = QOP_UNSPECIFIED;
   realm_ = nonce_ = domain_ = opaque_ = std::string();
 
-  if (!challenge->valid() ||
-      !LowerCaseEqualsASCII(challenge->scheme(), "digest"))
-    return false;  // FAIL -- Couldn't match auth-scheme.
+  // FAIL -- Couldn't match auth-scheme.
+  if (!LowerCaseEqualsASCII(challenge->scheme(), "digest"))
+    return false;
+
+  HttpUtil::NameValuePairsIterator parameters = challenge->param_pairs();
 
   // Loop through all the properties.
-  while (challenge->GetNext()) {
-    if (challenge->value().empty()) {
+  while (parameters.GetNext()) {
+    if (parameters.value().empty()) {
       DLOG(INFO) << "Invalid digest property";
       return false;
     }
 
-    if (!ParseChallengeProperty(challenge->name(), challenge->unquoted_value()))
-      return false;  // FAIL -- couldn't parse a property.
+    // FAIL -- couldn't parse a property.
+    if (!ParseChallengeProperty(parameters.name(),
+                                parameters.unquoted_value()))
+      return false;
   }
 
   // Check if tokenizer failed.
-  if (!challenge->valid())
-    return false;  // FAIL
+  if (!parameters.valid())
+    return false;
 
   // Check that a minimum set of properties were provided.
   if (nonce_.empty())
-    return false;  // FAIL
+    return false;
 
   return true;
 }

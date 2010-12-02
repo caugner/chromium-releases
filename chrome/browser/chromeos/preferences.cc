@@ -1,19 +1,23 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/preferences.h"
 
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/keyboard_library.h"
 #include "chrome/browser/chromeos/cros/input_method_library.h"
-#include "chrome/browser/chromeos/cros/synaptics_library.h"
+#include "chrome/browser/chromeos/cros/keyboard_library.h"
+#include "chrome/browser/chromeos/cros/power_library.h"
+#include "chrome/browser/chromeos/cros/touchpad_library.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profile.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "unicode/timezone.h"
@@ -21,22 +25,33 @@
 namespace chromeos {
 
 static const char kFallbackInputMethodLocale[] = "en-US";
+static const char kTalkAppExtensionId[] = "ggnioahjipcehijkhpdjekioddnjoben";
+
+Preferences::Preferences(Profile* profile)
+    : profile_(profile) {
+}
 
 // static
 void Preferences::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kTapToClickEnabled, false);
   prefs->RegisterBooleanPref(prefs::kLabsMediaplayerEnabled, false);
   prefs->RegisterBooleanPref(prefs::kLabsAdvancedFilesystemEnabled, false);
-  prefs->RegisterBooleanPref(prefs::kVertEdgeScrollEnabled, false);
-  prefs->RegisterIntegerPref(prefs::kTouchpadSpeedFactor, 9);
-  prefs->RegisterIntegerPref(prefs::kTouchpadSensitivity, 5);
+  // Check if the accessibility pref is already registered, which can happen
+  // in WizardController::RegisterPrefs. We still want to try to register
+  // the pref here in case of Chrome/Linux with ChromeOS=1.
+  if (prefs->FindPreference(prefs::kAccessibilityEnabled) == NULL) {
+    prefs->RegisterBooleanPref(prefs::kAccessibilityEnabled, false);
+  }
+  prefs->RegisterIntegerPref(prefs::kLabsTalkEnabled, 1);
+  prefs->RegisterIntegerPref(prefs::kTouchpadSensitivity, 3);
   prefs->RegisterStringPref(prefs::kLanguageCurrentInputMethod, "");
   prefs->RegisterStringPref(prefs::kLanguagePreviousInputMethod, "");
   prefs->RegisterStringPref(prefs::kLanguageHotkeyNextEngineInMenu,
                             language_prefs::kHotkeyNextEngineInMenu);
   prefs->RegisterStringPref(prefs::kLanguageHotkeyPreviousEngine,
                             language_prefs::kHotkeyPreviousEngine);
-  prefs->RegisterStringPref(prefs::kLanguagePreferredLanguages, "");
+  prefs->RegisterStringPref(prefs::kLanguagePreferredLanguages,
+                            kFallbackInputMethodLocale);
   prefs->RegisterStringPref(prefs::kLanguagePreloadEngines,
                             kFallbackInputMethodId);  // EN layout
   for (size_t i = 0; i < language_prefs::kNumChewingBooleanPrefs; ++i) {
@@ -101,13 +116,14 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
                              language_prefs::kXkbAutoRepeatDelayInMs);
   prefs->RegisterIntegerPref(prefs::kLanguageXkbAutoRepeatInterval,
                              language_prefs::kXkbAutoRepeatIntervalInMs);
+
+  // Screen lock default to off.
+  prefs->RegisterBooleanPref(prefs::kEnableScreenLock, false);
 }
 
 void Preferences::Init(PrefService* prefs) {
   tap_to_click_enabled_.Init(prefs::kTapToClickEnabled, prefs, this);
   accessibility_enabled_.Init(prefs::kAccessibilityEnabled, prefs, this);
-  vert_edge_scroll_enabled_.Init(prefs::kVertEdgeScrollEnabled, prefs, this);
-  speed_factor_.Init(prefs::kTouchpadSpeedFactor, prefs, this);
   sensitivity_.Init(prefs::kTouchpadSensitivity, prefs, this);
   language_hotkey_next_engine_in_menu_.Init(
       prefs::kLanguageHotkeyNextEngineInMenu, prefs, this);
@@ -168,6 +184,10 @@ void Preferences::Init(PrefService* prefs) {
   language_xkb_auto_repeat_interval_pref_.Init(
       prefs::kLanguageXkbAutoRepeatInterval, prefs, this);
 
+  labs_talk_enabled_.Init(prefs::kLabsTalkEnabled, prefs, this);
+
+  enable_screen_lock_.Init(prefs::kEnableScreenLock, prefs, this);
+
   // Initialize touchpad settings to what's saved in user preferences.
   NotifyPrefChanged(NULL);
 }
@@ -181,24 +201,12 @@ void Preferences::Observe(NotificationType type,
 
 void Preferences::NotifyPrefChanged(const std::string* pref_name) {
   if (!pref_name || *pref_name == prefs::kTapToClickEnabled) {
-    CrosLibrary::Get()->GetSynapticsLibrary()->SetBoolParameter(
-        PARAM_BOOL_TAP_TO_CLICK,
+    CrosLibrary::Get()->GetTouchpadLibrary()->SetTapToClick(
         tap_to_click_enabled_.GetValue());
   }
-  if (!pref_name || *pref_name == prefs::kVertEdgeScrollEnabled) {
-    CrosLibrary::Get()->GetSynapticsLibrary()->SetBoolParameter(
-        PARAM_BOOL_VERTICAL_EDGE_SCROLLING,
-        vert_edge_scroll_enabled_.GetValue());
-  }
-  if (!pref_name || *pref_name == prefs::kTouchpadSpeedFactor) {
-    CrosLibrary::Get()->GetSynapticsLibrary()->SetRangeParameter(
-        PARAM_RANGE_SPEED_SENSITIVITY,
-        speed_factor_.GetValue());
-  }
   if (!pref_name || *pref_name == prefs::kTouchpadSensitivity) {
-    CrosLibrary::Get()->GetSynapticsLibrary()->SetRangeParameter(
-          PARAM_RANGE_TOUCH_SENSITIVITY,
-          sensitivity_.GetValue());
+    CrosLibrary::Get()->GetTouchpadLibrary()->SetSensitivity(
+        sensitivity_.GetValue());
   }
 
   // We don't handle prefs::kLanguageCurrentInputMethod and PreviousInputMethod
@@ -336,6 +344,17 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
                      (*pref_name == prefs::kLanguageXkbAutoRepeatInterval))) {
     UpdateAutoRepeatRate();
   }
+
+  // Listen for explicit changes as ExtensionsService handles startup case.
+  if (pref_name && *pref_name == prefs::kLabsTalkEnabled) {
+    UpdateTalkApp();
+  }
+
+  // Init or update power manager config.
+  if (!pref_name || *pref_name == prefs::kEnableScreenLock) {
+    CrosLibrary::Get()->GetPowerLibrary()->EnableScreenLock(
+        enable_screen_lock_.GetValue());
+  }
 }
 
 void Preferences::SetLanguageConfigBoolean(const char* section,
@@ -424,6 +443,19 @@ void Preferences::UpdateAutoRepeatRate() {
   DCHECK(rate.initial_delay_in_ms > 0);
   DCHECK(rate.repeat_interval_in_ms > 0);
   CrosLibrary::Get()->GetKeyboardLibrary()->SetAutoRepeatRate(rate);
+}
+
+void Preferences::UpdateTalkApp() {
+  if (!profile_->GetExtensionsService()->is_ready()) {
+    NOTREACHED() << "Extensions service should be ready";
+    return;
+  }
+
+  if (labs_talk_enabled_.GetValue() == 0) {
+    profile_->GetExtensionsService()->DisableExtension(kTalkAppExtensionId);
+  } else {
+    profile_->GetExtensionsService()->EnableExtension(kTalkAppExtensionId);
+  }
 }
 
 }  // namespace chromeos

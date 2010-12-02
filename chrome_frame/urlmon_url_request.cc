@@ -11,6 +11,7 @@
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome_frame/bind_context_info.h"
 #include "chrome_frame/chrome_frame_activex_base.h"
@@ -29,7 +30,9 @@ UrlmonUrlRequest::UrlmonUrlRequest()
       thread_(NULL),
       parent_window_(NULL),
       privileged_mode_(false),
-      pending_(false) {
+      pending_(false),
+      is_expecting_download_(true),
+      cleanup_transaction_(false) {
   DLOG(INFO) << __FUNCTION__ << me();
 }
 
@@ -38,7 +41,7 @@ UrlmonUrlRequest::~UrlmonUrlRequest() {
 }
 
 std::string UrlmonUrlRequest::me() const {
-  return StringPrintf(" id: %i Obj: %X ", id(), this);
+  return base::StringPrintf(" id: %i Obj: %X ", id(), this);
 }
 
 bool UrlmonUrlRequest::Start() {
@@ -92,6 +95,8 @@ bool UrlmonUrlRequest::Read(int bytes_to_read) {
   DCHECK_GE(bytes_to_read, 0);
   DCHECK_EQ(0, calling_delegate_);
   DLOG(INFO) << __FUNCTION__ << me();
+
+  is_expecting_download_ = false;
 
   // Re-entrancy check. Thou shall not call Read() while process OnReadComplete!
   DCHECK_EQ(0u, pending_read_size_);
@@ -177,7 +182,7 @@ void UrlmonUrlRequest::TerminateBind(TerminateBindCallback* callback) {
         // Just drop the data.
       }
       DLOG_IF(WARNING, hr != E_PENDING) << __FUNCTION__ <<
-          StringPrintf(" expected E_PENDING but got 0x%08X", hr);
+          base::StringPrintf(" expected E_PENDING but got 0x%08X", hr);
     }
   }
 }
@@ -325,7 +330,8 @@ STDMETHODIMP UrlmonUrlRequest::OnProgress(ULONG progress, ULONG max_progress,
 
     default:
       DLOG(INFO) << __FUNCTION__ << me()
-          << StringPrintf(L"code: %i status: %ls", status_code, status_text);
+          << base::StringPrintf(L"code: %i status: %ls", status_code,
+                                status_text);
       break;
   }
 
@@ -344,12 +350,15 @@ STDMETHODIMP UrlmonUrlRequest::OnStopBinding(HRESULT result, LPCWSTR error) {
   // Mark we a are done.
   status_.Done();
 
-  if (result == INET_E_TERMINATED_BIND && terminate_requested())
-    terminate_bind_callback_->Run(moniker_, bind_context_);
-
-  // We always return INET_E_TERMINATED_BIND from OnDataAvailable
-  if (result == INET_E_TERMINATED_BIND)
+  if (result == INET_E_TERMINATED_BIND) {
+    if (terminate_requested()) {
+      terminate_bind_callback_->Run(moniker_, bind_context_);
+    } else {
+      cleanup_transaction_ = true;
+    }
+    // We may have returned INET_E_TERMINATED_BIND from OnDataAvailable.
     result = S_OK;
+  }
 
   if (state == Status::WORKING) {
     status_.set_result(result);
@@ -445,6 +454,11 @@ STDMETHODIMP UrlmonUrlRequest::GetBindInfo(DWORD* bind_flags,
     // these requests to the browser's cache
     *bind_flags |= BINDF_GETNEWESTVERSION | BINDF_PRAGMA_NO_CACHE;
 
+    // Attempt to avoid storing the response for XHR request.
+    // See http://crbug.com/55918
+    if (resource_type_ != ResourceType::MAIN_FRAME)
+      *bind_flags |= BINDF_NOWRITECACHE;
+
     // Initialize the STGMEDIUM.
     memset(&bind_info->stgmedData, 0, sizeof(STGMEDIUM));
     bind_info->grfBindInfoF = 0;
@@ -469,8 +483,10 @@ STDMETHODIMP UrlmonUrlRequest::OnDataAvailable(DWORD flags, DWORD size,
   DCHECK_EQ(thread_, PlatformThread::CurrentId());
   DLOG(INFO) << __FUNCTION__ << me() << "bytes available: " << size;
 
-  if (terminate_requested())
+  if (terminate_requested()) {
+    DLOG(INFO) << " Download requested. INET_E_TERMINATED_BIND returned";
     return INET_E_TERMINATED_BIND;
+  }
 
   if (!storage || (storage->tymed != TYMED_ISTREAM)) {
     NOTREACHED();
@@ -495,12 +511,15 @@ STDMETHODIMP UrlmonUrlRequest::OnDataAvailable(DWORD flags, DWORD size,
   }
 
   if (BSCF_LASTDATANOTIFICATION & flags) {
-    DLOG(INFO) << __FUNCTION__ << me() << "end of data.";
+    if (!is_expecting_download_ || pending()) {
+      DLOG(INFO) << __FUNCTION__ << me() << "EOF";
+      return S_OK;
+    }
     // Always return INET_E_TERMINATED_BIND to allow bind context reuse
     // if DownloadToHost is suddenly requested.
+    DLOG(INFO) << __FUNCTION__ << " EOF: INET_E_TERMINATED_BIND returned";
     return INET_E_TERMINATED_BIND;
   }
-
   return S_OK;
 }
 
@@ -545,8 +564,9 @@ STDMETHODIMP UrlmonUrlRequest::BeginningTransaction(const wchar_t* url,
   if (post_data_len() > 0) {
     // Tack on the Content-Length header since when using an IStream type
     // STGMEDIUM, it looks like it doesn't get set for us :(
-    new_headers = StringPrintf("Content-Length: %s\r\n",
-                               base::Int64ToString(post_data_len()).c_str());
+    new_headers = base::StringPrintf(
+        "Content-Length: %s\r\n",
+        base::Int64ToString(post_data_len()).c_str());
   }
 
   if (!extra_headers().empty()) {
@@ -556,7 +576,7 @@ STDMETHODIMP UrlmonUrlRequest::BeginningTransaction(const wchar_t* url,
 
   if (!referrer().empty()) {
     // Referrer is famously misspelled in HTTP:
-    new_headers += StringPrintf("Referer: %s\r\n", referrer().c_str());
+    new_headers += base::StringPrintf("Referer: %s\r\n", referrer().c_str());
   }
 
   // In the rare case if "User-Agent" string is already in |current_headers|.
@@ -785,7 +805,7 @@ HRESULT UrlmonUrlRequest::StartAsyncDownload() {
       // http://user2:secret@localhost:1337/auth-basic?set-cookie-if-challenged
       // when running the UrlRequest unit tests.
       DLOG(ERROR) << __FUNCTION__ << me() <<
-          StringPrintf("IUrlMoniker::BindToStorage failed 0x%08X.", hr);
+          base::StringPrintf("IUrlMoniker::BindToStorage failed 0x%08X.", hr);
       // In most cases we'll get a MK_E_SYNTAX error here but if we abort
       // the navigation ourselves such as in the case of seeing something
       // else than ALLOWALL in X-Frame-Options.
@@ -793,7 +813,7 @@ HRESULT UrlmonUrlRequest::StartAsyncDownload() {
   }
 
   DLOG_IF(ERROR, FAILED(hr)) << me() <<
-      StringPrintf(L"StartAsyncDownload failed: 0x%08X", hr);
+      base::StringPrintf(L"StartAsyncDownload failed: 0x%08X", hr);
 
   return hr;
 }
@@ -805,13 +825,34 @@ void UrlmonUrlRequest::NotifyDelegateAndDie() {
   PluginUrlRequestDelegate* delegate = delegate_;
   delegate_ = NULL;
   ReleaseBindings();
-  bind_context_.Release();
+  TerminateTransaction();
   if (delegate) {
     URLRequestStatus result = status_.get_result();
     delegate->OnResponseEnd(id(), result);
   } else {
     DLOG(WARNING) << __FUNCTION__ << me() << "no delegate";
   }
+}
+
+void UrlmonUrlRequest::TerminateTransaction() {
+  if (cleanup_transaction_ && bind_context_ && moniker_) {
+    // We return INET_E_TERMINATED_BIND from our OnDataAvailable implementation
+    // to ensure that the transaction stays around if Chrome decides to issue
+    // a download request when it finishes inspecting the headers received in
+    // OnResponse. However this causes the urlmon transaction object to leak.
+    // To workaround this we issue a dummy BindToObject call which should fail
+    // and clean up the transaction. We overwrite the __PrecreatedObject object
+    // param which ensures that urlmon does not end up instantiating mshtml
+    ScopedComPtr<IStream> dummy_stream;
+    CreateStreamOnHGlobal(NULL, TRUE, dummy_stream.Receive());
+    DCHECK(dummy_stream);
+    bind_context_->RegisterObjectParam(L"__PrecreatedObject",
+                                       dummy_stream);
+    ScopedComPtr<IUnknown> dummy;
+    moniker_->BindToObject(bind_context_, NULL, IID_IUnknown,
+                           reinterpret_cast<void**>(dummy.Receive()));
+  }
+  bind_context_.Release();
 }
 
 void UrlmonUrlRequest::ReleaseBindings() {
@@ -875,7 +916,8 @@ net::Error UrlmonUrlRequest::HresultToNetError(HRESULT hr) {
 
     default:
       DLOG(WARNING)
-          << StringPrintf("TODO: translate HRESULT 0x%08X to net::Error", hr);
+          << base::StringPrintf("TODO: translate HRESULT 0x%08X to net::Error",
+                                hr);
       break;
   }
   return ret;
@@ -928,7 +970,6 @@ void UrlmonUrlRequestManager::StartRequest(int request_id,
   if (pending_request_) {
     DCHECK_EQ(pending_request_->url(), request_info.url);
     new_request.swap(pending_request_);
-    new_request->set_pending(false);
     is_started = true;
     DLOG(INFO) << __FUNCTION__ << new_request->me()
         << "assigned id " << request_id;
@@ -945,6 +986,7 @@ void UrlmonUrlRequestManager::StartRequest(int request_id,
       request_info.referrer,
       request_info.extra_request_headers,
       request_info.upload_data,
+      static_cast<ResourceType::Type>(request_info.resource_type),
       enable_frame_busting_);
   new_request->set_parent_window(notification_window_);
   new_request->set_privileged_mode(privileged_mode_);

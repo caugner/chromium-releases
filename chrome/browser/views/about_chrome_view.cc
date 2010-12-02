@@ -20,6 +20,7 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/views/accessible_view_helper.h"
+#include "chrome/browser/views/window.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
@@ -81,7 +82,7 @@ namespace browser {
   views::Window* ShowAboutChromeView(gfx::NativeWindow parent,
                                      Profile* profile) {
       views::Window* about_chrome_window =
-        views::Window::CreateChromeWindow(parent,
+        browser::CreateViewsWindow(parent,
         gfx::Rect(),
         new AboutChromeView(profile));
       about_chrome_window->Show();
@@ -775,12 +776,9 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
         UserMetrics::RecordAction(UserMetricsAction("UpgradeCheck_Upgraded"),
                                   profile_);
       restart_button_visible_ = true;
-      const std::wstring& update_string = new_version_available_.empty()
-          ? l10n_util::GetStringF(IDS_UPGRADE_SUCCESSFUL_NOVERSION_RESTART,
-                                  l10n_util::GetString(IDS_PRODUCT_NAME))
-          : l10n_util::GetStringF(IDS_UPGRADE_SUCCESSFUL_RESTART,
-                                  l10n_util::GetString(IDS_PRODUCT_NAME),
-                                  new_version_available_);
+      const std::wstring& update_string =
+          l10n_util::GetStringF(IDS_UPGRADE_SUCCESSFUL_RESTART,
+                                l10n_util::GetString(IDS_PRODUCT_NAME));
       update_label_.SetText(update_string);
       show_success_indicator = true;
       break;

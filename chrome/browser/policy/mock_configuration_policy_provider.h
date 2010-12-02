@@ -7,15 +7,21 @@
 #pragma once
 
 #include <map>
+#include <utility>
 
 #include "base/stl_util-inl.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
+
+namespace policy {
 
 // Mock ConfigurationPolicyProvider implementation that supplies canned
 // values for polices.
 class MockConfigurationPolicyProvider : public ConfigurationPolicyProvider {
  public:
-  MockConfigurationPolicyProvider() {}
+  MockConfigurationPolicyProvider()
+      : ConfigurationPolicyProvider(
+          ConfigurationPolicyPrefStore::GetChromePolicyValueMap()) {
+  }
   ~MockConfigurationPolicyProvider() {
     STLDeleteValues(&policy_map_);
   }
@@ -23,7 +29,8 @@ class MockConfigurationPolicyProvider : public ConfigurationPolicyProvider {
   typedef std::map<ConfigurationPolicyStore::PolicyType, Value*> PolicyMap;
 
   void AddPolicy(ConfigurationPolicyStore::PolicyType policy, Value* value) {
-    policy_map_[policy] = value;
+    std::swap(policy_map_[policy], value);
+    delete value;
   }
 
   // ConfigurationPolicyProvider method overrides.
@@ -39,5 +46,6 @@ class MockConfigurationPolicyProvider : public ConfigurationPolicyProvider {
   PolicyMap policy_map_;
 };
 
-#endif  // CHROME_BROWSER_POLICY_MOCK_CONFIGURATION_POLICY_PROVIDER_H_
+}  // namespace policy
 
+#endif  // CHROME_BROWSER_POLICY_MOCK_CONFIGURATION_POLICY_PROVIDER_H_

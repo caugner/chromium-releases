@@ -7,10 +7,13 @@
 #include "base/path_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_action.h"
+#include "gfx/skia_util.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/image_decoder.h"
+
+using gfx::BitmapsAreEqual;
 
 static SkBitmap LoadIcon(const std::string& filename) {
   FilePath path;
@@ -27,21 +30,6 @@ static SkBitmap LoadIcon(const std::string& filename) {
   bitmap = decoder.Decode(data, file_contents.length());
 
   return bitmap;
-}
-
-static bool BitmapsAreEqual(const SkBitmap& bitmap1, const SkBitmap& bitmap2) {
-  void* addr1 = NULL;
-  void* addr2 = NULL;
-
-  bitmap1.lockPixels();
-  addr1 = bitmap1.getAddr32(0, 0);
-  bitmap1.unlockPixels();
-
-  bitmap2.lockPixels();
-  addr2 = bitmap2.getAddr32(0, 0);
-  bitmap2.unlockPixels();
-
-  return 0 == memcmp(addr1, addr2, bitmap1.getSize());
 }
 
 TEST(ExtensionActionTest, TabSpecificState) {
@@ -85,19 +73,19 @@ TEST(ExtensionActionTest, TabSpecificState) {
   ASSERT_EQ(1, action.GetIconIndex(1));
 
   // visibility
-  ASSERT_EQ(false, action.GetIsVisible(1));
+  ASSERT_FALSE(action.GetIsVisible(1));
   action.SetIsVisible(ExtensionAction::kDefaultTabId, true);
-  ASSERT_EQ(true, action.GetIsVisible(1));
-  ASSERT_EQ(true, action.GetIsVisible(100));
+  ASSERT_TRUE(action.GetIsVisible(1));
+  ASSERT_TRUE(action.GetIsVisible(100));
   action.SetIsVisible(ExtensionAction::kDefaultTabId, false);
-  ASSERT_EQ(false, action.GetIsVisible(1));
-  ASSERT_EQ(false, action.GetIsVisible(100));
+  ASSERT_FALSE(action.GetIsVisible(1));
+  ASSERT_FALSE(action.GetIsVisible(100));
   action.SetIsVisible(100, true);
-  ASSERT_EQ(false, action.GetIsVisible(1));
-  ASSERT_EQ(true, action.GetIsVisible(100));
+  ASSERT_FALSE(action.GetIsVisible(1));
+  ASSERT_TRUE(action.GetIsVisible(100));
   action.ClearAllValuesForTab(100);
-  ASSERT_EQ(false, action.GetIsVisible(1));
-  ASSERT_EQ(false, action.GetIsVisible(100));
+  ASSERT_FALSE(action.GetIsVisible(1));
+  ASSERT_FALSE(action.GetIsVisible(100));
 
   // badge text
   ASSERT_EQ("", action.GetBadgeText(1));

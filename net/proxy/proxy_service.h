@@ -177,10 +177,8 @@ class ProxyService : public base::RefCountedThreadSafe<ProxyService>,
   // specified fixed settings. |pc| must not be NULL.
   static ProxyService* CreateFixed(const ProxyConfig& pc);
 
-  // Creates a proxy service that always fails to fetch the proxy configuration,
-  // so it falls back to direct connect.
-  // TODO(eroman): Rename to CreateDirect().
-  static ProxyService* CreateNull();
+  // Creates a proxy service that uses a DIRECT connection for all requests.
+  static ProxyService* CreateDirect();
 
   // This method is used by tests to create a ProxyService that returns a
   // hardcoded proxy fallback list (|pac_string|) for every URL.
@@ -219,12 +217,15 @@ class ProxyService : public base::RefCountedThreadSafe<ProxyService>,
     STATE_READY,
   };
 
-  ~ProxyService();
+  virtual ~ProxyService();
 
   // Resets all the variables associated with the current proxy configuration,
   // and rewinds the current state to |STATE_NONE|. Returns the previous value
-  // of |current_state_|.
-  State ResetProxyConfig();
+  // of |current_state_|.  If |reset_fetched_config| is true then
+  // |fetched_config_| will also be reset, otherwise it will be left as-is.
+  // Resetting it means that we will have to re-fetch the configuration from
+  // the ProxyConfigService later.
+  State ResetProxyConfig(bool reset_fetched_config);
 
   // Retrieves the current proxy configuration from the ProxyConfigService, and
   // starts initializing for it.
@@ -266,6 +267,9 @@ class ProxyService : public base::RefCountedThreadSafe<ProxyService>,
 
   // ProxyConfigService::Observer
   virtual void OnProxyConfigChanged(const ProxyConfig& config);
+
+  // Start initialization using |fetched_config_|.
+  void InitializeUsingLastFetchedConfig();
 
   scoped_ptr<ProxyConfigService> config_service_;
   scoped_ptr<ProxyResolver> resolver_;
@@ -337,7 +341,7 @@ class SyncProxyServiceHelper
  private:
   friend class base::RefCountedThreadSafe<SyncProxyServiceHelper>;
 
-  ~SyncProxyServiceHelper() {}
+  virtual ~SyncProxyServiceHelper();
 
   void StartAsyncResolve(const GURL& url, const BoundNetLog& net_log);
   void StartAsyncReconsider(const GURL& url, const BoundNetLog& net_log);

@@ -4,7 +4,9 @@
 
 #include "webkit/support/webkit_support.h"
 
+#include "app/gfx/gl/gl_implementation.h"
 #include "base/at_exit.h"
+#include "base/base64.h"
 #include "base/command_line.h"
 #include "base/debug_util.h"
 #include "base/file_path.h"
@@ -16,6 +18,7 @@
 #include "base/process_util.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -104,6 +107,10 @@ class TestEnvironment {
     if (!unit_test_mode) {
       at_exit_manager_.reset(new base::AtExitManager);
       InitLogging(false);
+
+      // Default to OSMesa for GL, for testing WebGL, 3D CSS and other
+      // GPU-related APIs.
+      gfx::InitializeGLBindings(gfx::kGLImplementationOSMesaGL);
     }
     main_message_loop_.reset(new MessageLoopForUI);
     // TestWebKitClient must be instantiated after the MessageLoopForUI.
@@ -212,10 +219,6 @@ static void SetUpTestEnvironmentImpl(bool unit_test_mode) {
   }
 }
 
-void SetUpTestEnvironment(bool unit_test_mode) {
-  SetUpTestEnvironment();
-}
-
 void SetUpTestEnvironment() {
   SetUpTestEnvironmentImpl(false);
 }
@@ -252,9 +255,6 @@ WebPlugin* CreateWebPlugin(WebFrame* frame,
           &actual_mime_type) || !info.enabled) {
     return NULL;
   }
-
-  if (actual_mime_type.empty())
-    actual_mime_type = params.mimeType.utf8();
 
   return new WebPluginImplWithPageDelegate(
       frame, params, info.path, actual_mime_type);
@@ -342,6 +342,14 @@ void RunAllPendingMessages() {
   MessageLoop::current()->RunAllPending();
 }
 
+bool MessageLoopNestableTasksAllowed() {
+  return MessageLoop::current()->NestableTasksAllowed();
+}
+
+void MessageLoopSetNestableTasksAllowed(bool allowed) {
+  MessageLoop::current()->SetNestableTasksAllowed(allowed);
+}
+
 void DispatchMessageLoop() {
   MessageLoop* current = MessageLoop::current();
   bool old_state = current->NestableTasksAllowed();
@@ -352,14 +360,6 @@ void DispatchMessageLoop() {
 
 WebDevToolsAgentClient::WebKitClientMessageLoop* CreateDevToolsMessageLoop() {
   return new WebKitClientMessageLoopImpl();
-}
-
-void PostTaskFromHere(Task* task) {
-  MessageLoop::current()->PostTask(FROM_HERE, task);
-}
-
-void PostDelayedTaskFromHere(Task* task, int64 delay_ms) {
-  MessageLoop::current()->PostDelayedTask(FROM_HERE, task, delay_ms);
 }
 
 void PostDelayedTask(void (*func)(void*), void* context, int64 delay_ms) {
@@ -419,9 +419,26 @@ WebURL RewriteLayoutTestsURL(const std::string& utf8_url) {
 }
 
 bool SetCurrentDirectoryForFileURL(const WebKit::WebURL& fileUrl) {
-  FilePath localPath;
-  return net::FileURLToFilePath(fileUrl, &localPath)
-      && file_util::SetCurrentDirectory(localPath.DirName());
+  FilePath local_path;
+  return net::FileURLToFilePath(fileUrl, &local_path)
+      && file_util::SetCurrentDirectory(local_path.DirName());
+}
+
+WebURL LocalFileToDataURL(const WebURL& fileUrl) {
+  FilePath local_path;
+  if (!net::FileURLToFilePath(fileUrl, &local_path))
+    return WebURL();
+
+  std::string contents;
+  if (!file_util::ReadFileToString(local_path, &contents))
+    return WebURL();
+
+  std::string contents_base64;
+  if (!base::Base64Encode(contents, &contents_base64))
+    return WebURL();
+
+  const char kDataUrlPrefix[] = "data:text/css;charset=utf-8;base64,";
+  return WebURL(GURL(kDataUrlPrefix + contents_base64));
 }
 
 int64 GetCurrentTimeInMillisecond() {
@@ -457,7 +474,7 @@ std::string MakeURLErrorDescription(const WebKit::WebURLError& error) {
   } else
     DLOG(WARNING) << "Unknown error domain";
 
-  return StringPrintf("<NSError domain %s, code %d, failing URL \"%s\">",
+  return base::StringPrintf("<NSError domain %s, code %d, failing URL \"%s\">",
       domain.c_str(), code, error.unreachableURL.spec().data());
 }
 

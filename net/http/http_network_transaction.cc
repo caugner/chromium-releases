@@ -14,8 +14,9 @@
 #include "base/scoped_ptr.h"
 #include "base/stats_counters.h"
 #include "base/stl_util-inl.h"
-#include "base/string_util.h"
 #include "base/string_number_conversions.h"
+#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "build/build_config.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/auth.h"
@@ -25,6 +26,7 @@
 #include "net/base/net_util.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/ssl_connection_status_flags.h"
+#include "net/base/ssl_non_sensitive_host_info.h"
 #include "net/base/upload_data_stream.h"
 #include "net/http/http_auth.h"
 #include "net/http/http_auth_handler.h"
@@ -37,9 +39,9 @@
 #include "net/http/http_proxy_client_socket_pool.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_request_info.h"
+#include "net/http/http_response_body_drainer.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
-#include "net/http/http_stream_handle.h"
 #include "net/http/http_stream_request.h"
 #include "net/http/http_util.h"
 #include "net/http/url_security_manager.h"
@@ -67,7 +69,7 @@ void BuildRequestHeaders(const HttpRequestInfo* request_info,
   const std::string path = using_proxy ?
                            HttpUtil::SpecForRequest(request_info->url) :
                            HttpUtil::PathForRequest(request_info->url);
-  *request_line = StringPrintf(
+  *request_line = base::StringPrintf(
       "%s %s HTTP/1.1\r\n", request_info->method.c_str(), path.c_str());
   request_headers->SetHeader(HttpRequestHeaders::kHost,
                              GetHostAndOptionalPort(request_info->url));
@@ -164,6 +166,43 @@ HttpNetworkTransaction::HttpNetworkTransaction(HttpNetworkSession* session)
   if (session->http_stream_factory()->next_protos())
     ssl_config_.next_protos = *session->http_stream_factory()->next_protos();
 
+}
+
+HttpNetworkTransaction::~HttpNetworkTransaction() {
+  if (stream_.get()) {
+    HttpResponseHeaders* headers = GetResponseHeaders();
+    // TODO(mbelshe): The stream_ should be able to compute whether or not the
+    //                stream should be kept alive.  No reason to compute here
+    //                and pass it in.
+    bool try_to_keep_alive =
+        next_state_ == STATE_NONE &&
+        stream_->CanFindEndOfResponse() &&
+        (!headers || headers->IsKeepAlive());
+    if (!try_to_keep_alive) {
+      stream_->Close(true /* not reusable */);
+    } else {
+      if (stream_->IsResponseBodyComplete()) {
+        // If the response body is complete, we can just reuse the socket.
+        stream_->Close(false /* reusable */);
+      } else {
+        // Otherwise, we try to drain the response body.
+        // TODO(willchan): Consider moving this response body draining to the
+        // stream implementation.  For SPDY, there's clearly no point.  For
+        // HTTP, it can vary depending on whether or not we're pipelining.  It's
+        // stream dependent, so the different subtypes should be implementing
+        // their solutions.
+        HttpResponseBodyDrainer* drainer =
+          new HttpResponseBodyDrainer(stream_.release());
+        drainer->Start(session_);
+        // |drainer| will delete itself.
+      }
+    }
+  }
+
+  if (stream_request_.get()) {
+    stream_request_->Cancel();
+    stream_request_ = NULL;
+  }
 }
 
 int HttpNetworkTransaction::Start(const HttpRequestInfo* request_info,
@@ -291,8 +330,11 @@ void HttpNetworkTransaction::DidDrainBodyForAuthRestart(bool keep_alive) {
       // We should call connection_->set_idle_time(), but this doesn't occur
       // often enough to be worth the trouble.
       stream_->SetConnectionReused();
+      DCHECK(!auth_connection_.get());
+      auth_connection_.reset(stream_->DetachConnection());
+    } else {
+      stream_->Close(true);
     }
-    stream_->Close(!keep_alive);
     next_state_ = STATE_CREATE_STREAM;
   }
 
@@ -374,7 +416,12 @@ uint64 HttpNetworkTransaction::GetUploadProgress() const {
   return stream_->GetUploadProgress();
 }
 
-void HttpNetworkTransaction::OnStreamReady(HttpStreamHandle* stream) {
+void HttpNetworkTransaction::SetSSLNonSensitiveHostInfo(
+    SSLNonSensitiveHostInfo* host_info) {
+  ssl_config_.ssl_host_info = host_info;
+}
+
+void HttpNetworkTransaction::OnStreamReady(HttpStream* stream) {
   DCHECK_EQ(STATE_CREATE_STREAM_COMPLETE, next_state_);
   DCHECK(stream_request_.get());
 
@@ -440,31 +487,12 @@ void HttpNetworkTransaction::OnNeedsClientAuth(
   OnIOComplete(ERR_SSL_CLIENT_AUTH_CERT_NEEDED);
 }
 
-HttpNetworkTransaction::~HttpNetworkTransaction() {
-  if (stream_.get()) {
-    HttpResponseHeaders* headers = GetResponseHeaders();
-    // TODO(mbelshe): The stream_ should be able to compute whether or not the
-    //                stream should be kept alive.  No reason to compute here
-    //                and pass it in.
-    bool keep_alive = next_state_ == STATE_NONE &&
-                      stream_->IsResponseBodyComplete() &&
-                      stream_->CanFindEndOfResponse() &&
-                      (!headers || headers->IsKeepAlive());
-    stream_->Close(!keep_alive);
-  }
-
-  if (stream_request_.get()) {
-    stream_request_->Cancel();
-    stream_request_ = NULL;
-  }
-}
-
 bool HttpNetworkTransaction::is_https_request() const {
   return request_->url.SchemeIs("https");
 }
 
 void HttpNetworkTransaction::DoCallback(int rv) {
-  DCHECK(rv != ERR_IO_PENDING);
+  DCHECK_NE(rv, ERR_IO_PENDING);
   DCHECK(user_callback_);
 
   // Since Run may result in Read being called, clear user_callback_ up front.
@@ -566,13 +594,15 @@ int HttpNetworkTransaction::DoLoop(int result) {
 int HttpNetworkTransaction::DoCreateStream() {
   next_state_ = STATE_CREATE_STREAM_COMPLETE;
 
-  session_->http_stream_factory()->RequestStream(request_,
-                                                 &ssl_config_,
-                                                 &proxy_info_,
-                                                 this,
-                                                 net_log_,
-                                                 session_,
-                                                 &stream_request_);
+  session_->http_stream_factory()->RequestStream(
+      request_,
+      &ssl_config_,
+      &proxy_info_,
+      auth_connection_.release(),
+      this,
+      net_log_,
+      session_,
+      &stream_request_);
   return ERR_IO_PENDING;
 }
 
@@ -596,15 +626,15 @@ int HttpNetworkTransaction::DoInitStream() {
 int HttpNetworkTransaction::DoInitStreamComplete(int result) {
   if (result == OK) {
     next_state_ = STATE_GENERATE_PROXY_AUTH_TOKEN;
-
-    if (is_https_request())
-      stream_->GetSSLInfo(&response_.ssl_info);
   } else {
     if (result == ERR_SSL_CLIENT_AUTH_CERT_NEEDED)
       result = HandleCertificateRequest(result);
 
     if (result < 0)
-      return HandleIOError(result);
+      result = HandleIOError(result);
+
+    // The stream initialization failed, so this stream will never be useful.
+    stream_.reset();
   }
 
   return result;
@@ -616,8 +646,11 @@ int HttpNetworkTransaction::DoGenerateProxyAuthToken() {
     return OK;
   HttpAuth::Target target = HttpAuth::AUTH_PROXY;
   if (!auth_controllers_[target].get())
-    auth_controllers_[target] = new HttpAuthController(target, AuthURL(target),
-                                                       session_);
+    auth_controllers_[target] =
+        new HttpAuthController(target,
+                               AuthURL(target),
+                               session_->auth_cache(),
+                               session_->http_auth_handler_factory());
   return auth_controllers_[target]->MaybeGenerateAuthToken(request_,
                                                            &io_callback_,
                                                            net_log_);
@@ -634,8 +667,11 @@ int HttpNetworkTransaction::DoGenerateServerAuthToken() {
   next_state_ = STATE_GENERATE_SERVER_AUTH_TOKEN_COMPLETE;
   HttpAuth::Target target = HttpAuth::AUTH_SERVER;
   if (!auth_controllers_[target].get())
-    auth_controllers_[target] = new HttpAuthController(target, AuthURL(target),
-                                                       session_);
+    auth_controllers_[target] =
+        new HttpAuthController(target,
+                               AuthURL(target),
+                               session_->auth_cache(),
+                               session_->http_auth_handler_factory());
   if (!ShouldApplyServerAuth())
     return OK;
   return auth_controllers_[target]->MaybeGenerateAuthToken(request_,
@@ -826,6 +862,9 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
   int rv = HandleAuthChallenge();
   if (rv != OK)
     return rv;
+
+  if (is_https_request())
+    stream_->GetSSLInfo(&response_.ssl_info);
 
   headers_valid_ = true;
   return OK;
@@ -1183,9 +1222,10 @@ GURL HttpNetworkTransaction::AuthURL(HttpAuth::Target target) const {
   }
 }
 
-#define STATE_CASE(s)  case s: \
-                         description = StringPrintf("%s (0x%08X)", #s, s); \
-                         break
+#define STATE_CASE(s) \
+  case s: \
+    description = base::StringPrintf("%s (0x%08X)", #s, s); \
+    break
 
 std::string HttpNetworkTransaction::DescribeState(State state) {
   std::string description;
@@ -1202,7 +1242,8 @@ std::string HttpNetworkTransaction::DescribeState(State state) {
     STATE_CASE(STATE_DRAIN_BODY_FOR_AUTH_RESTART_COMPLETE);
     STATE_CASE(STATE_NONE);
     default:
-      description = StringPrintf("Unknown state 0x%08X (%u)", state, state);
+      description = base::StringPrintf("Unknown state 0x%08X (%u)", state,
+                                       state);
       break;
   }
   return description;

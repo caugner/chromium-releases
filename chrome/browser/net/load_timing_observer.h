@@ -13,6 +13,9 @@
 #include "net/base/net_log.h"
 #include "webkit/glue/resource_loader_bridge.h"
 
+class URLRequest;
+struct ResourceResponse;
+
 // LoadTimingObserver watches the NetLog event stream and collects the network
 // timing information.
 class LoadTimingObserver : public ChromeNetLog::Observer {
@@ -20,7 +23,7 @@ class LoadTimingObserver : public ChromeNetLog::Observer {
   struct URLRequestRecord {
     URLRequestRecord();
 
-    webkit_glue::ResourceLoaderBridge::LoadTimingInfo timing;
+    webkit_glue::ResourceLoadTimingInfo timing;
     uint32 connect_job_id;
     uint32 socket_log_id;
     bool socket_reused;
@@ -48,6 +51,10 @@ class LoadTimingObserver : public ChromeNetLog::Observer {
                           const net::NetLog::Source& source,
                           net::NetLog::EventPhase phase,
                           net::NetLog::EventParameters* params);
+
+  static void PopulateTimingInfo(URLRequest* request,
+                                 ResourceResponse* response);
+
  private:
   FRIEND_TEST_ALL_PREFIXES(LoadTimingObserverTest,
                            ConnectJobRecord);

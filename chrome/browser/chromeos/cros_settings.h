@@ -39,7 +39,7 @@ class CrosSettings : public NonThreadSafe {
   void FireObservers(const char* path);
 
   // Gets settings value of given |path| to |out_value|.
-  // Note that |out_value| is still owned by this class.
+  // Note that the caller owns |out_value| returned.
   bool Get(const std::string& path, Value** out_value) const;
 
   // Convenience forms of Set().  These methods will replace any existing
@@ -62,7 +62,7 @@ class CrosSettings : public NonThreadSafe {
   bool RemoveSettingsProvider(CrosSettingsProvider* provider);
 
   // If the pref at the given path changes, we call the observer's Observe
-  // method with NOTIFY_PREF_CHANGED.
+  // method with PREF_CHANGED.
   void AddSettingsObserver(const char* path, NotificationObserver* obs);
   void RemoveSettingsObserver(const char* path, NotificationObserver* obs);
 

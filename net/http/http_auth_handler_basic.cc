@@ -26,19 +26,36 @@ bool HttpAuthHandlerBasic::Init(HttpAuth::ChallengeTokenizer* challenge) {
   scheme_ = "basic";
   score_ = 1;
   properties_ = 0;
+  return ParseChallenge(challenge);
+}
 
+bool HttpAuthHandlerBasic::ParseChallenge(
+    HttpAuth::ChallengeTokenizer* challenge) {
   // Verify the challenge's auth-scheme.
-  if (!challenge->valid() ||
-      !LowerCaseEqualsASCII(challenge->scheme(), "basic"))
+  if (!LowerCaseEqualsASCII(challenge->scheme(), "basic"))
     return false;
 
+  HttpUtil::NameValuePairsIterator parameters = challenge->param_pairs();
+
   // Extract the realm (may be missing).
-  while (challenge->GetNext()) {
-    if (LowerCaseEqualsASCII(challenge->name(), "realm"))
-      realm_ = challenge->unquoted_value();
+  std::string realm;
+  while (parameters.GetNext()) {
+    if (LowerCaseEqualsASCII(parameters.name(), "realm"))
+      realm = parameters.unquoted_value();
   }
 
-  return challenge->valid();
+  if (!parameters.valid())
+    return false;
+
+  realm_ = realm;
+  return true;
+}
+
+HttpAuth::AuthorizationResult HttpAuthHandlerBasic::HandleAnotherChallenge(
+    HttpAuth::ChallengeTokenizer* challenge) {
+  // Basic authentication is always a single round, so any responses should
+  // be treated as a rejection.
+  return HttpAuth::AUTHORIZATION_RESULT_REJECT;
 }
 
 int HttpAuthHandlerBasic::GenerateAuthTokenImpl(

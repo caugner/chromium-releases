@@ -9,6 +9,8 @@
 #include <string>
 #include "base/basictypes.h"
 
+class GURL;
+
 namespace net {
 
 class HostPortPair {
@@ -16,6 +18,9 @@ class HostPortPair {
   HostPortPair();
   // If |in_host| represents an IPv6 address, it should not bracket the address.
   HostPortPair(const std::string& in_host, uint16 in_port);
+
+  // Creates a HostPortPair for the origin of |url|.
+  static HostPortPair FromURL(const GURL& url);
 
   // TODO(willchan): Define a functor instead.
   // Comparator function so this can be placed in a std::map.
@@ -49,6 +54,9 @@ class HostPortPair {
   // ToString() will convert the HostPortPair to "host:port".  If |host_| is an
   // IPv6 literal, it will add brackets around |host_|.
   std::string ToString() const;
+
+  // Returns |host_|, adding IPv6 brackets if needed.
+  std::string HostForURL() const;
 
  private:
   // If |host_| represents an IPv6 address, this string will not contain

@@ -23,7 +23,7 @@ CommandBufferPepper::~CommandBufferPepper() {
 
 // Not implemented in CommandBufferPepper.
 bool CommandBufferPepper::Initialize(int32 size) {
-  NOTREACHED();
+  GPU_NOTREACHED();
   return false;
 }
 
@@ -127,7 +127,7 @@ CommandBuffer::State CommandBufferPepper::Flush(int32 put_offset) {
 
 void CommandBufferPepper::SetGetOffset(int32 get_offset) {
   // Not implemented by proxy.
-  NOTREACHED();
+  GPU_NOTREACHED();
 }
 
 int32 CommandBufferPepper::CreateTransferBuffer(size_t size) {
@@ -155,13 +155,13 @@ Buffer CommandBufferPepper::GetTransferBuffer(int32 id) {
 
 void CommandBufferPepper::SetToken(int32 token) {
   // Not implemented by proxy.
-  NOTREACHED();
+  GPU_NOTREACHED();
 }
 
 void CommandBufferPepper::SetParseError(
     gpu::error::Error error) {
   // Not implemented by proxy.
-  NOTREACHED();
+  GPU_NOTREACHED();
 }
 
 gpu::error::Error CommandBufferPepper::GetCachedError() {

@@ -40,9 +40,13 @@ enum PlatformFileFlags {
   PLATFORM_FILE_TEMPORARY = 512,        // Used on Windows only
   PLATFORM_FILE_HIDDEN = 1024,          // Used on Windows only
   PLATFORM_FILE_DELETE_ON_CLOSE = 2048,
-  PLATFORM_FILE_TRUNCATE = 4096
+  PLATFORM_FILE_TRUNCATE = 4096,
+  PLATFORM_FILE_WRITE_ATTRIBUTES = 8192 // Used on Windows only
 };
 
+// PLATFORM_FILE_ERROR_ACCESS_DENIED is returned when a call fails because of
+// a filesystem restriction. PLATFORM_FILE_ERROR_SECURITY is returned when a
+// browser policy doesn't allow the operation to be executed.
 enum PlatformFileError {
   PLATFORM_FILE_OK = 0,
   PLATFORM_FILE_ERROR_FAILED = -1,
@@ -54,7 +58,11 @@ enum PlatformFileError {
   PLATFORM_FILE_ERROR_NO_MEMORY = -7,
   PLATFORM_FILE_ERROR_NO_SPACE = -8,
   PLATFORM_FILE_ERROR_NOT_A_DIRECTORY = -9,
-  PLATFORM_FILE_ERROR_INVALID_OPERATION = -10
+  PLATFORM_FILE_ERROR_INVALID_OPERATION = -10,
+  PLATFORM_FILE_ERROR_SECURITY = -11,
+  PLATFORM_FILE_ERROR_ABORT = -12,
+  PLATFORM_FILE_ERROR_NOT_A_FILE = -13,
+  PLATFORM_FILE_ERROR_NOT_EMPTY = -14,
 };
 
 // Used to hold information about a given file.
@@ -91,8 +99,33 @@ PlatformFile CreatePlatformFile(const std::wstring& name,
                                 int flags,
                                 bool* created);
 
-// Closes a file handle
+// Closes a file handle. Returns |true| on success and |false| otherwise.
 bool ClosePlatformFile(PlatformFile file);
+
+// Reads the given number of bytes (or until EOF is reached) starting with the
+// given offset. Returns the number of bytes read, or -1 on error.
+int ReadPlatformFile(PlatformFile file, int64 offset, char* data, int size);
+
+// Writes the given buffer into the file at the given offset, overwritting any
+// data that was previously there. Returns the number of bytes written, or -1
+// on error.
+int WritePlatformFile(PlatformFile file, int64 offset,
+                      const char* data, int size);
+
+// Truncates the given file to the given length. If |length| is greater than
+// the current size of the file, the file is extended with zeros. If the file
+// doesn't exist, |false| is returned.
+bool TruncatePlatformFile(PlatformFile file, int64 length);
+
+// Flushes the buffers of the given file.
+bool FlushPlatformFile(PlatformFile file);
+
+// Touches the given file.
+bool TouchPlatformFile(PlatformFile file, const Time& last_access_time,
+                       const Time& last_modified_time);
+
+// Returns some information for the given file.
+bool GetPlatformFileInfo(PlatformFile file, PlatformFileInfo* info);
 
 // Use this class to pass ownership of a PlatformFile to a receiver that may or
 // may not want to accept it.  This class does not own the storage for the

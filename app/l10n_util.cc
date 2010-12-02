@@ -17,6 +17,7 @@
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -227,6 +228,7 @@ bool IsLocalePartiallyPopulated(const std::string& locale_name) {
   return !IsLocaleNameTranslated("en", locale_name);
 }
 
+#if !defined(OS_MACOSX)
 bool IsLocaleAvailable(const std::string& locale,
                        const FilePath& locale_path) {
   // If locale has any illegal characters in it, we don't want to try to
@@ -324,6 +326,7 @@ std::string GetSystemLocale() {
   }
   return ret;
 }
+#endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 // Split and normalize the language list specified by LANGUAGE environment.
@@ -361,6 +364,20 @@ void SplitAndNormalizeLanguageList(const std::string& env_language,
   }
 }
 #endif
+
+// On Linux, the text layout engine Pango determines paragraph directionality
+// by looking at the first strongly-directional character in the text. This
+// means text such as "Google Chrome foo bar..." will be layed out LTR even
+// if "foo bar" is RTL. So this function prepends the necessary RLM in such
+// cases.
+void AdjustParagraphDirectionality(string16* paragraph) {
+#if defined(OS_LINUX)
+  if (base::i18n::IsRTL() &&
+      base::i18n::StringContainsStrongRTLChars(*paragraph)) {
+    paragraph->insert(0, 1, static_cast<char16>(base::i18n::kRightToLeftMark));
+  }
+#endif
+}
 
 }  // namespace
 
@@ -490,25 +507,23 @@ string16 GetDisplayNameForLocale(const std::string& locale,
 }
 
 std::wstring GetString(int message_id) {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  return UTF16ToWide(rb.GetLocalizedString(message_id));
+  return UTF16ToWide(GetStringUTF16(message_id));
 }
 
 std::string GetStringUTF8(int message_id) {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  return UTF16ToUTF8(rb.GetLocalizedString(message_id));
+  return UTF16ToUTF8(GetStringUTF16(message_id));
 }
 
 string16 GetStringUTF16(int message_id) {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  return rb.GetLocalizedString(message_id);
+  string16 str = rb.GetLocalizedString(message_id);
+  AdjustParagraphDirectionality(&str);
+
+  return str;
 }
 
 static string16 GetStringF(int message_id,
-                           const string16& a,
-                           const string16& b,
-                           const string16& c,
-                           const string16& d,
+                           const std::vector<string16>& replacements,
                            std::vector<size_t>* offsets) {
   // TODO(tc): We could save a string copy if we got the raw string as
   // a StringPiece and were able to call ReplaceStringPlaceholders with
@@ -516,35 +531,59 @@ static string16 GetStringF(int message_id,
   // practice, the strings should be relatively short.
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   const string16& format_string = rb.GetLocalizedString(message_id);
-  std::vector<string16> subst;
-  subst.push_back(a);
-  subst.push_back(b);
-  subst.push_back(c);
-  subst.push_back(d);
-  string16 formatted = ReplaceStringPlaceholders(format_string, subst,
+
+#ifndef NDEBUG
+  // Make sure every replacement string is being used, so we don't just
+  // silently fail to insert one. If |offsets| is non-NULL, then don't do this
+  // check as the code may simply want to find the placeholders rather than
+  // actually replacing them.
+  if (!offsets) {
+    std::string utf8_string = UTF16ToUTF8(format_string);
+
+    // $9 is the highest allowed placeholder.
+    for (size_t i = 0; i < 9; ++i) {
+      bool placeholder_should_exist = replacements.size() > i;
+
+      std::string placeholder = StringPrintf("$%d", static_cast<int>(i + 1));
+      size_t pos = utf8_string.find(placeholder.c_str());
+      if (placeholder_should_exist) {
+        DCHECK_NE(std::string::npos, pos) <<
+            " Didn't find a " << placeholder << " placeholder in " <<
+            utf8_string;
+      } else {
+        DCHECK_EQ(std::string::npos, pos) <<
+            " Unexpectedly found a " << placeholder << " placeholder in " <<
+            utf8_string;
+      }
+    }
+  }
+#endif
+
+  string16 formatted = ReplaceStringPlaceholders(format_string, replacements,
                                                  offsets);
+  AdjustParagraphDirectionality(&formatted);
+
   return formatted;
 }
 
 #if !defined(WCHAR_T_IS_UTF16)
 std::wstring GetStringF(int message_id, const std::wstring& a) {
-  return UTF16ToWide(GetStringF(message_id, WideToUTF16(a), string16(),
-                                string16(), string16(), NULL));
+  return UTF16ToWide(GetStringFUTF16(message_id, WideToUTF16(a)));
 }
 
 std::wstring GetStringF(int message_id,
                         const std::wstring& a,
                         const std::wstring& b) {
-  return UTF16ToWide(GetStringF(message_id, WideToUTF16(a), WideToUTF16(b),
-                                string16(), string16(), NULL));
+  return UTF16ToWide(GetStringFUTF16(message_id, WideToUTF16(a),
+                                     WideToUTF16(b)));
 }
 
 std::wstring GetStringF(int message_id,
                         const std::wstring& a,
                         const std::wstring& b,
                         const std::wstring& c) {
-  return UTF16ToWide(GetStringF(message_id, WideToUTF16(a), WideToUTF16(b),
-                                WideToUTF16(c), string16(), NULL));
+  return UTF16ToWide(GetStringFUTF16(message_id, WideToUTF16(a),
+                                     WideToUTF16(b), WideToUTF16(c)));
 }
 
 std::wstring GetStringF(int message_id,
@@ -552,29 +591,27 @@ std::wstring GetStringF(int message_id,
                         const std::wstring& b,
                         const std::wstring& c,
                         const std::wstring& d) {
-  return UTF16ToWide(GetStringF(message_id, WideToUTF16(a), WideToUTF16(b),
-                                WideToUTF16(c), WideToUTF16(d), NULL));
+  return UTF16ToWide(GetStringFUTF16(message_id, WideToUTF16(a), WideToUTF16(b),
+                                     WideToUTF16(c), WideToUTF16(d)));
 }
 #endif
 
 std::string GetStringFUTF8(int message_id,
                            const string16& a) {
-  return UTF16ToUTF8(GetStringF(message_id, a, string16(), string16(),
-                                string16(), NULL));
+  return UTF16ToUTF8(GetStringFUTF16(message_id, a));
 }
 
 std::string GetStringFUTF8(int message_id,
                            const string16& a,
                            const string16& b) {
-  return UTF16ToUTF8(GetStringF(message_id, a, b, string16(), string16(),
-                                NULL));
+  return UTF16ToUTF8(GetStringFUTF16(message_id, a, b));
 }
 
 std::string GetStringFUTF8(int message_id,
                            const string16& a,
                            const string16& b,
                            const string16& c) {
-  return UTF16ToUTF8(GetStringF(message_id, a, b, c, string16(), NULL));
+  return UTF16ToUTF8(GetStringFUTF16(message_id, a, b, c));
 }
 
 std::string GetStringFUTF8(int message_id,
@@ -582,25 +619,31 @@ std::string GetStringFUTF8(int message_id,
                            const string16& b,
                            const string16& c,
                            const string16& d) {
-  return UTF16ToUTF8(GetStringF(message_id, a, b, c, d, NULL));
+  return UTF16ToUTF8(GetStringFUTF16(message_id, a, b, c, d));
 }
 
 string16 GetStringFUTF16(int message_id,
                          const string16& a) {
-  return GetStringF(message_id, a, string16(), string16(), string16(), NULL);
+  std::vector<string16> replacements;
+  replacements.push_back(a);
+  return GetStringF(message_id, replacements, NULL);
 }
 
 string16 GetStringFUTF16(int message_id,
                          const string16& a,
                          const string16& b) {
-  return GetStringF(message_id, a, b, string16(), string16(), NULL);
+  return GetStringFUTF16(message_id, a, b, NULL);
 }
 
 string16 GetStringFUTF16(int message_id,
                          const string16& a,
                          const string16& b,
                          const string16& c) {
-  return GetStringF(message_id, a, b, c, string16(), NULL);
+  std::vector<string16> replacements;
+  replacements.push_back(a);
+  replacements.push_back(b);
+  replacements.push_back(c);
+  return GetStringF(message_id, replacements, NULL);
 }
 
 string16 GetStringFUTF16(int message_id,
@@ -608,14 +651,20 @@ string16 GetStringFUTF16(int message_id,
                          const string16& b,
                          const string16& c,
                          const string16& d) {
-  return GetStringF(message_id, a, b, c, d, NULL);
+  std::vector<string16> replacements;
+  replacements.push_back(a);
+  replacements.push_back(b);
+  replacements.push_back(c);
+  replacements.push_back(d);
+  return GetStringF(message_id, replacements, NULL);
 }
 
 std::wstring GetStringF(int message_id, const std::wstring& a, size_t* offset) {
   DCHECK(offset);
   std::vector<size_t> offsets;
-  string16 result = GetStringF(message_id, WideToUTF16(a), string16(),
-                               string16(), string16(), &offsets);
+  std::vector<string16> replacements;
+  replacements.push_back(WideToUTF16(a));
+  string16 result = GetStringF(message_id, replacements, &offsets);
   DCHECK(offsets.size() == 1);
   *offset = offsets[0];
   return UTF16ToWide(result);
@@ -625,24 +674,31 @@ std::wstring GetStringF(int message_id,
                         const std::wstring& a,
                         const std::wstring& b,
                         std::vector<size_t>* offsets) {
-  return UTF16ToWide(GetStringF(message_id, WideToUTF16(a), WideToUTF16(b),
-                                string16(), string16(), offsets));
+  std::vector<string16> replacements;
+  replacements.push_back(WideToUTF16(a));
+  replacements.push_back(WideToUTF16(b));
+  return UTF16ToWide(GetStringF(message_id, replacements, offsets));
 }
 
 string16 GetStringFUTF16(int message_id, const string16& a, size_t* offset) {
   DCHECK(offset);
   std::vector<size_t> offsets;
-  string16 result = GetStringFUTF16(message_id, a, string16(), &offsets);
+  std::vector<string16> replacements;
+  replacements.push_back(a);
+  string16 result = GetStringF(message_id, replacements, &offsets);
   DCHECK(offsets.size() == 1);
   *offset = offsets[0];
   return result;
 }
 
 string16 GetStringFUTF16(int message_id,
-                        const string16& a,
-                        const string16& b,
-                        std::vector<size_t>* offsets) {
-  return GetStringF(message_id, a, b, string16(), string16(), offsets);
+                         const string16& a,
+                         const string16& b,
+                         std::vector<size_t>* offsets) {
+  std::vector<string16> replacements;
+  replacements.push_back(a);
+  replacements.push_back(b);
+  return GetStringF(message_id, replacements, offsets);
 }
 
 std::wstring GetStringF(int message_id, int a) {

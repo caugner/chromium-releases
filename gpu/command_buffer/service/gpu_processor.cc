@@ -39,6 +39,7 @@ GPUProcessor::~GPUProcessor() {
 
 bool GPUProcessor::InitializeCommon(gfx::GLContext* context,
                                     const gfx::Size& size,
+                                    const std::vector<int32>& attribs,
                                     gles2::GLES2Decoder* parent_decoder,
                                     uint32 parent_texture_id) {
   DCHECK(context);
@@ -57,11 +58,21 @@ bool GPUProcessor::InitializeCommon(gfx::GLContext* context,
                                     decoder_.get()));
   }
 
+  if (!group_.Initialize(NULL)) {
+    LOG(ERROR) << "GPUProcessor::InitializeCommon failed because group "
+               << "failed to initialize.";
+    Destroy();
+    return false;
+  }
+
   // Initialize the decoder with either the view or pbuffer GLContext.
   if (!decoder_->Initialize(context,
                             size,
+                            attribs,
                             parent_decoder,
                             parent_texture_id)) {
+    LOG(ERROR) << "GPUProcessor::InitializeCommon failed because decoder "
+               << "failed to initialize.";
     Destroy();
     return false;
   }
@@ -88,9 +99,11 @@ void GPUProcessor::ProcessCommands() {
     return;
 
   if (decoder_.get()) {
-    // TODO(apatrick): need to do more than this on failure.
-    if (!decoder_->MakeCurrent())
+    if (!decoder_->MakeCurrent()) {
+      LOG(ERROR) << "Context lost because MakeCurrent failed.";
+      command_buffer_->SetParseError(error::kLostContext);
       return;
+    }
   }
 
   parser_->set_put(state.put_offset);

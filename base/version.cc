@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 
@@ -28,6 +29,8 @@ Version* Version::GetVersionFromString(const std::string& version_str) {
 }
 
 Version::Version() : is_valid_(false) {}
+
+Version::~Version() {}
 
 bool Version::Equals(const Version& that) const {
   DCHECK(is_valid_);

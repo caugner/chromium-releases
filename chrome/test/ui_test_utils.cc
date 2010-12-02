@@ -17,6 +17,7 @@
 #include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_manager.h"
@@ -28,8 +29,7 @@
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_action.h"
-#include "chrome/common/notification_registrar.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_type.h"
 #include "chrome/test/automation/javascript_execution_controller.h"
 #include "chrome/test/bookmark_load_observer.h"
 #if defined(TOOLKIT_VIEWS)
@@ -109,12 +109,10 @@ class DOMOperationObserver : public NotificationObserver {
     MessageLoopForUI::current()->Quit();
   }
 
-  bool GetResponse(std::string* response) {
+  bool GetResponse(std::string* response) WARN_UNUSED_RESULT {
     *response = response_;
     return did_respond_;
   }
-
-  std::string response() const { return response_; }
 
  private:
   NotificationRegistrar registrar_;
@@ -277,18 +275,18 @@ class InProcessJavaScriptExecutionController
 
  protected:
   // Executes |script| and sets the JSON response |json|.
-  bool ExecuteJavaScriptAndGetJSON(const std::string& script,
-                                   std::string* json) {
+  virtual bool ExecuteJavaScriptAndGetJSON(const std::string& script,
+                                           std::string* json) {
     render_view_host_->ExecuteJavascriptInWebFrame(L"", UTF8ToWide(script));
     DOMOperationObserver dom_op_observer(render_view_host_);
     return dom_op_observer.GetResponse(json);
   }
 
-  void FirstObjectAdded() {
+  virtual void FirstObjectAdded() {
     AddRef();
   }
 
-  void LastObjectRemoved() {
+  virtual void LastObjectRemoved() {
     Release();
   }
 
@@ -296,6 +294,52 @@ class InProcessJavaScriptExecutionController
   // Weak pointer to the associated RenderViewHost.
   RenderViewHost* render_view_host_;
 };
+
+// Specifying a prototype so that we can add the WARN_UNUSED_RESULT attribute.
+bool ExecuteJavaScriptHelper(RenderViewHost* render_view_host,
+                             const std::wstring& frame_xpath,
+                             const std::wstring& original_script,
+                             scoped_ptr<Value>* result) WARN_UNUSED_RESULT;
+
+// Executes the passed |original_script| in the frame pointed to by
+// |frame_xpath|.  If |result| is not NULL, stores the value that the evaluation
+// of the script in |result|.  Returns true on success.
+bool ExecuteJavaScriptHelper(RenderViewHost* render_view_host,
+                             const std::wstring& frame_xpath,
+                             const std::wstring& original_script,
+                             scoped_ptr<Value>* result) {
+  // TODO(jcampan): we should make the domAutomationController not require an
+  //                automation id.
+  std::wstring script = L"window.domAutomationController.setAutomationId(0);" +
+      original_script;
+  render_view_host->ExecuteJavascriptInWebFrame(frame_xpath, script);
+  DOMOperationObserver dom_op_observer(render_view_host);
+  std::string json;
+  if (!dom_op_observer.GetResponse(&json))
+    return false;
+
+  // Nothing more to do for callers that ignore the returned JS value.
+  if (!result)
+    return true;
+
+  // Wrap |json| in an array before deserializing because valid JSON has an
+  // array or an object as the root.
+  json.insert(0, "[");
+  json.append("]");
+
+  scoped_ptr<Value> root_val(base::JSONReader::Read(json, true));
+  if (!root_val->IsType(Value::TYPE_LIST))
+    return false;
+
+  ListValue* list = static_cast<ListValue*>(root_val.get());
+  Value* result_val;
+  if (!list || !list->GetSize() ||
+      !list->Remove(0, &result_val))  // Remove gives us ownership of the value.
+    return false;
+
+  result->reset(result_val);
+  return true;
+}
 
 }  // namespace
 
@@ -410,32 +454,12 @@ DOMElementProxyRef GetActiveDOMDocument(Browser* browser) {
   return executor->GetObjectProxy<DOMElementProxy>(element_handle);
 }
 
-Value* ExecuteJavaScript(RenderViewHost* render_view_host,
-                         const std::wstring& frame_xpath,
-                         const std::wstring& original_script) {
-  // TODO(jcampan): we should make the domAutomationController not require an
-  //                automation id.
-  std::wstring script = L"window.domAutomationController.setAutomationId(0);" +
-      original_script;
-  render_view_host->ExecuteJavascriptInWebFrame(frame_xpath, script);
-  DOMOperationObserver dom_op_observer(render_view_host);
-  std::string json = dom_op_observer.response();
-  // Wrap |json| in an array before deserializing because valid JSON has an
-  // array or an object as the root.
-  json.insert(0, "[");
-  json.append("]");
-
-  scoped_ptr<Value> root_val(base::JSONReader::Read(json, true));
-  if (!root_val->IsType(Value::TYPE_LIST))
-    return NULL;
-
-  ListValue* list = static_cast<ListValue*>(root_val.get());
-  Value* result;
-  if (!list || !list->GetSize() ||
-      !list->Remove(0, &result))  // Remove gives us ownership of the value.
-    return NULL;
-
-  return result;
+bool ExecuteJavaScript(RenderViewHost* render_view_host,
+                       const std::wstring& frame_xpath,
+                       const std::wstring& original_script) {
+  std::wstring script =
+      original_script + L"window.domAutomationController.send(0);";
+  return ExecuteJavaScriptHelper(render_view_host, frame_xpath, script, NULL);
 }
 
 bool ExecuteJavaScriptAndExtractInt(RenderViewHost* render_view_host,
@@ -443,9 +467,9 @@ bool ExecuteJavaScriptAndExtractInt(RenderViewHost* render_view_host,
                                     const std::wstring& script,
                                     int* result) {
   DCHECK(result);
-  scoped_ptr<Value> value(ExecuteJavaScript(render_view_host, frame_xpath,
-                                            script));
-  if (!value.get())
+  scoped_ptr<Value> value;
+  if (!ExecuteJavaScriptHelper(render_view_host, frame_xpath, script, &value) ||
+      !value.get())
     return false;
 
   return value->GetAsInteger(result);
@@ -456,9 +480,9 @@ bool ExecuteJavaScriptAndExtractBool(RenderViewHost* render_view_host,
                                      const std::wstring& script,
                                      bool* result) {
   DCHECK(result);
-  scoped_ptr<Value> value(ExecuteJavaScript(render_view_host, frame_xpath,
-                                            script));
-  if (!value.get())
+  scoped_ptr<Value> value;
+  if (!ExecuteJavaScriptHelper(render_view_host, frame_xpath, script, &value) ||
+      !value.get())
     return false;
 
   return value->GetAsBoolean(result);
@@ -469,9 +493,9 @@ bool ExecuteJavaScriptAndExtractString(RenderViewHost* render_view_host,
                                        const std::wstring& script,
                                        std::string* result) {
   DCHECK(result);
-  scoped_ptr<Value> value(ExecuteJavaScript(render_view_host, frame_xpath,
-                                            script));
-  if (!value.get())
+  scoped_ptr<Value> value;
+  if (!ExecuteJavaScriptHelper(render_view_host, frame_xpath, script, &value) ||
+      !value.get())
     return false;
 
   return value->GetAsString(result);
@@ -527,13 +551,13 @@ int FindInPage(TabContents* tab_contents, const string16& search_string,
   return observer.number_of_matches();
 }
 
-void WaitForNotification(NotificationType::Type type) {
+void WaitForNotification(NotificationType type) {
   TestNotificationObserver observer;
   RegisterAndWait(&observer, type, NotificationService::AllSources());
 }
 
 void RegisterAndWait(NotificationObserver* observer,
-                     NotificationType::Type type,
+                     NotificationType type,
                      const NotificationSource& source) {
   NotificationRegistrar registrar;
   registrar.Add(observer, type, source);
@@ -550,12 +574,41 @@ void WaitForBookmarkModelToLoad(BookmarkModel* model) {
   ASSERT_TRUE(model->IsLoaded());
 }
 
-bool SendKeyPressSync(gfx::NativeWindow window,
+void WaitForHistoryToLoad(Browser* browser) {
+  HistoryService* history_service =
+      browser->profile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  if (!history_service->BackendLoaded())
+    WaitForNotification(NotificationType::HISTORY_LOADED);
+}
+
+bool GetNativeWindow(const Browser* browser, gfx::NativeWindow* native_window) {
+  BrowserWindow* window = browser->window();
+  if (!window)
+    return false;
+
+  *native_window = window->GetNativeHandle();
+  return *native_window;
+}
+
+bool BringBrowserWindowToFront(const Browser* browser) {
+  gfx::NativeWindow window = NULL;
+  if (!GetNativeWindow(browser, &window))
+    return false;
+
+  ui_test_utils::ShowAndFocusNativeWindow(window);
+  return true;
+}
+
+bool SendKeyPressSync(const Browser* browser,
                       app::KeyboardCode key,
                       bool control,
                       bool shift,
                       bool alt,
                       bool command) {
+  gfx::NativeWindow window = NULL;
+  if (!GetNativeWindow(browser, &window))
+    return false;
+
   if (!ui_controls::SendKeyPressNotifyWhenDone(
           window, key, control, shift, alt, command,
           new MessageLoop::QuitTask())) {
@@ -568,6 +621,24 @@ bool SendKeyPressSync(gfx::NativeWindow window,
   RunMessageLoop();
   return !testing::Test::HasFatalFailure();
 }
+
+bool SendKeyPressAndWait(const Browser* browser,
+                         app::KeyboardCode key,
+                         bool control,
+                         bool shift,
+                         bool alt,
+                         bool command,
+                         NotificationType type,
+                         const NotificationSource& source) {
+  WindowedNotificationObserver observer(type, source);
+
+  if (!SendKeyPressSync(browser, key, control, shift, alt, command))
+    return false;
+
+  observer.Wait();
+  return !testing::Test::HasFatalFailure();
+}
+
 
 TimedMessageLoopRunner::TimedMessageLoopRunner()
     : loop_(new MessageLoopForUI()),
@@ -679,6 +750,54 @@ TestWebSocketServer::~TestWebSocketServer() {
   cmd_line->AppendSwitch("chromium");
   cmd_line->AppendSwitchPath("pidfile", websocket_pid_file_);
   base::LaunchApp(*cmd_line.get(), true, false, NULL);
+}
+
+WindowedNotificationObserver::WindowedNotificationObserver(
+    NotificationType notification_type,
+    const NotificationSource& source)
+    : seen_(false),
+      running_(false),
+      waiting_for_(source) {
+  registrar_.Add(this, notification_type, waiting_for_);
+}
+
+void WindowedNotificationObserver::Wait() {
+  if (waiting_for_ == NotificationService::AllSources()) {
+    LOG(FATAL) << "Wait called when monitoring all sources. You must use "
+               << "WaitFor in this case.";
+  }
+
+  if (seen_)
+    return;
+
+  running_ = true;
+  ui_test_utils::RunMessageLoop();
+}
+
+void WindowedNotificationObserver::WaitFor(const NotificationSource& source) {
+  if (waiting_for_ != NotificationService::AllSources()) {
+    LOG(FATAL) << "WaitFor called when already waiting on a specific source."
+               << "Use Wait in this case.";
+  }
+
+  waiting_for_ = source;
+  if (sources_seen_.count(waiting_for_.map_key()) > 0)
+    return;
+
+  running_ = true;
+  ui_test_utils::RunMessageLoop();
+}
+
+void WindowedNotificationObserver::Observe(NotificationType type,
+                                           const NotificationSource& source,
+                                           const NotificationDetails& details) {
+  if (waiting_for_ == source) {
+    seen_ = true;
+    if (running_)
+      MessageLoopForUI::current()->Quit();
+  } else {
+    sources_seen_.insert(source.map_key());
+  }
 }
 
 }  // namespace ui_test_utils

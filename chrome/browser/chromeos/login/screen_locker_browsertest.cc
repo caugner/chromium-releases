@@ -7,14 +7,14 @@
 #include "base/scoped_ptr.h"
 #include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/browser.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
-#include "chrome/browser/chromeos/cros/mock_screen_lock_library.h"
 #include "chrome/browser/chromeos/cros/mock_input_method_library.h"
+#include "chrome/browser/chromeos/cros/mock_screen_lock_library.h"
+#include "chrome/browser/chromeos/login/mock_authenticator.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/screen_locker_tester.h"
-#include "chrome/browser/chromeos/login/mock_authenticator.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/views/browser_dialogs.h"
 #include "chrome/common/chrome_switches.h"
@@ -223,6 +223,7 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestFullscreenExit) {
   }
   tester->InjectMockAuthenticator("user", "pass");
   tester->EnterPassword("pass");
+  ui_test_utils::RunAllPendingInMessageLoop();
   ScreenLocker::Hide();
   ui_test_utils::RunAllPendingInMessageLoop();
   EXPECT_FALSE(tester->IsLocked());

@@ -94,6 +94,7 @@
             'installer/util/run_all_unittests.cc',
             'installer/util/set_reg_value_work_item_unittest.cc',
             'installer/util/shell_util_unittest.cc',
+            'installer/util/wmi_unittest.cc',
             'installer/util/work_item_list_unittest.cc',
             'installer/util/version_unittest.cc',
           ],
@@ -146,6 +147,7 @@
             '<(DEPTH)/base/base.gyp:base',
             '<(DEPTH)/base/base.gyp:base_i18n',
             '<(DEPTH)/base/base.gyp:test_support_base',
+            '<(DEPTH)/chrome/chrome.gyp:test_support_common',
             '<(DEPTH)/testing/gtest.gyp:gtest',
           ],
           'include_dirs': [
@@ -376,6 +378,10 @@
           ['target_arch=="x64"', {
             'deb_arch': 'amd64',
             'rpm_arch': 'x86_64',
+          }],
+          ['target_arch=="arm"', {
+            'deb_arch': 'arm',
+            'rpm_arch': 'arm',
           }],
           ['internal_pdf', {
             'packaging_files_binaries': [

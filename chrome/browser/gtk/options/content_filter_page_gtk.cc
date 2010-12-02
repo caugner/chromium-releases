@@ -5,10 +5,12 @@
 #include "chrome/browser/gtk/options/content_filter_page_gtk.h"
 
 #include "app/l10n_util.h"
+#include "base/command_line.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
 #include "chrome/browser/geolocation/geolocation_exceptions_table_model.h"
 #include "chrome/browser/host_content_settings_map.h"
+#include "chrome/browser/plugin_exceptions_table_model.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/gtk/browser_window_gtk.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
@@ -17,6 +19,8 @@
 #include "chrome/browser/gtk/options/simple_content_exceptions_window.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification_exceptions_table_model.h"
+#include "chrome/browser/show_options_url.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
@@ -72,7 +76,7 @@ GtkWidget* ContentFilterPageGtk::InitGroup() {
      0,  // This dialog isn't used for cookies.
      0,
      0,
-     0,
+     IDS_PLUGIN_ASK_RADIO,
      0,
      IDS_GEOLOCATION_ASK_RADIO,
      IDS_NOTIFICATIONS_ASK_RADIO,
@@ -205,16 +209,23 @@ void ContentFilterPageGtk::OnExceptionsClicked(GtkWidget* button) {
       profile()->HasOffTheRecordProfile() ?
           profile()->GetOffTheRecordProfile()->GetHostContentSettingsMap() :
           NULL;
+  if (content_type_ == CONTENT_SETTINGS_TYPE_PLUGINS &&
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableResourceContentSettings)) {
+    PluginExceptionsTableModel* model =
+        new PluginExceptionsTableModel(settings_map, otr_settings_map);
+    model->LoadSettings();
+    SimpleContentExceptionsWindow::ShowExceptionsWindow(
+        GTK_WINDOW(gtk_widget_get_toplevel(button)),
+        model,
+        IDS_PLUGINS_EXCEPTION_TITLE);
+    return;
+  }
   ContentExceptionsWindowGtk::ShowExceptionsWindow(
       GTK_WINDOW(gtk_widget_get_toplevel(button)),
       settings_map, otr_settings_map, content_type_);
 }
 
 void ContentFilterPageGtk::OnPluginsPageLinkClicked(GtkWidget* button) {
-  // We open a new browser window so the Options dialog doesn't get lost
-  // behind other windows.
-  Browser* browser = Browser::Create(profile());
-  browser->OpenURL(GURL(chrome::kChromeUIPluginsURL),
-                   GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
-  browser->window()->Show();
+  browser::ShowOptionsURL(profile(), GURL(chrome::kChromeUIPluginsURL));
 }

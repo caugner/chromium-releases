@@ -17,6 +17,7 @@
 #include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "base/sys_string_conversions.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/plugins/plugin_instance.h"
 #include "webkit/glue/plugins/plugin_lib.h"
@@ -24,6 +25,7 @@
 #include "webkit/glue/plugins/plugin_stream_url.h"
 #include "webkit/glue/plugins/plugin_web_event_converter_mac.h"
 #include "webkit/glue/plugins/webplugin.h"
+#include "webkit/glue/plugins/webplugin_accelerated_surface_mac.h"
 #include "webkit/glue/webkit_glue.h"
 
 #ifndef NP_NO_CARBON
@@ -258,16 +260,17 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
       layer_(nil),
       surface_(NULL),
       renderer_(nil),
-      plugin_has_focus_(false),
-      has_webkit_focus_(false),
-      containing_view_has_focus_(false),
       containing_window_has_focus_(false),
       initial_window_focus_(false),
       container_is_visible_(false),
       have_called_set_window_(false),
+      ime_enabled_(false),
       external_drag_tracker_(new ExternalDragTracker()),
       handle_event_depth_(0),
-      first_set_window_call_(true) {
+      first_set_window_call_(true),
+      plugin_has_focus_(false),
+      has_webkit_focus_(false),
+      containing_view_has_focus_(true) {
   memset(&window_, 0, sizeof(window_));
 #ifndef NP_NO_CARBON
   memset(&np_cg_context_, 0, sizeof(np_cg_context_));
@@ -359,9 +362,9 @@ bool WebPluginDelegateImpl::PlatformInitialize() {
       if (instance()->event_model() != NPEventModelCocoa)
         return false;
       window_.type = NPWindowTypeDrawable;
-      // Ask the plug-in for the CALayer it created for rendering content. Have
-      // the renderer tell the browser to create a "windowed plugin" to host
-      // the IOSurface.
+      // Ask the plug-in for the CALayer it created for rendering content.
+      // Create a surface to host it, and request a "window" handle to identify
+      // the surface.
       CALayer* layer = nil;
       NPError err = instance()->NPP_GetValue(NPPVpluginCoreAnimationLayer,
                                              reinterpret_cast<void*>(&layer));
@@ -371,8 +374,8 @@ bool WebPluginDelegateImpl::PlatformInitialize() {
           redraw_timer_.reset(new base::RepeatingTimer<WebPluginDelegateImpl>);
         }
         layer_ = layer;
-        surface_ = new AcceleratedSurface;
-        surface_->Initialize(NULL, true);
+        surface_ = plugin_->GetAcceleratedSurface();
+
         renderer_ = [[CARenderer rendererWithCGLContext:surface_->context()
                                                 options:NULL] retain];
         [renderer_ setLayer:layer_];
@@ -421,11 +424,6 @@ void WebPluginDelegateImpl::PlatformDestroyInstance() {
   [renderer_ release];
   renderer_ = nil;
   layer_ = nil;
-  if (surface_) {
-    surface_->Destroy();
-    delete surface_;
-    surface_ = NULL;
-  }
 }
 
 void WebPluginDelegateImpl::UpdateGeometryAndContext(
@@ -464,15 +462,6 @@ void WebPluginDelegateImpl::Paint(CGContextRef context, const gfx::Rect& rect) {
 
 void WebPluginDelegateImpl::Print(CGContextRef context) {
   NOTIMPLEMENTED();
-}
-
-void WebPluginDelegateImpl::SetFocus(bool focused) {
-  // This is called when internal WebKit focus (the focused element on the page)
-  // changes, but plugins need to know about actual first responder status, so
-  // we have an extra layer of focus tracking.
-  has_webkit_focus_ = focused;
-  if (containing_view_has_focus_)
-    SetPluginHasFocus(focused);
 }
 
 bool WebPluginDelegateImpl::PlatformHandleInputEvent(
@@ -586,7 +575,13 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
     event_scope.reset(new NPAPI::ScopedCurrentPluginEvent(
         instance(), static_cast<NPCocoaEvent*>(plugin_event)));
   }
-  bool handled = instance()->NPP_HandleEvent(plugin_event) != 0;
+  int16_t handle_response = instance()->NPP_HandleEvent(plugin_event);
+  bool handled = handle_response != kNPEventNotHandled;
+
+  if (handled && event.type == WebInputEvent::KeyDown) {
+    // Update IME state as requested by the plugin.
+    SetImeEnabled(handle_response == kNPEventStartIME);
+  }
 
   // Plugins don't give accurate information about whether or not they handled
   // events, so browsers on the Mac ignore the return value.
@@ -791,6 +786,9 @@ void WebPluginDelegateImpl::SetWindowHasFocus(bool has_focus) {
     return;
   containing_window_has_focus_ = has_focus;
 
+  if (!has_focus)
+    SetImeEnabled(false);
+
 #ifndef NP_NO_QUICKDRAW
   // Make sure controls repaint with the correct look.
   if (quirks_ & PLUGIN_QUIRK_ALLOW_FASTER_QUICKDRAW_PATH)
@@ -823,13 +821,12 @@ void WebPluginDelegateImpl::SetWindowHasFocus(bool has_focus) {
   }
 }
 
-void WebPluginDelegateImpl::SetPluginHasFocus(bool has_focus) {
+bool WebPluginDelegateImpl::PlatformSetPluginHasFocus(bool focused) {
   if (!have_called_set_window_)
-    return;
+    return false;
 
-  if (has_focus == plugin_has_focus_)
-    return;
-  plugin_has_focus_ = has_focus;
+  if (!focused)
+    SetImeEnabled(false);
 
   ScopedActiveDelegate active_delegate(this);
 
@@ -837,7 +834,7 @@ void WebPluginDelegateImpl::SetPluginHasFocus(bool has_focus) {
 #ifndef NP_NO_CARBON
     case NPEventModelCarbon: {
       NPEvent focus_event = { 0 };
-      if (plugin_has_focus_)
+      if (focused)
         focus_event.what = NPEventType_GetFocusEvent;
       else
         focus_event.what = NPEventType_LoseFocusEvent;
@@ -850,16 +847,12 @@ void WebPluginDelegateImpl::SetPluginHasFocus(bool has_focus) {
       NPCocoaEvent focus_event;
       memset(&focus_event, 0, sizeof(focus_event));
       focus_event.type = NPCocoaEventFocusChanged;
-      focus_event.data.focus.hasFocus = plugin_has_focus_;
+      focus_event.data.focus.hasFocus = focused;
       instance()->NPP_HandleEvent(&focus_event);
       break;
     }
   }
-}
-
-void WebPluginDelegateImpl::SetContentAreaHasFocus(bool has_focus) {
-  containing_view_has_focus_ = has_focus;
-  SetPluginHasFocus(containing_view_has_focus_ && has_webkit_focus_);
+  return true;
 }
 
 void WebPluginDelegateImpl::SetContainerVisibility(bool is_visible) {
@@ -893,10 +886,24 @@ void WebPluginDelegateImpl::SetContainerVisibility(bool is_visible) {
     instance()->webplugin()->InvalidateRect(gfx::Rect());
 }
 
-void WebPluginDelegateImpl::WindowFrameChanged(gfx::Rect window_frame,
-                                               gfx::Rect view_frame) {
+void WebPluginDelegateImpl::WindowFrameChanged(const gfx::Rect& window_frame,
+                                               const gfx::Rect& view_frame) {
   instance()->set_window_frame(window_frame);
   SetContentAreaOrigin(gfx::Point(view_frame.x(), view_frame.y()));
+}
+
+void WebPluginDelegateImpl::ImeCompositionConfirmed(const string16& text) {
+  if (instance()->event_model() != NPEventModelCocoa) {
+    DLOG(ERROR) << "IME text receieved in Carbon event model";
+    return;
+  }
+
+  NPCocoaEvent text_event;
+  memset(&text_event, 0, sizeof(NPCocoaEvent));
+  text_event.type = NPCocoaEventTextInput;
+  text_event.data.text.text =
+      reinterpret_cast<NPNSString*>(base::SysUTF16ToNSString(text));
+  instance()->NPP_HandleEvent(&text_event);
 }
 
 void WebPluginDelegateImpl::SetThemeCursor(ThemeCursor cursor) {
@@ -957,6 +964,15 @@ void WebPluginDelegateImpl::PluginVisibilityChanged() {
   }
 }
 
+void WebPluginDelegateImpl::SetImeEnabled(bool enabled) {
+  if (instance()->event_model() != NPEventModelCocoa)
+    return;
+  if (enabled == ime_enabled_)
+    return;
+  ime_enabled_ = enabled;
+  plugin_->SetImeEnabled(enabled);
+}
+
 #pragma mark -
 #pragma mark Core Animation Support
 
@@ -965,9 +981,7 @@ void WebPluginDelegateImpl::DrawLayerInSurface() {
   if (!windowed_handle())
     return;
 
-  surface_->MakeCurrent();
-
-  surface_->Clear(window_rect_);
+  surface_->StartDrawing();
 
   [renderer_ beginFrameAtTime:CACurrentMediaTime() timeStamp:NULL];
   if (CGRectIsEmpty([renderer_ updateBounds])) {
@@ -980,34 +994,30 @@ void WebPluginDelegateImpl::DrawLayerInSurface() {
   [renderer_ render];
   [renderer_ endFrame];
 
-  surface_->SwapBuffers();
-  plugin_->AcceleratedFrameBuffersDidSwap(windowed_handle());
+  surface_->EndDrawing();
 }
 
-// Update the size of the IOSurface to match the current size of the plug-in,
-// then tell the browser host view so it can adjust its bookkeeping and CALayer
-// appropriately.
+// Update the size of the surface to match the current size of the plug-in.
 void WebPluginDelegateImpl::UpdateAcceleratedSurface() {
   // Will only have a window handle when using a Core Animation drawing model.
   if (!windowed_handle() || !layer_)
     return;
 
+  [CATransaction begin];
+  [CATransaction setValue:[NSNumber numberWithInt:0]
+                   forKey:kCATransactionAnimationDuration];
   [layer_ setFrame:CGRectMake(0, 0,
                               window_rect_.width(), window_rect_.height())];
-  [renderer_ setBounds:[layer_ bounds]];
+  [CATransaction commit];
 
-  uint64 io_surface_id = surface_->SetSurfaceSize(window_rect_.size());
-  if (io_surface_id) {
-    plugin_->SetAcceleratedSurface(windowed_handle(),
-                                   window_rect_.width(),
-                                   window_rect_.height(),
-                                   io_surface_id);
-  }
+  [renderer_ setBounds:[layer_ bounds]];
+  surface_->SetSize(window_rect_.size());
 }
 
 void WebPluginDelegateImpl::set_windowed_handle(
     gfx::PluginWindowHandle handle) {
   windowed_handle_ = handle;
+  surface_->SetWindowHandle(handle);
   UpdateAcceleratedSurface();
   // Kick off the drawing timer, if necessary.
   PluginVisibilityChanged();

@@ -239,6 +239,7 @@
         '../third_party/skia/src/core/SkGraphics.cpp',
         '../third_party/skia/src/core/SkLineClipper.cpp',
         '../third_party/skia/src/core/SkMMapStream.cpp',
+        '../third_party/skia/src/core/SkMallocPixelRef.cpp',
         '../third_party/skia/src/core/SkMask.cpp',
         '../third_party/skia/src/core/SkMaskFilter.cpp',
         '../third_party/skia/src/core/SkMath.cpp',
@@ -374,7 +375,7 @@
         #'../third_party/skia/src/ports/SkOSEvent_dummy.cpp',
         '../third_party/skia/src/ports/SkOSFile_stdio.cpp',
         #'../third_party/skia/src/ports/SkThread_none.cpp',
-        '../third_party/skia/src/ports/SkThread_pthread.cpp',
+        #'../third_party/skia/src/ports/SkThread_pthread.cpp',
         '../third_party/skia/src/ports/SkThread_win.cpp',
         '../third_party/skia/src/ports/SkTime_Unix.cpp',
         #'../third_party/skia/src/ports/SkXMLParser_empty.cpp',
@@ -511,6 +512,7 @@
         'ext/google_logging.cc',
         'ext/image_operations.cc',
         'ext/image_operations.h',
+        'ext/SkThread_chrome.cc',
         'ext/platform_canvas.h',
         'ext/platform_canvas.cc',
         'ext/platform_canvas_linux.cc',
@@ -592,6 +594,14 @@
             '../third_party/skia/src/opts/opts_check_SSE2.cpp'
           ],
         }],
+        ['clang==1', {
+          'defines': [
+            # Remove all use of __restrict__ -- skia uses it incorrectly,
+            # and clang is more strict about it.
+            # http://code.google.com/p/skia/issues/detail?id=63
+            'SK_RESTRICT=',
+          ],
+        }],
         [ 'OS == "linux" or OS == "freebsd" or OS == "openbsd" or OS == "solaris"', {
           'dependencies': [
             '../build/linux/system.gyp:gdk',
@@ -638,8 +648,8 @@
         [ 'OS == "win"', {
           'sources!': [
             '../third_party/skia/src/core/SkMMapStream.cpp',
-            '../third_party/skia/src/ports/SkThread_pthread.cpp',
             '../third_party/skia/src/ports/SkTime_Unix.cc',
+            'ext/SkThread_chrome.cc',
           ],
           'include_dirs': [
             'config/win',

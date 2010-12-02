@@ -37,8 +37,12 @@ class FirstRun {
     OEM_BUBBLE,        // Smaller bubble for OEM builds
     MINIMAL_BUBBLE     // Minimal bubble shown after search engine dialog
   } BubbleType;
+
   // See ProcessMasterPreferences for more info about this structure.
   struct MasterPrefs {
+    MasterPrefs();
+    ~MasterPrefs();
+
     int ping_delay;
     bool homepage_defined;
     int do_import_items;
@@ -49,6 +53,7 @@ class FirstRun {
     std::vector<GURL> new_tabs;
     std::vector<GURL> bookmarks;
   };
+
 #if defined(OS_WIN)
   // Creates the desktop shortcut to chrome for the current user. Returns
   // false if it fails. It will overwrite the shortcut if it exists.
@@ -140,6 +145,11 @@ class FirstRun {
   // loads the welcome tab once the message loop gets going. Returns false
   // if the pref could not be set.
   static bool SetShowWelcomePagePref();
+
+  // Sets the kAutoFillPersonalDataManagerFirstRun local state pref so that the
+  // browser loads PersonalDataManager once the main message loop gets going.
+  // Returns false if the pref could not be set.
+  static bool SetPersonalDataManagerFirstRunPref();
 
  private:
   friend class FirstRunTest;
@@ -292,44 +302,18 @@ class FirstRunBrowserProcess : public BrowserProcessImpl {
 // The values that it handles are meant to be used as the process exit code.
 class FirstRunImportObserver : public ImportObserver {
  public:
-  FirstRunImportObserver()
-      : loop_running_(false), import_result_(ResultCodes::NORMAL_EXIT) {
-  }
+  FirstRunImportObserver();
+
   int import_result() const;
   virtual void ImportCanceled();
   virtual void ImportComplete();
   void RunLoop();
+
  private:
   void Finish();
   bool loop_running_;
   int import_result_;
   DISALLOW_COPY_AND_ASSIGN(FirstRunImportObserver);
 };
-
-
-// Show the First Run UI to the user, allowing them to create shortcuts for
-// the app, import their bookmarks and other data from another browser into
-// |profile| and perhaps some other tasks.
-// |process_singleton| is used to lock the handling of CopyData messages
-// while the First Run UI is visible.
-// |homepage_defined| true indicates that homepage is defined in master
-// preferences and should not be imported from another browser.
-// |import_items| specifies the items to import, specified in master
-// preferences and will override default behavior of importer.
-// |dont_import_items| specifies the items *not* to import, specified in master
-// preferences and will override default behavior of importer.
-// |search_engine_experiment| indicates whether the experimental search engine
-// window should be shown.
-// |randomize_search_engine_experiment| is true if the logos in the search
-// engine window should be shown in randomized order.
-// Returns true if the user clicked "Start", false if the user pressed "Cancel"
-// or closed the dialog.
-bool OpenFirstRunDialog(Profile* profile,
-                        bool homepage_defined,
-                        int import_items,
-                        int dont_import_items,
-                        bool search_engine_experiment,
-                        bool randomize_search_engine_experiment,
-                        ProcessSingleton* process_singleton);
 
 #endif  // CHROME_BROWSER_FIRST_RUN_FIRST_RUN_H_

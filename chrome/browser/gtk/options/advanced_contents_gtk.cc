@@ -32,7 +32,6 @@
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/options/content_settings_window_gtk.h"
 #include "chrome/browser/gtk/options/options_layout_gtk.h"
-#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/options_page_base.h"
 #include "chrome/browser/options_util.h"
 #include "chrome/browser/prefs/pref_member.h"
@@ -40,6 +39,7 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/browser/show_options_url.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -79,8 +79,8 @@ const int kWrapWidth = 475;
 GtkWidget* CreateWrappedLabel(int string_id) {
   GtkWidget* label = gtk_label_new(
       l10n_util::GetStringUTF8(string_id).c_str());
-  gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
-  gtk_widget_set_size_request(label, kWrapWidth, -1);
+  gtk_misc_set_alignment(GTK_MISC(label), 0.0, 0.5);
+  gtk_util::SetLabelWidth(label, kWrapWidth);
   return label;
 }
 
@@ -368,7 +368,8 @@ class NetworkSection : public OptionsPageBase {
   static bool SearchPATH(ProxyConfigCommand* commands, size_t ncommands,
                          size_t* index);
   // Start the given proxy configuration utility.
-  static void StartProxyConfigUtil(const ProxyConfigCommand& command);
+  static void StartProxyConfigUtil(Profile* profile,
+                                   const ProxyConfigCommand& command);
 
   // Tracks the state of proxy preferences.
   scoped_ptr<PrefSetObserver> proxy_prefs_;
@@ -456,14 +457,12 @@ void NetworkSection::OnChangeProxiesButtonClicked(GtkButton *button,
   }
 
   if (found_command) {
-    StartProxyConfigUtil(command);
+    StartProxyConfigUtil(section->profile(), command);
   } else {
     const char* name = base::GetDesktopEnvironmentName(env.get());
     if (name)
       LOG(ERROR) << "Could not find " << name << " network settings in $PATH";
-    BrowserList::GetLastActive()->
-        OpenURL(GURL(kLinuxProxyConfigUrl),
-                GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+    browser::ShowOptionsURL(section->profile(), GURL(kLinuxProxyConfigUrl));
   }
 }
 
@@ -492,7 +491,8 @@ bool NetworkSection::SearchPATH(ProxyConfigCommand* commands, size_t ncommands,
 }
 
 // static
-void NetworkSection::StartProxyConfigUtil(const ProxyConfigCommand& command) {
+void NetworkSection::StartProxyConfigUtil(Profile* profile,
+                                          const ProxyConfigCommand& command) {
   std::vector<std::string> argv;
   argv.push_back(command.binary);
   for (size_t i = 1; command.argv[i]; i++)
@@ -501,9 +501,7 @@ void NetworkSection::StartProxyConfigUtil(const ProxyConfigCommand& command) {
   base::ProcessHandle handle;
   if (!base::LaunchApp(argv, no_files, false, &handle)) {
     LOG(ERROR) << "StartProxyConfigUtil failed to start " << command.binary;
-    BrowserList::GetLastActive()->
-        OpenURL(GURL(kLinuxProxyConfigUrl), GURL(), NEW_FOREGROUND_TAB,
-                PageTransition::LINK);
+    browser::ShowOptionsURL(profile, GURL(kLinuxProxyConfigUrl));
     return;
   }
   ProcessWatcher::EnsureProcessGetsReaped(handle);
@@ -684,9 +682,9 @@ void ChromeAppsSection::OnBackgroundModeClicked(GtkWidget* widget) {
 }
 
 void ChromeAppsSection::OnLearnMoreLinkClicked(GtkWidget* widget) {
-  BrowserList::GetLastActive()->OpenURL(
-      GURL(l10n_util::GetStringUTF8(IDS_LEARN_MORE_BACKGROUND_MODE_URL)),
-      GURL(), NEW_WINDOW, PageTransition::LINK);
+  browser::ShowOptionsURL(
+      profile(),
+      GURL(l10n_util::GetStringUTF8(IDS_LEARN_MORE_BACKGROUND_MODE_URL)));
 }
 
 
@@ -885,9 +883,9 @@ void PrivacySection::OnClearBrowsingDataButtonClicked(GtkButton* widget,
 // static
 void PrivacySection::OnLearnMoreLinkClicked(GtkButton *button,
                                             PrivacySection* privacy_section) {
-  BrowserList::GetLastActive()->
-      OpenURL(GURL(l10n_util::GetStringUTF8(IDS_LEARN_MORE_PRIVACY_URL)),
-              GURL(), NEW_WINDOW, PageTransition::LINK);
+  browser::ShowOptionsURL(
+      privacy_section->profile(),
+      GURL(l10n_util::GetStringUTF8(IDS_LEARN_MORE_PRIVACY_URL)));
 }
 
 // static
@@ -930,7 +928,6 @@ void PrivacySection::OnDNSPrefetchingChange(GtkWidget* widget,
           UserMetricsAction("Options_DnsPrefetchCheckbox_Disable"),
       privacy_section->profile()->GetPrefs());
   privacy_section->dns_prefetch_enabled_.SetValue(enabled);
-  chrome_browser_net::EnablePredictor(enabled);
 }
 
 // static
@@ -1001,7 +998,6 @@ void PrivacySection::NotifyPrefChanged(const std::string* pref_name) {
     bool enabled = dns_prefetch_enabled_.GetValue();
     gtk_toggle_button_set_active(
         GTK_TOGGLE_BUTTON(enable_dns_prefetching_checkbox_), enabled);
-    chrome_browser_net::EnablePredictor(enabled);
   }
   if (!pref_name || *pref_name == prefs::kSafeBrowsingEnabled) {
     gtk_widget_set_sensitive(
@@ -1187,9 +1183,8 @@ void SecuritySection::NotifyPrefChanged(const std::string* pref_name) {
 // static
 void SecuritySection::OnManageCertificatesClicked(GtkButton* button,
                                                   SecuritySection* section) {
-  BrowserList::GetLastActive()->
-      OpenURL(GURL(kLinuxCertificatesConfigUrl), GURL(), NEW_WINDOW,
-              PageTransition::LINK);
+  browser::ShowOptionsURL(section->profile(),
+                          GURL(kLinuxCertificatesConfigUrl));
 }
 
 // static

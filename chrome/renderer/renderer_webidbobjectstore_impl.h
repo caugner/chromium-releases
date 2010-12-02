@@ -29,21 +29,39 @@ class RendererWebIDBObjectStoreImpl : public WebKit::WebIDBObjectStore {
   WebKit::WebString keyPath() const;
   WebKit::WebDOMStringList indexNames() const;
 
-  void get(const WebKit::WebIDBKey& key, WebKit::WebIDBCallbacks* callbacks);
+  void get(const WebKit::WebIDBKey& key,
+           WebKit::WebIDBCallbacks* callbacks,
+           const WebKit::WebIDBTransaction& transaction,
+           WebKit::WebExceptionCode& ec);
   void put(const WebKit::WebSerializedScriptValue& value,
-           const WebKit::WebIDBKey& key, bool add_only,
-           WebKit::WebIDBCallbacks* callbacks);
-  void remove(const WebKit::WebIDBKey& key, WebKit::WebIDBCallbacks* callbacks);
+           const WebKit::WebIDBKey& key,
+           bool add_only,
+           WebKit::WebIDBCallbacks* callbacks,
+           const WebKit::WebIDBTransaction& transaction,
+           WebKit::WebExceptionCode& ec);
+  void remove(const WebKit::WebIDBKey& key,
+              WebKit::WebIDBCallbacks* callbacks,
+              const WebKit::WebIDBTransaction& transaction,
+              WebKit::WebExceptionCode& ec);
 
-  void createIndex(const WebKit::WebString& name,
-                   const WebKit::WebString& key_path, bool unique,
-                   WebKit::WebIDBCallbacks* callbacks);
+  WebKit::WebIDBIndex* createIndex(
+      const WebKit::WebString& name,
+      const WebKit::WebString& key_path,
+      bool unique,
+      const WebKit::WebIDBTransaction& transaction,
+      WebKit::WebExceptionCode& ec);
   // Transfers ownership of the WebIDBIndex to the caller.
-  WebKit::WebIDBIndex* index(const WebKit::WebString& name);
+  WebKit::WebIDBIndex* index(const WebKit::WebString& name,
+                             WebKit::WebExceptionCode& ec);
   void removeIndex(const WebKit::WebString& name,
-                   WebKit::WebIDBCallbacks* callbacks);
+                   const WebKit::WebIDBTransaction& transaction,
+                   WebKit::WebExceptionCode& ec);
+
   void openCursor(const WebKit::WebIDBKeyRange& idb_key_range,
-                  unsigned short direction, WebKit::WebIDBCallbacks* callbacks);
+                  unsigned short direction,
+                  WebKit::WebIDBCallbacks* callbacks,
+                  const WebKit::WebIDBTransaction& transaction,
+                  WebKit::WebExceptionCode& ec);
  private:
   int32 idb_object_store_id_;
 };

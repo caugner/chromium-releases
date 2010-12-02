@@ -1,4 +1,4 @@
-# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Copyright (c) 2010 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -33,6 +33,7 @@
         '../third_party/ffmpeg/ffmpeg.gyp:*',
         '../third_party/icu/icu.gyp:*',
         '../third_party/libjpeg/libjpeg.gyp:*',
+        '../third_party/libwebp/libwebp.gyp:*',
         '../third_party/libpng/libpng.gyp:*',
         '../third_party/libxml/libxml.gyp:*',
         '../third_party/libxslt/libxslt.gyp:*',
@@ -160,6 +161,7 @@
             '../chrome/chrome.gyp:interactive_ui_tests',
             '../chrome/chrome.gyp:nacl_ui_tests',
             '../chrome/chrome.gyp:nacl_sandbox_tests',
+            '../chrome/chrome.gyp:safe_browsing_tests',
             '../chrome/chrome.gyp:sync_integration_tests',
             '../chrome/chrome.gyp:sync_unit_tests',
             '../chrome/chrome.gyp:ui_tests',
@@ -186,6 +188,7 @@
             '../chrome/chrome.gyp:nacl_sandbox_tests',
             '../chrome/chrome.gyp:page_cycler_tests',
             '../chrome/chrome.gyp:plugin_tests',
+            '../chrome/chrome.gyp:safe_browsing_tests',
             '../chrome/chrome.gyp:startup_tests',
             '../chrome/chrome.gyp:sync_integration_tests',
             '../chrome/chrome.gyp:sync_unit_tests',
@@ -258,6 +261,7 @@
             '../chrome/chrome.gyp:nacl_sandbox_tests',
             '../chrome/chrome.gyp:page_cycler_tests',
             '../chrome/chrome.gyp:plugin_tests',
+            '../chrome/chrome.gyp:safe_browsing_tests',
             '../chrome/chrome.gyp:selenium_tests',
             '../chrome/chrome.gyp:startup_tests',
             '../chrome/chrome.gyp:sync_integration_tests',
@@ -334,6 +338,7 @@
             '../chrome/chrome.gyp:interactive_ui_tests',
             '../chrome/chrome.gyp:memory_test',
             '../chrome/chrome.gyp:page_cycler_tests',
+            '../chrome/chrome.gyp:safe_browsing_tests',
             '../chrome/chrome.gyp:startup_tests',
             '../chrome/chrome.gyp:sync_unit_tests',
             '../chrome/chrome.gyp:tab_switching_test',

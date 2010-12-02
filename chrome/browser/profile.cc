@@ -62,7 +62,7 @@ URLRequestContextGetter* Profile::default_request_context_;
 
 namespace {
 
-// FIXME: Duplicated in profile_impl.cc
+// TODO(pathorn): Duplicated in profile_impl.cc
 void CleanupRequestContext(ChromeURLRequestContextGetter* context) {
   if (context)
     context->CleanupOnUIThread();
@@ -140,8 +140,8 @@ class OffTheRecordProfileImpl : public Profile,
     CleanupRequestContext(extensions_request_context_);
 
     // Clean up all DB files/directories
-    ChromeThread::PostTask(
-        ChromeThread::FILE, FROM_HERE,
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
         NewRunnableMethod(
             db_tracker_.get(),
             &webkit_database::DatabaseTracker::DeleteIncognitoDBDirectory));
@@ -177,8 +177,8 @@ class OffTheRecordProfileImpl : public Profile,
   virtual ChromeAppCacheService* GetAppCacheService() {
     if (!appcache_service_) {
       appcache_service_ = new ChromeAppCacheService;
-      ChromeThread::PostTask(
-          ChromeThread::IO, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
           NewRunnableMethod(appcache_service_.get(),
                             &ChromeAppCacheService::InitializeOnIOThread,
                             GetPath(), IsOffTheRecord(),
@@ -304,7 +304,8 @@ class OffTheRecordProfileImpl : public Profile,
 
   virtual DownloadManager* GetDownloadManager() {
     if (!download_manager_.get()) {
-      scoped_refptr<DownloadManager> dlm(new DownloadManager);
+      scoped_refptr<DownloadManager> dlm(
+          new DownloadManager(g_browser_process->download_status_updater()));
       dlm->Init(this);
       download_manager_.swap(dlm);
     }
@@ -444,6 +445,11 @@ class OffTheRecordProfileImpl : public Profile,
     return NULL;
   }
 
+  virtual ProfileSyncService* GetProfileSyncService(
+      const std::string& cros_user) {
+    return NULL;
+  }
+
   virtual CloudPrintProxyService* GetCloudPrintProxyService() {
     return NULL;
   }
@@ -489,6 +495,10 @@ class OffTheRecordProfileImpl : public Profile,
     NOTREACHED();
   }
 
+  virtual void InitWebResources() {
+    NOTREACHED();
+  }
+
   virtual NTPResourceCache* GetNTPResourceCache() {
     // Just return the real profile resource cache.
     return profile_->GetNTPResourceCache();
@@ -514,9 +524,13 @@ class OffTheRecordProfileImpl : public Profile,
 #endif  // defined(OS_CHROMEOS)
 
   virtual void ExitedOffTheRecordMode() {
-    // Drop our download manager so we forget about all the downloads made
-    // in off-the-record mode.
-    download_manager_ = NULL;
+    // DownloadManager is lazily created, so check before accessing it.
+    if (download_manager_.get()) {
+      // Drop our download manager so we forget about all the downloads made
+      // in off-the-record mode.
+      download_manager_->Shutdown();
+      download_manager_ = NULL;
+    }
   }
 
   virtual void Observe(NotificationType type,
@@ -537,13 +551,17 @@ class OffTheRecordProfileImpl : public Profile,
   virtual ChromeBlobStorageContext* GetBlobStorageContext() {
     if (!blob_storage_context_) {
       blob_storage_context_ = new ChromeBlobStorageContext();
-      ChromeThread::PostTask(
-          ChromeThread::IO, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
           NewRunnableMethod(
               blob_storage_context_.get(),
               &ChromeBlobStorageContext::InitializeOnIOThread));
     }
     return blob_storage_context_;
+  }
+
+  virtual ExtensionInfoMap* GetExtensionInfoMap() {
+    return profile_->GetExtensionInfoMap();
   }
 
  private:

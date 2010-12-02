@@ -13,13 +13,20 @@
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/spellcheck_host_observer.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 
+class PrefService;
+
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/preferences.h"
+namespace chromeos {
+class Preferences;
+}
 #endif
+
+class NetPrefObserver;
 
 // The default profile implementation.
 class ProfileImpl : public Profile,
@@ -27,6 +34,8 @@ class ProfileImpl : public Profile,
                     public NotificationObserver {
  public:
   virtual ~ProfileImpl();
+
+  static void RegisterUserPrefs(PrefService* prefs);
 
   // Profile implementation.
   virtual ProfileId GetRuntimeId();
@@ -96,15 +105,19 @@ class ProfileImpl : public Profile,
   virtual StatusTray* GetStatusTray();
   virtual void MarkAsCleanShutdown();
   virtual void InitExtensions();
+  virtual void InitWebResources();
   virtual NTPResourceCache* GetNTPResourceCache();
   virtual FilePath last_selected_directory();
   virtual void set_last_selected_directory(const FilePath& path);
   virtual ProfileSyncService* GetProfileSyncService();
+  virtual ProfileSyncService* GetProfileSyncService(
+      const std::string& cros_user);
   virtual TokenService* GetTokenService();
-  void InitSyncService();
+  void InitSyncService(const std::string& cros_user);
   virtual CloudPrintProxyService* GetCloudPrintProxyService();
   void InitCloudPrintProxyService();
   virtual ChromeBlobStorageContext* GetBlobStorageContext();
+  virtual ExtensionInfoMap* GetExtensionInfoMap();
 
 #if defined(OS_CHROMEOS)
   virtual chromeos::ProxyConfigServiceImpl* GetChromeOSProxyConfigServiceImpl();
@@ -138,7 +151,11 @@ class ProfileImpl : public Profile,
     GetSessionService();
   }
 
+  void RegisterComponentExtensions();
+  void InstallDefaultApps();
+
   NotificationRegistrar registrar_;
+  PrefChangeRegistrar pref_change_registrar_;
 
   FilePath path_;
   FilePath base_cache_path_;
@@ -155,6 +172,7 @@ class ProfileImpl : public Profile,
   scoped_refptr<TransportSecurityPersister>
       transport_security_persister_;
   scoped_ptr<PrefService> prefs_;
+  scoped_ptr<NetPrefObserver> net_pref_observer_;
   scoped_ptr<TemplateURLFetcher> template_url_fetcher_;
   scoped_ptr<TemplateURLModel> template_url_model_;
   scoped_ptr<BookmarkModel> bookmark_bar_model_;
@@ -164,7 +182,7 @@ class ProfileImpl : public Profile,
   scoped_ptr<TokenService> token_service_;
   scoped_ptr<ProfileSyncFactory> profile_sync_factory_;
   scoped_ptr<ProfileSyncService> sync_service_;
-  scoped_ptr<CloudPrintProxyService> cloud_print_proxy_service_;
+  scoped_refptr<CloudPrintProxyService> cloud_print_proxy_service_;
 
   scoped_refptr<ChromeURLRequestContextGetter> request_context_;
 
@@ -238,8 +256,10 @@ class ProfileImpl : public Profile,
 
   scoped_refptr<ChromeBlobStorageContext> blob_storage_context_;
 
+  scoped_refptr<ExtensionInfoMap> extension_info_map_;
+
 #if defined(OS_CHROMEOS)
-  chromeos::Preferences chromeos_preferences_;
+  scoped_ptr<chromeos::Preferences> chromeos_preferences_;
 
   scoped_refptr<chromeos::ProxyConfigServiceImpl>
       chromeos_proxy_config_service_impl_;

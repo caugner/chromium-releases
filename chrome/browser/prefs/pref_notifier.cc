@@ -38,15 +38,13 @@ PrefNotifier::~PrefNotifier() {
 }
 
 void PrefNotifier::OnPreferenceSet(const char* pref_name,
-                                   PrefNotifier::PrefStoreType new_store,
-                                   const Value* old_value) {
-  if (pref_value_store_->PrefHasChanged(pref_name, new_store, old_value))
+                                   PrefNotifier::PrefStoreType new_store) {
+  if (pref_value_store_->PrefHasChanged(pref_name, new_store))
     FireObservers(pref_name);
 }
 
-void PrefNotifier::OnUserPreferenceSet(const char* pref_name,
-                                       const Value* old_value) {
-  OnPreferenceSet(pref_name, PrefNotifier::USER_STORE, old_value);
+void PrefNotifier::OnUserPreferenceSet(const char* pref_name) {
+  OnPreferenceSet(pref_name, PrefNotifier::USER_STORE);
 }
 
 void PrefNotifier::FireObservers(const char* path) {
@@ -120,6 +118,8 @@ void PrefNotifier::FireObserversForRefreshedManagedPrefs(
 void PrefNotifier::Observe(NotificationType type,
                            const NotificationSource& source,
                            const NotificationDetails& details) {
+  using policy::ConfigurationPolicyPrefStore;
+
   if (type == NotificationType::POLICY_CHANGED) {
       PrefValueStore::AfterRefreshCallback* callback =
           NewCallback(this,
@@ -127,14 +127,13 @@ void PrefNotifier::Observe(NotificationType type,
       // The notification of the policy refresh can come from any thread,
       // but the manipulation of the PrefValueStore must happen on the UI
       // thread, thus the policy refresh must be explicitly started on it.
-      ChromeThread::PostTask(
-          ChromeThread::UI, FROM_HERE,
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
           NewRunnableMethod(
               pref_value_store_,
               &PrefValueStore::RefreshPolicyPrefs,
               ConfigurationPolicyPrefStore::CreateManagedPolicyPrefStore(),
               ConfigurationPolicyPrefStore::CreateRecommendedPolicyPrefStore(),
-
               callback));
   }
 }

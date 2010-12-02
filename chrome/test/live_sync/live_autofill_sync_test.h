@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "chrome/browser/autofill/autofill_common_unittest.h"
+#include "chrome/browser/autofill/autofill_common_test.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/field_types.h"
@@ -29,11 +29,11 @@
 using base::WaitableEvent;
 using testing::_;
 
-namespace {
 // Define these << operators so we can use EXPECT_EQ with the
 // AutofillKeys type.
 template<class T1, class T2, class T3>
-std::ostream& operator<<(std::ostream& os, const std::set<T1, T2, T3>& seq) {
+static std::ostream& operator<<(
+    std::ostream& os, const std::set<T1, T2, T3>& seq) {
   typedef typename std::set<T1, T2, T3>::const_iterator SetConstIterator;
   for (SetConstIterator i = seq.begin(); i != seq.end(); ++i) {
     os << *i << ", ";
@@ -41,10 +41,11 @@ std::ostream& operator<<(std::ostream& os, const std::set<T1, T2, T3>& seq) {
   return os;
 }
 
-std::ostream& operator<<(std::ostream& os, const AutofillKey& key) {
+static std::ostream& operator<<(std::ostream& os, const AutofillKey& key) {
   return os << UTF16ToUTF8(key.name()) << ", " << UTF16ToUTF8(key.value());
 }
 
+namespace {
 class GetAllAutofillEntries
     : public base::RefCountedThreadSafe<GetAllAutofillEntries> {
  public:
@@ -53,9 +54,9 @@ class GetAllAutofillEntries
         done_event_(false, false) {}
 
   void Init() {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
-    ChromeThread::PostTask(
-        ChromeThread::DB,
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    BrowserThread::PostTask(
+        BrowserThread::DB,
         FROM_HERE,
         NewRunnableMethod(this, &GetAllAutofillEntries::Run));
     done_event_.Wait();
@@ -69,7 +70,7 @@ class GetAllAutofillEntries
   friend class base::RefCountedThreadSafe<GetAllAutofillEntries>;
 
   void Run() {
-    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::DB));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
     web_data_service_->GetDatabase()->GetAllAutofillEntries(&entries_);
     done_event_.Signal();
   }
@@ -96,23 +97,34 @@ class AutofillDBThreadObserverHelper : public DBThreadObserverHelper {
 };
 
 enum ProfileType {
-  MARION,
-  HOMER
+  PROFILE_MARION,
+  PROFILE_HOMER,
+  PROFILE_FRASIER,
+  PROFILE_NULL
 };
 
 void FillProfile(ProfileType type, AutoFillProfile* profile) {
   switch (type) {
-    case MARION:
-      autofill_unittest::SetProfileInfo(profile,
+    case PROFILE_MARION:
+      autofill_test::SetProfileInfo(profile,
         "Billing", "Marion", "Mitchell", "Morrison",
         "johnwayne@me.xyz", "Fox", "123 Zoo St.", "unit 5", "Hollywood", "CA",
         "91601", "US", "12345678910", "01987654321");
       break;
-    case HOMER:
-      autofill_unittest::SetProfileInfo(profile,
+    case PROFILE_HOMER:
+      autofill_test::SetProfileInfo(profile,
         "Shipping", "Homer", "J.", "Simpson",
         "homer@snpp.com", "SNPP", "1 Main St", "PO Box 1", "Springfield", "MA",
         "94101", "US", "14155551212", "14155551313");
+      break;
+    case PROFILE_FRASIER:
+      autofill_test::SetProfileInfo(profile,
+        "Business", "Frasier", "Winslow", "Crane",
+        "", "randomness", "", "Apt. 4", "Seattle", "WA",
+        "99121", "US", "0000000000", "ABCDEFGHIJK");
+    case PROFILE_NULL:
+      autofill_test::SetProfileInfo(profile,
+        "", "key", "", "", "", "", "", "", "", "", "", "", "", "");
       break;
   }
 }
@@ -245,7 +257,7 @@ class LiveAutofillSyncTest : public LiveSyncTest {
     pdm->Refresh();
     MessageLoop::current()->Run();
     pdm->RemoveObserver(&observer);
-    return pdm->profiles();
+    return pdm->web_profiles();
   }
 
   bool CompareAutoFillProfiles(const AutoFillProfiles& expected_profiles,

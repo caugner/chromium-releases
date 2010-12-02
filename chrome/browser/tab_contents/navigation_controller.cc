@@ -350,6 +350,9 @@ void NavigationController::GoBack() {
   DiscardNonCommittedEntries();
 
   pending_entry_index_ = current_index - 1;
+  entries_[pending_entry_index_]->set_transition_type(
+      entries_[pending_entry_index_]->transition_type() |
+      PageTransition::FORWARD_BACK);
   NavigateToPendingEntry(NO_RELOAD);
 }
 
@@ -380,6 +383,9 @@ void NavigationController::GoForward() {
   if (!transient)
     pending_entry_index_++;
 
+  entries_[pending_entry_index_]->set_transition_type(
+      entries_[pending_entry_index_]->transition_type() |
+      PageTransition::FORWARD_BACK);
   NavigateToPendingEntry(NO_RELOAD);
 }
 
@@ -418,6 +424,9 @@ void NavigationController::GoToIndex(int index) {
   DiscardNonCommittedEntries();
 
   pending_entry_index_ = index;
+  entries_[pending_entry_index_]->set_transition_type(
+      entries_[pending_entry_index_]->transition_type() |
+      PageTransition::FORWARD_BACK);
   NavigateToPendingEntry(NO_RELOAD);
 }
 
@@ -935,8 +944,7 @@ void NavigationController::CopyStateFrom(const NavigationController& source) {
   FinishRestore(source.last_committed_entry_index_, false);
 }
 
-void NavigationController::CopyStateFromAndPrune(
-    const NavigationController& source) {
+void NavigationController::CopyStateFromAndPrune(NavigationController* source) {
   // This code is intended for use when the last entry is the active entry.
   DCHECK((transient_entry_index_ != -1 &&
           transient_entry_index_ == entry_count() - 1) ||
@@ -947,15 +955,15 @@ void NavigationController::CopyStateFromAndPrune(
   // Remove all the entries leaving the active entry.
   PruneAllButActive();
 
-  // Insert the entries from source. Don't use source.GetCurrentEntryIndex as
+  // Insert the entries from source. Don't use source->GetCurrentEntryIndex as
   // we don't want to copy over the transient entry.
-  int max_source_index = source.pending_entry_index_ != -1 ?
-      source.pending_entry_index_ : source.last_committed_entry_index_;
+  int max_source_index = source->pending_entry_index_ != -1 ?
+      source->pending_entry_index_ : source->last_committed_entry_index_;
   if (max_source_index == -1)
-    max_source_index = source.entry_count();
+    max_source_index = source->entry_count();
   else
     max_source_index++;
-  InsertEntriesFrom(source, max_source_index);
+  InsertEntriesFrom(*source, max_source_index);
 
   // Adjust indices such that the last entry and pending are at the end now.
   last_committed_entry_index_ = entry_count() - 1;
@@ -970,7 +978,47 @@ void NavigationController::CopyStateFromAndPrune(
   }
 
   // Take over the session id from source.
-  session_id_ = source.session_id_;
+  session_id_ = source->session_id_;
+
+  // Reset source's session id as we're taking it over.
+  source->session_id_.clear();
+}
+
+void NavigationController::PruneAllButActive() {
+  int prune_count = entry_count();
+  if (transient_entry_index_ != -1) {
+    // There is a transient entry. Prune up to it.
+    DCHECK_EQ(entry_count() - 1, transient_entry_index_);
+    prune_count = transient_entry_index_;
+    transient_entry_index_ = 0;
+    last_committed_entry_index_ = -1;
+    pending_entry_index_ = -1;
+  } else if (!pending_entry_) {
+    // There's no pending entry. Leave the last entry (if there is one).
+    if (!prune_count)
+      return;
+
+    prune_count--;
+    last_committed_entry_index_ = 0;
+  } else if (pending_entry_index_ != -1) {
+    DCHECK_EQ(pending_entry_index_, prune_count - 1);
+    pending_entry_index_ = 0;
+    last_committed_entry_index_ = 0;
+    prune_count--;
+  } else {
+    // There is a pending_entry, but it's not in entries_.
+    pending_entry_index_ = -1;
+    last_committed_entry_index_ = -1;
+  }
+
+  if (tab_contents_->interstitial_page()) {
+    // Normally the interstitial page hides itself if the user doesn't proceeed.
+    // This would result in showing a NavigationEntry we just removed. Set this
+    // so the interstitial triggers a reload if the user doesn't proceed.
+    tab_contents_->interstitial_page()->set_reload_on_dont_proceed(true);
+  }
+
+  entries_.erase(entries_.begin(), entries_.begin() + prune_count);
 }
 
 void NavigationController::DiscardNonCommittedEntries() {
@@ -1143,43 +1191,6 @@ NavigationEntry* NavigationController::GetTransientEntry() const {
   if (transient_entry_index_ == -1)
     return NULL;
   return entries_[transient_entry_index_].get();
-}
-
-void NavigationController::PruneAllButActive() {
-  int prune_count = entry_count();
-  if (transient_entry_index_ != -1) {
-    // There is a transient entry. Prune up to it.
-    DCHECK_EQ(entry_count() - 1, transient_entry_index_);
-    prune_count = transient_entry_index_;
-    transient_entry_index_ = 0;
-    last_committed_entry_index_ = -1;
-    pending_entry_index_ = -1;
-  } else if (!pending_entry_) {
-    // There's no pending entry. Leave the last entry (if there is one).
-    if (!prune_count)
-      return;
-
-    prune_count--;
-    last_committed_entry_index_ = 0;
-  } else if (pending_entry_index_ != -1) {
-    DCHECK_EQ(pending_entry_index_, prune_count - 1);
-    pending_entry_index_ = 0;
-    last_committed_entry_index_ = 0;
-    prune_count--;
-  } else {
-    // There is a pending_entry, but it's not in entries_.
-    pending_entry_index_ = -1;
-    last_committed_entry_index_ = -1;
-  }
-
-  if (tab_contents_->interstitial_page()) {
-    // Normally the interstitial page hides itself if the user doesn't proceeed.
-    // This would result in showing a NavigationEntry we just removed. Set this
-    // so the interstitial triggers a reload if the user doesn't proceed.
-    tab_contents_->interstitial_page()->set_reload_on_dont_proceed(true);
-  }
-
-  entries_.erase(entries_.begin(), entries_.begin() + prune_count);
 }
 
 void NavigationController::InsertEntriesFrom(

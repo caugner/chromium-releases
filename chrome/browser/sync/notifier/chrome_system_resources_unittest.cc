@@ -4,12 +4,23 @@
 
 #include "chrome/browser/sync/notifier/chrome_system_resources.h"
 
+#include <string>
+
 #include "base/message_loop.h"
 #include "google/cacheinvalidation/invalidation-client.h"
+#include "chrome/browser/sync/notifier/state_writer.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace sync_notifier {
 namespace {
+
+using ::testing::_;
+
+class MockStateWriter : public StateWriter {
+ public:
+  MOCK_METHOD1(WriteState, void(const std::string&));
+};
 
 void ShouldNotRun() {
   ADD_FAILURE();
@@ -17,12 +28,20 @@ void ShouldNotRun() {
 
 class ChromeSystemResourcesTest : public testing::Test {
  public:
+  // Used as a callback.
   void IncrementCounter() {
     ++counter_;
   }
 
+  // Used as a callback.
+  void ExpectTrue(bool result) {
+    EXPECT_TRUE(result);
+  }
+
  protected:
-  ChromeSystemResourcesTest() : counter_(0) {}
+  ChromeSystemResourcesTest() :
+      chrome_system_resources_(&mock_state_writer_),
+      counter_(0) {}
 
   virtual ~ChromeSystemResourcesTest() {}
 
@@ -36,6 +55,7 @@ class ChromeSystemResourcesTest : public testing::Test {
 
   // Needed by |chrome_system_resources_|.
   MessageLoop message_loop_;
+  MockStateWriter mock_state_writer_;
   ChromeSystemResources chrome_system_resources_;
   int counter_;
 
@@ -89,6 +109,17 @@ TEST_F(ChromeSystemResourcesTest, ScheduleImmediately) {
   EXPECT_EQ(1, counter_);
 }
 
+TEST_F(ChromeSystemResourcesTest, ScheduleOnListenerThread) {
+  chrome_system_resources_.StartScheduler();
+  chrome_system_resources_.ScheduleOnListenerThread(
+      invalidation::NewPermanentCallback(
+          this, &ChromeSystemResourcesTest::IncrementCounter));
+  EXPECT_FALSE(chrome_system_resources_.IsRunningOnInternalThread());
+  EXPECT_EQ(0, counter_);
+  message_loop_.RunAllPending();
+  EXPECT_EQ(1, counter_);
+}
+
 TEST_F(ChromeSystemResourcesTest, ScheduleWithZeroDelay) {
   chrome_system_resources_.StartScheduler();
   chrome_system_resources_.ScheduleWithDelay(
@@ -101,6 +132,19 @@ TEST_F(ChromeSystemResourcesTest, ScheduleWithZeroDelay) {
 }
 
 // TODO(akalin): Figure out how to test with a non-zero delay.
+
+TEST_F(ChromeSystemResourcesTest, WriteState) {
+  EXPECT_CALL(mock_state_writer_, WriteState(_));
+
+  // Explicitness hack here to work around broken callback
+  // implementations.
+  ChromeSystemResourcesTest* run_object = this;
+  void (ChromeSystemResourcesTest::*run_function)(bool) =
+      &ChromeSystemResourcesTest::ExpectTrue;
+
+  chrome_system_resources_.WriteState(
+      "state", invalidation::NewPermanentCallback(run_object, run_function));
+}
 
 }  // namespace
 }  // namespace notifier

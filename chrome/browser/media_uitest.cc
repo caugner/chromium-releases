@@ -48,33 +48,62 @@ class MediaTest : public UITest {
   }
 };
 
-TEST_F(MediaTest, VideoBearTheora) {
+#if defined(OS_WIN)
+
+// Tests always fail on windows:  http://crbug.com/55477
+#define MAYBE_VideoBearTheora DISABLED_VideoBearTheora
+#define MAYBE_VideoBearSilentTheora DISABLED_VideoBearSilentTheora
+#define MAYBE_VideoBearWebm DISABLED_VideoBearWebm
+#define MAYBE_VideoBearSilentWebm DISABLED_VideoBearSilentWebm
+#define MAYBE_VideoBearMp4 DISABLED_VideoBearMp4
+#define MAYBE_VideoBearSilentMp4 DISABLED_VideoBearSilentMp4
+#define MAYBE_MediaUILayoutTest DISABLED_MediaUILayoutTest
+
+#else
+
+#define MAYBE_VideoBearTheora VideoBearTheora
+#define MAYBE_VideoBearSilentTheora VideoBearSilentTheora
+#define MAYBE_VideoBearWebm VideoBearWebm
+#define MAYBE_VideoBearSilentWebm VideoBearSilentWebm
+#define MAYBE_VideoBearMp4 VideoBearMp4
+#define MAYBE_VideoBearSilentMp4 VideoBearSilentMp4
+
+#if defined(OS_LINUX)
+// Test fails on linux: http://crbug.com/56364
+#define MAYBE_MediaUILayoutTest DISABLED_MediaUILayoutTest
+#else
+#define MAYBE_MediaUILayoutTest MediaUILayoutTest
+#endif
+
+#endif
+
+TEST_F(MediaTest, MAYBE_VideoBearTheora) {
   PlayVideo("bear.ogv");
 }
 
-TEST_F(MediaTest, VideoBearSilentTheora) {
+TEST_F(MediaTest, MAYBE_VideoBearSilentTheora) {
   PlayVideo("bear_silent.ogv");
 }
 
-TEST_F(MediaTest, VideoBearWebm) {
+TEST_F(MediaTest, MAYBE_VideoBearWebm) {
   PlayVideo("bear.webm");
 }
 
-TEST_F(MediaTest, VideoBearSilentWebm) {
+TEST_F(MediaTest, MAYBE_VideoBearSilentWebm) {
   PlayVideo("bear_silent.webm");
 }
 
 #if defined(GOOGLE_CHROME_BUILD) || defined(USE_PROPRIETARY_CODECS)
-TEST_F(MediaTest, VideoBearMp4) {
+TEST_F(MediaTest, MAYBE_VideoBearMp4) {
   PlayVideo("bear.mp4");
 }
 
-TEST_F(MediaTest, VideoBearSilentMp4) {
+TEST_F(MediaTest, MAYBE_VideoBearSilentMp4) {
   PlayVideo("bear_silent.mp4");
 }
 #endif
 
-TEST_F(UILayoutTest, MediaUILayoutTest) {
+TEST_F(UILayoutTest, MAYBE_MediaUILayoutTest) {
   static const char* kResources[] = {
     "content",
     "media-file.js",

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
+#include "base/utf_string_conversions.h"
+#include "base/string_split.h"
 #include "chrome/common/child_process.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_plugin_lib.h"
@@ -31,6 +33,7 @@
 namespace {
 
 using webkit_glue::ResourceLoaderBridge;
+using webkit_glue::ResourceResponseInfo;
 
 static MessageLoop* g_plugin_thread_message_loop;
 
@@ -69,7 +72,7 @@ class PluginRequestHandlerProxy
 
   virtual bool OnReceivedRedirect(
       const GURL& new_url,
-      const ResourceLoaderBridge::ResponseInfo& info,
+      const ResourceResponseInfo& info,
       bool* has_new_first_party_for_cookies,
       GURL* new_first_party_for_cookies) {
     plugin_->functions().response_funcs->received_redirect(
@@ -80,7 +83,7 @@ class PluginRequestHandlerProxy
   }
 
   virtual void OnReceivedResponse(
-      const ResourceLoaderBridge::ResponseInfo& info,
+      const ResourceResponseInfo& info,
       bool content_filtered) {
     response_headers_ = info.headers;
     plugin_->functions().response_funcs->start_completed(
@@ -104,7 +107,8 @@ class PluginRequestHandlerProxy
   }
 
   virtual void OnCompletedRequest(const URLRequestStatus& status,
-                                  const std::string& security_info) {
+                                  const std::string& security_info,
+                                  const base::Time& completion_time) {
     completed_ = true;
 
     if (!status.is_success()) {
@@ -383,7 +387,7 @@ CPError STDCALL CPB_AllowFileDrop(
 
   static const char kDelimiter('\b');
   std::vector<std::string> files;
-  SplitStringDontTrim(file_drag_data, kDelimiter, &files);
+  base::SplitStringDontTrim(file_drag_data, kDelimiter, &files);
 
   bool allowed = false;
   if (!PluginThread::current()->Send(

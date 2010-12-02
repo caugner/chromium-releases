@@ -700,8 +700,7 @@ void WidgetGtk::Close() {
 
 void WidgetGtk::CloseNow() {
   if (widget_) {
-    gtk_widget_destroy(widget_);
-    widget_ = NULL;
+    gtk_widget_destroy(widget_);  // Triggers OnDestroy().
   }
 }
 
@@ -776,6 +775,10 @@ bool WidgetGtk::IsVisible() const {
 bool WidgetGtk::IsActive() const {
   DCHECK(type_ != TYPE_CHILD);
   return is_active_;
+}
+
+bool WidgetGtk::IsAccessibleWidget() const {
+  return false;
 }
 
 void WidgetGtk::GenerateMousePressedForView(View* view,
@@ -1229,7 +1232,10 @@ void WidgetGtk::OnGrabNotify(GtkWidget* widget, gboolean was_grabbed) {
 
 void WidgetGtk::OnDestroy(GtkWidget* object) {
   // Note that this handler is hooked to GtkObject::destroy.
+  // NULL out pointers here since we might still be in an observerer list
+  // until delstion happens.
   widget_ = window_contents_ = NULL;
+  delegate_ = NULL;
   if (delete_on_destroy_) {
     // Delays the deletion of this WidgetGtk as we want its children to have
     // access to it when destroyed.
@@ -1435,6 +1441,17 @@ void WidgetGtk::CreateGtkWidget(GtkWidget* parent, const gfx::Rect& bounds) {
     if (transient_to_parent_)
       gtk_window_set_transient_for(GTK_WINDOW(widget_), GTK_WINDOW(parent));
     GTK_WIDGET_UNSET_FLAGS(widget_, GTK_DOUBLE_BUFFERED);
+
+    // Gtk determines the size for windows based on the requested size of the
+    // child. For WidgetGtk the child is a fixed. If the fixed ends up with a
+    // child widget it's possible the child widget will drive the requested size
+    // of the widget, which we don't want. We explicitly set a value of 1x1 here
+    // so that gtk doesn't attempt to resize the window if we end up with a
+    // situation where the requested size of a child of the fixed is greater
+    // than the size of the window. By setting the size in this manner we're
+    // also allowing users of WidgetGtk to change the requested size at any
+    // time.
+    gtk_widget_set_size_request(widget_, 1, 1);
 
     if (!bounds.size().IsEmpty()) {
       // When we realize the window, the window manager is given a size. If we

@@ -69,6 +69,7 @@
 #include "base/safe_strerror_posix.h"
 #include "base/stl_util-inl.h"
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/time.h"
@@ -600,7 +601,7 @@ void ProcessSingleton::LinuxWatcher::OnFileCanReadWithoutBlocking(int fd) {
 }
 
 void ProcessSingleton::LinuxWatcher::StartListening(int socket) {
-  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // Watch for client connections on this socket.
   MessageLoopForIO* ml = MessageLoopForIO::current();
   ml->AddDestructionObserver(this);
@@ -977,7 +978,7 @@ bool ProcessSingleton::Create() {
   if (listen(sock, 5) < 0)
     NOTREACHED() << "listen failed: " << safe_strerror(errno);
 
-  // Normally we would use ChromeThread, but the IO thread hasn't started yet.
+  // Normally we would use BrowserThread, but the IO thread hasn't started yet.
   // Using g_browser_process, we start the thread so we can listen on the
   // socket.
   MessageLoop* ml = g_browser_process->io_thread()->message_loop();

@@ -27,10 +27,12 @@ SSLAddCertHandler::SSLAddCertHandler(URLRequest* request,
   // Stay alive until the process completes and Finished() is called.
   AddRef();
   // Delay adding the certificate until the next mainloop iteration.
-  ChromeThread::PostTask(
-      ChromeThread::IO, FROM_HERE,
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(this, &SSLAddCertHandler::Run));
 }
+
+SSLAddCertHandler::~SSLAddCertHandler() {}
 
 void SSLAddCertHandler::Run() {
   int cert_error;

@@ -42,7 +42,7 @@ class BalloonHost : public RenderViewHostDelegate,
     // TODO(aa): Should this return the native view of the BalloonView*?
     return NULL;
   }
-  virtual TabContents* associated_tab_contents() { return NULL; }
+  virtual TabContents* associated_tab_contents() const { return NULL; }
 
   RenderViewHost* render_view_host() const { return render_view_host_; }
 
@@ -102,6 +102,7 @@ class BalloonHost : public RenderViewHostDelegate,
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation) {}
   virtual void GotFocus() {}
   virtual void TakeFocus(bool reverse) {}
+  virtual void LostCapture() {}
   virtual void Activate() {}
   virtual void Deactivate() {}
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
@@ -112,6 +113,8 @@ class BalloonHost : public RenderViewHostDelegate,
   virtual void HandleMouseMove() {}
   virtual void HandleMouseDown();
   virtual void HandleMouseLeave() {}
+  virtual void HandleMouseUp() {}
+  virtual void HandleMouseActivate() {}
   virtual void UpdatePreferredSize(const gfx::Size& pref_size);
   virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
 

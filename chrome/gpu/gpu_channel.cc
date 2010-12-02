@@ -57,9 +57,9 @@ void GpuChannel::OnMessageReceived(const IPC::Message& message) {
   if (message.routing_id() == MSG_ROUTING_CONTROL) {
     OnControlMessageReceived(message);
   } else {
-    // The sender should know not to route messages to an object after it
-    // has been destroyed.
-    CHECK(router_.RouteMessage(message));
+    // Fail silently if the GPU process has destroyed while the IPC message was
+    // en-route.
+    router_.RouteMessage(message);
   }
 }
 
@@ -89,8 +89,6 @@ void GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
         OnCreateOffscreenCommandBuffer)
     IPC_MESSAGE_HANDLER(GpuChannelMsg_DestroyCommandBuffer,
         OnDestroyCommandBuffer)
-    IPC_MESSAGE_HANDLER(GpuChannelMsg_GetVideoService,
-        OnGetVideoService)
     IPC_MESSAGE_HANDLER(GpuChannelMsg_CreateVideoDecoder,
         OnCreateVideoDecoder)
     IPC_MESSAGE_HANDLER(GpuChannelMsg_DestroyVideoDecoder,
@@ -145,18 +143,22 @@ void GpuChannel::OnCreateViewCommandBuffer(gfx::NativeViewId view_id,
 #endif
 
   *route_id = GenerateRouteID();
+  // TODO(enne): implement context creation attributes for view buffers
+  std::vector<int32> attribs;
   scoped_ptr<GpuCommandBufferStub> stub(new GpuCommandBufferStub(
-      this, handle, NULL, gfx::Size(), 0, *route_id,
+      this, handle, NULL, gfx::Size(), attribs, 0, *route_id,
       renderer_id_, render_view_id));
   router_.AddRoute(*route_id, stub.get());
   stubs_.AddWithID(stub.release(), *route_id);
 #endif  // ENABLE_GPU
 }
 
-void GpuChannel::OnCreateOffscreenCommandBuffer(int32 parent_route_id,
-                                                const gfx::Size& size,
-                                                uint32 parent_texture_id,
-                                                int32* route_id) {
+void GpuChannel::OnCreateOffscreenCommandBuffer(
+    int32 parent_route_id,
+    const gfx::Size& size,
+    const std::vector<int32>& attribs,
+    uint32 parent_texture_id,
+    int32* route_id) {
 #if defined(ENABLE_GPU)
   *route_id = GenerateRouteID();
   GpuCommandBufferStub* parent_stub = NULL;
@@ -168,6 +170,7 @@ void GpuChannel::OnCreateOffscreenCommandBuffer(int32 parent_route_id,
       gfx::kNullPluginWindow,
       parent_stub,
       size,
+      attribs,
       parent_texture_id,
       *route_id,
       0, 0));
@@ -185,44 +188,26 @@ void GpuChannel::OnDestroyCommandBuffer(int32 route_id) {
 #endif
 }
 
-void GpuChannel::OnGetVideoService(GpuVideoServiceInfoParam* info) {
-  info->service_available_ = 0;
-#if defined(ENABLE_GPU)
-#if defined(OS_WIN)
-  // TODO(jiesun): Not every windows platforms will support our media
-  // foundation implementation. Add more check here.
-  LOG(INFO) << "GpuChannel::OnGetVideoService";
-  GpuVideoService* service = GpuVideoService::get();
-  if (service == NULL)
-    return;
-
-  info->video_service_host_route_id_ = GenerateRouteID();
-  info->video_service_route_id_ = GenerateRouteID();
-  // TODO(jiesun): we could had multiple entries in this routing table.
-  router_.AddRoute(info->video_service_route_id_, service);
-  info->service_available_ = 1;
-#endif
-#endif
-}
-
-void GpuChannel::OnCreateVideoDecoder(GpuVideoDecoderInfoParam* info) {
+void GpuChannel::OnCreateVideoDecoder(int32 context_route_id,
+                                      int32 decoder_host_id) {
 #if defined(ENABLE_GPU)
   LOG(INFO) << "GpuChannel::OnCreateVideoDecoder";
-  info->decoder_id = -1;
   GpuVideoService* service = GpuVideoService::get();
-  if (service == NULL)
+  if (service == NULL) {
+    // TODO(hclam): Need to send a failure message.
     return;
+  }
 
   // The context ID corresponds to the command buffer used.
-  GpuCommandBufferStub* stub = stubs_.Lookup(info->context_id);
-
-  info->decoder_host_route_id = GenerateRouteID();
-  info->decoder_route_id = GenerateRouteID();
+  GpuCommandBufferStub* stub = stubs_.Lookup(context_route_id);
+  int32 decoder_id = GenerateRouteID();
 
   // TODO(hclam): Need to be careful about the lifetime of the command buffer
   // decoder.
-  service->CreateVideoDecoder(this, &router_, info,
-                              stub->processor()->decoder());
+  bool ret = service->CreateVideoDecoder(
+      this, &router_, decoder_host_id, decoder_id,
+      stub->processor()->decoder());
+  DCHECK(ret) << "Failed to create a GpuVideoDecoder";
 #endif
 }
 
