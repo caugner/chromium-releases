@@ -7,9 +7,10 @@
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "app/resource_bundle.h"
+#include "app/view_prop.h"
 #include "base/command_line.h"
-#include "base/histogram.h"
 #include "base/i18n/rtl.h"
+#include "base/metrics/histogram.h"
 #include "base/process_util.h"
 #include "base/scoped_comptr_win.h"
 #include "base/thread.h"
@@ -18,12 +19,11 @@
 #include "chrome/browser/accessibility/browser_accessibility_manager.h"
 #include "chrome/browser/accessibility/browser_accessibility_state.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_trial.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/plugin_process_host.h"
 #include "chrome/browser/renderer_host/backing_store.h"
 #include "chrome/browser/renderer_host/backing_store_win.h"
-#include "chrome/browser/renderer_host/gpu_view_host.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/common/chrome_constants.h"
@@ -51,6 +51,7 @@
 #include "webkit/glue/webaccessibility.h"
 #include "webkit/glue/webcursor.h"
 
+using app::ViewProp;
 using base::TimeDelta;
 using base::TimeTicks;
 using WebKit::WebInputEvent;
@@ -58,6 +59,8 @@ using WebKit::WebInputEventFactory;
 using WebKit::WebMouseEvent;
 using WebKit::WebTextDirection;
 using webkit_glue::WebPluginGeometry;
+
+const wchar_t kRenderWidgetHostHWNDClass[] = L"Chrome_RenderWidgetHostHWND";
 
 namespace {
 
@@ -71,7 +74,7 @@ const int kMaxTooltipLength = 1024;
 // listening for MSAA events.
 const int kIdCustom = 1;
 
-const wchar_t* kRenderWidgetHostViewKey = L"__RENDER_WIDGET_HOST_VIEW__";
+const char* const kRenderWidgetHostViewKey = "__RENDER_WIDGET_HOST_VIEW__";
 
 // A callback function for EnumThreadWindows to enumerate and dismiss
 // any owned popop windows
@@ -242,7 +245,8 @@ BOOL CALLBACK DetachPluginWindowsCallback(HWND window, LPARAM param) {
 
 // Draw the contents of |backing_store_dc| onto |paint_rect| with a 70% grey
 // filter.
-void DrawDeemphasized(const gfx::Rect& paint_rect,
+void DrawDeemphasized(const SkColor& color,
+                      const gfx::Rect& paint_rect,
                       HDC backing_store_dc,
                       HDC paint_dc) {
   gfx::CanvasSkia canvas(paint_rect.width(), paint_rect.height(), true);
@@ -257,9 +261,7 @@ void DrawDeemphasized(const gfx::Rect& paint_rect,
          paint_rect.y(),
          SRCCOPY);
   canvas.endPlatformPaint();
-  // 178 is 70% grey.
-  canvas.FillRectInt(SkColorSetARGB(178, 0, 0, 0), 0, 0,
-                     paint_rect.width(), paint_rect.height());
+  canvas.FillRectInt(color, 0, 0, paint_rect.width(), paint_rect.height());
   canvas.getTopPlatformDevice().drawToHDC(paint_dc, paint_rect.x(),
                                           paint_rect.y(), NULL);
 }
@@ -279,6 +281,7 @@ RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
 
 RenderWidgetHostViewWin::RenderWidgetHostViewWin(RenderWidgetHost* widget)
     : render_widget_host_(widget),
+      compositor_host_window_(NULL),
       track_mouse_leave_(false),
       ime_notification_(false),
       capture_enter_key_(false),
@@ -291,7 +294,7 @@ RenderWidgetHostViewWin::RenderWidgetHostViewWin(RenderWidgetHost* widget)
       shutdown_factory_(this),
       parent_hwnd_(NULL),
       is_loading_(false),
-      visually_deemphasized_(false),
+      overlay_color_(0),
       text_input_type_(WebKit::WebTextInputTypeNone) {
   render_widget_host_->set_view(this);
   registrar_.Add(this,
@@ -305,18 +308,6 @@ RenderWidgetHostViewWin::~RenderWidgetHostViewWin() {
 
 void RenderWidgetHostViewWin::CreateWnd(HWND parent) {
   Create(parent);  // ATL function to create the window.
-
-  // Add a property indicating that a particular renderer is associated with
-  // this window. Used by the GPU process to validate window handles it
-  // receives from renderer processes.
-  int renderer_id = render_widget_host_->process()->id();
-  SetProp(m_hWnd,
-          chrome::kChromiumRendererIdProperty,
-          reinterpret_cast<HANDLE>(renderer_id));
-
-  // Uncommenting this will enable experimental out-of-process painting.
-  // Contact brettw for more,
-  // gpu_view_host_.reset(new GpuViewHost(render_widget_host_, m_hWnd));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -382,6 +373,13 @@ void RenderWidgetHostViewWin::SetSize(const gfx::Size& size) {
   UINT swp_flags = SWP_NOSENDCHANGING | SWP_NOOWNERZORDER | SWP_NOCOPYBITS |
       SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE;
   SetWindowPos(NULL, 0, 0, size.width(), size.height(), swp_flags);
+  if (compositor_host_window_) {
+    ::SetWindowPos(compositor_host_window_,
+        NULL,
+        0, 0,
+        size.width(), size.height(),
+        SWP_NOSENDCHANGING | SWP_NOCOPYBITS | SWP_NOZORDER | SWP_NOACTIVATE);
+  }
   render_widget_host_->WasResized();
   EnsureTooltip();
 }
@@ -516,6 +514,27 @@ HWND RenderWidgetHostViewWin::ReparentWindow(HWND window) {
   return parent;
 }
 
+static BOOL CALLBACK AddChildWindowToVector(HWND hwnd, LPARAM lparam) {
+  std::vector<HWND>* vector = reinterpret_cast<std::vector<HWND>*>(lparam);
+  vector->push_back(hwnd);
+  return TRUE;
+}
+
+void RenderWidgetHostViewWin::CleanupCompositorWindow() {
+  if (!compositor_host_window_)
+    return;
+
+  std::vector<HWND> all_child_windows;
+  ::EnumChildWindows(compositor_host_window_, AddChildWindowToVector,
+    reinterpret_cast<LPARAM>(&all_child_windows));
+  if (all_child_windows.size()) {
+    DCHECK(all_child_windows.size() == 1);
+    ::ShowWindow(all_child_windows[0], SW_HIDE);
+    ::SetParent(all_child_windows[0], NULL);
+  }
+  compositor_host_window_ = NULL;
+}
+
 bool RenderWidgetHostViewWin::IsActivatable() const {
   // Popups should not be activated.
   return popup_type_ == WebKit::WebPopupTypeNone;
@@ -581,8 +600,6 @@ void RenderWidgetHostViewWin::UpdateCursor(const WebCursor& cursor) {
 }
 
 void RenderWidgetHostViewWin::UpdateCursorIfOverSelf() {
-  static HCURSOR kCursorResizeRight = LoadCursor(NULL, IDC_SIZENWSE);
-  static HCURSOR kCursorResizeLeft = LoadCursor(NULL, IDC_SIZENESW);
   static HCURSOR kCursorArrow = LoadCursor(NULL, IDC_ARROW);
   static HCURSOR kCursorAppStarting = LoadCursor(NULL, IDC_APPSTARTING);
   static HINSTANCE module_handle =
@@ -594,26 +611,19 @@ void RenderWidgetHostViewWin::UpdateCursorIfOverSelf() {
   if (WindowFromPoint(pt) == m_hWnd) {
     BOOL result = ::ScreenToClient(m_hWnd, &pt);
     DCHECK(result);
-    if (render_widget_host_->GetRootWindowResizerRect().Contains(pt.x, pt.y)) {
-      if (base::i18n::IsRTL())
-        SetCursor(kCursorResizeLeft);
-      else
-        SetCursor(kCursorResizeRight);
-    } else {
-      // We cannot pass in NULL as the module handle as this would only work for
-      // standard win32 cursors. We can also receive cursor types which are
-      // defined as webkit resources. We need to specify the module handle of
-      // chrome.dll while loading these cursors.
-      HCURSOR display_cursor = current_cursor_.GetCursor(module_handle);
+    // We cannot pass in NULL as the module handle as this would only work for
+    // standard win32 cursors. We can also receive cursor types which are
+    // defined as webkit resources. We need to specify the module handle of
+    // chrome.dll while loading these cursors.
+    HCURSOR display_cursor = current_cursor_.GetCursor(module_handle);
 
-      // If a page is in the loading state, we want to show the Arrow+Hourglass
-      // cursor only when the current cursor is the ARROW cursor. In all other
-      // cases we should continue to display the current cursor.
-      if (is_loading_ && display_cursor == kCursorArrow)
-        display_cursor = kCursorAppStarting;
+    // If a page is in the loading state, we want to show the Arrow+Hourglass
+    // cursor only when the current cursor is the ARROW cursor. In all other
+    // cases we should continue to display the current cursor.
+    if (is_loading_ && display_cursor == kCursorArrow)
+      display_cursor = kCursorAppStarting;
 
-      SetCursor(display_cursor);
-    }
+    SetCursor(display_cursor);
   }
 }
 
@@ -687,31 +697,6 @@ void RenderWidgetHostViewWin::Redraw() {
   EnumChildWindows(m_hWnd, EnumChildProc, lparam);
 }
 
-void RenderWidgetHostViewWin::DrawResizeCorner(const gfx::Rect& paint_rect,
-                                               HDC dc) {
-  gfx::Rect resize_corner_rect =
-      render_widget_host_->GetRootWindowResizerRect();
-  if (!paint_rect.Intersect(resize_corner_rect).IsEmpty()) {
-    SkBitmap* bitmap = ResourceBundle::GetSharedInstance().
-        GetBitmapNamed(IDR_TEXTAREA_RESIZER);
-    gfx::CanvasSkia canvas(bitmap->width(), bitmap->height(), false);
-    canvas.getDevice()->accessBitmap(true).eraseARGB(0, 0, 0, 0);
-    int x = resize_corner_rect.x() + resize_corner_rect.width() -
-        bitmap->width();
-    canvas.save();
-    if (base::i18n::IsRTL()) {
-      canvas.TranslateInt(bitmap->width(), 0);
-      canvas.ScaleInt(-1, 1);
-      x = 0;
-    }
-    canvas.DrawBitmapInt(*bitmap, 0, 0);
-    canvas.getTopPlatformDevice().drawToHDC(dc, x,
-        resize_corner_rect.y() + resize_corner_rect.height() -
-        bitmap->height(), NULL);
-    canvas.restore();
-  }
-}
-
 void RenderWidgetHostViewWin::DidUpdateBackingStore(
     const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
     const std::vector<gfx::Rect>& copy_rects) {
@@ -740,7 +725,12 @@ void RenderWidgetHostViewWin::RenderViewGone() {
   // TODO(darin): keep this around, and draw sad-tab into it.
   UpdateCursorIfOverSelf();
   being_destroyed_ = true;
+  CleanupCompositorWindow();
   DestroyWindow();
+}
+
+void RenderWidgetHostViewWin::WillWmDestroy() {
+  CleanupCompositorWindow();
 }
 
 void RenderWidgetHostViewWin::WillDestroyRenderWidget(RenderWidgetHost* rwh) {
@@ -756,6 +746,7 @@ void RenderWidgetHostViewWin::Destroy() {
   // OnFinalMessage();
   close_on_deactivate_ = false;
   being_destroyed_ = true;
+  CleanupCompositorWindow();
   DestroyWindow();
 }
 
@@ -789,15 +780,7 @@ void RenderWidgetHostViewWin::SetTooltipText(const std::wstring& tooltip_text) {
 
 BackingStore* RenderWidgetHostViewWin::AllocBackingStore(
     const gfx::Size& size) {
-  if (gpu_view_host_.get())
-    return gpu_view_host_->CreateBackingStore(size);
   return new BackingStoreWin(render_widget_host_, size);
-}
-
-VideoLayer* RenderWidgetHostViewWin::AllocVideoLayer(
-    const gfx::Size& size) {
-  NOTIMPLEMENTED();
-  return NULL;
 }
 
 void RenderWidgetHostViewWin::SetBackground(const SkBitmap& background) {
@@ -823,11 +806,16 @@ bool RenderWidgetHostViewWin::ContainsNativeView(
   return false;
 }
 
-void RenderWidgetHostViewWin::SetVisuallyDeemphasized(bool deemphasized) {
-  if (visually_deemphasized_ == deemphasized)
-    return;
+void RenderWidgetHostViewWin::SetVisuallyDeemphasized(const SkColor* color,
+                                                      bool animate) {
+  // |animate| is not yet implemented, and currently isn't used.
+  CHECK(!animate);
 
-  visually_deemphasized_ = deemphasized;
+  SkColor overlay_color = color ? *color : 0;
+  if (overlay_color_ == overlay_color)
+    return;
+  overlay_color_ = overlay_color;
+
   InvalidateRect(NULL, FALSE);
 }
 
@@ -840,12 +828,14 @@ LRESULT RenderWidgetHostViewWin::OnCreate(CREATESTRUCT* create_struct) {
   OnInputLangChange(0, 0);
   // Marks that window as supporting mouse-wheel messages rerouting so it is
   // scrolled when under the mouse pointer even if inactive.
-  views::SetWindowSupportsRerouteMouseWheel(m_hWnd);
+  props_.push_back(views::SetWindowSupportsRerouteMouseWheel(m_hWnd));
   // Save away our HWND in the parent window as a property so that the
   // accessibility code can find it.
-  ::SetProp(GetParent(), kViewsNativeHostPropForAccessibility, m_hWnd);
-  ::SetProp(m_hWnd, kRenderWidgetHostViewKey,
-            static_cast<RenderWidgetHostView*>(this));
+  props_.push_back(new ViewProp(GetParent(),
+                                kViewsNativeHostPropForAccessibility,
+                                m_hWnd));
+  props_.push_back(new ViewProp(m_hWnd, kRenderWidgetHostViewKey,
+                                static_cast<RenderWidgetHostView*>(this)));
   return 0;
 }
 
@@ -876,7 +866,9 @@ void RenderWidgetHostViewWin::OnDestroy() {
   // sequence as part of the usual cleanup when the plugin instance goes away.
   EnumChildWindows(m_hWnd, DetachPluginWindowsCallback, NULL);
 
-  ::RemoveProp(m_hWnd, kRenderWidgetHostViewKey);
+  props_.reset();
+
+  CleanupCompositorWindow();
 
   ResetTooltip();
   TrackMouseLeave(false);
@@ -885,20 +877,10 @@ void RenderWidgetHostViewWin::OnDestroy() {
 void RenderWidgetHostViewWin::OnPaint(HDC unused_dc) {
   DCHECK(render_widget_host_->process()->HasConnection());
 
-  if (gpu_view_host_.get()) {
-    // When we're proxying painting, we don't actually display the web page
-    // ourselves. We clear it white in case the proxy window isn't visible
-    // yet we won't show gibberish.
-    CPaintDC paint_dc(m_hWnd);
-    FillRect(paint_dc.m_hDC, &paint_dc.m_ps.rcPaint,
-             static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
-    return;
-  }
-
   // If the GPU process is rendering directly into the View,
   // call the compositor directly.
   RenderWidgetHost* render_widget_host = GetRenderWidgetHost();
-  if (render_widget_host->is_gpu_rendering_active()) {
+  if (render_widget_host->is_accelerated_compositing_active()) {
     // We initialize paint_dc here so that BeginPaint()/EndPaint()
     // get called to validate the region.
     CPaintDC paint_dc(m_hWnd);
@@ -943,9 +925,11 @@ void RenderWidgetHostViewWin::OnPaint(HDC unused_dc) {
     for (DWORD i = 0; i < region_data->rdh.nCount; ++i) {
       gfx::Rect paint_rect = bitmap_rect.Intersect(gfx::Rect(region_rects[i]));
       if (!paint_rect.IsEmpty()) {
-        DrawResizeCorner(paint_rect, backing_store->hdc());
-        if (visually_deemphasized_) {
-          DrawDeemphasized(paint_rect, backing_store->hdc(), paint_dc.m_hDC);
+        if (SkColorGetA(overlay_color_) > 0) {
+          DrawDeemphasized(overlay_color_,
+                           paint_rect,
+                           backing_store->hdc(),
+                           paint_dc.m_hDC);
         } else {
           BitBlt(paint_dc.m_hDC,
                  paint_rect.x(),
@@ -1271,21 +1255,6 @@ LRESULT RenderWidgetHostViewWin::OnMouseEvent(UINT message, WPARAM wparam,
   // call).  So the TabContents window would have to be specified to the
   // RenderViewHostHWND as there is no way to retrieve it from the HWND.
   if (!close_on_deactivate_) {  // Don't forward if the container is a popup.
-    if (message == WM_LBUTTONDOWN) {
-      // If we get clicked on, where the resize corner is drawn, we delegate the
-      // message to the root window, with the proper HTBOTTOMXXX wparam so that
-      // Windows can take care of the resizing for us.
-      if (render_widget_host_ &&
-          render_widget_host_->GetRootWindowResizerRect().
-              Contains(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam))) {
-        WPARAM wparam = HTBOTTOMRIGHT;
-        if (base::i18n::IsRTL())
-          wparam = HTBOTTOMLEFT;
-        HWND root_hwnd = ::GetAncestor(m_hWnd, GA_ROOT);
-        if (SendMessage(root_hwnd, WM_NCLBUTTONDOWN, wparam, lparam) == 0)
-          return 0;
-      }
-    }
     switch (message) {
       case WM_LBUTTONDOWN:
       case WM_MBUTTONDOWN:
@@ -1522,6 +1491,140 @@ void RenderWidgetHostViewWin::Observe(NotificationType type,
   browser_accessibility_manager_.reset(NULL);
 }
 
+// Looks through the children windows of the CompositorHostWindow. If the
+// compositor child window is found, its size is checked against the host
+// window's size. If the child is smaller in either dimensions, we fill
+// the host window with white to avoid unseemly cracks.
+static void PaintCompositorHostWindow(HWND hWnd) {
+  PAINTSTRUCT paint;
+  BeginPaint(hWnd, &paint);
+
+  std::vector<HWND> child_windows;
+  EnumChildWindows(hWnd, AddChildWindowToVector,
+      reinterpret_cast<LPARAM>(&child_windows));
+
+  if (child_windows.size()) {
+    HWND child = child_windows[0];
+
+    RECT host_rect, child_rect;
+    GetClientRect(hWnd, &host_rect);
+    if (GetClientRect(child, &child_rect)) {
+      if (child_rect.right < host_rect.right ||
+         child_rect.bottom != host_rect.bottom) {
+          FillRect(paint.hdc, &host_rect,
+              static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+      }
+    }
+  }
+  EndPaint(hWnd, &paint);
+}
+
+// WndProc for the compositor host window. We use this instead of Default so
+// we can drop WM_PAINT and WM_ERASEBKGD messages on the floor.
+static LRESULT CALLBACK CompositorHostWindowProc(HWND hWnd, UINT message,
+                                                 WPARAM wParam, LPARAM lParam) {
+  switch (message) {
+  case WM_ERASEBKGND:
+    return 0;
+  case WM_DESTROY:
+    return 0;
+  case WM_PAINT:
+    PaintCompositorHostWindow(hWnd);
+    return 0;
+  default:
+    return DefWindowProc(hWnd, message, wParam, lParam);
+  }
+}
+
+// Creates a HWND within the RenderWidgetHostView that will serve as a host
+// for a HWND that the GPU process will create. The host window is used
+// to Z-position the GPU's window relative to other plugin windows.
+gfx::PluginWindowHandle RenderWidgetHostViewWin::GetCompositorHostWindow() {
+  // If the window has been created, don't recreate it a second time
+  if (compositor_host_window_)
+    return compositor_host_window_;
+
+  static ATOM window_class = 0;
+  if (!window_class) {
+    WNDCLASSEX wcex;
+    wcex.cbSize         = sizeof(WNDCLASSEX);
+    wcex.style          = 0;
+    wcex.lpfnWndProc    = CompositorHostWindowProc;
+    wcex.cbClsExtra     = 0;
+    wcex.cbWndExtra     = 0;
+    wcex.hInstance      = GetModuleHandle(NULL);
+    wcex.hIcon          = 0;
+    wcex.hCursor        = 0;
+    wcex.hbrBackground  = NULL;
+    wcex.lpszMenuName   = 0;
+    wcex.lpszClassName  = L"CompositorHostWindowClass";
+    wcex.hIconSm        = 0;
+    window_class = RegisterClassEx(&wcex);
+    DCHECK(window_class);
+  }
+
+  RECT currentRect;
+  GetClientRect(&currentRect);
+  int width = currentRect.right - currentRect.left;
+  int height = currentRect.bottom - currentRect.top;
+
+  compositor_host_window_ = CreateWindowEx(
+    WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_RIGHTSCROLLBAR,
+    MAKEINTATOM(window_class), 0,
+    WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_DISABLED,
+    0, 0, width, height, m_hWnd, 0, GetModuleHandle(NULL), 0);
+  DCHECK(compositor_host_window_);
+
+  return static_cast<gfx::PluginWindowHandle>(compositor_host_window_);
+}
+
+void RenderWidgetHostViewWin::ShowCompositorHostWindow(bool show) {
+  // When we first create the compositor, we will get a show request from
+  // the renderer before we have gotten the create request from the GPU. In this
+  // case, simply ignore the show request.
+  if (compositor_host_window_ == NULL)
+    return;
+
+  if (show) {
+    UINT flags = SWP_NOSENDCHANGING | SWP_NOCOPYBITS | SWP_NOZORDER |
+      SWP_NOACTIVATE | SWP_DEFERERASE | SWP_SHOWWINDOW;
+    gfx::Rect rect = GetViewBounds();
+    ::SetWindowPos(compositor_host_window_, NULL, 0, 0,
+        rect.width(), rect.height(),
+        flags);
+
+    // Get all the child windows of this view, including the compositor window.
+    std::vector<HWND> all_child_windows;
+    ::EnumChildWindows(m_hWnd, AddChildWindowToVector,
+        reinterpret_cast<LPARAM>(&all_child_windows));
+
+    // Build a list of just the plugin window handles
+    std::vector<HWND> plugin_windows;
+    bool compositor_host_window_found = false;
+    for (size_t i = 0; i < all_child_windows.size(); ++i) {
+      if (all_child_windows[i] != compositor_host_window_)
+        plugin_windows.push_back(all_child_windows[i]);
+      else
+        compositor_host_window_found = true;
+    }
+    DCHECK(compositor_host_window_found);
+
+    // Set all the plugin windows to be "after" the compositor window.
+    // When the compositor window is created, gets placed above plugins.
+    for (size_t i = 0; i < plugin_windows.size(); ++i) {
+      HWND next;
+      if (i + 1 < plugin_windows.size())
+        next = plugin_windows[i+1];
+      else
+        next = compositor_host_window_;
+      ::SetWindowPos(plugin_windows[i], next, 0, 0, 0, 0,
+          SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
+    }
+  } else {
+    ::ShowWindow(compositor_host_window_, SW_HIDE);
+  }
+}
+
 void RenderWidgetHostViewWin::SetAccessibilityFocus(int acc_obj_id) {
   if (!browser_accessibility_manager_.get() ||
       !render_widget_host_ ||
@@ -1703,11 +1806,7 @@ void RenderWidgetHostViewWin::ShutdownHost() {
 RenderWidgetHostView*
     RenderWidgetHostView::GetRenderWidgetHostViewFromNativeView(
         gfx::NativeView native_view) {
-  if (::IsWindow(native_view)) {
-    HANDLE raw_render_host_view = ::GetProp(native_view,
-                                            kRenderWidgetHostViewKey);
-    if (raw_render_host_view)
-      return reinterpret_cast<RenderWidgetHostView*>(raw_render_host_view);
-  }
-  return NULL;
+  return ::IsWindow(native_view) ?
+      reinterpret_cast<RenderWidgetHostView*>(
+          ViewProp::GetValue(native_view, kRenderWidgetHostViewKey)) : NULL;
 }

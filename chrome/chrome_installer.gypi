@@ -88,6 +88,7 @@
             'installer/util/helper_unittest.cc',
             'installer/util/installer_util_unittests.rc',
             'installer/util/installer_util_unittests_resource.h',
+            'installer/util/language_selector_unittest.cc',
             'installer/util/lzma_util_unittest.cc',
             'installer/util/master_preferences_unittest.cc',
             'installer/util/move_tree_work_item_unittest.cc',
@@ -130,7 +131,7 @@
             },
           ],
           'sources': [
-            'installer/app/chromium_strings.grd',
+            'app/chromium_strings.grd',
           ],
           'direct_dependent_settings': {
             'include_dirs': [
@@ -180,6 +181,9 @@
             '<(DEPTH)/build/util/build_util.gyp:lastchange',
             '<(DEPTH)/build/util/support/support.gyp:*',
             '<(DEPTH)/build/win/system.gyp:cygwin',
+            '<(DEPTH)/ceee/ie/broker/broker.gyp:ceee_broker',
+            '<(DEPTH)/ceee/ie/plugin/toolband/toolband.gyp:ceee_ie',
+            '<(DEPTH)/ceee/installer_dll/ceee_installer_dll.gyp:ceee_installer_helper',
             '<(DEPTH)/chrome_frame/chrome_frame.gyp:npchrome_frame',
           ],
           'include_dirs': [

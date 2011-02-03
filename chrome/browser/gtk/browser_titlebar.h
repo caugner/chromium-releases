@@ -31,6 +31,10 @@ class BrowserTitlebar : public NotificationObserver,
                         public ActiveWindowWatcherX::Observer,
                         public menus::SimpleMenuModel::Delegate {
  public:
+  // A default button order string for when we aren't asking gconf for the
+  // metacity configuration.
+  static const char kDefaultButtonString[];
+
   BrowserTitlebar(BrowserWindowGtk* browser_window, GtkWindow* window);
   virtual ~BrowserTitlebar();
 
@@ -176,6 +180,12 @@ class BrowserTitlebar : public NotificationObserver,
   // HBoxes that contains the actual min/max/close buttons.
   GtkWidget* titlebar_left_buttons_hbox_;
   GtkWidget* titlebar_right_buttons_hbox_;
+
+  // Spy frame. One of these frames holds the spy guy in incognito mode. It's
+  // the side with the least buttons. These are NULL when we aren't in
+  // incognito mode.
+  GtkWidget* titlebar_left_spy_frame_;
+  GtkWidget* titlebar_right_spy_frame_;
 
   // Padding between the titlebar buttons and the top of the screen. Only show
   // when not maximized.

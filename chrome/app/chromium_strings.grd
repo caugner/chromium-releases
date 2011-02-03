@@ -155,6 +155,9 @@ be available for now. -->
           About Chromium Frame...
         </message>
       </if>
+      <message name="IDS_INSTANT_OPT_IN_TITLE" desc="Title of the instant opt-in dialog">
+        Instant
+      </message>
       <message name="IDS_CERT_ERROR_COMMON_NAME_INVALID_EXTRA_INFO_2" desc="2nd paragraph of extra information for an unsafe common name in an X509 certificate">
         In this case, the address listed in the certificate does not match the address of the website your browser tried to go to. One possible reason for this is that your communications are being intercepted by an attacker who is presenting a certificate for a different website, which would cause a mismatch. Another possible reason is that the server is set up to return the same certificate for multiple websites, including the one you are attempting to visit, even though that certificate is not valid for all of those websites. Chromium can say for sure that you reached &lt;strong&gt;<ph name="DOMAIN2">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but cannot verify that that is the same site as &lt;strong&gt;<ph name="DOMAIN">$2<ex>www.paypal.com</ex></ph>&lt;/strong&gt; which you intended to reach. If you proceed, Chromium will not check for any further name mismatches. In general, it is best not to proceed past this point.
       </message>
@@ -342,6 +345,9 @@ be available for now. -->
       <message name="IDS_INSTALL_HIGHER_VERSION" desc="Error displayed when higher version already exists.">
         This computer already has a more recent version of Chromium. If the software is not working, please uninstall Chromium and download it again.
       </message>
+      <message name="IDS_INSTALL_HIGHER_VERSION_CF" desc="Error displayed when higher version already exists.">
+        This computer already has a more recent version of Chromium Frame. If the software is not working, please uninstall Chromium Frame and download it again.
+      </message>
       <message name="IDS_INSTALL_USER_LEVEL_EXISTS" desc="Error displayed during system level install if user level Chromium is already installed.">
         Chromium has already been installed for this user. If the software is not working, please uninstall Chromium and download it again.
       </message>
@@ -352,7 +358,10 @@ be available for now. -->
         Installation failed due to unspecified error. If Chromium is currently running, please close it and try again.
       </message>
       <message name="IDS_SAME_VERSION_REPAIR_FAILED" desc="Error displayed if installation fails due to Chrome running.">
-        Can not install the same Google Chrome version that is currently running. Please close Google Chrome and try again.
+        Can not install the same Chromium version that is currently running. Please close Chromium and try again.
+      </message>
+      <message name="IDS_SAME_VERSION_REPAIR_FAILED_CF" desc="Error displayed if installation fails due to Chrome running.">
+        Can not install the same Chromium Frame version that is currently running. Please close Chromium Frame and try again.
       </message>
       <message name="IDS_SETUP_PATCH_FAILED" desc="Error message when setup.exe fails to patch itself.">
         Installation failed due to unspecified error. Please download Chromium again.
@@ -388,17 +397,6 @@ be available for now. -->
         Chromium installation directory seems to be in use. Please reboot your computer and try again.
       </message>
       <!-- Options Dialog -->
-      <message name="IDS_OPTIONS_ADVANCED_SECTION_TITLE_CHROME_APPS" desc="The title text in the options panel that provides options for installed web apps.">
-        Chromium Web Apps
-      </message>
-      <if expr="os == 'darwin'">
-        <message name="IDS_OPTIONS_CHROME_APPS_ENABLE_BACKGROUND_MODE" desc="The label in the checkbox that enables launch-at-login.">
-          Open Chromium at login and launch background web apps
-        </message>
-        <message name="IDS_OPTIONS_CHROME_APPS_ENABLE_BACKGROUND_MODE_DESCRIPTION" desc="The description text under the checkbox that enables launch-at-login.">
-          Web apps are only active while Chromium is running.
-        </message>
-      </if>
       <message name="IDS_OPTIONS_DISABLE_SERVICES" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
         Chromium may use web services to improve your browsing experience. You may optionally disable these services.
       </message>
@@ -423,9 +421,6 @@ be available for now. -->
       <message name="IDS_DEFAULT_BROWSER_INFOBAR_SHORT_TEXT" desc="More compact text to show in the default browser query infobar.">
         Chromium isn't your default browser.
       </message>
-      <message name="IDS_DEFAULT_SEARCH_PROMPT" desc="The message displayed when javascript has asked to change the default search engine. This appears in a message box.">
-        Would you like to make <ph name="HOST">$1<ex>www.bing.com</ex></ph> your search engine in Chromium?
-      </message>
       <!-- Try Chrome Toast Dialog -->
       <message name="IDS_TRY_TOAST_HEADING" desc="Top line of the try-chrome-again dialog">
         There is a new version of Chromium available.
@@ -447,6 +442,16 @@ be available for now. -->
       </message>
       <message name="IDS_TRY_TOAST_WHY" desc="Text of the url link that explains why this dialog is being shown">
         Why am I seeing this?
+      </message>
+      <!-- about:conflicts strings -->
+      <message name="IDS_CONFLICTS_CHECK_PAGE_TITLE_LONG" desc="The long title on the compatibility page">
+        Modules loaded into Chromium
+      </message>
+      <message name="IDS_CONFLICTS_CHECK_WARNING_CONFIRMED" desc="Warning label on the compatibility page">
+        This module is known to conflict with Chromium.
+      </message>
+      <message name="IDS_CONFLICTS_CHECK_WARNING_SUSPECTED" desc="Warning label on the compatibility page">
+        A module with the same name has been known to conflict with Chromium.
       </message>
 
       <if expr="os == 'darwin'">

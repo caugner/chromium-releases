@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "base/leak_tracker.h"
+#include "base/debug/leak_tracker.h"
 #include "base/linked_ptr.h"
 #include "base/logging.h"
 #include "base/non_thread_safe.h"
@@ -29,21 +29,23 @@ class Time;
 }  // namespace base
 
 namespace net {
+class CookieOptions;
 class IOBuffer;
 class SSLCertRequestInfo;
 class UploadData;
+class URLRequestJob;
 class X509Certificate;
 }  // namespace net
 
 class FilePath;
 class URLRequestContext;
-class URLRequestJob;
 
 // This stores the values of the Set-Cookie headers received during the request.
 // Each item in the vector corresponds to a Set-Cookie: line received,
 // excluding the "Set-Cookie:" part.
 typedef std::vector<std::string> ResponseCookies;
 
+namespace net {
 //-----------------------------------------------------------------------------
 // A class  representing the asynchronous load of a data stream from an URL.
 //
@@ -187,6 +189,7 @@ class URLRequest : public NonThreadSafe {
     // when LOAD_DO_NOT_SAVE_COOKIES is specified.
     virtual void OnSetCookie(URLRequest* request,
                              const std::string& cookie_line,
+                             const net::CookieOptions& options,
                              bool blocked_by_policy);
 
     // After calling Start(), the delegate will receive an OnResponseStarted
@@ -251,6 +254,10 @@ class URLRequest : public NonThreadSafe {
   // to handle those.
   static bool IsHandledURL(const GURL& url);
 
+  // Allow access to file:// on ChromeOS for tests.
+  static void AllowFileAccess();
+  static bool IsFileAccessAllowed();
+
   // The original url is the url used to initialize the request, and it may
   // differ from the url if the request was redirected.
   const GURL& original_url() const { return original_url_; }
@@ -298,7 +305,7 @@ class URLRequest : public NonThreadSafe {
   // expected modification time is provided (non-zero), it will be used to
   // check if the underlying file has been changed or not. The granularity of
   // the time comparison is 1 second since time_t precision is used in WebKit.
-  void AppendBytesToUpload(const char* bytes, int bytes_len);
+  void AppendBytesToUpload(const char* bytes, int bytes_len);  // takes a copy
   void AppendFileRangeToUpload(const FilePath& file_path,
                                uint64 offset, uint64 length,
                                const base::Time& expected_modification_time);
@@ -427,9 +434,7 @@ class URLRequest : public NonThreadSafe {
   // and the response has not yet been called).
   bool is_pending() const { return is_pending_; }
 
-  // Returns the error status of the request.  This value is 0 if there is no
-  // error.  Otherwise, it is a value defined by the operating system (e.g., an
-  // error code returned by GetLastError() on windows).
+  // Returns the error status of the request.
   const URLRequestStatus& status() const { return status_; }
 
   // This method is called to start the request.  The delegate will receive
@@ -634,9 +639,13 @@ class URLRequest : public NonThreadSafe {
   // this to determine which URLRequest to allocate sockets to first.
   net::RequestPriority priority_;
 
-  base::LeakTracker<URLRequest> leak_tracker_;
+  base::debug::LeakTracker<URLRequest> leak_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequest);
 };
+
+}  // namespace net
+
+typedef net::URLRequest URLRequest;
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_H_

@@ -47,12 +47,16 @@ class PPAPITest : public UITest {
     // Some stuff is hung off of the testing interface which is not enabled
     // by default.
     launch_arguments_.AppendSwitch(switches::kEnablePepperTesting);
+
+    // Give unlimited quota for files to Pepper tests.
+    // TODO(dumi): remove this switch once we have a quota management
+    // system in place.
+    launch_arguments_.AppendSwitch(switches::kUnlimitedQuotaForFiles);
   }
 
   void RunTest(const std::string& test_case) {
     FilePath test_path;
     PathService::Get(base::DIR_SOURCE_ROOT, &test_path);
-    test_path = test_path.Append(FILE_PATH_LITERAL("third_party"));
     test_path = test_path.Append(FILE_PATH_LITERAL("ppapi"));
     test_path = test_path.Append(FILE_PATH_LITERAL("tests"));
     test_path = test_path.Append(FILE_PATH_LITERAL("test_case.html"));
@@ -70,7 +74,7 @@ class PPAPITest : public UITest {
   void RunTestViaHTTP(const std::string& test_case) {
     net::TestServer test_server(
         net::TestServer::TYPE_HTTP,
-        FilePath(FILE_PATH_LITERAL("third_party/ppapi/tests")));
+        FilePath(FILE_PATH_LITERAL("ppapi/tests")));
     ASSERT_TRUE(test_server.Start());
     RunTestURL(test_server.GetURL("files/test_case.html?" + test_case));
   }
@@ -105,8 +109,8 @@ TEST_F(PPAPITest, Buffer) {
   RunTest("Buffer");
 }
 
-// http://bugs.chromium.org/51345
-TEST_F(PPAPITest, DISABLED_URLLoader) {
+// Flakey, http:L//crbug.com/57053
+TEST_F(PPAPITest, FLAKY_URLLoader) {
   RunTestViaHTTP("URLLoader");
 }
 
@@ -130,4 +134,19 @@ TEST_F(PPAPITest, CharSet) {
 
 TEST_F(PPAPITest, Var) {
   RunTest("Var");
+}
+
+// TODO(dumi): figure out why this test is flaky / crashing.
+TEST_F(PPAPITest, DISABLED_FileIO) {
+  RunTestViaHTTP("FileIO");
+}
+
+// TODO(dumi): figure out why this test is flaky / crashing.
+TEST_F(PPAPITest, DISABLED_FileRef) {
+  RunTestViaHTTP("FileRef");
+}
+
+// http://crbug.com/63239
+TEST_F(PPAPITest, DISABLED_DirectoryReader) {
+  RunTestViaHTTP("DirectoryReader");
 }

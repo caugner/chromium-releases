@@ -30,6 +30,8 @@ static const char test_page_contents[] =
   "<html><head><title>Google</title></head><body><h1>Google</h1></body></html>";
 static const uint32 test_page_contents_len = arraysize(test_page_contents) - 1;
 
+static const char kShmemSegmentName[] = "DeferredResourceLoaderTest";
+
 // Listens for request response data and stores it so that it can be compared
 // to the reference data.
 class TestRequestCallback : public ResourceLoaderBridge::Peer {
@@ -67,10 +69,6 @@ class TestRequestCallback : public ResourceLoaderBridge::Peer {
                                   const base::Time& completion_time) {
     EXPECT_FALSE(complete_);
     complete_ = true;
-  }
-
-  virtual GURL GetURLForDebugging() const {
-    return GURL();
   }
 
   const std::string& data() const {
@@ -121,9 +119,7 @@ class ResourceDispatcherTest : public testing::Test,
 
       // received data message with the test contents
       base::SharedMemory shared_mem;
-      EXPECT_TRUE(shared_mem.Create(std::string(), false, false,
-                                    test_page_contents_len));
-      EXPECT_TRUE(shared_mem.Map(test_page_contents_len));
+      EXPECT_TRUE(shared_mem.CreateAndMapAnonymous(test_page_contents_len));
       char* put_data_here = static_cast<char*>(shared_mem.memory());
       memcpy(put_data_here, test_page_contents, test_page_contents_len);
       base::SharedMemoryHandle dup_handle;
@@ -293,19 +289,16 @@ class DeferredResourceLoadingTest : public ResourceDispatcherTest,
                                   const base::Time& completion_time) {
   }
 
-  virtual GURL GetURLForDebugging() const {
-    return GURL();
-  }
-
  protected:
   virtual void SetUp() {
-    EXPECT_EQ(true, shared_handle_.Create("DeferredResourceLoaderTest", false,
-                                          false, 100));
     ResourceDispatcherTest::SetUp();
+    shared_handle_.Delete(kShmemSegmentName);
+    EXPECT_EQ(true, shared_handle_.CreateNamed(kShmemSegmentName, false, 100));
   }
 
   virtual void TearDown() {
     shared_handle_.Close();
+    EXPECT_TRUE(shared_handle_.Delete(kShmemSegmentName));
     ResourceDispatcherTest::TearDown();
   }
 
@@ -335,4 +328,3 @@ TEST_F(DeferredResourceLoadingTest, DeferredLoadTest) {
   message_loop.RunAllPending();
   delete bridge;
 }
-

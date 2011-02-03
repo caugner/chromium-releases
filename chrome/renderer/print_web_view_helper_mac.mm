@@ -9,7 +9,6 @@
 #include "app/l10n_util.h"
 #include "base/logging.h"
 #include "base/process_util.h"
-#include "base/scoped_cftyperef.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
 #include "chrome/renderer/render_view.h"
@@ -102,6 +101,7 @@ void PrintWebViewHelper::PrintPage(const ViewMsg_PrintPage_Params& params,
     NOTREACHED() << "Browser allocation request message failed";
   }
 
-  Send(new ViewHostMsg_DidPrintPage(routing_id(), page_params));
+  if (!is_preview_)
+    Send(new ViewHostMsg_DidPrintPage(routing_id(), page_params));
 }
 

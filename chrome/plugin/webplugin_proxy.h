@@ -15,7 +15,7 @@
 #include "base/hash_tables.h"
 #include "base/ref_counted.h"
 #if defined(OS_MACOSX)
-#include "base/scoped_cftyperef.h"
+#include "base/mac/scoped_cftyperef.h"
 #endif
 #include "base/scoped_handle.h"
 #include "base/scoped_ptr.h"
@@ -120,7 +120,8 @@ class WebPluginProxy : public webkit_glue::WebPlugin {
                         const char* buf,
                         unsigned int len,
                         int notify_id,
-                        bool popups_allowed);
+                        bool popups_allowed,
+                        bool notify_redirects);
   void UpdateGeometry(const gfx::Rect& window_rect,
                       const gfx::Rect& clip_rect,
                       const TransportDIB::Handle& windowless_buffer,
@@ -149,7 +150,8 @@ class WebPluginProxy : public webkit_glue::WebPlugin {
 
   // Tell the browser (via the renderer) to invalidate because the
   // accelerated buffers have changed.
-  virtual void AcceleratedFrameBuffersDidSwap(gfx::PluginWindowHandle window);
+  virtual void AcceleratedFrameBuffersDidSwap(
+      gfx::PluginWindowHandle window, uint64 surface_id);
 
   // Tell the renderer and browser to associate the given plugin handle with
   // |accelerated_surface_identifier|. The geometry is used to resize any
@@ -174,6 +176,8 @@ class WebPluginProxy : public webkit_glue::WebPlugin {
                                TransportDIB::Handle* dib_handle);
   virtual void FreeSurfaceDIB(TransportDIB::Id dib_id);
 #endif
+
+  virtual void URLRedirectResponse(bool allow, int resource_id);
 
  private:
   bool Send(IPC::Message* msg);
@@ -208,8 +212,8 @@ class WebPluginProxy : public webkit_glue::WebPlugin {
 #if defined(OS_MACOSX)
   scoped_ptr<TransportDIB> windowless_dib_;
   scoped_ptr<TransportDIB> background_dib_;
-  scoped_cftyperef<CGContextRef> windowless_context_;
-  scoped_cftyperef<CGContextRef> background_context_;
+  base::mac::ScopedCFTypeRef<CGContextRef> windowless_context_;
+  base::mac::ScopedCFTypeRef<CGContextRef> background_context_;
   scoped_ptr<WebPluginAcceleratedSurfaceProxy> accelerated_surface_;
 #else
   scoped_ptr<skia::PlatformCanvas> windowless_canvas_;

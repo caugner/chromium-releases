@@ -6,7 +6,7 @@
 
 #include "app/l10n_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/load_from_memory_cache_details.h"
 #include "chrome/browser/net/url_request_tracking.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -27,8 +27,8 @@ void SSLManager::OnSSLCertificateError(ResourceDispatcherHost* rdh,
                                        URLRequest* request,
                                        int cert_error,
                                        net::X509Certificate* cert) {
-  DLOG(INFO) << "OnSSLCertificateError() cert_error: " << cert_error <<
-                " url: " << request->url().spec();
+  DVLOG(1) << "OnSSLCertificateError() cert_error: " << cert_error
+           << " url: " << request->url().spec();
 
   ResourceDispatcherHostRequestInfo* info =
       ResourceDispatcherHost::InfoForRequest(request);
@@ -79,8 +79,9 @@ bool SSLManager::DeserializeSecurityInfo(const std::string& state,
   if (state.empty()) {
     // No SSL used.
     *cert_id = 0;
+    // The following are not applicable and are set to the default values.
     *cert_status = 0;
-    *security_bits = 0;  // Not encrypted.
+    *security_bits = -1;
     *ssl_connection_status = 0;
     return false;
   }
@@ -210,14 +211,14 @@ void SSLManager::DidLoadFromMemoryCache(LoadFromMemoryCacheDetails* details) {
   // caches sub-resources.
   // This resource must have been loaded with no filtering because filtered
   // resouces aren't cachable.
-  scoped_refptr<SSLRequestInfo> info = new SSLRequestInfo(
+  scoped_refptr<SSLRequestInfo> info(new SSLRequestInfo(
       details->url(),
       ResourceType::SUB_RESOURCE,
       details->frame_origin(),
       details->main_frame_origin(),
       details->pid(),
       details->ssl_cert_id(),
-      details->ssl_cert_status());
+      details->ssl_cert_status()));
 
   // Simulate loading this resource through the usual path.
   policy()->OnRequestStarted(info.get());
@@ -226,14 +227,14 @@ void SSLManager::DidLoadFromMemoryCache(LoadFromMemoryCacheDetails* details) {
 void SSLManager::DidStartResourceResponse(ResourceRequestDetails* details) {
   DCHECK(details);
 
-  scoped_refptr<SSLRequestInfo> info = new SSLRequestInfo(
+  scoped_refptr<SSLRequestInfo> info(new SSLRequestInfo(
       details->url(),
       details->resource_type(),
       details->frame_origin(),
       details->main_frame_origin(),
       details->origin_child_id(),
       details->ssl_cert_id(),
-      details->ssl_cert_status());
+      details->ssl_cert_status()));
 
   // Notify our policy that we started a resource request.  Ideally, the
   // policy should have the ability to cancel the request, but we can't do

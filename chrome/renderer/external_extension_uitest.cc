@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -26,6 +26,7 @@ class SearchProviderTest : public UITest {
       const IsSearchProviderTestData& data);
 
   net::TestServer test_server_;
+  bool test_server_started_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SearchProviderTest);
@@ -33,7 +34,14 @@ class SearchProviderTest : public UITest {
 
 SearchProviderTest::SearchProviderTest()
     : test_server_(net::TestServer::TYPE_HTTP,
-                   FilePath(FILE_PATH_LITERAL("chrome/test/data"))) {
+                   FilePath(FILE_PATH_LITERAL("chrome/test/data"))),
+      test_server_started_(false) {
+  // The test_server is started in the constructor (rather than the test body)
+  // so the mapping rules below can include the ephemeral port number.
+  test_server_started_ = test_server_.Start();
+  if (!test_server_started_)
+    return;
+
   // Enable the search provider additions.
   launch_arguments_.AppendSwitch(switches::kEnableSearchProviderApiV2);
 
@@ -112,9 +120,9 @@ void SearchProviderTest::FinishIsSearchProviderInstalledTest(
   EXPECT_STREQ("1\n", value.c_str());
 }
 
-// Flaky, http://crbug.com/57405.
+// http://code.google.com/p/chromium/issues/detail?id=62777
 TEST_F(SearchProviderTest, FLAKY_TestIsSearchProviderInstalled) {
-  ASSERT_TRUE(test_server_.Start());
+  ASSERT_TRUE(test_server_started_);
 
   // Use the default search provider, other installed search provider, and
   // one not installed as well. (Note that yahoo isn't tested because the
@@ -150,7 +158,7 @@ TEST_F(SearchProviderTest, FLAKY_TestIsSearchProviderInstalled) {
   }
 
   // The following should be re-enabled. At the moment, there are problems with
-  // doing all of these queries in parallel -- see http://crbug.com/57491.
+  // doing all of these queries in parallel -- see http://crbug.com/60043.
 #if 0
   // Remove the calls to FinishIsSearchProviderInstalledTest above when
   // re-enabling this code.

@@ -16,17 +16,29 @@ const CommandLinePrefStore::StringSwitchToPreferenceMapEntry
       { switches::kProxyServer, prefs::kProxyServer },
       { switches::kProxyPacUrl, prefs::kProxyPacUrl },
       { switches::kProxyBypassList, prefs::kProxyBypassList },
+      { switches::kAuthSchemes, prefs::kAuthSchemes },
+      { switches::kAuthServerWhitelist, prefs::kAuthServerWhitelist },
+      { switches::kAuthNegotiateDelegateWhitelist,
+          prefs::kAuthNegotiateDelegateWhitelist },
+      { switches::kGSSAPILibraryName, prefs::kGSSAPILibraryName },
 };
 
 const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
     CommandLinePrefStore::boolean_switch_map_[] = {
       { switches::kNoProxyServer, prefs::kNoProxyServer, true },
       { switches::kProxyAutoDetect, prefs::kProxyAutoDetect, true },
+      { switches::kDisableAuthNegotiateCnameLookup,
+          prefs::kDisableAuthNegotiateCnameLookup, true },
+      { switches::kEnableAuthNegotiatePort, prefs::kEnableAuthNegotiatePort,
+          true },
+      { switches::kDisable3DAPIs, prefs::kDisable3DAPIs, true },
 };
 
 CommandLinePrefStore::CommandLinePrefStore(const CommandLine* command_line)
     : command_line_(command_line),
       prefs_(new DictionaryValue()) {}
+
+CommandLinePrefStore::~CommandLinePrefStore() {}
 
 PrefStore::PrefReadError CommandLinePrefStore::ReadPrefs() {
   ApplySimpleSwitches();

@@ -4,10 +4,11 @@
 
 #include "chrome_frame/chrome_frame_automation.h"
 
+#include "app/app_switches.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/trace_event.h"
+#include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/lock.h"
@@ -26,6 +27,7 @@
 #include "chrome_frame/chrome_launcher_utils.h"
 #include "chrome_frame/crash_reporting/crash_metrics.h"
 #include "chrome_frame/custom_sync_call_context.h"
+#include "chrome_frame/simple_resource_loader.h"
 #include "chrome_frame/utils.h"
 
 #ifdef NDEBUG
@@ -42,6 +44,15 @@ static const wchar_t kUmaSendIntervalValue[] = L"UmaSendInterval";
 // The histograms created in ChromeFrame can be initialized on multiple
 // threads.
 Lock g_ChromeFrameHistogramLock;
+
+namespace {
+std::wstring GetCurrentModuleVersion() {
+  scoped_ptr<FileVersionInfo> module_version_info(
+      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+  DCHECK(module_version_info.get() != NULL);
+  return module_version_info->file_version();
+}
+}
 
 class ChromeFrameAutomationProxyImpl::TabProxyNotificationMessageFilter
     : public IPC::ChannelProxy::MessageFilter {
@@ -133,9 +144,12 @@ class ChromeFrameAutomationProxyImpl::CFMsgDispatcher
 };
 
 ChromeFrameAutomationProxyImpl::ChromeFrameAutomationProxyImpl(
-    AutomationProxyCacheEntry* entry, int launch_timeout)
+    AutomationProxyCacheEntry* entry,
+    std::string channel_id, int launch_timeout)
     : AutomationProxy(launch_timeout, false), proxy_entry_(entry) {
   TRACE_EVENT_BEGIN("chromeframe.automationproxy", this, "");
+
+  InitializeChannel(channel_id, false);
 
   sync_ = new CFMsgDispatcher();
   message_filter_ = new TabProxyNotificationMessageFilter(tracker_.get());
@@ -223,7 +237,7 @@ AutomationProxyCacheEntry::AutomationProxyCacheEntry(
 }
 
 AutomationProxyCacheEntry::~AutomationProxyCacheEntry() {
-  DLOG(INFO) << __FUNCTION__ << profile_name;
+  DVLOG(1) << __FUNCTION__ << profile_name;
   // Attempt to fix chrome_frame_tests crash seen at times on the IE6/IE7
   // builders. It appears that there are cases when we can enter here when the
   // AtExitManager is tearing down the global ProxyCache which causes a crash
@@ -260,14 +274,20 @@ void AutomationProxyCacheEntry::CreateProxy(ChromeFrameLaunchParams* params,
   // destruction notification.
 
   // At same time we must destroy/stop the thread from another thread.
+  std::string channel_id = AutomationProxy::GenerateChannelID();
   ChromeFrameAutomationProxyImpl* proxy =
-      new ChromeFrameAutomationProxyImpl(this, params->launch_timeout());
+      new ChromeFrameAutomationProxyImpl(this, channel_id,
+                                         params->launch_timeout());
+
+  // Ensure that the automation proxy actually respects our choice on whether
+  // or not to check the version.
+  proxy->set_perform_version_check(params->version_check());
 
   // Launch browser
   scoped_ptr<CommandLine> command_line(
       chrome_launcher::CreateLaunchCommandLine());
   command_line->AppendSwitchASCII(switches::kAutomationClientChannelID,
-                                  proxy->channel_id());
+                                  channel_id);
 
   // Run Chrome in Chrome Frame mode. In practice, this modifies the paths
   // and registry keys that Chrome looks in via the BrowserDistribution
@@ -295,9 +315,16 @@ void AutomationProxyCacheEntry::CreateProxy(ChromeFrameLaunchParams* params,
   if (IsAccessibleMode())
     command_line->AppendSwitch(switches::kForceRendererAccessibility);
 
-  DLOG(INFO) << "Profile path: " << params->profile_path().value();
+  DVLOG(1) << "Profile path: " << params->profile_path().value();
   command_line->AppendSwitchPath(switches::kUserDataDir,
                                  params->profile_path());
+
+  // Ensure that Chrome is running the specified version of chrome.dll.
+  command_line->AppendSwitchNative(switches::kChromeVersion,
+                                   GetCurrentModuleVersion());
+
+  if (!params->language().empty())
+    command_line->AppendSwitchNative(switches::kLang, params->language());
 
   std::wstring command_line_string(command_line->command_line_string());
   // If there are any extra arguments, append them to the command line.
@@ -471,7 +498,7 @@ void ProxyFactory::GetAutomationServer(
   }
 
   if (entry == NULL) {
-    DLOG(INFO) << __FUNCTION__ << " creating new proxy entry";
+    DVLOG(1) << __FUNCTION__ << " creating new proxy entry";
     entry = new AutomationProxyCacheEntry(params, delegate);
     proxies_.container().push_back(entry);
 
@@ -542,7 +569,7 @@ bool ProxyFactory::ReleaseAutomationServer(void* server_id,
   return true;
 }
 
-Singleton<ProxyFactory> g_proxy_factory;
+Singleton<ProxyFactory, LeakySingletonTraits<ProxyFactory> > g_proxy_factory;
 
 template <> struct RunnableMethodTraits<ChromeFrameAutomationClient> {
   static void RetainCallee(ChromeFrameAutomationClient* obj) {}
@@ -562,6 +589,7 @@ ChromeFrameAutomationClient::ChromeFrameAutomationClient()
       proxy_factory_(g_proxy_factory.get()),
       handle_top_level_requests_(false),
       tab_handle_(-1),
+      session_id_(-1),
       external_tab_cookie_(0),
       url_fetcher_(NULL),
       url_fetcher_flags_(PluginUrlRequestManager::NOT_THREADSAFE),
@@ -669,7 +697,7 @@ void ChromeFrameAutomationClient::Uninitialize() {
     url_fetcher_ = NULL;
   }
 
-  if (tab_.get()) {
+  if (tab_) {
     tab_->RemoveObserver(this);
     if (automation_server_)
       automation_server_->ReleaseTabProxy(tab_->handle());
@@ -720,8 +748,8 @@ bool ChromeFrameAutomationClient::InitiateNavigation(const std::string& url,
     if (!chrome_launch_params_) {
       FilePath profile_path;
       chrome_launch_params_ = new ChromeFrameLaunchParams(parsed_url,
-          referrer_gurl, profile_path, L"", L"", false, false,
-          route_all_top_level_navigations_);
+          referrer_gurl, profile_path, L"", SimpleResourceLoader::GetLanguage(),
+          L"", false, false, route_all_top_level_navigations_);
     } else {
       chrome_launch_params_->set_referrer(referrer_gurl);
       chrome_launch_params_->set_url(parsed_url);
@@ -890,6 +918,10 @@ void ChromeFrameAutomationClient::GetEnabledExtensionsComplete(
   delete extension_directories;
 }
 
+int ChromeFrameAutomationClient::GetSessionId() const {
+  return session_id_;
+}
+
 void ChromeFrameAutomationClient::OnChromeFrameHostMoved() {
   // Use a local var to avoid the small possibility of getting the tab_
   // member be cleared while we try to use it.
@@ -897,7 +929,7 @@ void ChromeFrameAutomationClient::OnChromeFrameHostMoved() {
   scoped_refptr<TabProxy> tab(tab_);
   // There also is a possibility that tab_ has not been set yet,
   // so we still need to test for NULL.
-  if (tab.get() != NULL)
+  if (tab)
     tab->OnHostMoved();
 }
 
@@ -952,13 +984,13 @@ void ChromeFrameAutomationClient::CreateExternalTab() {
       2);
 
   IPC::SyncMessage* message =
-      new AutomationMsg_CreateExternalTab(0, settings, NULL, NULL, NULL);
+      new AutomationMsg_CreateExternalTab(0, settings, NULL, NULL, 0, 0);
   automation_server_->SendAsAsync(message, new CreateExternalTabContext(this),
                                   this);
 }
 
 AutomationLaunchResult ChromeFrameAutomationClient::CreateExternalTabComplete(
-    HWND chrome_window, HWND tab_window, int tab_handle) {
+    HWND chrome_window, HWND tab_window, int tab_handle, int session_id) {
   if (!automation_server_) {
     // If we receive this notification while shutting down, do nothing.
     DLOG(ERROR) << "CreateExternalTabComplete called when automation server "
@@ -975,6 +1007,7 @@ AutomationLaunchResult ChromeFrameAutomationClient::CreateExternalTabComplete(
     tab_ = automation_server_->CreateTabProxy(tab_handle);
     tab_->AddObserver(this);
     tab_handle_ = tab_handle;
+    session_id_ = session_id;
   }
   return launch_result;
 }
@@ -1002,7 +1035,7 @@ void ChromeFrameAutomationClient::LaunchComplete(
     DCHECK(init_state_ == INITIALIZING);
     automation_server_ = proxy;
   } else {
-    DLOG(INFO) << "Not storing automation server pointer due to shutting down";
+    DVLOG(1) << "Not storing automation server pointer due to shutting down";
   }
 
   if (result == AUTOMATION_SUCCESS) {
@@ -1021,11 +1054,11 @@ void ChromeFrameAutomationClient::LaunchComplete(
         // ExternalTab.
         IPC::SyncMessage* message =
             new AutomationMsg_ConnectExternalTab(0, external_tab_cookie_, true,
-              m_hWnd, NULL, NULL, NULL);
+              m_hWnd, NULL, NULL, NULL, 0);
         automation_server_->SendAsAsync(message,
                                         new CreateExternalTabContext(this),
                                         this);
-        DLOG(INFO) << __FUNCTION__ << ": sending CreateExternalTabComplete";
+        DVLOG(1) << __FUNCTION__ << ": sending CreateExternalTabComplete";
       }
     }
   } else {
@@ -1048,8 +1081,6 @@ void ChromeFrameAutomationClient::AutomationServerDied() {
 void ChromeFrameAutomationClient::InitializeComplete(
     AutomationLaunchResult result) {
   DCHECK_EQ(PlatformThread::CurrentId(), ui_thread_id_);
-  std::string version = automation_server_->server_version();
-
   if (result != AUTOMATION_SUCCESS) {
     DLOG(WARNING) << "InitializeComplete: failure " << result;
     ReleaseAutomationServer();
@@ -1072,6 +1103,9 @@ void ChromeFrameAutomationClient::InitializeComplete(
     if (result == AUTOMATION_SUCCESS) {
       chrome_frame_delegate_->OnAutomationServerReady();
     } else {
+      std::string version;
+      if (automation_server_)
+        version = automation_server_->server_version();
       chrome_frame_delegate_->OnAutomationServerLaunchFailed(result, version);
     }
   }
@@ -1280,19 +1314,12 @@ void ChromeFrameAutomationClient::ReleaseAutomationServer() {
 
 void ChromeFrameAutomationClient::SendContextMenuCommandToChromeFrame(
   int selected_command) {
-  DCHECK(tab_ != NULL);
-  tab_->SendContextMenuCommand(selected_command);
+  if (tab_)
+    tab_->SendContextMenuCommand(selected_command);
 }
 
 std::wstring ChromeFrameAutomationClient::GetVersion() const {
-  static FileVersionInfo* version_info =
-      FileVersionInfo::CreateFileVersionInfoForCurrentModule();
-
-  std::wstring version;
-  if (version_info)
-    version = version_info->product_version();
-
-  return version;
+  return GetCurrentModuleVersion();
 }
 
 void ChromeFrameAutomationClient::Print(HDC print_dc,
@@ -1314,7 +1341,8 @@ void ChromeFrameAutomationClient::Print(HDC print_dc,
 }
 
 void ChromeFrameAutomationClient::PrintTab() {
-  tab_->PrintAsync();
+  if (tab_)
+    tab_->PrintAsync();
 }
 
 bool ChromeFrameAutomationClient::Reinitialize(
@@ -1357,7 +1385,7 @@ void ChromeFrameAutomationClient::BlockExternalTab(uint64 cookie) {
   // The host does not want this tab to be shown (due popup blocker).
   IPC::SyncMessage* message =
       new AutomationMsg_ConnectExternalTab(0, cookie, false, m_hWnd,
-                                           NULL, NULL, NULL);
+                                           NULL, NULL, NULL, 0);
   automation_server_->SendAsAsync(message, NULL, this);
 }
 

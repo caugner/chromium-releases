@@ -43,7 +43,9 @@ struct ViewHostMsg_DomMessage_Params;
 struct ViewHostMsg_PageHasOSDD_Type;
 struct ViewHostMsg_RunFileChooser_Params;
 struct ViewHostMsg_ShowNotification_Params;
+struct ViewHostMsg_ShowPopup_Params;
 struct ViewMsg_Navigate_Params;
+struct WebApplicationInfo;
 struct WebDropData;
 struct WebPreferences;
 struct UserMetricsAction;
@@ -58,7 +60,6 @@ class FormField;
 struct PasswordForm;
 struct PasswordFormFillData;
 struct WebAccessibility;
-struct WebApplicationInfo;
 }  // namespace webkit_glue
 
 namespace WebKit {
@@ -202,6 +203,9 @@ class RenderViewHost : public RenderWidgetHost {
   // behalf.
   bool PrintPages();
 
+  // Asks the renderer to render pages for print preview.
+  bool PrintPreview();
+
   // Notify renderer of success/failure of print job.
   void PrintingDone(int document_cookie, bool success);
 
@@ -216,8 +220,11 @@ class RenderViewHost : public RenderWidgetHost {
   // Cancel a pending find operation.
   void StopFinding(FindBarController::SelectionAction selection_action);
 
-  // Change the zoom level of a page.
+  // Increment, decrement, or reset the zoom level of a page.
   void Zoom(PageZoom::Function function);
+
+  // Change the zoom level of a page to a specific value.
+  void SetZoomLevel(double zoom_level);
 
   // Change the encoding of the page.
   void SetPageEncoding(const std::string& encoding);
@@ -405,18 +412,18 @@ class RenderViewHost : public RenderWidgetHost {
   // set to false when creating a renderer-initiated window via window.open.
   void AllowScriptToClose(bool visible);
 
+  // Resets the stored AutoFill state.
+  void ResetAutoFillState(int query_id);
+
   // Called by the AutoFillManager when the list of suggestions is ready.
-  void AutoFillSuggestionsReturned(
-      int query_id,
-      const std::vector<string16>& values,
-      const std::vector<string16>& labels,
-      const std::vector<string16>& icons,
-      const std::vector<int>& unique_ids);
+  void AutoFillSuggestionsReturned(const std::vector<string16>& values,
+                                   const std::vector<string16>& labels,
+                                   const std::vector<string16>& icons,
+                                   const std::vector<int>& unique_ids);
 
   // Called by the AutocompleteHistoryManager when the list of suggestions is
   // ready.
   void AutocompleteSuggestionsReturned(
-      int query_id,
       const std::vector<string16>& suggestions);
 
   // Called by the AutoFillManager when the FormData has been filled out.
@@ -439,7 +446,6 @@ class RenderViewHost : public RenderWidgetHost {
                                   const std::string& value);
   virtual void ForwardEditCommandsForNextKeyEvent(
       const EditCommands& edit_commands);
-  virtual gfx::Rect GetRootWindowResizerRect() const;
 
   // Creates a new RenderView with the given route id.
   void CreateNewWindow(int route_id,
@@ -490,6 +496,24 @@ class RenderViewHost : public RenderWidgetHost {
   // in render_messages.h.
   void EnablePreferredSizeChangedMode(int flags);
 
+#if defined(OS_MACOSX)
+  // Select popup menu related methods (for external popup menus).
+  void DidSelectPopupMenuItem(int selected_index);
+  void DidCancelPopupMenu();
+#endif
+
+  // SearchBox notifications.
+  void SearchBoxChange(const string16& value,
+                       bool verbatim,
+                       int selection_start,
+                       int selection_end);
+  void SearchBoxSubmit(const string16& value,
+                       bool verbatim);
+  void SearchBoxCancel();
+  void SearchBoxResize(const gfx::Rect& search_box_bounds);
+  void DetermineIfPageSupportsInstant(const string16& value,
+                                      bool verbatim);
+
 #if defined(UNIT_TEST)
   // These functions shouldn't be necessary outside of testing.
 
@@ -512,7 +536,7 @@ class RenderViewHost : public RenderWidgetHost {
   virtual void OnUserGesture();
   virtual void NotifyRendererUnresponsive();
   virtual void NotifyRendererResponsive();
-  virtual void OnMsgFocusedNodeChanged();
+  virtual void OnMsgFocusedNodeChanged(bool is_editable_node);
   virtual void OnMsgFocus();
   virtual void OnMsgBlur();
 
@@ -582,7 +606,8 @@ class RenderViewHost : public RenderWidgetHost {
   void OnMsgForwardMessageToExternalHost(const std::string& message,
                                          const std::string& origin,
                                          const std::string& target);
-  void OnMsgDocumentLoadedInFrame();
+  void OnMsgDocumentLoadedInFrame(long long frame_id);
+  void OnMsgDidFinishLoad(long long frame_id);
   void OnMsgGoToEntryAtOffset(int offset);
   void OnMsgSetTooltipText(const std::wstring& tooltip_text,
                            WebKit::WebTextDirection text_direction_hint);
@@ -631,12 +656,7 @@ class RenderViewHost : public RenderWidgetHost {
   void OnRequestUndockDevToolsWindow();
   void OnDevToolsRuntimePropertyChanged(const std::string& name,
                                         const std::string& value);
-
-  void OnUserMetricsRecordAction(const std::string& action);
   void OnMissingPluginStatus(int status);
-  void OnNonSandboxedPluginBlocked(const std::string& plugin,
-                                   const string16& name);
-  void OnBlockedPluginLoaded();
   void OnCrashedPlugin(const FilePath& plugin_path);
   void OnDisabledOutdatedPlugin(const string16& name, const GURL& update_url);
 
@@ -649,11 +669,11 @@ class RenderViewHost : public RenderWidgetHost {
                                     const std::string& data,
                                     int32 status);
 
-  void OnDidGetApplicationInfo(int32 page_id,
-                               const webkit_glue::WebApplicationInfo& info);
+  void OnDidGetApplicationInfo(int32 page_id, const WebApplicationInfo& info);
+  void OnInstallApplication(const WebApplicationInfo& info);
   void OnMsgShouldCloseACK(bool proceed);
   void OnQueryFormFieldAutoFill(int request_id,
-                                bool form_autofilled,
+                                const webkit_glue::FormData& form,
                                 const webkit_glue::FormField& field);
   void OnDidShowAutoFillSuggestions();
   void OnRemoveAutocompleteEntry(const string16& field_name,
@@ -661,6 +681,7 @@ class RenderViewHost : public RenderWidgetHost {
   void OnShowAutoFillDialog();
   void OnFillAutoFillFormData(int query_id,
                               const webkit_glue::FormData& form,
+                              const webkit_glue::FormField& field,
                               int unique_id);
   void OnDidFillAutoFillFormData();
 
@@ -694,15 +715,25 @@ class RenderViewHost : public RenderWidgetHost {
   void OnUpdateZoomLimits(int minimum_percent,
                           int maximum_percent,
                           bool remember);
-  void OnSetSuggestResult(int32 page_id, const std::string& result);
+  void OnSetSuggestions(int32 page_id,
+                        const std::vector<std::string>& suggestions);
+  void OnInstantSupportDetermined(int32 page_id, bool result);
   void OnDetectedPhishingSite(const GURL& phishing_url,
                               double phishing_score,
                               const SkBitmap& thumbnail);
   void OnScriptEvalResponse(int id, bool result);
   void OnUpdateContentRestrictions(int restrictions);
+  void OnPagesReadyForPreview(int document_cookie, int fd_in_browser);
+
+#if defined(OS_MACOSX)
+  void OnMsgShowPopup(const ViewHostMsg_ShowPopup_Params& params);
+#endif
 
  private:
   friend class TestRenderViewHost;
+
+  // Get/Create print preview tab.
+  TabContents* GetOrCreatePrintPreviewTab();
 
   // The SiteInstance associated with this RenderViewHost.  All pages drawn
   // in this RenderViewHost are part of this SiteInstance.  Should not change
@@ -772,12 +803,14 @@ class RenderViewHost : public RenderWidgetHost {
   // what process type we use.
   bool is_extension_process_;
 
+  // TODO(isherman): Consider splitting these off into a helper class.
   // AutoFill and Autocomplete suggestions.  We accumulate these separately and
   // send them back to the renderer together.
   std::vector<string16> autofill_values_;
   std::vector<string16> autofill_labels_;
   std::vector<string16> autofill_icons_;
   std::vector<int> autofill_unique_ids_;
+  int autofill_query_id_;
 
   // Whether the accessibility tree should be saved, for unit testing.
   bool save_accessibility_tree_for_testing_;

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "chrome/browser/automation/automation_resource_routing_delegate.h"
@@ -27,8 +28,8 @@ namespace history {
 class HistoryAddPageArgs;
 }
 
+struct ContextMenuParams;
 class DownloadItem;
-class ExtensionFunctionDispatcher;
 class GURL;
 class HtmlDialogUIDelegate;
 struct NativeWebKeyboardEvent;
@@ -37,7 +38,7 @@ class RenderViewHost;
 class TabContents;
 class TemplateURL;
 class TemplateURLModel;
-struct ContextMenuParams;
+struct WebApplicationInfo;
 
 // Objects implement this interface to get notified about changes in the
 // TabContents and to provide necessary functionality.
@@ -60,6 +61,10 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // |TabContents::InvalidateTypes| bits.
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags) = 0;
+
+  // Returns the set of headers to add to the navigation request. Use
+  // net::HttpUtil::AppendHeaderIfMissing to build the set of headers.
+  virtual std::string GetNavigationHeaders(const GURL& url);
 
   // Creates a new tab with the already-created TabContents 'new_contents'.
   // The window for the added contents should be reparented correctly when this
@@ -104,7 +109,7 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   virtual TabContents* GetConstrainingContents(TabContents* source);
 
   // Returns true if constrained windows should be focused. Default is true.
-  virtual bool ShouldFocusConstrainedWindow(TabContents* source);
+  virtual bool ShouldFocusConstrainedWindow();
 
   // Invoked prior to the TabContents showing a constrained window.
   virtual void WillShowConstrainedWindow(TabContents* source);
@@ -146,16 +151,19 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // Reloading can be disabled e. g. for the DevTools window.
   virtual bool CanReloadContents(TabContents* source) const;
 
-  // Return the rect where to display the resize corner, if any, otherwise
-  // an empty rect.
-  virtual gfx::Rect GetRootWindowResizerRect() const;
-
   // Show a dialog with HTML content. |delegate| contains a pointer to the
   // delegate who knows how to display the dialog (which file URL and JSON
   // string input to use during initialization). |parent_window| is the window
   // that should be parent of the dialog, or NULL for the default.
   virtual void ShowHtmlDialog(HtmlDialogUIDelegate* delegate,
                               gfx::NativeWindow parent_window);
+
+  // Invoked prior to showing before unload handler confirmation dialog.
+  virtual void WillRunBeforeUnloadConfirm();
+
+  // Returns true if javascript dialogs and unload alerts are suppressed.
+  // Default is false.
+  virtual bool ShouldSuppressDialogs();
 
   // Tells us that we've finished firing this tab's beforeunload event.
   // The proceed bool tells us whether the user chose to proceed closing the
@@ -187,12 +195,6 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   // this to disable inactive rendering for the frame in the window the select
   // is opened within if necessary.
   virtual void RenderWidgetShowing();
-
-  // This is used when the contents is an extension that needs to route
-  // api calls through to the Browser process.
-  virtual ExtensionFunctionDispatcher* CreateExtensionFunctionDispatcher(
-      RenderViewHost* render_view_host,
-      const std::string& extension_id);
 
   // This is called when WebKit tells us that it is done tabbing through
   // controls on the page. Provides a way for TabContentsDelegates to handle
@@ -280,9 +282,13 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
       const history::HistoryAddPageArgs& add_page_args,
       NavigationType::Type navigation_type);
 
-  // Notification when web app info data is available
+  // Notification that a user's request to install an application has completed.
   virtual void OnDidGetApplicationInfo(TabContents* tab_contents,
                                        int32 page_id);
+
+  // Notification when an application programmatically requests installation.
+  virtual void OnInstallApplication(TabContents* tab_contents,
+                                    const WebApplicationInfo& app_info);
 
   // Returns the native window framing the view containing the tab contents.
   virtual gfx::NativeWindow GetFrameNativeWindow();
@@ -305,7 +311,11 @@ class TabContentsDelegate : public AutomationResourceRoutingDelegate {
   virtual void UpdatePreferredSize(const gfx::Size& pref_size);
 
   // Notifies the delegate that the page has a suggest result.
-  virtual void OnSetSuggestResult(int32 page_id, const std::string& result);
+  virtual void OnSetSuggestions(int32 page_id,
+                                const std::vector<std::string>& result);
+
+ // Notifies the delegate whether the page supports instant-style interaction.
+  virtual void OnInstantSupportDetermined(int32 page_id, bool result);
 
   // Notifies the delegate that the content restrictions for this tab has
   // changed.

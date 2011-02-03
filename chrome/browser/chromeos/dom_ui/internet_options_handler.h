@@ -16,8 +16,11 @@ class WindowDelegate;
 }
 
 // ChromeOS internet options page UI handler.
-class InternetOptionsHandler : public OptionsPageUIHandler,
-                               public chromeos::NetworkLibrary::Observer {
+class InternetOptionsHandler
+  : public OptionsPageUIHandler,
+    public chromeos::NetworkLibrary::NetworkManagerObserver,
+    public chromeos::NetworkLibrary::NetworkObserver,
+    public chromeos::NetworkLibrary::CellularDataPlanObserver {
  public:
   InternetOptionsHandler();
   virtual ~InternetOptionsHandler();
@@ -28,11 +31,18 @@ class InternetOptionsHandler : public OptionsPageUIHandler,
   // DOMMessageHandler implementation.
   virtual void RegisterMessages();
 
-  // NetworkLibrary::Observer implementation.
-  virtual void NetworkChanged(chromeos::NetworkLibrary* obj);
-  virtual void CellularDataPlanChanged(chromeos::NetworkLibrary* obj);
+  // NetworkLibrary::NetworkManagerObserver implementation.
+  virtual void OnNetworkManagerChanged(chromeos::NetworkLibrary* network_lib);
+  // NetworkLibrary::NetworkObserver implementation.
+  virtual void OnNetworkChanged(chromeos::NetworkLibrary* network_lib,
+                                const chromeos::Network* network);
+  // NetworkLibrary::CellularDataPlanObserver implementation.
+  virtual void OnCellularDataPlanChanged(chromeos::NetworkLibrary* network_lib);
 
  private:
+  // Open a modal popup dialog.
+  void CreateModalPopup(views::WindowDelegate* view);
+
   // Passes data needed to show details overlay for network.
   // |args| will be [ network_type, service_path, command ]
   // And command is one of 'options', 'connect', disconnect', or 'forget'
@@ -56,23 +66,19 @@ class InternetOptionsHandler : public OptionsPageUIHandler,
 
   // Populates the ui with the details of the given device path. This forces
   // an overlay to be displayed in the UI.
-  void PopulateDictionaryDetails(const chromeos::Network& net,
+  void PopulateDictionaryDetails(const chromeos::Network* net,
                                  chromeos::NetworkLibrary* cros);
-
-  void PopupWirelessPassword(const chromeos::WifiNetwork& network);
 
   // Converts CellularDataPlan structure into dictionary for JS. Formats
   // plan settings into human readable texts.
   DictionaryValue* CellularDataPlanToDictionary(
-      const chromeos::CellularDataPlan& plan);
-  // Evaluates cellular plans status and returns warning string if it is near
-  // expiration.
-  string16 GetPlanWarning(
-      const chromeos::CellularDataPlan& plan);
+      const chromeos::CellularDataPlan* plan);
   // Creates the map of a network
   ListValue* GetNetwork(const std::string& service_path, const SkBitmap& icon,
       const std::string& name, bool connecting, bool connected,
-      int connection_type, bool remembered);
+      bool connectable, chromeos::ConnectionType connection_type,
+      bool remembered, chromeos::ActivationState activation_state,
+      bool restricted_ip);
 
   // Creates the map of wired networks
   ListValue* GetWiredList();
@@ -80,6 +86,17 @@ class InternetOptionsHandler : public OptionsPageUIHandler,
   ListValue* GetWirelessList();
   // Creates the map of remembered networks
   ListValue* GetRememberedList();
+  // Refresh the display of network information
+  void RefreshNetworkData(chromeos::NetworkLibrary* cros);
+  // Monitor the active network, if any
+  void MonitorActiveNetwork(chromeos::NetworkLibrary* cros);
+
+  // If any network is currently active, this is its service path
+  std::string active_network_;
+
+  // A boolean flag of whether to use DOMUI for connect UI. True to use DOMUI
+  // and false to use Views dialogs.
+  bool use_settings_ui_;
 
   DISALLOW_COPY_AND_ASSIGN(InternetOptionsHandler);
 };

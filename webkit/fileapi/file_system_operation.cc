@@ -36,11 +36,10 @@ void FileSystemOperation::CreateFile(const FilePath& path,
   pending_operation_ = kOperationCreateFile;
 #endif
 
-  base::FileUtilProxy::Create(
-    proxy_, path, base::PLATFORM_FILE_CREATE | base::PLATFORM_FILE_READ,
-    callback_factory_.NewCallback(
-        exclusive ? &FileSystemOperation::DidCreateFileExclusive
-                  : &FileSystemOperation::DidCreateFileNonExclusive));
+  base::FileUtilProxy::EnsureFileExists(
+    proxy_, path, callback_factory_.NewCallback(
+        exclusive ? &FileSystemOperation::DidEnsureFileExistsExclusive
+                  : &FileSystemOperation::DidEnsureFileExistsNonExclusive));
 }
 
 void FileSystemOperation::CreateDirectory(const FilePath& path,
@@ -219,23 +218,17 @@ void FileSystemOperation::Cancel(FileSystemOperation* cancel_operation) {
   }
 }
 
-void FileSystemOperation::DidCreateFileExclusive(
-    base::PlatformFileError rv,
-    base::PassPlatformFile file,
-    bool created) {
-  DidFinishFileOperation(rv);
+void FileSystemOperation::DidEnsureFileExistsExclusive(
+    base::PlatformFileError rv, bool created) {
+  if (rv == base::PLATFORM_FILE_OK && !created)
+    dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_EXISTS);
+  else
+    DidFinishFileOperation(rv);
 }
 
-void FileSystemOperation::DidCreateFileNonExclusive(
-    base::PlatformFileError rv,
-    base::PassPlatformFile file,
-    bool created) {
-  // Suppress the already exists error and report success.
-  if (rv == base::PLATFORM_FILE_OK ||
-      rv == base::PLATFORM_FILE_ERROR_EXISTS)
-    dispatcher_->DidSucceed();
-  else
-    dispatcher_->DidFail(rv);
+void FileSystemOperation::DidEnsureFileExistsNonExclusive(
+    base::PlatformFileError rv, bool /* created */) {
+  DidFinishFileOperation(rv);
 }
 
 void FileSystemOperation::DidFinishFileOperation(
@@ -263,8 +256,9 @@ void FileSystemOperation::DidDirectoryExists(
       dispatcher_->DidSucceed();
     else
       dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_FAILED);
-  } else
+  } else {
     dispatcher_->DidFail(rv);
+  }
 }
 
 void FileSystemOperation::DidFileExists(
@@ -275,8 +269,9 @@ void FileSystemOperation::DidFileExists(
       dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_FAILED);
     else
       dispatcher_->DidSucceed();
-  } else
+  } else {
     dispatcher_->DidFail(rv);
+  }
 }
 
 void FileSystemOperation::DidGetMetadata(
@@ -290,7 +285,7 @@ void FileSystemOperation::DidGetMetadata(
 
 void FileSystemOperation::DidReadDirectory(
     base::PlatformFileError rv,
-    const std::vector<base::file_util_proxy::Entry>& entries) {
+    const std::vector<base::FileUtilProxy::Entry>& entries) {
   if (rv == base::PLATFORM_FILE_OK)
     dispatcher_->DidReadDirectory(entries, false /* has_more */);
   else

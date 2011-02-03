@@ -24,14 +24,16 @@ extern "C" {
 #include "remoting/base/constants.h"
 #include "remoting/jingle_glue/jingle_client.h"
 #include "remoting/jingle_glue/jingle_thread.h"
-#include "remoting/protocol/jingle_chromoting_server.h"
+#include "remoting/protocol/jingle_session_manager.h"
 
 using remoting::kChromotingTokenServiceName;
 
 namespace remoting {
+namespace protocol {
 
 namespace {
 const int kBufferSize = 4096;
+const char kDummyAuthToken[] = "";
 }  // namespace
 
 class ProtocolTestClient;
@@ -42,7 +44,7 @@ class ProtocolTestConnection
   ProtocolTestConnection(ProtocolTestClient* client, MessageLoop* message_loop)
       : client_(client),
         message_loop_(message_loop),
-        connection_(NULL),
+        session_(NULL),
         ALLOW_THIS_IN_INITIALIZER_LIST(
             write_cb_(this, &ProtocolTestConnection::OnWritten)),
         pending_write_(false),
@@ -51,13 +53,13 @@ class ProtocolTestConnection
         closed_event_(true, false) {
   }
 
-  void Init(ChromotingConnection* connection);
+  void Init(Session* session);
   void Write(const std::string& str);
   void Read();
   void Close();
 
-  // ChromotingConnection::Callback interface.
-  virtual void OnStateChange(ChromotingConnection::State state);
+  // Session::Callback interface.
+  virtual void OnStateChange(Session::State state);
  private:
   void DoWrite(scoped_refptr<net::IOBuffer> buf, int size);
   void DoRead();
@@ -71,7 +73,7 @@ class ProtocolTestConnection
 
   ProtocolTestClient* client_;
   MessageLoop* message_loop_;
-  scoped_refptr<ChromotingConnection> connection_;
+  scoped_refptr<Session> session_;
   net::CompletionCallbackImpl<ProtocolTestConnection> write_cb_;
   bool pending_write_;
   net::CompletionCallbackImpl<ProtocolTestConnection> read_cb_;
@@ -96,14 +98,11 @@ class ProtocolTestClient
 
   // JingleClient::Callback interface.
   virtual void OnStateChange(JingleClient* client, JingleClient::State state);
-  virtual bool OnAcceptConnection(JingleClient* client, const std::string& jid,
-                                  JingleChannel::Callback** callback);
-  virtual void OnNewConnection(JingleClient* client,
-                               scoped_refptr<JingleChannel> channel);
 
-  // callback for JingleChromotingServer interface.
-  virtual void OnNewChromotocolConnection(ChromotingConnection* connection,
-                                          bool* accept);
+  // callback for JingleSessionManager interface.
+  virtual void OnNewSession(
+      Session* session,
+      SessionManager::IncomingSessionResponse* response);
 
  private:
   typedef std::list<scoped_refptr<ProtocolTestConnection> > ConnectionsList;
@@ -113,22 +112,22 @@ class ProtocolTestClient
 
   std::string host_jid_;
   scoped_refptr<JingleClient> client_;
-  scoped_refptr<JingleChromotingServer> server_;
+  scoped_refptr<JingleSessionManager> session_manager_;
   ConnectionsList connections_;
   Lock connections_lock_;
   base::WaitableEvent closed_event_;
 };
 
 
-void ProtocolTestConnection::Init(ChromotingConnection* connection) {
-  connection_ = connection;
+void ProtocolTestConnection::Init(Session* session) {
+  session_ = session;
 }
 
 void ProtocolTestConnection::Write(const std::string& str) {
   if (str.empty())
     return;
 
-  scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(str.length());
+  scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(str.length()));
   memcpy(buf->data(), str.c_str(), str.length());
   message_loop_->PostTask(
       FROM_HERE, NewRunnableMethod(
@@ -142,7 +141,7 @@ void ProtocolTestConnection::DoWrite(
     return;
   }
 
-  net::Socket* channel = connection_->GetEventsChannel();
+  net::Socket* channel = session_->event_channel();
   if (channel != NULL) {
     int result = channel->Write(buf, size, &write_cb_);
     if (result < 0) {
@@ -165,7 +164,7 @@ void ProtocolTestConnection::Read() {
 void ProtocolTestConnection::DoRead() {
   read_buffer_ = new net::IOBuffer(kBufferSize);
   while (true) {
-    int result = connection_->GetEventsChannel()->Read(
+    int result = session_->event_channel()->Read(
         read_buffer_, kBufferSize, &read_cb_);
     if (result < 0) {
       if (result != net::ERR_IO_PENDING)
@@ -178,7 +177,7 @@ void ProtocolTestConnection::DoRead() {
 }
 
 void ProtocolTestConnection::Close() {
-  connection_->Close(
+  session_->Close(
       NewRunnableMethod(this, &ProtocolTestConnection::OnFinishedClosing));
   closed_event_.Wait();
 }
@@ -187,14 +186,13 @@ void ProtocolTestConnection::OnFinishedClosing() {
   closed_event_.Signal();
 }
 
-void ProtocolTestConnection::OnStateChange(
-    ChromotingConnection::State state) {
-  LOG(INFO) << "State of " << connection_->jid() << " changed to " << state;
-  if (state == ChromotingConnection::CONNECTED) {
+void ProtocolTestConnection::OnStateChange(Session::State state) {
+  LOG(INFO) << "State of " << session_->jid() << " changed to " << state;
+  if (state == Session::CONNECTED) {
     // Start reading after we've connected.
     Read();
-  } else if (state == ChromotingConnection::CLOSED) {
-    std::cerr << "Connection to " << connection_->jid()
+  } else if (state == Session::CLOSED) {
+    std::cerr << "Connection to " << session_->jid()
               << " closed" << std::endl;
     client_->OnConnectionClosed(this);
   }
@@ -215,7 +213,7 @@ void ProtocolTestConnection::HandleReadResult(int result) {
   if (result > 0) {
     std::string str(reinterpret_cast<const char*>(read_buffer_->data()),
                     result);
-    std::cout << "(" << connection_->jid() << "): " << str << std::endl;
+    std::cout << "(" << session_->jid() << "): " << str << std::endl;
   } else {
     LOG(ERROR) << "Read() returned error " << result;
   }
@@ -229,7 +227,7 @@ void ProtocolTestClient::Run(const std::string& username,
   client_ = new JingleClient(&jingle_thread);
   client_->Init(username, auth_token, kChromotingTokenServiceName, this);
 
-  server_ = new JingleChromotingServer(jingle_thread.message_loop());
+  session_manager_ = new JingleSessionManager(&jingle_thread);
 
   host_jid_ = host_jid;
 
@@ -256,8 +254,8 @@ void ProtocolTestClient::Run(const std::string& username,
     connections_.pop_front();
   }
 
-  if (server_) {
-    server_->Close(
+  if (session_manager_) {
+    session_manager_->Close(
         NewRunnableMethod(this, &ProtocolTestClient::OnFinishedClosing));
     closed_event_.Wait();
   }
@@ -279,47 +277,40 @@ void ProtocolTestClient::OnStateChange(
   if (state == JingleClient::CONNECTED) {
     std::cerr << "Connected as " << client->GetFullJid() << std::endl;
 
-    server_->Init(
+    session_manager_->Init(
         client_->GetFullJid(), client_->session_manager(),
-        NewCallback(this,
-                    &ProtocolTestClient::OnNewChromotocolConnection));
-    server_->set_allow_local_ips(true);
+        NewCallback(this, &ProtocolTestClient::OnNewSession));
+    session_manager_->set_allow_local_ips(true);
 
     if (host_jid_ != "") {
       ProtocolTestConnection* connection =
           new ProtocolTestConnection(this, client_->message_loop());
-      connection->Init(server_->Connect(
-          host_jid_, NewCallback(connection,
-                                 &ProtocolTestConnection::OnStateChange)));
-      connections_.push_back(connection);
+      connection->Init(session_manager_->Connect(
+          host_jid_, kDummyAuthToken, CandidateSessionConfig::CreateDefault(),
+          NewCallback(connection,
+                      &ProtocolTestConnection::OnStateChange)));
+      connections_.push_back(make_scoped_refptr(connection));
     }
   } else if (state == JingleClient::CLOSED) {
     std::cerr << "Connection closed" << std::endl;
   }
 }
 
-bool ProtocolTestClient::OnAcceptConnection(
-    JingleClient* client, const std::string& jid,
-    JingleChannel::Callback** callback) {
-  return false;
-}
+void ProtocolTestClient::OnNewSession(
+    Session* session,
+    SessionManager::IncomingSessionResponse* response) {
+  std::cerr << "Accepting connection from " << session->jid() << std::endl;
 
-void ProtocolTestClient::OnNewConnection(
-    JingleClient* client, scoped_refptr<JingleChannel> channel) {
-  NOTREACHED();
-}
+  session->set_config(SessionConfig::CreateDefault());
+  *response = SessionManager::ACCEPT;
 
-void ProtocolTestClient::OnNewChromotocolConnection(
-    ChromotingConnection* connection, bool* accept) {
-  std::cerr << "Accepting connection from " << connection->jid() << std::endl;
   ProtocolTestConnection* test_connection =
       new ProtocolTestConnection(this, client_->message_loop());
-  connection->SetStateChangeCallback(
+  session->SetStateChangeCallback(
       NewCallback(test_connection, &ProtocolTestConnection::OnStateChange));
-  test_connection->Init(connection);
+  test_connection->Init(session);
   AutoLock auto_lock(connections_lock_);
-  connections_.push_back(test_connection);
-  *accept = true;
+  connections_.push_back(make_scoped_refptr(test_connection));
 }
 
 void ProtocolTestClient::OnFinishedClosing() {
@@ -339,9 +330,10 @@ void ProtocolTestClient::DestroyConnection(
   }
 }
 
+}  // namespace protocol
 }  // namespace remoting
 
-using remoting::ProtocolTestClient;
+using remoting::protocol::ProtocolTestClient;
 
 void usage(char* command) {
   std::cerr << "Usage: " << command << "--username=<username>" << std::endl
@@ -372,7 +364,7 @@ int main(int argc, char** argv) {
     usage(argv[0]);
   std::string auth_token(cmd_line->GetSwitchValueASCII("auth_token"));
 
-  scoped_refptr<ProtocolTestClient> client = new ProtocolTestClient();
+  scoped_refptr<ProtocolTestClient> client(new ProtocolTestClient());
 
   client->Run(username, auth_token, host_jid);
 

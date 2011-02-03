@@ -15,12 +15,14 @@
 #include "net/base/address_family.h"
 #include "net/base/auth.h"
 #include "net/base/host_resolver_proc.h"
+#include "net/base/ssl_cert_request_info.h"
 #include "net/base/ssl_info.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/socket/client_socket_pool_histograms.h"
 #include "net/socket/socket.h"
+#include "net/socket/ssl_host_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #define NET_TRACE(level, s)   DLOG(level) << s << __FUNCTION__ << "() "
@@ -48,54 +50,54 @@ inline char Asciify(char x) {
 void DumpData(const char* data, int data_len) {
   if (logging::LOG_INFO < logging::GetMinLogLevel())
     return;
-  DLOG(INFO) << "Length:  " << data_len;
+  DVLOG(1) << "Length:  " << data_len;
   const char* pfx = "Data:    ";
   if (!data || (data_len <= 0)) {
-    DLOG(INFO) << pfx << "<None>";
+    DVLOG(1) << pfx << "<None>";
   } else {
     int i;
     for (i = 0; i <= (data_len - 4); i += 4) {
-      DLOG(INFO) << pfx
-                 << AsciifyHigh(data[i + 0]) << AsciifyLow(data[i + 0])
-                 << AsciifyHigh(data[i + 1]) << AsciifyLow(data[i + 1])
-                 << AsciifyHigh(data[i + 2]) << AsciifyLow(data[i + 2])
-                 << AsciifyHigh(data[i + 3]) << AsciifyLow(data[i + 3])
-                 << "  '"
-                 << Asciify(data[i + 0])
-                 << Asciify(data[i + 1])
-                 << Asciify(data[i + 2])
-                 << Asciify(data[i + 3])
-                 << "'";
+      DVLOG(1) << pfx
+               << AsciifyHigh(data[i + 0]) << AsciifyLow(data[i + 0])
+               << AsciifyHigh(data[i + 1]) << AsciifyLow(data[i + 1])
+               << AsciifyHigh(data[i + 2]) << AsciifyLow(data[i + 2])
+               << AsciifyHigh(data[i + 3]) << AsciifyLow(data[i + 3])
+               << "  '"
+               << Asciify(data[i + 0])
+               << Asciify(data[i + 1])
+               << Asciify(data[i + 2])
+               << Asciify(data[i + 3])
+               << "'";
       pfx = "         ";
     }
     // Take care of any 'trailing' bytes, if data_len was not a multiple of 4.
     switch (data_len - i) {
       case 3:
-        DLOG(INFO) << pfx
-                   << AsciifyHigh(data[i + 0]) << AsciifyLow(data[i + 0])
-                   << AsciifyHigh(data[i + 1]) << AsciifyLow(data[i + 1])
-                   << AsciifyHigh(data[i + 2]) << AsciifyLow(data[i + 2])
-                   << "    '"
-                   << Asciify(data[i + 0])
-                   << Asciify(data[i + 1])
-                   << Asciify(data[i + 2])
-                   << " '";
+        DVLOG(1) << pfx
+                 << AsciifyHigh(data[i + 0]) << AsciifyLow(data[i + 0])
+                 << AsciifyHigh(data[i + 1]) << AsciifyLow(data[i + 1])
+                 << AsciifyHigh(data[i + 2]) << AsciifyLow(data[i + 2])
+                 << "    '"
+                 << Asciify(data[i + 0])
+                 << Asciify(data[i + 1])
+                 << Asciify(data[i + 2])
+                 << " '";
         break;
       case 2:
-        DLOG(INFO) << pfx
-                   << AsciifyHigh(data[i + 0]) << AsciifyLow(data[i + 0])
-                   << AsciifyHigh(data[i + 1]) << AsciifyLow(data[i + 1])
-                   << "      '"
-                   << Asciify(data[i + 0])
-                   << Asciify(data[i + 1])
-                   << "  '";
+        DVLOG(1) << pfx
+                 << AsciifyHigh(data[i + 0]) << AsciifyLow(data[i + 0])
+                 << AsciifyHigh(data[i + 1]) << AsciifyLow(data[i + 1])
+                 << "      '"
+                 << Asciify(data[i + 0])
+                 << Asciify(data[i + 1])
+                 << "  '";
         break;
       case 1:
-        DLOG(INFO) << pfx
-                   << AsciifyHigh(data[i + 0]) << AsciifyLow(data[i + 0])
-                   << "        '"
-                   << Asciify(data[i + 0])
-                   << "   '";
+        DVLOG(1) << pfx
+                 << AsciifyHigh(data[i + 0]) << AsciifyLow(data[i + 0])
+                 << "        '"
+                 << Asciify(data[i + 0])
+                 << "   '";
         break;
     }
   }
@@ -104,13 +106,12 @@ void DumpData(const char* data, int data_len) {
 void DumpMockRead(const MockRead& r) {
   if (logging::LOG_INFO < logging::GetMinLogLevel())
     return;
-  DLOG(INFO) << "Async:   " << r.async;
-  DLOG(INFO) << "Result:  " << r.result;
+  DVLOG(1) << "Async:   " << r.async
+           << "\nResult:  " << r.result;
   DumpData(r.data, r.data_len);
   const char* stop = (r.sequence_number & MockRead::STOPLOOP) ? " (STOP)" : "";
-  DLOG(INFO) << "Stage:   " << (r.sequence_number & ~MockRead::STOPLOOP)
-             << stop;
-  DLOG(INFO) << "Time:    " << r.time_stamp.ToInternalValue();
+  DVLOG(1) << "Stage:   " << (r.sequence_number & ~MockRead::STOPLOOP) << stop
+           << "\nTime:    " << r.time_stamp.ToInternalValue();
 }
 
 }  // namespace
@@ -127,7 +128,6 @@ void MockClientSocket::GetSSLInfo(net::SSLInfo* ssl_info) {
 
 void MockClientSocket::GetSSLCertRequestInfo(
     net::SSLCertRequestInfo* cert_request_info) {
-  NOTREACHED();
 }
 
 SSLClientSocket::NextProtoStatus
@@ -466,8 +466,9 @@ class MockSSLClientSocket::ConnectCallback
 
 MockSSLClientSocket::MockSSLClientSocket(
     net::ClientSocketHandle* transport_socket,
-    const std::string& hostname,
+    const HostPortPair& host_port_pair,
     const net::SSLConfig& ssl_config,
+    SSLHostInfo* ssl_host_info,
     net::SSLSocketDataProvider* data)
     : MockClientSocket(transport_socket->socket()->NetLog().net_log()),
       transport_(transport_socket),
@@ -475,6 +476,7 @@ MockSSLClientSocket::MockSSLClientSocket(
       is_npn_state_set_(false),
       new_npn_value_(false) {
   DCHECK(data_);
+  delete ssl_host_info;  // we take ownership but don't use it.
 }
 
 MockSSLClientSocket::~MockSSLClientSocket() {
@@ -512,6 +514,10 @@ bool MockSSLClientSocket::WasEverUsed() const {
   return transport_->socket()->WasEverUsed();
 }
 
+bool MockSSLClientSocket::UsingTCPFastOpen() const {
+  return transport_->socket()->UsingTCPFastOpen();
+}
+
 int MockSSLClientSocket::Read(net::IOBuffer* buf, int buf_len,
                               net::CompletionCallback* callback) {
   return transport_->socket()->Read(buf, buf_len, callback);
@@ -524,6 +530,18 @@ int MockSSLClientSocket::Write(net::IOBuffer* buf, int buf_len,
 
 void MockSSLClientSocket::GetSSLInfo(net::SSLInfo* ssl_info) {
   ssl_info->Reset();
+}
+
+void MockSSLClientSocket::GetSSLCertRequestInfo(
+    net::SSLCertRequestInfo* cert_request_info) {
+  DCHECK(cert_request_info);
+  if (data_->cert_request_info) {
+    cert_request_info->host_and_port =
+        data_->cert_request_info->host_and_port;
+    cert_request_info->client_certs = data_->cert_request_info->client_certs;
+  } else {
+    cert_request_info->Reset();
+  }
 }
 
 SSLClientSocket::NextProtoStatus MockSSLClientSocket::GetNextProto(
@@ -542,6 +560,29 @@ bool MockSSLClientSocket::set_was_npn_negotiated(bool negotiated) {
   is_npn_state_set_ = true;
   return new_npn_value_ = negotiated;
 }
+
+StaticSocketDataProvider::StaticSocketDataProvider()
+    : reads_(NULL),
+      read_index_(0),
+      read_count_(0),
+      writes_(NULL),
+      write_index_(0),
+      write_count_(0) {
+}
+
+StaticSocketDataProvider::StaticSocketDataProvider(MockRead* reads,
+                                                   size_t reads_count,
+                                                   MockWrite* writes,
+                                                   size_t writes_count)
+    : reads_(reads),
+      read_index_(0),
+      read_count_(reads_count),
+      writes_(writes),
+      write_index_(0),
+      write_count_(writes_count) {
+}
+
+StaticSocketDataProvider::~StaticSocketDataProvider() {}
 
 MockRead StaticSocketDataProvider::GetNextRead() {
   DCHECK(!at_read_eof());
@@ -610,6 +651,8 @@ DynamicSocketDataProvider::DynamicSocketDataProvider()
     : short_read_limit_(0),
       allow_unconsumed_reads_(false) {
 }
+
+DynamicSocketDataProvider::~DynamicSocketDataProvider() {}
 
 MockRead DynamicSocketDataProvider::GetNextRead() {
   if (reads_.empty())
@@ -786,6 +829,8 @@ void OrderedSocketData::CompleteRead() {
   }
 }
 
+OrderedSocketData::~OrderedSocketData() {}
+
 DeterministicSocketData::DeterministicSocketData(MockRead* reads,
     size_t reads_count, MockWrite* writes, size_t writes_count)
     : StaticSocketDataProvider(reads, reads_count, writes, writes_count),
@@ -936,6 +981,10 @@ void DeterministicSocketData::NextStep() {
 }
 
 
+MockClientSocketFactory::MockClientSocketFactory() {}
+
+MockClientSocketFactory::~MockClientSocketFactory() {}
+
 void MockClientSocketFactory::AddSocketDataProvider(
     SocketDataProvider* data) {
   mock_data_.Add(data);
@@ -977,14 +1026,20 @@ ClientSocket* MockClientSocketFactory::CreateTCPClientSocket(
 
 SSLClientSocket* MockClientSocketFactory::CreateSSLClientSocket(
     ClientSocketHandle* transport_socket,
-    const std::string& hostname,
-    const SSLConfig& ssl_config) {
+    const HostPortPair& host_and_port,
+    const SSLConfig& ssl_config,
+    SSLHostInfo* ssl_host_info,
+    DnsCertProvenanceChecker* dns_cert_checker) {
   MockSSLClientSocket* socket =
-      new MockSSLClientSocket(transport_socket, hostname, ssl_config,
-                              mock_ssl_data_.GetNext());
+      new MockSSLClientSocket(transport_socket, host_and_port, ssl_config,
+                              ssl_host_info, mock_ssl_data_.GetNext());
   ssl_client_sockets_.push_back(socket);
   return socket;
 }
+
+DeterministicMockClientSocketFactory::DeterministicMockClientSocketFactory() {}
+
+DeterministicMockClientSocketFactory::~DeterministicMockClientSocketFactory() {}
 
 void DeterministicMockClientSocketFactory::AddSocketDataProvider(
     DeterministicSocketData* data) {
@@ -1021,11 +1076,13 @@ ClientSocket* DeterministicMockClientSocketFactory::CreateTCPClientSocket(
 
 SSLClientSocket* DeterministicMockClientSocketFactory::CreateSSLClientSocket(
     ClientSocketHandle* transport_socket,
-    const std::string& hostname,
-    const SSLConfig& ssl_config) {
+    const HostPortPair& host_and_port,
+    const SSLConfig& ssl_config,
+    SSLHostInfo* ssl_host_info,
+    DnsCertProvenanceChecker* dns_cert_checker) {
   MockSSLClientSocket* socket =
-      new MockSSLClientSocket(transport_socket, hostname, ssl_config,
-                              mock_ssl_data_.GetNext());
+      new MockSSLClientSocket(transport_socket, host_and_port, ssl_config,
+                              ssl_host_info, mock_ssl_data_.GetNext());
   ssl_client_sockets_.push_back(socket);
   return socket;
 }
@@ -1104,6 +1161,8 @@ MockTCPClientSocketPool::MockConnectJob::MockConnectJob(
       ALLOW_THIS_IN_INITIALIZER_LIST(
           connect_callback_(this, &MockConnectJob::OnConnect)) {
 }
+
+MockTCPClientSocketPool::MockConnectJob::~MockConnectJob() {}
 
 int MockTCPClientSocketPool::MockConnectJob::Connect() {
   int rv = socket_->Connect(&connect_callback_);
@@ -1235,100 +1294,4 @@ const char kSOCKS5OkResponse[] =
     { 0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0x00, 0x50 };
 const int kSOCKS5OkResponseLength = arraysize(kSOCKS5OkResponse);
 
-MockSSLClientSocketPool::MockSSLClientSocketPool(
-    int max_sockets,
-    int max_sockets_per_group,
-    ClientSocketPoolHistograms* histograms,
-    ClientSocketFactory* socket_factory,
-    TCPClientSocketPool* tcp_pool)
-    : SSLClientSocketPool(max_sockets, max_sockets_per_group, histograms,
-                          NULL, NULL, socket_factory,
-                          tcp_pool,
-                          NULL, NULL, NULL, NULL),
-      client_socket_factory_(socket_factory),
-      release_count_(0),
-      cancel_count_(0) {
-}
-
-int MockSSLClientSocketPool::RequestSocket(const std::string& group_name,
-                                           const void* socket_params,
-                                           RequestPriority priority,
-                                           ClientSocketHandle* handle,
-                                           CompletionCallback* callback,
-                                           const BoundNetLog& net_log) {
-  ClientSocket* socket = client_socket_factory_->CreateTCPClientSocket(
-      AddressList(), net_log.net_log(), net::NetLog::Source());
-  MockConnectJob* job = new MockConnectJob(socket, handle, callback);
-  job_list_.push_back(job);
-  handle->set_pool_id(1);
-  return job->Connect();
-}
-
-void MockSSLClientSocketPool::CancelRequest(const std::string& group_name,
-                                            ClientSocketHandle* handle) {
-  std::vector<MockConnectJob*>::iterator i;
-  for (i = job_list_.begin(); i != job_list_.end(); ++i) {
-    if ((*i)->CancelHandle(handle)) {
-      cancel_count_++;
-      break;
-    }
-  }
-}
-
-void MockSSLClientSocketPool::ReleaseSocket(const std::string& group_name,
-                                            ClientSocket* socket, int id) {
-  EXPECT_EQ(1, id);
-  release_count_++;
-  delete socket;
-}
-
-MockSSLClientSocketPool::~MockSSLClientSocketPool() {}
-
-MockSSLClientSocketPool::MockConnectJob::MockConnectJob(
-    ClientSocket* socket,
-    ClientSocketHandle* handle,
-    CompletionCallback* callback)
-    : socket_(socket),
-      handle_(handle),
-      user_callback_(callback),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          connect_callback_(this, &MockConnectJob::OnConnect)) {
-}
-
-int MockSSLClientSocketPool::MockConnectJob::Connect() {
-  int rv = socket_->Connect(&connect_callback_);
-  if (rv == OK) {
-    user_callback_ = NULL;
-    OnConnect(OK);
-  }
-  return rv;
-}
-
-bool MockSSLClientSocketPool::MockConnectJob::CancelHandle(
-    const ClientSocketHandle* handle) {
-  if (handle != handle_)
-    return false;
-  socket_.reset();
-  handle_ = NULL;
-  user_callback_ = NULL;
-  return true;
-}
-
-void MockSSLClientSocketPool::MockConnectJob::OnConnect(int rv) {
-  if (!socket_.get())
-    return;
-  if (rv == OK) {
-    handle_->set_socket(socket_.release());
-  } else {
-    socket_.reset();
-  }
-
-  handle_ = NULL;
-
-  if (user_callback_) {
-    CompletionCallback* callback = user_callback_;
-    user_callback_ = NULL;
-    callback->Run(rv);
-  }
-}
 }  // namespace net

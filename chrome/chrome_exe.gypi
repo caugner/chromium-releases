@@ -15,9 +15,9 @@
           # Test files are not included.
           'app/breakpad_win.cc',
           'app/breakpad_win.h',
-          'app/chrome_exe_main.cc',
-          'app/chrome_exe_main.mm',
           'app/chrome_exe_main_gtk.cc',
+          'app/chrome_exe_main_mac.mm',
+          'app/chrome_exe_main_win.cc',
           'app/chrome_exe_resource.h',
           'app/client_util.cc',
           'app/client_util.h',
@@ -47,6 +47,19 @@
             'include_dirs': [
               '<(SHARED_INTERMEDIATE_DIR)/chrome',
             ],
+            # TODO(scottbyer): This is a temporary workaround.  The right fix
+            # is to change the output file to be in $(IntDir) for this project
+            # and the .dll project and use the hardlink script to link it back
+            # to $(OutDir).
+            'configurations': {
+              'Debug_Base': {
+                'msvs_settings': {
+                  'VCLinkerTool': {
+                    'LinkIncremental': '1',
+                  },
+                },
+              },
+            },
             'msvs_settings': {
               'VCLinkerTool': {
                 'DelayLoadDLLs': [
@@ -113,7 +126,6 @@
             ],
           }, {  # 'OS!="win"
             'sources!': [
-              'app/chrome_exe_main.cc',
               'app/client_util.cc',
             ]
           }],
@@ -180,7 +192,7 @@
             # On Linux, link the dependencies (libraries) that make up actual
             # Chromium functionality directly into the executable.
             '<@(chromium_dependencies)',
-            # Needed for chrome_dll_main.cc initialization of libraries.
+            # Needed for chrome_main.cc initialization of libraries.
             '../build/linux/system.gyp:dbus-glib',
             '../build/linux/system.gyp:gtk',
             'packed_resources',
@@ -188,7 +200,7 @@
             'installer_util',
           ],
           'sources': [
-            'app/chrome_dll_main.cc',
+            'app/chrome_main.cc',
             'app/chrome_dll_resource.h',
           ],
           'copies': [
@@ -385,11 +397,6 @@
                 '../sandbox/sandbox.gyp:sandbox',
               ],
             }],
-            ['linux_sandbox_path != ""', {
-              'defines': [
-                'LINUX_SANDBOX_PATH="<(linux_sandbox_path)"',
-              ],
-            }],
           ],
         }],
         ['OS != "mac"', {
@@ -446,6 +453,22 @@
         }],
       ],
     },
+    {
+      'target_name': 'chrome_mesa',
+      'type': 'none',
+      'dependencies': [
+        'chrome',
+        '../third_party/mesa/mesa.gyp:osmesa',
+      ],
+      'conditions': [
+        ['OS=="mac"', {
+          'copies': [{
+            'destination': '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Versions/<(version_full)/<(mac_product_name) Helper.app/Contents/MacOS/',
+            'files': ['<(PRODUCT_DIR)/osmesa.so'],
+          }],
+        }],
+      ],
+    },
   ],
   'conditions': [
     ['OS=="win"', {
@@ -491,75 +514,5 @@
         },
       ],
     }],
-    ['OS=="mac"', {
-      'targets': [
-        {
-          # This is the bundle of the manifest file of Chrome.
-          # It contains the manifest file and its string tables.
-          'target_name': 'chrome_manifest_bundle',
-          'type': 'loadable_module',
-          'mac_bundle': 1,
-          'product_extension': 'manifest',
-          'product_name': '<(mac_bundle_id)',
-          'variables': {
-            # This avoids stripping debugging symbols from the target, which
-            # would fail because there is no binary code here.
-            'mac_strip': 0,
-          },
-          'dependencies': [
-             # Provides app-Manifest.plist and its string tables:
-            'policy_templates',
-          ],
-          'actions': [
-            {
-              'action_name': 'Copy MCX manifest file to manifest bundle',
-              'inputs': [
-                '<(grit_out_dir)/app/policy/mac/app-Manifest.plist',
-              ],
-              'outputs': [
-                '<(INTERMEDIATE_DIR)/app_manifest/<(mac_bundle_id).manifest',
-              ],
-              'action': [
-                'cp',
-                '<@(_inputs)',
-                '<@(_outputs)',
-              ],
-              'message':
-                'Copying the MCX policy manifest file to the manifest bundle',
-              'process_outputs_as_mac_bundle_resources': 1,
-            },
-            {
-              'action_name':
-                'Copy Localizable.strings files to manifest bundle',
-              'variables': {
-                'input_path': '<(grit_out_dir)/app/policy/mac/strings',
-                # Directory to collect the Localizable.strings files before
-                # they are copied to the bundle.
-                'output_path': '<(INTERMEDIATE_DIR)/app_manifest',
-                # TODO(gfeher): replace this with <(locales) when we have real
-                # translations
-                'available_locales': 'en',
-              },
-              'inputs': [
-                # TODO: remove this helper when we have loops in GYP
-                '>!@(<(apply_locales_cmd) -d \'<(input_path)/ZZLOCALE.lproj/Localizable.strings\' <(available_locales))',
-              ],
-              'outputs': [
-                # TODO: remove this helper when we have loops in GYP
-                '>!@(<(apply_locales_cmd) -d \'<(output_path)/ZZLOCALE.lproj/Localizable.strings\' <(available_locales))',
-              ],
-              'action': [
-                'cp', '-R',
-                '<(input_path)/',
-                '<(output_path)',
-              ],
-              'message':
-                'Copy the Localizable.strings files to the manifest bundle',
-              'process_outputs_as_mac_bundle_resources': 1,
-            },
-          ],
-        },
-      ]
-    }]
   ],
 }

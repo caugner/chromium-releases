@@ -28,6 +28,10 @@ const CGFloat kMinElidedBubbleWidth = 150.0;
 // |kMinElidedBubbleWidth|.
 const float kMaxBubbleFraction = 0.5;
 
+// The info-bubble point should look like it points to the bottom of the lock
+// icon. Determined with Pixie.app.
+const CGFloat kPageInfoBubblePointYOffset = 6.0;
+
 // TODO(shess): This is ugly, find a better way.  Using it right now
 // so that I can crib from gtk and still be able to see that I'm using
 // the same values easily.
@@ -61,6 +65,12 @@ void EVBubbleDecoration::SetFullLabel(NSString* label) {
   SetLabel(full_label_);
 }
 
+NSPoint EVBubbleDecoration::GetBubblePointInFrame(NSRect frame) {
+  NSRect image_rect = GetImageRectInFrame(frame);
+  return NSMakePoint(NSMidX(image_rect),
+                     NSMaxY(image_rect) - kPageInfoBubblePointYOffset);
+}
+
 CGFloat EVBubbleDecoration::GetWidthForSpace(CGFloat width) {
   // Limit with to not take up too much of the available width, but
   // also don't let it shrink too much.
@@ -81,8 +91,8 @@ CGFloat EVBubbleDecoration::GetWidthForSpace(CGFloat width) {
   // prefix and the trailing country code in place.
   gfx::Font font(base::SysNSStringToWide([font_ fontName]),
                  [font_ pointSize]);
-  NSString* elided_label = base::SysWideToNSString(
-      ElideText(base::SysNSStringToWide(full_label_), font, width_left, true));
+  NSString* elided_label = base::SysUTF16ToNSString(
+      ElideText(base::SysNSStringToUTF16(full_label_), font, width_left, true));
 
   // Use the elided label.
   SetLabel(elided_label);

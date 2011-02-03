@@ -6,12 +6,27 @@
 
 #include "base/callback.h"
 #include "base/singleton.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/renderer_host/resource_message_filter.h"
 #include "chrome/browser/worker_host/worker_process_host.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/worker_messages.h"
 
+struct MessagePortDispatcher::MessagePort {
+  // sender and route_id are what we need to send messages to the port.
+  IPC::Message::Sender* sender;
+  int route_id;
+  // A function pointer to generate a new route id for the sender above.
+  // Owned by "sender" above, so don't delete.
+  CallbackWithReturnValue<int>::Type* next_routing_id;
+  // A globally unique id for this message port.
+  int message_port_id;
+  // The globally unique id of the entangled message port.
+  int entangled_message_port_id;
+  // If true, all messages to this message port are queued and not delivered.
+  bool queue_messages;
+  QueuedMessages queued_messages;
+};
 
 MessagePortDispatcher* MessagePortDispatcher::GetInstance() {
   return Singleton<MessagePortDispatcher>::get();
@@ -180,11 +195,13 @@ void MessagePortDispatcher::PostMessageTo(
       sent_ports[i]->route_id = new_routing_ids[i];
     }
 
-    // Now send the message to the entangled port.
-    IPC::Message* ipc_msg = new WorkerProcessMsg_Message(
-        entangled_port.route_id, message, sent_message_port_ids,
-        new_routing_ids);
-    entangled_port.sender->Send(ipc_msg);
+    if (entangled_port.sender) {
+      // Now send the message to the entangled port.
+      IPC::Message* ipc_msg = new WorkerProcessMsg_Message(
+          entangled_port.route_id, message, sent_message_port_ids,
+          new_routing_ids);
+      entangled_port.sender->Send(ipc_msg);
+    }
   }
 }
 
@@ -195,9 +212,11 @@ void MessagePortDispatcher::OnQueueMessages(int message_port_id) {
   }
 
   MessagePort& port = message_ports_[message_port_id];
-  port.sender->Send(new WorkerProcessMsg_MessagesQueued(port.route_id));
-  port.queue_messages = true;
-  port.sender = NULL;
+  if (port.sender) {
+    port.sender->Send(new WorkerProcessMsg_MessagesQueued(port.route_id));
+    port.queue_messages = true;
+    port.sender = NULL;
+  }
 }
 
 void MessagePortDispatcher::OnSendQueuedMessages(

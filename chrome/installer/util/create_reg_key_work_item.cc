@@ -6,10 +6,12 @@
 
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/registry.h"
+#include "base/win/registry.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/logging_installer.h"
+
+using base::win::RegKey;
 
 namespace {
 
@@ -40,7 +42,7 @@ CreateRegKeyWorkItem::CreateRegKeyWorkItem(HKEY predefined_root,
 bool CreateRegKeyWorkItem::Do() {
   if (!InitKeyList()) {
     // Nothing needs to be done here.
-    LOG(INFO) << "no key to create";
+    VLOG(1) << "no key to create";
     return true;
   }
 
@@ -61,11 +63,11 @@ bool CreateRegKeyWorkItem::Do() {
           LOG(ERROR) << key_path << " exists, this is not expected.";
           return false;
         }
-        LOG(INFO) << key_path << " exists";
+        VLOG(1) << key_path << " exists";
         // Remove the key path from list if it is already present.
         key_list_.pop_back();
       } else if (disposition == REG_CREATED_NEW_KEY) {
-        LOG(INFO) << "created " << key_path;
+        VLOG(1) << "created " << key_path;
         key_created_ = true;
       } else {
         LOG(ERROR) << "unkown disposition";
@@ -91,9 +93,9 @@ void CreateRegKeyWorkItem::Rollback() {
     key_path.assign(*itr);
     if (SHDeleteEmptyKey(predefined_root_, key_path.c_str()) ==
         ERROR_SUCCESS) {
-      LOG(INFO) << "rollback: delete " << key_path;
+      VLOG(1) << "rollback: delete " << key_path;
     } else {
-      LOG(INFO) << "rollback: can not delete " << key_path;
+      VLOG(1) << "rollback: can not delete " << key_path;
       // The key might have been deleted, but we don't reliably know what
       // error code(s) are returned in this case. So we just keep tring delete
       // the rest.

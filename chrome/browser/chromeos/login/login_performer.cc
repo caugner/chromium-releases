@@ -8,8 +8,9 @@
 #include "base/message_loop.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
-#include "chrome/browser/chromeos/cros_settings_provider_user.h"
+#include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
 
@@ -42,10 +43,14 @@ void LoginPerformer::OnLoginFailure(const LoginFailure& failure) {
 
 void LoginPerformer::OnLoginSuccess(
     const std::string& username,
+    const std::string& password,
     const GaiaAuthConsumer::ClientLoginResult& credentials,
     bool pending_requests) {
   if (delegate_) {
-    delegate_->OnLoginSuccess(username, credentials, pending_requests);
+    delegate_->OnLoginSuccess(username,
+                              password,
+                              credentials,
+                              pending_requests);
     if (!pending_requests)
       MessageLoop::current()->DeleteSoon(FROM_HERE, this);
   } else {
@@ -136,6 +141,7 @@ void LoginPerformer::ResyncEncryptedData() {
 // LoginPerformer, private:
 
 void LoginPerformer::StartAuthentication() {
+  BootTimesLoader::Get()->AddLoginTimeMarker("AuthStarted", false);
   authenticator_ = LoginUtils::Get()->CreateAuthenticator(this);
   Profile* profile = g_browser_process->profile_manager()->GetDefaultProfile();
   BrowserThread::PostTask(

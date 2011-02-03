@@ -10,11 +10,16 @@
 
 namespace net {
 
+class DnsCertProvenanceChecker;
+class SSLHostInfo;
+
 // Creates SSLClientSocketNSS objects.
 SSLClientSocket* SSLClientSocketNSSFactory(
     ClientSocketHandle* transport_socket,
-    const std::string& hostname,
-    const SSLConfig& ssl_config);
+    const HostPortPair& host_and_port,
+    const SSLConfig& ssl_config,
+    SSLHostInfo* ssl_host_info,
+    DnsCertProvenanceChecker* dns_cert_checker);
 
 }  // namespace net
 

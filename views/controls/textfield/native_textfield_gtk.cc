@@ -188,8 +188,8 @@ void NativeTextfieldGtk::UpdateBorder() {
       gtk_container_set_border_width(GTK_CONTAINER(native_view()), 0);
 
       // Use margin to match entry with no border
-      SetHorizontalMargins(kTextViewBorderWidth / 2 + 1,
-                           kTextViewBorderWidth / 2 + 1);
+      textfield_->SetHorizontalMargins(kTextViewBorderWidth / 2 + 1,
+                                       kTextViewBorderWidth / 2 + 1);
     }
   } else {
     if (!textfield_->draw_border())
@@ -291,16 +291,39 @@ gfx::Insets NativeTextfieldGtk::CalculateInsets() {
   return insets;
 }
 
-void NativeTextfieldGtk::SetHorizontalMargins(int left, int right) {
+void NativeTextfieldGtk::UpdateHorizontalMargins() {
   if (!native_view())
     return;
+
+  int left, right;
+  if (!textfield_->GetHorizontalMargins(&left, &right))
+    return;
+
   if (textfield_->IsMultiLine()) {
     GtkTextView* text_view = GTK_TEXT_VIEW(native_view());
     gtk_text_view_set_left_margin(text_view, left);
     gtk_text_view_set_right_margin(text_view, right);
   } else {
-    GtkBorder border = { left, right, 0, 0 };
+    gfx::Insets insets = GetEntryInnerBorder(GTK_ENTRY(native_view()));
+    GtkBorder border = {left, right, insets.top(), insets.bottom()};
     gtk_entry_set_inner_border(GTK_ENTRY(native_view()), &border);
+  }
+}
+
+void NativeTextfieldGtk::UpdateVerticalMargins() {
+  if (!native_view())
+    return;
+
+  int top, bottom;
+  if (!textfield_->GetVerticalMargins(&top, &bottom))
+    return;
+
+  if (!textfield_->IsMultiLine()) {
+    gfx::Insets insets = GetEntryInnerBorder(GTK_ENTRY(native_view()));
+    GtkBorder border = {insets.left(), insets.right(), top, bottom};
+    gtk_entry_set_inner_border(GTK_ENTRY(native_view()), &border);
+  } else {
+    NOTIMPLEMENTED();
   }
 }
 

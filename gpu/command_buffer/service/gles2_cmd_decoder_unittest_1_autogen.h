@@ -744,7 +744,7 @@ TEST_F(GLES2DecoderTest1, EnableVertexAttribArrayValidArgs) {
 }
 
 TEST_F(GLES2DecoderTest1, FinishValidArgs) {
-  EXPECT_CALL(*gl_, Flush());
+  EXPECT_CALL(*gl_, Finish());
   SpecializedSetup<Finish, 0>(true);
   Finish cmd;
   cmd.Init();
@@ -1752,6 +1752,8 @@ TEST_F(GLES2DecoderTest1, GetTexParameterivInvalidArgs2_1) {
 // TODO(gman): GetUniformLocation
 
 // TODO(gman): GetUniformLocationImmediate
+
+// TODO(gman): GetUniformLocationBucket
 
 #endif  // GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_1_AUTOGEN_H_
 

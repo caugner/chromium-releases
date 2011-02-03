@@ -8,17 +8,27 @@
 
 #include "app/resource_bundle.h"
 #include "app/text_elider.h"
+#include "base/mac_util.h"
 #include "base/stl_util-inl.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view_mac.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/cocoa/event_utils.h"
 #include "chrome/browser/cocoa/image_utils.h"
+#import "chrome/browser/cocoa/location_bar/instant_opt_in_controller.h"
+#import "chrome/browser/cocoa/location_bar/instant_opt_in_view.h"
+#import "chrome/browser/cocoa/location_bar/omnibox_popup_view.h"
+#include "chrome/browser/instant/instant_confirm_dialog.h"
+#include "chrome/browser/instant/promo_counter.h"
+#include "chrome/browser/profile.h"
 #include "gfx/rect.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
+#import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
 
 namespace {
 
@@ -81,13 +91,12 @@ NSColor* HoveredBackgroundColor() {
 static NSColor* ContentTextColor() {
   return [NSColor blackColor];
 }
+static NSColor* DimContentTextColor() {
+  return [NSColor darkGrayColor];
+}
 static NSColor* URLTextColor() {
   return [NSColor colorWithCalibratedRed:0.0 green:0.55 blue:0.0 alpha:1.0];
 }
-static NSColor* DescriptionTextColor() {
-  return [NSColor darkGrayColor];
-}
-
 }  // namespace
 
 // Helper for MatchText() to allow sharing code between the contents
@@ -96,7 +105,7 @@ static NSColor* DescriptionTextColor() {
 NSMutableAttributedString* AutocompletePopupViewMac::DecorateMatchedString(
     const std::wstring &matchString,
     const AutocompleteMatch::ACMatchClassifications &classifications,
-    NSColor* textColor, gfx::Font& font) {
+    NSColor* textColor, NSColor* dimTextColor, gfx::Font& font) {
   // Cache for on-demand computation of the bold version of |font|.
   NSFont* boldFont = nil;
 
@@ -133,6 +142,12 @@ NSMutableAttributedString* AutocompletePopupViewMac::DecorateMatchedString(
       }
       [as addAttribute:NSFontAttributeName value:boldFont range:range];
     }
+
+    if (0 != (i->style & ACMatchClassification::DIM)) {
+      [as addAttribute:NSForegroundColorAttributeName
+                 value:dimTextColor
+                 range:range];
+    }
   }
 
   return as;
@@ -149,7 +164,8 @@ NSMutableAttributedString* AutocompletePopupViewMac::ElideString(
   }
 
   // If ElideText() decides to do nothing, nothing to be done.
-  const std::wstring elided(ElideText(originalString, font, width, false));
+  const std::wstring elided(UTF16ToWideHack(ElideText(
+      WideToUTF16Hack(originalString), font, width, false)));
   if (0 == elided.compare(originalString)) {
     return aString;
   }
@@ -181,7 +197,9 @@ NSAttributedString* AutocompletePopupViewMac::MatchText(
   NSMutableAttributedString *as =
       DecorateMatchedString(match.contents,
                             match.contents_class,
-                            ContentTextColor(), font);
+                            ContentTextColor(),
+                            DimContentTextColor(),
+                            font);
 
   // If there is a description, append it, separated from the contents
   // with an en dash, and decorated with a distinct color.
@@ -205,9 +223,14 @@ NSAttributedString* AutocompletePopupViewMac::MatchText(
         [[[NSAttributedString alloc] initWithString:rawEnDash
                                          attributes:attributes] autorelease];
 
+    // In Windows, a boolean force_dim is passed as true for the
+    // description.  Here, we pass the dim text color for both normal and dim,
+    // to accomplish the same thing.
     NSAttributedString* description =
         DecorateMatchedString(match.description, match.description_class,
-                              DescriptionTextColor(), font);
+                              DimContentTextColor(),
+                              DimContentTextColor(),
+                              font);
 
     [as appendAttributedString:enDash];
     [as appendAttributedString:description];
@@ -236,9 +259,15 @@ NSAttributedString* AutocompletePopupViewMac::MatchText(
 
 @interface AutocompleteMatrix : NSMatrix {
  @private
+  // If YES, the matrix draws itself with rounded corners at the bottom.
+  // Otherwise, the bottom corners will be square.
+  BOOL bottomCornersRounded_;
+
   // Target for click and middle-click.
   AutocompletePopupViewMac* popupView_;  // weak, owns us.
 }
+
+@property(assign, nonatomic) BOOL bottomCornersRounded;
 
 // Create a zero-size matrix initializing |popupView_|.
 - initWithPopupView:(AutocompletePopupViewMac*)popupView;
@@ -260,7 +289,9 @@ AutocompletePopupViewMac::AutocompletePopupViewMac(
     : model_(new AutocompletePopupModel(this, edit_model, profile)),
       edit_view_(edit_view),
       field_(field),
-      popup_(nil) {
+      popup_(nil),
+      opt_in_controller_(nil),
+      targetPopupFrame_(NSZeroRect) {
   DCHECK(edit_view);
   DCHECK(edit_model);
   DCHECK(profile);
@@ -274,9 +305,20 @@ AutocompletePopupViewMac::~AutocompletePopupViewMac() {
 
   // Break references to |this| because the popup may not be
   // deallocated immediately.
-  AutocompleteMatrix* matrix = [popup_ contentView];
+  AutocompleteMatrix* matrix = GetAutocompleteMatrix();
   DCHECK(matrix == nil || [matrix isKindOfClass:[AutocompleteMatrix class]]);
   [matrix setPopupView:NULL];
+}
+
+AutocompleteMatrix* AutocompletePopupViewMac::GetAutocompleteMatrix() {
+  // The AutocompleteMatrix will always be the first subview of the popup's
+  // content view.
+  if (popup_ && [[[popup_ contentView] subviews] count]) {
+    NSArray* subviews = [[popup_ contentView] subviews];
+    DCHECK_GE([subviews count], 0U);
+    return (AutocompleteMatrix*)[subviews objectAtIndex:0];
+  }
+  return nil;
 }
 
 bool AutocompletePopupViewMac::IsOpen() const {
@@ -290,8 +332,7 @@ void AutocompletePopupViewMac::CreatePopupIfNeeded() {
                                                backing:NSBackingStoreBuffered
                                                  defer:YES]);
     [popup_ setMovableByWindowBackground:NO];
-    // The window shape is determined by the content view
-    // (AutocompleteMatrix).
+    // The window shape is determined by the content view (OmniboxPopupView).
     [popup_ setAlphaValue:1.0];
     [popup_ setOpaque:NO];
     [popup_ setBackgroundColor:[NSColor clearColor]];
@@ -300,7 +341,11 @@ void AutocompletePopupViewMac::CreatePopupIfNeeded() {
 
     scoped_nsobject<AutocompleteMatrix> matrix(
         [[AutocompleteMatrix alloc] initWithPopupView:this]);
-    [popup_ setContentView:matrix];
+    scoped_nsobject<OmniboxPopupView> contentView(
+        [[OmniboxPopupView alloc] initWithFrame:NSZeroRect]);
+
+    [contentView addSubview:matrix];
+    [popup_ setContentView:contentView];
   }
 }
 
@@ -391,7 +436,7 @@ void AutocompletePopupViewMac::UpdatePopupAppearance() {
 
     // Break references to |this| because the popup may not be
     // deallocated immediately.
-    AutocompleteMatrix* matrix = [popup_ contentView];
+    AutocompleteMatrix* matrix = GetAutocompleteMatrix();
     DCHECK(matrix == nil || [matrix isKindOfClass:[AutocompleteMatrix class]]);
     [matrix setPopupView:NULL];
 
@@ -408,7 +453,7 @@ void AutocompletePopupViewMac::UpdatePopupAppearance() {
   gfx::Font resultFont(base::SysNSStringToWide([fieldFont fontName]),
                        static_cast<int>(resultFontSize));
 
-  AutocompleteMatrix* matrix = [popup_ contentView];
+  AutocompleteMatrix* matrix = GetAutocompleteMatrix();
 
   // Calculate the width of the matrix based on backing out the
   // popup's border from the width of the field.  Would prefer to use
@@ -438,6 +483,22 @@ void AutocompletePopupViewMac::UpdatePopupAppearance() {
   const CGFloat cellHeight = cellSize.height + kCellHeightAdjust;
   [matrix setCellSize:NSMakeSize(matrixWidth, cellHeight)];
 
+  // Add in the instant view if needed and not already present.
+  CGFloat instantHeight = 0;
+  if (ShouldShowInstantOptIn()) {
+    if (!opt_in_controller_.get()) {
+      opt_in_controller_.reset(
+          [[InstantOptInController alloc] initWithDelegate:this]);
+    }
+    [[popup_ contentView] addSubview:[opt_in_controller_ view]];
+    [GetAutocompleteMatrix() setBottomCornersRounded:NO];
+    instantHeight = NSHeight([[opt_in_controller_ view] frame]);
+  } else {
+    [[opt_in_controller_ view] removeFromSuperview];
+    opt_in_controller_.reset(nil);
+    [GetAutocompleteMatrix() setBottomCornersRounded:YES];
+  }
+
   // Update the selection before placing (and displaying) the window.
   PaintUpdatesNow();
 
@@ -445,7 +506,17 @@ void AutocompletePopupViewMac::UpdatePopupAppearance() {
   // because actually resizing the matrix messed up the popup size
   // animation.
   DCHECK_EQ([matrix intercellSpacing].height, 0.0);
-  PositionPopup(rows * cellHeight);
+  CGFloat matrixHeight = rows * cellHeight;
+  PositionPopup(matrixHeight + instantHeight);
+}
+
+gfx::Rect AutocompletePopupViewMac::GetTargetBounds() {
+  // Flip the coordinate system before returning.
+  NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
+  NSRect monitorFrame = [screen frame];
+  gfx::Rect bounds(NSRectToCGRect(targetPopupFrame_));
+  bounds.set_y(monitorFrame.size.height - bounds.y() - bounds.height());
+  return bounds;
 }
 
 void AutocompletePopupViewMac::SetSelectedLine(size_t line) {
@@ -455,18 +526,12 @@ void AutocompletePopupViewMac::SetSelectedLine(size_t line) {
 // This is only called by model in SetSelectedLine() after updating
 // everything.  Popup should already be visible.
 void AutocompletePopupViewMac::PaintUpdatesNow() {
-  AutocompleteMatrix* matrix = [popup_ contentView];
+  AutocompleteMatrix* matrix = GetAutocompleteMatrix();
   [matrix selectCellAtRow:model_->selected_line() column:0];
 }
 
 AutocompletePopupModel* AutocompletePopupViewMac::GetModel() {
   return model_.get();
-}
-
-int AutocompletePopupViewMac::GetMaxYCoordinate() {
-  // TODO: implement if match preview pans out.
-  NOTIMPLEMENTED();
-  return 0;
 }
 
 void AutocompletePopupViewMac::OpenURLForRow(int row, bool force_background) {
@@ -488,6 +553,24 @@ void AutocompletePopupViewMac::OpenURLForRow(int row, bool force_background) {
   const bool is_keyword_hint = model_->GetKeywordForMatch(match, &keyword);
   edit_view_->OpenURL(url, disposition, match.transition, GURL(), row,
                       is_keyword_hint ? std::wstring() : keyword);
+}
+
+void AutocompletePopupViewMac::UserPressedOptIn(bool opt_in) {
+  PromoCounter* counter = model_->profile()->GetInstantPromoCounter();
+  DCHECK(counter);
+  counter->Hide();
+  if (opt_in) {
+    browser::ShowInstantConfirmDialogIfNecessary([field_ window],
+                                                 model_->profile());
+  }
+
+  // This call will remove and delete |opt_in_controller_|.
+  UpdatePopupAppearance();
+}
+
+bool AutocompletePopupViewMac::ShouldShowInstantOptIn() {
+  PromoCounter* counter = model_->profile()->GetInstantPromoCounter();
+  return (counter && counter->ShouldShow(base::Time::Now()));
 }
 
 @implementation AutocompleteButtonCell
@@ -550,7 +633,7 @@ void AutocompletePopupViewMac::OpenURLForRow(int row, bool force_background) {
 
 @implementation AutocompleteMatrix
 
-
+@synthesize bottomCornersRounded = bottomCornersRounded_;
 
 // Remove all tracking areas and initialize the one we want.  Removing
 // all might be overkill, but it's unclear why there would be others
@@ -733,10 +816,16 @@ void AutocompletePopupViewMac::OpenURLForRow(int row, bool force_background) {
 // This handles drawing the decorations of the rounded popup window,
 // calling on NSMatrix to draw the actual contents.
 - (void)drawRect:(NSRect)rect {
+  CGFloat bottomCornerRadius =
+      (bottomCornersRounded_ ? kPopupRoundingRadius : 0);
+
+  // "Top" really means "bottom" here, since the view is flipped.
   NSBezierPath* path =
-     [NSBezierPath bezierPathWithRoundedRect:[self bounds]
-                                     xRadius:kPopupRoundingRadius
-                                     yRadius:kPopupRoundingRadius];
+     [NSBezierPath gtm_bezierPathWithRoundRect:[self bounds]
+                           topLeftCornerRadius:bottomCornerRadius
+                          topRightCornerRadius:bottomCornerRadius
+                        bottomLeftCornerRadius:kPopupRoundingRadius
+                       bottomRightCornerRadius:kPopupRoundingRadius];
 
   // Draw the matrix clipped to our border.
   [NSGraphicsContext saveGraphicsState];

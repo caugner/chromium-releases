@@ -7,7 +7,6 @@
 
 #include <list>
 
-#include "base/lock.h"
 #include "media/audio/audio_io.h"
 #include "media/base/seekable_buffer.h"
 
@@ -29,7 +28,6 @@ class SineWaveAudioSource : public AudioOutputStream::AudioSourceCallback {
   virtual uint32 OnMoreData(
       AudioOutputStream* stream, uint8* dest, uint32 max_size,
       AudioBuffersState audio_buffers);
-  virtual void OnClose(AudioOutputStream* stream);
   virtual void OnError(AudioOutputStream* stream, int code);
 
  protected:
@@ -43,7 +41,7 @@ class SineWaveAudioSource : public AudioOutputStream::AudioSourceCallback {
 // defined by AudioSourceCallback are pull model only.
 class PushAudioOutput {
  public:
-  virtual ~PushAudioOutput(){}
+  virtual ~PushAudioOutput() {}
 
   // Write audio data to the audio device. It will be played eventually.
   // Returns false on failure.
@@ -73,7 +71,6 @@ class PushSource : public AudioOutputStream::AudioSourceCallback,
   // Implementation of AudioSourceCallback.
   virtual uint32 OnMoreData(AudioOutputStream* stream, uint8* dest,
                             uint32 max_size, AudioBuffersState buffers_state);
-  virtual void OnClose(AudioOutputStream* stream);
   virtual void OnError(AudioOutputStream* stream, int code);
 
   // Discard all buffered data and reset to initial state.

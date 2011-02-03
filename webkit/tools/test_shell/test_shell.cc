@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,8 +16,8 @@
 #endif
 #include "base/md5.h"
 #include "base/message_loop.h"
+#include "base/metrics/stats_table.h"
 #include "base/path_service.h"
-#include "base/stats_table.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -46,6 +46,8 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/glue_serialize.h"
+#include "webkit/glue/plugins/plugin_list.h"
+#include "webkit/glue/plugins/webplugininfo.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/tools/test_shell/accessibility_controller.h"
@@ -115,6 +117,9 @@ bool TestShell::allow_external_pages_ = false;
 int TestShell::file_test_timeout_ms_ = kDefaultFileTestTimeoutMillisecs;
 bool TestShell::test_is_preparing_ = false;
 bool TestShell::test_is_pending_ = false;
+int TestShell::load_count_ = 1;
+std::vector<std::string> TestShell::js_flags_;
+bool TestShell::dump_when_finished_ = true;
 bool TestShell::accelerated_2d_canvas_enabled_ = false;
 bool TestShell::accelerated_compositing_enabled_ = false;
 
@@ -148,12 +153,6 @@ TestShell::TestShell()
     filter->AddHostnameHandler("test-shell-resource", "inspector",
                                &URLRequestTestShellFileJob::InspectorFactory);
     url_util::AddStandardScheme("test-shell-resource");
-
-    if (!file_system_root_.CreateUniqueTempDir()) {
-      LOG(WARNING) << "Failed to create a temp dir for the filesystem."
-                      "FileSystem feature will be disabled.";
-      DCHECK(file_system_root_.path().empty());
-    }
 }
 
 TestShell::~TestShell() {
@@ -178,7 +177,7 @@ TestShell::~TestShell() {
 
   PlatformCleanUp();
 
-  StatsTable *table = StatsTable::current();
+  base::StatsTable *table = base::StatsTable::current();
   if (dump_stats_table_on_exit_) {
     // Dump the stats table.
     printf("<stats>\n");
@@ -494,7 +493,7 @@ void TestShell::ResetWebPreferences() {
         web_prefs_->default_encoding = "ISO-8859-1";
         web_prefs_->default_font_size = 16;
         web_prefs_->default_fixed_font_size = 13;
-        web_prefs_->minimum_font_size = 1;
+        web_prefs_->minimum_font_size = 0;
         web_prefs_->minimum_logical_font_size = 9;
         web_prefs_->javascript_can_open_windows_automatically = true;
         web_prefs_->dom_paste_enabled = true;
@@ -657,7 +656,7 @@ void TestShell::LoadFile(const FilePath& file) {
 void TestShell::LoadURL(const GURL& url) {
   // Used as a sentinal for run_webkit_tests.py to know when to start reading
   // test output for this test and so we know we're not getting out of sync.
-  if (layout_test_mode_ && test_params())
+  if (layout_test_mode_ && dump_when_finished_ && test_params())
     printf("#URL:%s\n", test_params()->test_url.c_str());
 
   LoadURLForFrame(url, std::wstring());
@@ -853,6 +852,9 @@ void EnableSpdy(bool enable) {
   // Used in benchmarking,  Ignored for test_shell.
 }
 
+void UserMetricsRecordAction(const std::string& action) {
+}
+
 std::string GetProductVersion() {
   return std::string("Chrome/0.0.0.0");
 }
@@ -872,5 +874,25 @@ bool GetFontTable(int fd, uint32_t table, uint8_t* output,
   return false;
 }
 #endif
+
+void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
+  NPAPI::PluginList::Singleton()->GetPlugins(refresh, plugins);
+  // Don't load the forked TestNetscapePlugIn in the chromium code, use
+  // the copy in webkit.org's repository instead.
+  const FilePath::StringType kPluginBlackList[] = {
+    FILE_PATH_LITERAL("npapi_layout_test_plugin.dll"),
+    FILE_PATH_LITERAL("TestNetscapePlugIn.plugin"),
+    FILE_PATH_LITERAL("libnpapi_layout_test_plugin.so"),
+  };
+  for (int i = plugins->size() - 1; i >= 0; --i) {
+    WebPluginInfo plugin_info = plugins->at(i);
+    for (size_t j = 0; j < arraysize(kPluginBlackList); ++j) {
+      if (plugin_info.path.BaseName() == FilePath(kPluginBlackList[j])) {
+        NPAPI::PluginList::Singleton()->DisablePlugin(plugin_info.path);
+        plugins->erase(plugins->begin() + i);
+      }
+    }
+  }
+}
 
 }  // namespace webkit_glue

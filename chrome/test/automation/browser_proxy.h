@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/browser.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
 
@@ -95,7 +95,7 @@ class BrowserProxy : public AutomationResourceProxy {
   scoped_refptr<AutocompleteEditProxy> GetAutocompleteEdit();
 
   // Apply the accelerator with given id (IDC_BACK, IDC_NEWTAB ...)
-  // The list can be found at chrome/app/chrome_dll_resource.h
+  // The list can be found at chrome/app/chrome_command_ids.h
   // Returns true if the call was successful.
   //
   // The alternate way to test the accelerators is to use the Windows messaging
@@ -135,14 +135,16 @@ class BrowserProxy : public AutomationResourceProxy {
   // will be false. Returns false on failure.
   bool IsFindWindowFullyVisible(bool* is_visible) WARN_UNUSED_RESULT;
 
-  // Run the specified command in the browser (see browser_commands.cc for the
-  // list of supported commands).  Returns true if the command was successfully
-  // dispatched, false otherwise.
+  // Run the specified command in the browser
+  // (see Browser::ExecuteCommandWithDisposition() for the list of supported
+  // commands).  Returns true if the command was successfully dispatched,
+  // false otherwise.
   bool RunCommandAsync(int browser_command) const WARN_UNUSED_RESULT;
 
-  // Run the specified command in the browser (see browser_commands.cc for the
-  // list of supported commands).  Returns true if the command was successfully
-  // dispatched and executed, false otherwise.
+  // Run the specified command in the browser
+  // (see Browser::ExecuteCommandWithDisposition() for the list of supported
+  // commands).  Returns true if the command was successfully dispatched and
+  // executed, false otherwise.
   bool RunCommand(int browser_command) const WARN_UNUSED_RESULT;
 
   // Returns whether the Bookmark bar is visible and whether we are animating

@@ -13,7 +13,7 @@
 #include "base/scoped_handle_win.h"
 #include "base/scoped_native_library.h"
 #include "base/waitable_event.h"
-#include "base/win_util.h"
+#include "base/win/windows_version.h"
 #include "chrome/browser/app_icon_win.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
@@ -24,6 +24,7 @@
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -261,36 +262,14 @@ class RegisterThumbnailTask : public Task {
     // message.
     // TODO(hbono): we need to check this registered message?
     ScopedComPtr<ITaskbarList3> taskbar;
-    HRESULT result = taskbar.CreateInstance(CLSID_TaskbarList, NULL,
-                                            CLSCTX_INPROC_SERVER);
-    if (FAILED(result)) {
-      LOG(INFO) << "failed creating a TaskbarList object: " << result;
+    if (FAILED(taskbar.CreateInstance(CLSID_TaskbarList, NULL,
+                                      CLSCTX_INPROC_SERVER)) ||
+        FAILED(taskbar->HrInit()) ||
+        FAILED(taskbar->RegisterTab(window_, frame_window_)) ||
+        FAILED(taskbar->SetTabOrder(window_, NULL)))
       return;
-    }
-
-    result = taskbar->HrInit();
-    if (FAILED(result)) {
-      LOG(INFO) << "failed initializing a TaskbarList obejct: " << result;
-      return;
-    }
-
-    result = taskbar->RegisterTab(window_, frame_window_);
-    if (FAILED(result)) {
-      LOG(INFO) << "failed registering a thumbnail window: " << result;
-      return;
-    }
-
-    result = taskbar->SetTabOrder(window_, NULL);
-    if (FAILED(result)) {
-      LOG(INFO) << "failed adding a thumbnail window: " << result;
-      return;
-    }
-
-    if (active_) {
-      result = taskbar->SetTabActive(window_, frame_window_, 0);
-      if (FAILED(result))
-        LOG(INFO) << "failed activating a thumbnail window: " << result;
-    }
+    if (active_)
+      taskbar->SetTabActive(window_, frame_window_, 0);
   }
 
  private:
@@ -1004,7 +983,10 @@ HICON AeroPeekWindow::OnGetIcon(UINT index) {
 }
 
 AeroPeekManager::AeroPeekManager(HWND application_window)
-    : application_window_(application_window) {
+    : application_window_(application_window),
+      border_left_(0),
+      border_top_(0),
+      toolbar_top_(0) {
 }
 
 AeroPeekManager::~AeroPeekManager() {
@@ -1029,7 +1011,7 @@ bool AeroPeekManager::Enabled() {
   // TODO(hbono): Bug 37957 <http://crbug.com/37957>: find solutions that avoid
   // flooding users with tab thumbnails.
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  return win_util::GetWinVersion() >= win_util::WINVERSION_WIN7 &&
+  return base::win::GetVersion() >= base::win::VERSION_WIN7 &&
       win_util::ShouldUseVistaFrame() &&
       !command_line->HasSwitch(switches::kApp) &&
       command_line->HasSwitch(switches::kEnableAeroPeekTabs);
@@ -1077,63 +1059,84 @@ int AeroPeekManager::GetTabID(TabContents* contents) const {
 ///////////////////////////////////////////////////////////////////////////////
 // AeroPeekManager, TabStripModelObserver implementation:
 
-void AeroPeekManager::TabInsertedAt(TabContents* contents,
+void AeroPeekManager::TabInsertedAt(TabContentsWrapper* contents,
                                     int index,
                                     bool foreground) {
-  // If there are not any AeroPeekWindow objects associated with the given
-  // tab, Create a new AeroPeekWindow object and add it to the list.
-  if (GetAeroPeekWindow(GetTabID(contents)))
+  if (!contents)
     return;
 
-  AeroPeekWindow* window = new AeroPeekWindow(application_window_,
-                                              this,
-                                              GetTabID(contents),
-                                              foreground,
-                                              contents->GetTitle(),
-                                              contents->GetFavIcon());
+  // If there are not any AeroPeekWindow objects associated with the given
+  // tab, Create a new AeroPeekWindow object and add it to the list.
+  if (GetAeroPeekWindow(GetTabID(contents->tab_contents())))
+    return;
+
+  AeroPeekWindow* window =
+      new AeroPeekWindow(application_window_,
+                         this,
+                         GetTabID(contents->tab_contents()),
+                         foreground,
+                         contents->tab_contents()->GetTitle(),
+                         contents->tab_contents()->GetFavIcon());
   if (!window)
     return;
 
   tab_list_.push_back(window);
 }
 
-void AeroPeekManager::TabClosingAt(TabContents* contents, int index) {
+void AeroPeekManager::TabClosingAt(TabStripModel* tab_strip_model,
+                                   TabContentsWrapper* contents,
+                                   int index) {
+  if (!contents)
+    return;
+
+  // |tab_strip_model| is NULL when this is being called from TabDetachedAt
+  // below.
   // Delete the AeroPeekWindow object associated with this tab and all its
   // resources. (AeroPeekWindow::Destory() also removes this tab from the tab
   // list of Windows.)
-  AeroPeekWindow* window = GetAeroPeekWindow(GetTabID(contents));
+  AeroPeekWindow* window =
+      GetAeroPeekWindow(GetTabID(contents->tab_contents()));
   if (!window)
     return;
 
   window->Destroy();
-  DeleteAeroPeekWindow(GetTabID(contents));
+  DeleteAeroPeekWindow(GetTabID(contents->tab_contents()));
 }
 
-void AeroPeekManager::TabDetachedAt(TabContents* contents, int index) {
+void AeroPeekManager::TabDetachedAt(TabContentsWrapper* contents, int index) {
+  if (!contents)
+    return;
+
   // Same as TabClosingAt(), we remove this tab from the tab list and delete
   // its AeroPeekWindow.
   // Chrome will call TabInsertedAt() when this tab is inserted to another
   // TabStrip. We will re-create an AeroPeekWindow object for this tab and
   // re-add it to the tab list there.
-  TabClosingAt(contents, index);
+  TabClosingAt(NULL, contents, index);
 }
 
-void AeroPeekManager::TabSelectedAt(TabContents* old_contents,
-                                    TabContents* new_contents,
+void AeroPeekManager::TabSelectedAt(TabContentsWrapper* old_contents,
+                                    TabContentsWrapper* new_contents,
                                     int index,
                                     bool user_gesture) {
   // Deactivate the old window in the thumbnail list and activate the new one
   // to synchronize the thumbnail list with TabStrip.
-  AeroPeekWindow* old_window = GetAeroPeekWindow(GetTabID(old_contents));
-  if (old_window)
-    old_window->Deactivate();
+  if (old_contents) {
+    AeroPeekWindow* old_window =
+        GetAeroPeekWindow(GetTabID(old_contents->tab_contents()));
+    if (old_window)
+      old_window->Deactivate();
+  }
 
-  AeroPeekWindow* new_window = GetAeroPeekWindow(GetTabID(new_contents));
-  if (new_window)
-    new_window->Activate();
+  if (new_contents) {
+    AeroPeekWindow* new_window =
+        GetAeroPeekWindow(GetTabID(new_contents->tab_contents()));
+    if (new_window)
+      new_window->Activate();
+  }
 }
 
-void AeroPeekManager::TabMoved(TabContents* contents,
+void AeroPeekManager::TabMoved(TabContentsWrapper* contents,
                                int from_index,
                                int to_index,
                                bool pinned_state_changed) {
@@ -1142,12 +1145,16 @@ void AeroPeekManager::TabMoved(TabContents* contents,
   // we detach/attach tabs.)
 }
 
-void AeroPeekManager::TabChangedAt(TabContents* contents,
+void AeroPeekManager::TabChangedAt(TabContentsWrapper* contents,
                                    int index,
                                    TabChangeType change_type) {
+  if (!contents)
+    return;
+
   // Retrieve the AeroPeekWindow object associated with this tab, update its
   // title, and post a task that update its thumbnail image if necessary.
-  AeroPeekWindow* window = GetAeroPeekWindow(GetTabID(contents));
+  AeroPeekWindow* window =
+      GetAeroPeekWindow(GetTabID(contents->tab_contents()));
   if (!window)
     return;
 
@@ -1156,9 +1163,9 @@ void AeroPeekManager::TabChangedAt(TabContents* contents,
   // Windows needs them (e.g. when a user hovers a taskbar icon) to avoid
   // hurting the rendering performance. (These functions just save the
   // information needed for handling update requests from Windows.)
-  window->SetTitle(contents->GetTitle());
-  window->SetFavIcon(contents->GetFavIcon());
-  window->Update(contents->is_loading());
+  window->SetTitle(contents->tab_contents()->GetTitle());
+  window->SetFavIcon(contents->tab_contents()->GetFavIcon());
+  window->Update(contents->tab_contents()->is_loading());
 }
 
 ///////////////////////////////////////////////////////////////////////////////

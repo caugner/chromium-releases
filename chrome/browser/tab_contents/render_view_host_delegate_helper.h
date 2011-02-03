@@ -30,8 +30,8 @@ class TabContents;
 // RenderViewHostDelegate::View methods.
 class RenderViewHostDelegateViewHelper {
  public:
-  RenderViewHostDelegateViewHelper() {}
-  virtual ~RenderViewHostDelegateViewHelper() {}
+  RenderViewHostDelegateViewHelper();
+  virtual ~RenderViewHostDelegateViewHelper();
 
   // Creates a new renderer for window.open. This will either be a
   // BackgroundContents (if the window_container_type ==
@@ -76,7 +76,7 @@ class RenderViewHostDelegateViewHelper {
       int route_id,
       Profile* profile,
       SiteInstance* site,
-      GURL opener_url,
+      const GURL& opener_url,
       const string16& frame_name);
 
   // Tracks created RenderViewHost objects that have not been shown yet.
@@ -99,8 +99,21 @@ class RenderViewHostDelegateHelper {
  public:
   static WebPreferences GetWebkitPrefs(Profile* profile, bool is_dom_ui);
 
+  static void UpdateInspectorSetting(Profile* profile,
+                                     const std::string& key,
+                                     const std::string& value);
+  static void ClearInspectorSettings(Profile* profile);
+
+  static bool gpu_enabled() { return gpu_enabled_; }
+  static void set_gpu_enabled(bool enabled) { gpu_enabled_ = enabled; }
+
  private:
   RenderViewHostDelegateHelper();
+
+  // Master switch for enabling/disabling GPU acceleration for the current
+  // browser session. It does not change the acceleration settings for
+  // existing tabs, just the future ones.
+  static bool gpu_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostDelegateHelper);
 };

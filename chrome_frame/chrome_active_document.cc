@@ -18,20 +18,20 @@
 #include <wininet.h>
 
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/scoped_variant_win.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/thread.h"
 #include "base/thread_local.h"
-#include "base/trace_event.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/scoped_variant.h"
 #include "grit/generated_resources.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/navigation_types.h"
 #include "chrome/common/page_zoom.h"
@@ -76,8 +76,7 @@ HRESULT ChromeActiveDocument::FinalConstruct() {
   if (cached_document && cached_document->IsValid()) {
     DCHECK(automation_client_.get() == NULL);
     automation_client_.swap(cached_document->automation_client_);
-    DLOG(INFO) << "Reusing automation client instance from "
-               << cached_document;
+    DVLOG(1) << "Reusing automation client instance from " << cached_document;
     DCHECK(automation_client_.get() != NULL);
     automation_client_->Reinitialize(this, url_fetcher_.get());
     is_automation_client_reused_ = true;
@@ -122,7 +121,7 @@ HRESULT ChromeActiveDocument::FinalConstruct() {
 }
 
 ChromeActiveDocument::~ChromeActiveDocument() {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   if (find_dialog_.IsWindow())
     find_dialog_.DestroyWindow();
   // ChromeFramePlugin
@@ -143,7 +142,7 @@ STDMETHODIMP ChromeActiveDocument::DoVerb(LONG verb,
   // Here we refuse to be activated in-place and we will force IE to UIActivate
   // us.
   if (OLEIVERB_INPLACEACTIVATE == verb)
-    return E_NOTIMPL;
+    return OLEOBJ_E_INVALIDVERB;
   // Check if we should activate as a docobject or not
   // (client supports IOleDocumentSite)
   if (doc_site_) {
@@ -171,12 +170,12 @@ STDMETHODIMP ChromeActiveDocument::DoVerb(LONG verb,
 
 // Override IOleInPlaceActiveObjectImpl::OnDocWindowActivate
 STDMETHODIMP ChromeActiveDocument::OnDocWindowActivate(BOOL activate) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   return S_OK;
 }
 
 STDMETHODIMP ChromeActiveDocument::TranslateAccelerator(MSG* msg) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   if (msg == NULL)
     return E_POINTER;
 
@@ -194,7 +193,7 @@ STDMETHODIMP ChromeActiveDocument::TranslateAccelerator(MSG* msg) {
 }
 // Override IPersistStorageImpl::IsDirty
 STDMETHODIMP ChromeActiveDocument::IsDirty() {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   return S_FALSE;
 }
 
@@ -231,7 +230,7 @@ STDMETHODIMP ChromeActiveDocument::Load(BOOL fully_avalable,
     DoQueryService(SID_SShellBrowser, client_site, browser_service.Receive());
     if (browser_service) {
       bool flagged = CheckForCFNavigation(browser_service, true);
-      DLOG_IF(INFO, flagged) << "Cleared flagged browser service";
+      DVLOG_IF(1, flagged) << "Cleared flagged browser service";
     }
   }
 
@@ -330,7 +329,7 @@ STDMETHODIMP ChromeActiveDocument::QueryStatus(const GUID* cmd_group_guid,
                                                ULONG number_of_commands,
                                                OLECMD commands[],
                                                OLECMDTEXT* command_text) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
 
   CommandStatusMap* command_map = NULL;
 
@@ -349,14 +348,13 @@ STDMETHODIMP ChromeActiveDocument::QueryStatus(const GUID* cmd_group_guid,
   }
 
   if (!command_map) {
-    DLOG(INFO) << "unsupported command group: "
-        << GuidToString(*cmd_group_guid);
+    DVLOG(1) << "unsupported command group: " << GuidToString(*cmd_group_guid);
     return OLECMDERR_E_NOTSUPPORTED;
   }
 
   for (ULONG command_index = 0; command_index < number_of_commands;
        command_index++) {
-    DLOG(INFO) << "Command id = " << commands[command_index].cmdID;
+    DVLOG(1) << "Command id = " << commands[command_index].cmdID;
     CommandStatusMap::iterator index =
         command_map->find(commands[command_index].cmdID);
     if (index != command_map->end())
@@ -370,7 +368,7 @@ STDMETHODIMP ChromeActiveDocument::Exec(const GUID* cmd_group_guid,
                                         DWORD cmd_exec_opt,
                                         VARIANT* in_args,
                                         VARIANT* out_args) {
-  DLOG(INFO) << __FUNCTION__ << " Cmd id =" << command_id;
+  DVLOG(1) << __FUNCTION__ << " Cmd id =" << command_id;
   // Bail out if we have been uninitialized.
   if (automation_client_.get() && automation_client_->tab()) {
     return ProcessExecCommand(cmd_group_guid, command_id, cmd_exec_opt,
@@ -396,7 +394,7 @@ STDMETHODIMP ChromeActiveDocument::LoadHistory(IStream* stream,
   stream->Stat(&statstg, STATFLAG_NONAME);
 
   DWORD url_size = statstg.cbSize.LowPart - cur_pos.LowPart;
-  ScopedBstr url_bstr;
+  base::win::ScopedBstr url_bstr;
   DWORD bytes_read = 0;
   stream->Read(url_bstr.AllocateBytes(url_size), url_size, &bytes_read);
   std::wstring url(url_bstr);
@@ -606,11 +604,13 @@ HRESULT ChromeActiveDocument::ActiveXDocActivate(LONG verb) {
 void ChromeActiveDocument::OnNavigationStateChanged(int tab_handle, int flags,
     const IPC::NavigationInfo& nav_info) {
   // TODO(joshia): handle INVALIDATE_TAB,INVALIDATE_LOAD etc.
-  DLOG(INFO) << __FUNCTION__ << std::endl << " Flags: " << flags
-      << "Url: " << nav_info.url <<
-      ", Title: " << nav_info.title <<
-      ", Type: " << nav_info.navigation_type << ", Relative Offset: " <<
-      nav_info.relative_offset << ", Index: " << nav_info.navigation_index;
+  DVLOG(1) << __FUNCTION__
+           << "\n Flags: " << flags
+           << ", Url: " << nav_info.url
+           << ", Title: " << nav_info.title
+           << ", Type: " << nav_info.navigation_type
+           << ", Relative Offset: " << nav_info.relative_offset
+           << ", Index: " << nav_info.navigation_index;
 
   UpdateNavigationState(nav_info);
 }
@@ -649,12 +649,12 @@ void ChromeActiveDocument::OnAcceleratorPressed(int tab_handle,
       BaseActiveX::OnAcceleratorPressed(tab_handle, accel_message);
     }
   } else {
-    DLOG(INFO) << "IE handled accel key " << accel_message.wParam;
+    DVLOG(1) << "IE handled accel key " << accel_message.wParam;
   }
 }
 
 void ChromeActiveDocument::OnTabbedOut(int tab_handle, bool reverse) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   if (in_place_frame_) {
     MSG msg = { NULL, WM_KEYDOWN, VK_TAB };
     in_place_frame_->TranslateAcceleratorW(&msg, 0);
@@ -663,17 +663,19 @@ void ChromeActiveDocument::OnTabbedOut(int tab_handle, bool reverse) {
 
 void ChromeActiveDocument::OnDidNavigate(int tab_handle,
                                          const IPC::NavigationInfo& nav_info) {
-  DLOG(INFO) << __FUNCTION__ << std::endl << "Url: " << nav_info.url <<
-      ", Title: " << nav_info.title <<
-      ", Type: " << nav_info.navigation_type << ", Relative Offset: " <<
-      nav_info.relative_offset << ", Index: " << nav_info.navigation_index;
+  DVLOG(1) << __FUNCTION__ << std::endl
+           << "Url: " << nav_info.url
+           << ", Title: " << nav_info.title
+           << ", Type: " << nav_info.navigation_type
+           << ", Relative Offset: " << nav_info.relative_offset
+           << ", Index: " << nav_info.navigation_index;
 
   CrashMetricsReporter::GetInstance()->IncrementMetric(
       CrashMetricsReporter::CHROME_FRAME_NAVIGATION_COUNT);
 
   // This could be NULL if the active document instance is being destroyed.
   if (!m_spInPlaceSite) {
-    DLOG(INFO) << __FUNCTION__ << "m_spInPlaceSite is NULL. Returning";
+    DVLOG(1) << __FUNCTION__ << "m_spInPlaceSite is NULL. Returning";
     return;
   }
 
@@ -681,6 +683,10 @@ void ChromeActiveDocument::OnDidNavigate(int tab_handle,
 }
 
 void ChromeActiveDocument::OnCloseTab(int tab_handle) {
+  // Base class will fire DIChromeFrameEvents::onclose.
+  BaseActiveX::OnCloseTab(tab_handle);
+
+  // Close the container window.
   ScopedComPtr<IWebBrowser2> web_browser2;
   DoQueryService(SID_SWebBrowserApp, m_spClientSite, web_browser2.Receive());
   if (web_browser2)
@@ -709,7 +715,7 @@ void ChromeActiveDocument::UpdateNavigationState(
         break;
     }
 
-    ScopedVariant secure_lock_status(lock_status);
+    base::win::ScopedVariant secure_lock_status(lock_status);
     IEExec(&CGID_ShellDocView, INTERNAL_CMDID_SET_SSL_LOCK,
            OLECMDEXECOPT_DODEFAULT, secure_lock_status.AsInput(), NULL);
   }
@@ -733,9 +739,9 @@ void ChromeActiveDocument::UpdateNavigationState(
   ChromeFrameUrl cf_url;
   bool is_attach_external_tab_url = cf_url.Parse(std::wstring(url_)) &&
       cf_url.attach_to_external_tab();
-  bool is_internal_navigation = ((new_navigation_info.navigation_index > 0) &&
-      (new_navigation_info.navigation_index !=
-       navigation_info_.navigation_index)) || is_attach_external_tab_url;
+
+  bool is_internal_navigation =
+      IsNewNavigation(new_navigation_info) || is_attach_external_tab_url;
 
   if (new_navigation_info.url.is_valid())
     url_.Allocate(UTF8ToWide(new_navigation_info.url.spec()).c_str());
@@ -774,7 +780,7 @@ void ChromeActiveDocument::UpdateNavigationState(
     // We need to tell IE that we support navigation so that IE will query us
     // for IPersistHistory and call GetPositionCookie to save our navigation
     // index.
-    ScopedVariant html_window(static_cast<IUnknown*>(
+    base::win::ScopedVariant html_window(static_cast<IUnknown*>(
         static_cast<IHTMLWindow2*>(this)));
     IEExec(&CGID_DocHostCmdPriv, DOCHOST_DOCCANNAVIGATE, 0,
            html_window.AsInput(), NULL);
@@ -785,7 +791,7 @@ void ChromeActiveDocument::UpdateNavigationState(
     // navigations. This will ensure that IE calls GetPositionCookie
     // to save the current position cookie in the travel log and then call
     // SetPositionCookie when the user hits Back/Forward to come back here.
-    ScopedVariant internal_navigation(HLNF_INTERNALJUMP);
+    base::win::ScopedVariant internal_navigation(HLNF_INTERNALJUMP);
     IEExec(&CGID_Explorer, INTERNAL_CMDID_FINALIZE_TRAVEL_LOG, 0,
            internal_navigation.AsInput(), NULL);
 
@@ -805,7 +811,7 @@ void ChromeActiveDocument::UpdateNavigationState(
   }
 
   if (is_title_changed) {
-    ScopedVariant title(new_navigation_info.title.c_str());
+    base::win::ScopedVariant title(new_navigation_info.title.c_str());
     IEExec(NULL, OLECMDID_SETTITLE, OLECMDEXECOPT_DONTPROMPTUSER,
            title.AsInput(), NULL);
   }
@@ -952,19 +958,20 @@ bool ChromeActiveDocument::PreProcessContextMenu(HMENU menu) {
   if (!browser_service || !travel_log)
     return true;
 
-  EnableMenuItem(menu, IDS_CONTENT_CONTEXT_BACK, MF_BYCOMMAND |
-      (SUCCEEDED(travel_log->GetTravelEntry(browser_service, TLOG_BACK, NULL)) ?
+  EnableMenuItem(menu, IDC_BACK, MF_BYCOMMAND |
+      (SUCCEEDED(travel_log->GetTravelEntry(browser_service, TLOG_BACK,
+                                            NULL)) ?
       MF_ENABLED : MF_DISABLED));
-  EnableMenuItem(menu, IDS_CONTENT_CONTEXT_FORWARD, MF_BYCOMMAND |
-      (SUCCEEDED(travel_log->GetTravelEntry(browser_service, TLOG_FORE, NULL)) ?
+  EnableMenuItem(menu, IDC_FORWARD, MF_BYCOMMAND |
+      (SUCCEEDED(travel_log->GetTravelEntry(browser_service, TLOG_FORE,
+                                            NULL)) ?
       MF_ENABLED : MF_DISABLED));
-
   // Call base class (adds 'About' item)
   return BaseActiveX::PreProcessContextMenu(menu);
 }
 
 bool ChromeActiveDocument::HandleContextMenuCommand(UINT cmd,
-    const IPC::ContextMenuParams& params) {
+    const IPC::MiniContextMenuParams& params) {
   ScopedComPtr<IWebBrowser2> web_browser2;
   DoQueryService(SID_SWebBrowserApp, m_spClientSite, web_browser2.Receive());
 
@@ -1050,7 +1057,7 @@ bool ChromeActiveDocument::LaunchUrl(const ChromeFrameUrl& cf_url,
 
 HRESULT ChromeActiveDocument::OnRefreshPage(const GUID* cmd_group_guid,
     DWORD command_id, DWORD cmd_exec_opt, VARIANT* in_args, VARIANT* out_args) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   popup_allowed_ = false;
   if (in_args->vt == VT_I4 &&
       in_args->lVal & OLECMDIDF_REFRESH_PAGEACTION_POPUPWINDOW) {
@@ -1183,7 +1190,7 @@ HRESULT ChromeActiveDocument::OnEncodingChange(const GUID* cmd_group_guid,
 
 void ChromeActiveDocument::OnGoToHistoryEntryOffset(int tab_handle,
                                                     int offset) {
-  DLOG(INFO) <<  __FUNCTION__ << " - offset:" << offset;
+  DVLOG(1) <<  __FUNCTION__ << " - offset:" << offset;
 
   ScopedComPtr<IBrowserService> browser_service;
   ScopedComPtr<ITravelLog> travel_log;
@@ -1207,8 +1214,7 @@ HRESULT ChromeActiveDocument::GetBrowserServiceAndTravelLog(
 
   if (travel_log) {
     hr = browser_service_local->GetTravelLog(travel_log);
-    DLOG_IF(INFO, !travel_log) << "browser_service->GetTravelLog failed: " <<
-        hr;
+    DVLOG_IF(1, !travel_log) << "browser_service->GetTravelLog failed: " << hr;
   }
 
   if (browser_service)
@@ -1290,18 +1296,56 @@ void ChromeActiveDocument::SetWindowDimensions() {
                  web_browser2.Receive());
   if (!web_browser2)
     return;
-  DLOG(INFO) << "this:" << this;
-  DLOG(INFO) << "dimensions: width:" << dimensions_.width()
-             << "height:" << dimensions_.height();
+  DVLOG(1) << "this:" << this << "\ndimensions: width:" << dimensions_.width()
+           << " height:" << dimensions_.height();
   if (!dimensions_.IsEmpty()) {
+    web_browser2->put_MenuBar(VARIANT_FALSE);
+    web_browser2->put_ToolBar(VARIANT_FALSE);
+
+    int width = dimensions_.width();
+    int height = dimensions_.height();
+    // Compute the size of the browser window given the desired size of the
+    // content area. As per MSDN, the WebBrowser object returns an error from
+    // this method. As a result the code below is best effort.
+    if (SUCCEEDED(web_browser2->ClientToWindow(&width, &height))) {
+      dimensions_.set_width(width);
+      dimensions_.set_height(height);
+    }
     web_browser2->put_Width(dimensions_.width());
     web_browser2->put_Height(dimensions_.height());
     web_browser2->put_Left(dimensions_.x());
     web_browser2->put_Top(dimensions_.y());
-    web_browser2->put_MenuBar(VARIANT_FALSE);
-    web_browser2->put_ToolBar(VARIANT_FALSE);
 
     dimensions_.set_height(0);
     dimensions_.set_width(0);
   }
 }
+
+bool ChromeActiveDocument::IsNewNavigation(
+    const IPC::NavigationInfo& new_navigation_info) const {
+  // A new navigation is typically an internal navigation which is initiated by
+  // the renderer(WebKit). Condition 1 below has to be true along with the
+  // any of the other conditions below.
+  // 1. The navigation index is greater than 0 which means that a top level
+  //    navigation was initiated on the current external tab.
+  // 2. The navigation type has changed.
+  // 3. The url or the referrer are different.
+  if (new_navigation_info.navigation_index <= 0)
+    return false;
+
+  if (new_navigation_info.navigation_index ==
+      navigation_info_.navigation_index)
+    return false;
+
+  if (new_navigation_info.navigation_type != navigation_info_.navigation_type)
+    return true;
+
+  if (new_navigation_info.url != navigation_info_.url)
+    return true;
+
+  if (new_navigation_info.referrer != navigation_info_.referrer)
+    return true;
+
+  return false;
+}
+

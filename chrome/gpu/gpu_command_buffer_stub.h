@@ -9,6 +9,7 @@
 #if defined(ENABLE_GPU)
 
 #include <vector>
+#include <string>
 
 #include "base/process.h"
 #include "base/weak_ptr.h"
@@ -30,6 +31,7 @@ class GpuCommandBufferStub
                        gfx::PluginWindowHandle handle,
                        GpuCommandBufferStub* parent,
                        const gfx::Size& size,
+                       const std::string& allowed_extensions,
                        const std::vector<int32>& attribs,
                        uint32 parent_texture_id,
                        int32 route_id,
@@ -47,7 +49,22 @@ class GpuCommandBufferStub
   // Get the GLContext associated with this object.
   gpu::GPUProcessor* processor() const { return processor_.get(); }
 
+  // Identifies the various GpuCommandBufferStubs in the GPU process belonging
+  // to the same renderer process.
   int32 route_id() const { return route_id_; }
+
+  // Identifies the various render views in the renderer process.
+  int32 renderer_route_id() const { return renderer_id_; }
+
+#if defined(OS_WIN)
+  // Called only by the compositor window's window proc
+  void OnCompositorWindowPainted();
+#endif
+
+#if defined(OS_MACOSX)
+  // Called only by the GpuChannel.
+  void AcceleratedSurfaceBuffersSwapped(uint64 swap_buffers_count);
+#endif
 
  private:
   // Message handlers:
@@ -68,7 +85,12 @@ class GpuCommandBufferStub
 #if defined(OS_MACOSX)
   void OnSetWindowSize(const gfx::Size& size);
   void SwapBuffersCallback();
+#elif defined(OS_WIN)
+  bool CreateCompositorWindow();
+  HWND compositor_window_;
 #endif
+
+  void ResizeCallback(gfx::Size size);
 
   // The lifetime of objects of this class is managed by a GpuChannel. The
   // GpuChannels destroy all the GpuCommandBufferStubs that they own when they
@@ -78,6 +100,7 @@ class GpuCommandBufferStub
   gfx::PluginWindowHandle handle_;
   base::WeakPtr<GpuCommandBufferStub> parent_;
   gfx::Size initial_size_;
+  std::string allowed_extensions_;
   std::vector<int32> requested_attribs_;
   uint32 parent_texture_id_;
   int32 route_id_;

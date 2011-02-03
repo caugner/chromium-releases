@@ -6,7 +6,6 @@
 
 #include "base/ref_counted.h"
 #include "base/singleton.h"
-#include "base/thread_local.h"
 #include "base/weak_ptr.h"
 #include "chrome/renderer/command_buffer_proxy.h"
 #include "chrome/renderer/ggl/ggl.h"
@@ -35,7 +34,11 @@ const int32 kCommandBufferSize = 1024 * 1024;
 // creation attributes.
 const int32 kTransferBufferSize = 1024 * 1024;
 
-base::ThreadLocalPointer<Context> g_current_context;
+// TODO(kbr) / TODO(apatrick): determine the best number of pending frames
+// in the general case. On Mac OS X it seems we really want this to be 1,
+// because otherwise the renderer process produces frames that do not
+// actually reach the screen.
+const int kMaxFramesPending = 1;
 
 // Singleton used to initialize and terminate the gles2 library.
 class GLES2Initializer {
@@ -64,6 +67,7 @@ class Context : public base::SupportsWeakPtr<Context> {
   bool Initialize(gfx::NativeViewId view,
                   int render_view_id,
                   const gfx::Size& size,
+                  const char* allowed_extensions,
                   const int32* attrib_list);
 
 #if defined(OS_MACOSX)
@@ -76,7 +80,7 @@ class Context : public base::SupportsWeakPtr<Context> {
 
   // Provides a callback that will be invoked when SwapBuffers has completed
   // service side.
-  void SetSwapBuffersCallback(Callback1<Context*>::Type* callback) {
+  void SetSwapBuffersCallback(Callback0::Type* callback) {
     swap_buffers_callback_.reset(callback);
   }
 
@@ -113,20 +117,29 @@ class Context : public base::SupportsWeakPtr<Context> {
   // Replace the current error code with this.
   void SetError(Error error);
 
+  bool IsCommandBufferContextLost();
+
   // TODO(gman): Remove this.
   void DisableShaderTranslation();
 
+  gpu::gles2::GLES2Implementation* gles2_implementation() const {
+    return gles2_implementation_;
+  }
  private:
   void OnSwapBuffers();
 
   scoped_refptr<GpuChannelHost> channel_;
   base::WeakPtr<Context> parent_;
-  scoped_ptr<Callback1<Context*>::Type> swap_buffers_callback_;
+  scoped_ptr<Callback0::Type> swap_buffers_callback_;
   uint32 parent_texture_id_;
   CommandBufferProxy* command_buffer_;
   gpu::gles2::GLES2CmdHelper* gles2_helper_;
   int32 transfer_buffer_id_;
   gpu::gles2::GLES2Implementation* gles2_implementation_;
+  gfx::Size size_;
+
+  int32 swap_buffer_tokens_[kMaxFramesPending];
+
   Error last_error_;
 
   DISALLOW_COPY_AND_ASSIGN(Context);
@@ -142,6 +155,8 @@ Context::Context(GpuChannelHost* channel, Context* parent)
       gles2_implementation_(NULL),
       last_error_(SUCCESS) {
   DCHECK(channel);
+  for (int i = 0; i < kMaxFramesPending; ++i)
+    swap_buffer_tokens_[i] = -1;
 }
 
 Context::~Context() {
@@ -151,10 +166,11 @@ Context::~Context() {
 bool Context::Initialize(gfx::NativeViewId view,
                          int render_view_id,
                          const gfx::Size& size,
+                         const char* allowed_extensions,
                          const int32* attrib_list) {
   DCHECK(size.width() >= 0 && size.height() >= 0);
 
-  if (channel_->state() != GpuChannelHost::CONNECTED)
+  if (channel_->state() != GpuChannelHost::kConnected)
     return false;
 
   // Ensure the gles2 library is initialized first in a thread safe way.
@@ -199,15 +215,18 @@ bool Context::Initialize(gfx::NativeViewId view,
 
   // Create a proxy to a command buffer in the GPU process.
   if (view) {
-    // TODO(enne): this call should also handle attribs
-    command_buffer_ =
-        channel_->CreateViewCommandBuffer(view, render_view_id);
+    command_buffer_ = channel_->CreateViewCommandBuffer(
+        view,
+        render_view_id,
+        allowed_extensions,
+        attribs);
   } else {
     CommandBufferProxy* parent_command_buffer =
         parent_.get() ? parent_->command_buffer_ : NULL;
     command_buffer_ = channel_->CreateOffscreenCommandBuffer(
         parent_command_buffer,
         size,
+        allowed_extensions,
         attribs,
         parent_texture_id_);
   }
@@ -257,19 +276,25 @@ bool Context::Initialize(gfx::NativeViewId view,
       transfer_buffer_id_,
       false);
 
+  size_ = size;
+
   return true;
 }
 
 #if defined(OS_MACOSX)
 void Context::ResizeOnscreen(const gfx::Size& size) {
   DCHECK(size.width() > 0 && size.height() > 0);
+  size_ = size;
   command_buffer_->SetWindowSize(size);
 }
 #endif
 
 void Context::ResizeOffscreen(const gfx::Size& size) {
   DCHECK(size.width() > 0 && size.height() > 0);
-  command_buffer_->ResizeOffscreenFrameBuffer(size);
+  if (size_ != size) {
+    command_buffer_->ResizeOffscreenFrameBuffer(size);
+    size_ = size;
+  }
 }
 
 uint32 Context::CreateParentTexture(const gfx::Size& size) const {
@@ -338,7 +363,6 @@ void Context::Destroy() {
 }
 
 bool Context::MakeCurrent(Context* context) {
-  g_current_context.Set(context);
   if (context) {
     gles2::SetGLContext(context->gles2_implementation_);
 
@@ -362,7 +386,18 @@ bool Context::SwapBuffers() {
   if (command_buffer_->GetLastState().error != gpu::error::kNoError)
     return false;
 
+  // Throttle until there are not too many frames pending.
+  if (swap_buffer_tokens_[0] != -1) {
+    gles2_helper_->WaitForToken(swap_buffer_tokens_[0]);
+  }
+
   gles2_implementation_->SwapBuffers();
+
+  // Insert a new token to throttle against for this frame.
+  for (int i = 0; i < kMaxFramesPending - 1; ++i)
+    swap_buffer_tokens_[i] = swap_buffer_tokens_[i + 1];
+  swap_buffer_tokens_[kMaxFramesPending - 1] = gles2_helper_->InsertToken();
+
   return true;
 }
 
@@ -393,14 +428,20 @@ void Context::SetError(Error error) {
   last_error_ = error;
 }
 
+bool Context::IsCommandBufferContextLost() {
+  gpu::CommandBuffer::State state = command_buffer_->GetLastState();
+  return state.error == gpu::error::kLostContext;
+}
+
 // TODO(gman): Remove This
 void Context::DisableShaderTranslation() {
-  gles2_implementation_->CommandBufferEnable(PEPPER3D_SKIP_GLSL_TRANSLATION);
+  gles2_implementation_->CommandBufferEnableCHROMIUM(
+      PEPPER3D_SKIP_GLSL_TRANSLATION);
 }
 
 void Context::OnSwapBuffers() {
   if (swap_buffers_callback_.get())
-    swap_buffers_callback_->Run(this);
+    swap_buffers_callback_->Run();
 }
 
 #endif  // ENABLE_GPU
@@ -408,10 +449,12 @@ void Context::OnSwapBuffers() {
 Context* CreateViewContext(GpuChannelHost* channel,
                            gfx::NativeViewId view,
                            int render_view_id,
+                           const char* allowed_extensions,
                            const int32* attrib_list) {
 #if defined(ENABLE_GPU)
   scoped_ptr<Context> context(new Context(channel, NULL));
-  if (!context->Initialize(view, render_view_id, gfx::Size(), attrib_list))
+  if (!context->Initialize(
+      view, render_view_id, gfx::Size(), allowed_extensions, attrib_list))
     return NULL;
 
   return context.release();
@@ -431,10 +474,11 @@ void ResizeOnscreenContext(Context* context, const gfx::Size& size) {
 Context* CreateOffscreenContext(GpuChannelHost* channel,
                                 Context* parent,
                                 const gfx::Size& size,
+                                const char* allowed_extensions,
                                 const int32* attrib_list) {
 #if defined(ENABLE_GPU)
   scoped_ptr<Context> context(new Context(channel, parent));
-  if (!context->Initialize(0, 0, size, attrib_list))
+  if (!context->Initialize(0, 0, size, allowed_extensions, attrib_list))
     return NULL;
 
   return context.release();
@@ -472,7 +516,7 @@ void DeleteParentTexture(Context* context, uint32 texture) {
 }
 
 void SetSwapBuffersCallback(Context* context,
-                            Callback1<Context*>::Type* callback) {
+                            Callback0::Type* callback) {
 #if defined(ENABLE_GPU)
   context->SetSwapBuffersCallback(callback);
 #endif
@@ -483,14 +527,6 @@ bool MakeCurrent(Context* context) {
   return Context::MakeCurrent(context);
 #else
   return false;
-#endif
-}
-
-Context* GetCurrentContext() {
-#if defined(ENABLE_GPU)
-  return g_current_context.Get();
-#else
-  return NULL;
 #endif
 }
 
@@ -510,9 +546,6 @@ bool DestroyContext(Context* context) {
   if (!context)
     return false;
 
-  if (context == GetCurrentContext())
-    MakeCurrent(NULL);
-
   delete context;
   return true;
 #else
@@ -529,16 +562,16 @@ media::VideoDecodeContext* CreateVideoDecodeContext(
   return context->CreateVideoDecodeContext(message_loop, hardware_decoder);
 }
 
-Error GetError() {
+Error GetError(Context* context) {
 #if defined(ENABLE_GPU)
-  Context* context = GetCurrentContext();
-  if (!context)
-    return BAD_CONTEXT;
-
   return context->GetError();
 #else
   return NOT_INITIALIZED;
 #endif
+}
+
+bool IsCommandBufferContextLost(Context* context) {
+  return context->IsCommandBufferContextLost();
 }
 
 // TODO(gman): Remove This
@@ -549,4 +582,12 @@ void DisableShaderTranslation(Context* context) {
   }
 #endif
 }
+
+gpu::gles2::GLES2Implementation* GetImplementation(Context* context) {
+  if (!context)
+    return NULL;
+
+  return context->gles2_implementation();
+}
+
 }  // namespace ggl

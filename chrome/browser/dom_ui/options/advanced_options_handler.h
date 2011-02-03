@@ -9,6 +9,7 @@
 #include "chrome/browser/dom_ui/options/options_ui.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_set_observer.h"
+#include "chrome/browser/printing/cloud_print/cloud_print_setup_flow.h"
 #include "chrome/browser/shell_dialogs.h"
 
 class OptionsManagedBannerHandler;
@@ -16,7 +17,8 @@ class OptionsManagedBannerHandler;
 // Chrome advanced options page UI handler.
 class AdvancedOptionsHandler
     : public OptionsPageUIHandler,
-      public SelectFileDialog::Listener {
+      public SelectFileDialog::Listener,
+      public CloudPrintSetupFlow::Delegate {
  public:
   AdvancedOptionsHandler();
   virtual ~AdvancedOptionsHandler();
@@ -37,6 +39,9 @@ class AdvancedOptionsHandler
   // SelectFileDialog::Listener implementation
   virtual void FileSelected(const FilePath& path, int index, void* params);
 
+  // CloudPrintSetupFlow::Delegate implementation.
+  virtual void OnDialogClosed();
+
  private:
   // Callback for the "selectDownloadLocation" message.  This will prompt
   // the user for a destination folder using platform-specific APIs.
@@ -53,6 +58,12 @@ class AdvancedOptionsHandler
   // Callback for the "metricsReportingCheckboxAction" message.  This is called
   // if the user toggles the metrics reporting checkbox.
   void HandleMetricsReportingCheckbox(const ListValue* args);
+
+  // Callback for the "defaultZoomLevelAction" message.  This is called if the
+  // user changes the default zoom level.  |args| is an array that contains
+  // one item, the zoom level as a numeric value.
+  void HandleDefaultZoomLevel(const ListValue* args);
+
 #if defined(OS_WIN)
   // Callback for the "Check SSL Revocation" checkbox.  This is needed so we
   // can support manual handling on Windows.
@@ -61,6 +72,14 @@ class AdvancedOptionsHandler
   // Callback for the "Use SSL2" checkbox.  This is needed so we can support
   // manual handling on Windows.
   void HandleUseSSL2Checkbox(const ListValue* args);
+
+  // Callback for the "Use SSL3" checkbox.  This is needed so we can support
+  // manual handling on Windows.
+  void HandleUseSSL3Checkbox(const ListValue* args);
+
+  // Callback for the "Use TLS1" checkbox.  This is needed so we can support
+  // manual handling on Windows.
+  void HandleUseTLS1Checkbox(const ListValue* args);
 
   // Callback for the "Show Gears Settings" button.
   void HandleShowGearsSettings(const ListValue* args);
@@ -78,8 +97,34 @@ class AdvancedOptionsHandler
   void ShowManageSSLCertificates(const ListValue* args);
 #endif
 
+#if !defined(OS_CHROMEOS)
+  // Callback for the Sign in to Cloud Print button.  This will start
+  // the authentication process.
+  void ShowCloudPrintSetupDialog(const ListValue* args);
+
+  // Callback for the Disable Cloud Print button.  This will sign out
+  // of cloud print.
+  void HandleDisableCloudPrintProxy(const ListValue* args);
+
+  // Callback for the Cloud Print manage button.  This will open a new
+  // tab pointed at the management URL.
+  void ShowCloudPrintManagePage(const ListValue* args);
+
+  // Pings the service to send us it's current notion of the enabled state.
+  void RefreshCloudPrintStatusFromService();
+
+  // Setup the enabled or disabled state of the cloud print proxy
+  // management UI.
+  void SetupCloudPrintProxySection();
+#endif
+
   // Setup the checked state for the metrics reporting checkbox.
   void SetupMetricsReportingCheckbox(bool user_changed);
+
+  // Setup the visibility for the metrics reporting setting.
+  void SetupMetricsReportingSettingVisibility();
+
+  void SetupDefaultZoomLevel();
 
   // Setup the download path based on user preferences.
   void SetupDownloadLocationPath();
@@ -99,14 +144,17 @@ class AdvancedOptionsHandler
 
 #if !defined(OS_CHROMEOS)
   BooleanPrefMember enable_metrics_recording_;
+  StringPrefMember cloud_print_proxy_email_;
+  bool cloud_print_proxy_ui_enabled_;
 #endif
 
   FilePathPrefMember default_download_location_;
   StringPrefMember auto_open_files_;
+  RealPrefMember default_zoom_level_;
   scoped_ptr<PrefSetObserver> proxy_prefs_;
   scoped_ptr<OptionsManagedBannerHandler> banner_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(AdvancedOptionsHandler);
 };
 
-#endif  // CHROME_BROWSER_DOM_UI_ADVANCED_OPTIONS_HANDLER_H_
+#endif  // CHROME_BROWSER_DOM_UI_OPTIONS_ADVANCED_OPTIONS_HANDLER_H_

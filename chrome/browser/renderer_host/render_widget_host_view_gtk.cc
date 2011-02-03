@@ -22,23 +22,21 @@
 #include "app/x11_util.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/histogram.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/renderer_host/backing_store_x.h"
-#include "chrome/browser/renderer_host/gpu_view_host.h"
 #include "chrome/browser/renderer_host/gtk_im_context_wrapper.h"
 #include "chrome/browser/renderer_host/gtk_key_bindings_handler.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
-#include "chrome/browser/renderer_host/video_layer_x.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/native_web_keyboard_event.h"
-#include "gfx/gtk_util.h"
+#include "gfx/gtk_preserve_window.h"
 #include "third_party/WebKit/WebKit/chromium/public/gtk/WebInputEventFactory.h"
 #include "webkit/glue/plugins/webplugin.h"
 #include "webkit/glue/webaccessibility.h"
@@ -48,20 +46,27 @@
 #include "views/widget/tooltip_window_gtk.h"
 #endif  // defined(OS_CHROMEOS)
 
-static const int kMaxWindowWidth = 4000;
-static const int kMaxWindowHeight = 4000;
-static const char* kRenderWidgetHostViewKey = "__RENDER_WIDGET_HOST_VIEW__";
+namespace {
+
+const int kMaxWindowWidth = 4000;
+const int kMaxWindowHeight = 4000;
+const char* kRenderWidgetHostViewKey = "__RENDER_WIDGET_HOST_VIEW__";
+
+// The duration of the fade-out animation. See |overlay_animation_|.
+const int kFadeEffectDuration = 300;
 
 #if defined(OS_CHROMEOS)
 // TODO(davemoore) Under Chromeos we are increasing the rate that the trackpad
 // generates events to get better precisions. Eventually we will coordinate the
 // driver and this setting to ensure they match.
-static const float kDefaultScrollPixelsPerTick = 20;
+const float kDefaultScrollPixelsPerTick = 20;
 #else
 // See WebInputEventFactor.cpp for a reason for this being the default
 // scroll size for linux.
-static const float kDefaultScrollPixelsPerTick = 160.0f / 3.0f;
+const float kDefaultScrollPixelsPerTick = 160.0f / 3.0f;
 #endif
+
+}  // namespace
 
 using WebKit::WebInputEventFactory;
 using WebKit::WebMouseWheelEvent;
@@ -71,17 +76,16 @@ using WebKit::WebMouseWheelEvent;
 class RenderWidgetHostViewGtkWidget {
  public:
   static GtkWidget* CreateNewWidget(RenderWidgetHostViewGtk* host_view) {
-    GtkWidget* widget = gtk_fixed_new();
+    GtkWidget* widget = gtk_preserve_window_new();
     gtk_widget_set_name(widget, "chrome-render-widget-host-view");
-    gtk_fixed_set_has_window(GTK_FIXED(widget), TRUE);
     // We manually double-buffer in Paint() because Paint() may or may not be
     // called in repsonse to an "expose-event" signal.
     gtk_widget_set_double_buffered(widget, FALSE);
     gtk_widget_set_redraw_on_allocate(widget, FALSE);
 #if defined(NDEBUG)
-    gtk_widget_modify_bg(widget, GTK_STATE_NORMAL, &gfx::kGdkWhite);
+    gtk_widget_modify_bg(widget, GTK_STATE_NORMAL, &gtk_util::kGdkWhite);
 #else
-    gtk_widget_modify_bg(widget, GTK_STATE_NORMAL, &gfx::kGdkGreen);
+    gtk_widget_modify_bg(widget, GTK_STATE_NORMAL, &gtk_util::kGdkGreen);
 #endif
     // Allow the browser window to be resized freely.
     gtk_widget_set_size_request(widget, 0, 0);
@@ -203,6 +207,9 @@ class RenderWidgetHostViewGtkWidget {
     if (!host_view->is_showing_context_menu_)
       host_view->GetRenderWidgetHost()->Blur();
 
+    // Prevents us from stealing input context focus in OnGrabNotify() handler.
+    host_view->was_focused_before_grab_ = false;
+
     // Disable the GtkIMContext object.
     host_view->im_context_->OnFocusOut();
 
@@ -265,6 +272,10 @@ class RenderWidgetHostViewGtkWidget {
       return FALSE;  // We do not forward any other buttons to the renderer.
     if (event->type == GDK_2BUTTON_PRESS || event->type == GDK_3BUTTON_PRESS)
       return FALSE;
+
+    // If we don't have focus already, this mouse click will focus us.
+    if (!gtk_widget_is_focus(widget))
+      host_view->host_->OnMouseActivate();
 
     // Confirm existing composition text on mouse click events, to make sure
     // the input caret won't be moved with an ongoing composition session.
@@ -353,9 +364,9 @@ class RenderWidgetHostViewGtkWidget {
 
   static gboolean ClientEvent(GtkWidget* widget, GdkEventClient* event,
                               RenderWidgetHostViewGtk* host_view) {
-    LOG(INFO) << "client event type: " << event->message_type
-              << " data_format: " << event->data_format
-              << " data: " << event->data.l;
+    VLOG(1) << "client event type: " << event->message_type
+            << " data_format: " << event->data_format
+            << " data: " << event->data.l;
     return true;
   }
 
@@ -365,6 +376,7 @@ class RenderWidgetHostViewGtkWidget {
   static float GetScrollPixelsPerTick() {
     static float scroll_pixels = -1;
     if (scroll_pixels < 0) {
+      // TODO(brettw): Remove the command line switch (crbug.com/63525)
       scroll_pixels = kDefaultScrollPixelsPerTick;
       CommandLine* command_line = CommandLine::ForCurrentProcess();
       std::string scroll_pixels_option =
@@ -471,12 +483,12 @@ RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
 
 RenderWidgetHostViewGtk::RenderWidgetHostViewGtk(RenderWidgetHost* widget_host)
     : host_(widget_host),
-      enable_gpu_rendering_(false),
       about_to_validate_and_paint_(false),
       is_hidden_(false),
       is_loading_(false),
       is_showing_context_menu_(false),
-      visually_deemphasized_(false),
+      overlay_color_(0),
+      overlay_animation_(this),
       parent_host_view_(NULL),
       parent_(NULL),
       is_popup_first_mouse_release_(true),
@@ -485,11 +497,6 @@ RenderWidgetHostViewGtk::RenderWidgetHostViewGtk(RenderWidgetHost* widget_host)
       dragged_at_horizontal_edge_(0),
       dragged_at_vertical_edge_(0) {
   host_->set_view(this);
-
-  // Enable experimental out-of-process GPU rendering.
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  enable_gpu_rendering_ =
-      command_line->HasSwitch(switches::kEnableGPURendering);
 }
 
 RenderWidgetHostViewGtk::~RenderWidgetHostViewGtk() {
@@ -507,6 +514,9 @@ void RenderWidgetHostViewGtk::InitAsChild() {
 #if defined(OS_CHROMEOS)
   tooltip_window_.reset(new views::TooltipWindowGtk(view_.get()));
 #endif  // defined(OS_CHROMEOS)
+
+  overlay_animation_.SetDuration(kFadeEffectDuration);
+  overlay_animation_.SetSlideDuration(kFadeEffectDuration);
 
   gtk_widget_show(view_.get());
 }
@@ -749,36 +759,9 @@ bool RenderWidgetHostViewGtk::IsPopup() {
 
 BackingStore* RenderWidgetHostViewGtk::AllocBackingStore(
     const gfx::Size& size) {
-  if (enable_gpu_rendering_) {
-    // Use a special GPU accelerated backing store.
-    if (!gpu_view_host_.get()) {
-      // Here we lazily make the GpuViewHost. This must be allocated when we
-      // have a native view realized, which happens sometime after creation
-      // when our owner puts us in the parent window.
-      DCHECK(GetNativeView());
-      XID window_xid = x11_util::GetX11WindowFromGtkWidget(GetNativeView());
-      gpu_view_host_.reset(new GpuViewHost(host_, window_xid));
-    }
-    return gpu_view_host_->CreateBackingStore(size);
-  }
-
   return new BackingStoreX(host_, size,
                            x11_util::GetVisualFromGtkWidget(view_.get()),
                            gtk_widget_get_visual(view_.get())->depth);
-}
-
-VideoLayer* RenderWidgetHostViewGtk::AllocVideoLayer(const gfx::Size& size) {
-  if (enable_gpu_rendering_) {
-    // TODO(scherkus): is it possible for a video layer to be allocated before a
-    // backing store?
-    DCHECK(gpu_view_host_.get())
-        << "AllocVideoLayer() called before AllocBackingStore()";
-    return gpu_view_host_->CreateVideoLayer(size);
-  }
-
-  return new VideoLayerX(host_, size,
-                         x11_util::GetVisualFromGtkWidget(view_.get()),
-                         gtk_widget_get_visual(view_.get())->depth);
 }
 
 void RenderWidgetHostViewGtk::SetBackground(const SkBitmap& background) {
@@ -839,21 +822,10 @@ void RenderWidgetHostViewGtk::ModifyEventForEdgeDragging(
 }
 
 void RenderWidgetHostViewGtk::Paint(const gfx::Rect& damage_rect) {
-  if (enable_gpu_rendering_) {
-    // When we're proxying painting, we don't actually display the web page
-    // ourselves.
-    if (gpu_view_host_.get())
-      gpu_view_host_->OnWindowPainted();
-
-    // Erase the background. This will prevent a flash of black when resizing
-    // or exposing the window. White is usually better than black.
-    return;
-  }
-
   // If the GPU process is rendering directly into the View,
   // call the compositor directly.
   RenderWidgetHost* render_widget_host = GetRenderWidgetHost();
-  if (render_widget_host->is_gpu_rendering_active()) {
+  if (render_widget_host->is_accelerated_compositing_active()) {
     host_->ScheduleComposite();
     return;
   }
@@ -876,26 +848,11 @@ void RenderWidgetHostViewGtk::Paint(const gfx::Rect& damage_rect) {
     // period where this object isn't attached to a window but hasn't been
     // Destroy()ed yet and it receives paint messages...
     if (window) {
-      gfx::Rect drop_shadow_area(0, 0, kMaxWindowWidth,
-                                 gtk_util::kInfoBarDropShadowHeight);
-      bool drop_shadow = host_->IsRenderView() &&
-          static_cast<RenderViewHost*>(host_)->delegate()->GetViewDelegate()->
-              ShouldDrawDropShadow() &&
-          drop_shadow_area.Intersects(paint_rect);
-
-      if (!visually_deemphasized_ && !drop_shadow) {
+      if (SkColorGetA(overlay_color_) == 0) {
         // In the common case, use XCopyArea. We don't draw more than once, so
         // we don't need to double buffer.
-        backing_store->XShowRect(
+        backing_store->XShowRect(gfx::Point(0, 0),
             paint_rect, x11_util::GetX11WindowFromGtkWidget(view_.get()));
-
-        // Paint the video layer using XCopyArea.
-        // TODO(scherkus): implement VideoLayerX::CairoShow() for grey
-        // blending.
-        VideoLayerX* video_layer = static_cast<VideoLayerX*>(
-            host_->video_layer());
-        if (video_layer)
-          video_layer->XShow(x11_util::GetX11WindowFromGtkWidget(view_.get()));
       } else {
         // If the grey blend is showing, we make two drawing calls. Use double
         // buffering to prevent flicker. Use CairoShowRect because XShowRect
@@ -915,15 +872,17 @@ void RenderWidgetHostViewGtk::Paint(const gfx::Rect& damage_rect) {
         backing_store->CairoShowRect(damage_rect, GDK_DRAWABLE(window));
 
         cairo_t* cr = gdk_cairo_create(window);
-        if (visually_deemphasized_) {
-          gdk_cairo_rectangle(cr, &rect);
-          cairo_set_source_rgba(cr, 0, 0, 0, 0.7);
-          cairo_fill(cr);
-        }
-        if (drop_shadow) {
-          gtk_util::DrawTopDropShadowForRenderView(
-              cr, gfx::Point(), damage_rect);
-        }
+        gdk_cairo_rectangle(cr, &rect);
+        SkColor overlay = SkColorSetA(
+            overlay_color_,
+            SkColorGetA(overlay_color_) *
+                overlay_animation_.GetCurrentValue());
+        float r = SkColorGetR(overlay) / 255.;
+        float g = SkColorGetG(overlay) / 255.;
+        float b = SkColorGetB(overlay) / 255.;
+        float a = SkColorGetA(overlay) / 255.;
+        cairo_set_source_rgba(cr, r, g, b, a);
+        cairo_fill(cr);
         cairo_destroy(cr);
 
         gdk_window_end_paint(window);
@@ -961,40 +920,34 @@ void RenderWidgetHostViewGtk::ShowCurrentCursor() {
   if (!view_.get()->window)
     return;
 
+  // TODO(port): WebKit bug https://bugs.webkit.org/show_bug.cgi?id=16388 is
+  // that calling gdk_window_set_cursor repeatedly is expensive.  We should
+  // avoid it here where possible.
   GdkCursor* gdk_cursor;
-  switch (current_cursor_.GetCursorType()) {
-    case GDK_CURSOR_IS_PIXMAP:
-      // TODO(port): WebKit bug https://bugs.webkit.org/show_bug.cgi?id=16388 is
-      // that calling gdk_window_set_cursor repeatedly is expensive.  We should
-      // avoid it here where possible.
-      gdk_cursor = current_cursor_.GetCustomCursor();
-      break;
-
-    case GDK_LAST_CURSOR:
-      if (is_loading_) {
-        // Use MOZ_CURSOR_SPINNING if we are showing the default cursor and
-        // the page is loading.
-        static const GdkColor fg = { 0, 0, 0, 0 };
-        static const GdkColor bg = { 65535, 65535, 65535, 65535 };
-        GdkPixmap* source =
-            gdk_bitmap_create_from_data(NULL, moz_spinning_bits, 32, 32);
-        GdkPixmap* mask =
-            gdk_bitmap_create_from_data(NULL, moz_spinning_mask_bits, 32, 32);
-        gdk_cursor = gdk_cursor_new_from_pixmap(source, mask, &fg, &bg, 2, 2);
-        g_object_unref(source);
-        g_object_unref(mask);
-      } else {
-        gdk_cursor = NULL;
-      }
-      break;
-
-    default:
-      gdk_cursor = gtk_util::GetCursor(
-          static_cast<GdkCursorType>(current_cursor_.GetCursorType()));
+  bool should_unref = false;
+  if (current_cursor_.GetCursorType() == GDK_LAST_CURSOR) {
+    if (is_loading_) {
+      // Use MOZ_CURSOR_SPINNING if we are showing the default cursor and
+      // the page is loading.
+      static const GdkColor fg = { 0, 0, 0, 0 };
+      static const GdkColor bg = { 65535, 65535, 65535, 65535 };
+      GdkPixmap* source =
+        gdk_bitmap_create_from_data(NULL, moz_spinning_bits, 32, 32);
+      GdkPixmap* mask =
+        gdk_bitmap_create_from_data(NULL, moz_spinning_mask_bits, 32, 32);
+      gdk_cursor = gdk_cursor_new_from_pixmap(source, mask, &fg, &bg, 2, 2);
+      should_unref = true;
+      g_object_unref(source);
+      g_object_unref(mask);
+    } else {
+      gdk_cursor = NULL;
+    }
+  } else {
+    gdk_cursor = current_cursor_.GetNativeCursor();
   }
   gdk_window_set_cursor(view_.get()->window, gdk_cursor);
   // The window now owns the cursor.
-  if (gdk_cursor)
+  if (should_unref && gdk_cursor)
     gdk_cursor_unref(gdk_cursor);
 }
 
@@ -1096,12 +1049,22 @@ void RenderWidgetHostViewGtk::DestroyPluginContainer(
   plugin_container_manager_.DestroyPluginContainer(id);
 }
 
-void RenderWidgetHostViewGtk::SetVisuallyDeemphasized(bool deemphasized) {
-  if (deemphasized == visually_deemphasized_)
+void RenderWidgetHostViewGtk::SetVisuallyDeemphasized(
+    const SkColor* color, bool animate) {
+  // Do nothing unless |color| has changed, meaning |animate| is only
+  // respected for the first call.
+  if (color && (*color == overlay_color_))
     return;
 
-  visually_deemphasized_ = deemphasized;
-  gtk_widget_queue_draw(view_.get());
+  overlay_color_ = color ? *color : 0;
+
+  if (animate) {
+    overlay_animation_.Reset();
+    overlay_animation_.Show();
+  } else {
+    overlay_animation_.Reset(1.0);
+    gtk_widget_queue_draw(view_.get());
+  }
 }
 
 bool RenderWidgetHostViewGtk::ContainsNativeView(
@@ -1110,6 +1073,13 @@ bool RenderWidgetHostViewGtk::ContainsNativeView(
   NOTREACHED() <<
     "RenderWidgetHostViewGtk::ContainsNativeView not implemented.";
   return false;
+}
+
+void RenderWidgetHostViewGtk::AcceleratedCompositingActivated(bool activated) {
+  GtkPreserveWindow* widget =
+    reinterpret_cast<GtkPreserveWindow*>(view_.get());
+
+  gtk_preserve_window_delegate_resize(widget, activated);
 }
 
 void RenderWidgetHostViewGtk::ForwardKeyboardEvent(
@@ -1123,6 +1093,18 @@ void RenderWidgetHostViewGtk::ForwardKeyboardEvent(
     host_->ForwardEditCommandsForNextKeyEvent(edit_commands);
   }
   host_->ForwardKeyboardEvent(event);
+}
+
+void RenderWidgetHostViewGtk::AnimationEnded(const Animation* animation) {
+  gtk_widget_queue_draw(view_.get());
+}
+
+void RenderWidgetHostViewGtk::AnimationProgressed(const Animation* animation) {
+  gtk_widget_queue_draw(view_.get());
+}
+
+void RenderWidgetHostViewGtk::AnimationCanceled(const Animation* animation) {
+  gtk_widget_queue_draw(view_.get());
 }
 
 // static

@@ -11,19 +11,18 @@
 #include "app/l10n_util.h"
 #include "app/x11_util.h"
 #include "base/command_line.h"
-#include "base/histogram.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/task.h"
 #include "base/time.h"
 #include "chrome/browser/renderer_host/backing_store_x.h"
-#include "chrome/browser/renderer_host/gpu_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
-#include "chrome/browser/renderer_host/video_layer_x.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/render_messages.h"
+#include "gfx/canvas.h"
 #include "third_party/WebKit/WebKit/chromium/public/gtk/WebInputEventFactory.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
 #include "views/event.h"
@@ -35,6 +34,80 @@ static const char* kRenderWidgetHostViewKey = "__RENDER_WIDGET_HOST_VIEW__";
 
 using WebKit::WebInputEventFactory;
 using WebKit::WebMouseWheelEvent;
+using WebKit::WebTouchEvent;
+
+namespace {
+
+int WebInputEventFlagsFromViewsEvent(const views::Event& event) {
+  int modifiers = 0;
+
+  if (event.IsShiftDown())
+    modifiers |= WebKit::WebInputEvent::ShiftKey;
+  if (event.IsControlDown())
+    modifiers |= WebKit::WebInputEvent::ControlKey;
+  if (event.IsAltDown())
+    modifiers |= WebKit::WebInputEvent::AltKey;
+  if (event.IsCapsLockDown())
+    modifiers |= WebKit::WebInputEvent::CapsLockOn;
+
+  return modifiers;
+}
+
+WebKit::WebTouchPoint::State TouchPointStateFromEvent(
+    const views::TouchEvent* event) {
+  switch (event->GetType()) {
+    case views::Event::ET_TOUCH_PRESSED:
+      return WebKit::WebTouchPoint::StatePressed;
+    case views::Event::ET_TOUCH_RELEASED:
+      return WebKit::WebTouchPoint::StateReleased;
+    case views::Event::ET_TOUCH_MOVED:
+      return WebKit::WebTouchPoint::StateMoved;
+    case views::Event::ET_TOUCH_CANCELLED:
+      return WebKit::WebTouchPoint::StateCancelled;
+    default:
+      return WebKit::WebTouchPoint::StateUndefined;
+  }
+}
+
+WebKit::WebInputEvent::Type TouchEventTypeFromEvent(
+    const views::TouchEvent* event) {
+  switch (event->GetType()) {
+    case views::Event::ET_TOUCH_PRESSED:
+      return WebKit::WebInputEvent::TouchStart;
+    case views::Event::ET_TOUCH_RELEASED:
+      return WebKit::WebInputEvent::TouchEnd;
+    case views::Event::ET_TOUCH_MOVED:
+      return WebKit::WebInputEvent::TouchMove;
+    case views::Event::ET_TOUCH_CANCELLED:
+      return WebKit::WebInputEvent::TouchCancel;
+    default:
+      return WebKit::WebInputEvent::Undefined;
+  }
+}
+
+void UpdateTouchPointPosition(const views::TouchEvent* event,
+                              const gfx::Point& origin,
+                              WebKit::WebTouchPoint* tpoint) {
+  tpoint->position.x = event->x();
+  tpoint->position.y = event->y();
+
+  tpoint->screenPosition.x = tpoint->position.x + origin.x();
+  tpoint->screenPosition.y = tpoint->position.y + origin.y();
+}
+
+void InitializeWebMouseEventFromViewsEvent(const views::LocatedEvent& e,
+                                           const gfx::Point& origin,
+                                           WebKit::WebMouseEvent* wmevent) {
+  wmevent->timeStampSeconds = base::Time::Now().ToDoubleT();
+  wmevent->modifiers = WebInputEventFlagsFromViewsEvent(e);
+
+  wmevent->windowX = wmevent->x = e.x();
+  wmevent->windowY = wmevent->y = e.y();
+  wmevent->globalX = wmevent->x + origin.x();
+  wmevent->globalY = wmevent->y + origin.y();
+}
+
+}  // namespace
 
 // static
 RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
@@ -44,22 +117,20 @@ RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
 
 RenderWidgetHostViewViews::RenderWidgetHostViewViews(RenderWidgetHost* host)
     : host_(host),
-      enable_gpu_rendering_(false),
       about_to_validate_and_paint_(false),
       is_hidden_(false),
       is_loading_(false),
+      native_cursor_(NULL),
       is_showing_context_menu_(false),
-      visually_deemphasized_(false) {
+      visually_deemphasized_(false),
+      touch_event_()
+    {
   SetFocusable(true);
   host_->set_view(this);
-
-  // Enable experimental out-of-process GPU rendering.
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  enable_gpu_rendering_ =
-      command_line->HasSwitch(switches::kEnableGPURendering);
 }
 
 RenderWidgetHostViewViews::~RenderWidgetHostViewViews() {
+  RenderViewGone();
 }
 
 void RenderWidgetHostViewViews::InitAsChild() {
@@ -113,7 +184,7 @@ void RenderWidgetHostViewViews::SetSize(const gfx::Size& size) {
   if (requested_size_.width() != width ||
       requested_size_.height() != height) {
     requested_size_ = gfx::Size(width, height);
-    SetBounds(GetViewBounds());
+    SetBounds(gfx::Rect(x(), y(), width, height));
     host_->WasResized();
   }
 }
@@ -145,7 +216,6 @@ void RenderWidgetHostViewViews::Blur() {
   // way to do that without focusing another widget.
   host_->Blur();
 }
-
 
 bool RenderWidgetHostViewViews::IsShowing() {
   return IsVisible();
@@ -216,6 +286,7 @@ void RenderWidgetHostViewViews::DidUpdateBackingStore(
 }
 
 void RenderWidgetHostViewViews::RenderViewGone() {
+  GetRenderWidgetHost()->ViewDestroyed();
   Destroy();
 }
 
@@ -249,40 +320,15 @@ bool RenderWidgetHostViewViews::IsPopup() {
 
 BackingStore* RenderWidgetHostViewViews::AllocBackingStore(
     const gfx::Size& size) {
-  if (enable_gpu_rendering_) {
-    // Use a special GPU accelerated backing store.
-    if (!gpu_view_host_.get()) {
-      // Here we lazily make the GpuViewHost. This must be allocated when we
-      // have a native view realized, which happens sometime after creation
-      // when our owner puts us in the parent window.
-      DCHECK(GetNativeView());
-      XID window_xid = x11_util::GetX11WindowFromGtkWidget(GetNativeView());
-      gpu_view_host_.reset(new GpuViewHost(host_, window_xid));
-    }
-    return gpu_view_host_->CreateBackingStore(size);
-  }
-
   return new BackingStoreX(host_, size,
                            x11_util::GetVisualFromGtkWidget(native_view()),
                            gtk_widget_get_visual(native_view())->depth);
 }
 
 gfx::NativeView RenderWidgetHostViewViews::native_view() const {
-  return GetWidget()->GetNativeView();
-}
-
-VideoLayer* RenderWidgetHostViewViews::AllocVideoLayer(const gfx::Size& size) {
-  if (enable_gpu_rendering_) {
-    // TODO(scherkus): is it possible for a video layer to be allocated before a
-    // backing store?
-    DCHECK(gpu_view_host_.get())
-        << "AllocVideoLayer() called before AllocBackingStore()";
-    return gpu_view_host_->CreateVideoLayer(size);
-  }
-
-  return new VideoLayerX(host_, size,
-                         x11_util::GetVisualFromGtkWidget(native_view()),
-                         gtk_widget_get_visual(native_view())->depth);
+  if (GetWidget())
+    return GetWidget()->GetNativeView();
+  return NULL;
 }
 
 void RenderWidgetHostViewViews::SetBackground(const SkBitmap& background) {
@@ -291,21 +337,20 @@ void RenderWidgetHostViewViews::SetBackground(const SkBitmap& background) {
 }
 
 void RenderWidgetHostViewViews::Paint(gfx::Canvas* canvas) {
-  if (enable_gpu_rendering_) {
-    // When we're proxying painting, we don't actually display the web page
-    // ourselves.
-    if (gpu_view_host_.get())
-      gpu_view_host_->OnWindowPainted();
-
-    // Erase the background. This will prevent a flash of black when resizing
-    // or exposing the window. White is usually better than black.
+  if (is_hidden_) {
     return;
   }
+
+  // Paint a "hole" in the canvas so that the render of the web page is on
+  // top of whatever else has already been painted in the views hierarchy.
+  // Later views might still get to paint on top.
+  canvas->FillRectInt(SK_ColorBLACK, 0, 0, kMaxWindowWidth, kMaxWindowHeight,
+                      SkXfermode::kClear_Mode);
 
   // Don't do any painting if the GPU process is rendering directly
   // into the View.
   RenderWidgetHost* render_widget_host = GetRenderWidgetHost();
-  if (render_widget_host->is_gpu_rendering_active()) {
+  if (render_widget_host->is_accelerated_compositing_active()) {
     return;
   }
 
@@ -313,8 +358,11 @@ void RenderWidgetHostViewViews::Paint(gfx::Canvas* canvas) {
   DCHECK(!about_to_validate_and_paint_);
 
   // TODO(anicolao): get the damage somehow
-  //invalid_rect_ = damage_rect;
+  // invalid_rect_ = damage_rect;
   invalid_rect_ = bounds();
+  gfx::Point origin;
+  ConvertPointToWidget(this, &origin);
+
   about_to_validate_and_paint_ = true;
   BackingStoreX* backing_store = static_cast<BackingStoreX*>(
       host_->GetBackingStore(true));
@@ -332,17 +380,8 @@ void RenderWidgetHostViewViews::Paint(gfx::Canvas* canvas) {
       if (!visually_deemphasized_) {
         // In the common case, use XCopyArea. We don't draw more than once, so
         // we don't need to double buffer.
-        backing_store->XShowRect(
+        backing_store->XShowRect(origin,
             paint_rect, x11_util::GetX11WindowFromGtkWidget(native_view()));
-
-        // Paint the video layer using XCopyArea.
-        // TODO(scherkus): implement VideoLayerX::CairoShow() for grey
-        // blending.
-        VideoLayerX* video_layer = static_cast<VideoLayerX*>(
-            host_->video_layer());
-        if (video_layer)
-          video_layer->XShow(
-              x11_util::GetX11WindowFromGtkWidget(native_view()));
       } else {
         // If the grey blend is showing, we make two drawing calls. Use double
         // buffering to prevent flicker. Use CairoShowRect because XShowRect
@@ -388,34 +427,20 @@ void RenderWidgetHostViewViews::Paint(gfx::Canvas* canvas) {
   }
 }
 
+gfx::NativeCursor RenderWidgetHostViewViews::GetCursorForPoint(
+    views::Event::EventType type, const gfx::Point& point) {
+  return native_cursor_;
+}
+
 bool RenderWidgetHostViewViews::OnMousePressed(const views::MouseEvent& event) {
   RequestFocus();
 
   // TODO(anicolao): validate event generation.
-  WebKit::WebMouseEvent e;
-  e.timeStampSeconds = base::Time::Now().ToDoubleT();
-  e.modifiers = 0;
-  if (event.IsMiddleMouseButton()) {
-    e.modifiers |= WebKit::WebInputEvent::MiddleButtonDown;
-    e.button = WebKit::WebMouseEvent::ButtonMiddle;
-  }
-  if (event.IsRightMouseButton()) {
-    e.modifiers |= WebKit::WebInputEvent::RightButtonDown;
-    e.button = WebKit::WebMouseEvent::ButtonRight;
-  }
-  if (event.IsLeftMouseButton()) {
-    e.modifiers |= WebKit::WebInputEvent::LeftButtonDown;
-    e.button = WebKit::WebMouseEvent::ButtonLeft;
-  }
-  e.windowX = e.x = event.x();
-  e.windowY = e.y = event.y();
-  int x, y;
-  gdk_window_get_origin(GetNativeView()->window, &x, &y);
-  e.globalX = e.x + x;
-  e.globalY = e.y + y;
-  e.clickCount = 1;
+  WebKit::WebMouseEvent e = WebMouseEventFromViewsEvent(event);
+
   // TODO(anicolao): deal with double clicks
   e.type = WebKit::WebInputEvent::MouseDown;
+  e.clickCount = 1;
 
   GetRenderWidgetHost()->ForwardMouseEvent(e);
   return true;
@@ -423,28 +448,11 @@ bool RenderWidgetHostViewViews::OnMousePressed(const views::MouseEvent& event) {
 
 void RenderWidgetHostViewViews::OnMouseReleased(const views::MouseEvent& event,
                                                 bool canceled) {
-  WebKit::WebMouseEvent e;
-  e.timeStampSeconds = base::Time::Now().ToDoubleT();
-  e.windowX = e.x = event.x();
-  e.windowY = e.y = event.y();
-  int x, y;
-  gdk_window_get_origin(GetNativeView()->window, &x, &y);
-  e.globalX = e.x + x;
-  e.globalY = e.y + y;
-  e.clickCount = 1;
+  WebKit::WebMouseEvent e = WebMouseEventFromViewsEvent(event);
+
   e.type = WebKit::WebInputEvent::MouseUp;
-  if (event.IsMiddleMouseButton()) {
-    e.modifiers |= WebKit::WebInputEvent::MiddleButtonDown;
-    e.button = WebKit::WebMouseEvent::ButtonMiddle;
-  }
-  if (event.IsRightMouseButton()) {
-    e.modifiers |= WebKit::WebInputEvent::RightButtonDown;
-    e.button = WebKit::WebMouseEvent::ButtonRight;
-  }
-  if (event.IsLeftMouseButton()) {
-    e.modifiers |= WebKit::WebInputEvent::LeftButtonDown;
-    e.button = WebKit::WebMouseEvent::ButtonLeft;
-  }
+  e.clickCount = 1;
+
   GetRenderWidgetHost()->ForwardMouseEvent(e);
 }
 
@@ -454,24 +462,10 @@ bool RenderWidgetHostViewViews::OnMouseDragged(const views::MouseEvent& event) {
 }
 
 void RenderWidgetHostViewViews::OnMouseMoved(const views::MouseEvent& event) {
-  WebKit::WebMouseEvent e;
-  e.timeStampSeconds = base::Time::Now().ToDoubleT();
-  e.windowX = e.x = event.x();
-  e.windowY = e.y = event.y();
-  int x, y;
-  gdk_window_get_origin(GetNativeView()->window, &x, &y);
-  e.globalX = e.x + x;
-  e.globalY = e.y + y;
+  WebKit::WebMouseEvent e = WebMouseEventFromViewsEvent(event);
+
   e.type = WebKit::WebInputEvent::MouseMove;
-  if (event.IsMiddleMouseButton()) {
-    e.modifiers |= WebKit::WebInputEvent::MiddleButtonDown;
-  }
-  if (event.IsRightMouseButton()) {
-    e.modifiers |= WebKit::WebInputEvent::RightButtonDown;
-  }
-  if (event.IsLeftMouseButton()) {
-    e.modifiers |= WebKit::WebInputEvent::LeftButtonDown;
-  }
+
   GetRenderWidgetHost()->ForwardMouseEvent(e);
 }
 
@@ -484,8 +478,18 @@ void RenderWidgetHostViewViews::OnMouseExited(const views::MouseEvent& event) {
 }
 
 bool RenderWidgetHostViewViews::OnMouseWheel(const views::MouseWheelEvent& e) {
-  NOTIMPLEMENTED();
-  return false;
+  WebMouseWheelEvent wmwe;
+  InitializeWebMouseEventFromViewsEvent(e, GetPosition(), &wmwe);
+
+  wmwe.type = WebKit::WebInputEvent::MouseWheel;
+  wmwe.button = WebKit::WebMouseEvent::ButtonNone;
+
+  // TODO(sadrul): How do we determine if it's a horizontal scroll?
+  wmwe.deltaY = e.GetOffset();
+  wmwe.wheelTicksY = wmwe.deltaY > 0 ? 1 : -1;
+
+  GetRenderWidgetHost()->ForwardWheelEvent(wmwe);
+  return true;
 }
 
 bool RenderWidgetHostViewViews::OnKeyPressed(const views::KeyEvent &e) {
@@ -499,11 +503,10 @@ bool RenderWidgetHostViewViews::OnKeyPressed(const views::KeyEvent &e) {
 
   wke.text[0] = wke.unmodifiedText[0] =
     static_cast<unsigned short>(gdk_keyval_to_unicode(
-          app::GdkKeyCodeForWindowsKeyCode(e.GetKeyCode(), false /*shift*/)));
+          app::GdkKeyCodeForWindowsKeyCode(e.GetKeyCode(),
+              e.IsShiftDown() ^ e.IsCapsLockDown())));
 
-  // If ctrl key is pressed down, then control character shall be input.
-  // TODO(anicolao): deal with modifiers
-
+  wke.modifiers = WebInputEventFlagsFromViewsEvent(e);
   ForwardKeyboardEvent(wke);
 
   // send the keypress event
@@ -564,7 +567,7 @@ void RenderWidgetHostViewViews::DidGainFocus() {
 void RenderWidgetHostViewViews::WillLoseFocus() {
   // If we are showing a context menu, maintain the illusion that webkit has
   // focus.
-  if (!is_showing_context_menu_)
+  if (!is_showing_context_menu_ && !is_hidden_)
     GetRenderWidgetHost()->Blur();
 }
 
@@ -572,10 +575,10 @@ void RenderWidgetHostViewViews::WillLoseFocus() {
 void RenderWidgetHostViewViews::ShowCurrentCursor() {
   // The widget may not have a window. If that's the case, abort mission. This
   // is the same issue as that explained above in Paint().
-  if (!native_view()->window)
+  if (!native_view() || !native_view()->window)
     return;
 
-  // TODO(anicolao): change to set cursors without GTK
+  native_cursor_ = current_cursor_.GetNativeCursor();
 }
 
 void RenderWidgetHostViewViews::CreatePluginContainer(
@@ -588,7 +591,8 @@ void RenderWidgetHostViewViews::DestroyPluginContainer(
   // TODO(anicolao): plugin_container_manager_.DestroyPluginContainer(id);
 }
 
-void RenderWidgetHostViewViews::SetVisuallyDeemphasized(bool deemphasized) {
+void RenderWidgetHostViewViews::SetVisuallyDeemphasized(
+    const SkColor* color, bool animate) {
   // TODO(anicolao)
 }
 
@@ -598,6 +602,36 @@ bool RenderWidgetHostViewViews::ContainsNativeView(
   NOTREACHED() <<
     "RenderWidgetHostViewViews::ContainsNativeView not implemented.";
   return false;
+}
+
+void RenderWidgetHostViewViews::AcceleratedCompositingActivated(
+    bool activated) {
+  // TODO(anicolao): figure out if we need something here
+  if (activated)
+    NOTIMPLEMENTED();
+}
+
+WebKit::WebMouseEvent RenderWidgetHostViewViews::WebMouseEventFromViewsEvent(
+    const views::MouseEvent& event) {
+  WebKit::WebMouseEvent wmevent;
+  InitializeWebMouseEventFromViewsEvent(event, GetPosition(), &wmevent);
+
+  // Setting |wmevent.button| is not necessary for -move events, but it is
+  // necessary for -clicks and -drags.
+  if (event.IsMiddleMouseButton()) {
+    wmevent.modifiers |= WebKit::WebInputEvent::MiddleButtonDown;
+    wmevent.button = WebKit::WebMouseEvent::ButtonMiddle;
+  }
+  if (event.IsRightMouseButton()) {
+    wmevent.modifiers |= WebKit::WebInputEvent::RightButtonDown;
+    wmevent.button = WebKit::WebMouseEvent::ButtonRight;
+  }
+  if (event.IsLeftMouseButton()) {
+    wmevent.modifiers |= WebKit::WebInputEvent::LeftButtonDown;
+    wmevent.button = WebKit::WebMouseEvent::ButtonLeft;
+  }
+
+  return wmevent;
 }
 
 void RenderWidgetHostViewViews::ForwardKeyboardEvent(
@@ -614,6 +648,75 @@ TODO(bryeung): key bindings
   }
 #endif
   host_->ForwardKeyboardEvent(event);
+}
+
+bool RenderWidgetHostViewViews::OnTouchEvent(const views::TouchEvent& e) {
+  // Update the list of touch points first.
+  WebKit::WebTouchPoint* point = NULL;
+
+  switch (e.GetType()) {
+    case views::Event::ET_TOUCH_PRESSED:
+      // Add a new touch point.
+      if (touch_event_.touchPointsLength <
+          WebTouchEvent::touchPointsLengthCap) {
+        point = &touch_event_.touchPoints[touch_event_.touchPointsLength++];
+        point->id = e.identity();
+      }
+      break;
+    case views::Event::ET_TOUCH_RELEASED:
+    case views::Event::ET_TOUCH_CANCELLED:
+    case views::Event::ET_TOUCH_MOVED: {
+      // The touch point should have been added to the event from an earlier
+      // _PRESSED event. So find that.
+      // At the moment, only a maximum of 4 touch-points are allowed. So a
+      // simple loop should be sufficient.
+      for (int i = 0; i < WebTouchEvent::touchPointsLengthCap; ++i) {
+        point = touch_event_.touchPoints + i;
+        if (point->id == e.identity()) {
+          break;
+        }
+        point = NULL;
+      }
+      DCHECK(point != NULL) << "Touchpoint not found for event " << e.GetType();
+      break;
+    }
+    default:
+      DLOG(WARNING) << "Unknown touch event " << e.GetType();
+      break;
+  }
+
+  if (!point)
+    return false;
+
+  // Update the location and state of the point.
+  UpdateTouchPointPosition(&e, GetPosition(), point);
+  point->state = TouchPointStateFromEvent(&e);
+
+  // Mark the rest of the points as stationary.
+  for (int i = 0; i < touch_event_.touchPointsLength; ++i) {
+    WebKit::WebTouchPoint* iter = touch_event_.touchPoints + i;
+    if (iter != point) {
+      iter->state = WebKit::WebTouchPoint::StateStationary;
+    }
+  }
+
+  // Update the type of the touch event.
+  touch_event_.type = TouchEventTypeFromEvent(&e);
+
+  // The event and all the touches have been updated. Dispatch.
+  host_->ForwardTouchEvent(touch_event_);
+
+  // If the touch was released, then remove it from the list of touch points.
+  if (e.GetType() == views::Event::ET_TOUCH_RELEASED) {
+    --touch_event_.touchPointsLength;
+    for (int i = point - touch_event_.touchPoints;
+         i < touch_event_.touchPointsLength;
+         ++i) {
+      touch_event_.touchPoints[i] = touch_event_.touchPoints[i + 1];
+    }
+  }
+
+  return true;
 }
 
 // static

@@ -11,17 +11,18 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/scoped_bstr_win.h"
 #include "base/singleton.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/trace_event.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/scoped_bstr.h"
+#include "base/win/scoped_variant.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -204,7 +205,7 @@ void ChromeFrameActivex::OnMessageFromChromeFrame(int tab_handle,
                                                   const std::string& message,
                                                   const std::string& origin,
                                                   const std::string& target) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
 
   if (target.compare("*") != 0) {
     bool drop = true;
@@ -214,7 +215,7 @@ void ChromeFrameActivex::OnMessageFromChromeFrame(int tab_handle,
       ScopedComPtr<IDispatch> message_event;
       if (SUCCEEDED(CreateDomEvent("message", message, origin,
                                    message_event.Receive()))) {
-        ScopedBstr target_bstr(UTF8ToWide(target).c_str());
+        base::win::ScopedBstr target_bstr(UTF8ToWide(target).c_str());
         Fire_onprivatemessage(message_event, target_bstr);
 
         FireEvent(onprivatemessage_, message_event, target_bstr);
@@ -239,17 +240,41 @@ void ChromeFrameActivex::OnMessageFromChromeFrame(int tab_handle,
 
     FireEvent(onmessage_, message_event);
 
-    ScopedVariant event_var;
+    base::win::ScopedVariant event_var;
     event_var.Set(static_cast<IDispatch*>(message_event));
     InvokeScriptFunction(onmessage_handler_, event_var.AsInput());
   }
+}
+
+bool ChromeFrameActivex::ShouldShowVersionMismatchDialog(
+    bool is_privileged,
+    IOleClientSite* client_site) {
+  if (!is_privileged) {
+    return true;
+  }
+
+  if (client_site) {
+    ScopedComPtr<IChromeFramePrivileged> service;
+    HRESULT hr = DoQueryService(SID_ChromeFramePrivileged,
+                                client_site,
+                                service.Receive());
+    if (SUCCEEDED(hr) && service) {
+      return (S_FALSE != service->ShouldShowVersionMismatchDialog());
+    }
+  }
+
+  NOTREACHED();
+  return true;
 }
 
 void ChromeFrameActivex::OnAutomationServerLaunchFailed(
     AutomationLaunchResult reason, const std::string& server_version) {
   Base::OnAutomationServerLaunchFailed(reason, server_version);
 
-  if (reason == AUTOMATION_VERSION_MISMATCH) {
+  if (reason == AUTOMATION_VERSION_MISMATCH &&
+      ShouldShowVersionMismatchDialog(is_privileged_, m_spClientSite)) {
+    THREAD_SAFE_UMA_HISTOGRAM_COUNTS(
+        "ChromeFrame.VersionMismatchDisplayed", 1);
     DisplayVersionMismatchWarning(m_hWnd, server_version);
   }
 }
@@ -258,7 +283,7 @@ void ChromeFrameActivex::OnExtensionInstalled(
     const FilePath& path,
     void* user_data,
     AutomationMsg_ExtensionResponseValues response) {
-  ScopedBstr path_str(path.value().c_str());
+  base::win::ScopedBstr path_str(path.value().c_str());
   Fire_onextensionready(path_str, response);
 }
 
@@ -313,10 +338,10 @@ STDMETHODIMP ChromeFrameActivex::Load(IPropertyBag* bag, IErrorLog* error_log) {
     (L"onreadystatechanged"),
   };
 
-  ScopedComPtr<IHTMLObjectElement> obj_element;
+  base::win::ScopedComPtr<IHTMLObjectElement> obj_element;
   GetObjectElement(obj_element.Receive());
 
-  ScopedBstr object_id;
+  base::win::ScopedBstr object_id;
   GetObjectScriptId(obj_element, object_id.Receive());
 
   ScopedComPtr<IHTMLElement2> element;
@@ -324,8 +349,8 @@ STDMETHODIMP ChromeFrameActivex::Load(IPropertyBag* bag, IErrorLog* error_log) {
   HRESULT hr = S_OK;
 
   for (int i = 0; SUCCEEDED(hr) && i < arraysize(event_props); ++i) {
-    ScopedBstr prop(event_props[i]);
-    ScopedVariant value;
+    base::win::ScopedBstr prop(event_props[i]);
+    base::win::ScopedVariant value;
     if (SUCCEEDED(bag->Read(prop, value.Receive(), error_log))) {
       if (value.type() != VT_BSTR ||
           FAILED(hr = CreateScriptBlockForEvent(element, object_id,
@@ -334,25 +359,26 @@ STDMETHODIMP ChromeFrameActivex::Load(IPropertyBag* bag, IErrorLog* error_log) {
                     << base::StringPrintf(L"hr=0x%08X, vt=%i", hr,
                                          value.type());
       } else {
-        DLOG(INFO) << "script block created for event " << prop <<
-            base::StringPrintf(" (0x%08X)", hr) << " connections: " <<
+        DVLOG(1) << "script block created for event " << prop
+                 << base::StringPrintf(" (0x%08X)", hr) << " connections: " <<
             ProxyDIChromeFrameEvents<ChromeFrameActivex>::m_vec.GetSize();
       }
     } else {
-      DLOG(INFO) << "event property " << prop << " not in property bag";
+      DVLOG(1) << "event property " << prop << " not in property bag";
     }
   }
 
-  ScopedVariant src;
-  if (SUCCEEDED(bag->Read(StackBstr(L"src"), src.Receive(), error_log))) {
+  base::win::ScopedVariant src;
+  if (SUCCEEDED(bag->Read(base::win::ScopedBstr(L"src"), src.Receive(),
+                          error_log))) {
     if (src.type() == VT_BSTR) {
       hr = put_src(V_BSTR(&src));
       DCHECK(hr != E_UNEXPECTED);
     }
   }
 
-  ScopedVariant use_chrome_network;
-  if (SUCCEEDED(bag->Read(StackBstr(L"useChromeNetwork"),
+  base::win::ScopedVariant use_chrome_network;
+  if (SUCCEEDED(bag->Read(base::win::ScopedBstr(L"useChromeNetwork"),
                           use_chrome_network.Receive(), error_log))) {
     VariantChangeType(use_chrome_network.AsInput(),
                       use_chrome_network.AsInput(),
@@ -378,7 +404,7 @@ STDMETHODIMP ChromeFrameActivex::put_src(BSTR src) {
   if (document_url.SchemeIsSecure()) {
     GURL source_url(src);
     if (!source_url.SchemeIsSecure()) {
-      Base::put_src(ScopedBstr(g_activex_insecure_content_error));
+      Base::put_src(base::win::ScopedBstr(g_activex_insecure_content_error));
       return E_ACCESSDENIED;
     }
   }
@@ -406,7 +432,7 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
     ScopedComPtr<IHTMLDocument2> document;
     GetContainingDocument(document.Receive());
     if (document) {
-      ScopedBstr url;
+      base::win::ScopedBstr url;
       if (SUCCEEDED(document->get_URL(url.Receive())))
         WideToUTF8(url, url.Length(), &document_url_);
     }
@@ -427,31 +453,23 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
       url_fetcher_->set_privileged_mode(is_privileged_);
     }
 
-    std::wstring chrome_extra_arguments;
     std::wstring profile_name(GetHostProcessName(false));
     if (is_privileged_) {
-      // Does the host want to provide extra arguments?
-      ScopedBstr extra_arguments_arg;
-      service_hr = service->GetChromeExtraArguments(
-          extra_arguments_arg.Receive());
-      if (S_OK == service_hr && extra_arguments_arg)
-        chrome_extra_arguments.assign(extra_arguments_arg,
-                                      extra_arguments_arg.Length());
 
-      ScopedBstr automated_functions_arg;
+      base::win::ScopedBstr automated_functions_arg;
       service_hr = service->GetExtensionApisToAutomate(
           automated_functions_arg.Receive());
       if (S_OK == service_hr && automated_functions_arg) {
         std::string automated_functions(
             WideToASCII(static_cast<BSTR>(automated_functions_arg)));
         functions_enabled_.clear();
-        // SplitString writes one empty entry for blank strings, so we need this
-        // to allow specifying zero automation of API functions.
+        // base::SplitString writes one empty entry for blank strings, so we
+        // need this to allow specifying zero automation of API functions.
         if (!automated_functions.empty())
-          SplitString(automated_functions, ',', &functions_enabled_);
+          base::SplitString(automated_functions, ',', &functions_enabled_);
       }
 
-      ScopedBstr profile_name_arg;
+      base::win::ScopedBstr profile_name_arg;
       service_hr = service->GetChromeProfileName(profile_name_arg.Receive());
       if (S_OK == service_hr && profile_name_arg)
         profile_name.assign(profile_name_arg, profile_name_arg.Length());
@@ -463,6 +481,15 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
     }
 
     InitializeAutomationSettings();
+
+    // To avoid http://code.google.com/p/chromium/issues/detail?id=63427,
+    // we always pass this flag needed by CEEE. It has no effect on
+    // normal CF operation.
+    //
+    // Extra arguments are passed on verbatim, so we add the -- prefix.
+    std::wstring chrome_extra_arguments(L"--");
+    chrome_extra_arguments.append(
+        ASCIIToWide(switches::kEnableExperimentalExtensionApis));
 
     url_fetcher_->set_frame_busting(!is_privileged_);
     automation_client_->SetUrlFetcher(url_fetcher_.get());
@@ -534,7 +561,8 @@ HRESULT ChromeFrameActivex::CreateScriptBlockForEvent(
   HRESULT hr = GetContainingDocument(document.Receive());
   if (SUCCEEDED(hr)) {
     ScopedComPtr<IHTMLElement> element, new_element;
-    document->createElement(StackBstr(L"script"), element.Receive());
+    document->createElement(base::win::ScopedBstr(L"script"),
+                            element.Receive());
     if (element) {
       ScopedComPtr<IHTMLScriptElement> script_element;
       if (SUCCEEDED(hr = script_element.QueryFrom(element))) {
@@ -542,9 +570,10 @@ HRESULT ChromeFrameActivex::CreateScriptBlockForEvent(
         script_element->put_event(event_name);
         script_element->put_text(script);
 
-        hr = insert_after->insertAdjacentElement(StackBstr(L"afterEnd"),
-                                                 element,
-                                                 new_element.Receive());
+        hr = insert_after->insertAdjacentElement(
+            base::win::ScopedBstr(L"afterEnd"),
+            element,
+            new_element.Receive());
       }
     }
   }
@@ -629,7 +658,7 @@ HRESULT ChromeFrameActivex::registerBhoIfNeeded() {
   }
 
   if (NavigationManager::GetThreadInstance() != NULL) {
-    DLOG(INFO) << "BHO already loaded";
+    DVLOG(1) << "BHO already loaded";
     return S_OK;
   }
 
@@ -661,7 +690,7 @@ HRESULT ChromeFrameActivex::registerBhoIfNeeded() {
     return hr;
   }
 
-  web_browser2->PutProperty(ScopedBstr(bho_class_id_as_string),
-                            ScopedVariant(bho));
+  web_browser2->PutProperty(base::win::ScopedBstr(bho_class_id_as_string),
+                            base::win::ScopedVariant(bho));
   return S_OK;
 }

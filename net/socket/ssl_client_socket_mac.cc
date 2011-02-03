@@ -9,9 +9,13 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
-#include "base/scoped_cftyperef.h"
+#include <algorithm>
+
+#include "base/lazy_instance.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
+#include "base/sys_info.h"
 #include "net/base/address_list.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/io_buffer.h"
@@ -21,6 +25,7 @@
 #include "net/base/ssl_connection_status_flags.h"
 #include "net/base/ssl_info.h"
 #include "net/socket/client_socket_handle.h"
+#include "net/socket/ssl_error_params.h"
 
 // Welcome to Mac SSL. We've been waiting for you.
 //
@@ -104,9 +109,6 @@ namespace {
 const unsigned int kWriteSizePauseLimit = 2 * 1024 * 1024;
 const unsigned int kWriteSizeResumeLimit = 1 * 1024 * 1024;
 
-// You can change this to LOG(WARNING) during development.
-#define SSL_LOG LOG(INFO) << "SSL: "
-
 #if MAC_OS_X_VERSION_MAX_ALLOWED <= MAC_OS_X_VERSION_10_5
 // When compiled against the Mac OS X 10.5 SDK, define symbolic constants for
 // cipher suites added in Mac OS X 10.6.
@@ -140,12 +142,34 @@ enum {
 };
 #endif
 
+// On OS X 10.5.x, SSLHandshake() is broken with respect to renegotiation
+// handshakes, and the only way to advance the handshake state machine is
+// to use SSLRead(), which transparently re-handshakes and then reads
+// application data. Using SSLRead() to pump the handshake, rather than
+// SSLHandshake(), is not presently implemented, so on 10.5.x, SSL
+// renegotiation is disabled entirely. On 10.6.x, SSLHandshake() behaves as
+// expected/documented, so renegotiation is supported.
+struct RenegotiationBroken {
+  RenegotiationBroken() : broken(false) {
+    int32 major, minor, bugfix;
+    base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
+    if (major < 10 || (major == 10 && minor < 6))
+      broken = true;
+  }
+
+  bool broken;
+};
+
+base::LazyInstance<RenegotiationBroken> g_renegotiation_broken(
+    base::LINKER_INITIALIZED);
+
 // For an explanation of the Mac OS X error codes, please refer to:
 // http://developer.apple.com/mac/library/documentation/Security/Reference/secureTransportRef/Reference/reference.html
 int NetErrorFromOSStatus(OSStatus status) {
   switch (status) {
     case errSSLWouldBlock:
       return ERR_IO_PENDING;
+    case paramErr:
     case errSSLBadCipherSuite:
     case errSSLBadConfiguration:
       return ERR_INVALID_ARGUMENT;
@@ -167,7 +191,6 @@ int NetErrorFromOSStatus(OSStatus status) {
     case errSSLPeerHandshakeFail:  // Received a handshake_failure alert.
     case errSSLPeerNoRenegotiation:  // Received a no_renegotiation alert
     case errSSLPeerUnexpectedMsg:  // Received an unexpected_message alert.
-    case errSSLPeerUserCancelled:  // Received a user_cancelled alert.
     case errSSLProtocol:
     case errSSLRecordOverflow:
       return ERR_SSL_PROTOCOL_ERROR;
@@ -189,23 +212,28 @@ int NetErrorFromOSStatus(OSStatus status) {
 
     // (Note that all errSSLPeer* codes indicate errors reported by the peer,
     // so the cert-related ones refer to my _client_ cert.)
+    // TODO(wtc): Add fine-grained error codes for client certificate errors
+    // reported by the server using the following SSL/TLS alert messages:
+    //   access_denied
+    //   bad_certificate
+    //   unsupported_certificate
+    //   certificate_expired
+    //   certificate_revoked
+    //   certificate_unknown
+    //   unknown_ca
     case errSSLPeerCertUnknown...errSSLPeerBadCert:
     case errSSLPeerUnknownCA:
-    // TODO(rsleevi): Add a new error code for access_denied - the peer has
-    // accepted the certificate as valid, but denied access to the requested
-    // resource. Returning ERR_BAD_SSL_CLIENT_AUTH simply gives the user a
-    // chance to select a new certificate, if they have one, and try again.
     case errSSLPeerAccessDenied:
       LOG(WARNING) << "Server rejected client cert (OSStatus=" << status << ")";
       return ERR_BAD_SSL_CLIENT_AUTH_CERT;
 
+    case errSSLNegotiation:
     case errSSLPeerInsufficientSecurity:
     case errSSLPeerProtocolVersion:
       return ERR_SSL_VERSION_OR_CIPHER_MISMATCH;
 
     case errSSLBufferOverflow:
     case errSSLModuleAttach:
-    case errSSLNegotiation:
     case errSSLSessionNotFound:
     default:
       LOG(WARNING) << "Unknown error " << status <<
@@ -416,7 +444,7 @@ X509Certificate* GetServerCert(SSLContextRef ssl_context) {
   // before the certificate message has arrived and been parsed).
   if (status != noErr || !certs)
     return NULL;
-  scoped_cftyperef<CFArrayRef> scoped_certs(certs);
+  base::mac::ScopedCFTypeRef<CFArrayRef> scoped_certs(certs);
 
   DCHECK_GT(CFArrayGetCount(certs), 0);
 
@@ -447,20 +475,33 @@ FNTYPE LookupFunction(CFStringRef bundleName, CFStringRef fnName) {
       CFBundleGetFunctionPointerForName(bundle, fnName));
 }
 
-// A class that wraps an array of enabled cipher suites that can be passed to
-// SSLSetEnabledCiphers.
-//
-// Used as a singleton.
+struct CipherSuiteIsDisabledFunctor {
+  explicit CipherSuiteIsDisabledFunctor(
+      const std::vector<uint16>& disabled_cipher_suites)
+      : disabled_cipher_suites_(disabled_cipher_suites) {}
+
+  // Returns true if the given |cipher_suite| appears within the set of
+  // |disabled_cipher_suites|.
+  bool operator()(SSLCipherSuite cipher_suite) const {
+    return binary_search(disabled_cipher_suites_.begin(),
+                         disabled_cipher_suites_.end(),
+                         static_cast<uint16>(cipher_suite));
+  }
+
+  const std::vector<uint16>& disabled_cipher_suites_;
+};
+
+// Class to determine what cipher suites are available and which cipher
+// suites should be enabled, based on the overall security policy.
 class EnabledCipherSuites {
  public:
-  EnabledCipherSuites();
-
-  const SSLCipherSuite* ciphers() const {
-    return ciphers_.empty() ? NULL : &ciphers_[0];
-  }
-  size_t num_ciphers() const { return ciphers_.size(); }
+  const std::vector<SSLCipherSuite>& ciphers() const { return ciphers_; }
 
  private:
+  friend struct DefaultSingletonTraits<EnabledCipherSuites>;
+  EnabledCipherSuites();
+  ~EnabledCipherSuites() {}
+
   std::vector<SSLCipherSuite> ciphers_;
 
   DISALLOW_COPY_AND_ASSIGN(EnabledCipherSuites);
@@ -498,7 +539,7 @@ EnabledCipherSuites::EnabledCipherSuites() {
 //-----------------------------------------------------------------------------
 
 SSLClientSocketMac::SSLClientSocketMac(ClientSocketHandle* transport_socket,
-                                       const std::string& hostname,
+                                       const HostPortPair& host_and_port,
                                        const SSLConfig& ssl_config)
     : handshake_io_callback_(this, &SSLClientSocketMac::OnHandshakeIOComplete),
       transport_read_callback_(this,
@@ -506,7 +547,7 @@ SSLClientSocketMac::SSLClientSocketMac(ClientSocketHandle* transport_socket,
       transport_write_callback_(this,
                                 &SSLClientSocketMac::OnTransportWriteComplete),
       transport_(transport_socket),
-      hostname_(hostname),
+      host_and_port_(host_and_port),
       ssl_config_(ssl_config),
       user_connect_callback_(NULL),
       user_read_callback_(NULL),
@@ -519,6 +560,11 @@ SSLClientSocketMac::SSLClientSocketMac(ClientSocketHandle* transport_socket,
       ssl_context_(NULL),
       pending_send_error_(OK),
       net_log_(transport_socket->socket()->NetLog()) {
+  // Sort the list of ciphers to disable, since disabling ciphers on Mac
+  // requires subtracting from a list of enabled ciphers while maintaining
+  // ordering, as opposed to merely needing to iterate them as with NSS.
+  sort(ssl_config_.disabled_cipher_suites.begin(),
+       ssl_config_.disabled_cipher_suites.end());
 }
 
 SSLClientSocketMac::~SSLClientSocketMac() {
@@ -555,7 +601,7 @@ void SSLClientSocketMac::Disconnect() {
     SSLClose(ssl_context_);
     SSLDisposeContext(ssl_context_);
     ssl_context_ = NULL;
-    SSL_LOG << "----- Disposed SSLContext";
+    VLOG(1) << "----- Disposed SSLContext";
   }
 
   // Shut down anything that may call us back.
@@ -608,6 +654,14 @@ void SSLClientSocketMac::SetOmniboxSpeculation() {
 bool SSLClientSocketMac::WasEverUsed() const {
   if (transport_.get() && transport_->socket()) {
     return transport_->socket()->WasEverUsed();
+  }
+  NOTREACHED();
+  return false;
+}
+
+bool SSLClientSocketMac::UsingTCPFastOpen() const {
+  if (transport_.get() && transport_->socket()) {
+    return transport_->socket()->UsingTCPFastOpen();
   }
   NOTREACHED();
   return false;
@@ -694,7 +748,7 @@ void SSLClientSocketMac::GetSSLCertRequestInfo(
   CFArrayRef valid_issuer_names = NULL;
   if (SSLCopyDistinguishedNames(ssl_context_, &valid_issuer_names) == noErr &&
       valid_issuer_names != NULL) {
-    SSL_LOG << "Server has " << CFArrayGetCount(valid_issuer_names)
+    VLOG(1) << "Server has " << CFArrayGetCount(valid_issuer_names)
             << " valid issuer names";
     int n = CFArrayGetCount(valid_issuer_names);
     for (int i = 0; i < n; i++) {
@@ -711,12 +765,14 @@ void SSLClientSocketMac::GetSSLCertRequestInfo(
   }
 
   // Now get the available client certs whose issuers are allowed by the server.
-  cert_request_info->host_and_port = hostname_;
+  cert_request_info->host_and_port = host_and_port_.ToString();
   cert_request_info->client_certs.clear();
-  X509Certificate::GetSSLClientCertificates(hostname_,
+  // TODO(rch):  we should consider passing a host-port pair as the first
+  // argument to X509Certificate::GetSSLClientCertificates.
+  X509Certificate::GetSSLClientCertificates(host_and_port_.host(),
                                             valid_issuers,
                                             &cert_request_info->client_certs);
-  SSL_LOG << "Asking user to choose between "
+  VLOG(1) << "Asking user to choose between "
           << cert_request_info->client_certs.size() << " client certs...";
 }
 
@@ -727,7 +783,7 @@ SSLClientSocketMac::GetNextProto(std::string* proto) {
 }
 
 int SSLClientSocketMac::InitializeSSLContext() {
-  SSL_LOG << "----- InitializeSSLContext";
+  VLOG(1) << "----- InitializeSSLContext";
   OSStatus status = noErr;
 
   status = SSLNewContext(false, &ssl_context_);
@@ -752,10 +808,22 @@ int SSLClientSocketMac::InitializeSSLContext() {
   if (status)
     return NetErrorFromOSStatus(status);
 
-  const EnabledCipherSuites* enabled_ciphers =
-      Singleton<EnabledCipherSuites>::get();
-  status = SSLSetEnabledCiphers(ssl_context_, enabled_ciphers->ciphers(),
-                                enabled_ciphers->num_ciphers());
+  std::vector<SSLCipherSuite> enabled_ciphers =
+      Singleton<EnabledCipherSuites>::get()->ciphers();
+
+  CipherSuiteIsDisabledFunctor is_disabled_cipher(
+      ssl_config_.disabled_cipher_suites);
+  std::vector<SSLCipherSuite>::iterator new_end =
+      std::remove_if(enabled_ciphers.begin(), enabled_ciphers.end(),
+                     is_disabled_cipher);
+  if (new_end != enabled_ciphers.end())
+    enabled_ciphers.erase(new_end, enabled_ciphers.end());
+
+  status = SSLSetEnabledCiphers(
+      ssl_context_,
+      enabled_ciphers.empty() ? NULL : &enabled_ciphers[0],
+      enabled_ciphers.size());
+
   if (status)
     return NetErrorFromOSStatus(status);
 
@@ -769,8 +837,8 @@ int SSLClientSocketMac::InitializeSSLContext() {
 
   // Passing the domain name enables the server_name TLS extension (SNI).
   status = SSLSetPeerDomainName(ssl_context_,
-                                hostname_.data(),
-                                hostname_.length());
+                                host_and_port_.host().data(),
+                                host_and_port_.host().length());
   if (status)
     return NetErrorFromOSStatus(status);
 
@@ -797,10 +865,9 @@ int SSLClientSocketMac::InitializeSSLContext() {
   if (rv != OK)
     return rv;
   const struct addrinfo* ai = address.head();
-  std::string peer_id(hostname_);
+  std::string peer_id(host_and_port_.ToString());
   peer_id += std::string(reinterpret_cast<char*>(ai->ai_addr),
                          ai->ai_addrlen);
-
   // SSLSetPeerID() treats peer_id as a binary blob, and makes its
   // own copy.
   status = SSLSetPeerID(ssl_context_, peer_id.data(), peer_id.length());
@@ -961,39 +1028,50 @@ int SSLClientSocketMac::DoHandshake() {
   if (client_cert_state > kSSLClientCertNone)
     client_cert_requested_ = true;
 
+  int net_error = ERR_FAILED;
   switch (status) {
     case noErr:
       return DidCompleteHandshake();
     case errSSLWouldBlock:
       next_handshake_state_ = STATE_HANDSHAKE;
-      break;
+      return ERR_IO_PENDING;
     case errSSLClosedGraceful:
       // The server unexpectedly closed on us.
-      return ERR_SSL_PROTOCOL_ERROR;
+      net_error = ERR_SSL_PROTOCOL_ERROR;
+      break;
     case errSSLClosedAbort:
     case errSSLPeerHandshakeFail:
       if (client_cert_requested_) {
-        // See if the server aborted due to client cert checking.
         if (!ssl_config_.send_client_cert) {
-          SSL_LOG << "Server requested SSL cert during handshake";
-          return ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
+          // The server aborted, likely due to requiring a client certificate
+          // and one wasn't sent.
+          VLOG(1) << "Server requested SSL cert during handshake";
+          net_error = ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
+        } else {
+          // The server aborted, likely due to not liking the client
+          // certificate that was sent.
+          LOG(WARNING) << "Server aborted SSL handshake";
+          net_error = ERR_BAD_SSL_CLIENT_AUTH_CERT;
         }
-        LOG(WARNING) << "Server aborted SSL handshake";
-        return ERR_BAD_SSL_CLIENT_AUTH_CERT;
+        // Don't fall through - the error was intentionally remapped.
+        break;
+      }
+      // Fall through if a client cert wasn't requested.
+    default:
+      net_error = NetErrorFromOSStatus(status);
+      DCHECK(!IsCertificateError(net_error));
+      if (!ssl_config_.send_client_cert &&
+         (client_cert_state == kSSLClientCertRejected ||
+          net_error == ERR_BAD_SSL_CLIENT_AUTH_CERT)) {
+        // The server unexpectedly sent a peer certificate error alert when no
+        // certificate had been sent.
+        net_error = ERR_SSL_PROTOCOL_ERROR;
       }
       break;
   }
 
-  int net_error = NetErrorFromOSStatus(status);
-  DCHECK(!IsCertificateError(net_error));
-
-  if (!ssl_config_.send_client_cert &&
-     (client_cert_state == kSSLClientCertRejected ||
-      net_error == ERR_BAD_SSL_CLIENT_AUTH_CERT)) {
-    // The server unexpectedly sent a peer certificate error alert when no
-    // certificate had been sent.
-    net_error = ERR_SSL_PROTOCOL_ERROR;
-  }
+  net_log_.AddEvent(NetLog::TYPE_SSL_HANDSHAKE_ERROR,
+                    new SSLErrorParams(net_error, status));
   return net_error;
 }
 
@@ -1002,14 +1080,14 @@ int SSLClientSocketMac::DoVerifyCert() {
 
   DCHECK(server_cert_);
 
-  SSL_LOG << "DoVerifyCert...";
+  VLOG(1) << "DoVerifyCert...";
   int flags = 0;
   if (ssl_config_.rev_checking_enabled)
     flags |= X509Certificate::VERIFY_REV_CHECKING_ENABLED;
   if (ssl_config_.verify_ev_cert)
     flags |= X509Certificate::VERIFY_EV_CERT;
   verifier_.reset(new CertVerifier);
-  return verifier_->Verify(server_cert_, hostname_, flags,
+  return verifier_->Verify(server_cert_, host_and_port_.host(), flags,
                            &server_cert_verify_result_,
                            &handshake_io_callback_);
 }
@@ -1018,7 +1096,7 @@ int SSLClientSocketMac::DoVerifyCertComplete(int result) {
   DCHECK(verifier_.get());
   verifier_.reset();
 
-  SSL_LOG << "...DoVerifyCertComplete (result=" << result << ")";
+  VLOG(1) << "...DoVerifyCertComplete (result=" << result << ")";
   if (IsCertificateError(result) && ssl_config_.IsAllowedBadCert(server_cert_))
     result = OK;
 
@@ -1028,7 +1106,7 @@ int SSLClientSocketMac::DoVerifyCertComplete(int result) {
     // asking for one, and abort the connection.
     return ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
   }
-  SSL_LOG << "Handshake finished! (DoVerifyCertComplete)";
+  VLOG(1) << "Handshake finished! (DoVerifyCertComplete)";
 
   if (renegotiating_) {
     DidCompleteRenegotiation();
@@ -1045,9 +1123,9 @@ int SSLClientSocketMac::SetClientCert() {
   if (!ssl_config_.send_client_cert || !ssl_config_.client_cert)
     return noErr;
 
-  scoped_cftyperef<CFArrayRef> cert_refs(
+  base::mac::ScopedCFTypeRef<CFArrayRef> cert_refs(
       ssl_config_.client_cert->CreateClientCertificateChain());
-  SSL_LOG << "SSLSetCertificate(" << CFArrayGetCount(cert_refs) << " certs)";
+  VLOG(1) << "SSLSetCertificate(" << CFArrayGetCount(cert_refs) << " certs)";
   OSStatus result = SSLSetCertificate(ssl_context_, cert_refs);
   if (result)
     LOG(ERROR) << "SSLSetCertificate returned OSStatus " << result;
@@ -1059,6 +1137,9 @@ int SSLClientSocketMac::DoPayloadRead() {
   OSStatus status = SSLRead(ssl_context_, user_read_buf_->data(),
                             user_read_buf_len_, &processed);
   if (status == errSSLWouldBlock && renegotiating_) {
+    if (g_renegotiation_broken.Get().broken)
+      return ERR_SSL_RENEGOTIATION_REQUESTED;
+
     CHECK_EQ(static_cast<size_t>(0), processed);
     next_handshake_state_ = STATE_HANDSHAKE;
     return DoHandshakeLoop(OK);
@@ -1121,10 +1202,10 @@ void SSLClientSocketMac::DidCompleteRenegotiation() {
 
 int SSLClientSocketMac::DidCompleteHandshake() {
   DCHECK(!server_cert_ || renegotiating_);
-  SSL_LOG << "Handshake completed, next verify cert";
+  VLOG(1) << "Handshake completed, next verify cert";
 
-  scoped_refptr<X509Certificate> new_server_cert =
-      GetServerCert(ssl_context_);
+  scoped_refptr<X509Certificate> new_server_cert(
+      GetServerCert(ssl_context_));
   if (!new_server_cert)
     return ERR_UNEXPECTED;
 

@@ -10,11 +10,13 @@
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/ppapi/c/pp_instance.h"
-#include "third_party/ppapi/c/pp_module.h"
-#include "third_party/ppapi/c/pp_resource.h"
-#include "third_party/ppapi/c/ppb_image_data.h"
-#include "third_party/ppapi/c/trusted/ppb_image_data_trusted.h"
+#include "ppapi/c/pp_instance.h"
+#include "ppapi/c/pp_module.h"
+#include "ppapi/c/pp_resource.h"
+#include "ppapi/c/ppb_image_data.h"
+#include "ppapi/c/trusted/ppb_image_data_trusted.h"
+#include "third_party/skia/include/core/SkColorPriv.h"
+#include "webkit/glue/plugins/pepper_common.h"
 #include "webkit/glue/plugins/pepper_plugin_instance.h"
 #include "webkit/glue/plugins/pepper_plugin_module.h"
 
@@ -23,41 +25,45 @@ namespace pepper {
 namespace {
 
 PP_ImageDataFormat GetNativeImageDataFormat() {
-  return PP_IMAGEDATAFORMAT_BGRA_PREMUL;
+  return ImageData::GetNativeImageDataFormat();
 }
 
-bool IsImageDataFormatSupported(PP_ImageDataFormat format) {
-  return format == PP_IMAGEDATAFORMAT_BGRA_PREMUL;
+PP_Bool IsImageDataFormatSupported(PP_ImageDataFormat format) {
+  return BoolToPPBool(ImageData::IsImageDataFormatSupported(format));
 }
 
 PP_Resource Create(PP_Module module_id,
                    PP_ImageDataFormat format,
                    const PP_Size* size,
-                   bool init_to_zero) {
+                   PP_Bool init_to_zero) {
   PluginModule* module = ResourceTracker::Get()->GetModule(module_id);
   if (!module)
     return 0;
 
   scoped_refptr<ImageData> data(new ImageData(module));
-  if (!data->Init(format, size->width, size->height, init_to_zero))
+  if (!data->Init(format,
+                  size->width,
+                  size->height,
+                  PPBoolToBool(init_to_zero))) {
     return 0;
+  }
 
   return data->GetReference();
 }
 
-bool IsImageData(PP_Resource resource) {
-  return !!Resource::GetAs<ImageData>(resource);
+PP_Bool IsImageData(PP_Resource resource) {
+  return BoolToPPBool(!!Resource::GetAs<ImageData>(resource));
 }
 
-bool Describe(PP_Resource resource, PP_ImageDataDesc* desc) {
+PP_Bool Describe(PP_Resource resource, PP_ImageDataDesc* desc) {
   // Give predictable values on failure.
   memset(desc, 0, sizeof(PP_ImageDataDesc));
 
   scoped_refptr<ImageData> image_data(Resource::GetAs<ImageData>(resource));
   if (!image_data)
-    return false;
+    return PP_FALSE;
   image_data->Describe(desc);
-  return true;
+  return PP_TRUE;
 }
 
 void* Map(PP_Resource resource) {
@@ -73,10 +79,10 @@ void Unmap(PP_Resource resource) {
     image_data->Unmap();
 }
 
-uint64_t GetNativeMemoryHandle2(PP_Resource resource) {
+uint64_t GetNativeMemoryHandle2(PP_Resource resource, uint32_t* byte_count) {
   scoped_refptr<ImageData> image_data(Resource::GetAs<ImageData>(resource));
   if (image_data)
-    return image_data->GetNativeMemoryHandle();
+    return image_data->GetNativeMemoryHandle(byte_count);
   return 0;
 }
 
@@ -98,6 +104,7 @@ const PPB_ImageDataTrusted ppb_imagedata_trusted = {
 
 ImageData::ImageData(PluginModule* module)
     : Resource(module),
+      format_(PP_IMAGEDATAFORMAT_BGRA_PREMUL),
       width_(0),
       height_(0) {
 }
@@ -115,12 +122,28 @@ const PPB_ImageDataTrusted* ImageData::GetTrustedInterface() {
   return &ppb_imagedata_trusted;
 }
 
+// static
+PP_ImageDataFormat ImageData::GetNativeImageDataFormat() {
+  if (SK_B32_SHIFT == 0)
+    return PP_IMAGEDATAFORMAT_BGRA_PREMUL;
+  else if (SK_R32_SHIFT == 0)
+    return PP_IMAGEDATAFORMAT_RGBA_PREMUL;
+  else
+    return PP_IMAGEDATAFORMAT_BGRA_PREMUL;  // Default to something on failure.
+}
+
+// static
+bool ImageData::IsImageDataFormatSupported(PP_ImageDataFormat format) {
+  return format == PP_IMAGEDATAFORMAT_BGRA_PREMUL ||
+      format == PP_IMAGEDATAFORMAT_RGBA_PREMUL;
+}
+
 bool ImageData::Init(PP_ImageDataFormat format,
                      int width, int height,
                      bool init_to_zero) {
   // TODO(brettw) this should be called only on the main thread!
   // TODO(brettw) use init_to_zero when we implement caching.
-  if (format != PP_IMAGEDATAFORMAT_BGRA_PREMUL)
+  if (!IsImageDataFormatSupported(format))
     return false;  // Only support this one format for now.
   if (width <= 0 || height <= 0)
     return false;
@@ -130,13 +153,14 @@ bool ImageData::Init(PP_ImageDataFormat format,
 
   platform_image_.reset(
       module()->GetSomeInstance()->delegate()->CreateImage2D(width, height));
+  format_ = format;
   width_ = width;
   height_ = height;
   return !!platform_image_.get();
 }
 
 void ImageData::Describe(PP_ImageDataDesc* desc) const {
-  desc->format = PP_IMAGEDATAFORMAT_BGRA_PREMUL;
+  desc->format = format_;
   desc->size.width = width_;
   desc->size.height = height_;
   desc->stride = width_ * 4;
@@ -165,8 +189,8 @@ void ImageData::Unmap() {
   // in the future to save some memory.
 }
 
-uint64 ImageData::GetNativeMemoryHandle() const {
-  return platform_image_->GetSharedMemoryHandle();
+uint64 ImageData::GetNativeMemoryHandle(uint32* byte_count) const {
+  return platform_image_->GetSharedMemoryHandle(byte_count);
 }
 
 const SkBitmap* ImageData::GetMappedBitmap() const {
@@ -178,6 +202,7 @@ const SkBitmap* ImageData::GetMappedBitmap() const {
 void ImageData::Swap(ImageData* other) {
   swap(other->platform_image_, platform_image_);
   swap(other->mapped_canvas_, mapped_canvas_);
+  std::swap(other->format_, format_);
   std::swap(other->width_, width_);
   std::swap(other->height_, height_);
 }

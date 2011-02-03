@@ -10,7 +10,6 @@
 #include "base/scoped_ptr.h"
 #include "jingle/notifier/base/xmpp_connection.h"
 #include "jingle/notifier/communicator/xmpp_connection_generator.h"
-#include "talk/base/sigslot.h"
 #include "talk/xmpp/xmppengine.h"
 
 namespace talk_base {
@@ -21,44 +20,44 @@ namespace notifier {
 
 class ConnectionSettings;
 class LoginSettings;
-class XmppConnectionGenerator;
-class XmppConnection;
 
 // Handles all of the aspects of a single login attempt (across multiple ip
 // addresses) and maintainence. By containing this within one class, when
 // another login attempt is made, this class will be disposed and all of the
 // signalling for the previous login attempt will be cleaned up immediately.
 class SingleLoginAttempt : public XmppConnection::Delegate,
-                           public sigslot::has_slots<> {
+                           public XmppConnectionGenerator::Delegate {
  public:
-  explicit SingleLoginAttempt(LoginSettings* login_settings);
+  class Delegate {
+   public:
+    virtual ~Delegate() {}
+
+    virtual void OnConnect(base::WeakPtr<talk_base::Task> base_task) = 0;
+    virtual void OnNeedReconnect() = 0;
+    virtual void OnRedirect(const std::string& redirect_server,
+                            int redirect_port) = 0;
+  };
+
+  // Does not take ownership of |login_settings| or |delegate|.
+  // Neither may be NULL.
+  SingleLoginAttempt(LoginSettings* login_settings, Delegate* delegate);
 
   virtual ~SingleLoginAttempt();
 
+  // XmppConnection::Delegate implementation.
   virtual void OnConnect(base::WeakPtr<talk_base::Task> parent);
-
   virtual void OnError(buzz::XmppEngine::Error error,
                        int error_subcode,
                        const buzz::XmlElement* stream_error);
 
-  // Typically handled by storing the redirect for 5 seconds, and setting it
-  // into LoginSettings, then creating a new SingleLoginAttempt, and doing
-  // StartConnection.
-  //
-  // SignalRedirect(const std::string& redirect_server, int redirect_port);
-  sigslot::signal2<const std::string&, int> SignalRedirect;
-
-  sigslot::signal0<> SignalNeedAutoReconnect;
-
-  sigslot::signal1<base::WeakPtr<talk_base::Task> > SignalConnect;
+  // XmppConnectionGenerator::Delegate implementation.
+  virtual void OnNewSettings(const ConnectionSettings& new_settings);
+  virtual void OnExhaustedSettings(bool successfully_resolved_dns,
+                                   int first_dns_error);
 
  private:
-  void DoLogin(const ConnectionSettings& connection_settings);
-
-  void OnAttemptedAllConnections(bool successfully_resolved_dns,
-                                 int first_dns_error);
-
   LoginSettings* login_settings_;
+  Delegate* delegate_;
   XmppConnectionGenerator connection_generator_;
   scoped_ptr<XmppConnection> xmpp_connection_;
 

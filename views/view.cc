@@ -26,7 +26,7 @@
 #include "views/window/window.h"
 
 #if defined(OS_WIN)
-#include "views/accessibility/view_accessibility_wrapper.h"
+#include "views/accessibility/view_accessibility.h"
 #endif
 #if defined(OS_LINUX)
 #include "app/scoped_handle_gtk.h"
@@ -68,9 +68,6 @@ View::View()
       accelerator_focus_manager_(NULL),
       registered_accelerator_count_(0),
       context_menu_controller_(NULL),
-#if defined(OS_WIN)
-      accessibility_(NULL),
-#endif
       drag_controller_(NULL),
       flip_canvas_on_paint_for_rtl_ui_(false) {
 }
@@ -87,8 +84,8 @@ View::~View() {
   }
 
 #if defined(OS_WIN)
-  if (accessibility_.get())
-    accessibility_->Uninitialize();
+  if (view_accessibility_.get())
+    view_accessibility_->set_view(NULL);
 #endif
 }
 
@@ -117,8 +114,13 @@ int View::GetX(PositionMirroringSettings settings) const {
 }
 
 void View::SetBounds(const gfx::Rect& bounds) {
-  if (bounds == bounds_)
+  if (bounds == bounds_) {
+    if (needs_layout_) {
+      needs_layout_ = false;
+      Layout();
+    }
     return;
+  }
 
   gfx::Rect prev = bounds_;
   bounds_ = bounds;
@@ -230,8 +232,8 @@ void View::Layout() {
 }
 
 void View::InvalidateLayout() {
-  if (needs_layout_)
-    return;
+  // Always invalidate up. This is needed to handle the case of us already being
+  // valid, but not our parent.
   needs_layout_ = true;
   if (parent_)
     parent_->InvalidateLayout();
@@ -988,7 +990,7 @@ void View::PrintViewHierarchyImp(int indent) {
   buf << L' ';
   buf << this;
 
-  LOG(INFO) << buf.str();
+  VLOG(1) << buf.str();
   std::cout << buf.str() << std::endl;
 
   for (int i = 0, count = GetChildViewCount(); i < count; ++i)
@@ -1013,7 +1015,7 @@ void View::PrintFocusHierarchyImp(int indent) {
   buf << L' ';
   buf << this;
 
-  LOG(INFO) << buf.str();
+  VLOG(1) << buf.str();
   std::cout << buf.str() << std::endl;
 
   if (GetChildViewCount() > 0)
@@ -1292,7 +1294,7 @@ void View::OnMouseExited(const MouseEvent& e) {
 
 #if defined(TOUCH_UI)
 bool View::OnTouchEvent(const TouchEvent& event) {
-  DLOG(INFO) << "visited the OnTouchEvent";
+  DVLOG(1) << "visited the OnTouchEvent";
   return false;
 }
 #endif

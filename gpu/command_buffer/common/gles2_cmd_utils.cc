@@ -291,6 +291,10 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
     case GL_CURRENT_VERTEX_ATTRIB:
       return 4;
 
+    // -- glHint with GL_OES_standard_derivatives
+    case GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES:
+      return 1;
+
     // bad enum
     default:
       return 0;
@@ -440,6 +444,8 @@ size_t GLES2Util::GetGLTypeSizeForTexturesAndBuffers(uint32 type) {
       return sizeof(GLuint);  // NOLINT
     case GL_FLOAT:
       return sizeof(GLfloat);  // NOLINT
+    case GL_FIXED:
+      return sizeof(GLfixed);  // NOLINT
     default:
       return 0;
   }

@@ -7,7 +7,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory_debug.h"
-#include "base/stats_counters.h"
+#include "base/metrics/stats_counters.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "net/base/address_list_net_log_param.h"
@@ -35,7 +35,7 @@ void AssertEventNotSignaled(WSAEVENT hEvent) {
     // This LOG statement is unreachable since we have already crashed, but it
     // should prevent the compiler from optimizing away the |wait_rv| and
     // |err| variables so they appear nicely on the stack in crash dumps.
-    LOG(INFO) << "wait_rv=" << wait_rv << ", err=" << err;
+    VLOG(1) << "wait_rv=" << wait_rv << ", err=" << err;
   }
 }
 
@@ -64,8 +64,6 @@ int MapWinsockError(int os_error) {
   // There are numerous Winsock error codes, but these are the ones we thus far
   // find interesting.
   switch (os_error) {
-    // connect fails with WSAEACCES when Windows Firewall blocks the
-    // connection.
     case WSAEACCES:
       return ERR_ACCESS_DENIED;
     case WSAENETDOWN:
@@ -104,6 +102,10 @@ int MapWinsockError(int os_error) {
 
 int MapConnectError(int os_error) {
   switch (os_error) {
+    // connect fails with WSAEACCES when Windows Firewall blocks the
+    // connection.
+    case WSAEACCES:
+      return ERR_NETWORK_ACCESS_DENIED;
     case WSAETIMEDOUT:
       return ERR_CONNECTION_TIMED_OUT;
     default: {
@@ -290,8 +292,8 @@ TCPClientSocketWin::TCPClientSocketWin(const AddressList& addresses,
       write_callback_(NULL),
       next_connect_state_(CONNECT_STATE_NONE),
       connect_os_error_(0),
-      net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)) {
-
+      net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)),
+      previously_disconnected_(false) {
   scoped_refptr<NetLog::EventParameters> params;
   if (source.is_valid())
     params = new NetLogSourceParameter("source_dependency", source);
@@ -304,6 +306,15 @@ TCPClientSocketWin::~TCPClientSocketWin() {
   net_log_.EndEvent(NetLog::TYPE_SOCKET_ALIVE, NULL);
 }
 
+void TCPClientSocketWin::AdoptSocket(SOCKET socket) {
+  DCHECK_EQ(socket_, INVALID_SOCKET);
+  socket_ = socket;
+  int error = SetupSocket();
+  DCHECK_EQ(0, error);
+  current_ai_ = addresses_.head();
+  use_history_.set_was_ever_connected();
+}
+
 int TCPClientSocketWin::Connect(CompletionCallback* callback) {
   DCHECK(CalledOnValidThread());
 
@@ -311,7 +322,7 @@ int TCPClientSocketWin::Connect(CompletionCallback* callback) {
   if (socket_ != INVALID_SOCKET)
     return OK;
 
-  static StatsCounter connects("tcp.connect");
+  static base::StatsCounter connects("tcp.connect");
   connects.Increment();
 
   net_log_.BeginEvent(NetLog::TYPE_TCP_CONNECT,
@@ -363,6 +374,11 @@ int TCPClientSocketWin::DoConnect() {
   const struct addrinfo* ai = current_ai_;
   DCHECK(ai);
   DCHECK_EQ(0, connect_os_error_);
+
+  if (previously_disconnected_) {
+    use_history_.Reset();
+    previously_disconnected_ = false;
+  }
 
   net_log_.BeginEvent(NetLog::TYPE_TCP_CONNECT_ATTEMPT,
                       new NetLogStringParameter(
@@ -478,6 +494,8 @@ void TCPClientSocketWin::DoDisconnect() {
 
   core_->Detach();
   core_ = NULL;
+
+  previously_disconnected_ = true;
 }
 
 bool TCPClientSocketWin::IsConnected() const {
@@ -536,6 +554,11 @@ bool TCPClientSocketWin::WasEverUsed() const {
   return use_history_.was_used_to_convey_data();
 }
 
+bool TCPClientSocketWin::UsingTCPFastOpen() const {
+  // Not supported on windows.
+  return false;
+}
+
 int TCPClientSocketWin::Read(IOBuffer* buf,
                              int buf_len,
                              CompletionCallback* callback) {
@@ -564,12 +587,12 @@ int TCPClientSocketWin::Read(IOBuffer* buf,
       // false error reports.
       // See bug 5297.
       base::MemoryDebug::MarkAsInitialized(core_->read_buffer_.buf, num);
-      static StatsCounter read_bytes("tcp.read_bytes");
+      static base::StatsCounter read_bytes("tcp.read_bytes");
       read_bytes.Add(num);
       if (num > 0)
         use_history_.set_was_used_to_convey_data();
-      net_log_.AddEvent(NetLog::TYPE_SOCKET_BYTES_RECEIVED,
-                        new NetLogIntegerParameter("num_bytes", num));
+      LogByteTransfer(net_log_, NetLog::TYPE_SOCKET_BYTES_RECEIVED, num,
+                      core_->read_buffer_.buf);
       return static_cast<int>(num);
     }
   } else {
@@ -594,7 +617,7 @@ int TCPClientSocketWin::Write(IOBuffer* buf,
   DCHECK_GT(buf_len, 0);
   DCHECK(!core_->write_iobuffer_);
 
-  static StatsCounter writes("tcp.writes");
+  static base::StatsCounter writes("tcp.writes");
   writes.Increment();
 
   core_->write_buffer_.len = buf_len;
@@ -616,12 +639,12 @@ int TCPClientSocketWin::Write(IOBuffer* buf,
                    << " bytes, but " << rv << " bytes reported.";
         return ERR_WINSOCK_UNEXPECTED_WRITTEN_BYTES;
       }
-      static StatsCounter write_bytes("tcp.write_bytes");
+      static base::StatsCounter write_bytes("tcp.write_bytes");
       write_bytes.Add(rv);
       if (rv > 0)
         use_history_.set_was_used_to_convey_data();
-      net_log_.AddEvent(NetLog::TYPE_SOCKET_BYTES_SENT,
-                        new NetLogIntegerParameter("num_bytes", rv));
+      LogByteTransfer(net_log_, NetLog::TYPE_SOCKET_BYTES_SENT, rv,
+                      core_->write_buffer_.buf);
       return rv;
     }
   } else {
@@ -660,7 +683,10 @@ int TCPClientSocketWin::CreateSocket(const struct addrinfo* ai) {
     LOG(ERROR) << "WSASocket failed: " << os_error;
     return os_error;
   }
+  return SetupSocket();
+}
 
+int TCPClientSocketWin::SetupSocket() {
   // Increase the socket buffer sizes from the default sizes for WinXP.  In
   // performance testing, there is substantial benefit by increasing from 8KB
   // to 64KB.
@@ -777,12 +803,12 @@ void TCPClientSocketWin::DidCompleteRead() {
   waiting_read_ = false;
   core_->read_iobuffer_ = NULL;
   if (ok) {
-    static StatsCounter read_bytes("tcp.read_bytes");
+    static base::StatsCounter read_bytes("tcp.read_bytes");
     read_bytes.Add(num_bytes);
     if (num_bytes > 0)
       use_history_.set_was_used_to_convey_data();
-    net_log_.AddEvent(NetLog::TYPE_SOCKET_BYTES_RECEIVED,
-                      new NetLogIntegerParameter("num_bytes", num_bytes));
+    LogByteTransfer(net_log_, NetLog::TYPE_SOCKET_BYTES_RECEIVED, num_bytes,
+                    core_->read_buffer_.buf);
   }
   DoReadCallback(ok ? num_bytes : MapWinsockError(WSAGetLastError()));
 }
@@ -808,12 +834,12 @@ void TCPClientSocketWin::DidCompleteWrite() {
                  << " bytes reported.";
       rv = ERR_WINSOCK_UNEXPECTED_WRITTEN_BYTES;
     } else {
-      static StatsCounter write_bytes("tcp.write_bytes");
+      static base::StatsCounter write_bytes("tcp.write_bytes");
       write_bytes.Add(num_bytes);
       if (num_bytes > 0)
         use_history_.set_was_used_to_convey_data();
-      net_log_.AddEvent(NetLog::TYPE_SOCKET_BYTES_SENT,
-                        new NetLogIntegerParameter("num_bytes", rv));
+      LogByteTransfer(net_log_, NetLog::TYPE_SOCKET_BYTES_SENT, num_bytes,
+                      core_->write_buffer_.buf);
     }
   }
   core_->write_iobuffer_ = NULL;

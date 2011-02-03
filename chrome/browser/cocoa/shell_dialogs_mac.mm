@@ -13,11 +13,13 @@
 
 #include "app/l10n_util_mac.h"
 #import "base/cocoa_protocols_mac.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/mac_util.h"
-#include "base/scoped_cftyperef.h"
+#include "base/mac/scoped_cftyperef.h"
 #import "base/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
+#include "base/thread_restrictions.h"
 #include "grit/generated_resources.h"
 
 static const int kFileTypePopupTag = 1234;
@@ -165,8 +167,16 @@ void SelectFileDialogImpl::SelectFile(
   NSString* default_dir = nil;
   NSString* default_filename = nil;
   if (!default_path.empty()) {
-    default_dir = base::SysUTF8ToNSString(default_path.DirName().value());
-    default_filename = base::SysUTF8ToNSString(default_path.BaseName().value());
+    // The file dialog is going to do a ton of stats anyway. Not much
+    // point in eliminating this one.
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    if (file_util::DirectoryExists(default_path)) {
+      default_dir = base::SysUTF8ToNSString(default_path.value());
+    } else {
+      default_dir = base::SysUTF8ToNSString(default_path.DirName().value());
+      default_filename =
+          base::SysUTF8ToNSString(default_path.BaseName().value());
+    }
   }
 
   NSMutableArray* allowed_file_types = nil;
@@ -204,6 +214,11 @@ void SelectFileDialogImpl::SelectFile(
   type_map_[dialog] = type;
 
   SheetContext* context = new SheetContext;
+
+  // |context| should never be NULL, but we are seeing indications otherwise.
+  // |This CHECK is here to confirm if we are actually getting NULL
+  // ||context|s. http://crbug.com/58959
+  CHECK(context);
   context->type = type;
   context->owning_window = owning_window;
 
@@ -308,11 +323,11 @@ NSView* SelectFileDialogImpl::GetAccessoryView(const FileTypeInfo* file_types,
           file_types->extensions[type];
       DCHECK(!ext_list.empty());
       NSString* type_extension = base::SysUTF8ToNSString(ext_list[0]);
-      scoped_cftyperef<CFStringRef> uti(
+      base::mac::ScopedCFTypeRef<CFStringRef> uti(
           UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension,
                                                 (CFStringRef)type_extension,
                                                 NULL));
-      scoped_cftyperef<CFStringRef> description(
+      base::mac::ScopedCFTypeRef<CFStringRef> description(
           UTTypeCopyDescription(uti.get()));
 
       type_description =
@@ -347,6 +362,11 @@ bool SelectFileDialogImpl::ShouldEnableFilename(NSSavePanel* dialog,
 - (void)endedPanel:(NSSavePanel*)panel
         withReturn:(int)returnCode
            context:(void *)context {
+  // |context| should never be NULL, but we are seeing indications otherwise.
+  // |This CHECK is here to confirm if we are actually getting NULL
+  // ||context|s. http://crbug.com/58959
+  CHECK(context);
+
   int index = 0;
   SelectFileDialogImpl::SheetContext* context_struct =
       (SelectFileDialogImpl::SheetContext*)context;

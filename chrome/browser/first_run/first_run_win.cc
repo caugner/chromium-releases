@@ -18,13 +18,13 @@
 #include "base/file_util.h"
 #include "base/object_watcher.h"
 #include "base/path_service.h"
-#include "base/registry.h"
 #include "base/scoped_comptr_win.h"
 #include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
+#include "base/win/registry.h"
+#include "base/win/windows_version.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/importer/importer.h"
@@ -281,7 +281,7 @@ bool Upgrade::SwapNewChromeExeIfPresent() {
   bool user_install = InstallUtil::IsPerUserInstall(curr_chrome_exe.c_str());
   HKEY reg_root = user_install ? HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE;
   BrowserDistribution *dist = BrowserDistribution::GetDistribution();
-  RegKey key;
+  base::win::RegKey key;
   std::wstring rename_cmd;
   if (key.Open(reg_root, dist->GetVersionKey().c_str(), KEY_READ) &&
       key.ReadValue(google_update::kRegRenameCmdField, &rename_cmd)) {
@@ -415,7 +415,7 @@ std::string EncodeImportParams(int browser_type, int options,
 bool DecodeImportParams(const std::string& encoded, int* browser_type,
                         int* options, int* skip_first_run_ui, HWND* window) {
   std::vector<std::string> parts;
-  SplitString(encoded, '@', &parts);
+  base::SplitString(encoded, '@', &parts);
   if (parts.size() != 4)
     return false;
 
@@ -440,7 +440,7 @@ bool DecodeImportParams(const std::string& encoded, int* browser_type,
 void FirstRun::PlatformSetup() {
   FirstRun::CreateChromeDesktopShortcut();
   // Windows 7 has deprecated the quick launch bar.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_WIN7)
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
     CreateChromeQuickLaunchShortcut();
 }
 
@@ -561,7 +561,7 @@ int FirstRun::ImportFromBrowser(Profile* profile,
 
   StartImportingWithUI(
       parent_window,
-      items_to_import,
+      static_cast<uint16>(items_to_import),
       importer_host,
       importer_host->GetSourceProfileInfoForBrowserType(browser_type),
       profile,

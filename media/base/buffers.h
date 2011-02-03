@@ -33,11 +33,11 @@
 
 namespace media {
 
+// Indicates an invalid or missing timestamp.
+extern const base::TimeDelta kNoTimestamp;
+
 class StreamSample : public base::RefCountedThreadSafe<StreamSample> {
  public:
-  // Constant timestamp value to indicate an invalid or missing timestamp.
-  static const base::TimeDelta kInvalidTimestamp;
-
   // Returns the timestamp of this buffer in microseconds.
   base::TimeDelta GetTimestamp() const {
     return timestamp_;
@@ -53,12 +53,6 @@ class StreamSample : public base::RefCountedThreadSafe<StreamSample> {
   // depending on specific data.
   virtual bool IsEndOfStream() const = 0;
 
-  // Indicates that this sample is discontinuous from the previous one, for
-  // example, following a seek.
-  bool IsDiscontinuous() const {
-    return discontinuous_;
-  }
-
   // Sets the timestamp of this buffer in microseconds.
   void SetTimestamp(const base::TimeDelta& timestamp) {
     timestamp_ = timestamp;
@@ -69,11 +63,6 @@ class StreamSample : public base::RefCountedThreadSafe<StreamSample> {
     duration_ = duration;
   }
 
-  // Sets the value returned by IsDiscontinuous().
-  void SetDiscontinuous(bool discontinuous) {
-    discontinuous_ = discontinuous;
-  }
-
  protected:
   friend class base::RefCountedThreadSafe<StreamSample>;
   StreamSample();
@@ -81,7 +70,6 @@ class StreamSample : public base::RefCountedThreadSafe<StreamSample> {
 
   base::TimeDelta timestamp_;
   base::TimeDelta duration_;
-  bool discontinuous_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StreamSample);
@@ -101,23 +89,6 @@ class Buffer : public StreamSample {
 
  protected:
   virtual ~Buffer() {}
-};
-
-
-class WritableBuffer : public Buffer  {
- public:
-  // Returns a read-write pointer to the buffer data.
-  virtual uint8* GetWritableData() = 0;
-
-  // Updates the size of valid data in bytes, which must be less than or equal
-  // to GetBufferSize().
-  virtual void SetDataSize(size_t data_size) = 0;
-
-  // Returns the size of the underlying buffer.
-  virtual size_t GetBufferSize() const = 0;
-
- protected:
-  virtual ~WritableBuffer() {}
 };
 
 }  // namespace media

@@ -12,11 +12,11 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/time.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_list.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/sessions/base_session_service.h"
 #include "chrome/browser/sessions/session_id.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 
@@ -240,7 +240,7 @@ class SessionService : public BaseSessionService,
   SessionCommand* CreatePinnedStateCommand(const SessionID& tab_id,
                                            bool is_pinned);
 
-  // Callback form the backend for getting the commands from the previous
+  // Callback from the backend for getting the commands from the previous
   // or save file. Converts the commands in SessionWindows and notifies
   // the real callback.
   void OnGotSessionCommands(

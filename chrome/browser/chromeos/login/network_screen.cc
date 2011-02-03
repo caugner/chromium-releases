@@ -77,9 +77,9 @@ void NetworkScreen::ButtonPressed(views::Button* sender,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// NetworkLibrary::Observer implementation:
+// NetworkLibrary::NetworkManagerObserver implementation:
 
-void NetworkScreen::NetworkChanged(NetworkLibrary* network_lib) {
+void NetworkScreen::OnNetworkManagerChanged(NetworkLibrary* network_lib) {
   UpdateStatus(network_lib);
 }
 
@@ -99,6 +99,7 @@ NetworkSelectionView* NetworkScreen::AllocateView() {
 // NetworkScreen, views::InfoBubbleDelegate implementation:
 
 void NetworkScreen::OnHelpLinkActivated() {
+  ClearErrors();
   if (!help_app_.get())
     help_app_.reset(new HelpAppLauncher(view()->GetNativeWindow()));
   help_app_->ShowHelpTopic(HelpAppLauncher::HELP_CONNECTIVITY);
@@ -110,7 +111,7 @@ void NetworkScreen::OnHelpLinkActivated() {
 void NetworkScreen::Refresh() {
   if (CrosLibrary::Get()->EnsureLoaded()) {
     SubscribeNetworkNotification();
-    NetworkChanged(chromeos::CrosLibrary::Get()->GetNetworkLibrary());
+    OnNetworkManagerChanged(chromeos::CrosLibrary::Get()->GetNetworkLibrary());
   }
 }
 
@@ -120,14 +121,16 @@ void NetworkScreen::Refresh() {
 void NetworkScreen::SubscribeNetworkNotification() {
   if (!is_network_subscribed_) {
     is_network_subscribed_ = true;
-    chromeos::CrosLibrary::Get()->GetNetworkLibrary()->AddObserver(this);
+    chromeos::CrosLibrary::Get()->GetNetworkLibrary()
+        ->AddNetworkManagerObserver(this);
   }
 }
 
 void NetworkScreen::UnsubscribeNetworkNotification() {
   if (is_network_subscribed_) {
     is_network_subscribed_ = false;
-    chromeos::CrosLibrary::Get()->GetNetworkLibrary()->RemoveObserver(this);
+    chromeos::CrosLibrary::Get()->GetNetworkLibrary()
+        ->RemoveNetworkManagerObserver(this);
   }
 }
 
@@ -140,40 +143,50 @@ void NetworkScreen::NotifyOnConnection() {
 
 void NetworkScreen::OnConnectionTimeout() {
   StopWaitingForConnection(network_id_);
-  // Show error bubble.
-  ClearErrors();
-  views::View* network_control = view()->GetNetworkControlView();
-  bubble_ = MessageBubble::Show(
-      network_control->GetWidget(),
-      network_control->GetScreenBounds(),
-      BubbleBorder::LEFT_TOP,
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_WARNING),
-      l10n_util::GetStringF(IDS_NETWORK_SELECTION_ERROR,
-                            l10n_util::GetString(IDS_PRODUCT_OS_NAME),
-                            UTF16ToWide(network_id_)),
-      l10n_util::GetString(IDS_NETWORK_SELECTION_ERROR_HELP),
-      this);
-  network_control->RequestFocus();
+  NetworkLibrary* network = CrosLibrary::Get()->GetNetworkLibrary();
+  bool is_connected = network && network->Connected();
+
+  if (!is_connected &&
+      !view()->is_dialog_open() &&
+      !(help_app_.get() && help_app_->is_open())) {
+    // Show error bubble.
+    ClearErrors();
+    views::View* network_control = view()->GetNetworkControlView();
+    bubble_ = MessageBubble::Show(
+        network_control->GetWidget(),
+        network_control->GetScreenBounds(),
+        BubbleBorder::LEFT_TOP,
+        ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_WARNING),
+        l10n_util::GetStringF(IDS_NETWORK_SELECTION_ERROR,
+                              l10n_util::GetString(IDS_PRODUCT_OS_NAME),
+                              UTF16ToWide(network_id_)),
+        l10n_util::GetString(IDS_NETWORK_SELECTION_ERROR_HELP),
+        this);
+    network_control->RequestFocus();
+  }
 }
 
 void NetworkScreen::UpdateStatus(NetworkLibrary* network) {
   if (!view() || !network)
     return;
 
+  if (network->Connected())
+    ClearErrors();
+
   if (network->ethernet_connected()) {
     StopWaitingForConnection(
         l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET));
   } else if (network->wifi_connected()) {
-    StopWaitingForConnection(ASCIIToUTF16(network->wifi_network().name()));
+    StopWaitingForConnection(ASCIIToUTF16(network->wifi_network()->name()));
   } else if (network->cellular_connected()) {
-    StopWaitingForConnection(ASCIIToUTF16(network->cellular_network().name()));
+    StopWaitingForConnection(ASCIIToUTF16(network->cellular_network()->name()));
   } else if (network->ethernet_connecting()) {
     WaitForConnection(
         l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET));
   } else if (network->wifi_connecting()) {
-    WaitForConnection(ASCIIToUTF16(network->wifi_network().name()));
+    WaitForConnection(ASCIIToUTF16(network->wifi_network()->name()));
   } else if (network->cellular_connecting()) {
-    WaitForConnection(ASCIIToUTF16(network->cellular_network().name()));
+    WaitForConnection(ASCIIToUTF16(network->cellular_network()->name()));
   } else {
     StopWaitingForConnection(network_id_);
   }

@@ -1,6 +1,7 @@
 // Microsoft Visual C++ generated resource script.
 //
 #include "chrome_dll_resource.h"
+#include "chrome_command_ids.h"
 
 #define APSTUDIO_READONLY_SYMBOLS
 /////////////////////////////////////////////////////////////////////////////
@@ -159,8 +160,6 @@ BEGIN
     "\0"
 END
 
-#else     // APSTUDIO_INVOKED
-#include "chrome_dll_version.rc"
 #endif    // APSTUDIO_INVOKED
 
 /////////////////////////////////////////////////////////////////////////////
@@ -275,3 +274,6 @@ END
 
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED
+
+// (temp change to touch this file or incremental builds may break now
+// that we removed chrome_dll_version.rc from it)

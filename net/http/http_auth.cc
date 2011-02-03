@@ -42,8 +42,8 @@ void HttpAuth::ChooseBestChallenge(
     int rv = http_auth_handler_factory->CreateAuthHandlerFromString(
         cur_challenge, target, origin, net_log, &cur);
     if (rv != OK) {
-      LOG(INFO) << "Unable to create AuthHandler. Status: "
-                << ErrorToString(rv) << " Challenge: " << cur_challenge;
+      VLOG(1) << "Unable to create AuthHandler. Status: "
+              << ErrorToString(rv) << " Challenge: " << cur_challenge;
       continue;
     }
     if (cur.get() && (!best.get() || best->score() < cur->score()) &&
@@ -60,7 +60,10 @@ HttpAuth::AuthorizationResult HttpAuth::HandleChallengeResponse(
     Target target,
     const std::set<std::string>& disabled_schemes,
     std::string* challenge_used) {
+  DCHECK(handler);
+  DCHECK(headers);
   DCHECK(challenge_used);
+  challenge_used->clear();
   const std::string& current_scheme = handler->scheme();
   if (disabled_schemes.find(current_scheme) != disabled_schemes.end())
     return HttpAuth::AUTHORIZATION_RESULT_REJECT;

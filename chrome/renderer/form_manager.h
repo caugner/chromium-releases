@@ -28,24 +28,33 @@ class FormManager {
  public:
   // A bit field mask for form requirements.
   enum RequirementsMask {
-    REQUIRE_NONE = 0x0,             // No requirements.
-    REQUIRE_AUTOCOMPLETE = 0x1,     // Require that autocomplete != off.
-    REQUIRE_ENABLED = 0x2,          // Require that disabled attribute is off.
-    REQUIRE_EMPTY = 0x4,            // Require that the fields are empty.
+    REQUIRE_NONE         = 0,       // No requirements.
+    REQUIRE_AUTOCOMPLETE = 1 << 0,  // Require that autocomplete != off.
+    REQUIRE_ENABLED      = 1 << 1,  // Require that disabled attribute is off.
+    REQUIRE_EMPTY        = 1 << 2,  // Require that the fields are empty.
+  };
+
+  // A bit field mask to extract data from WebFormControlElement.
+  enum ExtractMask {
+    EXTRACT_NONE        = 0,
+    EXTRACT_VALUE       = 1 << 0,  // Extract value from WebFormControlElement.
+    EXTRACT_OPTION_TEXT = 1 << 1,  // Extract option text from
+                                   // WebFormSelectElement. Only valid when
+                                   // |EXTRACT_VALUE| is set.
+                                   // This is used for form submission where
+                                   // human readable value is captured.
+    EXTRACT_OPTIONS     = 1 << 2,  // Extract options from
+                                   // WebFormControlElement.
   };
 
   FormManager();
   virtual ~FormManager();
 
   // Fills out a FormField object from a given WebFormControlElement.
-  // If |get_value| is true, |field| will have the value set from |element|.
-  // If |get_options| is true, |field| will have the select options set from
-  // |element|.
-  // TODO(jhawkins): Use a bit-field instead of two parameters.
+  // |extract_mask|: See the enum ExtractMask above for details.
   static void WebFormControlElementToFormField(
       const WebKit::WebFormControlElement& element,
-      bool get_value,
-      bool get_options,
+      ExtractMask extract_mask,
       webkit_glue::FormField* field);
 
   // Returns the corresponding label for |element|.  WARNING: This method can
@@ -63,8 +72,7 @@ class FormManager {
   // private.
   static bool WebFormElementToFormData(const WebKit::WebFormElement& element,
                                        RequirementsMask requirements,
-                                       bool get_values,
-                                       bool get_options,
+                                       ExtractMask extract_mask,
                                        webkit_glue::FormData* form);
 
   // Scans the DOM in |frame| extracting and storing forms.
@@ -90,17 +98,21 @@ class FormManager {
   // store multiple forms with the same names from different frames.
   bool FillForm(const webkit_glue::FormData& form, const WebKit::WebNode& node);
 
-  // Previews the form represented by |form|.  Same conditions as FillForm.
-  bool PreviewForm(const webkit_glue::FormData& form);
+  // Previews the form represented by |form|. |node| is the form control element
+  // that initiated the preview process. Same conditions as FillForm.
+  bool PreviewForm(const webkit_glue::FormData& form,
+                   const WebKit::WebNode &node);
 
   // Clears the values of all input elements in the form that contains |node|.
   // Returns false if the form is not found.
   bool ClearFormWithNode(const WebKit::WebNode& node);
 
   // Clears the placeholder values and the auto-filled background for any fields
-  // in the form containing |node| that have been previewed. Returns false if
-  // the form is not found.
-  bool ClearPreviewedFormWithNode(const WebKit::WebNode& node);
+  // in the form containing |node| that have been previewed. Resets the
+  // autofilled state of |node| to |was_autofilled|. Returns false if the form
+  // is not found.
+  bool ClearPreviewedFormWithNode(const WebKit::WebNode& node,
+                                  bool was_autofilled);
 
   // Resets the stored set of forms.
   void Reset();
@@ -115,18 +127,15 @@ class FormManager {
   // Stores the WebFormElement and the form control elements for a form.
   // Original form values are stored so when we clear a form we can reset
   // "select-one" values to their original state.
-  struct FormElement {
-    WebKit::WebFormElement form_element;
-    std::vector<WebKit::WebFormControlElement> control_elements;
-    std::vector<string16> control_values;
-  };
+  struct FormElement;
 
   // Type for cache of FormElement objects.
   typedef std::vector<FormElement*> FormElementList;
 
   // The callback type used by ForEachMatchingFormField().
-  typedef Callback2<WebKit::WebFormControlElement*,
-                    const webkit_glue::FormField*>::Type Callback;
+  typedef Callback3<WebKit::WebFormControlElement*,
+                    const webkit_glue::FormField*,
+                    bool>::Type Callback;
 
   // Infers corresponding label for |element| from surrounding context in the
   // DOM.  Contents of preceding <p> tag or preceding text element found in
@@ -157,13 +166,15 @@ class FormManager {
   // value in |data|.  This method also sets the autofill attribute, causing the
   // background to be yellow.
   void FillFormField(WebKit::WebFormControlElement* field,
-                     const webkit_glue::FormField* data);
+                     const webkit_glue::FormField* data,
+                     bool is_initiating_node);
 
   // A ForEachMatchingFormField() callback that sets |field|'s placeholder value
   // using the value in |data|, causing the test to be greyed-out.  This method
   // also sets the autofill attribute, causing the background to be yellow.
   void PreviewFormField(WebKit::WebFormControlElement* field,
-                        const webkit_glue::FormField* data);
+                        const webkit_glue::FormField* data,
+                        bool is_initiating_node);
 
   // The cached FormElement objects.
   FormElementList form_elements_;

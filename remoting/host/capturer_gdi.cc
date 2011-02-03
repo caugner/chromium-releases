@@ -14,12 +14,14 @@ static const int kPixelsPerMeter = 3780;
 // 32 bit RGBA is 4 bytes per pixel.
 static const int kBytesPerPixel = 4;
 
-CapturerGdi::CapturerGdi()
-    : desktop_dc_(NULL),
+CapturerGdi::CapturerGdi(MessageLoop* message_loop)
+    : Capturer(message_loop),
+      desktop_dc_(NULL),
       memory_dc_(NULL),
       capture_fullscreen_(true) {
   memset(target_bitmap_, 0, sizeof(target_bitmap_));
   memset(buffers_, 0, sizeof(buffers_));
+  ScreenConfigurationChanged();
 }
 
 CapturerGdi::~CapturerGdi() {
@@ -57,7 +59,7 @@ void CapturerGdi::ScreenConfigurationChanged() {
   int rounded_width = (width_ + 3) & (~3);
 
   // Dimensions of screen.
-  pixel_format_ = PixelFormatRgb32;
+  pixel_format_ = media::VideoFrame::RGB32;
   bytes_per_row_ = rounded_width * kBytesPerPixel;
 
   // Create a differ for this screen size.
@@ -132,6 +134,11 @@ void CapturerGdi::CaptureImage() {
   // And then copy the rect from desktop to memory.
   BitBlt(memory_dc_, 0, 0, width_, height_, desktop_dc_, 0, 0,
       SRCCOPY | CAPTUREBLT);
+}
+
+// static
+Capturer* Capturer::Create(MessageLoop* message_loop) {
+  return new CapturerGdi(message_loop);
 }
 
 }  // namespace remoting

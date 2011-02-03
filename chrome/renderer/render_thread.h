@@ -50,11 +50,16 @@ struct WebPreferences;
 
 namespace base {
 class MessageLoopProxy;
+template<class T> class ScopedCallbackFactory;
 class Thread;
 }
 
 namespace IPC {
 struct ChannelHandle;
+}
+
+namespace safe_browsing {
+class Scorer;
 }
 
 namespace WebKit {
@@ -189,6 +194,12 @@ class RenderThread : public RenderThreadBase,
     return spellchecker_.get();
   }
 
+  // Returns the phishing Scorer object, or NULL if a model has not been passed
+  // in from the browser yet.
+  const safe_browsing::Scorer* phishing_scorer() const {
+    return phishing_scorer_.get();
+  }
+
   bool plugin_refresh_allowed() const { return plugin_refresh_allowed_; }
 
   // Do DNS prefetch resolution of a hostname.
@@ -267,10 +278,6 @@ class RenderThread : public RenderThreadBase,
   void OnExtensionSetHostPermissions(
       const GURL& extension_url,
       const std::vector<URLPattern>& permissions);
-  void OnExtensionSetIncognitoEnabled(
-      const std::string& extension_id,
-      bool enabled,
-      bool incognito_split_mode);
   void OnSetNextPageID(int32 next_page_id);
   void OnSetIsIncognitoProcess(bool is_incognito_process);
   void OnSetCSSColors(const std::vector<CSSColors::CSSColorMapping>& colors);
@@ -289,9 +296,9 @@ class RenderThread : public RenderThreadBase,
   void OnGetRendererTcmalloc();
   void OnGetV8HeapStats();
 
-  void OnExtensionMessageInvoke(const std::string& function_name,
+  void OnExtensionMessageInvoke(const std::string& extension_id,
+                                const std::string& function_name,
                                 const ListValue& args,
-                                bool cross_incognito,
                                 const GURL& event_url);
   void OnPurgeMemory();
   void OnPurgePluginListCache(bool reload_pages);
@@ -309,6 +316,8 @@ class RenderThread : public RenderThreadBase,
   void OnSetPhishingModel(IPC::PlatformFileForTransit model_file);
 
   void OnGetAccessibilityTree();
+
+  void OnSetSpeechInputEnabled(bool enabled);
 
   // Gather usage statistics from the in-memory cache and inform our host.
   // These functions should be call periodically so that the host can make
@@ -328,8 +337,12 @@ class RenderThread : public RenderThreadBase,
   // it is allowed to run on.
   void RegisterExtension(v8::Extension* extension, bool restrict_to_extensions);
 
+  // Callback to be run once the phishing Scorer has been created.
+  void PhishingScorerCreated(safe_browsing::Scorer* scorer);
+
   // These objects live solely on the render thread.
   scoped_ptr<ScopedRunnableMethodFactory<RenderThread> > task_factory_;
+  scoped_ptr<base::ScopedCallbackFactory<RenderThread> > callback_factory_;
   scoped_ptr<VisitedLinkSlave> visited_link_slave_;
   scoped_ptr<UserScriptSlave> user_script_slave_;
   scoped_ptr<RendererNetPredictor> renderer_net_predictor_;
@@ -341,6 +354,7 @@ class RenderThread : public RenderThreadBase,
   scoped_ptr<WebKit::WebStorageEventDispatcher> dom_storage_event_dispatcher_;
   scoped_ptr<WebDatabaseObserverImpl> web_database_observer_impl_;
   scoped_ptr<SpellCheck> spellchecker_;
+  scoped_ptr<const safe_browsing::Scorer> phishing_scorer_;
 
   // Used on the renderer and IPC threads.
   scoped_refptr<DBMessageFilter> db_message_filter_;
@@ -374,6 +388,10 @@ class RenderThread : public RenderThreadBase,
 
   bool suspend_webkit_shared_timer_;
   bool notify_webkit_of_modal_loop_;
+
+  // True if this renderer has speech input enabled, set once during thread
+  // initialization.
+  bool is_speech_input_enabled_;
 
   // Timer that periodically calls IdleHandler.
   base::RepeatingTimer<RenderThread> idle_timer_;

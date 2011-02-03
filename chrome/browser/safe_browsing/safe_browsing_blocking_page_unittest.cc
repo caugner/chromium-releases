@@ -4,7 +4,7 @@
 
 #include "chrome/browser/renderer_host/test/test_render_view_host.h"
 
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/test_tab_contents.h"
@@ -61,7 +61,7 @@ class SafeBrowsingBlockingPageTest : public RenderViewHostTestHarness,
       : ui_thread_(BrowserThread::UI, MessageLoop::current()),
         io_thread_(BrowserThread::IO, MessageLoop::current()) {
     ResetUserResponse();
-    service_ = new SafeBrowsingService();
+    service_ = SafeBrowsingService::CreateSafeBrowsingService();
   }
 
   virtual void SetUp() {

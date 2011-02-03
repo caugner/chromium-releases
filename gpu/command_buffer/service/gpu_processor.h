@@ -18,7 +18,6 @@
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
 #include "gpu/command_buffer/service/cmd_parser.h"
-#include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 
 #if defined(OS_MACOSX)
@@ -30,12 +29,16 @@ class GLContext;
 }
 
 namespace gpu {
+namespace gles2 {
+class ContextGroup;
+}
 
 // This class processes commands in a command buffer. It is event driven and
 // posts tasks to the current message loop to do additional work.
 class GPUProcessor : public CommandBufferEngine {
  public:
-  explicit GPUProcessor(CommandBuffer* command_buffer);
+  // If a group is not passed in one will be created.
+  GPUProcessor(CommandBuffer* command_buffer, gles2::ContextGroup* group);
 
   // This constructor is for unit tests.
   GPUProcessor(CommandBuffer* command_buffer,
@@ -48,21 +51,18 @@ class GPUProcessor : public CommandBufferEngine {
   // Perform platform specific and common initialization.
   bool Initialize(gfx::PluginWindowHandle hwnd,
                   const gfx::Size& size,
+                  const char* allowed_extensions,
                   const std::vector<int32>& attribs,
                   GPUProcessor* parent,
                   uint32 parent_texture_id);
-
-  // Perform common initialization. Takes ownership of GLContext.
-  bool InitializeCommon(gfx::GLContext* context,
-                        const gfx::Size& size,
-                        const std::vector<int32>& attribs,
-                        gles2::GLES2Decoder* parent_decoder,
-                        uint32 parent_texture_id);
 
   void Destroy();
   void DestroyCommon();
 
   virtual void ProcessCommands();
+
+  // Helper which causes a call to ProcessCommands to be scheduled later.
+  void ScheduleProcessCommands();
 
   // Implementation of CommandBufferEngine.
   virtual Buffer GetSharedMemoryBuffer(int32 shm_id);
@@ -86,7 +86,24 @@ class GPUProcessor : public CommandBufferEngine {
   virtual void SetTransportDIBAllocAndFree(
       Callback2<size_t, TransportDIB::Handle*>::Type* allocator,
       Callback1<TransportDIB::Id>::Type* deallocator);
+  // Returns the id of the current IOSurface, or 0.
+  virtual uint64 GetSurfaceId();
+  // To prevent the GPU process from overloading the browser process,
+  // we need to track the number of swap buffers calls issued and
+  // acknowledged per on-screen (IOSurface-backed) context, and keep
+  // the GPU from getting too far ahead of the browser. Note that this
+  // is also predicated on a flow control mechanism between the
+  // renderer and GPU processes.
+  uint64 swap_buffers_count() const;
+  void set_acknowledged_swap_buffers_count(
+      uint64 acknowledged_swap_buffers_count);
+
+  void DidDestroySurface();
 #endif
+
+  // Sets a callback that is called when a glResizeCHROMIUM command
+  // is processed.
+  virtual void SetResizeCallback(Callback1<gfx::Size>::Type* callback);
 
   // Sets a callback which is called when a SwapBuffers command is processed.
   // Must be called after Initialize().
@@ -95,6 +112,16 @@ class GPUProcessor : public CommandBufferEngine {
 
   // Get the GLES2Decoder associated with this processor.
   gles2::GLES2Decoder* decoder() const { return decoder_.get(); }
+
+ protected:
+  // Perform common initialization. Takes ownership of GLContext.
+  bool InitializeCommon(gfx::GLContext* context,
+                        const gfx::Size& size,
+                        const char* allowed_extensions,
+                        const std::vector<int32>& attribs,
+                        gles2::GLES2Decoder* parent_decoder,
+                        uint32 parent_texture_id);
+
 
  private:
   // Called via a callback just before we are supposed to call the
@@ -108,14 +135,13 @@ class GPUProcessor : public CommandBufferEngine {
 
   int commands_per_update_;
 
-  // TODO(gman): Group needs to be passed in so it can be shared by
-  //    multiple GPUProcessors.
-  gles2::ContextGroup group_;
   scoped_ptr<gles2::GLES2Decoder> decoder_;
   scoped_ptr<CommandParser> parser_;
 
 #if defined(OS_MACOSX)
   scoped_ptr<AcceleratedSurface> surface_;
+  uint64 swap_buffers_count_;
+  uint64 acknowledged_swap_buffers_count_;
 #endif
 
   ScopedRunnableMethodFactory<GPUProcessor> method_factory_;

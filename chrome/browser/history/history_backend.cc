@@ -9,7 +9,7 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
-#include "base/histogram.h"
+#include "base/metrics/histogram.h"
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
 #include "base/scoped_vector.h"
@@ -239,9 +239,9 @@ HistoryBackend::~HistoryBackend() {
   }
 }
 
-void HistoryBackend::Init(bool force_fail) {
+void HistoryBackend::Init(const std::string& languages, bool force_fail) {
   if (!force_fail)
-    InitImpl();
+    InitImpl(languages);
   delegate_->DBLoaded();
 }
 
@@ -509,7 +509,7 @@ void HistoryBackend::AddPage(scoped_refptr<HistoryAddPageArgs> request) {
   ScheduleCommit();
 }
 
-void HistoryBackend::InitImpl() {
+void HistoryBackend::InitImpl(const std::string& languages) {
   DCHECK(!db_.get()) << "Initializing HistoryBackend twice";
   // In the rare case where the db fails to initialize a dialog may get shown
   // the blocks the caller, yet allows other messages through. For this reason
@@ -548,7 +548,7 @@ void HistoryBackend::InitImpl() {
   // Fill the in-memory database and send it back to the history service on the
   // main thread.
   InMemoryHistoryBackend* mem_backend = new InMemoryHistoryBackend;
-  if (mem_backend->Init(history_name, db_.get()))
+  if (mem_backend->Init(history_name, db_.get(), languages))
     delegate_->SetInMemoryBackend(mem_backend);  // Takes ownership of pointer.
   else
     delete mem_backend;  // Error case, run without the in-memory DB.
@@ -581,12 +581,9 @@ void HistoryBackend::InitImpl() {
 
   // Thumbnail database.
   thumbnail_db_.reset(new ThumbnailDatabase());
-  if (history::TopSites::IsEnabled()) {
-    // TODO(sky): once we reenable top sites this needs to be fixed.
-    // if (!db_->needs_version_18_migration()) {
+  if (history::TopSites::IsEnabled() && !db_->GetNeedsThumbnailMigration()) {
     // No convertion needed - use new filename right away.
-    // thumbnail_name = GetFaviconsFileName();
-    // }
+    thumbnail_name = GetFaviconsFileName();
   }
   if (thumbnail_db_->Init(thumbnail_name,
                           history_publisher_.get()) != sql::INIT_OK) {
@@ -599,12 +596,9 @@ void HistoryBackend::InitImpl() {
     thumbnail_db_.reset();
   }
 
-  if (history::TopSites::IsEnabled()) {
-    // TODO(sky): fix when reenabling top sites migration.
-    // if (db_->needs_version_18_migration()) {
-    // LOG(INFO) << "Starting TopSites migration";
-    // delegate_->StartTopSitesMigration();
-    // }
+  if (history::TopSites::IsEnabled() && db_->GetNeedsThumbnailMigration()) {
+    VLOG(1) << "Starting TopSites migration";
+    delegate_->StartTopSitesMigration();
   }
 
   // Archived database.
@@ -1041,6 +1035,14 @@ void HistoryBackend::SetKeywordSearchTermsForURL(const GURL& url,
   }
 
   db_->SetKeywordSearchTermsForURL(url_row.id(), keyword_id, term);
+
+  // details is deleted by BroadcastNotifications.
+  KeywordSearchTermDetails* details = new KeywordSearchTermDetails;
+  details->url = url;
+  details->keyword_id = keyword_id;
+  details->term = term;
+  BroadcastNotifications(NotificationType::HISTORY_KEYWORD_SEARCH_TERM_UPDATED,
+                         details);
   ScheduleCommit();
 }
 
@@ -1341,6 +1343,16 @@ void HistoryBackend::QueryMostVisitedURLs(
   }
 
   MostVisitedURLList* result = &request->value;
+  QueryMostVisitedURLsImpl(result_count, days_back, result);
+  request->ForwardResult(QueryMostVisitedURLsRequest::TupleType(
+      request->handle(), *result));
+}
+
+void HistoryBackend::QueryMostVisitedURLsImpl(int result_count,
+                                              int days_back,
+                                              MostVisitedURLList* result) {
+  if (!db_.get())
+    return;
 
   ScopedVector<PageUsageData> data;
   db_->QuerySegmentUsage(base::Time::Now() -
@@ -1354,9 +1366,6 @@ void HistoryBackend::QueryMostVisitedURLs(
     MostVisitedURL url = MakeMostVisitedURL(*current_data, redirects);
     result->push_back(url);
   }
-
-  request->ForwardResult(QueryMostVisitedURLsRequest::TupleType(
-      request->handle(), *result));
 }
 
 void HistoryBackend::GetRedirectsFromSpecificVisit(
@@ -1513,6 +1522,19 @@ void HistoryBackend::GetPageThumbnailDirectly(
 
     UMA_HISTOGRAM_TIMES("History.GetPageThumbnail",
                         TimeTicks::Now() - beginning_time);
+  }
+}
+
+void HistoryBackend::MigrateThumbnailsDatabase() {
+  // If there is no History DB, we can't record that the migration was done.
+  // It will be recorded on the next run.
+  if (db_.get()) {
+    // If there is no thumbnail DB, we can still record a successful migration.
+    if (thumbnail_db_.get()) {
+      thumbnail_db_->RenameAndDropThumbnails(GetThumbnailFileName(),
+                                             GetFaviconsFileName());
+    }
+    db_->ThumbnailMigrationDone();
   }
 }
 
@@ -2147,19 +2169,6 @@ BookmarkService* HistoryBackend::GetBookmarkService() {
   if (bookmark_service_)
     bookmark_service_->BlockTillLoaded();
   return bookmark_service_;
-}
-
-void HistoryBackend::MigrateThumbnailsDatabase() {
-  // If there is no History DB, we can't record that the migration was done.
-  // It will be recorded on the next run.
-  if (db_.get()) {
-    // If there is no thumbnail DB, we can still record a successful migration.
-    if (thumbnail_db_.get()) {
-      thumbnail_db_->RenameAndDropThumbnails(GetThumbnailFileName(),
-                                             GetFaviconsFileName());
-    }
-    db_->MigrationToTopSitesDone();
-  }
 }
 
 }  // namespace history

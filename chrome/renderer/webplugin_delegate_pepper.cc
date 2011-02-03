@@ -15,19 +15,19 @@
 
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/histogram.h"
 #if defined(OS_MACOSX)
 #include "base/mac_util.h"
 #endif
 #include "base/md5.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
+#include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #if defined(OS_MACOSX)
-#include "base/scoped_cftyperef.h"
+#include "base/mac/scoped_cftyperef.h"
 #endif
 #include "base/scoped_ptr.h"
-#include "base/stats_counters.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/task.h"
@@ -114,8 +114,8 @@ WebPluginDelegatePepper* WebPluginDelegatePepper::Create(
     const FilePath& filename,
     const std::string& mime_type,
     const base::WeakPtr<RenderView>& render_view) {
-  scoped_refptr<NPAPI::PluginLib> plugin_lib =
-      NPAPI::PluginLib::CreatePluginLib(filename);
+  scoped_refptr<NPAPI::PluginLib> plugin_lib(
+      NPAPI::PluginLib::CreatePluginLib(filename));
   if (plugin_lib.get() == NULL)
     return NULL;
 
@@ -123,8 +123,8 @@ WebPluginDelegatePepper* WebPluginDelegatePepper::Create(
   if (err != NPERR_NO_ERROR)
     return NULL;
 
-  scoped_refptr<NPAPI::PluginInstance> instance =
-      plugin_lib->CreateInstance(mime_type);
+  scoped_refptr<NPAPI::PluginInstance> instance(
+      plugin_lib->CreateInstance(mime_type));
   return new WebPluginDelegatePepper(render_view,
                                      instance.get());
 }
@@ -614,7 +614,8 @@ NPError WebPluginDelegatePepper::Device2DGetStateContext(
     // Return the least significant 8 characters (i.e. 4 bytes)
     // of the 32 character hexadecimal result as an int.
     int int_val;
-    base::HexStringToInt(hex_md5.substr(24), &int_val);
+    DCHECK_EQ(hex_md5.length(), 32u);
+    base::HexStringToInt(hex_md5.begin() + 24, hex_md5.end(), &int_val);
     *value = int_val;
     return NPERR_NO_ERROR;
   }
@@ -1602,7 +1603,7 @@ void WebPluginDelegatePepper::ForwardHandleRepaint(
 
 void WebPluginDelegatePepper::Synchronize3DContext(
     NPDeviceContext3D* context,
-    gpu::CommandBuffer::State state) {
+    const gpu::CommandBuffer::State& state) {
   context->getOffset = state.get_offset;
   context->putOffset = state.put_offset;
   context->token = state.token;
@@ -1739,11 +1740,11 @@ void WebPluginDelegatePepper::DrawSkBitmapToCanvas(
     int canvas_height) {
   SkAutoLockPixels lock(bitmap);
   DCHECK(bitmap.getConfig() == SkBitmap::kARGB_8888_Config);
-  scoped_cftyperef<CGDataProviderRef> data_provider(
+  base::mac::ScopedCFTypeRef<CGDataProviderRef> data_provider(
       CGDataProviderCreateWithData(
           NULL, bitmap.getAddr32(0, 0),
           bitmap.rowBytes() * bitmap.height(), NULL));
-  scoped_cftyperef<CGImageRef> image(
+  base::mac::ScopedCFTypeRef<CGImageRef> image(
       CGImageCreate(
           bitmap.width(), bitmap.height(),
           8, 32, bitmap.rowBytes(),

@@ -6,7 +6,7 @@
 
 #include "base/message_loop.h"
 #include "base/time.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/sync/engine/apply_updates_command.h"
 #include "chrome/browser/sync/engine/build_and_process_conflict_sets_command.h"
 #include "chrome/browser/sync/engine/build_commit_command.h"
@@ -49,21 +49,15 @@ using syncable::WriteTransaction;
 
 namespace browser_sync {
 
+using sessions::ScopedSessionContextConflictResolver;
 using sessions::StatusController;
 using sessions::SyncSession;
 using sessions::ConflictProgress;
 
-Syncer::Syncer(sessions::SyncSessionContext* context)
+Syncer::Syncer()
     : early_exit_requested_(false),
       max_commit_batch_size_(kDefaultMaxCommitBatchSize),
-      resolver_scoper_(context, &resolver_),
-      context_(context),
-      updates_source_(sync_pb::GetUpdatesCallerInfo::UNKNOWN),
       pre_conflict_resolution_closure_(NULL) {
-
-  ScopedDirLookup dir(context->directory_manager(), context->account_name());
-  // The directory must be good here.
-  CHECK(dir.good());
 }
 
 Syncer::~Syncer() {}
@@ -78,18 +72,16 @@ void Syncer::RequestEarlyExit() {
   early_exit_requested_ = true;
 }
 
-bool Syncer::SyncShare(sessions::SyncSession::Delegate* delegate) {
-  sessions::SyncSession session(context_, delegate);
-  return SyncShare(&session);
-}
+void Syncer::SyncShare(sessions::SyncSession* session) {
+  ScopedDirLookup dir(session->context()->directory_manager(),
+                      session->context()->account_name());
+  // The directory must be good here.
+  CHECK(dir.good());
 
-bool Syncer::SyncShare(sessions::SyncSession* session) {
-  sync_pb::GetUpdatesCallerInfo::GetUpdatesSource source =
-      TestAndSetUpdatesSource();
-  session->set_source(source);
-  if (sync_pb::GetUpdatesCallerInfo::CLEAR_PRIVATE_DATA == source) {
+  const sessions::SyncSourceInfo& source(session->source());
+  if (sync_pb::GetUpdatesCallerInfo::CLEAR_PRIVATE_DATA == source.first) {
     SyncShare(session, CLEAR_PRIVATE_DATA, SYNCER_END);
-    return false;
+    return;
   } else {
     // This isn't perfect, as we can end up bundling extensions activity
     // intended for the next session into the current one.  We could do a
@@ -100,23 +92,17 @@ bool Syncer::SyncShare(sessions::SyncSession* session) {
     // the records set here on the original attempt.  This should provide us
     // with the right data "most of the time", and we're only using this for
     // analysis purposes, so Law of Large Numbers FTW.
-    context_->extensions_monitor()->GetAndClearRecords(
+    session->context()->extensions_monitor()->GetAndClearRecords(
         session->mutable_extensions_activity());
     SyncShare(session, SYNCER_BEGIN, SYNCER_END);
-    return session->HasMoreToSync();
   }
-}
-
-bool Syncer::SyncShare(SyncerStep first_step, SyncerStep last_step,
-                       sessions::SyncSession::Delegate* delegate) {
-  sessions::SyncSession session(context_, delegate);
-  SyncShare(&session, first_step, last_step);
-  return session.HasMoreToSync();
 }
 
 void Syncer::SyncShare(sessions::SyncSession* session,
                        const SyncerStep first_step,
                        const SyncerStep last_step) {
+  ScopedSessionContextConflictResolver scoped(session->context(),
+                                              &resolver_);
   SyncerStep current_step = first_step;
 
   SyncerStep next_step = current_step;
@@ -154,7 +140,7 @@ void Syncer::SyncShare(sessions::SyncSession* session,
         break;
       }
       case PROCESS_UPDATES: {
-       VLOG(1) << "Processing Updates";
+        VLOG(1) << "Processing Updates";
         ProcessUpdatesCommand process_updates;
         process_updates.Execute(session);
         next_step = STORE_TIMESTAMPS;
@@ -187,8 +173,8 @@ void Syncer::SyncShare(sessions::SyncSession* session,
         session->status_controller()->set_syncing(true);
 
         VLOG(1) << "Processing Commit Request";
-        ScopedDirLookup dir(context_->directory_manager(),
-                            context_->account_name());
+        ScopedDirLookup dir(session->context()->directory_manager(),
+                            session->context()->account_name());
         if (!dir.good()) {
           LOG(ERROR) << "Scoped dir lookup failed!";
           return;

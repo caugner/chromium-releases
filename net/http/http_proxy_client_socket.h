@@ -78,6 +78,7 @@ class HttpProxyClientSocket : public ClientSocket {
   virtual void SetSubresourceSpeculation();
   virtual void SetOmniboxSpeculation();
   virtual bool WasEverUsed() const;
+  virtual bool UsingTCPFastOpen() const;
 
   // Socket methods:
   virtual int Read(IOBuffer* buf, int buf_len, CompletionCallback* callback);
@@ -155,7 +156,8 @@ class HttpProxyClientSocket : public ClientSocket {
   // If true, then the connection to the proxy is a SPDY connection.
   const bool using_spdy_;
 
-  std::string request_headers_;
+  std::string request_line_;
+  HttpRequestHeaders request_headers_;
 
   const BoundNetLog net_log_;
 

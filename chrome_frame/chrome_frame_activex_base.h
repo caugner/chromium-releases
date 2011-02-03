@@ -16,14 +16,15 @@
 #include <string>
 #include <vector>
 
-#include "base/histogram.h"
-#include "base/scoped_bstr_win.h"
-#include "base/scoped_comptr_win.h"
-#include "base/scoped_variant_win.h"
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/scoped_bstr.h"
+#include "base/win/scoped_comptr.h"
+#include "base/win/scoped_variant.h"
 #include "grit/chrome_frame_resources.h"
+#include "ceee/ie/common/ceee_util.h"
 #include "chrome/common/url_constants.h"
 #include "chrome_frame/chrome_frame_plugin.h"
 #include "chrome_frame/com_message_event.h"
@@ -38,7 +39,6 @@
 // Include without path to make GYP build see it.
 #include "chrome_tab.h"  // NOLINT
 
-
 // Connection point class to support firing IChromeFrameEvents (dispinterface).
 template<class T>
 class ATL_NO_VTABLE ProxyDIChromeFrameEvents
@@ -52,7 +52,8 @@ class ATL_NO_VTABLE ProxyDIChromeFrameEvents
     // a threading issue, but a re-entrance issue, because the connection
     // can be affected by the implementation of the sinks receiving the event.
     me->Lock();
-    std::vector< ScopedComPtr<IUnknown> > sink_array(m_vec.GetSize());
+    std::vector< base::win::ScopedComPtr<IUnknown> > sink_array(
+        m_vec.GetSize());
     for (int connection = 0; connection < m_vec.GetSize(); ++connection)
       sink_array[connection] = m_vec.GetAt(connection);
     me->Unlock();
@@ -140,6 +141,10 @@ class ATL_NO_VTABLE ProxyDIChromeFrameEvents
   void Fire_onchannelerror() {  // NOLINT
     FireMethodWithParams(CF_EVENT_DISPID_ONCHANNELERROR, NULL, 0);
   }
+
+  void Fire_onclose() {  // NOLINT
+    FireMethodWithParams(CF_EVENT_DISPID_ONCLOSE, NULL, 0);
+  }
 };
 
 extern bool g_first_launch_by_process_;
@@ -162,6 +167,7 @@ class ATL_NO_VTABLE ChromeFrameActivexBase :  // NOLINT
   public com_util::IProvideClassInfo2Impl<class_id,
                                           DIID_DIChromeFrameEvents>,
   public com_util::IDispatchImpl<IChromeFrame>,
+  public IChromeFrameInternal,
   public IConnectionPointContainerImpl<T>,
   public ProxyDIChromeFrameEvents<T>,
   public IPropertyNotifySinkCP<T>,
@@ -169,7 +175,7 @@ class ATL_NO_VTABLE ChromeFrameActivexBase :  // NOLINT
   public CComControl<T>,
   public ChromeFramePlugin<T> {
  protected:
-  typedef std::set<ScopedComPtr<IDispatch> > EventHandlers;
+  typedef std::set<base::win::ScopedComPtr<IDispatch> > EventHandlers;
   typedef ChromeFrameActivexBase<T, class_id> BasePlugin;
 
  public:
@@ -177,7 +183,8 @@ class ATL_NO_VTABLE ChromeFrameActivexBase :  // NOLINT
       : ready_state_(READYSTATE_UNINITIALIZED),
       url_fetcher_(new UrlmonUrlRequestManager()),
       failed_to_fetch_in_place_frame_(false),
-      draw_sad_tab_(false) {
+      draw_sad_tab_(false),
+      prev_resource_instance_(NULL) {
     m_bWindowOnly = TRUE;
     url_fetcher_->set_container(static_cast<IDispatch*>(this));
   }
@@ -195,6 +202,7 @@ DECLARE_NOT_AGGREGATABLE(T)
 BEGIN_COM_MAP(ChromeFrameActivexBase)
   COM_INTERFACE_ENTRY(IChromeFrame)
   COM_INTERFACE_ENTRY(IDispatch)
+  COM_INTERFACE_ENTRY(IChromeFrameInternal)
   COM_INTERFACE_ENTRY(IViewObjectEx)
   COM_INTERFACE_ENTRY(IViewObject2)
   COM_INTERFACE_ENTRY(IViewObject)
@@ -244,10 +252,16 @@ END_MSG_MAP()
   DECLARE_PROTECT_FINAL_CONSTRUCT()
 
   virtual void SetResourceModule() {
+    DCHECK(NULL == prev_resource_instance_);
     SimpleResourceLoader* loader_instance = SimpleResourceLoader::instance();
     DCHECK(loader_instance);
-    HINSTANCE res_dll = loader_instance->GetResourceModuleHandle();
-    _AtlBaseModule.SetResourceInstance(res_dll);
+    HMODULE res_dll = loader_instance->GetResourceModuleHandle();
+    prev_resource_instance_ = _AtlBaseModule.SetResourceInstance(res_dll);
+  }
+
+  virtual void ClearResourceModule() {
+    _AtlBaseModule.SetResourceInstance(prev_resource_instance_);
+    prev_resource_instance_ = NULL;
   }
 
   HRESULT FinalConstruct() {
@@ -272,6 +286,8 @@ END_MSG_MAP()
 
   void FinalRelease() {
     Uninitialize();
+
+    ClearResourceModule();
   }
 
   void ResetUrlRequestManager() {
@@ -283,7 +299,7 @@ END_MSG_MAP()
 #ifndef NDEBUG
     wchar_t buffer[64] = {0};
     ::StringFromGUID2(riid, buffer, arraysize(buffer));
-    DLOG(INFO) << "E_NOINTERFACE: " << buffer;
+    DVLOG(1) << "E_NOINTERFACE: " << buffer;
 #endif
     return E_NOINTERFACE;
   }
@@ -328,7 +344,6 @@ END_MSG_MAP()
     return S_OK;
   }
 
-
   // Used to setup the document_url_ member needed for completing navigation.
   // Create external tab (possibly in incognito mode).
   HRESULT IOleObject_SetClientSite(IOleClientSite* client_site) {
@@ -346,7 +361,7 @@ END_MSG_MAP()
   }
 
   bool HandleContextMenuCommand(UINT cmd,
-                                const IPC::ContextMenuParams& params) {
+                                const IPC::MiniContextMenuParams& params) {
     if (cmd == IDC_ABOUT_CHROME_FRAME) {
       int tab_handle = automation_client_->tab()->handle();
       HostNavigate(GURL("about:version"), GURL(), NEW_WINDOW);
@@ -397,15 +412,19 @@ END_MSG_MAP()
                  (lstrcmpi(profile_name.c_str(), kRundllProfileName) == 0);
     // Browsers without IDeleteBrowsingHistory in non-priv mode
     // have their profiles moved into "Temporary Internet Files".
-    if (is_IE && GetIEVersion() < IE_8 && !is_privileged_) {
+    //
+    // If CEEE is registered, we must have a persistent profile. We
+    // considered checking if e.g. ceee_ie.dll is loaded in the process
+    // but this gets into edge cases when the user enables the CEEE add-on
+    // after CF is first loaded.
+    if (is_IE && GetIEVersion() < IE_8 && !ceee_util::IsIeCeeeRegistered()) {
       *profile_path = GetIETemporaryFilesFolder();
       *profile_path = profile_path->Append(L"Google Chrome Frame");
     } else {
       ChromeFramePlugin::GetProfilePath(profile_name, profile_path);
     }
-    DLOG(INFO) << __FUNCTION__ << ": " << profile_path->value();
+    DVLOG(1) << __FUNCTION__ << ": " << profile_path->value();
   }
-
 
   void OnLoad(int tab_handle, const GURL& url) {
     if (ready_state_ < READYSTATE_COMPLETE) {
@@ -423,10 +442,10 @@ END_MSG_MAP()
   void OnMessageFromChromeFrame(int tab_handle, const std::string& message,
                                 const std::string& origin,
                                 const std::string& target) {
-    ScopedComPtr<IDispatch> message_event;
+    base::win::ScopedComPtr<IDispatch> message_event;
     if (SUCCEEDED(CreateDomEvent("message", message, origin,
                                  message_event.Receive()))) {
-      ScopedVariant event_var;
+      base::win::ScopedVariant event_var;
       event_var.Set(static_cast<IDispatch*>(message_event));
       InvokeScriptFunction(onmessage_handler_, event_var.AsInput());
     }
@@ -437,7 +456,7 @@ END_MSG_MAP()
 
     HWND parent = ::GetParent(m_hWnd);
     ::SetFocus(parent);
-    ScopedComPtr<IOleControlSite> control_site;
+    base::win::ScopedComPtr<IOleControlSite> control_site;
     control_site.QueryFrom(m_spClientSite);
     if (control_site)
       control_site->OnFocus(FALSE);
@@ -455,9 +474,11 @@ END_MSG_MAP()
   // There's room for improvement here and also see todo below.
   LPARAM OnDownloadRequestInHost(UINT message, WPARAM wparam, LPARAM lparam,
                                  BOOL& handled) {
-    ScopedComPtr<IMoniker> moniker(reinterpret_cast<IMoniker*>(lparam));
+    base::win::ScopedComPtr<IMoniker> moniker(
+        reinterpret_cast<IMoniker*>(lparam));
     DCHECK(moniker);
-    ScopedComPtr<IBindCtx> bind_context(reinterpret_cast<IBindCtx*>(wparam));
+    base::win::ScopedComPtr<IBindCtx> bind_context(
+        reinterpret_cast<IBindCtx*>(wparam));
 
     // TODO(tommi): It looks like we might have to switch the request object
     // into a pass-through request object and serve up any thus far received
@@ -475,9 +496,6 @@ END_MSG_MAP()
     std::wstring wide_url = url_;
     GURL parsed_url(WideToUTF8(wide_url));
 
-    std::string scheme(parsed_url.scheme());
-    std::string host(parsed_url.host());
-
     // If Chrome-Frame is presently navigated to an extension page, navigating
     // the host to a url with scheme chrome-extension will fail, so we
     // point the host at http:local_host.  Note that this is NOT the URL
@@ -486,14 +504,18 @@ END_MSG_MAP()
     // be constructed in the new IE tab.
     if (parsed_url.SchemeIs("chrome-extension") &&
         is_privileged_) {
-      scheme = "http";
-      host = "local_host";
+      const char kScheme[] = "http";
+      const char kHost[] = "local_host";
+
+      GURL::Replacements r;
+      r.SetScheme(kScheme, url_parse::Component(0, sizeof(kScheme) -1));
+      r.SetHost(kHost, url_parse::Component(0, sizeof(kHost) - 1));
+      parsed_url = parsed_url.ReplaceComponents(r);
     }
 
     std::string url = base::StringPrintf(
-        "%hs:%hs?attach_external_tab&%I64u&%d&%d&%d&%d&%d&%hs",
-        scheme.c_str(),
-        host.c_str(),
+        "%hs?attach_external_tab&%I64u&%d&%d&%d&%d&%d&%hs",
+        parsed_url.GetOrigin().spec().c_str(),
         params.cookie,
         params.disposition,
         params.dimensions.x(),
@@ -506,7 +528,7 @@ END_MSG_MAP()
 
   virtual void OnHandleContextMenu(int tab_handle, HANDLE menu_handle,
                                    int align_flags,
-                                   const IPC::ContextMenuParams& params) {
+                                   const IPC::MiniContextMenuParams& params) {
     scoped_refptr<BasePlugin> ref(this);
     ChromeFramePlugin<T>::OnHandleContextMenu(tab_handle, menu_handle,
                                               align_flags, params);
@@ -532,7 +554,7 @@ END_MSG_MAP()
 
   LRESULT OnDestroy(UINT message, WPARAM wparam, LPARAM lparam,
                     BOOL& handled) {  // NO_LINT
-    DLOG(INFO) << __FUNCTION__;
+    DVLOG(1) << __FUNCTION__;
     return 0;
   }
 
@@ -548,12 +570,16 @@ END_MSG_MAP()
   // ChromeFrameDelegate override
   virtual void OnAutomationServerLaunchFailed(
       AutomationLaunchResult reason, const std::string& server_version) {
-    DLOG(INFO) << __FUNCTION__;
+    DVLOG(1) << __FUNCTION__;
     if (reason == AUTOMATION_SERVER_CRASHED)
       draw_sad_tab_ = true;
 
     ready_state_ = READYSTATE_UNINITIALIZED;
     FireOnChanged(DISPID_READYSTATE);
+  }
+
+  virtual void OnCloseTab(int tab_handle) {
+    Fire_onclose();
   }
 
   // Overridden to take advantage of readystate prop changes and send those
@@ -678,7 +704,7 @@ END_MSG_MAP()
   }
 
   STDMETHOD(get_readyState)(long* ready_state) {  // NOLINT
-    DLOG(INFO) << __FUNCTION__;
+    DVLOG(1) << __FUNCTION__;
     DCHECK(ready_state);
 
     if (!ready_state)
@@ -763,7 +789,7 @@ END_MSG_MAP()
 
     DCHECK(handlers != NULL);
 
-    handlers->insert(ScopedComPtr<IDispatch>(listener));
+    handlers->insert(base::win::ScopedComPtr<IDispatch>(listener));
 
     return hr;
   }
@@ -872,6 +898,19 @@ END_MSG_MAP()
     return S_OK;
   }
 
+  STDMETHOD(getSessionId)(int* session_id) {
+    DCHECK(automation_client_.get());
+    DCHECK(session_id);
+
+    if (!is_privileged_) {
+      DLOG(ERROR) << "Attempt to getSessionId in non-privileged mode";
+      return E_ACCESSDENIED;
+    }
+
+    *session_id = automation_client_->GetSessionId();
+    return (*session_id) == -1 ? S_FALSE : S_OK;
+  }
+
   STDMETHOD(registerBhoIfNeeded)() {
     return E_NOTIMPL;
   }
@@ -934,7 +973,7 @@ END_MSG_MAP()
     if (SUCCEEDED(hr)) {
       ev->AddRef();
 
-      ScopedComPtr<IOleContainer> container;
+      base::win::ScopedComPtr<IOleContainer> container;
       m_spClientSite->GetContainer(container.Receive());
       if (ev->Initialize(container, data, origin, event_type)) {
         *event = ev;
@@ -951,7 +990,7 @@ END_MSG_MAP()
   // Helper function to execute a function on a script IDispatch interface.
   HRESULT InvokeScriptFunction(const VARIANT& script_object,
                                const std::string& param) {
-    ScopedVariant script_arg(UTF8ToWide(param.c_str()).c_str());
+    base::win::ScopedVariant script_arg(UTF8ToWide(param.c_str()).c_str());
     return InvokeScriptFunction(script_object, script_arg.AsInput());
   }
 
@@ -998,7 +1037,7 @@ END_MSG_MAP()
     MSG accel_message = msg;
     accel_message.hwnd = ::GetParent(m_hWnd);
     HRESULT hr = S_FALSE;
-    ScopedComPtr<IBrowserService2> bs2;
+    base::win::ScopedComPtr<IBrowserService2> bs2;
 
     // For non-IE containers, we use the standard IOleInPlaceFrame contract
     // (which IE does not support). For IE, we try to use IBrowserService2,
@@ -1008,7 +1047,7 @@ END_MSG_MAP()
     // retry, and we fall back to the IBrowserService2 and PostMessage
     // approaches below.
     if (!in_place_frame_ && !failed_to_fetch_in_place_frame_) {
-      ScopedComPtr<IOleInPlaceUIWindow> dummy_ui_window;
+      base::win::ScopedComPtr<IOleInPlaceUIWindow> dummy_ui_window;
       RECT dummy_pos_rect = {0};
       RECT dummy_clip_rect = {0};
       OLEINPLACEFRAMEINFO dummy_frame_info = {0};
@@ -1075,8 +1114,8 @@ END_MSG_MAP()
     if (hr != S_OK)
       hr = AllowFrameToTranslateAccelerator(accel_message);
 
-    DLOG(INFO) << __FUNCTION__ << " browser response: "
-               << base::StringPrintf("0x%08x", hr);
+    DVLOG(1) << __FUNCTION__ << " browser response: "
+             << base::StringPrintf("0x%08x", hr);
 
     if (hr != S_OK) {
       // The WM_SYSCHAR message is not processed by the IOleControlSite
@@ -1112,13 +1151,13 @@ END_MSG_MAP()
  protected:
   void HostNavigate(const GURL& url_to_open,
                     const GURL& referrer, int open_disposition) {
-    ScopedComPtr<IWebBrowser2> web_browser2;
+    base::win::ScopedComPtr<IWebBrowser2> web_browser2;
     DoQueryService(SID_SWebBrowserApp, m_spClientSite, web_browser2.Receive());
     if (!web_browser2) {
       NOTREACHED() << "Failed to retrieve IWebBrowser2 interface";
       return;
     }
-    ScopedVariant url;
+    base::win::ScopedVariant url;
     // Check to see if the URL uses a "view-source:" prefix, if so, open it
     // using chrome frame full tab mode by using 'cf:' protocol handler.
     // Also change the disposition to NEW_WINDOW since IE6 doesn't have tabs.
@@ -1187,8 +1226,8 @@ END_MSG_MAP()
     //       L"No_Name", uri, L"");
     // }
     // End of MSHTML-like logic
-    VARIANT empty = ScopedVariant::kEmptyVariant;
-    ScopedVariant http_headers;
+    VARIANT empty = base::win::ScopedVariant::kEmptyVariant;
+    base::win::ScopedVariant http_headers;
 
     if (referrer.is_valid()) {
       std::wstring referrer_header = L"Referer: ";
@@ -1213,15 +1252,15 @@ END_MSG_MAP()
     automation_client_->set_use_chrome_network(chrome_network);
   }
 
-  ScopedBstr url_;
-  ScopedComPtr<IOleDocumentSite> doc_site_;
+  base::win::ScopedBstr url_;
+  base::win::ScopedComPtr<IOleDocumentSite> doc_site_;
 
   // If false, we tried but failed to fetch an IOleInPlaceFrame from our host.
   // Cached here so we don't try to fetch it every time if we keep failing.
   bool failed_to_fetch_in_place_frame_;
   bool draw_sad_tab_;
 
-  ScopedComPtr<IOleInPlaceFrame> in_place_frame_;
+  base::win::ScopedComPtr<IOleInPlaceFrame> in_place_frame_;
 
   // For more information on the ready_state_ property see:
   // http://msdn.microsoft.com/en-us/library/aa768179(VS.85).aspx#
@@ -1229,9 +1268,9 @@ END_MSG_MAP()
 
   // The following members contain IDispatch interfaces representing the
   // onload/onerror/onmessage handlers on the page.
-  ScopedVariant onload_handler_;
-  ScopedVariant onerror_handler_;
-  ScopedVariant onmessage_handler_;
+  base::win::ScopedVariant onload_handler_;
+  base::win::ScopedVariant onerror_handler_;
+  base::win::ScopedVariant onmessage_handler_;
 
   EventHandlers onmessage_;
   EventHandlers onloaderror_;
@@ -1243,6 +1282,8 @@ END_MSG_MAP()
   // Handle network requests when host network stack is used. Passed to the
   // automation client on initialization.
   scoped_ptr<UrlmonUrlRequestManager> url_fetcher_;
+
+  HINSTANCE prev_resource_instance_;
 };
 
 #endif  // CHROME_FRAME_CHROME_FRAME_ACTIVEX_BASE_H_

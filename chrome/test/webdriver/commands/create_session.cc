@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/values.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 
@@ -24,7 +24,7 @@ void CreateSession::ExecutePost(Response* const response) {
     return;
   }
 
-  LOG(INFO) << "Created session " << session_id;
+  VLOG(1) << "Created session " << session_id;
   std::ostringstream stream;
   stream << "http://" << session_manager->GetIPAddress() << "/session/"
          << session_id;

@@ -45,6 +45,7 @@ KNOWN_COMPUTED_USERS = (
   'extension_metrics_module.cc', # extensions hook for user metrics
   'safe_browsing_blocking_page.cc', # various interstitial types and actions
   'language_options_handler.cc', # languages and input methods in chrome os
+  'about_flags.cc', # do not generate a warning; see AddAboutFlagsActions()
 )
 
 # Language codes used in Chrome. The list should be updated when a new
@@ -151,6 +152,38 @@ def AddWebKitEditorActions(actions):
     if match:  # Plain call to RecordAction
       actions.add(match.group(1))
 
+def AddClosedSourceActions(actions):
+  """Add actions that are in code which is not checked out by default
+
+  Arguments
+    actions: set of actions to add to.
+  """
+  actions.add('PDF.PrintPage')
+  actions.add('PDF.FitToHeightButton')
+  actions.add('PDF.FitToWidthButton')
+  actions.add('PDF.ZoomFromBrowser')
+  actions.add('PDF.ZoomOutButton')
+  actions.add('PDF.ZoomInButton')
+
+def AddAboutFlagsActions(actions):
+  """This parses the experimental feature flags for UMA actions.
+
+  Arguments:
+    actions: set of actions to add to.
+  """
+  about_flags = os.path.join(path_utils.ScriptDir(), '..', 'browser',
+                             'about_flags.cc')
+  flag_name_re = re.compile(r'\s*"([0-9a-zA-Z\-_]+)",\s*// FLAGS:RECORD_UMA')
+  for line in open(about_flags):
+    match = flag_name_re.search(line)
+    if match:
+      actions.add("AboutFlags_" + match.group(1))
+    # If the line contains the marker but was not matched by the regex, put up
+    # an error if the line is not a comment.
+    elif 'FLAGS:RECORD_UMA' in line and line[0:2] != '//':
+      print >>sys.stderr, 'WARNING: This line is marked for recording ' + \
+          'about:flags metrics, but is not in the proper format:\n' + line
+
 def GrepForActions(path, actions):
   """Grep a source file for calls to UserMetrics functions.
 
@@ -160,7 +193,7 @@ def GrepForActions(path, actions):
   """
   global number_of_files_total
   number_of_files_total = number_of_files_total + 1
-  # we look for the UserMetricsAction structur constructor
+  # we look for the UserMetricsAction structure constructor
   # this should be on one line
   action_re = re.compile(r'UserMetricsAction\("([^"]*)')
   computed_action_re = re.compile(r'UserMetrics::RecordComputedAction')
@@ -208,6 +241,7 @@ def main(argv):
   AddComputedActions(actions)
   # TODO(fmantek): bring back webkit editor actions.
   # AddWebKitEditorActions(actions)
+  AddAboutFlagsActions(actions)
 
   # Walk the source tree to process all .cc files.
   chrome_root = os.path.join(path_utils.ScriptDir(), '..')
@@ -218,6 +252,8 @@ def main(argv):
 
   # print "Scanned {0} number of files".format(number_of_files_total)
   # print "Found {0} entries".format(len(actions))
+
+  AddClosedSourceActions(actions)
 
   if hash_output:
     f = open("chromeactions.txt", "w")

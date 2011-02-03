@@ -11,7 +11,7 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/ref_counted.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 
 // This class lets you register interest in changes on a FilePath.
 // The delegate will get called whenever the file or directory referenced by the
@@ -33,17 +33,11 @@ class FilePathWatcher {
   };
 
   FilePathWatcher();
-  ~FilePathWatcher() {
-    impl_->Cancel();
-  }
+  ~FilePathWatcher();
 
   // Register interest in any changes on |path|. OnPathChanged will be called
   // back for each change. Returns true on success.
-  bool Watch(const FilePath& path, Delegate* delegate) WARN_UNUSED_RESULT {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-    DCHECK(path.IsAbsolute());
-    return impl_->Watch(path, delegate);
-  }
+  bool Watch(const FilePath& path, Delegate* delegate) WARN_UNUSED_RESULT;
 
   // Used internally to encapsulate different members on different platforms.
   class PlatformDelegate

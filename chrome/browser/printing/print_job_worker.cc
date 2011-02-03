@@ -1,11 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/printing/print_job_worker.h"
 
 #include "base/message_loop.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/common/notification_service.h"
 #include "printing/printed_document.h"
@@ -57,7 +57,9 @@ PrintJobWorker::PrintJobWorker(PrintJobWorkerOwner* owner)
 }
 
 PrintJobWorker::~PrintJobWorker() {
-  // The object is deleted in the UI thread.
+  // The object is normally deleted in the UI thread, but when the user
+  // cancels printing or in the case of print preview, the worker is destroyed
+  // on the I/O thread.
   DCHECK_EQ(owner_->message_loop(), MessageLoop::current());
 }
 
@@ -80,22 +82,14 @@ void PrintJobWorker::GetSettings(bool ask_user_for_settings,
   printing_context_->set_use_overlays(use_overlays);
 
   if (ask_user_for_settings) {
-#if defined(OS_MACOSX) || defined(USE_X11)
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         NewRunnableMethod(this, &PrintJobWorker::GetSettingsWithUI,
                           parent_view, document_page_count,
                           has_selection));
-#else
-    printing_context_->AskUserForSettings(
-        parent_view,
-        document_page_count,
-        has_selection,
-        NewCallback(this, &PrintJobWorker::GetSettingsDone));
-#endif  // defined(OS_MACOSX) || defined(USE_X11)
   } else {
-    PrintingContext::Result result = printing_context_->UseDefaultSettings();
-    GetSettingsDone(result);
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+        NewRunnableMethod(this, &PrintJobWorker::UseDefaultSettings));
   }
 }
 
@@ -114,7 +108,6 @@ void PrintJobWorker::GetSettingsDone(PrintingContext::Result result) {
       result));
 }
 
-#if defined(OS_MACOSX) || defined(USE_X11)
 void PrintJobWorker::GetSettingsWithUI(gfx::NativeView parent_view,
                                        int document_page_count,
                                        bool has_selection) {
@@ -131,7 +124,11 @@ void PrintJobWorker::GetSettingsWithUIDone(PrintingContext::Result result) {
   message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
       this, &PrintJobWorker::GetSettingsDone, result));
 }
-#endif  // defined(OS_MACOSX) || defined(USE_X11)
+
+void PrintJobWorker::UseDefaultSettings() {
+  PrintingContext::Result result = printing_context_->UseDefaultSettings();
+  GetSettingsDone(result);
+}
 
 void PrintJobWorker::StartPrinting(PrintedDocument* new_document) {
   DCHECK_EQ(message_loop(), MessageLoop::current());

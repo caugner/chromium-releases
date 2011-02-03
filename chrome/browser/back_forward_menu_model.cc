@@ -7,13 +7,14 @@
 #include "chrome/browser/back_forward_menu_model.h"
 
 #include "app/l10n_util.h"
+#include "app/text_elider.h"
 #include "app/resource_bundle.h"
 #include "base/string_number_conversions.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -21,6 +22,7 @@
 
 const int BackForwardMenuModel::kMaxHistoryItems = 12;
 const int BackForwardMenuModel::kMaxChapterStops = 5;
+static const int kMaxWidth = 700;
 
 BackForwardMenuModel::BackForwardMenuModel(Browser* browser,
                                            ModelType model_type)
@@ -71,10 +73,13 @@ string16 BackForwardMenuModel::GetLabelAt(int index) const {
   if (IsSeparator(index))
     return string16();
 
-  // Return the entry title, escaping any '&' characters.
+  // Return the entry title, escaping any '&' characters and eliding it if it's
+  // super long.
   NavigationEntry* entry = GetNavigationEntry(index);
   string16 menu_text(entry->GetTitleForDisplay(
       &GetTabContents()->controller()));
+  menu_text = gfx::ElideText(menu_text, gfx::Font(), kMaxWidth, false);
+
   for (size_t i = menu_text.find('&'); i != string16::npos;
        i = menu_text.find('&', i + 2)) {
     menu_text.insert(i, 1, '&');
@@ -137,8 +142,7 @@ void BackForwardMenuModel::ActivatedAt(int index) {
 }
 
 void BackForwardMenuModel::ActivatedAtWithDisposition(
-      int index,
-      WindowOpenDisposition disposition) {
+      int index, int disposition) {
   Profile* profile = browser_->profile();
 
   DCHECK(!IsSeparator(index));
@@ -147,7 +151,7 @@ void BackForwardMenuModel::ActivatedAtWithDisposition(
   if (index == GetItemCount() - 1) {
     UserMetrics::RecordComputedAction(BuildActionName("ShowFullHistory", -1),
                                       profile);
-    browser_->ShowSingletonTab(GURL(chrome::kChromeUIHistoryURL));
+    browser_->ShowSingletonTab(GURL(chrome::kChromeUIHistoryURL), false);
     return;
   }
 
@@ -162,8 +166,8 @@ void BackForwardMenuModel::ActivatedAtWithDisposition(
   }
 
   int controller_index = MenuIndexToNavEntryIndex(index);
-  if (!browser_->NavigateToIndexWithDisposition(controller_index,
-                                                disposition)) {
+  if (!browser_->NavigateToIndexWithDisposition(
+          controller_index, static_cast<WindowOpenDisposition>(disposition))) {
     NOTREACHED();
   }
 }

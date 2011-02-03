@@ -1,4 +1,7 @@
-debug("Test IndexedDB's KeyPath.");
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 
 function cursorSuccess()
 {
@@ -17,8 +20,8 @@ function cursorSuccess()
 function openCursor()
 {
     debug("Opening cursor #" + count);
-    keyRange = webkitIDBKeyRange.leftBound("myKey" + count);
-    result = objectStore.openCursor(keyRange);
+    keyRange = webkitIDBKeyRange.lowerBound("myKey" + count);
+    result = objectStore.openCursor({range: keyRange});
     result.onsuccess = cursorSuccess;
     result.onerror = unexpectedErrorCallback;
 }
@@ -41,7 +44,7 @@ function createObjectStore()
 {
     debug('createObjectStore');
     deleteAllObjectStores(db);
-    window.objectStore = db.createObjectStore('test', 'keyPath');
+    window.objectStore = db.createObjectStore('test', {keyPath: 'keyPath'});
     count = 0;
     populateObjectStore();
 }
@@ -57,8 +60,9 @@ function setVersion()
 
 function test()
 {
+    debug("Test IndexedDB's KeyPath.");
     debug("Opening IndexedDB");
-    result = webkitIndexedDB.open('name', 'description');
+    result = webkitIndexedDB.open('name');
     result.onsuccess = setVersion;
     result.onerror = unexpectedErrorCallback;
 }

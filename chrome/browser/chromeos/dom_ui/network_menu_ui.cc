@@ -8,10 +8,12 @@
 #include "base/values.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/status/network_menu.h"
 #include "chrome/browser/chromeos/views/domui_menu_widget.h"
 #include "chrome/browser/chromeos/views/native_menu_domui.h"
+#include "chrome/browser/dom_ui/dom_ui_theme_source.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
@@ -20,6 +22,23 @@
 #include "views/controls/menu/menu_2.h"
 
 namespace {
+
+class NetworkMenuSourceDelegate : public chromeos::MenuSourceDelegate {
+ public:
+  virtual void AddLocalizedStrings(DictionaryValue* localized_strings) const {
+    DCHECK(localized_strings);
+
+    localized_strings->SetString("reconnect", l10n_util::GetStringUTF16(
+        IDS_NETWORK_RECONNECT_TITLE));
+    localized_strings->SetString("auto_connect_this_network",
+        l10n_util::GetStringUTF16(
+            IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_AUTO_CONNECT));
+    localized_strings->SetString("ssid_prompt",
+        l10n_util::GetStringUTF16(IDS_NETWORK_SSID_HINT));
+    localized_strings->SetString("pass_prompt",
+        l10n_util::GetStringUTF16(IDS_NETWORK_PASSWORD_HINT));
+  }
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -89,30 +108,22 @@ NetworkMenuUI::NetworkMenuUI(TabContents* contents)
     : chromeos::MenuUI(
         contents,
         ALLOW_THIS_IN_INITIALIZER_LIST(
-            CreateMenuUIHTMLSource(*this,
+            CreateMenuUIHTMLSource(new NetworkMenuSourceDelegate(),
                                    chrome::kChromeUINetworkMenu,
                                    "NetworkMenu",
                                    IDR_NETWORK_MENU_JS,
                                    IDR_NETWORK_MENU_CSS))) {
   NetworkMenuHandler* handler = new NetworkMenuHandler();
   AddMessageHandler((handler)->Attach(this));
-}
 
-void NetworkMenuUI::AddCustomConfigValues(DictionaryValue* config) const {
-}
-
-void NetworkMenuUI::AddLocalizedStrings(
-    DictionaryValue* localized_strings) const {
-  DCHECK(localized_strings);
-
-  localized_strings->SetString("reconnect", l10n_util::GetStringUTF16(
-      IDS_NETWORK_RECONNECT_TITLE));
-  localized_strings->SetString("remeber_this_network",
-      l10n_util::GetStringUTF16(IDS_NETWORK_REMEMBER_THIS_NETWORK_TITLE));
-  localized_strings->SetString("ssid_prompt",
-      l10n_util::GetStringUTF16(IDS_NETWORK_SSID_HINT));
-  localized_strings->SetString("pass_prompt",
-      l10n_util::GetStringUTF16(IDS_NETWORK_PASSWORD_HINT));
+  // Set up chrome://theme/ source.
+  DOMUIThemeSource* theme = new DOMUIThemeSource(GetProfile());
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      NewRunnableMethod(
+          Singleton<ChromeURLDataManager>::get(),
+          &ChromeURLDataManager::AddDataSource,
+          make_scoped_refptr(theme)));
 }
 
 bool NetworkMenuUI::ModelAction(const menus::MenuModel* model,
@@ -139,14 +150,14 @@ bool NetworkMenuUI::ModelAction(const menus::MenuModel* model,
   values->GetString(2, &passphrase);  // Optional
   std::string ssid;
   values->GetString(3, &ssid);  // Optional
-  int remember = -1;  // -1 indicates not set
-  std::string remember_str;
-  if (values->GetString(4, &remember_str))  // Optional
-    base::StringToInt(remember_str, &remember);
+  int auto_connect = -1;  // -1 indicates default action (auto connect)
+  std::string auto_connect_str;
+  if (values->GetString(4, &auto_connect_str))  // Optional
+    base::StringToInt(auto_connect_str, &auto_connect);
 
   if (action == "connect" || action == "reconnect") {
     close_menu = network_menu->ConnectToNetworkAt(index, passphrase, ssid,
-                                                  remember);
+                                                  auto_connect);
   } else {
     LOG(WARNING) << "Unrecognized action: " << action
                  << " from: " << chrome::kChromeUINetworkMenu;
@@ -175,6 +186,7 @@ DictionaryValue* NetworkMenuUI::CreateMenuItem(const menus::MenuModel* model,
   item->SetString("status", info.status);
   item->SetString("message", info.message);
   item->SetString("ip_address", info.ip_address);
+  item->SetString("passphrase", info.passphrase);
   item->SetBoolean("need_passphrase", info.need_passphrase);
   item->SetBoolean("remembered", info.remembered);
   return item;

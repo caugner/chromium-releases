@@ -12,11 +12,11 @@
 #include "app/resource_bundle.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/histogram.h"
 #include "base/i18n/number_formatting.h"
+#include "base/metrics/histogram.h"
+#include "base/metrics/stats_table.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
-#include "base/stats_table.h"
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
@@ -25,7 +25,6 @@
 #include "base/tracked_objects.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/about_flags.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/defaults.h"
@@ -42,6 +41,8 @@
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/sync_ui_util.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/about_handler.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
@@ -63,6 +64,7 @@
 #endif
 
 #if defined(OS_WIN)
+#include "chrome/browser/enumerate_modules_model_win.h"
 #include "chrome/browser/views/about_ipc_dialog.h"
 #elif defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -100,6 +102,9 @@ const char kAppCacheInternalsPath[] = "appcache-internals";
 const char kBlobInternalsPath[] = "blob-internals";
 const char kCreditsPath[] = "credits";
 const char kCachePath[] = "view-http-cache";
+#if defined(OS_WIN)
+const char kConflictsPath[] = "conflicts";
+#endif
 const char kDnsPath[] = "dns";
 const char kFlagsPath[] = "flags";
 const char kGpuPath[] = "gpu";
@@ -133,6 +138,9 @@ const char *kAllAboutPaths[] = {
   kBlobInternalsPath,
   kCachePath,
   kCreditsPath,
+#if defined(OS_WIN)
+  kConflictsPath,
+#endif
   kDnsPath,
   kFlagsPath,
   kGpuPath,
@@ -259,11 +267,12 @@ std::string AboutAbout() {
   html.append("<html><head><title>About Pages</title></head><body>\n");
   html.append("<h2>List of About pages</h2><ul>\n");
   for (size_t i = 0; i < arraysize(kAllAboutPaths); i++) {
-    if (kAllAboutPaths[i] == kFlagsPath && !about_flags::IsEnabled())
-      continue;
     if (kAllAboutPaths[i] == kAppCacheInternalsPath ||
         kAllAboutPaths[i] == kBlobInternalsPath ||
         kAllAboutPaths[i] == kCachePath ||
+#if defined(OS_WIN)
+        kAllAboutPaths[i] == kConflictsPath ||
+#endif
         kAllAboutPaths[i] == kFlagsPath ||
         kAllAboutPaths[i] == kNetInternalsPath ||
         kAllAboutPaths[i] == kPluginsPath) {
@@ -306,8 +315,8 @@ std::string AboutNetwork(const std::string& query) {
 class AboutDnsHandler : public base::RefCountedThreadSafe<AboutDnsHandler> {
  public:
   static void Start(AboutSource* source, int request_id) {
-    scoped_refptr<AboutDnsHandler> handler =
-        new AboutDnsHandler(source, request_id);
+    scoped_refptr<AboutDnsHandler> handler(
+        new AboutDnsHandler(source, request_id));
     handler->StartOnUIThread();
   }
 
@@ -403,7 +412,7 @@ std::string AboutHistograms(const std::string& query) {
   current_synchronizer->FetchRendererHistogramsSynchronously(wait_time);
 
   std::string data;
-  StatisticsRecorder::WriteHTMLGraph(query, &data);
+  base::StatisticsRecorder::WriteHTMLGraph(query, &data);
   return data;
 }
 
@@ -428,7 +437,7 @@ std::string AboutStats() {
   // stats computations across runs.
   static DictionaryValue root;
 
-  StatsTable* table = StatsTable::current();
+  base::StatsTable* table = base::StatsTable::current();
   if (!table)
     return std::string();
 
@@ -675,38 +684,7 @@ std::string AboutVersion(DictionaryValue* localized_strings) {
       version_html, localized_strings, "t" /* template root node id */);
 }
 
-static void AddBoolSyncDetail(ListValue* details, const std::string& stat_name,
-                              bool stat_value) {
-  DictionaryValue* val = new DictionaryValue;
-  val->SetString("stat_name", stat_name);
-  val->SetBoolean("stat_value", stat_value);
-  details->Append(val);
-}
 
-static void AddIntSyncDetail(ListValue* details, const std::string& stat_name,
-                             int64 stat_value) {
-  DictionaryValue* val = new DictionaryValue;
-  val->SetString("stat_name", stat_name);
-  val->SetString("stat_value", base::FormatNumber(stat_value));
-  details->Append(val);
-}
-
-static std::string MakeSyncAuthErrorText(
-    const GoogleServiceAuthError::State& state) {
-  switch (state) {
-    case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
-    case GoogleServiceAuthError::ACCOUNT_DELETED:
-    case GoogleServiceAuthError::ACCOUNT_DISABLED:
-    case GoogleServiceAuthError::SERVICE_UNAVAILABLE:
-      return "INVALID_GAIA_CREDENTIALS";
-    case GoogleServiceAuthError::USER_NOT_SIGNED_UP:
-      return "USER_NOT_SIGNED_UP";
-    case GoogleServiceAuthError::CONNECTION_FAILED:
-      return "CONNECTION_FAILED";
-    default:
-      return std::string();
-  }
-}
 
 std::string AboutSync() {
   FilePath user_data_dir;
@@ -717,71 +695,10 @@ std::string AboutSync() {
   ProfileSyncService* service = profile->GetProfileSyncService();
 
   DictionaryValue strings;
-  if (!service || !service->HasSyncSetupCompleted()) {
+  if (!service) {
     strings.SetString("summary", "SYNC DISABLED");
   } else {
-    SyncManager::Status full_status(service->QueryDetailedSyncStatus());
-
-    strings.SetString("service_url", service->sync_service_url().spec());
-    strings.SetString("summary",
-        ProfileSyncService::BuildSyncStatusSummaryText(
-            full_status.summary));
-
-    strings.Set("authenticated",
-        new FundamentalValue(full_status.authenticated));
-    strings.SetString("auth_problem",
-        MakeSyncAuthErrorText(service->GetAuthError().state()));
-
-    strings.SetString("time_since_sync", service->GetLastSyncedTimeString());
-
-    ListValue* details = new ListValue();
-    strings.Set("details", details);
-    AddBoolSyncDetail(details, "Server Up", full_status.server_up);
-    AddBoolSyncDetail(details, "Server Reachable",
-                      full_status.server_reachable);
-    AddBoolSyncDetail(details, "Server Broken", full_status.server_broken);
-    AddBoolSyncDetail(details, "Notifications Enabled",
-                      full_status.notifications_enabled);
-    AddIntSyncDetail(details, "Notifications Received",
-                     full_status.notifications_received);
-    AddIntSyncDetail(details, "Notifications Sent",
-                     full_status.notifications_sent);
-    AddIntSyncDetail(details, "Unsynced Count", full_status.unsynced_count);
-    AddIntSyncDetail(details, "Conflicting Count",
-                     full_status.conflicting_count);
-    AddBoolSyncDetail(details, "Syncing", full_status.syncing);
-    AddBoolSyncDetail(details, "Initial Sync Ended",
-                      full_status.initial_sync_ended);
-    AddBoolSyncDetail(details, "Syncer Stuck", full_status.syncer_stuck);
-    AddIntSyncDetail(details, "Updates Available",
-                     full_status.updates_available);
-    AddIntSyncDetail(details, "Updates Received", full_status.updates_received);
-    AddBoolSyncDetail(details, "Disk Full", full_status.disk_full);
-    AddBoolSyncDetail(details, "Invalid Store", full_status.invalid_store);
-    AddIntSyncDetail(details, "Max Consecutive Errors",
-                     full_status.max_consecutive_errors);
-
-    if (service->unrecoverable_error_detected()) {
-      strings.Set("unrecoverable_error_detected", new FundamentalValue(true));
-      strings.SetString("unrecoverable_error_message",
-                        service->unrecoverable_error_message());
-      tracked_objects::Location loc(service->unrecoverable_error_location());
-      std::string location_str;
-      loc.Write(true, true, &location_str);
-      strings.SetString("unrecoverable_error_location", location_str);
-    }
-
-    browser_sync::ModelSafeRoutingInfo routes;
-    service->backend()->GetModelSafeRoutingInfo(&routes);
-    ListValue* routing_info = new ListValue();
-    strings.Set("routing_info", routing_info);
-    browser_sync::ModelSafeRoutingInfo::const_iterator it = routes.begin();
-    for (; it != routes.end(); ++it) {
-      DictionaryValue* val = new DictionaryValue;
-      val->SetString("model_type", ModelTypeToString(it->first));
-      val->SetString("group", ModelSafeGroupToString(it->second));
-      routing_info->Append(val);
-    }
+    sync_ui_util::ConstructAboutInformation(service, &strings);
   }
 
   static const base::StringPiece sync_html(
@@ -841,43 +758,64 @@ void DxDiagNodeToHTML(std::string* output, const DxDiagNode& node) {
 }
 
 std::string AboutGpu() {
-  GPUInfo gpu_info = GpuProcessHost::Get()->gpu_info();
+  const GPUInfo& gpu_info = GpuProcessHostUIShim::Get()->gpu_info();
 
   std::string html;
-  if (!gpu_info.initialized()) {
+
+  html.append("<html><head><title>About GPU</title></head>\n");
+
+  if (gpu_info.progress() != GPUInfo::kComplete) {
     GpuProcessHostUIShim::Get()->CollectGraphicsInfoAsynchronously();
-    // If it's not initialized yet, let the user know and reload the page
-    html.append("<html><head><title>About GPU</title></head>\n");
+
+    // If it's not fully initialized yet, set a timeout to reload the page.
     html.append("<body onload=\"setTimeout('window.location.reload(true)',");
     html.append("2000)\">\n");
-    html.append("<h2>GPU Information</h2>\n");
-    html.append("<p>Retrieving GPU information . . .</p>\n");
-    html.append("</body></html> ");
   } else {
-    html.append("<html><head><title>About GPU</title></head><body>\n");
-    html.append("<h2>GPU Information</h2><ul>\n");
-    html.append("<li><strong>Vendor ID:</strong> ");
+    html.append("<body>\n");
+  }
+
+  html.append("<h2>GPU Information</h2>\n");
+
+  if (gpu_info.progress() == GPUInfo::kUninitialized) {
+    html.append("<p>Retrieving GPU information . . .</p>\n");
+  } else {
+    html.append("<table><tr>");
+    html.append("<td><strong>Initialization time</strong></td><td>");
+    html.append(base::Int64ToString(
+        gpu_info.initialization_time().InMilliseconds()));
+    html.append("</td></tr><tr><td>");
+    html.append("<strong>Vendor ID</strong></td><td>");
     html.append(base::StringPrintf("0x%04x", gpu_info.vendor_id()));
-    html.append("<li><strong>Device ID:</strong> ");
+    html.append("</td></tr><tr><td>");
+    html.append("<strong>Device ID</strong></td><td>");
     html.append(base::StringPrintf("0x%04x", gpu_info.device_id()));
-    html.append("<li><strong>Driver Version:</strong> ");
+    html.append("</td></tr><tr><td>");
+    html.append("<strong>Driver Version</strong></td><td>");
     html.append(WideToASCII(gpu_info.driver_version()).c_str());
-    html.append("<li><strong>Pixel Shader Version:</strong> ");
+    html.append("</td></tr><tr><td>");
+    html.append("<strong>Pixel Shader Version</strong></td><td>");
+    html.append(VersionNumberToString(gpu_info.pixel_shader_version()).c_str());
+    html.append("</td></tr><tr><td>");
+    html.append("<strong>Vertex Shader Version</strong></td><td>");
     html.append(VersionNumberToString(
-                    gpu_info.pixel_shader_version()).c_str());
-    html.append("<li><strong>Vertex Shader Version:</strong> ");
-    html.append(VersionNumberToString(
-                    gpu_info.vertex_shader_version()).c_str());
-    html.append("<li><strong>GL Version:</strong> ");
+        gpu_info.vertex_shader_version()).c_str());
+    html.append("</td></tr><tr><td>");
+    html.append("<strong>GL Version</strong></td><td>");
     html.append(VersionNumberToString(gpu_info.gl_version()).c_str());
+    html.append("</td></tr></table>");
 
 #if defined(OS_WIN)
-    html.append("<li><strong>DirectX Diagnostics:</strong> ");
-    DxDiagNodeToHTML(&html, gpu_info.dx_diagnostics());
+    if (gpu_info.progress() != GPUInfo::kComplete) {
+      html.append("<p>Retrieving DirectX Diagnostics . . .</p>\n");
+    } else {
+      html.append("<h2>DirectX Diagnostics</h2>");
+      DxDiagNodeToHTML(&html, gpu_info.dx_diagnostics());
+    }
 #endif
-
-    html.append("</ul></body></html> ");
   }
+
+  html.append("</body></html>");
+
   return html;
 }
 
@@ -1079,7 +1017,7 @@ void AboutMemoryHandler::OnDetailsAvailable() {
         base::Int64ToString(aggregate.working_set.shareable)));
   }
   if (log_string.length() > 0)
-    LOG(INFO) << "memory: " << log_string;
+    VLOG(1) << "memory: " << log_string;
 
   // Set the browser & renderer detailed process data.
   DictionaryValue* browser_data = new DictionaryValue();
@@ -1120,7 +1058,8 @@ ChromeOSAboutVersionHandler::ChromeOSAboutVersionHandler(AboutSource* source,
     : source_(source),
       request_id_(request_id) {
   loader_.GetVersion(&consumer_,
-      NewCallback(this, &ChromeOSAboutVersionHandler::OnVersion));
+                     NewCallback(this, &ChromeOSAboutVersionHandler::OnVersion),
+                     chromeos::VersionLoader::VERSION_FULL);
 }
 
 void ChromeOSAboutVersionHandler::OnVersion(
@@ -1178,13 +1117,19 @@ bool WillHandleBrowserAboutURL(GURL* url, Profile* profile) {
     return true;
   }
 
-  if (about_flags::IsEnabled()) {
-    // Rewrite about:flags and about:vaporware to chrome://flags/.
-    if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutFlagsURL) ||
-        LowerCaseEqualsASCII(url->spec(), chrome::kAboutVaporwareURL)) {
-      *url = GURL(chrome::kChromeUIFlagsURL);
-      return true;
-    }
+#if defined(OS_WIN)
+  // Rewrite about:conflicts/* URLs to chrome://conflicts/*
+  if (StartsWithAboutSpecifier(*url, chrome::kAboutConflicts)) {
+    *url = GURL(chrome::kChromeUIConflictsURL);
+    return true;
+  }
+#endif
+
+  // Rewrite about:flags and about:vaporware to chrome://flags/.
+  if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutFlagsURL) ||
+      LowerCaseEqualsASCII(url->spec(), chrome::kAboutVaporwareURL)) {
+    *url = GURL(chrome::kChromeUIFlagsURL);
+    return true;
   }
 
   // Rewrite about:net-internals/* URLs to chrome://net-internals/*
@@ -1215,11 +1160,11 @@ bool WillHandleBrowserAboutURL(GURL* url, Profile* profile) {
 
   // Handle URLs to wreck the gpu process.
   if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutGpuCrashURL)) {
-    GpuProcessHost::SendAboutGpuCrash();
+    GpuProcessHostUIShim::Get()->SendAboutGpuCrash();
     return true;
   }
   if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutGpuHangURL)) {
-    GpuProcessHost::SendAboutGpuHang();
+    GpuProcessHostUIShim::Get()->SendAboutGpuHang();
     return true;
   }
 

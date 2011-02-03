@@ -4,7 +4,6 @@
 
 #include "chrome/browser/extensions/extension_process_manager.h"
 
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/browsing_instance.h"
 #if defined(OS_MACOSX)
@@ -16,6 +15,7 @@
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/notification_service.h"
@@ -32,11 +32,12 @@ class IncognitoExtensionProcessManager : public ExtensionProcessManager {
  public:
   explicit IncognitoExtensionProcessManager(Profile* profile);
   virtual ~IncognitoExtensionProcessManager() {}
-  virtual ExtensionHost* CreateView(Extension* extension,
+  virtual ExtensionHost* CreateView(const Extension* extension,
                                     const GURL& url,
                                     Browser* browser,
                                     ViewType::Type view_type);
-  virtual void CreateBackgroundHost(Extension* extension, const GURL& url);
+  virtual void CreateBackgroundHost(const Extension* extension,
+                                    const GURL& url);
   virtual SiteInstance* GetSiteInstanceForURL(const GURL& url);
   virtual RenderProcessHost* GetExtensionProcess(const GURL& url);
 
@@ -48,7 +49,7 @@ class IncognitoExtensionProcessManager : public ExtensionProcessManager {
 
   // Returns the extension for an URL, which can either be a chrome-extension
   // URL or a web app URL.
-  Extension* GetExtensionOrAppByURL(const GURL& url);
+  const Extension* GetExtensionOrAppByURL(const GURL& url);
 
   // Returns true if the extension is allowed to run in incognito mode.
   bool IsIncognitoEnabled(const Extension* extension);
@@ -57,7 +58,7 @@ class IncognitoExtensionProcessManager : public ExtensionProcessManager {
 };
 
 static void CreateBackgroundHost(
-    ExtensionProcessManager* manager, Extension* extension) {
+    ExtensionProcessManager* manager, const Extension* extension) {
   // Start the process for the master page, if it exists.
   if (extension->background_url().is_valid())
     manager->CreateBackgroundHost(extension, extension->background_url());
@@ -72,6 +73,8 @@ static void CreateBackgroundHosts(
 }
 
 }  // namespace
+
+extern bool g_log_bug53991;
 
 //
 // ExtensionProcessManager
@@ -103,11 +106,12 @@ ExtensionProcessManager::ExtensionProcessManager(Profile* profile)
 }
 
 ExtensionProcessManager::~ExtensionProcessManager() {
+  VLOG_IF(1, g_log_bug53991) << "~ExtensionProcessManager: " << this;
   CloseBackgroundHosts();
   DCHECK(background_hosts_.empty());
 }
 
-ExtensionHost* ExtensionProcessManager::CreateView(Extension* extension,
+ExtensionHost* ExtensionProcessManager::CreateView(const Extension* extension,
                                                    const GURL& url,
                                                    Browser* browser,
                                                    ViewType::Type view_type) {
@@ -134,14 +138,14 @@ ExtensionHost* ExtensionProcessManager::CreateView(const GURL& url,
   ExtensionsService* service =
       browsing_instance_->profile()->GetExtensionsService();
   if (service) {
-    Extension* extension = service->GetExtensionByURL(url);
+    const Extension* extension = service->GetExtensionByURL(url);
     if (extension)
       return CreateView(extension, url, browser, view_type);
   }
   return NULL;
 }
 
-ExtensionHost* ExtensionProcessManager::CreatePopup(Extension* extension,
+ExtensionHost* ExtensionProcessManager::CreatePopup(const Extension* extension,
                                                     const GURL& url,
                                                     Browser* browser) {
   return CreateView(extension, url, browser, ViewType::EXTENSION_POPUP);
@@ -152,9 +156,8 @@ ExtensionHost* ExtensionProcessManager::CreatePopup(const GURL& url,
   return CreateView(url, browser, ViewType::EXTENSION_POPUP);
 }
 
-ExtensionHost* ExtensionProcessManager::CreateInfobar(Extension* extension,
-                                                      const GURL& url,
-                                                      Browser* browser) {
+ExtensionHost* ExtensionProcessManager::CreateInfobar(
+    const Extension* extension, const GURL& url, Browser* browser) {
   return CreateView(extension, url, browser, ViewType::EXTENSION_INFOBAR);
 }
 
@@ -164,7 +167,7 @@ ExtensionHost* ExtensionProcessManager::CreateInfobar(const GURL& url,
 }
 
 void ExtensionProcessManager::CreateBackgroundHost(
-    Extension* extension, const GURL& url) {
+    const Extension* extension, const GURL& url) {
   // Don't create multiple background hosts for an extension.
   if (GetBackgroundHostForExtension(extension))
     return;
@@ -182,7 +185,7 @@ void ExtensionProcessManager::CreateBackgroundHost(
   OnExtensionHostCreated(host, true);
 }
 
-void ExtensionProcessManager::OpenOptionsPage(Extension* extension,
+void ExtensionProcessManager::OpenOptionsPage(const Extension* extension,
                                               Browser* browser) {
   DCHECK(!extension->options_url().is_empty());
 
@@ -200,7 +203,7 @@ void ExtensionProcessManager::OpenOptionsPage(Extension* extension,
 }
 
 ExtensionHost* ExtensionProcessManager::GetBackgroundHostForExtension(
-    Extension* extension) {
+    const Extension* extension) {
   for (ExtensionHostSet::iterator iter = background_hosts_.begin();
        iter != background_hosts_.end(); ++iter) {
     ExtensionHost* host = *iter;
@@ -227,7 +230,7 @@ void ExtensionProcessManager::RegisterExtensionProcess(
       browsing_instance_->profile()->GetExtensionsService();
 
   std::vector<std::string> page_action_ids;
-  Extension* extension =
+  const Extension* extension =
       extension_service->GetExtensionById(extension_id, false);
   if (extension->page_action())
     page_action_ids.push_back(extension->page_action()->id());
@@ -251,8 +254,8 @@ RenderProcessHost* ExtensionProcessManager::GetExtensionProcess(
     const GURL& url) {
   if (!browsing_instance_->HasSiteInstance(url))
     return NULL;
-  scoped_refptr<SiteInstance> site =
-      browsing_instance_->GetSiteInstanceForURL(url);
+  scoped_refptr<SiteInstance> site(
+      browsing_instance_->GetSiteInstanceForURL(url));
   if (site->HasProcess())
     return site->GetProcess();
   return NULL;
@@ -276,23 +279,24 @@ void ExtensionProcessManager::Observe(NotificationType type,
                                       const NotificationSource& source,
                                       const NotificationDetails& details) {
   switch (type.value) {
-    case NotificationType::EXTENSIONS_READY:
+    case NotificationType::EXTENSIONS_READY: {
       CreateBackgroundHosts(this,
           Source<Profile>(source).ptr()->GetExtensionsService()->extensions());
       break;
+    }
 
     case NotificationType::EXTENSION_LOADED: {
       ExtensionsService* service =
           Source<Profile>(source).ptr()->GetExtensionsService();
       if (service->is_ready()) {
-        Extension* extension = Details<Extension>(details).ptr();
+        const Extension* extension = Details<const Extension>(details).ptr();
         ::CreateBackgroundHost(this, extension);
       }
       break;
     }
 
     case NotificationType::EXTENSION_UNLOADED: {
-      Extension* extension = Details<Extension>(details).ptr();
+      const Extension* extension = Details<const Extension>(details).ptr();
       for (ExtensionHostSet::iterator iter = background_hosts_.begin();
            iter != background_hosts_.end(); ++iter) {
         ExtensionHost* host = *iter;
@@ -347,6 +351,7 @@ void ExtensionProcessManager::OnExtensionHostCreated(ExtensionHost* host,
 }
 
 void ExtensionProcessManager::CloseBackgroundHosts() {
+  VLOG_IF(1, g_log_bug53991) << "CloseBackgroundHosts: " << this;
   for (ExtensionHostSet::iterator iter = background_hosts_.begin();
        iter != background_hosts_.end(); ) {
     ExtensionHostSet::iterator current = iter++;
@@ -370,7 +375,7 @@ IncognitoExtensionProcessManager::IncognitoExtensionProcessManager(
 }
 
 ExtensionHost* IncognitoExtensionProcessManager::CreateView(
-    Extension* extension,
+    const Extension* extension,
     const GURL& url,
     Browser* browser,
     ViewType::Type view_type) {
@@ -390,7 +395,7 @@ ExtensionHost* IncognitoExtensionProcessManager::CreateView(
 }
 
 void IncognitoExtensionProcessManager::CreateBackgroundHost(
-    Extension* extension, const GURL& url) {
+    const Extension* extension, const GURL& url) {
   if (extension->incognito_split_mode()) {
     if (IsIncognitoEnabled(extension))
       ExtensionProcessManager::CreateBackgroundHost(extension, url);
@@ -402,7 +407,7 @@ void IncognitoExtensionProcessManager::CreateBackgroundHost(
 
 SiteInstance* IncognitoExtensionProcessManager::GetSiteInstanceForURL(
     const GURL& url) {
-  Extension* extension = GetExtensionOrAppByURL(url);
+  const Extension* extension = GetExtensionOrAppByURL(url);
   if (!extension || extension->incognito_split_mode()) {
     return ExtensionProcessManager::GetSiteInstanceForURL(url);
   } else {
@@ -412,7 +417,7 @@ SiteInstance* IncognitoExtensionProcessManager::GetSiteInstanceForURL(
 
 RenderProcessHost* IncognitoExtensionProcessManager::GetExtensionProcess(
     const GURL& url) {
-  Extension* extension = GetExtensionOrAppByURL(url);
+  const Extension* extension = GetExtensionOrAppByURL(url);
   if (!extension || extension->incognito_split_mode()) {
     return ExtensionProcessManager::GetExtensionProcess(url);
   } else {
@@ -420,7 +425,7 @@ RenderProcessHost* IncognitoExtensionProcessManager::GetExtensionProcess(
   }
 }
 
-Extension* IncognitoExtensionProcessManager::GetExtensionOrAppByURL(
+const Extension* IncognitoExtensionProcessManager::GetExtensionOrAppByURL(
     const GURL& url) {
   ExtensionsService* service =
       browsing_instance_->profile()->GetExtensionsService();
@@ -448,6 +453,9 @@ void IncognitoExtensionProcessManager::Observe(
       // it matches our profile.
       Browser* browser = Source<Browser>(source).ptr();
       if (browser->profile() == browsing_instance_->profile()) {
+        // On Chrome OS, a login screen is implemented as a browser.
+        // This browser has no extension service.  In this case,
+        // service will be NULL.
         ExtensionsService* service =
             browsing_instance_->profile()->GetExtensionsService();
         if (service && service->is_ready())

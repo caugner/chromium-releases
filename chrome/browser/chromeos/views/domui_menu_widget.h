@@ -11,6 +11,7 @@
 #include "views/widget/widget_gtk.h"
 
 class DOMView;
+class ExtensionApiTest;
 
 namespace chromeos {
 
@@ -44,8 +45,8 @@ class DOMUIMenuWidget : public views::WidgetGtk {
   }
 
   // Returns true if the menu widget has input grab.
-  bool did_pointer_grab() const {
-    return did_pointer_grab_;
+  bool did_input_grab() const {
+    return did_input_grab_;
   }
 
   // Enables/Disables menu scroll.
@@ -92,8 +93,8 @@ class DOMUIMenuWidget : public views::WidgetGtk {
   // MenuLocator that controls the position of this menu widget.
   scoped_ptr<chromeos::MenuLocator> menu_locator_;
 
-  // True if the widget has pointer grab.
-  bool did_pointer_grab_;
+  // True if the widget has input grab.
+  bool did_input_grab_;
 
   // True if the widget is for root menu (very first menu in
   // submenu chain).

@@ -12,6 +12,8 @@
 #include "remoting/base/capture_data.h"
 #include "remoting/base/types.h"
 
+class MessageLoop;
+
 namespace remoting {
 
 // A class to perform the task of capturing the image of a window.
@@ -42,20 +44,22 @@ class Capturer {
   // CaptureCompletedCallback is called when the capturer has completed.
   typedef Callback1<scoped_refptr<CaptureData> >::Type CaptureCompletedCallback;
 
-  Capturer();
   virtual ~Capturer();
+
+  // Create platform-specific cpaturer.
+  static Capturer* Create(MessageLoop* message_loop);
 
   // Called when the screen configuration is changed.
   virtual void ScreenConfigurationChanged() = 0;
 
   // Return the width of the screen.
-  virtual int width() const { return width_; }
+  virtual int width() const;
 
   // Return the height of the screen.
-  virtual int height() const { return height_; }
+  virtual int height() const;
 
   // Return the pixel format of the screen.
-  virtual PixelFormat pixel_format() const { return pixel_format_; }
+  virtual media::VideoFrame::Format pixel_format() const;
 
   // Clear out the list of invalid rects.
   void ClearInvalidRects();
@@ -82,6 +86,8 @@ class Capturer {
   virtual void CaptureInvalidRects(CaptureCompletedCallback* callback);
 
  protected:
+  explicit Capturer(MessageLoop* message_loop);
+
   // Update the list of |invalid_rects| to prepare for capturing the
   // screen data.
   // Depending on the platform implementation, this routine might:
@@ -116,11 +122,14 @@ class Capturer {
   int height_;
 
   // Format of pixels returned in buffer.
-  PixelFormat pixel_format_;
+  media::VideoFrame::Format pixel_format_;
   int bytes_per_row_;
 
   // The current buffer with valid data for reading.
   int current_buffer_;
+
+  // Message loop that operations should run on.
+  MessageLoop* message_loop_;
 
  private:
   // Rects that have been manually invalidated (through InvalidateRect).

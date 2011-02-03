@@ -5,6 +5,8 @@
 #include <string>
 
 #include "base/scoped_comptr_win.h"
+#include "base/test/test_file_util.h"
+#include "base/win/windows_version.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "chrome_frame/test/chrome_frame_ui_test_utils.h"
 #include "chrome_frame/test/mock_ie_event_sink_actions.h"
@@ -67,10 +69,6 @@ TEST_P(FullTabNavigationTest, TypeUrl) {
 
 // This tests navigation to a typed URL containing an fragment.
 TEST_P(FullTabNavigationTest, TypeAnchorUrl) {
-  if (IsIBrowserServicePatchEnabled()) {
-    LOG(ERROR) << "Not running test. IBrowserServicePatch is in place.";
-    return;
-  }
   MockAccEventObserver acc_observer;
   EXPECT_CALL(acc_observer, OnAccDocLoad(_)).Times(testing::AnyNumber());
   AccObjectMatcher address_matcher(L"Address", L"editable text");
@@ -78,6 +76,7 @@ TEST_P(FullTabNavigationTest, TypeAnchorUrl) {
 
   ie_mock_.ExpectNavigation(IN_IE, GetSimplePageUrl());
   server_mock_.ExpectAndServeRequest(CFInvocation::None(), GetSimplePageUrl());
+
   // Enter the new url into the address bar.
   EXPECT_CALL(ie_mock_, OnLoad(IN_IE, StrEq(GetSimplePageUrl())))
       .WillOnce(testing::DoAll(
@@ -275,58 +274,47 @@ TEST_P(FullTabNavigationTest, BackForwardAnchor) {
 
 // Test that a user cannot navigate to a restricted site and that the security
 // dialog appears.
-TEST_P(FullTabNavigationTest, FLAKY_RestrictedSite) {
-  if (!GetParam().invokes_cf() || GetInstalledIEVersion() == IE_8) {
-    // Test has been disabled on IE8 bot because it hangs at times.
-    // http://crbug.com/47596
-    LOG(ERROR) << "Test disabled for this configuration.";
-    return;
-  }
-  if (IsIBrowserServicePatchEnabled()) {
-    LOG(ERROR) << "Not running test. IBrowserServicePatch is in place.";
-    return;
-  }
-  MockWindowObserver win_observer_mock;
-
+TEST_P(FullTabNavigationTest, RestrictedSite) {
+  // Add the server to restricted sites zone.
   ScopedComPtr<IInternetSecurityManager> security_manager;
   HRESULT hr = security_manager.CreateInstance(CLSID_InternetSecurityManager);
   ASSERT_HRESULT_SUCCEEDED(hr);
-  // Add the server to restricted sites zone.
   hr = security_manager->SetZoneMapping(URLZONE_UNTRUSTED,
       GetTestUrl(L"").c_str(), SZM_CREATE);
 
   EXPECT_CALL(ie_mock_, OnFileDownload(_, _)).Times(testing::AnyNumber());
   server_mock_.ExpectAndServeAnyRequests(GetParam());
 
-  ProtocolPatchMethod patch_method = GetPatchMethod();
+  MockWindowObserver win_observer_mock;
 
-  const char* kAlertDlgCaption = "Security Alert";
+  // If the page is loaded in mshtml, then IE allows the page to be loaded
+  // and just shows 'Restricted sites' in the status bar.
+  if (!GetParam().invokes_cf()) {
+    ie_mock_.ExpectNavigation(IN_IE, GetSimplePageUrl());
+    EXPECT_CALL(ie_mock_, OnLoad(IN_IE, StrEq(GetSimplePageUrl())))
+        .Times(1)
+        .WillOnce(CloseBrowserMock(&ie_mock_));
+  } else {
+    // If the page is being loaded in chrome frame then we will see
+    // a security dialog.
+    const char* kAlertDlgCaption = "Security Alert";
+    win_observer_mock.WatchWindow(kAlertDlgCaption, "");
 
-  EXPECT_CALL(ie_mock_, OnBeforeNavigate2(
-      _,
-      testing::Field(&VARIANT::bstrVal, testing::StrCaseEq(GetSimplePageUrl())),
-      _, _, _, _, _))
-    .Times(1)
-    .WillOnce(WatchWindow(&win_observer_mock, kAlertDlgCaption));
+    EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_, testing::Field(&VARIANT::bstrVal,
+        testing::HasSubstr(GetSimplePageUrl())), _, _, _, _, _))
+        .Times(testing::AtMost(2));
 
-  if (patch_method == PATCH_METHOD_INET_PROTOCOL) {
-    EXPECT_CALL(ie_mock_, OnBeforeNavigate2(
-        _,
-        testing::Field(&VARIANT::bstrVal, testing::HasSubstr(L"res://")),
-        _, _, _, _, _))
+    EXPECT_CALL(ie_mock_, OnNavigateComplete2(_,
+            testing::Field(&VARIANT::bstrVal, StrEq(GetSimplePageUrl()))))
         .Times(testing::AtMost(1));
+
+    EXPECT_CALL(win_observer_mock, OnWindowOpen(_))
+        .Times(1)
+        .WillOnce(DoCloseWindow());
+    EXPECT_CALL(win_observer_mock, OnWindowClose(_))
+        .Times(1)
+        .WillOnce(CloseBrowserMock(&ie_mock_));
   }
-
-  EXPECT_CALL(ie_mock_, OnNavigateComplete2(_,
-      testing::Field(&VARIANT::bstrVal, StrEq(GetSimplePageUrl()))))
-      .Times(testing::AtMost(1));
-
-  EXPECT_CALL(win_observer_mock, OnWindowOpen(_))
-      .Times(1)
-      .WillOnce(DoCloseWindow());
-  EXPECT_CALL(win_observer_mock, OnWindowClose(_))
-      .Times(1)
-      .WillOnce(CloseBrowserMock(&ie_mock_));
 
   LaunchIEAndNavigate(GetSimplePageUrl());
 
@@ -379,6 +367,14 @@ TEST_P(FullTabNavigationTest, DISABLED_JavascriptWindowOpenDifferentDomain) {
 // Tests that the parent window can successfully close its popup through
 // the javascript close method.
 TEST_P(FullTabNavigationTest, JavascriptWindowOpenCanClose) {
+  // Please see http://code.google.com/p/chromium/issues/detail?id=60987
+  // for more information on why this test is disabled for Vista with IE7.
+  if (base::win::GetVersion() == base::win::VERSION_VISTA &&
+      GetInstalledIEVersion() == IE_7) {
+    LOG(INFO) << "Not running test on Vista with IE7";
+    return;
+  }
+
   std::wstring parent_url = GetTestUrl(L"window_open.html?simple.html");
   MockAccEventObserver acc_observer;
   MockIEEventSink new_window_mock;
@@ -466,6 +462,14 @@ INSTANTIATE_TEST_CASE_P(
 
 // Test window.open calls.
 TEST_P(NavigationTransitionTest, JavascriptWindowOpen) {
+  // Please see http://code.google.com/p/chromium/issues/detail?id=60987
+  // for more information on why this test is disabled for Vista with IE7.
+  if (base::win::GetVersion() == base::win::VERSION_VISTA &&
+      GetInstalledIEVersion() == IE_7) {
+    LOG(INFO) << "Not running test on Vista with IE7";
+    return;
+  }
+
   std::wstring parent_url = GetTestUrl(L"window_open.html?simple.html");
   std::wstring new_window_url = GetSimplePageUrl();
   MockAccEventObserver acc_observer;
@@ -713,5 +717,306 @@ TEST_P(FullTabNavigationTest, CF_UnloadEventTest) {
 
   LaunchIEAndNavigate(kUnloadEventTestUrl);
 }
+
+// Fixture for ChromeFrame download tests.
+class FullTabDownloadTest
+    : public MockIEEventSinkTest, public testing::TestWithParam<CFInvocation> {
+ public:
+  FullTabDownloadTest() {}
+};
+
+void SaveOwnerWindow(HWND* owner_window, HWND window) {
+  *owner_window = GetWindow(window, GW_OWNER);
+}
+
+void CloseWindow(HWND* window) {
+  if (window)
+    PostMessage(*window, WM_CLOSE, 0, 0);
+}
+
+// See bug http://crbug.com/36694
+// This test does the following:-
+// Navigates IE to a URL which in ChromeFrame.
+// Performs a top level form post in the document
+// In response to the POST we send over an attachment via the
+// content-disposition header.
+// IE brings up a file open dialog in this context.
+// We bring up the Save dialog via accessibility and save the file
+// and validate that all is well.
+TEST_F(FullTabDownloadTest, CF_DownloadFileFromPost) {
+  // Please see http://code.google.com/p/chromium/issues/detail?id=60987
+  // for more information on why this test is disabled for Vista with IE7.
+  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
+    if (GetInstalledIEVersion() == IE_7) {
+      LOG(INFO) << "Not running test on Vista with IE7";
+      return;
+    } else if (GetInstalledIEVersion() == IE_9) {
+      LOG(INFO) << "Not running test on Vista/Windows 7 with IE9";
+      return;
+    }
+  }
+
+  chrome_frame_test::MockWindowObserver download_watcher;
+  download_watcher.WatchWindow("File Download", "");
+
+  chrome_frame_test::MockWindowObserver save_dialog_watcher;
+  save_dialog_watcher.WatchWindow("Save As", "");
+
+  EXPECT_CALL(server_mock_, Get(_, StrEq(L"/post_source.html"), _)).WillOnce(
+    SendFast(
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: text/html\r\n",
+      "<html>"
+      "<head><meta http-equiv=\"x-ua-compatible\" content=\"chrome=1\" />"
+      " <script type=\"text/javascript\">"
+      " function onLoad() {"
+      " document.getElementById(\"myform\").submit();}</script></head>"
+      " <body onload=\"setTimeout(onLoad, 2000);\">"
+      " <form id=\"myform\" action=\"post_target.html\" method=\"POST\">"
+      "</form></body></html>"));
+
+  EXPECT_CALL(server_mock_, Post(_, StrEq(L"/post_target.html"), _)).WillOnce(
+    SendFast(
+      "HTTP/1.1 200 OK\r\n"
+      "content-disposition: attachment;filename=\"hello.txt\"\r\n"
+      "Content-Type: application/text\r\n"
+      "Cache-Control: private\r\n",
+      "hello"));
+
+
+  // If you want to debug this action then you may need to
+  // SendMessage(parent_window, WM_NCACTIVATE, TRUE, 0);
+  // SendMessage(parent_window, WM_COMMAND, MAKEWPARAM(0x114B, BN_CLICKED),
+  //             control_window);
+  // For the uninitiated, please debug IEFrame!CDialogActivateGuard::*
+  EXPECT_CALL(download_watcher, OnWindowOpen(_))
+      .Times(2)
+      .WillOnce(DelayAccDoDefaultAction(
+          AccObjectMatcher(L"Save", L"push button"),
+          1000))
+      .WillOnce(testing::Return());
+
+  EXPECT_CALL(download_watcher, OnWindowClose(_))
+      .Times(testing::AnyNumber());
+
+  std::wstring src_url = server_mock_.Resolve(L"/post_source.html");
+  std::wstring tgt_url = server_mock_.Resolve(L"/post_target.html");
+
+  EXPECT_CALL(ie_mock_, OnFileDownload(_, _)).Times(testing::AnyNumber());
+
+  EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_,
+                              testing::Field(&VARIANT::bstrVal,
+                              StrEq(src_url)), _, _, _, _, _));
+  EXPECT_CALL(ie_mock_, OnNavigateComplete2(_,
+                              testing::Field(&VARIANT::bstrVal,
+                              StrEq(src_url))));
+  EXPECT_CALL(ie_mock_, OnLoad(true, StrEq(src_url)))
+      .Times(testing::AnyNumber());
+
+  EXPECT_CALL(ie_mock_, OnLoadError(StrEq(tgt_url)))
+      .Times(testing::AnyNumber());
+  EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_,
+                              testing::Field(&VARIANT::bstrVal,
+                              StrEq(tgt_url)), _, _, _, _, _));
+  FilePath temp_file_path;
+  ASSERT_TRUE(file_util::CreateTemporaryFile(&temp_file_path));
+  file_util::DieFileDie(temp_file_path, false);
+
+  temp_file_path = temp_file_path.ReplaceExtension(L"txt");
+  file_util::DieFileDie(temp_file_path, false);
+
+  AccObjectMatcher file_name_box(L"File name:", L"editable text");
+
+  HWND owner_window = NULL;
+
+  EXPECT_CALL(save_dialog_watcher, OnWindowOpen(_))
+        .WillOnce(testing::DoAll(
+            testing::Invoke(testing::CreateFunctor(
+                SaveOwnerWindow, &owner_window)),
+            AccSendCharMessage(file_name_box, L'a'),
+            AccSetValue(file_name_box, temp_file_path.value()),
+            AccDoDefaultAction(AccObjectMatcher(L"Save", L"push button"))));
+
+  EXPECT_CALL(save_dialog_watcher, OnWindowClose(_))
+        .WillOnce(testing::DoAll(
+            WaitForFileSave(temp_file_path, 2000),
+            testing::InvokeWithoutArgs(
+                testing::CreateFunctor(CloseWindow, &owner_window)),
+            CloseBrowserMock(&ie_mock_)));
+  LaunchIENavigateAndLoop(src_url, kChromeFrameLongNavigationTimeoutInSeconds);
+
+  std::string data;
+  EXPECT_TRUE(file_util::ReadFileToString(temp_file_path, &data));
+  EXPECT_EQ("hello", data);
+  file_util::DieFileDie(temp_file_path, false);
+}
+
+// Test fixture for testing if http header works for supported content types
+class HttpHeaderTest : public MockIEEventSinkTest, public testing::Test {
+ public:
+  HttpHeaderTest() {}
+
+  void HeaderTestWithData(const char* content_type, const char* data) {
+    const wchar_t* relative_url = L"/header_test";
+    const char* kHeaderFormat =
+        "HTTP/1.1 200 OK\r\n"
+        "Connection: close\r\n"
+        "Content-Type: %s\r\n"
+        "X-UA-Compatible: chrome=1\r\n";
+    std::string header = StringPrintf(kHeaderFormat, content_type);
+    std::wstring url = server_mock_.Resolve(relative_url);
+    EXPECT_CALL(server_mock_, Get(_, StrEq(relative_url), _))
+        .WillRepeatedly(SendFast(header, data));
+
+    InSequence expect_in_sequence_for_scope;
+
+    ie_mock_.ExpectNavigation(IN_CF, url);
+    EXPECT_CALL(ie_mock_, OnLoad(IN_CF, StrEq(url)))
+        .WillOnce(CloseBrowserMock(&ie_mock_));
+
+    LaunchIEAndNavigate(url);
+  }
+};
+
+const char* kXmlContent =
+  "<tree>"
+    "<node href=\"root.htm\" text=\"Root\">"
+      "<node href=\"child1.htm\" text=\"Child 1\" />"
+      "<node href=\"child2.htm\" text=\"Child 2\" />"
+    "</node>"
+  "</tree>";
+
+TEST_F(HttpHeaderTest, ApplicationXhtml) {
+  HeaderTestWithData("application/xhtml+xml", kXmlContent);
+}
+
+TEST_F(HttpHeaderTest, ApplicationXml) {
+  HeaderTestWithData("application/xml", kXmlContent);
+}
+
+TEST_F(HttpHeaderTest, TextXml) {
+  HeaderTestWithData("text/xml", kXmlContent);
+}
+
+const char* kImageSvg =
+  "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" "
+      "\"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">"
+  "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100%\" height=\"100%\">"
+    "<rect height=\"100\" width=\"300\" "
+        "style=\"fill:rgb(0,0,255);stroke-width:2;\"/>"
+  "</svg>";
+
+TEST_F(HttpHeaderTest, DISABLED_ImageSvg) {
+  HeaderTestWithData("image/svg", kImageSvg);
+}
+
+TEST_F(HttpHeaderTest, ImageSvgXml) {
+  HeaderTestWithData("image/svg+xml", kImageSvg);
+}
+
+// Tests refreshing causes a page load.
+TEST_P(FullTabNavigationTest, RefreshContents) {
+  bool in_cf = GetParam().invokes_cf();
+  if (!in_cf) {
+    VLOG(1) << "Disabled for this configuration";
+    return;
+  }
+
+  std::wstring src_url = server_mock_.Resolve(L"/refresh_src.html");
+
+  EXPECT_CALL(server_mock_, Get(_, StrEq(L"/refresh_src.html"), _))
+      .Times(2)
+      .WillRepeatedly(
+        SendFast(
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html\r\n",
+            "<html>"
+            "<head><meta http-equiv=\"x-ua-compatible\" content=\"chrome=1\""
+            "/></head>"
+            "<body>Hi there. Got new content?"
+            "</body></html>"));
+
+  EXPECT_CALL(ie_mock_, OnFileDownload(_, _)).Times(testing::AnyNumber());
+
+  EXPECT_CALL(ie_mock_,
+              OnBeforeNavigate2(_, testing::Field(&VARIANT::bstrVal,
+                                                  StrEq(src_url)),
+                                _, _, _, _, _));
+  EXPECT_CALL(ie_mock_,
+              OnNavigateComplete2(_, testing::Field(&VARIANT::bstrVal,
+                                                    StrEq(src_url))))
+      .WillOnce(testing::DoAll(
+          DelayRefresh(&ie_mock_, &loop_, 2000),
+          DelayCloseBrowserMock(&loop_, 4000, &ie_mock_)));
+
+  EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(src_url)))
+      .Times(2);
+
+  LaunchIEAndNavigate(src_url);
+}
+
+class FullTabSeleniumTest
+    : public MockIEEventSinkTest, public testing::TestWithParam<CFInvocation> {
+ public:
+  FullTabSeleniumTest()
+      : MockIEEventSinkTest(1337, L"127.0.0.1", GetSeleniumTestFolder()) {}
+};
+
+ACTION(VerifySeleniumCoreTestResults) {
+  int num_tests = 0;
+  int failed_tests = 0;
+
+  swscanf(arg0, L"%d/%d", &num_tests, &failed_tests);
+
+  // Currently we run total 505 tests and 8 steps fail.
+  // TODO(amit): send results as JSON, diagnose and eliminate failures.
+  ASSERT_EQ(num_tests, 505) << "Expected to run: " << 505 << " tests." <<
+      " Actual number of tests run: " << num_tests;
+  ASSERT_LE(failed_tests, 8) << "Expected failures: " << 8 <<
+      " Actual failures: " << failed_tests;
+}
+
+// Tests refreshing causes a page load.
+TEST_F(FullTabSeleniumTest, DISABLED_Core) {
+  server_mock_.ExpectAndServeAnyRequests(CFInvocation::HttpHeader());
+  std::wstring url = GetTestUrl(L"core/TestRunner.html");
+
+  // Expectations for TestRunner.html
+  EXPECT_CALL(ie_mock_, OnFileDownload(_, _)).Times(testing::AnyNumber());
+  EXPECT_CALL(ie_mock_, OnBeforeNavigate2(_,
+                              testing::Field(&VARIANT::bstrVal,
+                              testing::StartsWith(url)), _, _, _, _, _))
+      .Times(testing::AnyNumber());
+  EXPECT_CALL(ie_mock_, OnNavigateComplete2(_,
+                              testing::Field(&VARIANT::bstrVal,
+                              testing::StartsWith(url))))
+      .Times(testing::AnyNumber());
+  EXPECT_CALL(ie_mock_, OnLoad(true, testing::StartsWith(url)))
+      .Times(testing::AnyNumber());
+
+  // Expectation for cookie test
+  EXPECT_CALL(ie_mock_, OnLoadError(testing::StartsWith(url)))
+    .Times(testing::AtMost(3));
+
+  // Expectations for popups
+  std::wstring attach_url_prefix = GetTestUrl(L"?attach_external_tab&");
+  EXPECT_CALL(ie_mock_, OnNewWindow3(_, _, _, _,
+                            testing::StartsWith(attach_url_prefix)))
+      .Times(testing::AnyNumber());
+  EXPECT_CALL(ie_mock_, OnNewBrowserWindow(_,
+                            testing::StartsWith(attach_url_prefix)))
+      .Times(testing::AnyNumber());
+
+  // At the end the tests will post us a message.  See _onTestSuiteComplete in
+  // ...\src\data\selenium_core\core\scripts\selenium-testrunner.js
+  EXPECT_CALL(ie_mock_, OnMessage(_, _, _))
+      .WillOnce(testing::DoAll(VerifySeleniumCoreTestResults(),
+                               CloseBrowserMock(&ie_mock_)));
+
+  // Selenium tests take longer to finish, lets give it 2 mins.
+  const int kSeleniumTestTimeout = 120;
+  LaunchIENavigateAndLoop(url, kSeleniumTestTimeout);
+}
+
 
 }  // namespace chrome_frame_test

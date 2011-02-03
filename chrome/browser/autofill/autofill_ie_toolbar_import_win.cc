@@ -5,13 +5,16 @@
 #include "chrome/browser/autofill/autofill_ie_toolbar_import_win.h"
 
 #include "base/basictypes.h"
-#include "base/registry.h"
 #include "base/string16.h"
+#include "base/win/registry.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/credit_card.h"
+#include "chrome/browser/autofill/crypto/rc4_decryptor.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/sync/util/data_encryption.h"
+
+using base::win::RegKey;
 
 // Forward declaration. This function is not in unnamed namespace as it
 // is referenced in the unittest.
@@ -19,23 +22,37 @@ bool ImportCurrentUserProfiles(std::vector<AutoFillProfile>* profiles,
                                std::vector<CreditCard>* credit_cards);
 namespace {
 
-#if defined(GOOGLE_CHROME_BUILD)
-#include "chrome/browser/autofill/internal/autofill_ie_toolbar_decryption.h"
-#else  // defined(GOOGLE_CHROME_BUILD)
-inline std::wstring DecryptCCNumber(const std::wstring& data) {
-  return std::wstring();
-}
-inline bool IsEmptySalt(const std::wstring& salt) {
-  return false;
-}
-#endif  // defined(GOOGLE_CHROME_BUILD)
-
 const wchar_t* const kProfileKey =
     L"Software\\Google\\Google Toolbar\\4.0\\Autofill\\Profiles";
 const wchar_t* const kCreditCardKey =
     L"Software\\Google\\Google Toolbar\\4.0\\Autofill\\Credit Cards";
 const wchar_t* const kPasswordHashValue = L"password_hash";
 const wchar_t* const kSaltValue = L"salt";
+
+// This is RC4 decryption for Toolbar credit card data. This is necessary
+// because it is not standard, so Crypto api cannot be used.
+std::wstring DecryptCCNumber(const std::wstring& data) {
+  const wchar_t* kEmptyKey =
+    L"\x3605\xCEE5\xCE49\x44F7\xCF4E\xF6CC\x604B\xFCBE\xC70A\x08FD";
+  const size_t kMacLen = 10;
+
+  if (data.length() <= kMacLen)
+    return std::wstring();
+
+  RC4Decryptor rc4_algorithm(kEmptyKey);
+  return rc4_algorithm.Run(data.substr(kMacLen));
+}
+
+bool IsEmptySalt(std::wstring const& salt) {
+  // Empty salt in IE Toolbar is \x1\x2...\x14
+  if (salt.length() != 20)
+    return false;
+  for (size_t i = 0; i < salt.length(); ++i) {
+    if (salt[i] != i + 1)
+      return false;
+  }
+  return true;
+}
 
 string16 ReadAndDecryptValue(RegKey* key, const wchar_t* value_name) {
   DWORD data_type = REG_BINARY;
@@ -116,6 +133,9 @@ bool ImportSingleProfile(FormGroup* profile,
     string16 field_value = ReadAndDecryptValue(key, value_name.c_str());
     if (!field_value.empty()) {
       has_non_empty_fields = true;
+      if (it->second == CREDIT_CARD_NUMBER) {
+        field_value = DecryptCCNumber(field_value);
+      }
       profile->SetInfo(AutoFillType(it->second), field_value);
     }
   }
@@ -177,7 +197,8 @@ bool ImportCurrentUserProfiles(std::vector<AutoFillProfile>* profiles,
         profile_reg_values[i].field_type;
   }
 
-  RegistryKeyIterator iterator_profiles(HKEY_CURRENT_USER, kProfileKey);
+  base::win::RegistryKeyIterator iterator_profiles(HKEY_CURRENT_USER,
+                                                   kProfileKey);
   for (; iterator_profiles.Valid(); ++iterator_profiles) {
     std::wstring key_name(kProfileKey);
     key_name.append(L"\\");
@@ -208,7 +229,8 @@ bool ImportCurrentUserProfiles(std::vector<AutoFillProfile>* profiles,
 
   // We import CC profiles only if they are not password protected.
   if (password_hash.empty() && IsEmptySalt(salt)) {
-    RegistryKeyIterator iterator_cc(HKEY_CURRENT_USER, kCreditCardKey);
+    base::win::RegistryKeyIterator iterator_cc(HKEY_CURRENT_USER,
+                                               kCreditCardKey);
     for (; iterator_cc.Valid(); ++iterator_cc) {
       std::wstring key_name(kCreditCardKey);
       key_name.append(L"\\");
@@ -218,12 +240,6 @@ bool ImportCurrentUserProfiles(std::vector<AutoFillProfile>* profiles,
       if (ImportSingleProfile(&credit_card, &key, reg_to_field)) {
         string16 cc_number = credit_card.GetFieldText(
             AutoFillType(CREDIT_CARD_NUMBER));
-
-        if (!cc_number.empty()) {
-          // No additional password, and CC# is not empty, decrypt CC#.
-          cc_number = DecryptCCNumber(cc_number);
-        }
-        credit_card.SetInfo(AutoFillType(CREDIT_CARD_NUMBER), cc_number);
         if (!cc_number.empty())
           credit_cards->push_back(credit_card);
       }
@@ -233,6 +249,9 @@ bool ImportCurrentUserProfiles(std::vector<AutoFillProfile>* profiles,
 }
 
 bool ImportAutofillDataWin(PersonalDataManager* pdm) {
+  // In incognito mode we do not have PDM - and we should not import anything.
+  if (!pdm)
+    return false;
   AutoFillImporter *importer = new AutoFillImporter(pdm);
   // importer will self delete.
   return importer->ImportProfiles();

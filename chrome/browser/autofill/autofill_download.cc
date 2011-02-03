@@ -5,10 +5,12 @@
 #include "chrome/browser/autofill/autofill_download.h"
 
 #include <algorithm>
+#include <vector>
 
 #include "base/logging.h"
 #include "base/rand_util.h"
 #include "base/stl_util-inl.h"
+#include "chrome/browser/autofill/autofill_metrics.h"
 #include "chrome/browser/autofill/autofill_xml_parser.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
@@ -24,6 +26,11 @@
 #define AUTO_FILL_UPLOAD_SERVER_REQUEST_URL DISABLED_REQUEST_URL
 #define AUTO_FILL_QUERY_SERVER_NAME_START_IN_HEADER "SOMESERVER/"
 #endif
+
+struct AutoFillDownloadManager::FormRequestData {
+  std::vector<std::string> form_signatures;
+  AutoFillRequestType request_type;
+};
 
 AutoFillDownloadManager::AutoFillDownloadManager(Profile* profile)
     : profile_(profile),
@@ -66,17 +73,13 @@ bool AutoFillDownloadManager::StartQueryRequest(
     return false;
   }
   std::string form_xml;
-  FormStructure::EncodeQueryRequest(forms, &form_xml);
-
   FormRequestData request_data;
-  request_data.form_signatures.reserve(forms.size());
-  for (ScopedVector<FormStructure>::const_iterator it = forms.begin();
-       it != forms.end();
-       ++it) {
-    request_data.form_signatures.push_back((*it)->FormSignature());
-  }
+  if (!FormStructure::EncodeQueryRequest(forms, &request_data.form_signatures,
+                                         &form_xml))
+    return false;
 
   request_data.request_type = AutoFillDownloadManager::REQUEST_QUERY;
+  autofill_metrics::LogServerQueryMetric(autofill_metrics::QUERY_SENT);
 
   return StartRequest(form_xml, request_data);
 }
@@ -92,12 +95,13 @@ bool AutoFillDownloadManager::StartUploadRequest(
   double upload_rate = form_was_matched ? GetPositiveUploadRate() :
                                           GetNegativeUploadRate();
   if (base::RandDouble() > upload_rate) {
-    LOG(INFO) << "AutoFillDownloadManager: Upload request is ignored";
+    VLOG(1) << "AutoFillDownloadManager: Upload request is ignored";
     // If we ever need notification that upload was skipped, add it here.
     return false;
   }
   std::string form_xml;
-  form.EncodeUploadRequest(form_was_matched, &form_xml);
+  if (!form.EncodeUploadRequest(form_was_matched, &form_xml))
+    return false;
 
   FormRequestData request_data;
   request_data.form_signatures.push_back(form.FormSignature());
@@ -233,16 +237,16 @@ void AutoFillDownloadManager::OnURLFetchComplete(const URLFetcher* source,
       }
     }
 
-    LOG(INFO) << "AutoFillDownloadManager: " << type_of_request <<
-        " request has failed with response" << response_code;
+    LOG(WARNING) << "AutoFillDownloadManager: " << type_of_request
+                 << " request has failed with response " << response_code;
     if (observer_) {
       observer_->OnHeuristicsRequestError(it->second.form_signatures[0],
                                           it->second.request_type,
                                           response_code);
     }
   } else {
-    LOG(INFO) << "AutoFillDownloadManager: " << type_of_request <<
-        " request has succeeded";
+    VLOG(1) << "AutoFillDownloadManager: " << type_of_request
+            << " request has succeeded";
     if (it->second.request_type == AutoFillDownloadManager::REQUEST_QUERY) {
       if (observer_)
         observer_->OnLoadedAutoFillHeuristics(data);
@@ -265,4 +269,3 @@ void AutoFillDownloadManager::OnURLFetchComplete(const URLFetcher* source,
   delete it->first;
   url_fetchers_.erase(it);
 }
-

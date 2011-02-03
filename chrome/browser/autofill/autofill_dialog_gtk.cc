@@ -21,8 +21,6 @@
 #include "chrome/browser/autofill/form_group.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/phone_number.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_list.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/gtk/gtk_tree.h"
 #include "chrome/browser/gtk/gtk_util.h"
@@ -30,6 +28,8 @@
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_type.h"
@@ -612,7 +612,7 @@ void AutoFillDialog::AddAddressToTree(const AutoFillProfile& profile,
       list_store_, iter,
       COL_WEIGHT, PANGO_WEIGHT_NORMAL,
       COL_WEIGHT_SET, TRUE,
-      COL_TITLE, UTF16ToUTF8(profile.PreviewSummary()).c_str(),
+      COL_TITLE, UTF16ToUTF8(profile.Label()).c_str(),
       -1);
 }
 

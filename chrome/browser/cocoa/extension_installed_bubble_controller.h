@@ -33,8 +33,9 @@ const int kInnerVerticalMargin = 10;
 // We use a different kind of notification for each of these extension types.
 typedef enum {
   kBrowserAction,
-  kPageAction,
-  kGeneric
+  kGeneric,
+  kOmniboxKeyword,
+  kPageAction
 } ExtensionType;
 
 }
@@ -47,7 +48,7 @@ typedef enum {
     NSWindowController<NSWindowDelegate> {
  @private
   NSWindow* parentWindow_;  // weak
-  Extension* extension_;  // weak
+  const Extension* extension_;  // weak
   Browser* browser_;  // weak
   scoped_nsobject<NSImage> icon_;
 
@@ -68,17 +69,18 @@ typedef enum {
   IBOutlet HoverCloseButton* closeButton_;
   IBOutlet NSImageView* iconImage_;
   IBOutlet NSTextField* extensionInstalledMsg_;
-  IBOutlet NSTextField* pageActionInfoMsg_;  // Only shown for page actions.
+  // Only shown for page actions and omnibox keywords.
+  IBOutlet NSTextField* extraInfoMsg_;
   IBOutlet NSTextField* extensionInstalledInfoMsg_;
 }
 
-@property (nonatomic, readonly) Extension* extension;
+@property (nonatomic, readonly) const Extension* extension;
 @property (nonatomic) BOOL pageActionRemoved;
 
 // Initialize the window, and then create observers to wait for the extension
 // to complete loading, or the browser window to close.
 - (id)initWithParentWindow:(NSWindow*)parentWindow
-                 extension:(Extension*)extension
+                 extension:(const Extension*)extension
                    browser:(Browser*)browser
                       icon:(SkBitmap)icon;
 
@@ -89,6 +91,10 @@ typedef enum {
 // the extensionObserver when the extension has completed loading.
 - (void)showWindow:(id)sender;
 
+// Clears our weak pointer to the Extension. This callback is triggered by
+// the extensionObserver when the extension is unloaded.
+- (void)extensionUnloaded:(id)sender;
+
 @end
 
 @interface ExtensionInstalledBubbleController(ExposedForTesting)
@@ -98,7 +104,7 @@ typedef enum {
 - (int)calculateWindowHeight;
 - (void)setMessageFrames:(int)newWindowHeight;
 - (NSRect)getExtensionInstalledMsgFrame;
-- (NSRect)getPageActionInfoMsgFrame;
+- (NSRect)getExtraInfoMsgFrame;
 - (NSRect)getExtensionInstalledInfoMsgFrame;
 
 @end  // ExtensionInstalledBubbleController(ExposedForTesting)

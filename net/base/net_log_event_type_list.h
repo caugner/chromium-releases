@@ -334,6 +334,17 @@ EVENT_TYPE(SSL_HANDSHAKE_ERROR)
 EVENT_TYPE(SSL_READ_ERROR)
 EVENT_TYPE(SSL_WRITE_ERROR)
 
+// An SSL Snap Start was attempted
+// The following parameters are attached to the event:
+//   {
+//     "type": <Integer code for the Snap Start result>,
+//   }
+EVENT_TYPE(SSL_SNAP_START)
+
+// We found that our prediction of the server's certificates was correct and
+// we merged the verification with the SSLHostInfo.
+EVENT_TYPE(SSL_VERIFICATION_MERGED)
+
 // An SSL error occurred while calling an NSS function not directly related to
 // one of the above activities.  Can also be used when more information than
 // is provided by just an error code is needed:
@@ -347,14 +358,18 @@ EVENT_TYPE(SSL_NSS_ERROR)
 // The specified number of bytes were sent on the socket.
 // The following parameters are attached:
 //   {
-//     "num_bytes": <Number of bytes that were just sent>
+//     "byte_count": <Number of bytes that were just sent>,
+//     "hex_encoded_bytes": <The exact bytes sent, as a hexadecimal string.
+//                           Only present when byte logging is enabled>
 //   }
 EVENT_TYPE(SOCKET_BYTES_SENT)
 
 // The specified number of bytes were received on the socket.
 // The following parameters are attached:
 //   {
-//     "num_bytes": <Number of bytes that were just sent>
+//     "byte_count": <Number of bytes that were just received>,
+//     "hex_encoded_bytes": <The exact bytes received, as a hexadecimal string.
+//                           Only present when byte logging is enabled>
 //   }
 EVENT_TYPE(SOCKET_BYTES_RECEIVED)
 
@@ -412,6 +427,13 @@ EVENT_TYPE(SOCKET_POOL_REUSED_AN_EXISTING_SOCKET)
 //   }
 EVENT_TYPE(TCP_CLIENT_SOCKET_POOL_REQUESTED_SOCKET)
 
+// This event simply describes the host:port that were requested from the
+// socket pool. Its parameters are:
+//   {
+//     "host_and_port": <String encoding the host and port>
+//   }
+EVENT_TYPE(TCP_CLIENT_SOCKET_POOL_REQUESTED_SOCKETS)
+
 
 // A backup socket is created due to slow connect
 EVENT_TYPE(SOCKET_BACKUP_CREATED)
@@ -433,6 +455,13 @@ EVENT_TYPE(SOCKET_POOL_BOUND_TO_CONNECT_JOB)
 //      "source_dependency": <Source identifier for the socket we acquired>
 //   }
 EVENT_TYPE(SOCKET_POOL_BOUND_TO_SOCKET)
+
+// The start/end of a client socket pool request for multiple sockets.
+// The event parameters are:
+//   {
+//      "num_sockets": <Number of sockets we're trying to ensure are connected>
+//   }
+EVENT_TYPE(SOCKET_POOL_CONNECTING_N_SOCKETS)
 
 // ------------------------------------------------------------------------
 // URLRequest
@@ -566,8 +595,18 @@ EVENT_TYPE(SPDY_SESSION_SYN_STREAM)
 //     "flags": <The control frame flags>
 //     "headers": <The list of header:value pairs>
 //     "id": <The stream id>
+//     "associated_stream": <The stream id>
 //   }
 EVENT_TYPE(SPDY_SESSION_PUSHED_SYN_STREAM)
+
+// This event is sent for a SPDY HEADERS frame.
+// The following parameters are attached:
+//   {
+//     "flags": <The control frame flags>
+//     "headers": <The list of header:value pairs>
+//     "id": <The stream id>
+//   }
+EVENT_TYPE(SPDY_SESSION_HEADERS)
 
 // This event is sent for a SPDY SYN_REPLY.
 // The following parameters are attached:

@@ -6,12 +6,13 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "net/test/test_server.h"
 
 static void PrintUsage() {
-  printf("run_testserver --doc-root=relpath [--http|--https|--ftp]\n");
+  printf("run_testserver --doc-root=relpath [--http|--https|--ftp|--sync]\n");
   printf("(NOTE: relpath should be relative to the 'src' directory)\n");
 }
 
@@ -23,15 +24,16 @@ int main(int argc, const char* argv[]) {
   CommandLine::Init(argc, argv);
   CommandLine* command_line = CommandLine::ForCurrentProcess();
 
-  if (command_line->GetSwitchCount() == 0 ||
-      command_line->HasSwitch("help")) {
-    PrintUsage();
+  if (!logging::InitLogging(FILE_PATH_LITERAL("testserver.log"),
+                            logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG,
+                            logging::LOCK_LOG_FILE,
+                            logging::APPEND_TO_OLD_LOG_FILE)) {
+    printf("Error: could not initialize logging. Exiting.\n");
     return -1;
   }
 
-  FilePath doc_root =  command_line->GetSwitchValuePath("doc-root");
-  if (doc_root.empty()) {
-    printf("Error: --doc-root must be specified\n");
+  if (command_line->GetSwitchCount() == 0 ||
+      command_line->HasSwitch("help")) {
     PrintUsage();
     return -1;
   }
@@ -41,6 +43,15 @@ int main(int argc, const char* argv[]) {
     server_type = net::TestServer::TYPE_HTTPS;
   } else if (command_line->HasSwitch("ftp")) {
     server_type = net::TestServer::TYPE_FTP;
+  } else if (command_line->HasSwitch("sync")) {
+    server_type = net::TestServer::TYPE_SYNC;
+  }
+
+  FilePath doc_root = command_line->GetSwitchValuePath("doc-root");
+  if ((server_type != net::TestServer::TYPE_SYNC) && doc_root.empty()) {
+    printf("Error: --doc-root must be specified\n");
+    PrintUsage();
+    return -1;
   }
 
   net::TestServer test_server(server_type, doc_root);

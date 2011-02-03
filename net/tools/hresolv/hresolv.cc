@@ -73,7 +73,7 @@ std::string FormatAddrinfoFlags(int ai_flags) {
     if (!flag_names.empty()) {
       flag_names += "|";
     }
-    StringAppendF(&flag_names, "0x%x", ai_flags);
+    base::StringAppendF(&flag_names, "0x%x", ai_flags);
   }
   return flag_names;
 }
@@ -161,14 +161,15 @@ std::string FormatAddrinfoDetails(const struct addrinfo& ai,
 std::string FormatAddressList(const net::AddressList& address_list,
                               const std::string& host) {
   std::string ret_string;
-  StringAppendF(&ret_string, "AddressList {\n");
-  StringAppendF(&ret_string, "  Host: %s\n", host.c_str());
+  base::StringAppendF(&ret_string, "AddressList {\n");
+  base::StringAppendF(&ret_string, "  Host: %s\n", host.c_str());
   for (const struct addrinfo* it = address_list.head();
        it != NULL;
        it = it->ai_next) {
-    StringAppendF(&ret_string, "%s", FormatAddrinfoDetails(*it, "  ").c_str());
+    base::StringAppendF(&ret_string, "%s",
+                        FormatAddrinfoDetails(*it, "  ").c_str());
   }
-  StringAppendF(&ret_string, "}\n");
+  base::StringAppendF(&ret_string, "}\n");
   return ret_string;
 }
 
@@ -382,14 +383,14 @@ bool ReadHostsAndTimesFromFile(const FilePath& path,
   std::vector<std::string> lines;
   // TODO(cbentzel): This should probably handle CRLF-style separators as well.
   // Maybe it's worth adding functionality like this to base tools.
-  SplitString(file_contents, '\n', &lines);
+  base::SplitString(file_contents, '\n', &lines);
   std::vector<std::string>::const_iterator line_end = lines.end();
   int previous_timestamp = 0;
   for (std::vector<std::string>::const_iterator it = lines.begin();
        it != line_end;
        ++it) {
     std::vector<std::string> tokens;
-    SplitStringAlongWhitespace(*it, &tokens);
+    base::SplitStringAlongWhitespace(*it, &tokens);
     switch (tokens.size()) {
       case 0:
         // Unexpected, but keep going.

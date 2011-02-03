@@ -33,6 +33,12 @@ class TCPClientSocketLibevent : public ClientSocket, NonThreadSafe {
 
   virtual ~TCPClientSocketLibevent();
 
+  // AdoptSocket causes the given, connected socket to be adopted as a TCP
+  // socket. This object must not be connected. This object takes ownership of
+  // the given socket and then acts as if Connect() had been called. This
+  // function is intended for testing only.
+  void AdoptSocket(int socket);
+
   // ClientSocket methods:
   virtual int Connect(CompletionCallback* callback);
   virtual void Disconnect();
@@ -43,6 +49,7 @@ class TCPClientSocketLibevent : public ClientSocket, NonThreadSafe {
   virtual void SetSubresourceSpeculation();
   virtual void SetOmniboxSpeculation();
   virtual bool WasEverUsed() const;
+  virtual bool UsingTCPFastOpen() const;
 
   // Socket methods:
   // Multiple outstanding requests are not supported.
@@ -124,8 +131,14 @@ class TCPClientSocketLibevent : public ClientSocket, NonThreadSafe {
   // Returns the OS error code (or 0 on success).
   int CreateSocket(const struct addrinfo* ai);
 
+  // Returns the OS error code (or 0 on success).
+  int SetupSocket();
+
   // Helper to add a TCP_CONNECT (end) event to the NetLog.
   void LogConnectCompletion(int net_error);
+
+  // Internal function to write to a socket.
+  int InternalWrite(IOBuffer* buf, int buf_len);
 
   int socket_;
 
@@ -165,9 +178,18 @@ class TCPClientSocketLibevent : public ClientSocket, NonThreadSafe {
 
   BoundNetLog net_log_;
 
+  // This socket was previously disconnected and has not been re-connected.
+  bool previously_disconnected_;
+
   // Record of connectivity and transmissions, for use in speculative connection
   // histograms.
   UseHistory use_history_;
+
+  // Enables experimental TCP FastOpen option.
+  bool use_tcp_fastopen_;
+
+  // True when TCP FastOpen is in use and we have done the connect.
+  bool tcp_fastopen_connected_;
 
   DISALLOW_COPY_AND_ASSIGN(TCPClientSocketLibevent);
 };

@@ -10,6 +10,7 @@
 #pragma once
 
 #include <list>
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -25,6 +26,7 @@
 #endif
 #include "chrome/browser/sync/engine/syncer_types.h"
 #include "chrome/browser/sync/sessions/sync_session.h"
+#include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/common/deprecated/event_sys-inl.h"
 
 class EventListenerHookup;
@@ -43,6 +45,9 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
   FRIEND_TEST_ALL_PREFIXES(SyncerThreadTest, CalculatePollingWaitTime);
   FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, Polling);
   FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, Nudge);
+  FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, NudgeWithDataTypes);
+  FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest,
+                           NudgeWithDataTypesCoalesced);
   FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, Throttling);
   FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, AuthInvalid);
   FRIEND_TEST_ALL_PREFIXES(SyncerThreadWithSyncerTest, Pause);
@@ -127,6 +132,13 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
   // from the SyncerThread's controller and will cause a mutex lock.
   virtual void NudgeSyncer(int milliseconds_from_now, NudgeSource source);
 
+  // Same as |NudgeSyncer|, but supports tracking the datatypes that caused
+  // the nudge to occur.
+  virtual void NudgeSyncerWithDataTypes(
+      int milliseconds_from_now,
+      NudgeSource source,
+      const syncable::ModelTypeBitSet& model_type);
+
   void SetNotificationsEnabled(bool notifications_enabled);
 
   // Call this when a directory is opened
@@ -185,6 +197,11 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
     // could be a pending nudge of type kUnknown, so it's better to
     // check pending_nudge_time_.)
     NudgeSource pending_nudge_source_;
+
+    // BitSet of the datatypes that have triggered the current nudge
+    // (can be union of various bitsets when multiple nudges are coalesced)
+    syncable::ModelTypeBitSet pending_nudge_types_;
+
     // null iff there is no pending nudge.
     base::TimeTicks pending_nudge_time_;
 
@@ -226,7 +243,17 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
 
   void HandleServerConnectionEvent(const ServerConnectionEvent& event);
 
-  void SyncMain(Syncer* syncer);
+  // Collect all local state required for a sync and build a SyncSession out of
+  // it, reset state for the next time, and performs the sync cycle.
+  // See |GetAndResetNudgeSource| for details on what 'reset' means.
+  // |was_nudged| is set to true if the session returned is fulfilling a nudge.
+  // Returns once the session is finished (HasMoreToSync returns false).  The
+  // caller owns the returned SyncSession.
+  sessions::SyncSession* SyncMain(Syncer* syncer,
+                                  bool was_throttled,
+                                  bool continue_sync_cycle,
+                                  bool* initial_sync_for_thread,
+                                  bool* was_nudged);
 
   // Calculates the next sync wait time and exponential backoff state.
   // last_poll_wait is the time duration of the previous polling timeout which
@@ -246,18 +273,24 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
   // Helper to above function, considers effect of user idle time.
   virtual int CalculateSyncWaitTime(int last_wait, int user_idle_ms);
 
-  // Sets the source value of the controlled syncer's updates_source value.
+  // Resets the source tracking state to a clean slate and returns the current
+  // state in a SyncSourceInfo.
   // The initial sync boolean is updated if read as a sentinel.  The following
   // two methods work in concert to achieve this goal.
   // If |was_throttled| was true, this still discards elapsed nudges, but we
   // treat the request as a periodic poll rather than a nudge from a source.
-  // TODO(timsteele/code reviewer): The first poll after a throttle period
-  // will appear as a periodic request.  Do we want to be more specific?
-  // Returns true if it determines a nudge actually occurred.
-  bool UpdateNudgeSource(bool was_throttled, bool continue_sync_cycle,
-                         bool* initial_sync);
-  void SetUpdatesSource(bool nudged, NudgeSource nudge_source,
-                        bool* initial_sync);
+  // Builds a SyncSourceInfo and returns whether a nudge occurred in the
+  // |was_nudged| parameter.
+  sessions::SyncSourceInfo GetAndResetNudgeSource(bool was_throttled,
+                                                  bool continue_sync_cycle,
+                                                  bool* initial_sync,
+                                                  bool* was_nudged);
+
+  sessions::SyncSourceInfo MakeSyncSourceInfo(
+      bool nudged,
+      NudgeSource nudge_source,
+      const syncable::ModelTypeBitSet& nudge_types,
+      bool* initial_sync);
 
   int UserIdleTime();
 
@@ -300,7 +333,10 @@ class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
   // This causes syncer to start syncing ASAP. If the rate of requests is too
   // high the request will be silently dropped.  mutex_ should be held when
   // this is called.
-  void NudgeSyncImpl(int milliseconds_from_now, NudgeSource source);
+  void NudgeSyncImpl(
+      int milliseconds_from_now,
+      NudgeSource source,
+      const syncable::ModelTypeBitSet& model_types);
 
 #if defined(OS_LINUX)
   // On Linux, we need this information in order to query idle time.

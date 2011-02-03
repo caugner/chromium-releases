@@ -16,7 +16,8 @@
 #include "base/platform_thread.h"
 #include "base/string_util.h"
 #include "base/test/test_file_util.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/download/download_util.h"
 #include "chrome/browser/net/url_request_mock_http_job.h"
 #include "chrome/browser/net/url_request_slow_download_job.h"
 #include "chrome/common/chrome_constants.h"
@@ -31,26 +32,6 @@
 namespace {
 
 const wchar_t kDocRoot[] = L"chrome/test/data";
-
-#if defined(OS_WIN)
-// Checks if the volume supports Alternate Data Streams. This is required for
-// the Zone Identifier implementation.
-bool VolumeSupportsADS(const std::wstring path) {
-  wchar_t drive[MAX_PATH] = {0};
-  wcscpy_s(drive, MAX_PATH, path.c_str());
-
-  EXPECT_TRUE(PathStripToRootW(drive));
-
-  DWORD fs_flags = 0;
-  EXPECT_TRUE(GetVolumeInformationW(drive, NULL, 0, 0, NULL, &fs_flags, NULL,
-                                    0));
-
-  if (fs_flags & FILE_NAMED_STREAMS)
-    return true;
-
-  return false;
-}
-#endif  // defined(OS_WIN)
 
 class DownloadTest : public UITest {
  protected:
@@ -73,8 +54,8 @@ class DownloadTest : public UITest {
 
 #if defined(OS_WIN)
     // Check if the Zone Identifier is correctly set.
-    if (VolumeSupportsADS(file_on_client.value()))
-      CheckZoneIdentifier(file_on_client.value());
+    if (file_util::VolumeSupportsADS(file_on_client))
+      EXPECT_TRUE(file_util::HasInternetZoneIdentifier(file_on_client));
 #endif
 
     // Delete the client copy of the file.
@@ -83,6 +64,12 @@ class DownloadTest : public UITest {
 
   void CheckDownload(const FilePath& file) {
     CheckDownload(file, file);
+  }
+
+  void CleanupDownloadFiles(const FilePath& prefix) {
+    FilePath path_prefix(download_prefix_);
+    path_prefix = path_prefix.Append(prefix);
+    download_util::EraseUniqueDownloadFiles(path_prefix);
   }
 
   virtual void SetUp() {
@@ -94,6 +81,11 @@ class DownloadTest : public UITest {
   void RunSizeTest(const GURL& url,
                    const std::wstring& expected_title_in_progress,
                    const std::wstring& expected_title_finished) {
+    FilePath filename;
+    net::FileURLToFilePath(url, &filename);
+    filename = filename.BaseName();
+    CleanupDownloadFiles(filename);
+
     {
       EXPECT_EQ(1, GetTabCount());
 
@@ -115,9 +107,6 @@ class DownloadTest : public UITest {
       EXPECT_TRUE(WaitForDownloadShelfVisible(window.get()));
     }
 
-    FilePath filename;
-    net::FileURLToFilePath(url, &filename);
-    filename = filename.BaseName();
     FilePath download_path = download_prefix_.Append(filename);
     EXPECT_TRUE(file_util::PathExists(download_path));
 
@@ -125,47 +114,6 @@ class DownloadTest : public UITest {
     EXPECT_TRUE(file_util::DieFileDie(download_path, true));
     EXPECT_FALSE(file_util::PathExists(download_path));
   }
-
-#if defined(OS_WIN)
-  // Checks if the ZoneIdentifier is correctly set to "Internet" (3)
-  void CheckZoneIdentifier(const std::wstring full_path) {
-    std::wstring path = full_path + L":Zone.Identifier";
-
-    // This polling and sleeping here is a very bad pattern. But due to how
-    // Windows file semantics work it's really hard to do it other way. We are
-    // reading a file written by a different process, using a different handle.
-    // Windows does not guarantee that we will get the same contents even after
-    // the other process closes the handle, flushes the buffers, etc.
-    for (int i = 0; i < 20; i++) {
-      PlatformThread::Sleep(sleep_timeout_ms());
-
-      const DWORD kShare = FILE_SHARE_READ |
-                           FILE_SHARE_WRITE |
-                           FILE_SHARE_DELETE;
-      HANDLE file = CreateFile(path.c_str(), GENERIC_READ, kShare, NULL,
-                               OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-      if (file == INVALID_HANDLE_VALUE)
-        continue;
-
-      char buffer[100] = {0};
-      DWORD read = 0;
-      BOOL read_result = ReadFile(file, buffer, 100, &read, NULL);
-      CloseHandle(file);
-
-      if (!read_result)
-        continue;
-
-      const char kIdentifier[] = "[ZoneTransfer]\nZoneId=3";
-      if (read != arraysize(kIdentifier))
-        continue;
-
-      if (strcmp(kIdentifier, buffer) == 0)
-        return;
-    }
-
-    FAIL() << "Could not detect Internet ZoneIndentifier";
-  }
-#endif  // defined(OS_WIN)
 
   FilePath download_prefix_;
 };
@@ -177,6 +125,7 @@ class DownloadTest : public UITest {
 // Additionally, there is Windows-specific flake, http://crbug.com/20809.
 TEST_F(DownloadTest, DISABLED_DownloadMimeType) {
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  CleanupDownloadFiles(file);
 
   EXPECT_EQ(1, GetTabCount());
 
@@ -199,9 +148,7 @@ TEST_F(DownloadTest, DISABLED_DownloadMimeType) {
 TEST_F(DownloadTest, FLAKY_NoDownload) {
   FilePath file(FILE_PATH_LITERAL("download-test2.html"));
   FilePath file_path = download_prefix_.Append(file);
-
-  if (file_util::PathExists(file_path))
-    ASSERT_TRUE(file_util::Delete(file_path, false));
+  CleanupDownloadFiles(file);
 
   NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
   WaitUntilTabCount(1);
@@ -227,6 +174,7 @@ TEST_F(DownloadTest, FLAKY_NoDownload) {
 TEST_F(DownloadTest, DISABLED_ContentDisposition) {
   FilePath file(FILE_PATH_LITERAL("download-test3.gif"));
   FilePath download_file(FILE_PATH_LITERAL("download-test3-attachment.gif"));
+  CleanupDownloadFiles(file);
 
   NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
   WaitUntilTabCount(1);
@@ -249,6 +197,7 @@ TEST_F(DownloadTest, DISABLED_ContentDisposition) {
 TEST_F(DownloadTest, DISABLED_PerWindowShelf) {
   FilePath file(FILE_PATH_LITERAL("download-test3.gif"));
   FilePath download_file(FILE_PATH_LITERAL("download-test3-attachment.gif"));
+  CleanupDownloadFiles(download_file);
 
   NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file));
   WaitUntilTabCount(1);
@@ -339,6 +288,7 @@ TEST_F(DownloadTest, DISABLED_IncognitoDownload) {
 
   // Download something.
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  CleanupDownloadFiles(file);
   scoped_refptr<TabProxy> tab(incognito->GetTab(0));
   ASSERT_TRUE(tab.get());
   ASSERT_TRUE(tab->NavigateToURL(URLRequestMockHTTPJob::GetMockUrl(file)));
@@ -396,6 +346,7 @@ TEST_F(DownloadTest, FLAKY_CloseNewTab1) {
   ASSERT_TRUE(tab_proxy.get());
 
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  CleanupDownloadFiles(file);
   ASSERT_TRUE(tab_proxy->NavigateToURLAsyncWithDisposition(
       URLRequestMockHTTPJob::GetMockUrl(file),
       NEW_BACKGROUND_TAB));
@@ -425,6 +376,7 @@ TEST_F(DownloadTest, FLAKY_DontCloseNewTab2) {
       FilePath(FILE_PATH_LITERAL("download_page1.html")))));
 
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  CleanupDownloadFiles(file);
   ASSERT_TRUE(tab_proxy->NavigateToURLAsync(GURL("javascript:openNew()")));
 
   ASSERT_TRUE(WaitForDownloadShelfVisible(browser));
@@ -454,6 +406,7 @@ TEST_F(DownloadTest, FLAKY_DontCloseNewTab3) {
   ASSERT_TRUE(tab_proxy->NavigateToURLAsync(GURL("javascript:openNew()")));
 
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  CleanupDownloadFiles(file);
   ASSERT_TRUE(tab_proxy->NavigateToURLAsync(
       URLRequestMockHTTPJob::GetMockUrl(file)));
 
@@ -482,6 +435,7 @@ TEST_F(DownloadTest, FLAKY_CloseNewTab2) {
       FilePath(FILE_PATH_LITERAL("download_page3.html")))));
 
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  CleanupDownloadFiles(file);
   ASSERT_TRUE(tab_proxy->NavigateToURLAsync(GURL("javascript:openNew()")));
 
   ASSERT_TRUE(WaitForDownloadShelfVisible(browser));
@@ -509,6 +463,7 @@ TEST_F(DownloadTest, FLAKY_CloseNewTab3) {
       FilePath(FILE_PATH_LITERAL("download_page4.html")))));
 
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  CleanupDownloadFiles(file);
   ASSERT_TRUE(tab_proxy->NavigateToURLAsync(
       GURL("javascript:document.getElementById('form').submit()")));
 
@@ -533,6 +488,7 @@ TEST_F(DownloadTest, DISABLED_DontCloseNewWindow) {
   ASSERT_TRUE(tab_proxy.get());
 
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  CleanupDownloadFiles(file);
   ASSERT_TRUE(tab_proxy->NavigateToURLAsyncWithDisposition(
       URLRequestMockHTTPJob::GetMockUrl(file), NEW_WINDOW));
 
@@ -558,6 +514,7 @@ TEST_F(DownloadTest, DISABLED_NewWindow) {
   ASSERT_TRUE(tab_proxy.get());
 
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+  CleanupDownloadFiles(file);
   ASSERT_TRUE(tab_proxy->NavigateToURLAsyncWithDisposition(
     URLRequestMockHTTPJob::GetMockUrl(file), NEW_WINDOW));
 

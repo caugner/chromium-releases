@@ -8,7 +8,8 @@
 
 #include "app/win_util.h"
 #include "base/command_line.h"
-#include "base/debug_util.h"
+#include "base/debug/debugger.h"
+#include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
@@ -16,8 +17,7 @@
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/trace_event.h"
-#include "base/win_util.h"
+#include "base/win/windows_version.h"
 #include "chrome/common/child_process_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -173,7 +173,7 @@ void AddDllEvictionPolicy(sandbox::TargetPolicy* policy) {
     // To minimize the list we only add an unload policy if the dll is also
     // loaded in this process. All the injected dlls of interest do this.
     if (::GetModuleHandleW(kTroublesomeDlls[ix])) {
-      LOG(INFO) << "dll to unload found: " << kTroublesomeDlls[ix];
+      VLOG(1) << "dll to unload found: " << kTroublesomeDlls[ix];
       policy->AddDllToUnload(kTroublesomeDlls[ix]);
     }
   }
@@ -228,7 +228,7 @@ bool ApplyPolicyForUntrustedPlugin(sandbox::TargetPolicy* policy) {
   policy->SetJobLevel(sandbox::JOB_UNPROTECTED, 0);
 
   sandbox::TokenLevel initial_token = sandbox::USER_UNPROTECTED;
-  if (win_util::GetWinVersion() > win_util::WINVERSION_XP) {
+  if (base::win::GetVersion() > base::win::VERSION_XP) {
     // On 2003/Vista the initial token has to be restricted if the main token
     // is restricted.
     initial_token = sandbox::USER_RESTRICTED_SAME_ACCESS;
@@ -279,7 +279,7 @@ bool ApplyPolicyForUntrustedPlugin(sandbox::TargetPolicy* policy) {
                         policy))
     return false;
 
-  if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA) {
+  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
     if (!AddKeyAndSubkeys(L"HKEY_CURRENT_USER\\SOFTWARE\\AppDataLow",
                           sandbox::TargetPolicy::REG_ALLOW_ANY,
                           policy))
@@ -329,6 +329,24 @@ bool LoadFlashBroker(const FilePath& plugin_path, CommandLine* cmd_line) {
 
   cmd_line->AppendSwitchASCII("flash-broker",
                               base::Int64ToString(::GetProcessId(process)));
+
+  // The flash broker, unders some circumstances can linger beyond the lifetime
+  // of the flash player, so we put it in a job object, when the browser
+  // terminates the job object is destroyed (by the OS) and the flash broker
+  // is terminated.
+  HANDLE job = ::CreateJobObjectW(NULL, NULL);
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_limits = {0};
+  job_limits.BasicLimitInformation.LimitFlags =
+      JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (::SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                &job_limits, sizeof(job_limits))) {
+    ::AssignProcessToJobObject(job, process);
+    // Yes, we are leaking the object here. Read comment above.
+  } else {
+    ::CloseHandle(job);
+    return false;
+  }
+
   ::CloseHandle(process);
   return true;
 }
@@ -343,11 +361,10 @@ bool ApplyPolicyForBuiltInFlashPlugin(sandbox::TargetPolicy* policy) {
 
   sandbox::TokenLevel initial_token = sandbox::USER_UNPROTECTED;
 
-  if (win_util::GetWinVersion() > win_util::WINVERSION_XP)
+  if (base::win::GetVersion() > base::win::VERSION_XP)
     initial_token = sandbox::USER_RESTRICTED_SAME_ACCESS;
 
   policy->SetTokenLevel(initial_token, sandbox::USER_LIMITED);
-
   policy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
 
   // TODO(cpu): Proxy registry access and remove these policies.
@@ -362,6 +379,26 @@ bool ApplyPolicyForBuiltInFlashPlugin(sandbox::TargetPolicy* policy) {
     return false;
   return true;
 }
+
+// Returns true of the plugin specified in |cmd_line| is the built-in
+// flash plugin and optionally returns its full path in |flash_path|
+bool IsBuiltInFlash(const CommandLine* cmd_line, FilePath* flash_path) {
+  std::wstring plugin_dll = cmd_line->
+      GetSwitchValueNative(switches::kPluginPath);
+
+  FilePath builtin_flash;
+  if (!PathService::Get(chrome::FILE_FLASH_PLUGIN, &builtin_flash))
+    return false;
+
+  FilePath plugin_path(plugin_dll);
+  if (plugin_path != builtin_flash)
+    return false;
+
+  if (flash_path)
+    *flash_path = plugin_path;
+  return true;
+}
+
 
 // Adds the custom policy rules for a given plugin. |trusted_plugins| contains
 // the comma separate list of plugin dll names that should not be sandboxed.
@@ -382,18 +419,15 @@ bool AddPolicyForPlugin(CommandLine* cmd_line,
   }
 
   // The built-in flash gets a custom, more restricted sandbox.
-  FilePath builtin_flash;
-  if (PathService::Get(chrome::FILE_FLASH_PLUGIN, &builtin_flash)) {
-    FilePath plugin_path(plugin_dll);
-    if (plugin_path == builtin_flash) {
-      // Spawn the flash broker and apply sandbox policy.
-      if (!LoadFlashBroker(plugin_path, cmd_line)) {
-        // Could not start the broker, use a very weak policy instead.
-        DLOG(WARNING) << "Failed to start flash broker";
-        return ApplyPolicyForTrustedPlugin(policy);
-      }
-      return ApplyPolicyForBuiltInFlashPlugin(policy);
+  FilePath flash_path;
+  if (IsBuiltInFlash(cmd_line, &flash_path)) {
+    // Spawn the flash broker and apply sandbox policy.
+    if (!LoadFlashBroker(flash_path, cmd_line)) {
+      // Could not start the broker, use a very weak policy instead.
+      DLOG(WARNING) << "Failed to start flash broker";
+      return ApplyPolicyForTrustedPlugin(policy);
     }
+    return ApplyPolicyForBuiltInFlashPlugin(policy);
   }
 
   PluginPolicyCategory policy_category =
@@ -417,7 +451,7 @@ void AddPolicyForRenderer(sandbox::TargetPolicy* policy,
   policy->SetJobLevel(sandbox::JOB_LOCKDOWN, 0);
 
   sandbox::TokenLevel initial_token = sandbox::USER_UNPROTECTED;
-  if (win_util::GetWinVersion() > win_util::WINVERSION_XP) {
+  if (base::win::GetVersion() > base::win::VERSION_XP) {
     // On 2003/Vista the initial token has to be restricted if the main
     // token is restricted.
     initial_token = sandbox::USER_RESTRICTED_SAME_ACCESS;
@@ -475,6 +509,8 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
     type = ChildProcessInfo::NACL_BROKER_PROCESS;
   } else if (type_str == switches::kGpuProcess) {
     type = ChildProcessInfo::GPU_PROCESS;
+  } else if (type_str == switches::kPpapiPluginProcess) {
+    type = ChildProcessInfo::PPAPI_PLUGIN_PROCESS;
   } else {
     NOTREACHED();
     return 0;
@@ -482,19 +518,36 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
 
   TRACE_EVENT_BEGIN("StartProcessWithAccess", 0, type_str);
 
+  // To decide if the process is going to be sandboxed we have two cases.
+  // First case: all process types except the nacl broker, gpu process and
+  // the plugin process are sandboxed by default.
   bool in_sandbox =
       (type != ChildProcessInfo::NACL_BROKER_PROCESS) &&
-      !browser_command_line.HasSwitch(switches::kNoSandbox) &&
-      (type != ChildProcessInfo::PLUGIN_PROCESS ||
-       browser_command_line.HasSwitch(switches::kSafePlugins)) &&
-      (type != ChildProcessInfo::GPU_PROCESS);
+      (type != ChildProcessInfo::GPU_PROCESS) &&
+      (type != ChildProcessInfo::PLUGIN_PROCESS);
+
+  // Second case: If it is the plugin process then it depends on it being
+  // the built-in flash, the user forcing plugins into sandbox or the
+  // the user explicitly excluding flash from the sandbox.
+  if (!in_sandbox && (type == ChildProcessInfo::PLUGIN_PROCESS)) {
+      in_sandbox = browser_command_line.HasSwitch(switches::kSafePlugins) ||
+          (IsBuiltInFlash(cmd_line, NULL) &&
+           browser_command_line.HasSwitch(switches::kEnableFlashSandbox));
+  }
+
+  if (browser_command_line.HasSwitch(switches::kNoSandbox)) {
+    // The user has explicity opted-out from all sandboxing.
+    in_sandbox = false;
+  }
+
 #if !defined (GOOGLE_CHROME_BUILD)
   if (browser_command_line.HasSwitch(switches::kInProcessPlugins)) {
     // In process plugins won't work if the sandbox is enabled.
     in_sandbox = false;
   }
 #endif
-  if (!browser_command_line.HasSwitch(switches::kDisableExperimentalWebGL) &&
+  if (!browser_command_line.HasSwitch(switches::kDisable3DAPIs) &&
+      !browser_command_line.HasSwitch(switches::kDisableExperimentalWebGL) &&
       browser_command_line.HasSwitch(switches::kInProcessWebGL)) {
     // In process WebGL won't work if the sandbox is enabled.
     in_sandbox = false;
@@ -513,7 +566,7 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   // Prefetch hints on windows:
   // Using a different prefetch profile per process type will allow Windows
   // to create separate pretetch settings for browser, renderer etc.
-  cmd_line->AppendArg(StringPrintf("/prefetch:%d", type));
+  cmd_line->AppendArg(base::StringPrintf("/prefetch:%d", type));
 
   if (!in_sandbox) {
     base::LaunchApp(*cmd_line, false, false, &process);
@@ -562,7 +615,7 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   TRACE_EVENT_BEGIN("StartProcessWithAccess::LAUNCHPROCESS", 0, 0);
 
   result = g_broker_services->SpawnTarget(
-      cmd_line->program().c_str(),
+      cmd_line->GetProgram().value().c_str(),
       cmd_line->command_line_string().c_str(),
       policy, &target);
   policy->Release();
@@ -579,7 +632,7 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   // Help the process a little. It can't start the debugger by itself if
   // the process is in a sandbox.
   if (child_needs_help)
-    DebugUtil::SpawnDebuggerOnProcess(target.dwProcessId);
+    base::debug::SpawnDebuggerOnProcess(target.dwProcessId);
 
   return process;
 }

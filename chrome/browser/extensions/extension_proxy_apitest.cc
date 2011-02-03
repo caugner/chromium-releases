@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/browser.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
@@ -16,7 +16,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ProxyAutoSettings) {
       switches::kEnableExperimentalExtensionApis);
 
   ASSERT_TRUE(RunExtensionTest("proxy/auto")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension);
 
   PrefService* pref_service = browser()->profile()->GetPrefs();
@@ -46,7 +46,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ProxyManualSingle) {
       switches::kEnableExperimentalExtensionApis);
 
   ASSERT_TRUE(RunExtensionTest("proxy/single")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension);
 
   PrefService* pref_service = browser()->profile()->GetPrefs();
@@ -81,7 +81,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ProxyManualIndividual) {
       switches::kEnableExperimentalExtensionApis);
 
   ASSERT_TRUE(RunExtensionTest("proxy/individual")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension);
 
   PrefService* pref_service = browser()->profile()->GetPrefs();

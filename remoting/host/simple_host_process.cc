@@ -23,35 +23,32 @@
 #include "base/environment.h"
 #include "base/file_path.h"
 #include "base/logging.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/nss_util.h"
-#include "base/scoped_nsautorelease_pool.h"
+#include "base/path_service.h"
 #include "base/thread.h"
-#include "remoting/base/encoder_verbatim.h"
-#include "remoting/base/encoder_zlib.h"
+#include "media/base/media.h"
+#include "remoting/base/tracer.h"
 #include "remoting/host/capturer_fake.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/json_host_config.h"
-#include "remoting/base/tracer.h"
+#include "remoting/proto/video.pb.h"
+
+using remoting::ChromotingHost;
+using remoting::protocol::CandidateSessionConfig;
+using remoting::protocol::ChannelConfig;
+using std::string;
+using std::wstring;
 
 #if defined(OS_WIN)
-#include "remoting/host/capturer_gdi.h"
-#include "remoting/host/event_executor_win.h"
-#elif defined(OS_LINUX)
-#include "remoting/host/capturer_linux.h"
-#include "remoting/host/event_executor_linux.h"
-#elif defined(OS_MACOSX)
-#include "remoting/host/capturer_mac.h"
-#include "remoting/host/event_executor_mac.h"
-#endif
-
-#if defined(OS_WIN)
-const std::wstring kDefaultConfigPath = L".ChromotingConfig.json";
+const wchar_t kDefaultConfigPath[] = L".ChromotingConfig.json";
 const wchar_t kHomeDrive[] = L"HOMEDRIVE";
 const wchar_t kHomePath[] = L"HOMEPATH";
+// TODO(sergeyu): Use environment utils from base/environment.h.
 const wchar_t* GetEnvironmentVar(const wchar_t* x) { return _wgetenv(x); }
 #else
-const std::string kDefaultConfigPath = ".ChromotingConfig.json";
+const char kDefaultConfigPath[] = ".ChromotingConfig.json";
 static char* GetEnvironmentVar(const char* x) { return getenv(x); }
 #endif
 
@@ -59,61 +56,41 @@ void ShutdownTask(MessageLoop* message_loop) {
   message_loop->PostTask(FROM_HERE, new MessageLoop::QuitTask());
 }
 
-const std::string kFakeSwitchName = "fake";
-const std::string kConfigSwitchName = "config";
-const std::string kVerbatimSwitchName = "verbatim";
+const char kFakeSwitchName[] = "fake";
+const char kConfigSwitchName[] = "config";
+const char kVideoSwitchName[] = "video";
+
+const char kVideoSwitchValueVerbatim[] = "verbatim";
+const char kVideoSwitchValueZip[] = "zip";
+const char kVideoSwitchValueVp8[] = "vp8";
+const char kVideoSwitchValueVp8Rtp[] = "vp8rtp";
+
 
 int main(int argc, char** argv) {
   // Needed for the Mac, so we don't leak objects when threads are created.
-  base::ScopedNSAutoreleasePool pool;
+  base::mac::ScopedNSAutoreleasePool pool;
 
   CommandLine::Init(argc, argv);
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
 
   base::AtExitManager exit_manager;
-
   base::EnsureNSPRInit();
 
-  scoped_ptr<remoting::Capturer> capturer;
-  scoped_ptr<remoting::Encoder> encoder;
-  scoped_ptr<remoting::EventExecutor> event_handler;
-#if defined(OS_WIN)
-  capturer.reset(new remoting::CapturerGdi());
-  event_handler.reset(new remoting::EventExecutorWin(capturer.get()));
-#elif defined(OS_LINUX)
-  capturer.reset(new remoting::CapturerLinux());
-  event_handler.reset(new remoting::EventExecutorLinux(capturer.get()));
-#elif defined(OS_MACOSX)
-  capturer.reset(new remoting::CapturerMac());
-  event_handler.reset(new remoting::EventExecutorMac(capturer.get()));
-#endif
-  encoder.reset(new remoting::EncoderZlib());
+  // Allocate a chromoting context and starts it.
+  remoting::ChromotingHostContext context;
+  context.Start();
 
-  // Check the argument to see if we should use a fake capturer and encoder.
-  bool fake = cmd_line->HasSwitch(kFakeSwitchName);
-  bool verbatim = cmd_line->HasSwitch(kVerbatimSwitchName);
 
 #if defined(OS_WIN)
-  std::wstring path = GetEnvironmentVar(kHomeDrive);
-  path += GetEnvironmentVar(kHomePath);
+  wstring home_path = GetEnvironmentVar(kHomeDrive);
+  home_path += GetEnvironmentVar(kHomePath);
 #else
-  std::string path = GetEnvironmentVar(base::env_vars::kHome);
+  string home_path = GetEnvironmentVar(base::env_vars::kHome);
 #endif
-  FilePath config_path(path);
+  FilePath config_path(home_path);
   config_path = config_path.Append(kDefaultConfigPath);
   if (cmd_line->HasSwitch(kConfigSwitchName)) {
     config_path = cmd_line->GetSwitchValuePath(kConfigSwitchName);
-  }
-
-  if (fake) {
-    // Inject a fake capturer.
-    LOG(INFO) << "Using a fake capturer.";
-    capturer.reset(new remoting::CapturerFake());
-  }
-
-  if (verbatim) {
-    LOG(INFO) << "Using the verbatim encoder.";
-    encoder.reset(new remoting::EncoderVerbatim());
   }
 
   base::Thread file_io_thread("FileIO");
@@ -125,20 +102,53 @@ int main(int argc, char** argv) {
 
   if (!config->Read()) {
     LOG(ERROR) << "Failed to read configuration file " << config_path.value();
+    context.Stop();
     return 1;
   }
 
-  // Allocate a chromoting context and starts it.
-  remoting::ChromotingHostContext context;
-  context.Start();
+  FilePath module_path;
+  PathService::Get(base::DIR_MODULE, &module_path);
+  CHECK(media::InitializeMediaLibrary(module_path))
+      << "Cannot load media library";
 
   // Construct a chromoting host.
-  scoped_refptr<remoting::ChromotingHost> host =
-      new remoting::ChromotingHost(&context,
-                                   config,
-                                   capturer.release(),
-                                   encoder.release(),
-                                   event_handler.release());
+  scoped_refptr<ChromotingHost> host;
+
+  bool fake = cmd_line->HasSwitch(kFakeSwitchName);
+  if (fake) {
+    host = ChromotingHost::Create(
+        &context, config,
+        new remoting::CapturerFake(context.main_message_loop()));
+  } else {
+    host = ChromotingHost::Create(&context, config);
+  }
+
+  if (cmd_line->HasSwitch(kVideoSwitchName)) {
+    string video_codec = cmd_line->GetSwitchValueASCII(kVideoSwitchName);
+    scoped_ptr<CandidateSessionConfig> config(
+        CandidateSessionConfig::CreateDefault());
+    config->mutable_video_configs()->clear();
+
+    ChannelConfig::TransportType transport = ChannelConfig::TRANSPORT_STREAM;
+    ChannelConfig::Codec codec;
+    if (video_codec == kVideoSwitchValueVerbatim) {
+      codec = ChannelConfig::CODEC_VERBATIM;
+    } else if (video_codec == kVideoSwitchValueZip) {
+      codec = ChannelConfig::CODEC_ZIP;
+    } else if (video_codec == kVideoSwitchValueVp8) {
+      codec = ChannelConfig::CODEC_VP8;
+    } else if (video_codec == kVideoSwitchValueVp8Rtp) {
+      transport = ChannelConfig::TRANSPORT_SRTP;
+      codec = ChannelConfig::CODEC_VP8;
+    } else {
+      LOG(ERROR) << "Unknown video codec: " << video_codec;
+      context.Stop();
+      return 1;
+    }
+    config->mutable_video_configs()->push_back(ChannelConfig(
+        transport, remoting::protocol::kDefaultStreamVersion, codec));
+    host->set_protocol_config(config.release());
+  }
 
   // Let the chromoting host run until the shutdown task is executed.
   MessageLoop message_loop(MessageLoop::TYPE_UI);

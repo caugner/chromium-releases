@@ -13,6 +13,9 @@
 #if defined(OS_LINUX)
 typedef struct _GdkEventKey GdkEventKey;
 #endif
+#if defined(TOUCH_UI)
+typedef union _XEvent XEvent;
+#endif
 
 class OSExchangeData;
 
@@ -58,13 +61,14 @@ class Event {
   // file, this header is used on non-views platforms (e.g. OSX).  For
   // example, these EventFlags are used by the automation provider for
   // all platforms.
-  enum EventFlags { EF_SHIFT_DOWN         = 1 << 0,
-                    EF_CONTROL_DOWN       = 1 << 1,
-                    EF_ALT_DOWN           = 1 << 2,
-                    EF_LEFT_BUTTON_DOWN   = 1 << 3,
-                    EF_MIDDLE_BUTTON_DOWN = 1 << 4,
-                    EF_RIGHT_BUTTON_DOWN  = 1 << 5,
-                    EF_COMMAND_DOWN       = 1 << 6,  // Only useful on OSX
+  enum EventFlags { EF_CAPS_LOCK_DOWN     = 1 << 0,
+                    EF_SHIFT_DOWN         = 1 << 1,
+                    EF_CONTROL_DOWN       = 1 << 2,
+                    EF_ALT_DOWN           = 1 << 3,
+                    EF_LEFT_BUTTON_DOWN   = 1 << 4,
+                    EF_MIDDLE_BUTTON_DOWN = 1 << 5,
+                    EF_RIGHT_BUTTON_DOWN  = 1 << 6,
+                    EF_COMMAND_DOWN       = 1 << 7,  // Only useful on OSX
   };
 
   // Return the event type
@@ -94,6 +98,10 @@ class Event {
   // Return whether the control modifier is down
   bool IsControlDown() const {
     return (flags_ & EF_CONTROL_DOWN) != 0;
+  }
+
+  bool IsCapsLockDown() const {
+    return (flags_ & EF_CAPS_LOCK_DOWN) != 0;
   }
 
   // Return whether the alt modifier is down
@@ -222,6 +230,11 @@ class MouseEvent : public LocatedEvent {
   // from 'from' coordinate system to 'to' coordinate system
   MouseEvent(const MouseEvent& model, View* from, View* to);
 
+#if defined(TOUCH_UI)
+  // Create a mouse event from an X mouse event.
+  explicit MouseEvent(XEvent* xevent);
+#endif
+
   // Conveniences to quickly test what button is down
   bool IsOnlyLeftMouseButton() const {
     return (GetFlags() & EF_LEFT_BUTTON_DOWN) &&
@@ -284,6 +297,10 @@ class TouchEvent : public LocatedEvent {
   // from 'from' coordinate system to 'to' coordinate system.
   TouchEvent(const TouchEvent& model, View* from, View* to);
 
+#if defined(HAVE_XINPUT2)
+  explicit TouchEvent(XEvent* xev);
+#endif
+
   // Return the touch point for this event.
   bool identity() const {
     return touch_id_;
@@ -316,6 +333,11 @@ class KeyEvent : public Event {
            int message_flags);
 #if defined(OS_LINUX)
   explicit KeyEvent(GdkEventKey* event);
+#endif
+
+#if defined(TOUCH_UI)
+  // Create a key event from an X key event.
+  explicit KeyEvent(XEvent* xevent);
 #endif
 
   // This returns a VKEY_ value as defined in app/keyboard_codes.h which is
@@ -362,6 +384,10 @@ class MouseWheelEvent : public LocatedEvent {
       : LocatedEvent(ET_MOUSEWHEEL, gfx::Point(x, y), flags),
         offset_(offset) {
   }
+
+#if defined(TOUCH_UI)
+  explicit MouseWheelEvent(XEvent* xev);
+#endif
 
   int GetOffset() const {
     return offset_;

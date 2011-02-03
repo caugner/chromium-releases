@@ -8,9 +8,11 @@
 
 #include <gtk/gtk.h>
 #include <map>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -18,7 +20,6 @@
 
 class AutocompleteEditModel;
 class AutocompleteEditView;
-struct AutocompleteMatch;
 class AutocompletePopupModel;
 class GtkThemeProvider;
 class Profile;
@@ -37,10 +38,10 @@ class AutocompletePopupViewGtk : public AutocompletePopupView,
   virtual bool IsOpen() const { return opened_; }
   virtual void InvalidateLine(size_t line);
   virtual void UpdatePopupAppearance();
+  virtual gfx::Rect GetTargetBounds();
   virtual void PaintUpdatesNow();
   virtual void OnDragCanceled();
   virtual AutocompletePopupModel* GetModel();
-  virtual int GetMaxYCoordinate();
 
   // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
@@ -48,6 +49,17 @@ class AutocompletePopupViewGtk : public AutocompletePopupView,
                        const NotificationDetails& details);
 
  private:
+  // Be friendly for unit tests.
+  friend class AutocompletePopupViewGtkTest;
+  static void SetupLayoutForMatch(
+      PangoLayout* layout,
+      const std::wstring& text,
+      const AutocompleteMatch::ACMatchClassifications& classifications,
+      const GdkColor* base_color,
+      const GdkColor* dim_color,
+      const GdkColor* url_color,
+      const std::string& prefix_text);
+
   void Show(size_t num_results);
   void Hide();
 
@@ -118,10 +130,10 @@ class AutocompletePopupViewGtk : public AutocompletePopupView,
   GdkColor hovered_background_color_;
   GdkColor content_text_color_;
   GdkColor selected_content_text_color_;
+  GdkColor content_dim_text_color_;
+  GdkColor selected_content_dim_text_color_;
   GdkColor url_text_color_;
   GdkColor url_selected_text_color_;
-  GdkColor description_text_color_;
-  GdkColor description_selected_text_color_;
 
   // If the user cancels a dragging action (i.e. by pressing ESC), we don't have
   // a convenient way to release mouse capture. Instead we use this flag to

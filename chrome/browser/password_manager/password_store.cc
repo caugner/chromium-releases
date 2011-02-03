@@ -7,7 +7,7 @@
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 
 using std::vector;
 using webkit_glue::PasswordForm;
@@ -27,6 +27,8 @@ void PasswordStore::ScheduleTask(Task* task) {
 void PasswordStore::ReportMetrics() {
   ScheduleTask(NewRunnableMethod(this, &PasswordStore::ReportMetricsImpl));
 }
+
+PasswordStore::~PasswordStore() {}
 
 void PasswordStore::AddLogin(const PasswordForm& form) {
   ScheduleTask(NewRunnableMethod(this, &PasswordStore::AddLoginImpl, form));

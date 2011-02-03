@@ -10,17 +10,19 @@
 #include <utility>
 
 #include "app/l10n_util.h"
+#include "base/basictypes.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/browser.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/input_method_library.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/spellcheck_common.h"
 #include "grit/chromium_strings.h"
@@ -56,8 +58,9 @@ void LanguageOptionsHandler::GetLocalizedValues(
   localized_strings->SetString("ok_button", l10n_util::GetStringUTF16(IDS_OK));
   localized_strings->SetString("remove_button",
       l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_LANGUAGES_REMOVE_BUTTON));
-  localized_strings->SetString("restart_button",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_LANGUAGES_RESTART_BUTTON));
+  localized_strings->SetString("sign_out_button",
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_LANGUAGES_SIGN_OUT_BUTTON));
   localized_strings->SetString("add_language_instructions",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_LANGUAGES_ADD_LANGUAGE_INSTRUCTIONS));
@@ -84,7 +87,7 @@ void LanguageOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringFUTF16(
           IDS_OPTIONS_SETTINGS_LANGUAGES_DISPLAY_IN_THIS_LANGUAGE,
           l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME)));
-  localized_strings->SetString("restart_required",
+  localized_strings->SetString("sign_out_required",
       l10n_util::GetStringUTF16(IDS_OPTIONS_RESTART_REQUIRED));
   localized_strings->SetString("this_language_is_currently_in_use",
       l10n_util::GetStringFUTF16(
@@ -130,8 +133,8 @@ void LanguageOptionsHandler::RegisterMessages() {
                   &LanguageOptionsHandler::SpellCheckLanguageChangeCallback));
   dom_ui_->RegisterMessageCallback("uiLanguageChange",
       NewCallback(this, &LanguageOptionsHandler::UiLanguageChangeCallback));
-  dom_ui_->RegisterMessageCallback("uiLanguageRestart",
-      NewCallback(this, &LanguageOptionsHandler::RestartCallback));
+  dom_ui_->RegisterMessageCallback("uiLanguageSignOut",
+      NewCallback(this, &LanguageOptionsHandler::SignOutCallback));
 }
 
 ListValue* LanguageOptionsHandler::GetInputMethodList(
@@ -287,9 +290,17 @@ void LanguageOptionsHandler::UiLanguageChangeCallback(
       "LanguageOptions_UiLanguageChange_%s", language_code.c_str());
   UserMetrics::RecordComputedAction(action);
 
-  PrefService* prefs = g_browser_process->local_state();
-  prefs->SetString(prefs::kApplicationLocale, language_code);
-  prefs->SavePersistentPrefs();
+  // We maintain kApplicationLocale property in both a global storage
+  // and user's profile.  Global property determines locale of login screen,
+  // while user's profile determines his personal locale preference.
+  PrefService* prefs[] = {
+      g_browser_process->local_state(),
+      dom_ui_->GetProfile()->GetPrefs()
+  };
+  for (size_t i = 0; i < arraysize(prefs); ++i) {
+    prefs[i]->SetString(prefs::kApplicationLocale, language_code);
+    prefs[i]->SavePersistentPrefs();
+  }
   dom_ui_->CallJavascriptFunction(
       L"options.LanguageOptions.uiLanguageSaved");
 }
@@ -303,13 +314,11 @@ void LanguageOptionsHandler::SpellCheckLanguageChangeCallback(
   UserMetrics::RecordComputedAction(action);
 }
 
-void LanguageOptionsHandler::RestartCallback(const ListValue* args) {
-  UserMetrics::RecordAction(UserMetricsAction("LanguageOptions_Restart"));
+void LanguageOptionsHandler::SignOutCallback(const ListValue* args) {
+  UserMetrics::RecordAction(UserMetricsAction("LanguageOptions_SignOut"));
 
   Browser* browser = Browser::GetBrowserForController(
       &dom_ui_->tab_contents()->controller(), NULL);
-  // TODO(kochi): For ChromiumOS, just exiting means browser restart.
-  // Implement browser restart for Chromium Win/Linux/Mac.
   if (browser)
     browser->ExecuteCommand(IDC_EXIT);
 }

@@ -48,6 +48,7 @@ class ProfileImpl : public Profile,
   virtual ChromeAppCacheService* GetAppCacheService();
   virtual webkit_database::DatabaseTracker* GetDatabaseTracker();
   virtual history::TopSites* GetTopSites();
+  virtual history::TopSites* GetTopSitesWithoutCreating();
   virtual VisitedLinkMaster* GetVisitedLinkMaster();
   virtual UserScriptMaster* GetUserScriptMaster();
   virtual SSLHostState* GetSSLHostState();
@@ -56,6 +57,7 @@ class ProfileImpl : public Profile,
   virtual ExtensionDevToolsManager* GetExtensionDevToolsManager();
   virtual ExtensionProcessManager* GetExtensionProcessManager();
   virtual ExtensionMessageService* GetExtensionMessageService();
+  virtual ExtensionEventRouter* GetExtensionEventRouter();
   virtual FaviconService* GetFaviconService(ServiceAccessType sat);
   virtual HistoryService* GetHistoryService(ServiceAccessType sat);
   virtual HistoryService* GetHistoryServiceWithoutCreating();
@@ -68,19 +70,20 @@ class ProfileImpl : public Profile,
   virtual TemplateURLFetcher* GetTemplateURLFetcher();
   virtual DownloadManager* GetDownloadManager();
   virtual PersonalDataManager* GetPersonalDataManager();
-  virtual FileSystemHostContext* GetFileSystemHostContext();
+  virtual BrowserFileSystemContext* GetFileSystemContext();
   virtual void InitThemes();
-  virtual void SetTheme(Extension* extension);
+  virtual void SetTheme(const Extension* extension);
   virtual void SetNativeTheme();
   virtual void ClearTheme();
-  virtual Extension* GetTheme();
+  virtual const Extension* GetTheme();
   virtual BrowserThemeProvider* GetThemeProvider();
   virtual bool HasCreatedDownloadManager() const;
   virtual URLRequestContextGetter* GetRequestContext();
   virtual URLRequestContextGetter* GetRequestContextForMedia();
   virtual URLRequestContextGetter* GetRequestContextForExtensions();
-  virtual void RegisterExtensionWithRequestContexts(Extension* extension);
-  virtual void UnregisterExtensionWithRequestContexts(Extension* extension);
+  virtual void RegisterExtensionWithRequestContexts(const Extension* extension);
+  virtual void UnregisterExtensionWithRequestContexts(
+      const Extension* extension);
   virtual net::SSLConfigService* GetSSLConfigService();
   virtual HostContentSettingsMap* GetHostContentSettingsMap();
   virtual HostZoomMap* GetHostZoomMap();
@@ -91,6 +94,7 @@ class ProfileImpl : public Profile,
   virtual SessionService* GetSessionService();
   virtual void ShutdownSessionService();
   virtual bool HasSessionService() const;
+  virtual bool HasProfileSyncService() const;
   virtual bool DidLastSessionExitCleanly();
   virtual BookmarkModel* GetBookmarkModel();
   virtual bool IsSameProfile(Profile* profile);
@@ -101,7 +105,7 @@ class ProfileImpl : public Profile,
   virtual void ReinitializeSpellCheckHost(bool force);
   virtual WebKitContext* GetWebKitContext();
   virtual DesktopNotificationService* GetDesktopNotificationService();
-  virtual BackgroundContentsService* GetBackgroundContentsService();
+  virtual BackgroundContentsService* GetBackgroundContentsService() const;
   virtual StatusTray* GetStatusTray();
   virtual void MarkAsCleanShutdown();
   virtual void InitExtensions();
@@ -118,10 +122,15 @@ class ProfileImpl : public Profile,
   void InitCloudPrintProxyService();
   virtual ChromeBlobStorageContext* GetBlobStorageContext();
   virtual ExtensionInfoMap* GetExtensionInfoMap();
+  virtual PromoCounter* GetInstantPromoCounter();
+  virtual BrowserSignin* GetBrowserSignin();
+  virtual policy::ProfilePolicyContext* GetPolicyContext();
 
 #if defined(OS_CHROMEOS)
   virtual chromeos::ProxyConfigServiceImpl* GetChromeOSProxyConfigServiceImpl();
 #endif  // defined(OS_CHROMEOS)
+
+  virtual PrefProxyConfigTracker* GetProxyConfigTracker();
 
   // NotificationObserver implementation.
   virtual void Observe(NotificationType type,
@@ -166,11 +175,13 @@ class ProfileImpl : public Profile,
   scoped_refptr<ExtensionDevToolsManager> extension_devtools_manager_;
   scoped_ptr<ExtensionProcessManager> extension_process_manager_;
   scoped_refptr<ExtensionMessageService> extension_message_service_;
+  scoped_ptr<ExtensionEventRouter> extension_event_router_;
   scoped_ptr<SSLHostState> ssl_host_state_;
   scoped_refptr<net::TransportSecurityState>
       transport_security_state_;
   scoped_refptr<TransportSecurityPersister>
       transport_security_persister_;
+  scoped_ptr<policy::ProfilePolicyContext> profile_policy_context_;
   scoped_ptr<PrefService> prefs_;
   scoped_ptr<NetPrefObserver> net_pref_observer_;
   scoped_ptr<TemplateURLFetcher> template_url_fetcher_;
@@ -215,7 +226,8 @@ class ProfileImpl : public Profile,
   scoped_ptr<StatusTray> status_tray_;
   scoped_refptr<PersonalDataManager> personal_data_manager_;
   scoped_ptr<PinnedTabService> pinned_tab_service_;
-  scoped_refptr<FileSystemHostContext> file_system_host_context_;
+  scoped_refptr<BrowserFileSystemContext> browser_file_system_context_;
+  scoped_ptr<BrowserSignin> browser_signin_;
   bool history_service_created_;
   bool favicon_service_created_;
   bool created_web_data_service_;
@@ -239,6 +251,11 @@ class ProfileImpl : public Profile,
   // Indicates whether |spellcheck_host_| has told us initialization is
   // finished.
   bool spellcheck_host_ready_;
+
+#if defined(OS_WIN)
+  bool checked_instant_promo_;
+  scoped_ptr<PromoCounter> instant_promo_counter_;
+#endif
 
   // Set to true when ShutdownSessionService is invoked. If true
   // GetSessionService won't recreate the SessionService.
@@ -264,6 +281,8 @@ class ProfileImpl : public Profile,
   scoped_refptr<chromeos::ProxyConfigServiceImpl>
       chromeos_proxy_config_service_impl_;
 #endif
+
+  scoped_refptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileImpl);
 };

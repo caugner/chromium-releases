@@ -53,7 +53,6 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual int sizeInBytes(int type);
 
   virtual bool isGLES2Compliant();
-  virtual bool isGLES2ParameterStrict();
   virtual bool isGLES2NPOTStrict();
   virtual bool isErrorGeneratedOnOutOfBoundsAccesses();
 
@@ -165,6 +164,8 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual Attributes getContextAttributes();
 
   virtual unsigned long getError();
+
+  virtual bool isContextLost();
 
   virtual void getFloatv(unsigned long pname, float* value);
 
@@ -341,9 +342,7 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual void deleteTexture(unsigned);
 
   virtual void synthesizeGLError(unsigned long error);
-  virtual bool supportsBGRA();
 
-  virtual bool supportsMapSubCHROMIUM();
   virtual void* mapBufferSubDataCHROMIUM(
       unsigned target, int offset, int size, unsigned access);
   virtual void unmapBufferSubDataCHROMIUM(const void*);
@@ -359,7 +358,6 @@ class WebGraphicsContext3DCommandBufferImpl
       unsigned access);
   virtual void unmapTexSubImage2DCHROMIUM(const void*);
 
-  virtual bool supportsCopyTextureToParentTextureCHROMIUM();
   virtual void copyTextureToParentTextureCHROMIUM(
       unsigned texture, unsigned parentTexture);
 
@@ -367,6 +365,8 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual void deleteCompositorTexture(unsigned parent_texture);
   virtual void copyTextureToCompositor(unsigned texture,
                                        unsigned parent_texture);
+
+  ggl::Context* context() { return context_; }
 
  private:
   // The GGL context we use for OpenGL rendering.

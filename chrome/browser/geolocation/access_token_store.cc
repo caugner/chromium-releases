@@ -8,7 +8,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
@@ -94,8 +94,8 @@ void AccessTokenStore::RegisterPrefs(PrefService* prefs) {
 AccessTokenStore::Handle AccessTokenStore::LoadAccessTokens(
     CancelableRequestConsumerBase* consumer,
     LoadAccessTokensCallbackType* callback) {
-  scoped_refptr<CancelableRequest<LoadAccessTokensCallbackType> > request =
-      new CancelableRequest<LoadAccessTokensCallbackType>(callback);
+  scoped_refptr<CancelableRequest<LoadAccessTokensCallbackType> > request(
+      new CancelableRequest<LoadAccessTokensCallbackType>(callback));
   AddRequest(request, consumer);
   DCHECK(request->handle());
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2008-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@ TEST(DataBufferTest, StreamSampleImpl) {
   const base::TimeDelta kDurationB = base::TimeDelta::FromMicroseconds(5678);
 
   // Create a DataBuffer.
-  scoped_refptr<DataBuffer> buffer = new DataBuffer(0);
+  scoped_refptr<DataBuffer> buffer(new DataBuffer(0));
   ASSERT_TRUE(buffer);
 
   buffer->SetTimestamp(kTimestampA);
@@ -23,37 +23,31 @@ TEST(DataBufferTest, StreamSampleImpl) {
   EXPECT_TRUE(kTimestampA == buffer->GetTimestamp());
   EXPECT_TRUE(kDurationA == buffer->GetDuration());
   EXPECT_TRUE(buffer->IsEndOfStream());
-  EXPECT_FALSE(buffer->IsDiscontinuous());
   buffer->SetTimestamp(kTimestampB);
   buffer->SetDuration(kDurationB);
   EXPECT_TRUE(kTimestampB == buffer->GetTimestamp());
   EXPECT_TRUE(kDurationB == buffer->GetDuration());
-
-  buffer->SetDiscontinuous(true);
-  EXPECT_TRUE(buffer->IsDiscontinuous());
-  buffer->SetDiscontinuous(false);
-  EXPECT_FALSE(buffer->IsDiscontinuous());
 }
 
-TEST(DataBufferTest, Ctors) {
+TEST(DataBufferTest, Constructors) {
   const size_t kTestSize = 10;
 
-  scoped_refptr<DataBuffer> buffer = new DataBuffer(0);
+  scoped_refptr<DataBuffer> buffer(new DataBuffer(0));
   EXPECT_FALSE(buffer->GetData());
 
-  scoped_refptr<DataBuffer> buffer2 = new DataBuffer(kTestSize);
+  scoped_refptr<DataBuffer> buffer2(new DataBuffer(kTestSize));
   EXPECT_EQ(0u, buffer2->GetDataSize());
   EXPECT_EQ(kTestSize, buffer2->GetBufferSize());
 }
 
-TEST(DataBufferTest, WritableBufferImpl) {
+TEST(DataBufferTest, ReadingWriting) {
   const char kData[] = "hello";
   const size_t kDataSize = arraysize(kData);
   const char kNewData[] = "chromium";
   const size_t kNewDataSize = arraysize(kNewData);
 
   // Create a DataBuffer.
-  scoped_refptr<DataBuffer> buffer = new DataBuffer(kDataSize);
+  scoped_refptr<DataBuffer> buffer(new DataBuffer(kDataSize));
   ASSERT_TRUE(buffer);
 
   uint8* data = buffer->GetWritableData();
@@ -66,7 +60,7 @@ TEST(DataBufferTest, WritableBufferImpl) {
   ASSERT_EQ(0, memcmp(read_only_data, kData, kDataSize));
   EXPECT_FALSE(buffer->IsEndOfStream());
 
-  scoped_refptr<DataBuffer> buffer2 = new DataBuffer(kNewDataSize + 10);
+  scoped_refptr<DataBuffer> buffer2(new DataBuffer(kNewDataSize + 10));
   data = buffer2->GetWritableData();
   ASSERT_TRUE(data);
   ASSERT_EQ(kNewDataSize + 10, buffer2->GetBufferSize());

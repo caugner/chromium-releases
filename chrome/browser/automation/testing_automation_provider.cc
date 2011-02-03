@@ -10,12 +10,16 @@
 #include "base/json/json_writer.h"
 #include "base/json/string_escape.h"
 #include "base/path_service.h"
+#include "base/stringprintf.h"
+#include "base/thread_restrictions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/app_modal_dialog.h"
 #include "chrome/browser/app_modal_dialog_queue.h"
+#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/automation/automation_autocomplete_edit_tracker.h"
 #include "chrome/browser/automation/automation_browser_tracker.h"
@@ -37,9 +41,15 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/find_bar.h"
+#include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/location_bar.h"
 #include "chrome/browser/login_prompt.h"
 #include "chrome/browser/native_app_modal_dialog.h"
+#include "chrome/browser/notifications/balloon.h"
+#include "chrome/browser/notifications/balloon_collection.h"
+#include "chrome/browser/notifications/balloon_host.h"
+#include "chrome/browser/notifications/notification.h"
+#include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -51,7 +61,7 @@
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/interstitial_page.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -59,7 +69,7 @@
 #include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/automation/automation_messages.h"
+#include "chrome/common/automation_messages.h"
 #include "net/base/cookie_store.h"
 #include "net/url_request/url_request_context.h"
 #include "views/event.h"
@@ -408,6 +418,8 @@ void TestingAutomationProvider::OnMessageReceived(
     IPC_MESSAGE_HANDLER(AutomationMsg_WindowTitle, GetWindowTitle)
     IPC_MESSAGE_HANDLER(AutomationMsg_SetShelfVisibility, SetShelfVisibility)
     IPC_MESSAGE_HANDLER(AutomationMsg_BlockedPopupCount, GetBlockedPopupCount)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_CaptureEntirePageAsPNG,
+                                    CaptureEntirePageAsPNG)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_SendJSONRequest,
                                     SendJSONRequest)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_WaitForTabCountToBecome,
@@ -419,6 +431,7 @@ void TestingAutomationProvider::OnMessageReceived(
     IPC_MESSAGE_HANDLER(AutomationMsg_ShutdownSessionService,
                         ShutdownSessionService)
     IPC_MESSAGE_HANDLER(AutomationMsg_SetContentSetting, SetContentSetting)
+    IPC_MESSAGE_HANDLER(AutomationMsg_LoadBlockedPlugins, LoadBlockedPlugins)
     IPC_MESSAGE_HANDLER(AutomationMsg_ResetToDefaultTheme, ResetToDefaultTheme)
 
     IPC_MESSAGE_UNHANDLED(AutomationProvider::OnMessageReceived(message));
@@ -473,7 +486,7 @@ void TestingAutomationProvider::AppendTab(int handle, const GURL& url,
   if (browser_tracker_->ContainsHandle(handle)) {
     Browser* browser = browser_tracker_->GetResource(handle);
     observer = AddTabStripObserver(browser, reply_message);
-    TabContents* contents =
+    TabContentsWrapper* contents =
         browser->AddSelectedTabWithURL(url, PageTransition::TYPED);
     if (contents) {
       append_tab_response =
@@ -555,8 +568,9 @@ void TestingAutomationProvider::DeleteCookie(const GURL& url,
     NavigationController* tab = tab_tracker_->GetResource(handle);
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        new DeleteCookieTask(url, cookie_name,
-                             tab->profile()->GetRequestContext()));
+        new DeleteCookieTask(
+            url, cookie_name,
+            make_scoped_refptr(tab->profile()->GetRequestContext())));
     *success = true;
   }
 }
@@ -809,9 +823,12 @@ void TestingAutomationProvider::GetLastActiveBrowserWindow(int* handle) {
 }
 
 void TestingAutomationProvider::GetActiveWindow(int* handle) {
-  gfx::NativeWindow window =
-      BrowserList::GetLastActive()->window()->GetNativeHandle();
-  *handle = window_tracker_->Add(window);
+  *handle = 0;
+  Browser* browser = BrowserList::GetLastActive();
+  if (browser) {
+    gfx::NativeWindow window = browser->window()->GetNativeHandle();
+    *handle = window_tracker_->Add(window);
+  }
 }
 
 void TestingAutomationProvider::ExecuteBrowserCommandAsync(int handle,
@@ -947,8 +964,7 @@ void TestingAutomationProvider::GetTab(int win_handle,
   if (browser_tracker_->ContainsHandle(win_handle) && (tab_index >= 0)) {
     Browser* browser = browser_tracker_->GetResource(win_handle);
     if (tab_index < browser->tab_count()) {
-      TabContents* tab_contents =
-          browser->GetTabContentsAt(tab_index);
+      TabContents* tab_contents = browser->GetTabContentsAt(tab_index);
       *tab_handle = tab_tracker_->Add(&tab_contents->controller());
     }
   }
@@ -1166,9 +1182,9 @@ void TestingAutomationProvider::ExecuteJavascript(
     // communication while sending back the response of
     // this javascript execution.
     std::wstring set_automation_id;
-    SStringPrintf(&set_automation_id,
-      L"window.domAutomationController.setAutomationId(%d);",
-      reply_message->routing_id());
+    base::SStringPrintf(&set_automation_id,
+        L"window.domAutomationController.setAutomationId(%d);",
+        reply_message->routing_id());
 
     DCHECK(reply_message_ == NULL);
     reply_message_ = reply_message;
@@ -1342,7 +1358,7 @@ void TestingAutomationProvider::GetSecurityState(int handle,
 void TestingAutomationProvider::GetPageType(
     int handle,
     bool* success,
-    NavigationEntry::PageType* page_type) {
+    PageType* page_type) {
   if (tab_tracker_->ContainsHandle(handle)) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
     NavigationEntry* entry = tab->GetActiveEntry();
@@ -1350,12 +1366,12 @@ void TestingAutomationProvider::GetPageType(
     *success = true;
     // In order to return the proper result when an interstitial is shown and
     // no navigation entry were created for it we need to ask the TabContents.
-    if (*page_type == NavigationEntry::NORMAL_PAGE &&
+    if (*page_type == NORMAL_PAGE &&
         tab->tab_contents()->showing_interstitial_page())
-      *page_type = NavigationEntry::INTERSTITIAL_PAGE;
+      *page_type = INTERSTITIAL_PAGE;
   } else {
     *success = false;
-    *page_type = NavigationEntry::NORMAL_PAGE;
+    *page_type = NORMAL_PAGE;
   }
 }
 
@@ -1373,7 +1389,7 @@ void TestingAutomationProvider::ActionOnSSLBlockingPage(
   if (tab_tracker_->ContainsHandle(handle)) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
     NavigationEntry* entry = tab->GetActiveEntry();
-    if (entry->page_type() == NavigationEntry::INTERSTITIAL_PAGE) {
+    if (entry->page_type() == INTERSTITIAL_PAGE) {
       TabContents* tab_contents = tab->tab_contents();
       InterstitialPage* ssl_blocking_page =
           InterstitialPage::GetInterstitialPage(tab_contents);
@@ -1539,9 +1555,9 @@ void TestingAutomationProvider::GetBookmarksAsJSON(
       if (!browser->profile()->GetBookmarkModel()->IsLoaded()) {
         return;
       }
-      scoped_refptr<BookmarkStorage> storage = new BookmarkStorage(
+      scoped_refptr<BookmarkStorage> storage(new BookmarkStorage(
           browser->profile(),
-          browser->profile()->GetBookmarkModel());
+          browser->profile()->GetBookmarkModel()));
       *success = storage->SerializeData(bookmarks_as_json);
     }
   }
@@ -1969,6 +1985,22 @@ void TestingAutomationProvider::GetBlockedPopupCount(int handle, int* count) {
   }
 }
 
+void TestingAutomationProvider::CaptureEntirePageAsPNG(
+    int tab_handle, const FilePath& path, IPC::Message* reply_message) {
+  RenderViewHost* render_view = GetViewForTab(tab_handle);
+  if (render_view) {
+    // This will delete itself when finished.
+    PageSnapshotTaker* snapshot_taker = new PageSnapshotTaker(
+        this, reply_message, render_view, path);
+    snapshot_taker->Start();
+  } else {
+    LOG(ERROR) << "Could not get render view for tab handle";
+    AutomationMsg_CaptureEntirePageAsPNG::WriteReplyParams(reply_message,
+                                                           false);
+    Send(reply_message);
+  }
+}
+
 void TestingAutomationProvider::SendJSONRequest(int handle,
                                                 std::string json_request,
                                                 IPC::Message* reply_message) {
@@ -2094,6 +2126,33 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
       &TestingAutomationProvider::GetAutoFillProfile;
   handler_map["FillAutoFillProfile"] =
       &TestingAutomationProvider::FillAutoFillProfile;
+
+  handler_map["GetActiveNotifications"] =
+      &TestingAutomationProvider::GetActiveNotifications;
+  handler_map["CloseNotification"] =
+      &TestingAutomationProvider::CloseNotification;
+  handler_map["WaitForNotificationCount"] =
+      &TestingAutomationProvider::WaitForNotificationCount;
+
+  handler_map["SignInToSync"] = &TestingAutomationProvider::SignInToSync;
+  handler_map["GetSyncInfo"] = &TestingAutomationProvider::GetSyncInfo;
+  handler_map["AwaitSyncCycleCompletion"] =
+      &TestingAutomationProvider::AwaitSyncCycleCompletion;
+  handler_map["EnableSyncForDatatypes"] =
+      &TestingAutomationProvider::EnableSyncForDatatypes;
+  handler_map["DisableSyncForDatatypes"] =
+      &TestingAutomationProvider::DisableSyncForDatatypes;
+
+  handler_map["GetNTPInfo"] =
+      &TestingAutomationProvider::GetNTPInfo;
+  handler_map["MoveNTPMostVisitedThumbnail"] =
+      &TestingAutomationProvider::MoveNTPMostVisitedThumbnail;
+  handler_map["RemoveNTPMostVisitedThumbnail"] =
+      &TestingAutomationProvider::RemoveNTPMostVisitedThumbnail;
+  handler_map["UnpinNTPMostVisitedThumbnail"] =
+      &TestingAutomationProvider::UnpinNTPMostVisitedThumbnail;
+  handler_map["RestoreAllNTPMostVisitedThumbnails"] =
+      &TestingAutomationProvider::RestoreAllNTPMostVisitedThumbnails;
 
   if (handler_map.find(std::string(command)) != handler_map.end()) {
     (this->*handler_map[command])(browser, dict_value, reply_message);
@@ -2291,6 +2350,7 @@ void TestingAutomationProvider::GetBrowserInfo(
     Browser* browser,
     DictionaryValue* args,
     IPC::Message* reply_message) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;  // needed for PathService
   DictionaryValue* properties = new DictionaryValue;
   properties->SetString("ChromeVersion", chrome::kChromeVersion);
   properties->SetString("BrowserProcessExecutableName",
@@ -2441,10 +2501,10 @@ void TestingAutomationProvider::GetNavigationInfo(
   return_value->Set("ssl", ssl);
 
   // Page type.
-  std::map<NavigationEntry::PageType, std::string> pagetype_to_string;
-  pagetype_to_string[NavigationEntry::NORMAL_PAGE] = "NORMAL_PAGE";
-  pagetype_to_string[NavigationEntry::ERROR_PAGE] = "ERROR_PAGE";
-  pagetype_to_string[NavigationEntry::INTERSTITIAL_PAGE] = "INTERSTITIAL_PAGE";
+  std::map<PageType, std::string> pagetype_to_string;
+  pagetype_to_string[NORMAL_PAGE] = "NORMAL_PAGE";
+  pagetype_to_string[ERROR_PAGE] = "ERROR_PAGE";
+  pagetype_to_string[INTERSTITIAL_PAGE] = "INTERSTITIAL_PAGE";
   return_value->SetString("page_type",
                           pagetype_to_string[nav_entry->page_type()]);
 
@@ -3655,7 +3715,7 @@ void TestingAutomationProvider::GetThemeInfo(
     DictionaryValue* args,
     IPC::Message* reply_message) {
   scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
-  Extension* theme = browser->profile()->GetTheme();
+  const Extension* theme = browser->profile()->GetTheme();
   if (theme) {
     return_value->SetString("name", theme->name());
     return_value->Set("images", theme->GetThemeImages()->DeepCopy());
@@ -3812,16 +3872,230 @@ void TestingAutomationProvider::FillAutoFillProfile(
   reply.SendSuccess(NULL);
 }
 
+// Sample json output: { "success": true }
+void TestingAutomationProvider::SignInToSync(Browser* browser,
+                                             DictionaryValue* args,
+                                             IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  std::string username;
+  std::string password;
+  if (!args->GetString("username", &username) ||
+      !args->GetString("password", &password)) {
+      reply.SendError("Invalid or missing args");
+      return;
+  }
+  if (sync_waiter_.get() == NULL) {
+    sync_waiter_.reset(new ProfileSyncServiceHarness(
+        browser->profile(), username, password, 0));
+  } else {
+    sync_waiter_->SetCredentials(username, password);
+  }
+  if (sync_waiter_->SetupSync()) {
+    DictionaryValue* return_value = new DictionaryValue;
+    return_value->SetBoolean("success", true);
+    reply.SendSuccess(return_value);
+  } else {
+    reply.SendError("Signing in to sync was unsuccessful");
+  }
+}
+
+// Sample json output:
+// {u'summary': u'SYNC DISABLED'}
+//
+// { u'authenticated': True,
+//   u'last synced': u'Just now',
+//   u'summary': u'READY',
+//   u'sync url': u'clients4.google.com',
+//   u'synced datatypes': [ u'Bookmarks',
+//                          u'Preferences',
+//                          u'Passwords',
+//                          u'Autofill',
+//                          u'Themes',
+//                          u'Extensions',
+//                          u'Apps']}
+void TestingAutomationProvider::GetSyncInfo(Browser* browser,
+                                            DictionaryValue* args,
+                                            IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  DictionaryValue* sync_info = new DictionaryValue;
+  DictionaryValue* return_value = new DictionaryValue;
+  if (sync_waiter_.get() == NULL) {
+    sync_waiter_.reset(
+        ProfileSyncServiceHarness::CreateAndAttach(browser->profile()));
+  }
+  if (!sync_waiter_->IsSyncAlreadySetup()) {
+    sync_info->SetString("summary", "SYNC DISABLED");
+  } else {
+    ProfileSyncService* service = sync_waiter_->service();
+    ProfileSyncService::Status status = sync_waiter_->GetStatus();
+    sync_info->SetString("summary",
+        ProfileSyncService::BuildSyncStatusSummaryText(status.summary));
+    sync_info->SetString("sync url", service->sync_service_url().host());
+    sync_info->SetBoolean("authenticated", status.authenticated);
+    sync_info->SetString("last synced", service->GetLastSyncedTimeString());
+    ListValue* synced_datatype_list = new ListValue;
+    syncable::ModelTypeSet synced_datatypes;
+    service->GetPreferredDataTypes(&synced_datatypes);
+    for (syncable::ModelTypeSet::iterator it = synced_datatypes.begin();
+         it != synced_datatypes.end(); ++it) {
+      synced_datatype_list->Append(
+          new StringValue(syncable::ModelTypeToString(*it)));
+    }
+    sync_info->Set("synced datatypes", synced_datatype_list);
+  }
+  return_value->Set("sync_info", sync_info);
+  reply.SendSuccess(return_value);
+}
+
+// Sample json output: { "success": true }
+void TestingAutomationProvider::AwaitSyncCycleCompletion(
+    Browser* browser,
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  if (sync_waiter_.get() == NULL) {
+    sync_waiter_.reset(
+        ProfileSyncServiceHarness::CreateAndAttach(browser->profile()));
+  }
+  if (!sync_waiter_->IsSyncAlreadySetup()) {
+    reply.SendError("Not signed in to sync");
+    return;
+  }
+  sync_waiter_->AwaitSyncCycleCompletion("Waiting for sync cycle");
+  ProfileSyncService::Status status = sync_waiter_->GetStatus();
+  if (status.summary == ProfileSyncService::Status::READY) {
+    scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+    return_value->SetBoolean("success", true);
+    reply.SendSuccess(return_value.get());
+  } else {
+    reply.SendError("Wait for sync cycle was unsuccessful");
+  }
+}
+
+// Refer to EnableSyncForDatatypes() in chrome/test/pyautolib/pyauto.py for
+// sample json input. Sample json output: { "success": true }
+void TestingAutomationProvider::EnableSyncForDatatypes(
+    Browser* browser,
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  if (sync_waiter_.get() == NULL) {
+    sync_waiter_.reset(
+        ProfileSyncServiceHarness::CreateAndAttach(browser->profile()));
+  }
+  if (!sync_waiter_->IsSyncAlreadySetup()) {
+    reply.SendError("Not signed in to sync");
+    return;
+  }
+  ListValue* datatypes = NULL;
+  if (!args->GetList("datatypes", &datatypes)) {
+    reply.SendError("Invalid or missing args");
+    return;
+  }
+  std::string first_datatype;
+  datatypes->GetString(0, &first_datatype);
+  if (first_datatype == "All") {
+    sync_waiter_->EnableSyncForAllDatatypes();
+  } else {
+    int num_datatypes = datatypes->GetSize();
+    for (int i = 0; i < num_datatypes; ++i) {
+      std::string datatype_string;
+      datatypes->GetString(i, &datatype_string);
+      syncable::ModelType datatype =
+          syncable::ModelTypeFromString(datatype_string);
+      if (datatype == syncable::UNSPECIFIED) {
+        AutomationJSONReply(this, reply_message).SendError(StringPrintf(
+            "Invalid datatype string: %s.", datatype_string.c_str()));
+        return;
+      }
+      sync_waiter_->EnableSyncForDatatype(datatype);
+      sync_waiter_->AwaitSyncCycleCompletion(StringPrintf(
+          "Enabling datatype: %s", datatype_string.c_str()));
+    }
+  }
+  ProfileSyncService::Status status = sync_waiter_->GetStatus();
+  if (status.summary == ProfileSyncService::Status::READY ||
+      status.summary == ProfileSyncService::Status::SYNCING) {
+    DictionaryValue* return_value = new DictionaryValue;
+    return_value->SetBoolean("success", true);
+    reply.SendSuccess(return_value);
+  } else {
+    reply.SendError("Enabling sync for given datatypes was unsuccessful");
+  }
+}
+
+// Refer to DisableSyncForDatatypes() in chrome/test/pyautolib/pyauto.py for
+// sample json input. Sample json output: { "success": true }
+void TestingAutomationProvider::DisableSyncForDatatypes(
+    Browser* browser,
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  if (sync_waiter_.get() == NULL) {
+    sync_waiter_.reset(
+        ProfileSyncServiceHarness::CreateAndAttach(browser->profile()));
+  }
+  if (!sync_waiter_->IsSyncAlreadySetup()) {
+    reply.SendError("Not signed in to sync");
+    return;
+  }
+  ListValue* datatypes = NULL;
+  if (!args->GetList("datatypes", &datatypes)) {
+    reply.SendError("Invalid or missing args");
+    return;
+  }
+  std::string first_datatype;
+  datatypes->GetString(0, &first_datatype);
+  if (first_datatype == "All") {
+    sync_waiter_->DisableSyncForAllDatatypes();
+    ProfileSyncService::Status status = sync_waiter_->GetStatus();
+    if (status.summary != ProfileSyncService::Status::READY &&
+        status.summary != ProfileSyncService::Status::SYNCING) {
+      DictionaryValue* return_value = new DictionaryValue;
+      return_value->SetBoolean("success", true);
+      reply.SendSuccess(return_value);
+    } else {
+      reply.SendError("Disabling all sync datatypes was unsuccessful");
+    }
+  } else {
+    int num_datatypes = datatypes->GetSize();
+    for (int i = 0; i < num_datatypes; i++) {
+      std::string datatype_string;
+      datatypes->GetString(i, &datatype_string);
+      syncable::ModelType datatype =
+          syncable::ModelTypeFromString(datatype_string);
+      if (datatype == syncable::UNSPECIFIED) {
+        AutomationJSONReply(this, reply_message).SendError(StringPrintf(
+            "Invalid datatype string: %s.", datatype_string.c_str()));
+        return;
+      }
+      sync_waiter_->DisableSyncForDatatype(datatype);
+      sync_waiter_->AwaitSyncCycleCompletion(StringPrintf(
+          "Disabling datatype: %s", datatype_string.c_str()));
+    }
+    ProfileSyncService::Status status = sync_waiter_->GetStatus();
+    if (status.summary == ProfileSyncService::Status::READY ||
+        status.summary == ProfileSyncService::Status::SYNCING) {
+      DictionaryValue* return_value = new DictionaryValue;
+      return_value->SetBoolean("success", true);
+      reply.SendSuccess(return_value);
+    } else {
+      reply.SendError("Disabling sync for given datatypes was unsuccessful");
+    }
+  }
+}
+
 /* static */
 ListValue* TestingAutomationProvider::GetListFromAutoFillProfiles(
-    std::vector<AutoFillProfile*> autofill_profiles) {
+    const std::vector<AutoFillProfile*>& autofill_profiles) {
   ListValue* profiles = new ListValue;
 
   std::map<AutoFillFieldType, std::wstring> autofill_type_to_string
       = GetAutoFillFieldToStringMap();
 
   // For each AutoFillProfile, transform it to a dictionary object to return.
-  for (std::vector<AutoFillProfile*>::iterator it = autofill_profiles.begin();
+  for (std::vector<AutoFillProfile*>::const_iterator it =
+           autofill_profiles.begin();
        it != autofill_profiles.end(); ++it) {
     AutoFillProfile* profile = *it;
     DictionaryValue* profile_info = new DictionaryValue;
@@ -3841,14 +4115,15 @@ ListValue* TestingAutomationProvider::GetListFromAutoFillProfiles(
 
 /* static */
 ListValue* TestingAutomationProvider::GetListFromCreditCards(
-    std::vector<CreditCard*> credit_cards) {
+    const std::vector<CreditCard*>& credit_cards) {
   ListValue* cards = new ListValue;
 
   std::map<AutoFillFieldType, std::wstring> credit_card_type_to_string =
       GetCreditCardFieldToStringMap();
 
   // For each AutoFillProfile, transform it to a dictionary object to return.
-  for (std::vector<CreditCard*>::iterator it = credit_cards.begin();
+  for (std::vector<CreditCard*>::const_iterator it =
+           credit_cards.begin();
        it != credit_cards.end(); ++it) {
     CreditCard* card = *it;
     DictionaryValue* card_info = new DictionaryValue;
@@ -3881,8 +4156,7 @@ TestingAutomationProvider::GetAutoFillProfilesFromList(
   int num_profiles = profiles.GetSize();
   for (int i = 0; i < num_profiles; i++) {
     profiles.GetDictionary(i, &profile_info);
-    // Choose an id of 0 so that a unique id will be created.
-    AutoFillProfile profile(string16(), 0);
+    AutoFillProfile profile;
     // Loop through the possible profile types and add those provided.
     for (std::map<AutoFillFieldType, std::wstring>::iterator type_it =
          autofill_type_to_string.begin();
@@ -3915,7 +4189,7 @@ std::vector<CreditCard> TestingAutomationProvider::GetCreditCardsFromList(
   int num_credit_cards = cards.GetSize();
   for (int i = 0; i < num_credit_cards; i++) {
     cards.GetDictionary(i, &card_info);
-    CreditCard card(string16(), 0);
+    CreditCard card;
     // Loop through the possible credit card fields and add those provided.
     for (std::map<AutoFillFieldType, std::wstring>::iterator type_it =
         credit_card_type_to_string.begin();
@@ -3966,6 +4240,184 @@ std::map<AutoFillFieldType, std::wstring>
   credit_card_type_to_string[CREDIT_CARD_EXP_4_DIGIT_YEAR] =
       L"CREDIT_CARD_EXP_4_DIGIT_YEAR";
   return credit_card_type_to_string;
+}
+
+// Refer to GetActiveNotifications() in chrome/test/pyautolib/pyauto.py for
+// sample json input/output.
+void TestingAutomationProvider::GetActiveNotifications(
+    Browser* browser,
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  NotificationUIManager* manager = g_browser_process->notification_ui_manager();
+  const BalloonCollection::Balloons& balloons =
+      manager->balloon_collection()->GetActiveBalloons();
+  scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+  ListValue* list = new ListValue;
+  return_value->Set("notifications", list);
+  BalloonCollection::Balloons::const_iterator iter;
+  for (iter = balloons.begin(); iter != balloons.end(); ++iter) {
+    const Notification& notification = (*iter)->notification();
+    DictionaryValue* balloon = new DictionaryValue;
+    balloon->SetString("content_url", notification.content_url().spec());
+    balloon->SetString("origin_url", notification.origin_url().spec());
+    balloon->SetString("display_source", notification.display_source());
+    BalloonView* view = (*iter)->view();
+    if (view && view->GetHost() && view->GetHost()->render_view_host()) {
+      balloon->SetInteger("pid", base::GetProcId(
+          view->GetHost()->render_view_host()->process()->GetHandle()));
+    }
+    list->Append(balloon);
+  }
+  AutomationJSONReply(this, reply_message).SendSuccess(return_value.get());
+}
+
+// Refer to CloseNotification() in chrome/test/pyautolib/pyauto.py for
+// sample json input.
+// Returns empty json message.
+void TestingAutomationProvider::CloseNotification(
+    Browser* browser,
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  int index;
+  if (!args->GetInteger("index", &index)) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "'index' missing or invalid.");
+    return;
+  }
+  NotificationUIManager* manager = g_browser_process->notification_ui_manager();
+  BalloonCollection* collection = manager->balloon_collection();
+  const BalloonCollection::Balloons& balloons = collection->GetActiveBalloons();
+  int balloon_count = static_cast<int>(balloons.size());
+  if (index < 0 || index >= balloon_count) {
+    AutomationJSONReply(this, reply_message).SendError(
+        StringPrintf("No notification at index %d", index));
+    return;
+  }
+  // This will delete itself when finished.
+  new OnNotificationBalloonCountObserver(
+      this, reply_message, collection, balloon_count - 1);
+  manager->CancelById(balloons[index]->notification().notification_id());
+}
+
+// Refer to WaitForNotificationCount() in chrome/test/pyautolib/pyauto.py for
+// sample json input.
+// Returns empty json message.
+void TestingAutomationProvider::WaitForNotificationCount(
+    Browser* browser,
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  int count;
+  if (!args->GetInteger("count", &count)) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "'count' missing or invalid.");
+    return;
+  }
+  NotificationUIManager* manager = g_browser_process->notification_ui_manager();
+  BalloonCollection* collection = manager->balloon_collection();
+  const BalloonCollection::Balloons& balloons = collection->GetActiveBalloons();
+  if (static_cast<int>(balloons.size()) == count) {
+    AutomationJSONReply(this, reply_message).SendSuccess(NULL);
+    return;
+  }
+  // This will delete itself when finished.
+  new OnNotificationBalloonCountObserver(
+      this, reply_message, collection, count);
+}
+
+// Sample JSON input: { "command": "GetNTPInfo" }
+// For output, refer to chrome/test/pyautolib/ntp_model.py.
+void TestingAutomationProvider::GetNTPInfo(
+    Browser* browser,
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  // This observer will delete itself.
+  new NTPInfoObserver(this, reply_message, &consumer_);
+}
+
+void TestingAutomationProvider::MoveNTPMostVisitedThumbnail(
+    Browser* browser,
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  std::string url, error;
+  int index, old_index;
+  if (!args->GetString("url", &url)) {
+    reply.SendError("Missing or invalid 'url' key.");
+    return;
+  }
+  if (!args->GetInteger("index", &index)) {
+    reply.SendError("Missing or invalid 'index' key.");
+    return;
+  }
+  if (!args->GetInteger("old_index", &old_index)) {
+    reply.SendError("Missing or invalid 'old_index' key");
+    return;
+  }
+  history::TopSites* top_sites = browser->profile()->GetTopSites();
+  if (!top_sites) {
+    reply.SendError("TopSites service is not initialized.");
+    return;
+  }
+  GURL swapped;
+  // If thumbnail A is switching positions with a pinned thumbnail B, B
+  // should be pinned in the old index of A.
+  if (top_sites->GetPinnedURLAtIndex(index, &swapped)) {
+    top_sites->AddPinnedURL(swapped, old_index);
+  }
+  top_sites->AddPinnedURL(GURL(url), index);
+  reply.SendSuccess(NULL);
+}
+
+void TestingAutomationProvider::RemoveNTPMostVisitedThumbnail(
+    Browser* browser,
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  std::string url;
+  if (!args->GetString("url", &url)) {
+    reply.SendError("Missing or invalid 'url' key.");
+    return;
+  }
+  history::TopSites* top_sites = browser->profile()->GetTopSites();
+  if (!top_sites) {
+    reply.SendError("TopSites service is not initialized.");
+    return;
+  }
+  top_sites->AddBlacklistedURL(GURL(url));
+  reply.SendSuccess(NULL);
+}
+
+void TestingAutomationProvider::UnpinNTPMostVisitedThumbnail(
+    Browser* browser,
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  std::string url;
+  if (!args->GetString("url", &url)) {
+    reply.SendError("Missing or invalid 'url' key.");
+    return;
+  }
+  history::TopSites* top_sites = browser->profile()->GetTopSites();
+  if (!top_sites) {
+    reply.SendError("TopSites service is not initialized.");
+    return;
+  }
+  top_sites->RemovePinnedURL(GURL(url));
+  reply.SendSuccess(NULL);
+}
+
+void TestingAutomationProvider::RestoreAllNTPMostVisitedThumbnails(
+    Browser* browser,
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  history::TopSites* top_sites = browser->profile()->GetTopSites();
+  if (!top_sites) {
+    reply.SendError("TopSites service is not initialized.");
+    return;
+  }
+  top_sites->ClearBlacklistedURLs();
+  reply.SendSuccess(NULL);
 }
 
 void TestingAutomationProvider::WaitForTabCountToBecome(
@@ -4052,6 +4504,21 @@ void TestingAutomationProvider::SetContentSetting(
   }
 }
 
+void TestingAutomationProvider::LoadBlockedPlugins(int tab_handle,
+                                                   bool* success) {
+  *success = false;
+  if (tab_tracker_->ContainsHandle(tab_handle)) {
+    NavigationController* nav = tab_tracker_->GetResource(tab_handle);
+    if (!nav)
+      return;
+    TabContents* contents = nav->tab_contents();
+    if (!contents)
+      return;
+    contents->render_view_host()->LoadBlockedPlugins();
+    *success = true;
+  }
+}
+
 void TestingAutomationProvider::ResetToDefaultTheme() {
   profile_->ClearTheme();
 }
@@ -4082,11 +4549,11 @@ void TestingAutomationProvider::OnRedirectQueryComplete(
 void TestingAutomationProvider::OnBrowserAdded(const Browser* browser) {
 }
 
-void TestingAutomationProvider::OnBrowserRemoving(const Browser* browser) {
+void TestingAutomationProvider::OnBrowserRemoved(const Browser* browser) {
   // For backwards compatibility with the testing automation interface, we
   // want the automation provider (and hence the process) to go away when the
   // last browser goes away.
-  if (BrowserList::size() == 1 && !CommandLine::ForCurrentProcess()->HasSwitch(
+  if (BrowserList::empty() && !CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kKeepAliveForTest)) {
     // If you change this, update Observer for NotificationType::SESSION_END
     // below.
@@ -4099,9 +4566,9 @@ void TestingAutomationProvider::Observe(NotificationType type,
                                         const NotificationSource& source,
                                         const NotificationDetails& details) {
   DCHECK(type == NotificationType::SESSION_END);
-  // OnBrowserRemoving does a ReleaseLater. When session end is received we exit
+  // OnBrowserRemoved does a ReleaseLater. When session end is received we exit
   // before the task runs resulting in this object not being deleted. This
-  // Release balance out the Release scheduled by OnBrowserRemoving.
+  // Release balance out the Release scheduled by OnBrowserRemoved.
   Release();
 }
 

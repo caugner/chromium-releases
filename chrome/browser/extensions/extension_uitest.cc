@@ -8,9 +8,9 @@
 #include "base/values.h"
 #include "chrome/browser/automation/extension_automation_constants.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/test/automation/automation_messages.h"
 #include "chrome/test/automation/automation_proxy_uitest.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
@@ -121,6 +121,7 @@ class ExtensionTestSimpleApiCall : public ExtensionUITest {
   DISALLOW_COPY_AND_ASSIGN(ExtensionTestSimpleApiCall);
 };
 
+// Flaky: http://crbug.com/44599
 TEST_F(ExtensionTestSimpleApiCall, FLAKY_RunTest) {
   namespace keys = extension_automation_constants;
 
@@ -167,6 +168,14 @@ TEST_F(ExtensionTestSimpleApiCall, FLAKY_RunTest) {
   EXPECT_TRUE(message_dict->GetBoolean(keys::kAutomationHasCallbackKey,
                                        &has_callback));
   EXPECT_FALSE(has_callback);
+  DictionaryValue* associated_tab = NULL;
+  EXPECT_TRUE(message_dict->GetDictionary(keys::kAutomationTabJsonKey,
+      &associated_tab));
+  std::string associated_tab_url;
+  EXPECT_TRUE(associated_tab->GetString(
+      extension_tabs_module_constants::kUrlKey, &associated_tab_url));
+  EXPECT_EQ("chrome-extension://pmgpglkggjdpkpghhdmbdhababjpcohk/test.html",
+            associated_tab_url);
 }
 
 // A test that loads a basic extension that makes an API call that does
@@ -208,6 +217,11 @@ public:
     bool has_callback = false;
     EXPECT_TRUE(request_dict->GetBoolean(keys::kAutomationHasCallbackKey,
       &has_callback));
+    // The API requests in this extension come from the background page, so
+    // the tab is not set.
+    DictionaryValue* associated_tab = NULL;
+    EXPECT_FALSE(request_dict->GetDictionary(keys::kAutomationTabJsonKey,
+      &associated_tab));
 
     if (messages_received_ == 1) {
       EXPECT_EQ("tabs.getSelected", function_name);

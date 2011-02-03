@@ -7,6 +7,7 @@
 
 #include <windows.h>
 #include <mmsystem.h>
+#include <mmreg.h>
 
 #include "base/basictypes.h"
 #include "base/scoped_handle_win.h"
@@ -34,7 +35,7 @@ class PCMWaveOutAudioOutputStream : public AudioOutputStream {
   virtual ~PCMWaveOutAudioOutputStream();
 
   // Implementation of AudioOutputStream.
-  virtual bool Open(uint32 packet_size);
+  virtual bool Open();
   virtual void Close();
   virtual void Start(AudioSourceCallback* callback);
   virtual void Stop();
@@ -64,7 +65,7 @@ class PCMWaveOutAudioOutputStream : public AudioOutputStream {
   void HandleError(MMRESULT error);
   // Allocates and prepares the memory that will be used for playback. Only
   // two buffers are created.
-  void SetupBuffers(uint32 rq_size);
+  void SetupBuffers();
   // Deallocates the memory allocated in SetupBuffers.
   void FreeBuffers();
 
@@ -100,13 +101,13 @@ class PCMWaveOutAudioOutputStream : public AudioOutputStream {
   UINT device_id_;
 
   // Windows native structure to encode the format parameters.
-  WAVEFORMATEX format_;
+  WAVEFORMATPCMEX format_;
 
   // Handle to the instance of the wave device.
   HWAVEOUT waveout_;
 
   // Pointer to the first allocated audio buffer. This object owns it.
-  WAVEHDR*  buffer_;
+  WAVEHDR* buffer_;
 
   // An event that is signaled when the callback thread is ready to stop.
   ScopedHandle stopped_event_;
@@ -115,4 +116,3 @@ class PCMWaveOutAudioOutputStream : public AudioOutputStream {
 };
 
 #endif  // MEDIA_AUDIO_WIN_WAVEOUT_OUTPUT_WIN_H_
-

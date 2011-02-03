@@ -30,6 +30,8 @@ const std::wstring& SStringPrintf(std::wstring* dst,
 // Append result to a supplied string.
 void StringAppendF(std::string* dst, const char* format, ...)
     PRINTF_FORMAT(2, 3);
+// TODO(evanm): this is only used in a few places in the code;
+// replace with string16 version.
 void StringAppendF(std::wstring* dst, const wchar_t* format, ...)
     WPRINTF_FORMAT(2, 3);
 
@@ -47,10 +49,6 @@ void StringAppendV(std::wstring* dst, const wchar_t* format, va_list ap)
 //
 // TODO(brettw) remove these when calling code is converted.
 using base::StringPrintf;
-using base::StringPrintV;
-using base::SStringPrintf;
-using base::StringAppendV;
-using base::StringAppendF;
 using base::StringAppendV;
 
 #endif  // BASE_STRINGPRINTF_H_

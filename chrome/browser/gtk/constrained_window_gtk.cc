@@ -9,7 +9,19 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+
+#if defined(TOUCH_UI)
+#include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
+#else
 #include "chrome/browser/tab_contents/tab_contents_view_gtk.h"
+#endif
+
+ConstrainedWindowGtkDelegate::~ConstrainedWindowGtkDelegate() {
+}
+
+bool ConstrainedWindowGtkDelegate::GetBackgroundColor(GdkColor* color) {
+  return false;
+}
 
 ConstrainedWindowGtk::ConstrainedWindowGtk(
     TabContents* owner, ConstrainedWindowGtkDelegate* delegate)
@@ -26,11 +38,23 @@ ConstrainedWindowGtk::ConstrainedWindowGtk(
   GtkWidget* ebox = gtk_event_box_new();
   GtkWidget* frame = gtk_frame_new(NULL);
   gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_OUT);
+
   GtkWidget* alignment = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
   gtk_alignment_set_padding(GTK_ALIGNMENT(alignment),
       gtk_util::kContentAreaBorder, gtk_util::kContentAreaBorder,
       gtk_util::kContentAreaBorder, gtk_util::kContentAreaBorder);
-  gtk_container_add(GTK_CONTAINER(alignment), dialog);
+  GdkColor background;
+  if (delegate->GetBackgroundColor(&background)) {
+    gtk_widget_modify_base(ebox, GTK_STATE_NORMAL, &background);
+    gtk_widget_modify_fg(ebox, GTK_STATE_NORMAL, &background);
+    gtk_widget_modify_bg(ebox, GTK_STATE_NORMAL, &background);
+  }
+
+  if (gtk_widget_get_parent(dialog))
+    gtk_widget_reparent(dialog, alignment);
+  else
+    gtk_container_add(GTK_CONTAINER(alignment), dialog);
+
   gtk_container_add(GTK_CONTAINER(frame), alignment);
   gtk_container_add(GTK_CONTAINER(ebox), frame);
   border_.Own(ebox);
@@ -47,8 +71,8 @@ ConstrainedWindowGtk::~ConstrainedWindowGtk() {
 void ConstrainedWindowGtk::ShowConstrainedWindow() {
   gtk_widget_show_all(border_.get());
 
-  // We collaborate with TabContentsViewGtk and stick ourselves in the
-  // TabContentsViewGtk's floating container.
+  // We collaborate with TabContentsView and stick ourselves in the
+  // TabContentsView's floating container.
   ContainingView()->AttachConstrainedWindow(this);
 
   visible_ = true;
@@ -63,8 +87,9 @@ void ConstrainedWindowGtk::CloseConstrainedWindow() {
   delete this;
 }
 
-TabContentsViewGtk* ConstrainedWindowGtk::ContainingView() {
-  return static_cast<TabContentsViewGtk*>(owner_->view());
+ConstrainedWindowGtk::TabContentsViewType*
+    ConstrainedWindowGtk::ContainingView() {
+  return static_cast<TabContentsViewType*>(owner_->view());
 }
 
 gboolean ConstrainedWindowGtk::OnKeyPress(GtkWidget* sender,

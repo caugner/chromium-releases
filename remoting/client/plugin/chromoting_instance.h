@@ -12,14 +12,14 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/scoped_ptr.h"
+#include "ppapi/c/pp_instance.h"
+#include "ppapi/c/pp_rect.h"
+#include "ppapi/c/pp_resource.h"
+#include "ppapi/cpp/instance.h"
+#include "ppapi/cpp/var.h"
 #include "remoting/client/client_context.h"
-#include "remoting/client/host_connection.h"
 #include "remoting/client/plugin/chromoting_scriptable_object.h"
-#include "third_party/ppapi/c/pp_instance.h"
-#include "third_party/ppapi/c/pp_rect.h"
-#include "third_party/ppapi/c/pp_resource.h"
-#include "third_party/ppapi/cpp/instance.h"
-#include "third_party/ppapi/cpp/var.h"
+#include "remoting/protocol/connection_to_host.h"
 
 class MessageLoop;
 struct PP_InputEvent;
@@ -34,13 +34,22 @@ class Module;
 
 namespace remoting {
 
+namespace protocol {
+class ConnectionToHost;
+}  // namespace protocol
+
 class ChromotingClient;
 class ClientContext;
-class HostConnection;
 class InputHandler;
 class JingleThread;
 class PepperView;
 class RectangleUpdateDecoder;
+
+struct ClientConfig;
+
+namespace protocol {
+class HostConnection;
+}  // namespace protocol
 
 class ChromotingInstance : public pp::Instance {
  public:
@@ -74,7 +83,7 @@ class ChromotingInstance : public pp::Instance {
   MessageLoop* pepper_main_loop_dont_post_to_me_;
 
   ClientContext context_;
-  scoped_ptr<HostConnection> host_connection_;
+  scoped_ptr<protocol::ConnectionToHost> host_connection_;
   scoped_ptr<PepperView> view_;
   scoped_ptr<RectangleUpdateDecoder> rectangle_decoder_;
   scoped_ptr<InputHandler> input_handler_;

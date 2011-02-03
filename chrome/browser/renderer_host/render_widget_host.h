@@ -19,6 +19,7 @@
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/property_bag.h"
 #include "gfx/native_widget_types.h"
+#include "gfx/rect.h"
 #include "gfx/size.h"
 #include "ipc/ipc_channel.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
@@ -42,9 +43,7 @@ class RenderProcessHost;
 class RenderWidgetHostView;
 class RenderWidgetHostPaintingObserver;
 class TransportDIB;
-class VideoLayer;
 class WebCursor;
-struct ViewHostMsg_ShowPopup_Params;
 struct ViewHostMsg_UpdateRect_Params;
 
 // This class manages the browser side of a browser<->renderer HWND connection.
@@ -204,7 +203,9 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   virtual void LostCapture();
 
   // Tells us whether the page is rendered directly via the GPU process.
-  bool is_gpu_rendering_active() { return is_gpu_rendering_active_; }
+  bool is_accelerated_compositing_active() {
+    return is_accelerated_compositing_active_;
+  }
 
   // Notifies the RenderWidgetHost that the View was destroyed.
   void ViewDestroyed();
@@ -248,9 +249,6 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // block briefly waiting for an ack from the renderer.
   void ScheduleComposite();
 
-  // Returns the video layer if it exists, NULL otherwise.
-  VideoLayer* video_layer() const { return video_layer_.get(); }
-
   // Starts a hang monitor timeout. If there's already a hang monitor timeout
   // the new one will only fire if it has a shorter delay than the time
   // left on the existing timeouts.
@@ -283,6 +281,10 @@ class RenderWidgetHost : public IPC::Channel::Listener,
                                   const std::string& value);
   virtual void ForwardEditCommandsForNextKeyEvent(
       const EditCommands& edit_commands);
+#if defined(TOUCH_UI)
+  virtual void ForwardTouchEvent(const WebKit::WebTouchEvent& touch_event);
+#endif
+
 
   // Update the text direction of the focused input element and notify it to a
   // renderer process.
@@ -366,10 +368,6 @@ class RenderWidgetHost : public IPC::Channel::Listener,
 
   // Cancels an ongoing composition.
   void ImeCancelComposition();
-
-  // This is for derived classes to give us access to the resizer rect.
-  // And to also expose it to the RenderWidgetHostView.
-  virtual gfx::Rect GetRootWindowResizerRect() const;
 
   // Makes an IPC call to toggle the spelling panel.
   void ToggleSpellPanel(bool is_currently_visible);
@@ -479,9 +477,6 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   void OnMsgRequestMove(const gfx::Rect& pos);
   void OnMsgPaintAtSizeAck(int tag, const gfx::Size& size);
   void OnMsgUpdateRect(const ViewHostMsg_UpdateRect_Params& params);
-  void OnMsgCreateVideo(const gfx::Size& size);
-  void OnMsgUpdateVideo(TransportDIB::Id bitmap, const gfx::Rect& bitmap_rect);
-  void OnMsgDestroyVideo();
   void OnMsgInputEventAck(const IPC::Message& message);
   virtual void OnMsgFocus();
   virtual void OnMsgBlur();
@@ -491,10 +486,9 @@ class RenderWidgetHost : public IPC::Channel::Listener,
                                     const gfx::Rect& caret_rect);
   void OnMsgImeCancelComposition();
 
-  void OnMsgGpuRenderingActivated(bool activated);
+  void OnMsgDidActivateAcceleratedCompositing(bool activated);
 
 #if defined(OS_MACOSX)
-  void OnMsgShowPopup(const ViewHostMsg_ShowPopup_Params& params);
   void OnMsgGetScreenInfo(gfx::NativeViewId view,
                           WebKit::WebScreenInfo* results);
   void OnMsgGetWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
@@ -512,34 +506,24 @@ class RenderWidgetHost : public IPC::Channel::Listener,
                                            int32 width,
                                            int32 height,
                                            TransportDIB::Handle transport_dib);
-  void OnAcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window);
+  void OnAcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window,
+                                          uint64 surface_id);
 #elif defined(OS_POSIX)
   void OnMsgCreatePluginContainer(gfx::PluginWindowHandle id);
   void OnMsgDestroyPluginContainer(gfx::PluginWindowHandle id);
 #endif
 
   // Paints the given bitmap to the current backing store at the given location.
-  // |*painted_synchronously| will be true if the message was processed
-  // synchronously, and the bitmap is done being used. False means that the
-  // backing store will paint the bitmap at a later time and that the DIB can't
-  // be freed (it will be the backing store's job to free it later).
   void PaintBackingStoreRect(TransportDIB::Id bitmap,
                              const gfx::Rect& bitmap_rect,
                              const std::vector<gfx::Rect>& copy_rects,
-                             const gfx::Size& view_size,
-                             bool* painted_synchronously);
+                             const gfx::Size& view_size);
 
   // Scrolls the given |clip_rect| in the backing by the given dx/dy amount. The
   // |dib| and its corresponding location |bitmap_rect| in the backing store
   // is the newly painted pixels by the renderer.
   void ScrollBackingStoreRect(int dx, int dy, const gfx::Rect& clip_rect,
                               const gfx::Size& view_size);
-
-  // Paints the entire given bitmap into the current video layer, if it exists.
-  // |bitmap_rect| specifies the destination size and absolute location of the
-  // bitmap on the backing store.
-  void PaintVideoLayer(TransportDIB::Id bitmap,
-                       const gfx::Rect& bitmap_rect);
 
   // Called by OnMsgInputEventAck() to process a keyboard event ack message.
   void ProcessKeyboardEventAck(int type, bool processed);
@@ -582,7 +566,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   bool is_hidden_;
 
   // True when a page is rendered directly via the GPU process.
-  bool is_gpu_rendering_active_;
+  bool is_accelerated_compositing_active_;
 
   // Set if we are waiting for a repaint ack for the view.
   bool repaint_ack_pending_;
@@ -593,12 +577,21 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // The current size of the RenderWidget.
   gfx::Size current_size_;
 
+  // The current reserved area of the RenderWidget where contents should not be
+  // rendered to draw the resize corner, sidebar mini tabs etc.
+  gfx::Rect current_reserved_rect_;
+
   // The size we last sent as requested size to the renderer. |current_size_|
   // is only updated once the resize message has been ack'd. This on the other
   // hand is updated when the resize message is sent. This is very similar to
   // |resize_ack_pending_|, but the latter is not set if the new size has width
   // or height zero, which is why we need this too.
   gfx::Size in_flight_size_;
+
+  // The reserved area we last sent to the renderer. |current_reserved_rect_|
+  // is only updated once the resize message has been ack'd. This on the other
+  // hand is updated when the resize message is sent.
+  gfx::Rect in_flight_reserved_rect_;
 
   // True if a mouse move event was sent to the render view and we are waiting
   // for a corresponding ViewHostMsg_HandleInputEvent_ACK message.
@@ -689,9 +682,6 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // switching back to the original tab, because the content may already be
   // changed.
   bool suppress_next_char_events_;
-
-  // Optional video YUV layer for used for out-of-process compositing.
-  scoped_ptr<VideoLayer> video_layer_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHost);
 };

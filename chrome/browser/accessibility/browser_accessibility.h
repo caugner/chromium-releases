@@ -15,7 +15,9 @@
 #include "webkit/glue/webaccessibility.h"
 
 class BrowserAccessibilityManager;
-#if defined(OS_WIN)
+#if defined(OS_MACOSX) && __OBJC__
+@class BrowserAccessibilityCocoa;
+#elif defined(OS_WIN)
 class BrowserAccessibilityWin;
 #endif
 
@@ -53,6 +55,11 @@ class BrowserAccessibility {
   // than windows.
   virtual void ReleaseReference() = 0;
 
+  // Replace a child object. Used when updating the accessibility tree.
+  virtual void ReplaceChild(
+      BrowserAccessibility* old_acc,
+      BrowserAccessibility* new_acc);
+
   // Initialize this object
   void Initialize(BrowserAccessibilityManager* manager,
                   BrowserAccessibility* parent,
@@ -83,23 +90,51 @@ class BrowserAccessibility {
   // of its parent.
   BrowserAccessibility* GetNextSibling();
 
-  // Replace a child object. Used when updating the accessibility tree.
-  void ReplaceChild(
-      const BrowserAccessibility* old_acc,
-      BrowserAccessibility* new_acc);
+  // Returns the bounds of this object in screen coordinates.
+  gfx::Rect GetBoundsRect();
+
+  // Returns the deepest descendant that contains the specified point.
+  BrowserAccessibility* BrowserAccessibilityForPoint(const gfx::Point& point);
 
   // Accessors
+  const std::map<int32, string16>& attributes() const { return attributes_; }
   int32 child_id() const { return child_id_; }
   const std::vector<BrowserAccessibility*>& children() const {
     return children_;
   }
-  int32 renderer_id() const { return renderer_id_; }
+  const std::vector<std::pair<string16, string16> >& html_attributes() const {
+    return html_attributes_;
+  }
   int32 index_in_parent() const { return index_in_parent_; }
   WebKit::WebRect location() const { return location_; }
+  BrowserAccessibilityManager* manager() const { return manager_; }
+  const string16& name() const { return name_; }
+  int32 renderer_id() const { return renderer_id_; }
+  int32 role() const { return role_; }
+  const string16& role_name() const { return role_name_; }
+  int32 state() const { return state_; }
+  const string16& value() const { return value_; }
 
-#if defined(OS_WIN)
+#if defined(OS_MACOSX) && __OBJC__
+  BrowserAccessibilityCocoa* toBrowserAccessibilityCocoa();
+#elif defined(OS_WIN)
   BrowserAccessibilityWin* toBrowserAccessibilityWin();
 #endif
+
+  // BrowserAccessibilityCocoa needs access to these methods.
+  // Return true if this attribute is in the attributes map.
+  bool HasAttribute(WebAccessibility::Attribute attribute);
+
+  // Retrieve the string value of an attribute from the attribute map and
+  // returns true if found.
+  bool GetAttribute(WebAccessibility::Attribute attribute, string16* value);
+
+  // Retrieve the value of an attribute from the attribute map and
+  // if found and nonempty, try to convert it to an integer.
+  // Returns true only if both the attribute was found and it was successfully
+  // converted to an integer.
+  bool GetAttributeAsInt(
+      WebAccessibility::Attribute attribute, int* value_int);
 
  protected:
   BrowserAccessibility();

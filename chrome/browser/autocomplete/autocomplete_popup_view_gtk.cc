@@ -17,6 +17,7 @@
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view_gtk.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
@@ -41,8 +42,6 @@ const GdkColor kHoveredBackgroundColor = GDK_COLOR_RGB(0xef, 0xf2, 0xfa);
 
 const GdkColor kContentTextColor = GDK_COLOR_RGB(0x00, 0x00, 0x00);
 const GdkColor kURLTextColor = GDK_COLOR_RGB(0x00, 0x88, 0x00);
-const GdkColor kDescriptionTextColor = GDK_COLOR_RGB(0x80, 0x80, 0x80);
-const GdkColor kDescriptionSelectedTextColor = GDK_COLOR_RGB(0x78, 0x82, 0xb1);
 
 // We have a 1 pixel border around the entire results popup.
 const int kBorderThickness = 1;
@@ -111,10 +110,70 @@ size_t GetUTF8Offset(const std::wstring& wide_text, size_t wide_text_offset) {
   return WideToUTF8(wide_text.substr(0, wide_text_offset)).size();
 }
 
-void SetupLayoutForMatch(PangoLayout* layout,
+// Generates the normal URL color, a green color used in unhighlighted URL
+// text. It is a mix of |kURLTextColor| and the current text color.  Unlike the
+// selected text color, it is more important to match the qualities of the
+// foreground typeface color instead of taking the background into account.
+GdkColor NormalURLColor(GdkColor foreground) {
+  color_utils::HSL fg_hsl;
+  color_utils::SkColorToHSL(gfx::GdkColorToSkColor(foreground), &fg_hsl);
+
+  color_utils::HSL hue_hsl;
+  color_utils::SkColorToHSL(gfx::GdkColorToSkColor(kURLTextColor), &hue_hsl);
+
+  // Only allow colors that have a fair amount of saturation in them (color vs
+  // white). This means that our output color will always be fairly green.
+  double s = std::max(0.5, fg_hsl.s);
+
+  // Make sure the luminance is at least as bright as the |kURLTextColor| green
+  // would be if we were to use that.
+  double l;
+  if (fg_hsl.l < hue_hsl.l)
+    l = hue_hsl.l;
+  else
+    l = (fg_hsl.l + hue_hsl.l) / 2;
+
+  color_utils::HSL output = { hue_hsl.h, s, l };
+  return gfx::SkColorToGdkColor(color_utils::HSLToSkColor(output, 255));
+}
+
+// Generates the selected URL color, a green color used on URL text in the
+// currently highlighted entry in the autocomplete popup. It's a mix of
+// |kURLTextColor|, the current text color, and the background color (the
+// select highlight). It is more important to contrast with the background
+// saturation than to look exactly like the foreground color.
+GdkColor SelectedURLColor(GdkColor foreground, GdkColor background) {
+  color_utils::HSL fg_hsl;
+  color_utils::SkColorToHSL(gfx::GdkColorToSkColor(foreground), &fg_hsl);
+
+  color_utils::HSL bg_hsl;
+  color_utils::SkColorToHSL(gfx::GdkColorToSkColor(background), &bg_hsl);
+
+  color_utils::HSL hue_hsl;
+  color_utils::SkColorToHSL(gfx::GdkColorToSkColor(kURLTextColor), &hue_hsl);
+
+  // The saturation of the text should be opposite of the background, clamped
+  // to 0.2-0.8. We make sure it's greater than 0.2 so there's some color, but
+  // less than 0.8 so it's not the oversaturated neon-color.
+  double opposite_s = 1 - bg_hsl.s;
+  double s = std::max(0.2, std::min(0.8, opposite_s));
+
+  // The luminance should match the luminance of the foreground text.  Again,
+  // we clamp so as to have at some amount of color (green) in the text.
+  double opposite_l = fg_hsl.l;
+  double l = std::max(0.1, std::min(0.9, opposite_l));
+
+  color_utils::HSL output = { hue_hsl.h, s, l };
+  return gfx::SkColorToGdkColor(color_utils::HSLToSkColor(output, 255));
+}
+}  // namespace
+
+void AutocompletePopupViewGtk::SetupLayoutForMatch(
+    PangoLayout* layout,
     const std::wstring& text,
-    AutocompleteMatch::ACMatchClassifications classifications,
+    const AutocompleteMatch::ACMatchClassifications& classifications,
     const GdkColor* base_color,
+    const GdkColor* dim_color,
     const GdkColor* url_color,
     const std::string& prefix_text) {
   // In RTL, mark text with left-to-right embedding mark if there is no strong
@@ -175,6 +234,9 @@ void SetupLayoutForMatch(PangoLayout* layout,
       }
     }
 
+    if (i->style & ACMatchClassification::DIM)
+      color = dim_color;
+
     PangoAttribute* fg_attr = pango_attr_foreground_new(
         color->red, color->green, color->blue);
     fg_attr->start_index = offset;
@@ -192,65 +254,6 @@ void SetupLayoutForMatch(PangoLayout* layout,
   pango_layout_set_attributes(layout, attrs);  // Ref taken.
   pango_attr_list_unref(attrs);
 }
-
-// Generates the normal URL color, a green color used in unhighlighted URL
-// text. It is a mix of |kURLTextColor| and the current text color.  Unlike the
-// selected text color, It is more important to match the qualities of the
-// foreground typeface color instead of taking the background into account.
-GdkColor NormalURLColor(GdkColor foreground) {
-  color_utils::HSL fg_hsl;
-  color_utils::SkColorToHSL(gfx::GdkColorToSkColor(foreground), &fg_hsl);
-
-  color_utils::HSL hue_hsl;
-  color_utils::SkColorToHSL(gfx::GdkColorToSkColor(kURLTextColor), &hue_hsl);
-
-  // Only allow colors that have a fair amount of saturation in them (color vs
-  // white). This means that our output color will always be fairly green.
-  double s = std::max(0.5, fg_hsl.s);
-
-  // Make sure the luminance is at least as bright as the |kURLTextColor| green
-  // would be if we were to use that.
-  double l;
-  if (fg_hsl.l < hue_hsl.l)
-    l = hue_hsl.l;
-  else
-    l = (fg_hsl.l + hue_hsl.l) / 2;
-
-  color_utils::HSL output = { hue_hsl.h, s, l };
-  return gfx::SkColorToGdkColor(color_utils::HSLToSkColor(output, 255));
-}
-
-// Generates the selected URL color, a green color used on URL text in the
-// currently highlighted entry in the autocomplete popup. It's a mix of
-// |kURLTextColor|, the current text color, and the background color (the
-// select highlight). It is more important to contrast with the background
-// saturation than to look exactly like the foreground color.
-GdkColor SelectedURLColor(GdkColor foreground, GdkColor background) {
-  color_utils::HSL fg_hsl;
-  color_utils::SkColorToHSL(gfx::GdkColorToSkColor(foreground), &fg_hsl);
-
-  color_utils::HSL bg_hsl;
-  color_utils::SkColorToHSL(gfx::GdkColorToSkColor(background), &bg_hsl);
-
-  color_utils::HSL hue_hsl;
-  color_utils::SkColorToHSL(gfx::GdkColorToSkColor(kURLTextColor), &hue_hsl);
-
-  // The saturation of the text should be opposite of the background, clamped
-  // to 0.2-0.8. We make sure it's greater than 0.2 so there's some color, but
-  // less than 0.8 so it's not the oversaturated neon-color.
-  double opposite_s = 1 - bg_hsl.s;
-  double s = std::max(0.2, std::min(0.8, opposite_s));
-
-  // The luminance should match the luminance of the foreground text.  Again,
-  // we clamp so as to have at some amount of color (green) in the text.
-  double opposite_l = fg_hsl.l;
-  double l = std::max(0.1, std::min(0.9, opposite_l));
-
-  color_utils::HSL output = { hue_hsl.h, s, l };
-  return gfx::SkColorToGdkColor(color_utils::HSLToSkColor(output, 255));
-}
-
-}  // namespace
 
 AutocompletePopupViewGtk::AutocompletePopupViewGtk(
     AutocompleteEditView* edit_view,
@@ -353,6 +356,22 @@ void AutocompletePopupViewGtk::UpdatePopupAppearance() {
   gtk_widget_queue_draw(window_);
 }
 
+gfx::Rect AutocompletePopupViewGtk::GetTargetBounds() {
+  if (!GTK_WIDGET_REALIZED(window_))
+    return gfx::Rect();
+
+  gfx::Rect retval = gtk_util::GetWidgetScreenBounds(window_);
+
+  // The widget bounds don't update synchronously so may be out of sync with
+  // our last size request.
+  GtkRequisition req;
+  gtk_widget_size_request(window_, &req);
+  retval.set_width(req.width);
+  retval.set_height(req.height);
+
+  return retval;
+}
+
 void AutocompletePopupViewGtk::PaintUpdatesNow() {
   // Paint our queued invalidations now, synchronously.
   gdk_window_process_updates(window_->window, FALSE);
@@ -364,12 +383,6 @@ void AutocompletePopupViewGtk::OnDragCanceled() {
 
 AutocompletePopupModel* AutocompletePopupViewGtk::GetModel() {
   return model_.get();
-}
-
-int AutocompletePopupViewGtk::GetMaxYCoordinate() {
-  // TODO: implement if match preview pans out.
-  NOTIMPLEMENTED();
-  return 0;
 }
 
 void AutocompletePopupViewGtk::Observe(NotificationType type,
@@ -389,8 +402,6 @@ void AutocompletePopupViewGtk::Observe(NotificationType type,
     url_text_color_ = NormalURLColor(content_text_color_);
     url_selected_text_color_ = SelectedURLColor(selected_content_text_color_,
                                                 selected_background_color_);
-    description_text_color_ = content_text_color_;
-    description_selected_text_color_ = selected_content_text_color_;
   } else {
     border_color_ = kBorderColor;
     background_color_ = kBackgroundColor;
@@ -401,9 +412,15 @@ void AutocompletePopupViewGtk::Observe(NotificationType type,
     selected_content_text_color_ = kContentTextColor;
     url_text_color_ = kURLTextColor;
     url_selected_text_color_ = kURLTextColor;
-    description_text_color_ = kDescriptionTextColor;
-    description_selected_text_color_ = kDescriptionSelectedTextColor;
   }
+
+  // Calculate dimmed colors.
+  content_dim_text_color_ =
+      gtk_util::AverageColors(content_text_color_,
+                              background_color_);
+  selected_content_dim_text_color_ =
+      gtk_util::AverageColors(selected_content_text_color_,
+                              selected_background_color_);
 
   // Set the background color, so we don't need to paint it manually.
   gtk_widget_modify_bg(window_, GTK_STATE_NORMAL, &background_color_);
@@ -600,7 +617,9 @@ gboolean AutocompletePopupViewGtk::HandleExpose(GtkWidget* widget,
     // Note: We force to URL to LTR for all text directions.
     SetupLayoutForMatch(layout_, match.contents, match.contents_class,
                         is_selected ? &selected_content_text_color_ :
-                        &content_text_color_,
+                            &content_text_color_,
+                        is_selected ? &selected_content_dim_text_color_ :
+                            &content_dim_text_color_,
                         is_selected ? &url_selected_text_color_ :
                             &url_text_color_,
                         std::string());
@@ -624,9 +643,15 @@ gboolean AutocompletePopupViewGtk::HandleExpose(GtkWidget* widget,
     if (has_description) {
       pango_layout_set_width(layout_,
           (text_width - actual_content_width) * PANGO_SCALE);
+
+      // In Windows, a boolean "force_dim" is passed as true for the
+      // description.  Here, we pass the dim text color for both normal and dim,
+      // to accomplish the same thing.
       SetupLayoutForMatch(layout_, match.description, match.description_class,
-                          is_selected ? &description_selected_text_color_ :
-                              &description_text_color_,
+                          is_selected ? &selected_content_dim_text_color_ :
+                              &content_dim_text_color_,
+                          is_selected ? &selected_content_dim_text_color_ :
+                              &content_dim_text_color_,
                           is_selected ? &url_selected_text_color_ :
                               &url_text_color_,
                           std::string(" - "));

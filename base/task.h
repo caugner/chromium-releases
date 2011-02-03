@@ -180,7 +180,7 @@ class ScopedRunnableMethodFactory {
 template<class T>
 class DeleteTask : public CancelableTask {
  public:
-  explicit DeleteTask(T* obj) : obj_(obj) {
+  explicit DeleteTask(const T* obj) : obj_(obj) {
   }
   virtual void Run() {
     delete obj_;
@@ -190,14 +190,14 @@ class DeleteTask : public CancelableTask {
   }
 
  private:
-  T* obj_;
+  const T* obj_;
 };
 
 // Task to Release() an object
 template<class T>
 class ReleaseTask : public CancelableTask {
  public:
-  explicit ReleaseTask(T* obj) : obj_(obj) {
+  explicit ReleaseTask(const T* obj) : obj_(obj) {
   }
   virtual void Run() {
     if (obj_)
@@ -208,7 +208,7 @@ class ReleaseTask : public CancelableTask {
   }
 
  private:
-  T* obj_;
+  const T* obj_;
 };
 
 // RunnableMethodTraits --------------------------------------------------------
@@ -274,7 +274,7 @@ struct RunnableMethodTraits {
 //   };
 //   }  // namespace foo
 //
-//   DISABLE_RUNNABLE_METHOD_REFCOUNT(foo::Bar)
+//   DISABLE_RUNNABLE_METHOD_REFCOUNT(foo::Bar);
 //
 // This is different from DISALLOW_COPY_AND_ASSIGN which is declared inside the
 // class.

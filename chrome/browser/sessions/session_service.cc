@@ -10,12 +10,11 @@
 
 #include "base/callback.h"
 #include "base/file_util.h"
-#include "base/histogram.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/pickle.h"
 #include "base/scoped_vector.h"
 #include "base/thread.h"
-#include "chrome/browser/browser_init.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
@@ -30,6 +29,7 @@
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser_init.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_service.h"
@@ -417,9 +417,9 @@ SessionService::Handle SessionService::GetCurrentSession(
   if (pending_window_close_ids_.empty()) {
     // If there are no pending window closes, we can get the current session
     // from memory.
-    scoped_refptr<InternalSessionRequest> request = new InternalSessionRequest(
+    scoped_refptr<InternalSessionRequest> request(new InternalSessionRequest(
         NewCallback(this, &SessionService::OnGotSessionCommands),
-        callback);
+        callback));
     AddRequest(request, consumer);
     IdToRange tab_to_available_range;
     std::set<SessionID::id_type> windows_to_track;
@@ -447,7 +447,7 @@ void SessionService::Save() {
         &last_updated_save_time_);
     NotificationService::current()->Notify(
         NotificationType::SESSION_SERVICE_SAVED,
-        NotificationService::AllSources(),
+        Source<Profile>(profile()),
         NotificationService::NoDetails());
   }
 }
@@ -1473,4 +1473,3 @@ void SessionService::RecordUpdatedSaveTime(base::TimeDelta delta,
         50);
   }
 }
-

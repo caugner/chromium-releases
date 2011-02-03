@@ -1,4 +1,4 @@
-# Copyright (c) 2010 The Chromium OS Authors. All rights reserved.
+# Copyright (c) 2010 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -17,4 +17,5 @@ DOC = """
 This is a wrapper test for Chrome browser_test.
 """
 
-job.run_test('desktopui_BrowserTest')
+job.run_test('desktopui_BrowserTest', group=0, total_groups=4)
+

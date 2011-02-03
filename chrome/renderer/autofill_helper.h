@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "chrome/renderer/form_manager.h"
 #include "chrome/renderer/page_click_listener.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebNode.h"
@@ -17,6 +18,7 @@ class RenderView;
 
 namespace WebKit {
 class WebInputElement;
+class WebKeyboardEvent;
 class WebString;
 }
 
@@ -30,10 +32,6 @@ class WebString;
 class AutoFillHelper : public PageClickListener {
  public:
   explicit AutoFillHelper(RenderView* render_view);
-
-  // Queries the browser for Autocomplete and AutoFill suggestions for the given
-  // |node|.
-  void QueryAutoFillSuggestions(const WebKit::WebNode& node);
 
   // Removes the Autocomplete suggestion |value| for the field named |name|.
   void RemoveAutocompleteSuggestion(const WebKit::WebString& name,
@@ -83,10 +81,11 @@ class AutoFillHelper : public PageClickListener {
   // WebViewClient editor call forwarded by the RenderView.
   void TextDidChangeInTextField(const WebKit::WebInputElement& element);
 
-  // Called when an input element in the page has been clicked.
-  // |already_focused| is true if |element| was focused before it was clicked.
-  void InputElementClicked(const WebKit::WebInputElement& element,
-                           bool already_focused);
+  // WebViewClient editor call forwarded by the RenderView.  For lower level
+  // event translation.  Specifically, for down/up key presses in an input
+  // element.
+  void KeyDownInTextField(const WebKit::WebInputElement& element,
+                          const WebKit::WebKeyboardEvent& event);
 
  private:
   enum AutoFillAction {
@@ -107,20 +106,37 @@ class AutoFillHelper : public PageClickListener {
   // when |element| contains no text.
   // |requires_caret_at_end| specifies whether suggestions should be shown when
   // the caret is not after the last character in |element|.
+  // |display_warning_if_disabled| specifies whether a warning should be
+  // displayed to the user if AutoFill has suggestions available, but cannot
+  // fill them because it is disabled (e.g. when trying to fill a credit card
+  // form on a non-secure website).
   void ShowSuggestions(const WebKit::WebInputElement& element,
                        bool autofill_on_empty_values,
-                       bool requires_caret_at_end);
+                       bool requires_caret_at_end,
+                       bool display_warning_if_disabled);
+
+  // Queries the browser for Autocomplete and AutoFill suggestions for the given
+  // |node|.
+  void QueryAutoFillSuggestions(const WebKit::WebNode& node,
+                                bool display_warning_if_disabled);
 
   // Queries the AutoFillManager for form data for the form containing |node|.
   // |value| is the current text in the field, and |unique_id| is the selected
   // profile's unique ID.  |action| specifies whether to Fill or Preview the
   // values returned from the AutoFillManager.
-  void QueryAutoFillFormData(const WebKit::WebNode& node,
-                             int unique_id,
-                             AutoFillAction action);
+  void FillAutoFillFormData(const WebKit::WebNode& node,
+                            int unique_id,
+                            AutoFillAction action);
 
   // Scans the given frame for forms and sends them up to the browser.
   void SendForms(WebKit::WebFrame* frame);
+
+  // Fills |form| and |field| with the FormData and FormField corresponding to
+  // |node|. Returns true if the data was found; and false otherwise.
+  bool FindFormAndFieldForNode(
+      const WebKit::WebNode& node,
+      webkit_glue::FormData* form,
+      webkit_glue::FormField* field) WARN_UNUSED_RESULT;
 
   // Weak reference.
   RenderView* render_view_;
@@ -136,6 +152,12 @@ class AutoFillHelper : public PageClickListener {
 
   // The action to take when receiving AutoFill data from the AutoFillManager.
   AutoFillAction autofill_action_;
+
+  // Should we display a warning if autofill is disabled?
+  bool display_warning_if_disabled_;
+
+  // Was the query node autofilled prior to previewing the form?
+  bool was_query_node_autofilled_;
 
   // The menu index of the "Clear" menu item.
   int suggestions_clear_index_;

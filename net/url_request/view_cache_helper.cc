@@ -28,7 +28,7 @@ void HexDump(const char *buf, size_t buf_len, std::string* result) {
 
   const unsigned char *p;
   while (buf_len) {
-    StringAppendF(result, "%08x:  ", offset);
+    base::StringAppendF(result, "%08x:  ", offset);
     offset += kMaxRows;
 
     p = (const unsigned char *) buf;
@@ -38,7 +38,7 @@ void HexDump(const char *buf, size_t buf_len, std::string* result) {
 
     // print hex codes:
     for (i = 0; i < row_max; ++i)
-      StringAppendF(result, "%02x  ", *p++);
+      base::StringAppendF(result, "%02x  ", *p++);
     for (i = row_max; i < kMaxRows; ++i)
       result->append("    ");
 
@@ -72,6 +72,22 @@ std::string FormatEntryInfo(disk_cache::Entry* entry,
 }  // namespace.
 
 namespace net {
+
+ViewCacheHelper::ViewCacheHelper()
+    : disk_cache_(NULL),
+      entry_(NULL),
+      iter_(NULL),
+      buf_len_(0),
+      index_(0),
+      data_(NULL),
+      callback_(NULL),
+      next_state_(STATE_NONE),
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          cache_callback_(this, &ViewCacheHelper::OnIOComplete)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          entry_callback_(new CancelableCompletionCallback<ViewCacheHelper>(
+              this, &ViewCacheHelper::OnIOComplete))) {
+}
 
 ViewCacheHelper::~ViewCacheHelper() {
   if (entry_)

@@ -23,13 +23,13 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+
 #include "main/glheader.h"
 #include "main/context.h"
 #include "main/colormac.h"
 #include "main/image.h"
 #include "main/imports.h"
-#include "main/pixel.h"
-#include "shader/prog_instruction.h"
+#include "program/prog_instruction.h"
 
 #include "s_context.h"
 #include "s_texcombine.h"
@@ -319,18 +319,18 @@ texture_combine( GLcontext *ctx, GLuint unit, GLuint n,
             /* (a * b) + (c * d) - 0.5 */
             for (i = 0; i < n; i++) {
                rgba[i][RCOMP] = (arg0[i][RCOMP] * arg1[i][RCOMP] +
-                                 arg2[i][RCOMP] * arg3[i][RCOMP] - 0.5) * scaleRGB;
+                                 arg2[i][RCOMP] * arg3[i][RCOMP] - 0.5F) * scaleRGB;
                rgba[i][GCOMP] = (arg0[i][GCOMP] * arg1[i][GCOMP] +
-                                 arg2[i][GCOMP] * arg3[i][GCOMP] - 0.5) * scaleRGB;
+                                 arg2[i][GCOMP] * arg3[i][GCOMP] - 0.5F) * scaleRGB;
                rgba[i][BCOMP] = (arg0[i][BCOMP] * arg1[i][BCOMP] +
-                                 arg2[i][BCOMP] * arg3[i][BCOMP] - 0.5) * scaleRGB;
+                                 arg2[i][BCOMP] * arg3[i][BCOMP] - 0.5F) * scaleRGB;
             }
          }
          else {
             for (i = 0; i < n; i++) {
-               rgba[i][RCOMP] = (arg0[i][RCOMP] + arg1[i][RCOMP] - 0.5) * scaleRGB;
-               rgba[i][GCOMP] = (arg0[i][GCOMP] + arg1[i][GCOMP] - 0.5) * scaleRGB;
-               rgba[i][BCOMP] = (arg0[i][BCOMP] + arg1[i][BCOMP] - 0.5) * scaleRGB;
+               rgba[i][RCOMP] = (arg0[i][RCOMP] + arg1[i][RCOMP] - 0.5F) * scaleRGB;
+               rgba[i][GCOMP] = (arg0[i][GCOMP] + arg1[i][GCOMP] - 0.5F) * scaleRGB;
+               rgba[i][BCOMP] = (arg0[i][BCOMP] + arg1[i][BCOMP] - 0.5F) * scaleRGB;
             }
          }
          break;
@@ -371,7 +371,7 @@ texture_combine( GLcontext *ctx, GLuint unit, GLuint n,
                            (arg0[i][GCOMP] - 0.5F) * (arg1[i][GCOMP] - 0.5F) +
                            (arg0[i][BCOMP] - 0.5F) * (arg1[i][BCOMP] - 0.5F))
                * 4.0F * scaleRGB;
-            dot = CLAMP(dot, 0.0, 1.0F);
+            dot = CLAMP(dot, 0.0F, 1.0F);
             rgba[i][RCOMP] = rgba[i][GCOMP] = rgba[i][BCOMP] = dot;
          }
          break;
@@ -388,11 +388,11 @@ texture_combine( GLcontext *ctx, GLuint unit, GLuint n,
       case GL_MODULATE_SIGNED_ADD_ATI:
          for (i = 0; i < n; i++) {
             rgba[i][RCOMP] = ((arg0[i][RCOMP] * arg2[i][RCOMP]) +
-                              arg1[i][RCOMP] - 0.5) * scaleRGB;
+                              arg1[i][RCOMP] - 0.5F) * scaleRGB;
             rgba[i][GCOMP] = ((arg0[i][GCOMP] * arg2[i][GCOMP]) +
-                              arg1[i][GCOMP] - 0.5) * scaleRGB;
+                              arg1[i][GCOMP] - 0.5F) * scaleRGB;
             rgba[i][BCOMP] = ((arg0[i][BCOMP] * arg2[i][BCOMP]) +
-                              arg1[i][BCOMP] - 0.5) * scaleRGB;
+                              arg1[i][BCOMP] - 0.5F) * scaleRGB;
 	 }
          break;
       case GL_MODULATE_SUBTRACT_ATI:
@@ -459,7 +459,7 @@ texture_combine( GLcontext *ctx, GLuint unit, GLuint n,
             for (i = 0; i < n; i++) {
                rgba[i][ACOMP] = (arg0[i][ACOMP] * arg1[i][ACOMP] +
                                  arg2[i][ACOMP] * arg3[i][ACOMP] -
-                                 0.5) * scaleA;
+                                 0.5F) * scaleA;
             }
          }
          else {

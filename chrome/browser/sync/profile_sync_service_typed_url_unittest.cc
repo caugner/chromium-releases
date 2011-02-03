@@ -429,7 +429,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeAdd) {
 
   history::URLsModifiedDetails details;
   details.changed_urls.push_back(added_entry);
-  scoped_refptr<ThreadNotifier> notifier = new ThreadNotifier(&history_thread_);
+  scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&history_thread_));
   notifier->Notify(NotificationType::HISTORY_TYPED_URLS_MODIFIED,
                    Details<history::URLsModifiedDetails>(&details));
 
@@ -462,7 +462,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeUpdate) {
 
   history::URLsModifiedDetails details;
   details.changed_urls.push_back(updated_entry);
-  scoped_refptr<ThreadNotifier> notifier = new ThreadNotifier(&history_thread_);
+  scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&history_thread_));
   notifier->Notify(NotificationType::HISTORY_TYPED_URLS_MODIFIED,
                    Details<history::URLsModifiedDetails>(&details));
 
@@ -497,7 +497,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeRemove) {
   history::URLsDeletedDetails changes;
   changes.all_history = false;
   changes.urls.insert(GURL("http://mine.com"));
-  scoped_refptr<ThreadNotifier> notifier = new ThreadNotifier(&history_thread_);
+  scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&history_thread_));
   notifier->Notify(NotificationType::HISTORY_URLS_DELETED,
                    Details<history::URLsDeletedDetails>(&changes));
 
@@ -531,7 +531,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeRemoveAll) {
 
   history::URLsDeletedDetails changes;
   changes.all_history = true;
-  scoped_refptr<ThreadNotifier> notifier = new ThreadNotifier(&history_thread_);
+  scoped_refptr<ThreadNotifier> notifier(new ThreadNotifier(&history_thread_));
   notifier->Notify(NotificationType::HISTORY_URLS_DELETED,
                    Details<history::URLsDeletedDetails>(&changes));
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "jingle/notifier/communicator/single_login_attempt.h"
 
+#include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "jingle/notifier/communicator/connection_options.h"
 #include "jingle/notifier/communicator/connection_settings.h"
@@ -27,37 +28,32 @@ class NetLog;
 
 namespace notifier {
 
-SingleLoginAttempt::SingleLoginAttempt(LoginSettings* login_settings)
+SingleLoginAttempt::SingleLoginAttempt(LoginSettings* login_settings,
+                                       Delegate* delegate)
     : login_settings_(login_settings),
+      delegate_(delegate),
       connection_generator_(
+          ALLOW_THIS_IN_INITIALIZER_LIST(this),
           login_settings_->host_resolver(),
           &login_settings_->connection_options(),
           login_settings_->try_ssltcp_first(),
           login_settings_->server_list(),
           login_settings_->server_count()) {
-  connection_generator_.SignalExhaustedSettings.connect(
-      this,
-      &SingleLoginAttempt::OnAttemptedAllConnections);
-  connection_generator_.SignalNewSettings.connect(
-      this,
-      &SingleLoginAttempt::DoLogin);
-
   connection_generator_.StartGenerating();
 }
 
 SingleLoginAttempt::~SingleLoginAttempt() {}
 
 void SingleLoginAttempt::OnConnect(base::WeakPtr<talk_base::Task> base_task) {
-  SignalConnect(base_task);
+  delegate_->OnConnect(base_task);
 }
 
 void SingleLoginAttempt::OnError(buzz::XmppEngine::Error error, int subcode,
                                  const buzz::XmlElement* stream_error) {
-  LOG(INFO) << "Error: " << error << ", subcode: " << subcode;
+  VLOG(1) << "Error: " << error << ", subcode: " << subcode;
   if (stream_error) {
     DCHECK_EQ(error, buzz::XmppEngine::ERROR_STREAM);
-    LOG(INFO) << "Stream error: "
-              << XmlElementToString(*stream_error);
+    VLOG(1) << "Stream error: " << XmlElementToString(*stream_error);
   }
 
   // Check for redirection.
@@ -87,7 +83,7 @@ void SingleLoginAttempt::OnError(buzz::XmppEngine::Error error, int subcode,
         if (redirect_port == 0) {
           redirect_port = kDefaultXmppPort;
         }
-        SignalRedirect(redirect_server, redirect_port);
+        delegate_->OnRedirect(redirect_server, redirect_port);
         // May be deleted at this point.
         return;
       }
@@ -98,17 +94,7 @@ void SingleLoginAttempt::OnError(buzz::XmppEngine::Error error, int subcode,
   connection_generator_.UseNextConnection();
 }
 
-void SingleLoginAttempt::OnAttemptedAllConnections(
-    bool successfully_resolved_dns,
-    int first_dns_error) {
-  if (!successfully_resolved_dns) {
-    LOG(INFO) << "Could not resolve DNS: " << first_dns_error;
-  }
-  LOG(INFO) << "Could not connect to any XMPP server";
-  SignalNeedAutoReconnect();
-}
-
-void SingleLoginAttempt::DoLogin(
+void SingleLoginAttempt::OnNewSettings(
     const ConnectionSettings& connection_settings) {
   // TODO(akalin): Resolve any unresolved IPs, possibly through a
   // proxy, instead of skipping them.
@@ -130,6 +116,15 @@ void SingleLoginAttempt::DoLogin(
           client_settings.token_service());
   xmpp_connection_.reset(
       new XmppConnection(client_settings, this, pre_xmpp_auth));
+}
+
+void SingleLoginAttempt::OnExhaustedSettings(
+    bool successfully_resolved_dns,
+    int first_dns_error) {
+  if (!successfully_resolved_dns)
+    VLOG(1) << "Could not resolve DNS: " << first_dns_error;
+  VLOG(1) << "Could not connect to any XMPP server";
+  delegate_->OnNeedReconnect();
 }
 
 }  // namespace notifier

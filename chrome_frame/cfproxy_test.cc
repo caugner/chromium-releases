@@ -5,8 +5,8 @@
 #include <string>
 #include "base/file_path.h"
 #include "base/waitable_event.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome_frame/cfproxy_private.h"
-#include "chrome/test/automation/automation_messages.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gmock_mutant.h"
@@ -33,10 +33,10 @@ struct MockChromeProxyDelegate : public ChromeProxyDelegate {
   MOCK_METHOD0(Disconnected, void());
   MOCK_METHOD0(tab_handle, int());
 
-  MOCK_METHOD4(Completed_CreateTab, void(bool success, HWND chrome_wnd,
-      HWND tab_window, int tab_handle));
-  MOCK_METHOD4(Completed_ConnectToTab, void(bool success, HWND chrome_window,
-      HWND tab_window, int tab_handle));
+  MOCK_METHOD5(Completed_CreateTab, void(bool success, HWND chrome_wnd,
+      HWND tab_window, int tab_handle, int session_id));
+  MOCK_METHOD5(Completed_ConnectToTab, void(bool success, HWND chrome_window,
+      HWND tab_window, int tab_handle, int session_id));
   MOCK_METHOD2(Completed_Navigate, void(bool success,
       enum AutomationMsg_NavigationResponseValues res));
   MOCK_METHOD3(Completed_InstallExtension, void(bool success,
@@ -73,7 +73,7 @@ struct MockChromeProxyDelegate : public ChromeProxyDelegate {
   // Misc. UI.
   MOCK_METHOD1(HandleAccelerator, void(const MSG& accel_message));
   MOCK_METHOD3(HandleContextMenu, void(HANDLE menu_handle, int align_flags,
-      const IPC::ContextMenuParams& params));
+      const IPC::MiniContextMenuParams& params));
   MOCK_METHOD1(TabbedOut, void(bool reverse));
 
   //
@@ -247,6 +247,47 @@ TEST(ChromeProxy, LaunchChrome) {
   factory.ReleaseProxy(&delegate, params.profile);
 }
 
+// Test that a channel error results in Completed_XYZ(false, ) called if
+// the synchronious XYZ message has been sent.
+TEST(ChromeProxy, ChannelError) {
+  base::WaitableEvent connected(false, false);
+  StrictMock<MockCFProxyTraits> api;
+  StrictMock<MockChromeProxyDelegate> delegate;
+  StrictMock<MockFactory> factory;
+  CFProxy* proxy = new CFProxy(&api);
+
+  ProxyParams params;
+  params.profile = "Adam N. Epilinter";
+  params.timeout = base::TimeDelta::FromMilliseconds(300);
+
+  testing::InSequence s;
+
+  EXPECT_CALL(factory, CreateProxy()).WillOnce(Return(proxy));
+  EXPECT_CALL(api, DoCreateChannel(_, proxy)).WillOnce(Return(&api.sender));
+  EXPECT_CALL(api, LaunchApp(_)).WillOnce(DoAll(
+      API_FIRE_CONNECT(api, base::TimeDelta::FromMilliseconds(10)),
+      Return(true)));
+  EXPECT_CALL(delegate, Connected(proxy))
+      .WillOnce(DoAll(
+          InvokeWithoutArgs(CreateFunctor(proxy, &ChromeProxy::ConnectTab,
+                                          &delegate, HWND(6), 512)),
+          InvokeWithoutArgs(&connected, &base::WaitableEvent::Signal)));
+
+  EXPECT_CALL(api.sender, Send(_));
+  EXPECT_CALL(delegate, Completed_ConnectToTab(false, _, _, _, _));
+  EXPECT_CALL(api, CloseChannel(&api.sender));
+  EXPECT_CALL(delegate, PeerLost(_, ChromeProxyDelegate::CHANNEL_ERROR));
+
+  factory.GetProxy(&delegate, params);
+  EXPECT_TRUE(connected.TimedWait(base::TimeDelta::FromSeconds(15)));
+  // Simulate a channel error.
+  api.FireError(base::TimeDelta::FromMilliseconds(0));
+
+  // Expectations when the Proxy is destroyed.
+  EXPECT_CALL(delegate, tab_handle()).WillOnce(Return(0));
+  EXPECT_CALL(delegate, Disconnected());
+  factory.ReleaseProxy(&delegate, params.profile);
+}
 ///////////////////////////////////////////////////////////////////////////////
 namespace {
 template <typename M, typename A>
@@ -275,7 +316,16 @@ inline IPC::Message* CreateReply(M* m, const A& a, const B& b, const C& c) {
   }
   return r;
 }
-}  // namespace
+
+template <typename M, typename A, typename B, typename C, typename D>
+inline IPC::Message* CreateReply(M* m, const A& a, const B& b, const C& c,
+                                 const D& d) {
+  IPC::Message* r = IPC::SyncMessage::GenerateReply(m);
+  if (r) {
+    M::WriteReplyParams(r, a, b, c, d);
+  }
+  return r;
+}}  // namespace
 
 DISABLE_RUNNABLE_METHOD_REFCOUNT(SyncMsgSender);
 TEST(SyncMsgSender, Deserialize) {
@@ -288,12 +338,16 @@ TEST(SyncMsgSender, Deserialize) {
   TabsMap tab2delegate;
   SyncMsgSender queue(&tab2delegate);
 
+  const int kTabHandle = 6;
+  const int kSessionId = 8;
+
   // Create some sync messages and their replies.
   AutomationMsg_InstallExtension m1(0, FilePath(L"c:\\awesome.x"), 0);
-  AutomationMsg_CreateExternalTab m2(0, IPC::ExternalTabSettings(), 0, 0, 0);
+  AutomationMsg_CreateExternalTab m2(0, IPC::ExternalTabSettings(), 0, 0, 0, 0);
   scoped_ptr<IPC::Message> r1(CreateReply(&m1,
       AUTOMATION_MSG_EXTENSION_INSTALL_SUCCEEDED));
-  scoped_ptr<IPC::Message> r2(CreateReply(&m2, (HWND)1, (HWND)2, 6));
+  scoped_ptr<IPC::Message> r2(CreateReply(&m2, (HWND)1, (HWND)2, kTabHandle,
+                                          kSessionId));
 
   queue.QueueSyncMessage(&m1, &d1, NULL);
   queue.QueueSyncMessage(&m2, &d1, NULL);
@@ -301,7 +355,8 @@ TEST(SyncMsgSender, Deserialize) {
   testing::InSequence s;
   EXPECT_CALL(d1, Completed_InstallExtension(true,
       AUTOMATION_MSG_EXTENSION_INSTALL_SUCCEEDED, NULL));
-  EXPECT_CALL(d1, Completed_CreateTab(true, (HWND)1, (HWND)2, 6));
+  EXPECT_CALL(d1, Completed_CreateTab(true, (HWND)1, (HWND)2, kTabHandle,
+                                      kSessionId));
 
   // Execute replies in a worker thread.
   ipc.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(&queue,
@@ -431,7 +486,7 @@ TEST(Deserialize, DispatchTabMessage) {
   EXPECT_TRUE(DispatchTabMessageToDelegate(&delegate, m9));
 
   // Tuple4<int, HANDLE, int, IPC::ContextMenuParams>
-  IPC::ContextMenuParams ctxmenu = { 711, 512, GURL("http://link_src"),
+  IPC::MiniContextMenuParams ctxmenu = { 711, 512, GURL("http://link_src"),
       GURL("http://unfiltered_link_url"), GURL("http://src_url"),
       GURL("http://page_url"), GURL("http://frame_url") };
   AutomationMsg_ForwardContextMenuToExternalHost m10(0, 1, HANDLE(7), 4,

@@ -6,7 +6,7 @@
 #include "base/file_path.h"
 #include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -378,6 +378,7 @@ TEST_F(SessionRestoreUITest, DontRestoreWhileIncognito) {
 
 // Launches an app window, closes tabbed browser, launches and makes sure
 // we restore the tabbed browser url.
+// Flaky: http://crbug.com/29110
 TEST_F(SessionRestoreUITest,
        FLAKY_RestoreAfterClosingTabbedBrowserWithAppAndLaunching) {
   NavigateToURL(url1_);
@@ -435,19 +436,14 @@ TEST_F(SessionRestoreUITest, TwoWindowsCloseOneRestoreOnlyOne) {
   ASSERT_EQ(url1_, GetActiveTabURL());
 }
 
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-// Flaky, sometimes times out: http://crbug.com/52022
-#define MAYBE_ShareProcessesOnRestore FLAKY_ShareProcessesOnRestore
-#else
-#define MAYBE_ShareProcessesOnRestore ShareProcessesOnRestore
-#endif
 // Make sure after a restore the number of processes matches that of the number
 // of processes running before the restore. This creates a new tab so that
 // we should have two new tabs running.  (This test will pass in both
 // process-per-site and process-per-site-instance, because we treat the new tab
 // as a special case in process-per-site-instance so that it only ever uses one
 // process.)
-TEST_F(SessionRestoreUITest, MAYBE_ShareProcessesOnRestore) {
+// Flaky as per http://crbug.com/52022
+TEST_F(SessionRestoreUITest, FLAKY_ShareProcessesOnRestore) {
   if (in_process_renderer()) {
     // No point in running this test in single process mode.
     return;

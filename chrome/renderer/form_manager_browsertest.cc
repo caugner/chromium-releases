@@ -37,6 +37,9 @@ namespace {
 
 typedef RenderViewTest FormManagerTest;
 
+// TODO(isherman): Pull this as a named constant from WebKit
+const int kDefaultMaxLength = 0x80000;
+
 TEST_F(FormManagerTest, WebFormElementToFormData) {
   LoadHTML("<FORM name=\"TestForm\" action=\"http://cnn.com\" method=\"post\">"
            "  <INPUT type=\"text\" id=\"firstname\" value=\"John\"/>"
@@ -55,8 +58,7 @@ TEST_F(FormManagerTest, WebFormElementToFormData) {
   FormData form;
   EXPECT_TRUE(FormManager::WebFormElementToFormData(forms[0],
                                                     FormManager::REQUIRE_NONE,
-                                                    true,
-                                                    false,
+                                                    FormManager::EXTRACT_VALUE,
                                                     &form));
   EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
   EXPECT_EQ(GURL(frame->url()), form.origin);
@@ -69,25 +71,29 @@ TEST_F(FormManagerTest, WebFormElementToFormData) {
                 ASCIIToUTF16("firstname"),
                 ASCIIToUTF16("John"),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields[1].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("lastname"),
                 ASCIIToUTF16("Smith"),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields[2].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("notvisible"),
                 ASCIIToUTF16("apple"),
                 ASCIIToUTF16("hidden"),
-                0)));
+                0,
+                false)));
   EXPECT_TRUE(fields[3].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("reply-send"),
                 string16(),
                 ASCIIToUTF16("submit"),
-                0)));
+                0,
+                false)));
 }
 
 TEST_F(FormManagerTest, ExtractForms) {
@@ -118,19 +124,22 @@ TEST_F(FormManagerTest, ExtractForms) {
                       ASCIIToUTF16("firstname"),
                       ASCIIToUTF16("John"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Smith"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 }
 
@@ -168,19 +177,22 @@ TEST_F(FormManagerTest, ExtractMultipleForms) {
                       ASCIIToUTF16("firstname"),
                       ASCIIToUTF16("John"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Smith"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 
   // Second form.
@@ -195,19 +207,22 @@ TEST_F(FormManagerTest, ExtractMultipleForms) {
                       ASCIIToUTF16("firstname"),
                       ASCIIToUTF16("John"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields2[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Smith"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields2[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields2[2]);
 }
 
@@ -268,19 +283,22 @@ TEST_F(FormManagerTest, GetFormsAutocomplete) {
                       ASCIIToUTF16("middlename"),
                       ASCIIToUTF16("Jack"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Smith"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 }
 
@@ -314,19 +332,22 @@ TEST_F(FormManagerTest, GetFormsElementsEnabled) {
                       ASCIIToUTF16("middlename"),
                       ASCIIToUTF16("Jack"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Smith"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("submit"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 }
 
@@ -366,19 +387,22 @@ TEST_F(FormManagerTest, FindForm) {
                       ASCIIToUTF16("firstname"),
                       ASCIIToUTF16("John"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Smith"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 }
 
@@ -422,43 +446,50 @@ TEST_F(FormManagerTest, FillForm) {
                       ASCIIToUTF16("firstname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("imhidden"),
                       string16(),
                       ASCIIToUTF16("hidden"),
-                      0),
+                      0,
+                      false),
             fields[2]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("notempty"),
                       ASCIIToUTF16("Hi"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[3]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("noautocomplete"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[4]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("notenabled"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[5]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[6]);
 
   // Fill the form.
@@ -468,7 +499,7 @@ TEST_F(FormManagerTest, FillForm) {
   form.fields[3].set_value(ASCIIToUTF16("Beta"));
   form.fields[4].set_value(ASCIIToUTF16("Gamma"));
   form.fields[5].set_value(ASCIIToUTF16("Delta"));
-  EXPECT_TRUE(form_manager.FillForm(form, WebNode()));
+  EXPECT_TRUE(form_manager.FillForm(form, input_element));
 
   // Verify the filled elements.
   WebDocument document = web_frame->document();
@@ -476,6 +507,8 @@ TEST_F(FormManagerTest, FillForm) {
       document.getElementById("firstname").to<WebInputElement>();
   EXPECT_TRUE(firstname.isAutofilled());
   EXPECT_EQ(ASCIIToUTF16("Wyatt"), firstname.value());
+  EXPECT_EQ(5, firstname.selectionStart());
+  EXPECT_EQ(5, firstname.selectionEnd());
 
   WebInputElement lastname =
       document.getElementById("lastname").to<WebInputElement>();
@@ -547,43 +580,50 @@ TEST_F(FormManagerTest, PreviewForm) {
                       ASCIIToUTF16("firstname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("imhidden"),
                       string16(),
                       ASCIIToUTF16("hidden"),
-                      0),
+                      0,
+                      false),
             fields[2]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("notempty"),
                       ASCIIToUTF16("Hi"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[3]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("noautocomplete"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[4]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("notenabled"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[5]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[6]);
 
   // Preview the form.
@@ -593,7 +633,7 @@ TEST_F(FormManagerTest, PreviewForm) {
   form.fields[3].set_value(ASCIIToUTF16("Beta"));
   form.fields[4].set_value(ASCIIToUTF16("Gamma"));
   form.fields[5].set_value(ASCIIToUTF16("Delta"));
-  EXPECT_TRUE(form_manager.PreviewForm(form));
+  EXPECT_TRUE(form_manager.PreviewForm(form, input_element));
 
   // Verify the previewed elements.
   WebDocument document = web_frame->document();
@@ -601,6 +641,8 @@ TEST_F(FormManagerTest, PreviewForm) {
       document.getElementById("firstname").to<WebInputElement>();
   EXPECT_TRUE(firstname.isAutofilled());
   EXPECT_EQ(ASCIIToUTF16("Wyatt"), firstname.suggestedValue());
+  EXPECT_EQ(0, firstname.selectionStart());
+  EXPECT_EQ(5, firstname.selectionEnd());
 
   WebInputElement lastname =
       document.getElementById("lastname").to<WebInputElement>();
@@ -688,19 +730,22 @@ TEST_F(FormManagerTest, Labels) {
                 ASCIIToUTF16("firstname"),
                 ASCIIToUTF16("John"),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields[1].StrictlyEqualsHack(
       FormField(ASCIIToUTF16("Last name:"),
                 ASCIIToUTF16("lastname"),
                 ASCIIToUTF16("Smith"),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields[2].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("reply-send"),
                 string16(),
                 ASCIIToUTF16("submit"),
-                0)));
+                0,
+                false)));
 }
 
 TEST_F(FormManagerTest, LabelsWithSpans) {
@@ -734,25 +779,30 @@ TEST_F(FormManagerTest, LabelsWithSpans) {
                 ASCIIToUTF16("firstname"),
                 ASCIIToUTF16("John"),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields[1].StrictlyEqualsHack(
       FormField(ASCIIToUTF16("Last name:"),
                 ASCIIToUTF16("lastname"),
                 ASCIIToUTF16("Smith"),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields[2].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("reply-send"),
                 string16(),
                 ASCIIToUTF16("submit"),
-                0)));
+                0,
+                false)));
 }
 
 // This test is different from FormManagerTest.Labels in that the label elements
 // for= attribute is set to the name of the form control element it is a label
 // for instead of the id of the form control element.  This is invalid because
-// the for= attribute must be set to the id of the form control element.
+// the for= attribute must be set to the id of the form control element;
+// however, current label parsing code will extract the text from the previous
+// label element and apply it to the following input field.
 TEST_F(FormManagerTest, InvalidLabels) {
   LoadHTML("<FORM name=\"TestForm\" action=\"http://cnn.com\" method=\"post\">"
            "  <LABEL for=\"firstname\"> First name: </LABEL>"
@@ -779,21 +829,27 @@ TEST_F(FormManagerTest, InvalidLabels) {
 
   const std::vector<FormField>& fields = form.fields;
   ASSERT_EQ(3U, fields.size());
-  EXPECT_TRUE(fields[0].StrictlyEqualsHack(FormField(string16(),
-                                           ASCIIToUTF16("firstname"),
-                                           ASCIIToUTF16("John"),
-                                           ASCIIToUTF16("text"),
-                                           20)));
-  EXPECT_TRUE(fields[1].StrictlyEqualsHack(FormField(string16(),
-                                           ASCIIToUTF16("lastname"),
-                                           ASCIIToUTF16("Smith"),
-                                           ASCIIToUTF16("text"),
-                                           20)));
-  EXPECT_TRUE(fields[2].StrictlyEqualsHack(FormField(string16(),
-                                           ASCIIToUTF16("reply-send"),
-                                           string16(),
-                                           ASCIIToUTF16("submit"),
-                                           0)));
+  EXPECT_TRUE(fields[0].StrictlyEqualsHack(
+      FormField(ASCIIToUTF16("First name:"),
+                ASCIIToUTF16("firstname"),
+                ASCIIToUTF16("John"),
+                ASCIIToUTF16("text"),
+                kDefaultMaxLength,
+                false)));
+  EXPECT_TRUE(fields[1].StrictlyEqualsHack(
+      FormField(ASCIIToUTF16("Last name:"),
+                ASCIIToUTF16("lastname"),
+                ASCIIToUTF16("Smith"),
+                ASCIIToUTF16("text"),
+                kDefaultMaxLength,
+                false)));
+  EXPECT_TRUE(fields[2].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("reply-send"),
+                string16(),
+                ASCIIToUTF16("submit"),
+                0,
+                false)));
 }
 
 // This test has three form control elements, only one of which has a label
@@ -832,19 +888,22 @@ TEST_F(FormManagerTest, OneLabelElementFirstControlElementDisabled) {
                       ASCIIToUTF16("middlename"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(ASCIIToUTF16("Last name:"),
                       ASCIIToUTF16("lastname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 }
 
@@ -878,19 +937,22 @@ TEST_F(FormManagerTest, LabelsInferredFromText) {
                       ASCIIToUTF16("firstname"),
                       ASCIIToUTF16("John"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(ASCIIToUTF16("Last name:"),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Smith"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 }
 
@@ -924,17 +986,20 @@ TEST_F(FormManagerTest, LabelsInferredFromTextHidden) {
                                                      ASCIIToUTF16("firstname"),
                                                      ASCIIToUTF16("John"),
                                                      ASCIIToUTF16("hidden"),
-                                                     0)));
+                                                     0,
+                                                     false)));
   EXPECT_TRUE(fields[1].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("lastname"),
                                                      ASCIIToUTF16("Smith"),
                                                      ASCIIToUTF16("hidden"),
-                                                     0)));
+                                                     0,
+                                                     false)));
   EXPECT_TRUE(fields[2].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("reply-send"),
                                                      string16(),
                                                      ASCIIToUTF16("submit"),
-                                                     0)));
+                                                     0,
+                                                     false)));
 }
 
 TEST_F(FormManagerTest, LabelsInferredFromParagraph) {
@@ -967,19 +1032,22 @@ TEST_F(FormManagerTest, LabelsInferredFromParagraph) {
                       ASCIIToUTF16("firstname"),
                       ASCIIToUTF16("John"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(ASCIIToUTF16("Last name:"),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Smith"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 }
 
@@ -1024,19 +1092,22 @@ TEST_F(FormManagerTest, LabelsInferredFromTableCell) {
                       ASCIIToUTF16("firstname"),
                       ASCIIToUTF16("John"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(ASCIIToUTF16("Last name:"),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Smith"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 }
 
@@ -1100,19 +1171,214 @@ TEST_F(FormManagerTest, LabelsInferredFromTableCellNested) {
                       ASCIIToUTF16("firstname"),
                       ASCIIToUTF16("John"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(ASCIIToUTF16("Last name:"),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Smith"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
+            fields[2]);
+}
+
+TEST_F(FormManagerTest, LabelsInferredFromTableEmptyTDs) {
+  LoadHTML("<FORM name=\"TestForm\" action=\"http://cnn.com\" method=\"post\">"
+           "<TABLE>"
+           "  <TR>"
+           "    <TD>"
+           "      <SPAN>*</SPAN>"
+           "      <B>First Name</B>"
+           "    </TD>"
+           "    <TD></TD>"
+           "    <TD>"
+           "      <INPUT type=\"text\" id=\"firstname\" value=\"John\"/>"
+           "    </TD>"
+           "  </TR>"
+           "  <TR>"
+           "    <TD>"
+           "      <SPAN>*</SPAN>"
+           "      <B>Last Name</B>"
+           "    </TD>"
+           "    <TD></TD>"
+           "    <TD>"
+           "      <INPUT type=\"text\" id=\"lastname\" value=\"Milton\"/>"
+           "    </TD>"
+           "  </TR>"
+           "  <TR>"
+           "    <TD></TD>"
+           "    <TD>"
+           "      <INPUT type=\"submit\" name=\"reply-send\" value=\"Send\"/>"
+           "    </TD>"
+           "  </TR>"
+           "</TABLE>"
+           "</FORM>");
+
+  WebFrame* web_frame = GetMainFrame();
+  ASSERT_NE(static_cast<WebFrame*>(NULL), web_frame);
+
+  FormManager form_manager;
+  form_manager.ExtractForms(web_frame);
+
+  std::vector<FormData> forms;
+  form_manager.GetFormsInFrame(web_frame, FormManager::REQUIRE_NONE, &forms);
+  ASSERT_EQ(1U, forms.size());
+
+  const FormData& form = forms[0];
+  EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
+  EXPECT_EQ(GURL(web_frame->url()), form.origin);
+  EXPECT_EQ(GURL("http://cnn.com"), form.action);
+
+  const std::vector<FormField>& fields = form.fields;
+  ASSERT_EQ(3U, fields.size());
+  EXPECT_EQ(FormField(ASCIIToUTF16("*First Name"),
+                      ASCIIToUTF16("firstname"),
+                      ASCIIToUTF16("John"),
+                      ASCIIToUTF16("text"),
+                      kDefaultMaxLength,
+                      false),
+            fields[0]);
+  EXPECT_EQ(FormField(ASCIIToUTF16("*Last Name"),
+                      ASCIIToUTF16("lastname"),
+                      ASCIIToUTF16("Milton"),
+                      ASCIIToUTF16("text"),
+                      kDefaultMaxLength,
+                      false),
+            fields[1]);
+  EXPECT_EQ(FormField(string16(),
+                      ASCIIToUTF16("reply-send"),
+                      ASCIIToUTF16("Send"),
+                      ASCIIToUTF16("submit"),
+                      0,
+                      false),
+            fields[2]);
+}
+
+TEST_F(FormManagerTest, LabelsInferredFromTableLabels) {
+  LoadHTML("<FORM name=\"TestForm\" action=\"http://cnn.com\" method=\"post\">"
+           "<TABLE>"
+           "  <TR>"
+           "    <TD>"
+           "      <LABEL>First Name:</LABEL>"
+           "      <INPUT type=\"text\" id=\"firstname\" value=\"John\"/>"
+           "    </TD>"
+           "  </TR>"
+           "  <TR>"
+           "    <TD>"
+           "      <LABEL>Last Name:</LABEL>"
+           "      <INPUT type=\"text\" id=\"lastname\" value=\"Smith\"/>"
+           "    </TD>"
+           "  </TR>"
+           "</TABLE>"
+           "<INPUT type=\"submit\" name=\"reply-send\" value=\"Send\"/>"
+           "</FORM>");
+
+  WebFrame* web_frame = GetMainFrame();
+  ASSERT_NE(static_cast<WebFrame*>(NULL), web_frame);
+
+  FormManager form_manager;
+  form_manager.ExtractForms(web_frame);
+
+  std::vector<FormData> forms;
+  form_manager.GetFormsInFrame(web_frame, FormManager::REQUIRE_NONE, &forms);
+  ASSERT_EQ(1U, forms.size());
+
+  const FormData& form = forms[0];
+  EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
+  EXPECT_EQ(GURL(web_frame->url()), form.origin);
+  EXPECT_EQ(GURL("http://cnn.com"), form.action);
+
+  const std::vector<FormField>& fields = form.fields;
+  ASSERT_EQ(3U, fields.size());
+  EXPECT_EQ(FormField(ASCIIToUTF16("First Name:"),
+                      ASCIIToUTF16("firstname"),
+                      ASCIIToUTF16("John"),
+                      ASCIIToUTF16("text"),
+                      kDefaultMaxLength,
+                      false),
+            fields[0]);
+  EXPECT_EQ(FormField(ASCIIToUTF16("Last Name:"),
+                      ASCIIToUTF16("lastname"),
+                      ASCIIToUTF16("Smith"),
+                      ASCIIToUTF16("text"),
+                      kDefaultMaxLength,
+                      false),
+            fields[1]);
+  EXPECT_EQ(FormField(string16(),
+                      ASCIIToUTF16("reply-send"),
+                      ASCIIToUTF16("Send"),
+                      ASCIIToUTF16("submit"),
+                      0,
+                      false),
+            fields[2]);
+}
+
+TEST_F(FormManagerTest, LabelsInferredFromTableTDInterveningElements) {
+  LoadHTML("<FORM name=\"TestForm\" action=\"http://cnn.com\" method=\"post\">"
+           "<TABLE>"
+           "  <TR>"
+           "    <TD>"
+           "      First Name:"
+           "      <BR>"
+           "      <INPUT type=\"text\" id=\"firstname\" value=\"John\"/>"
+           "    </TD>"
+           "  </TR>"
+           "  <TR>"
+           "    <TD>"
+           "      Last Name:"
+           "      <BR>"
+           "      <INPUT type=\"text\" id=\"lastname\" value=\"Smith\"/>"
+           "    </TD>"
+           "  </TR>"
+           "</TABLE>"
+           "<INPUT type=\"submit\" name=\"reply-send\" value=\"Send\"/>"
+           "</FORM>");
+
+  WebFrame* web_frame = GetMainFrame();
+  ASSERT_NE(static_cast<WebFrame*>(NULL), web_frame);
+
+  FormManager form_manager;
+  form_manager.ExtractForms(web_frame);
+
+  std::vector<FormData> forms;
+  form_manager.GetFormsInFrame(web_frame, FormManager::REQUIRE_NONE, &forms);
+  ASSERT_EQ(1U, forms.size());
+
+  const FormData& form = forms[0];
+  EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
+  EXPECT_EQ(GURL(web_frame->url()), form.origin);
+  EXPECT_EQ(GURL("http://cnn.com"), form.action);
+
+  const std::vector<FormField>& fields = form.fields;
+  ASSERT_EQ(3U, fields.size());
+  EXPECT_EQ(FormField(ASCIIToUTF16("First Name:"),
+                      ASCIIToUTF16("firstname"),
+                      ASCIIToUTF16("John"),
+                      ASCIIToUTF16("text"),
+                      kDefaultMaxLength,
+                      false),
+            fields[0]);
+  EXPECT_EQ(FormField(ASCIIToUTF16("Last Name:"),
+                      ASCIIToUTF16("lastname"),
+                      ASCIIToUTF16("Smith"),
+                      ASCIIToUTF16("text"),
+                      kDefaultMaxLength,
+                      false),
+            fields[1]);
+  EXPECT_EQ(FormField(string16(),
+                      ASCIIToUTF16("reply-send"),
+                      ASCIIToUTF16("Send"),
+                      ASCIIToUTF16("submit"),
+                      0,
+                      false),
             fields[2]);
 }
 
@@ -1173,19 +1439,22 @@ TEST_F(FormManagerTest, LabelsInferredFromDefinitionList) {
                       ASCIIToUTF16("firstname"),
                       ASCIIToUTF16("John"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(ASCIIToUTF16("Last name:"),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Smith"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 }
 
@@ -1219,19 +1488,22 @@ TEST_F(FormManagerTest, LabelsInferredWithSameName) {
                       ASCIIToUTF16("Address"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(ASCIIToUTF16("Address Line 2:"),
                       ASCIIToUTF16("Address"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 }
 
@@ -1263,8 +1535,7 @@ TEST_F(FormManagerTest, LabelsInferredWithImageTags) {
   FormData form;
   EXPECT_TRUE(FormManager::WebFormElementToFormData(forms[0],
                                                     FormManager::REQUIRE_NONE,
-                                                    true,
-                                                    false,
+                                                    FormManager::EXTRACT_VALUE,
                                                     &form));
   EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
   EXPECT_EQ(GURL(frame->url()), form.origin);
@@ -1276,38 +1547,99 @@ TEST_F(FormManagerTest, LabelsInferredWithImageTags) {
                       ASCIIToUTF16("dayphone1"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(ASCIIToUTF16("-"),
                       ASCIIToUTF16("dayphone2"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(ASCIIToUTF16("-"),
                       ASCIIToUTF16("dayphone3"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[2]);
   EXPECT_EQ(FormField(ASCIIToUTF16("ext.:"),
                       ASCIIToUTF16("dayphone4"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[3]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("dummy"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[4]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[5]);
+}
+
+TEST_F(FormManagerTest, LabelsInferredFromDivTable) {
+  LoadHTML("<FORM name=\"TestForm\" action=\"http://cnn.com\" method=\"post\">"
+           "<DIV>First Name:<BR>"
+           "  <SPAN>"
+           "    <INPUT type=\"text\" name=\"firstname\" value=\"John\">"
+           "  </SPAN>"
+           "</DIV>"
+           "<DIV>Last Name:<BR>"
+           "  <SPAN>"
+           "    <INPUT type=\"text\" name=\"lastname\" value=\"Doe\">"
+           "  </SPAN>"
+           "</DIV>"
+           "<input type=\"submit\" name=\"reply-send\" value=\"Send\">"
+           "</FORM>");
+
+  WebFrame* web_frame = GetMainFrame();
+  ASSERT_NE(static_cast<WebFrame*>(NULL), web_frame);
+
+  FormManager form_manager;
+  form_manager.ExtractForms(web_frame);
+
+  std::vector<FormData> forms;
+  form_manager.GetFormsInFrame(web_frame, FormManager::REQUIRE_NONE, &forms);
+  ASSERT_EQ(1U, forms.size());
+
+  const FormData& form = forms[0];
+  EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
+  EXPECT_EQ(GURL(web_frame->url()), form.origin);
+  EXPECT_EQ(GURL("http://cnn.com"), form.action);
+
+  const std::vector<FormField>& fields = form.fields;
+  ASSERT_EQ(3U, fields.size());
+  EXPECT_EQ(FormField(ASCIIToUTF16("First Name:"),
+                      ASCIIToUTF16("firstname"),
+                      ASCIIToUTF16("John"),
+                      ASCIIToUTF16("text"),
+                      kDefaultMaxLength,
+                      false),
+            fields[0]);
+  EXPECT_EQ(FormField(ASCIIToUTF16("Last Name:"),
+                      ASCIIToUTF16("lastname"),
+                      string16(),
+                      ASCIIToUTF16("text"),
+                      kDefaultMaxLength,
+                      false),
+            fields[1]);
+  EXPECT_EQ(FormField(string16(),
+                      ASCIIToUTF16("reply-send"),
+                      ASCIIToUTF16("Send"),
+                      ASCIIToUTF16("submit"),
+                      0,
+                      false),
+            fields[2]);
 }
 
 TEST_F(FormManagerTest, FillFormMaxLength) {
@@ -1346,19 +1678,22 @@ TEST_F(FormManagerTest, FillFormMaxLength) {
                       ASCIIToUTF16("firstname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      5,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      5,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 
   // Fill the form.
@@ -1380,19 +1715,22 @@ TEST_F(FormManagerTest, FillFormMaxLength) {
                 ASCIIToUTF16("firstname"),
                 ASCIIToUTF16("Broth"),
                 ASCIIToUTF16("text"),
-                20)));
+                5,
+                false)));
   EXPECT_TRUE(fields2[1].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("lastname"),
                 ASCIIToUTF16("Jonat"),
                 ASCIIToUTF16("text"),
-                20)));
+                5,
+                false)));
   EXPECT_TRUE(fields2[2].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("reply-send"),
                 string16(),
                 ASCIIToUTF16("submit"),
-                0)));
+                0,
+                false)));
 }
 
 // This test uses negative values of the maxlength attribute for input elements.
@@ -1434,19 +1772,22 @@ TEST_F(FormManagerTest, FillFormNegativeMaxLength) {
                       ASCIIToUTF16("firstname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 
   // Fill the form.
@@ -1469,19 +1810,22 @@ TEST_F(FormManagerTest, FillFormNegativeMaxLength) {
                 ASCIIToUTF16("firstname"),
                 ASCIIToUTF16("Brother"),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields2[1].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("lastname"),
                 ASCIIToUTF16("Jonathan"),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields2[2].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("reply-send"),
                 string16(),
                 ASCIIToUTF16("submit"),
-                0)));
+                0,
+                false)));
 }
 
 // This test sends a FormData object to FillForm with more fields than are in
@@ -1520,28 +1864,32 @@ TEST_F(FormManagerTest, FillFormMoreFormDataFields) {
                    ASCIIToUTF16("prefix"),
                    string16(),
                    ASCIIToUTF16("text"),
-                   20);
+                   kDefaultMaxLength,
+                   false);
   form->fields.insert(form->fields.begin(), field1);
 
   FormField field2(string16(),
                    ASCIIToUTF16("hidden"),
                    string16(),
                    ASCIIToUTF16("text"),
-                   20);
+                   kDefaultMaxLength,
+                   false);
   form->fields.insert(form->fields.begin() + 2, field2);
 
   FormField field3(string16(),
                    ASCIIToUTF16("second"),
                    string16(),
                    ASCIIToUTF16("text"),
-                   20);
+                   kDefaultMaxLength,
+                   false);
   form->fields.insert(form->fields.begin() + 4, field3);
 
   FormField field4(string16(),
                    ASCIIToUTF16("postfix"),
                    string16(),
                    ASCIIToUTF16("text"),
-                   20);
+                   kDefaultMaxLength,
+                   false);
   form->fields.insert(form->fields.begin() + 6, field4);
 
   // Fill the form.
@@ -1572,22 +1920,26 @@ TEST_F(FormManagerTest, FillFormMoreFormDataFields) {
                                                      ASCIIToUTF16("firstname"),
                                                      ASCIIToUTF16("Brother"),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[1].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("middlename"),
                                                      ASCIIToUTF16("Joseph"),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[2].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("lastname"),
                                                      ASCIIToUTF16("Jonathan"),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[3].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("reply-send"),
                                                      string16(),
                                                      ASCIIToUTF16("submit"),
-                                                     0)));
+                                                     0,
+                                                     false)));
 }
 
 // This test sends a FormData object to FillForm with fewer fields than are in
@@ -1650,42 +2002,50 @@ TEST_F(FormManagerTest, FillFormFewerFormDataFields) {
                                                      ASCIIToUTF16("prefix"),
                                                      string16(),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[1].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("firstname"),
                                                      ASCIIToUTF16("Brother"),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[2].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("hidden"),
                                                      string16(),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[3].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("middlename"),
                                                      ASCIIToUTF16("Joseph"),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[4].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("second"),
                                                      string16(),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[5].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("lastname"),
                                                      ASCIIToUTF16("Jonathan"),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[6].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("postfix"),
                                                      string16(),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[7].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("reply-send"),
                                                      string16(),
                                                      ASCIIToUTF16("submit"),
-                                                     0)));
+                                                     0,
+                                                     false)));
 }
 
 // This test sends a FormData object to FillForm with a field changed from
@@ -1745,22 +2105,26 @@ TEST_F(FormManagerTest, FillFormChangedFormDataFields) {
                                            ASCIIToUTF16("firstname"),
                                            ASCIIToUTF16("Brother"),
                                            ASCIIToUTF16("text"),
-                                           20)));
+                                           kDefaultMaxLength,
+                                           false)));
   EXPECT_TRUE(fields[1].StrictlyEqualsHack(FormField(string16(),
                                            ASCIIToUTF16("middlename"),
                                            string16(),
                                            ASCIIToUTF16("text"),
-                                           20)));
+                                           kDefaultMaxLength,
+                                           false)));
   EXPECT_TRUE(fields[2].StrictlyEqualsHack(FormField(string16(),
                                            ASCIIToUTF16("lastname"),
                                            ASCIIToUTF16("Jonathan"),
                                            ASCIIToUTF16("text"),
-                                           20)));
+                                           kDefaultMaxLength,
+                                           false)));
   EXPECT_TRUE(fields[3].StrictlyEqualsHack(FormField(string16(),
                                            ASCIIToUTF16("reply-send"),
                                            string16(),
                                            ASCIIToUTF16("submit"),
-                                           0)));
+                                           0,
+                                           false)));
 }
 
 // This test sends a FormData object to FillForm with fewer fields than are in
@@ -1817,27 +2181,32 @@ TEST_F(FormManagerTest, FillFormExtraFieldInCache) {
                                                      ASCIIToUTF16("firstname"),
                                                      ASCIIToUTF16("Brother"),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[1].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("middlename"),
                                                      ASCIIToUTF16("Joseph"),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[2].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("lastname"),
                                                      ASCIIToUTF16("Jonathan"),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[3].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("postfix"),
                                                      string16(),
                                                      ASCIIToUTF16("text"),
-                                                     20)));
+                                                     kDefaultMaxLength,
+                                                     false)));
   EXPECT_TRUE(fields[4].StrictlyEqualsHack(FormField(string16(),
                                                      ASCIIToUTF16("reply-send"),
                                                      string16(),
                                                      ASCIIToUTF16("submit"),
-                                                     0)));
+                                                     0,
+                                                     false)));
 }
 
 TEST_F(FormManagerTest, FillFormEmptyName) {
@@ -1876,19 +2245,22 @@ TEST_F(FormManagerTest, FillFormEmptyName) {
                       ASCIIToUTF16("firstname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       string16(),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 
   // Fill the form.
@@ -1910,19 +2282,22 @@ TEST_F(FormManagerTest, FillFormEmptyName) {
                       ASCIIToUTF16("firstname"),
                       ASCIIToUTF16("Wyatt"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
                       fields2[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Earp"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
                       fields2[1]);
   EXPECT_EQ(FormField(string16(),
                       string16(),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
                       fields2[2]);
 }
 
@@ -1968,19 +2343,22 @@ TEST_F(FormManagerTest, FillFormEmptyFormNames) {
                       ASCIIToUTF16("apple"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("banana"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       string16(),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 
   // Fill the form.
@@ -2002,19 +2380,22 @@ TEST_F(FormManagerTest, FillFormEmptyFormNames) {
                       ASCIIToUTF16("apple"),
                       ASCIIToUTF16("Red"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
                       fields2[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("banana"),
                       ASCIIToUTF16("Yellow"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
                       fields2[1]);
   EXPECT_EQ(FormField(string16(),
                       string16(),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
                       fields2[2]);
 }
 
@@ -2042,8 +2423,7 @@ TEST_F(FormManagerTest, ThreePartPhone) {
   FormData form;
   EXPECT_TRUE(FormManager::WebFormElementToFormData(forms[0],
                                                     FormManager::REQUIRE_NONE,
-                                                    true,
-                                                    false,
+                                                    FormManager::EXTRACT_VALUE,
                                                     &form));
   EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
   EXPECT_EQ(GURL(frame->url()), form.origin);
@@ -2055,50 +2435,55 @@ TEST_F(FormManagerTest, ThreePartPhone) {
                       ASCIIToUTF16("dayphone1"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(ASCIIToUTF16("-"),
                       ASCIIToUTF16("dayphone2"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(ASCIIToUTF16("-"),
                       ASCIIToUTF16("dayphone3"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[2]);
   EXPECT_EQ(FormField(ASCIIToUTF16("ext.:"),
                       ASCIIToUTF16("dayphone4"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[3]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[4]);
 }
 
 
-TEST_F(FormManagerTest, SizeFields) {
+TEST_F(FormManagerTest, MaxLengthFields) {
   LoadHTML("<FORM name=\"TestForm\" action=\"http://cnn.com\" method=\"post\">"
            "  Phone:"
-           "  <input type=\"text\" size=\"3\" name=\"dayphone1\">"
+           "  <input type=\"text\" maxlength=\"3\" name=\"dayphone1\">"
            "  -"
-           "  <input type=\"text\" size=\"3\" name=\"dayphone2\">"
+           "  <input type=\"text\" maxlength=\"3\" name=\"dayphone2\">"
            "  -"
-           "  <input type=\"text\" size=\"4\" name=\"dayphone3\">"
+           "  <input type=\"text\" maxlength=\"4\" size=\"5\""
+           "         name=\"dayphone3\">"
            "  ext.:"
-           "  <input type=\"text\" size=\"5\" name=\"dayphone4\">"
+           "  <input type=\"text\" maxlength=\"5\" name=\"dayphone4\">"
            "  <input type=\"text\" name=\"default1\">"
-           "  <input type=\"text\" size=\"-1\" name=\"invalid1\">"
+           "  <input type=\"text\" maxlength=\"-1\" name=\"invalid1\">"
            "  <input type=\"submit\" name=\"reply-send\" value=\"Send\">"
            "</FORM>");
-
 
   WebFrame* frame = GetMainFrame();
   ASSERT_NE(static_cast<WebFrame*>(NULL), frame);
@@ -2110,8 +2495,7 @@ TEST_F(FormManagerTest, SizeFields) {
   FormData form;
   EXPECT_TRUE(FormManager::WebFormElementToFormData(forms[0],
                                                     FormManager::REQUIRE_NONE,
-                                                    true,
-                                                    false,
+                                                    FormManager::EXTRACT_VALUE,
                                                     &form));
   EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
   EXPECT_EQ(GURL(frame->url()), form.origin);
@@ -2123,45 +2507,52 @@ TEST_F(FormManagerTest, SizeFields) {
                       ASCIIToUTF16("dayphone1"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      3),
+                      3,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(ASCIIToUTF16("-"),
                       ASCIIToUTF16("dayphone2"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      3),
+                      3,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(ASCIIToUTF16("-"),
                       ASCIIToUTF16("dayphone3"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      4),
+                      4,
+                      false),
             fields[2]);
   EXPECT_EQ(FormField(ASCIIToUTF16("ext.:"),
                       ASCIIToUTF16("dayphone4"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      5),
+                      5,
+                      false),
             fields[3]);
-  // When unspecified |size|, default is 20.
+  // When unspecified |size|, default is returned.
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("default1"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[4]);
-  // When invalid |size| same value is returned.
+  // When invalid |size|, default is returned.
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("invalid1"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      -1),
+                      kDefaultMaxLength,
+                      false),
             fields[5]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("reply-send"),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[6]);
 }
 
@@ -2207,19 +2598,22 @@ TEST_F(FormManagerTest, FillFormNonEmptyField) {
                       ASCIIToUTF16("firstname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       string16(),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
             fields[1]);
   EXPECT_EQ(FormField(string16(),
                       string16(),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
             fields[2]);
 
   // Fill the form.
@@ -2241,20 +2635,27 @@ TEST_F(FormManagerTest, FillFormNonEmptyField) {
                       ASCIIToUTF16("firstname"),
                       ASCIIToUTF16("Wyatt"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
                       fields2[0]);
   EXPECT_EQ(FormField(string16(),
                       ASCIIToUTF16("lastname"),
                       ASCIIToUTF16("Earp"),
                       ASCIIToUTF16("text"),
-                      20),
+                      kDefaultMaxLength,
+                      false),
                       fields2[1]);
   EXPECT_EQ(FormField(string16(),
                       string16(),
                       ASCIIToUTF16("Send"),
                       ASCIIToUTF16("submit"),
-                      0),
+                      0,
+                      false),
                       fields2[2]);
+
+  // Verify that the cursor position has been updated.
+  EXPECT_EQ(5, input_element.selectionStart());
+  EXPECT_EQ(5, input_element.selectionEnd());
 }
 
 TEST_F(FormManagerTest, ClearFormWithNode) {
@@ -2310,37 +2711,47 @@ TEST_F(FormManagerTest, ClearFormWithNode) {
                 ASCIIToUTF16("firstname"),
                 string16(),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields2[1].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("lastname"),
                 string16(),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields2[2].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("noAC"),
                 string16(),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields2[3].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("notenabled"),
                 ASCIIToUTF16("no clear"),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields2[4].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("notvisible"),
                 ASCIIToUTF16("apple"),
                 ASCIIToUTF16("hidden"),
-                0)));
+                0,
+                false)));
   EXPECT_TRUE(fields2[5].StrictlyEqualsHack(
       FormField(string16(),
                 string16(),
                 string16(),
                 ASCIIToUTF16("submit"),
-                0)));
+                0,
+                false)));
+
+  // Verify that the cursor position has been updated.
+  EXPECT_EQ(0, firstname.selectionStart());
+  EXPECT_EQ(0, firstname.selectionEnd());
 }
 
 TEST_F(FormManagerTest, ClearFormWithNodeContainingSelectOne) {
@@ -2399,25 +2810,33 @@ TEST_F(FormManagerTest, ClearFormWithNodeContainingSelectOne) {
                 ASCIIToUTF16("firstname"),
                 string16(),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields2[1].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("lastname"),
                 string16(),
                 ASCIIToUTF16("text"),
-                20)));
+                kDefaultMaxLength,
+                false)));
   EXPECT_TRUE(fields2[2].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("state"),
                 ASCIIToUTF16("?"),
                 ASCIIToUTF16("select-one"),
-                0)));
+                0,
+                false)));
   EXPECT_TRUE(fields2[3].StrictlyEqualsHack(
       FormField(string16(),
                 string16(),
                 string16(),
                 ASCIIToUTF16("submit"),
-                0)));
+                0,
+                false)));
+
+  // Verify that the cursor position has been updated.
+  EXPECT_EQ(0, firstname.selectionStart());
+  EXPECT_EQ(0, firstname.selectionEnd());
 }
 
 TEST_F(FormManagerTest, ClearPreviewedFormWithNode) {
@@ -2455,12 +2874,124 @@ TEST_F(FormManagerTest, ClearPreviewedFormWithNode) {
   email.setSuggestedValue(ASCIIToUTF16("wyatt@earp.com"));
 
   // Clear the previewed fields.
-  EXPECT_TRUE(form_manager.ClearPreviewedFormWithNode(firstname));
+  EXPECT_TRUE(form_manager.ClearPreviewedFormWithNode(lastname, false));
 
-  // Fields with non-empty values are not modified.
+  // Fields with empty suggestions suggestions are not modified.
   EXPECT_EQ(ASCIIToUTF16("Wyatt"), firstname.value());
   EXPECT_TRUE(firstname.suggestedValue().isEmpty());
   EXPECT_TRUE(firstname.isAutofilled());
+
+  // Verify the previewed fields are cleared.
+  EXPECT_TRUE(lastname.value().isEmpty());
+  EXPECT_TRUE(lastname.suggestedValue().isEmpty());
+  EXPECT_FALSE(lastname.isAutofilled());
+  EXPECT_TRUE(email.value().isEmpty());
+  EXPECT_TRUE(email.suggestedValue().isEmpty());
+  EXPECT_FALSE(email.isAutofilled());
+
+  // Verify that the cursor position has been updated.
+  EXPECT_EQ(0, lastname.selectionStart());
+  EXPECT_EQ(0, lastname.selectionEnd());
+}
+
+TEST_F(FormManagerTest, ClearPreviewedFormWithNonEmptyInitiatingNode) {
+  LoadHTML("<FORM name=\"TestForm\" action=\"http://buh.com\" method=\"post\">"
+           "  <INPUT type=\"text\" id=\"firstname\" value=\"W\"/>"
+           "  <INPUT type=\"text\" id=\"lastname\"/>"
+           "  <INPUT type=\"text\" id=\"email\"/>"
+           "  <INPUT type=\"submit\" value=\"Send\"/>"
+           "</FORM>");
+
+  WebFrame* web_frame = GetMainFrame();
+  ASSERT_NE(static_cast<WebFrame*>(NULL), web_frame);
+
+  FormManager form_manager;
+  form_manager.ExtractForms(web_frame);
+
+  // Verify that we have the form.
+  std::vector<FormData> forms;
+  form_manager.GetFormsInFrame(web_frame, FormManager::REQUIRE_NONE, &forms);
+  ASSERT_EQ(1U, forms.size());
+
+  // Set the auto-filled attribute.
+  WebInputElement firstname =
+      web_frame->document().getElementById("firstname").to<WebInputElement>();
+  firstname.setAutofilled(true);
+  WebInputElement lastname =
+      web_frame->document().getElementById("lastname").to<WebInputElement>();
+  lastname.setAutofilled(true);
+  WebInputElement email =
+      web_frame->document().getElementById("email").to<WebInputElement>();
+  email.setAutofilled(true);
+
+  // Set the suggested values on all of the elements.
+  firstname.setSuggestedValue(ASCIIToUTF16("Wyatt"));
+  lastname.setSuggestedValue(ASCIIToUTF16("Earp"));
+  email.setSuggestedValue(ASCIIToUTF16("wyatt@earp.com"));
+
+  // Clear the previewed fields.
+  EXPECT_TRUE(form_manager.ClearPreviewedFormWithNode(firstname, false));
+
+  // Fields with non-empty values are restored.
+  EXPECT_EQ(ASCIIToUTF16("W"), firstname.value());
+  EXPECT_TRUE(firstname.suggestedValue().isEmpty());
+  EXPECT_FALSE(firstname.isAutofilled());
+  EXPECT_EQ(1, firstname.selectionStart());
+  EXPECT_EQ(1, firstname.selectionEnd());
+
+  // Verify the previewed fields are cleared.
+  EXPECT_TRUE(lastname.value().isEmpty());
+  EXPECT_TRUE(lastname.suggestedValue().isEmpty());
+  EXPECT_FALSE(lastname.isAutofilled());
+  EXPECT_TRUE(email.value().isEmpty());
+  EXPECT_TRUE(email.suggestedValue().isEmpty());
+  EXPECT_FALSE(email.isAutofilled());
+}
+
+TEST_F(FormManagerTest, ClearPreviewedFormWithAutofilledInitiatingNode) {
+  LoadHTML("<FORM name=\"TestForm\" action=\"http://buh.com\" method=\"post\">"
+           "  <INPUT type=\"text\" id=\"firstname\" value=\"W\"/>"
+           "  <INPUT type=\"text\" id=\"lastname\"/>"
+           "  <INPUT type=\"text\" id=\"email\"/>"
+           "  <INPUT type=\"submit\" value=\"Send\"/>"
+           "</FORM>");
+
+  WebFrame* web_frame = GetMainFrame();
+  ASSERT_NE(static_cast<WebFrame*>(NULL), web_frame);
+
+  FormManager form_manager;
+  form_manager.ExtractForms(web_frame);
+
+  // Verify that we have the form.
+  std::vector<FormData> forms;
+  form_manager.GetFormsInFrame(web_frame, FormManager::REQUIRE_NONE, &forms);
+  ASSERT_EQ(1U, forms.size());
+
+  // Set the auto-filled attribute.
+  WebInputElement firstname =
+      web_frame->document().getElementById("firstname").to<WebInputElement>();
+  firstname.setAutofilled(true);
+  WebInputElement lastname =
+      web_frame->document().getElementById("lastname").to<WebInputElement>();
+  lastname.setAutofilled(true);
+  WebInputElement email =
+      web_frame->document().getElementById("email").to<WebInputElement>();
+  email.setAutofilled(true);
+
+  // Set the suggested values on all of the elements.
+  firstname.setSuggestedValue(ASCIIToUTF16("Wyatt"));
+  lastname.setSuggestedValue(ASCIIToUTF16("Earp"));
+  email.setSuggestedValue(ASCIIToUTF16("wyatt@earp.com"));
+
+  // Clear the previewed fields.
+  EXPECT_TRUE(form_manager.ClearPreviewedFormWithNode(firstname, true));
+
+  // Fields with non-empty values are restored.
+  EXPECT_EQ(ASCIIToUTF16("W"), firstname.value());
+  EXPECT_TRUE(firstname.suggestedValue().isEmpty());
+  EXPECT_TRUE(firstname.isAutofilled());
+  EXPECT_EQ(1, firstname.selectionStart());
+  EXPECT_EQ(1, firstname.selectionEnd());
 
   // Verify the previewed fields are cleared.
   EXPECT_TRUE(lastname.value().isEmpty());
@@ -2533,19 +3064,22 @@ TEST_F(FormManagerTest, LabelsHiddenFields) {
                 ASCIIToUTF16("firstname"),
                 ASCIIToUTF16("John"),
                 ASCIIToUTF16("hidden"),
-                0)));
+                0,
+                false)));
   EXPECT_TRUE(fields[1].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("lastname"),
                 ASCIIToUTF16("Smith"),
                 ASCIIToUTF16("hidden"),
-                0)));
+                0,
+                false)));
   EXPECT_TRUE(fields[2].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("reply-send"),
                 string16(),
                 ASCIIToUTF16("submit"),
-                0)));
+                0,
+                false)));
 }
 
 TEST_F(FormManagerTest, LabelForElementHidden) {
@@ -2566,6 +3100,114 @@ TEST_F(FormManagerTest, LabelForElementHidden) {
   // Hidden form control element should not have a label set.
   FormManager form_manager;
   EXPECT_EQ(string16(), form_manager.LabelForElement(firstname));
+}
+
+TEST_F(FormManagerTest, SelectOneAsText) {
+  LoadHTML("<FORM name=\"TestForm\" action=\"http://cnn.com\" method=\"post\">"
+           "  <INPUT type=\"text\" id=\"firstname\" value=\"John\"/>"
+           "  <INPUT type=\"text\" id=\"lastname\" value=\"Smith\"/>"
+           "  <SELECT id=\"country\">"
+           "    <OPTION value=\"AF\">Afghanistan</OPTION>"
+           "    <OPTION value=\"AL\">Albania</OPTION>"
+           "    <OPTION value=\"DZ\">Algeria</OPTION>"
+           "  </SELECT>"
+           "  <INPUT type=\"submit\" name=\"reply-send\" value=\"Send\"/>"
+           "</FORM>");
+
+  WebFrame* frame = GetMainFrame();
+  ASSERT_NE(static_cast<WebFrame*>(NULL), frame);
+
+  // Set the value of the select-one.
+  WebSelectElement select_element =
+      frame->document().getElementById("country").to<WebSelectElement>();
+  select_element.setValue(WebString::fromUTF8("AL"));
+
+  WebVector<WebFormElement> forms;
+  frame->forms(forms);
+  ASSERT_EQ(1U, forms.size());
+
+  FormData form;
+
+  // Extract the country select-one value as text.
+  EXPECT_TRUE(FormManager::WebFormElementToFormData(
+      forms[0], FormManager::REQUIRE_NONE,
+      static_cast<FormManager::ExtractMask>(FormManager::EXTRACT_VALUE |
+          FormManager::EXTRACT_OPTION_TEXT),
+          &form));
+  EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
+  EXPECT_EQ(GURL(frame->url()), form.origin);
+  EXPECT_EQ(GURL("http://cnn.com"), form.action);
+
+  const std::vector<FormField>& fields = form.fields;
+  ASSERT_EQ(4U, fields.size());
+  EXPECT_TRUE(fields[0].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("firstname"),
+                ASCIIToUTF16("John"),
+                ASCIIToUTF16("text"),
+                kDefaultMaxLength,
+                false)));
+  EXPECT_TRUE(fields[1].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("lastname"),
+                ASCIIToUTF16("Smith"),
+                ASCIIToUTF16("text"),
+                kDefaultMaxLength,
+                false)));
+  EXPECT_TRUE(fields[2].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("country"),
+                ASCIIToUTF16("Albania"),
+                ASCIIToUTF16("select-one"),
+                0,
+                false)));
+  EXPECT_TRUE(fields[3].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("reply-send"),
+                string16(),
+                ASCIIToUTF16("submit"),
+                0,
+                false)));
+
+  form.fields.clear();
+  // Extract the country select-one value as value.
+  EXPECT_TRUE(FormManager::WebFormElementToFormData(forms[0],
+                                                    FormManager::REQUIRE_NONE,
+                                                    FormManager::EXTRACT_VALUE,
+                                                    &form));
+  EXPECT_EQ(ASCIIToUTF16("TestForm"), form.name);
+  EXPECT_EQ(GURL(frame->url()), form.origin);
+  EXPECT_EQ(GURL("http://cnn.com"), form.action);
+
+  ASSERT_EQ(4U, fields.size());
+  EXPECT_TRUE(fields[0].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("firstname"),
+                ASCIIToUTF16("John"),
+                ASCIIToUTF16("text"),
+                kDefaultMaxLength,
+                false)));
+  EXPECT_TRUE(fields[1].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("lastname"),
+                ASCIIToUTF16("Smith"),
+                ASCIIToUTF16("text"),
+                kDefaultMaxLength,
+                false)));
+  EXPECT_TRUE(fields[2].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("country"),
+                ASCIIToUTF16("AL"),
+                ASCIIToUTF16("select-one"),
+                0,
+                false)));
+  EXPECT_TRUE(fields[3].StrictlyEqualsHack(
+      FormField(string16(),
+                ASCIIToUTF16("reply-send"),
+                string16(),
+                ASCIIToUTF16("submit"),
+                0,
+                false)));
 }
 
 }  // namespace

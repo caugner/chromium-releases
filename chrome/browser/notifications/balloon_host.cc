@@ -7,6 +7,7 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/notifications/balloon.h"
+#include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/site_instance.h"
@@ -17,6 +18,31 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/common/renderer_preferences.h"
 #include "chrome/common/url_constants.h"
+#include "webkit/glue/webpreferences.h"
+
+namespace {
+class BalloonPaintObserver : public RenderWidgetHost::PaintObserver {
+ public:
+  explicit BalloonPaintObserver(BalloonHost* balloon_host)
+      : balloon_host_(balloon_host) {
+  }
+
+  virtual void RenderWidgetHostWillPaint(RenderWidgetHost* rhw) {}
+  virtual void RenderWidgetHostDidPaint(RenderWidgetHost* rwh);
+
+ private:
+  BalloonHost* balloon_host_;
+
+  DISALLOW_COPY_AND_ASSIGN(BalloonPaintObserver);
+};
+
+void BalloonPaintObserver::RenderWidgetHostDidPaint(RenderWidgetHost* rwh) {
+  balloon_host_->RenderWidgetHostDidPaint();
+  // WARNING: we may have been deleted (if the balloon host cleared the paint
+  // observer).
+}
+
+}  // namespace
 
 BalloonHost::BalloonHost(Balloon* balloon)
     : render_view_host_(NULL),
@@ -40,16 +66,46 @@ BalloonHost::BalloonHost(Balloon* balloon)
 }
 
 void BalloonHost::Shutdown() {
+  NotifyDisconnect();
   if (render_view_host_) {
     render_view_host_->Shutdown();
     render_view_host_ = NULL;
   }
 }
 
+Browser* BalloonHost::GetBrowser() const {
+  // Notifications aren't associated with a particular browser.
+  return NULL;
+}
+
+gfx::NativeView BalloonHost::GetNativeViewOfHost() {
+  // TODO(aa): Should this return the native view of the BalloonView*?
+  return NULL;
+}
+
+TabContents* BalloonHost::associated_tab_contents() const { return NULL; }
+
+const string16& BalloonHost::GetSource() const {
+  return balloon_->notification().display_source();
+}
+
 WebPreferences BalloonHost::GetWebkitPrefs() {
-  WebPreferences prefs;
-  prefs.allow_scripts_to_close_windows = true;
-  return prefs;
+  WebPreferences web_prefs =
+      RenderViewHostDelegateHelper::GetWebkitPrefs(GetProfile(), enable_dom_ui_);
+  web_prefs.allow_scripts_to_close_windows = true;
+  return web_prefs;
+}
+
+SiteInstance* BalloonHost::GetSiteInstance() const {
+  return site_instance_.get();
+}
+
+Profile* BalloonHost::GetProfile() const {
+  return balloon_->profile();
+}
+
+const GURL& BalloonHost::GetURL() const {
+  return balloon_->notification().content_url();
 }
 
 void BalloonHost::Close(RenderViewHost* render_view_host) {
@@ -61,8 +117,12 @@ void BalloonHost::RenderViewCreated(RenderViewHost* render_view_host) {
   render_view_host->Send(new ViewMsg_DisableScrollbarsForSmallWindows(
       render_view_host->routing_id(), balloon_->min_scrollbar_size()));
   render_view_host->WasResized();
+#if !defined(OS_MACOSX)
+  // TODO(levin): Make all of the code that went in originally with this change
+  // to be cross-platform. See http://crbug.com/64720
   render_view_host->EnablePreferredSizeChangedMode(
       kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow);
+#endif
 }
 
 void BalloonHost::RenderViewReady(RenderViewHost* render_view_host) {
@@ -74,6 +134,18 @@ void BalloonHost::RenderViewReady(RenderViewHost* render_view_host) {
 
 void BalloonHost::RenderViewGone(RenderViewHost* render_view_host) {
   Close(render_view_host);
+}
+
+int BalloonHost::GetBrowserWindowID() const {
+  return extension_misc::kUnknownWindowId;
+}
+
+ViewType::Type BalloonHost::GetRenderViewType() const {
+  return ViewType::NOTIFICATION;
+}
+
+RenderViewHostDelegate::View* BalloonHost::GetViewDelegate() {
+  return this;
 }
 
 void BalloonHost::ProcessDOMUIMessage(
@@ -155,6 +227,9 @@ void BalloonHost::Init() {
 
   rvh->set_view(render_widget_host_view());
   rvh->CreateRenderView(string16());
+#if defined(OS_MACOSX)
+  rvh->set_paint_observer(new BalloonPaintObserver(this));
+#endif
   rvh->NavigateToURL(balloon_->notification().content_url());
 
   initialized_ = true;
@@ -164,6 +239,26 @@ void BalloonHost::EnableDOMUI() {
   DCHECK(render_view_host_ == NULL) <<
       "EnableDOMUI has to be called before a renderer is created.";
   enable_dom_ui_ = true;
+}
+
+void BalloonHost::UpdateInspectorSetting(const std::string& key,
+                                         const std::string& value) {
+  RenderViewHostDelegateHelper::UpdateInspectorSetting(
+      GetProfile(), key, value);
+}
+
+void BalloonHost::ClearInspectorSettings() {
+  RenderViewHostDelegateHelper::ClearInspectorSettings(GetProfile());
+}
+
+void BalloonHost::RenderWidgetHostDidPaint() {
+  render_view_host_->set_paint_observer(NULL);
+  render_view_host_->EnablePreferredSizeChangedMode(
+      kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow);
+}
+
+BalloonHost::~BalloonHost() {
+  DCHECK(!render_view_host_);
 }
 
 void BalloonHost::NotifyDisconnect() {

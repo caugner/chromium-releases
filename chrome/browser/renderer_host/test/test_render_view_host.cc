@@ -114,12 +114,6 @@ BackingStore* TestRenderWidgetHostView::AllocBackingStore(
   return new TestBackingStore(rwh_, size);
 }
 
-VideoLayer* TestRenderWidgetHostView::AllocVideoLayer(
-    const gfx::Size& size) {
-  NOTIMPLEMENTED();
-  return NULL;
-}
-
 #if defined(OS_MACOSX)
 
 void TestRenderWidgetHostView::ShowPopupWithItems(
@@ -167,7 +161,7 @@ void TestRenderWidgetHostView::AcceleratedSurfaceSetIOSurface(
     gfx::PluginWindowHandle window,
     int32 width,
     int32 height,
-    uint64 io_surface_identifier) {
+    uint64 surface_id) {
 }
 
 void TestRenderWidgetHostView::AcceleratedSurfaceSetTransportDIB(
@@ -178,10 +172,24 @@ void TestRenderWidgetHostView::AcceleratedSurfaceSetTransportDIB(
 }
 
 void TestRenderWidgetHostView::AcceleratedSurfaceBuffersSwapped(
-    gfx::PluginWindowHandle window) {
+    gfx::PluginWindowHandle window,
+    uint64 surface_id,
+    int renderer_id,
+    int32 route_id,
+    uint64 swap_buffers_count) {
 }
 
 void TestRenderWidgetHostView::GpuRenderingStateDidChange() {
+}
+#elif defined(OS_WIN)
+gfx::PluginWindowHandle TestRenderWidgetHostView::GetCompositorHostWindow() {
+  return gfx::kNullPluginWindow;
+}
+
+void TestRenderWidgetHostView::WillWmDestroy() {
+}
+
+void TestRenderWidgetHostView::ShowCompositorHostWindow(bool show) {
 }
 #endif
 

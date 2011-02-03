@@ -15,9 +15,9 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/test/automation/automation_messages.h"
 
 // TODO(siggi): Find a more structured way to read and write JSON messages.
 
@@ -107,9 +107,9 @@ bool ExtensionPortContainer::Send(IPC::Message *message) {
 }
 
 void ExtensionPortContainer::OnExtensionMessageInvoke(
+    const std::string& extension_id,
     const std::string& function_name,
     const ListValue& args,
-    bool requires_incognito_access,
     const GURL& event_url) {
   if (function_name == ExtensionMessageService::kDispatchOnMessage) {
     DCHECK_EQ(args.GetSize(), 2u);
@@ -119,7 +119,7 @@ void ExtensionPortContainer::OnExtensionMessageInvoke(
     if (args.GetString(0, &message) && args.GetInteger(1, &source_port_id))
       OnExtensionHandleMessage(message, source_port_id);
   } else if (function_name == ExtensionMessageService::kDispatchOnDisconnect) {
-    DCHECK_EQ(args.GetSize(), 1u);
+    DCHECK_EQ(args.GetSize(), 2u);
     int port_id;
     if (args.GetInteger(0, &port_id))
       OnExtensionPortDisconnected(port_id);

@@ -12,31 +12,52 @@
 
 #include <algorithm>
 
-#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/registry.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/values.h"
-#include "base/win_util.h"
+#include "base/win/registry.h"
+#include "base/win/windows_version.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/l10n_string_util.h"
-#include "chrome/installer/util/master_preferences.h"
+#include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/work_item_list.h"
 
-bool InstallUtil::ExecuteExeAsAdmin(const std::wstring& exe,
-                                    const std::wstring& params,
-                                    DWORD* exit_code) {
+using base::win::RegKey;
+using installer_util::MasterPreferences;
+
+const MasterPreferences& InstallUtil::GetMasterPreferencesForCurrentProcess() {
+  static MasterPreferences prefs(*CommandLine::ForCurrentProcess());
+  return prefs;
+}
+
+bool InstallUtil::ExecuteExeAsAdmin(const CommandLine& cmd, DWORD* exit_code) {
+  FilePath::StringType program(cmd.GetProgram().value());
+  DCHECK(!program.empty());
+  DCHECK(program[0] != '\"');
+
+  CommandLine::StringType params(cmd.command_line_string());
+  if (params[0] == '"') {
+    DCHECK_EQ('"', params[program.length() + 1]);
+    DCHECK_EQ(program, params.substr(1, program.length()));
+    params = params.substr(program.length() + 2);
+  } else {
+    DCHECK_EQ(program, params.substr(0, program.length()));
+    params = params.substr(program.length());
+  }
+
+  TrimWhitespace(params, TRIM_ALL, &params);
+
   SHELLEXECUTEINFO info = {0};
   info.cbSize = sizeof(SHELLEXECUTEINFO);
   info.fMask = SEE_MASK_NOCLOSEPROCESS;
   info.lpVerb = L"runas";
-  info.lpFile = exe.c_str();
+  info.lpFile = program.c_str();
   info.lpParameters = params.c_str();
   info.nShow = SW_SHOW;
   if (::ShellExecuteEx(&info) == FALSE)
@@ -69,28 +90,25 @@ installer::Version* InstallUtil::GetChromeVersion(bool system_install) {
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   if (!key.Open(reg_root, dist->GetVersionKey().c_str(), KEY_READ) ||
       !key.ReadValue(google_update::kRegVersionField, &version_str)) {
-    LOG(INFO) << "No existing Chrome install found.";
+    VLOG(1) << "No existing Chrome install found.";
     key.Close();
     return NULL;
   }
   key.Close();
-  LOG(INFO) << "Existing Chrome version found " << version_str;
+  VLOG(1) << "Existing Chrome version found " << version_str;
   return installer::Version::GetVersionFromString(version_str);
 }
 
 bool InstallUtil::IsOSSupported() {
   int major, minor;
-  win_util::WinVersion version = win_util::GetWinVersion();
-  win_util::GetServicePackLevel(&major, &minor);
+  base::win::Version version = base::win::GetVersion();
+  base::win::GetServicePackLevel(&major, &minor);
 
   // We do not support Win2K or older, or XP without service pack 2.
-  LOG(INFO) << "Windows Version: " << version
-            << ", Service Pack: " << major << "." << minor;
-  if ((version > win_util::WINVERSION_XP) ||
-      (version == win_util::WINVERSION_XP && major >= 2)) {
-    return true;
-  }
-  return false;
+  VLOG(1) << "Windows Version: " << version
+          << ", Service Pack: " << major << "." << minor;
+  return (version > base::win::VERSION_XP) ||
+      (version == base::win::VERSION_XP && major >= 2);
 }
 
 void InstallUtil::WriteInstallerResult(bool system_install,
@@ -133,24 +151,8 @@ bool InstallUtil::IsPerUserInstall(const wchar_t* const exe_path) {
 }
 
 bool InstallUtil::IsChromeFrameProcess() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  DCHECK(command_line)
-      << "IsChromeFrameProcess() called before ComamandLine::Init()";
-
-  FilePath module_path;
-  PathService::Get(base::FILE_MODULE, &module_path);
-  std::wstring module_name(module_path.BaseName().value());
-
-  scoped_ptr<DictionaryValue> prefs(installer_util::GetInstallPreferences(
-                                    *command_line));
-  DCHECK(prefs.get());
-  bool is_cf = false;
-  installer_util::GetDistroBooleanPreference(prefs.get(),
-      installer_util::master_preferences::kChromeFrame, &is_cf);
-
-  // Also assume this to be a ChromeFrame process if we are running inside
-  // the Chrome Frame DLL.
-  return is_cf || module_name == installer_util::kChromeFrameDll;
+  const MasterPreferences& prefs = GetMasterPreferencesForCurrentProcess();
+  return prefs.install_chrome_frame();
 }
 
 bool InstallUtil::IsChromeSxSProcess() {
@@ -176,18 +178,13 @@ bool InstallUtil::IsMSIProcess(bool system_level) {
   static bool is_msi_ = false;
   static bool msi_checked_ = false;
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  CHECK(command_line);
-
   if (!msi_checked_) {
     msi_checked_ = true;
 
-    scoped_ptr<DictionaryValue> prefs(installer_util::GetInstallPreferences(
-                                      *command_line));
-    DCHECK(prefs.get());
+    const MasterPreferences& prefs = GetMasterPreferencesForCurrentProcess();
+
     bool is_msi = false;
-    installer_util::GetDistroBooleanPreference(prefs.get(),
-        installer_util::master_preferences::kMsi, &is_msi);
+    prefs.GetBool(installer_util::master_preferences::kMsi, &is_msi);
 
     if (!is_msi) {
       // We didn't find it in the preferences, try looking in the registry.
@@ -258,7 +255,7 @@ bool InstallUtil::BuildDLLRegistrationList(const std::wstring& install_path,
 // otherwise false.
 bool InstallUtil::DeleteRegistryKey(RegKey& root_key,
                                     const std::wstring& key_path) {
-  LOG(INFO) << "Deleting registry key " << key_path;
+  VLOG(1) << "Deleting registry key " << key_path;
   if (!root_key.DeleteKey(key_path.c_str()) &&
       ::GetLastError() != ERROR_MOD_NOT_FOUND) {
     LOG(ERROR) << "Failed to delete registry key: " << key_path;
@@ -274,7 +271,7 @@ bool InstallUtil::DeleteRegistryValue(HKEY reg_root,
                                       const std::wstring& key_path,
                                       const std::wstring& value_name) {
   RegKey key(reg_root, key_path.c_str(), KEY_ALL_ACCESS);
-  LOG(INFO) << "Deleting registry value " << value_name;
+  VLOG(1) << "Deleting registry value " << value_name;
   if (key.ValueExists(value_name.c_str()) &&
       !key.DeleteValue(value_name.c_str())) {
     LOG(ERROR) << "Failed to delete registry value: " << value_name;

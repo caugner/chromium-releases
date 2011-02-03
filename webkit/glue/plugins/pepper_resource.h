@@ -7,34 +7,43 @@
 
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
-#include "third_party/ppapi/c/pp_resource.h"
+#include "ppapi/c/pp_resource.h"
 #include "webkit/glue/plugins/pepper_resource_tracker.h"
 
 namespace pepper {
 
-class Buffer;
-class Audio;
-class AudioConfig;
-class DirectoryReader;
-class FileChooser;
-class FileIO;
-class FileRef;
-class Font;
-class Graphics2D;
-class Graphics3D;
-class ImageData;
-class ObjectVar;
-class PluginModule;
-class PrivateFontFile;
-class Scrollbar;
-class StringVar;
-class Transport;
-class URLLoader;
-class URLRequestInfo;
-class URLResponseInfo;
-class Var;
-class VideoDecoder;
-class Widget;
+// If you inherit from resource, make sure you add the class name here.
+#define FOR_ALL_RESOURCES(F) \
+  F(Audio) \
+  F(AudioConfig) \
+  F(Buffer) \
+  F(DirectoryReader) \
+  F(FileChooser) \
+  F(FileIO) \
+  F(FileRef) \
+  F(FileSystem) \
+  F(Font) \
+  F(Graphics2D) \
+  F(Graphics3D) \
+  F(ImageData) \
+  F(ObjectVar) \
+  F(PluginModule) \
+  F(PrivateFontFile) \
+  F(Scrollbar) \
+  F(StringVar) \
+  F(Transport) \
+  F(URLLoader) \
+  F(URLRequestInfo) \
+  F(URLResponseInfo) \
+  F(Var) \
+  F(VarObjectClass) \
+  F(VideoDecoder) \
+  F(Widget)
+
+// Forward declaration of Resource classes.
+#define DECLARE_RESOURCE_CLASS(RESOURCE) class RESOURCE;
+FOR_ALL_RESOURCES(DECLARE_RESOURCE_CLASS)
+#undef DECLARE_RESOURCE_CLASS
 
 class Resource : public base::RefCountedThreadSafe<Resource> {
  public:
@@ -61,6 +70,18 @@ class Resource : public base::RefCountedThreadSafe<Resource> {
   // reference to the plugin.
   PP_Resource GetReference();
 
+  // Returns the resource ID of this object OR NULL IF THERE IS NONE ASSIGNED.
+  // This will happen if the plugin doesn't have a reference to the given
+  // resource. The resource will not be addref'ed.
+  //
+  // This should only be used as an input parameter to the plugin for status
+  // updates in the proxy layer, where if the plugin has no reference, it will
+  // just give up since nothing needs to be updated.
+  //
+  // Generally you should use GetReference instead. This is why it has this
+  // obscure name rather than pp_resource().
+  PP_Resource GetReferenceNoAddRef() const;
+
   // When you need to ensure that a resource has a reference, but you do not
   // want to increase the refcount (for example, if you need to call a plugin
   // callback function with a reference), you can use this class. For example:
@@ -80,30 +101,11 @@ class Resource : public base::RefCountedThreadSafe<Resource> {
   // Type-specific getters for individual resource types. These will return
   // NULL if the resource does not match the specified type. Used by the Cast()
   // function.
-  virtual Audio* AsAudio() { return NULL; }
-  virtual AudioConfig* AsAudioConfig() { return NULL; }
-  virtual Buffer* AsBuffer() { return NULL; }
-  virtual DirectoryReader* AsDirectoryReader() { return NULL; }
-  virtual FileChooser* AsFileChooser() { return NULL; }
-  virtual FileIO* AsFileIO() { return NULL; }
-  virtual FileRef* AsFileRef() { return NULL; }
-  virtual Font* AsFont() { return NULL; }
-  virtual Graphics2D* AsGraphics2D() { return NULL; }
-  virtual Graphics3D* AsGraphics3D() { return NULL; }
-  virtual ImageData* AsImageData() { return NULL; }
-  virtual ObjectVar* AsObjectVar() { return NULL; }
-  virtual PrivateFontFile* AsPrivateFontFile() { return NULL; }
-  virtual Scrollbar* AsScrollbar() { return NULL; }
-  virtual StringVar* AsStringVar() { return NULL; }
-  virtual Transport* AsTransport() { return NULL; }
-  virtual URLLoader* AsURLLoader() { return NULL; }
-  virtual URLRequestInfo* AsURLRequestInfo() { return NULL; }
-  virtual URLResponseInfo* AsURLResponseInfo() { return NULL; }
-  virtual Var* AsVar() { return NULL; }
-  virtual VideoDecoder* AsVideoDecoder() { return NULL; }
-  virtual Widget* AsWidget() { return NULL; }
+  #define DEFINE_TYPE_GETTER(RESOURCE)  \
+      virtual RESOURCE* As##RESOURCE() { return NULL; }
+  FOR_ALL_RESOURCES(DEFINE_TYPE_GETTER)
+  #undef DEFINE_TYPE_GETTER
 
- private:
   // If referenced by a plugin, holds the id of this resource object. Do not
   // access this member directly, because it is possible that the plugin holds
   // no references to the object, and therefore the resource_id_ is zero. Use
@@ -129,30 +131,10 @@ class Resource : public base::RefCountedThreadSafe<Resource> {
       return As##Type();                             \
   }
 
-DEFINE_RESOURCE_CAST(Audio)
-DEFINE_RESOURCE_CAST(AudioConfig)
-DEFINE_RESOURCE_CAST(Buffer)
-DEFINE_RESOURCE_CAST(DirectoryReader)
-DEFINE_RESOURCE_CAST(FileChooser)
-DEFINE_RESOURCE_CAST(FileIO)
-DEFINE_RESOURCE_CAST(FileRef)
-DEFINE_RESOURCE_CAST(Font)
-DEFINE_RESOURCE_CAST(Graphics2D)
-DEFINE_RESOURCE_CAST(Graphics3D)
-DEFINE_RESOURCE_CAST(ImageData)
-DEFINE_RESOURCE_CAST(ObjectVar)
-DEFINE_RESOURCE_CAST(PrivateFontFile)
-DEFINE_RESOURCE_CAST(Scrollbar)
-DEFINE_RESOURCE_CAST(StringVar);
-DEFINE_RESOURCE_CAST(Transport)
-DEFINE_RESOURCE_CAST(URLLoader)
-DEFINE_RESOURCE_CAST(URLRequestInfo)
-DEFINE_RESOURCE_CAST(URLResponseInfo)
-DEFINE_RESOURCE_CAST(Var)
-DEFINE_RESOURCE_CAST(VideoDecoder)
-DEFINE_RESOURCE_CAST(Widget)
-
+FOR_ALL_RESOURCES(DEFINE_RESOURCE_CAST)
 #undef DEFINE_RESOURCE_CAST
+
+#undef FOR_ALL_RESOURCES
 }  // namespace pepper
 
 #endif  // WEBKIT_GLUE_PLUGINS_PEPPER_RESOURCE_H_

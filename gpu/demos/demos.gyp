@@ -127,12 +127,12 @@
       'type': 'static_library',
       'dependencies': [
         'gpu_demo_framework',
-        '../../third_party/ppapi/ppapi.gyp:ppapi_cpp',
-        '../../third_party/ppapi/ppapi.gyp:ppapi_cpp_objects'
+        '../../ppapi/ppapi.gyp:ppapi_cpp',
+        '../../ppapi/ppapi.gyp:ppapi_cpp_objects'
       ],
       'include_dirs': [
         '../..',
-        '../../third_party/ppapi',
+        '../../ppapi',
         '../../third_party/gles2_book/Common/Include',
       ],
       'sources': [
@@ -148,7 +148,7 @@
         'include_dirs': [
           '../../third_party',
           '../../third_party/gles2_book/Common/Include',
-          '../../third_party/ppapi',
+          '../../ppapi',
           '../..'
         ],
         'run_as': {
@@ -156,7 +156,6 @@
             ['OS=="mac"', {
               'action': [
                 '<(PRODUCT_DIR)/Chromium.app/Contents/MacOS/Chromium',
-                '--enable-gpu-plugin',
                 '--register-pepper-plugins='
                   '<(PRODUCT_DIR)/$(PRODUCT_NAME).plugin;'
                   'pepper-application/x-gpu-demo',
@@ -165,7 +164,6 @@
              }, { # OS != "mac"
               'action': [
                 '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)chrome<(EXECUTABLE_SUFFIX)',
-                '--enable-gpu-plugin',
                 '--register-pepper-plugins=$(TargetPath);'
                   'pepper-application/x-gpu-demo',
                 'file://$(ProjectDir)pepper_gpu_demo.html',

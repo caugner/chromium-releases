@@ -10,15 +10,31 @@
 
 namespace remoting {
 
-Capturer::Capturer()
+Capturer::Capturer(MessageLoop* message_loop)
     : width_(0),
       height_(0),
-      pixel_format_(PixelFormatInvalid),
+      pixel_format_(media::VideoFrame::INVALID),
       bytes_per_row_(0),
-      current_buffer_(0) {
+      current_buffer_(0),
+      message_loop_(message_loop) {
 }
 
 Capturer::~Capturer() {
+}
+
+// Return the width of the screen.
+int Capturer::width() const {
+  return width_;
+}
+
+// Return the height of the screen.
+int Capturer::height() const {
+  return height_;
+}
+
+// Return the pixel format of the screen.
+media::VideoFrame::Format Capturer::pixel_format() const {
+  return pixel_format_;
 }
 
 void Capturer::ClearInvalidRects() {

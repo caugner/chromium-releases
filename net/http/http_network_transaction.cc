@@ -8,11 +8,11 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/field_trial.h"
 #include "base/format_macros.h"
-#include "base/histogram.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/histogram.h"
+#include "base/metrics/stats_counters.h"
 #include "base/scoped_ptr.h"
-#include "base/stats_counters.h"
 #include "base/stl_util-inl.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
@@ -26,7 +26,6 @@
 #include "net/base/net_util.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/ssl_connection_status_flags.h"
-#include "net/base/ssl_non_sensitive_host_info.h"
 #include "net/base/upload_data_stream.h"
 #include "net/http/http_auth.h"
 #include "net/http/http_auth_handler.h"
@@ -60,75 +59,6 @@ namespace net {
 
 namespace {
 
-void BuildRequestHeaders(const HttpRequestInfo* request_info,
-                         const HttpRequestHeaders& authorization_headers,
-                         const UploadDataStream* upload_data_stream,
-                         bool using_proxy,
-                         std::string* request_line,
-                         HttpRequestHeaders* request_headers) {
-  const std::string path = using_proxy ?
-                           HttpUtil::SpecForRequest(request_info->url) :
-                           HttpUtil::PathForRequest(request_info->url);
-  *request_line = base::StringPrintf(
-      "%s %s HTTP/1.1\r\n", request_info->method.c_str(), path.c_str());
-  request_headers->SetHeader(HttpRequestHeaders::kHost,
-                             GetHostAndOptionalPort(request_info->url));
-
-  // For compat with HTTP/1.0 servers and proxies:
-  if (using_proxy) {
-    request_headers->SetHeader(HttpRequestHeaders::kProxyConnection,
-                               "keep-alive");
-  } else {
-    request_headers->SetHeader(HttpRequestHeaders::kConnection, "keep-alive");
-  }
-
-  // Our consumer should have made sure that this is a safe referrer.  See for
-  // instance WebCore::FrameLoader::HideReferrer.
-  if (request_info->referrer.is_valid()) {
-    request_headers->SetHeader(HttpRequestHeaders::kReferer,
-                               request_info->referrer.spec());
-  }
-
-  // Add a content length header?
-  if (upload_data_stream) {
-    request_headers->SetHeader(
-        HttpRequestHeaders::kContentLength,
-        base::Uint64ToString(upload_data_stream->size()));
-  } else if (request_info->method == "POST" || request_info->method == "PUT" ||
-             request_info->method == "HEAD") {
-    // An empty POST/PUT request still needs a content length.  As for HEAD,
-    // IE and Safari also add a content length header.  Presumably it is to
-    // support sending a HEAD request to an URL that only expects to be sent a
-    // POST or some other method that normally would have a message body.
-    request_headers->SetHeader(HttpRequestHeaders::kContentLength, "0");
-  }
-
-  // Honor load flags that impact proxy caches.
-  if (request_info->load_flags & LOAD_BYPASS_CACHE) {
-    request_headers->SetHeader(HttpRequestHeaders::kPragma, "no-cache");
-    request_headers->SetHeader(HttpRequestHeaders::kCacheControl, "no-cache");
-  } else if (request_info->load_flags & LOAD_VALIDATE_CACHE) {
-    request_headers->SetHeader(HttpRequestHeaders::kCacheControl, "max-age=0");
-  }
-
-  request_headers->MergeFrom(authorization_headers);
-
-  // Headers that will be stripped from request_info->extra_headers to prevent,
-  // e.g., plugins from overriding headers that are controlled using other
-  // means. Otherwise a plugin could set a referrer although sending the
-  // referrer is inhibited.
-  // TODO(jochen): check whether also other headers should be stripped.
-  static const char* const kExtraHeadersToBeStripped[] = {
-    "Referer"
-  };
-
-  HttpRequestHeaders stripped_extra_headers;
-  stripped_extra_headers.CopyFrom(request_info->extra_headers);
-  for (size_t i = 0; i < arraysize(kExtraHeadersToBeStripped); ++i)
-    stripped_extra_headers.RemoveHeader(kExtraHeadersToBeStripped[i]);
-  request_headers->MergeFrom(stripped_extra_headers);
-}
-
 void ProcessAlternateProtocol(HttpStreamFactory* factory,
                               HttpAlternateProtocols* alternate_protocols,
                               const HttpResponseHeaders& headers,
@@ -159,13 +89,13 @@ HttpNetworkTransaction::HttpNetworkTransaction(HttpNetworkSession* session)
       request_(NULL),
       headers_valid_(false),
       logged_response_time_(false),
+      request_headers_(),
       read_buf_len_(0),
       next_state_(STATE_NONE),
       establishing_tunnel_(false) {
   session->ssl_config_service()->GetSSLConfig(&ssl_config_);
   if (session->http_stream_factory()->next_protos())
     ssl_config_.next_protos = *session->http_stream_factory()->next_protos();
-
 }
 
 HttpNetworkTransaction::~HttpNetworkTransaction() {
@@ -197,11 +127,6 @@ HttpNetworkTransaction::~HttpNetworkTransaction() {
         // |drainer| will delete itself.
       }
     }
-  }
-
-  if (stream_request_.get()) {
-    stream_request_->Cancel();
-    stream_request_ = NULL;
   }
 }
 
@@ -245,10 +170,8 @@ int HttpNetworkTransaction::RestartWithCertificate(
   DCHECK_EQ(STATE_NONE, next_state_);
 
   ssl_config_.client_cert = client_cert;
-  if (client_cert) {
-    session_->ssl_client_auth_cache()->Add(GetHostAndPort(request_->url),
-                                           client_cert);
-  }
+  session_->ssl_client_auth_cache()->Add(
+      response_.cert_request_info->host_and_port, client_cert);
   ssl_config_.send_client_cert = true;
   // Reset the other member variables.
   // Note: this is necessary only with SSL renegotiation.
@@ -326,20 +249,25 @@ void HttpNetworkTransaction::DidDrainBodyForAuthRestart(bool keep_alive) {
   DCHECK(!stream_request_.get());
 
   if (stream_.get()) {
+    HttpStream* new_stream = NULL;
     if (keep_alive) {
       // We should call connection_->set_idle_time(), but this doesn't occur
       // often enough to be worth the trouble.
       stream_->SetConnectionReused();
-      DCHECK(!auth_connection_.get());
-      auth_connection_.reset(stream_->DetachConnection());
-    } else {
-      stream_->Close(true);
+      new_stream = stream_->RenewStreamForAuth();
     }
-    next_state_ = STATE_CREATE_STREAM;
+
+    if (!new_stream) {
+      stream_->Close(!keep_alive);
+      next_state_ = STATE_CREATE_STREAM;
+    } else {
+      next_state_ = STATE_INIT_STREAM;
+    }
+    stream_.reset(new_stream);
   }
 
   // Reset the other member variables.
-  ResetStateForRestart();
+  ResetStateForAuthRestart();
 }
 
 bool HttpNetworkTransaction::IsReadyToRestartForAuth() {
@@ -354,7 +282,7 @@ int HttpNetworkTransaction::Read(IOBuffer* buf, int buf_len,
 
   State next_state = STATE_NONE;
 
-  scoped_refptr<HttpResponseHeaders> headers = GetResponseHeaders();
+  scoped_refptr<HttpResponseHeaders> headers(GetResponseHeaders());
   if (headers_valid_ && headers.get() && stream_request_.get()) {
     // We're trying to read the body of the response but we're still trying
     // to establish an SSL tunnel through the proxy.  We can't read these
@@ -414,11 +342,6 @@ uint64 HttpNetworkTransaction::GetUploadProgress() const {
     return 0;
 
   return stream_->GetUploadProgress();
-}
-
-void HttpNetworkTransaction::SetSSLNonSensitiveHostInfo(
-    SSLNonSensitiveHostInfo* host_info) {
-  ssl_config_.ssl_host_info = host_info;
 }
 
 void HttpNetworkTransaction::OnStreamReady(HttpStream* stream) {
@@ -594,15 +517,15 @@ int HttpNetworkTransaction::DoLoop(int result) {
 int HttpNetworkTransaction::DoCreateStream() {
   next_state_ = STATE_CREATE_STREAM_COMPLETE;
 
-  session_->http_stream_factory()->RequestStream(
-      request_,
-      &ssl_config_,
-      &proxy_info_,
-      auth_connection_.release(),
-      this,
-      net_log_,
-      session_,
-      &stream_request_);
+  stream_request_.reset(
+      session_->http_stream_factory()->RequestStream(
+          request_,
+          &ssl_config_,
+          &proxy_info_,
+          session_,
+          this,
+          net_log_));
+  DCHECK(stream_request_.get());
   return ERR_IO_PENDING;
 }
 
@@ -610,10 +533,16 @@ int HttpNetworkTransaction::DoCreateStreamComplete(int result) {
   if (result == OK) {
     next_state_ = STATE_INIT_STREAM;
     DCHECK(stream_.get());
+  } else if (result == ERR_SSL_CLIENT_AUTH_CERT_NEEDED) {
+    result = HandleCertificateRequest(result);
   }
 
+  // Handle possible handshake errors that may have occurred if the stream
+  // used SSL for one or more of the layers.
+  result = HandleSSLHandshakeError(result);
+
   // At this point we are done with the stream_request_.
-  stream_request_ = NULL;
+  stream_request_.reset();
   return result;
 }
 
@@ -627,9 +556,6 @@ int HttpNetworkTransaction::DoInitStreamComplete(int result) {
   if (result == OK) {
     next_state_ = STATE_GENERATE_PROXY_AUTH_TOKEN;
   } else {
-    if (result == ERR_SSL_CLIENT_AUTH_CERT_NEEDED)
-      result = HandleCertificateRequest(result);
-
     if (result < 0)
       result = HandleIOError(result);
 
@@ -699,45 +625,16 @@ int HttpNetworkTransaction::DoSendRequest() {
 
   // This is constructed lazily (instead of within our Start method), so that
   // we have proxy info available.
-  if (request_headers_.empty() && !response_.was_fetched_via_spdy) {
-    // Figure out if we can/should add Proxy-Authentication & Authentication
-    // headers.
-    HttpRequestHeaders authorization_headers;
-    bool have_proxy_auth = (ShouldApplyProxyAuth() &&
-                            HaveAuth(HttpAuth::AUTH_PROXY));
-    bool have_server_auth = (ShouldApplyServerAuth() &&
-                             HaveAuth(HttpAuth::AUTH_SERVER));
-    if (have_proxy_auth)
-      auth_controllers_[HttpAuth::AUTH_PROXY]->AddAuthorizationHeader(
-          &authorization_headers);
-    if (have_server_auth)
-      auth_controllers_[HttpAuth::AUTH_SERVER]->AddAuthorizationHeader(
-          &authorization_headers);
-    std::string request_line;
-    HttpRequestHeaders request_headers;
-
-    BuildRequestHeaders(request_, authorization_headers, request_body,
-                        !is_https_request() && (proxy_info_.is_http() ||
-                                        proxy_info_.is_https()),
-                        &request_line, &request_headers);
+  if (request_headers_.IsEmpty()) {
+    bool using_proxy = (proxy_info_.is_http()|| proxy_info_.is_https()) &&
+                        !is_https_request();
+    HttpUtil::BuildRequestHeaders(request_, request_body, auth_controllers_,
+                                  ShouldApplyServerAuth(),
+                                  ShouldApplyProxyAuth(), using_proxy,
+                                  &request_headers_);
 
     if (session_->network_delegate())
-      session_->network_delegate()->OnSendHttpRequest(&request_headers);
-
-    if (net_log_.IsLoggingAll()) {
-      net_log_.AddEvent(
-          NetLog::TYPE_HTTP_TRANSACTION_SEND_REQUEST_HEADERS,
-          new NetLogHttpRequestParameter(request_line, request_headers));
-    }
-
-    request_headers_ = request_line + request_headers.ToString();
-  } else {
-    if (net_log_.IsLoggingAll()) {
-      net_log_.AddEvent(
-          NetLog::TYPE_HTTP_TRANSACTION_SEND_REQUEST_HEADERS,
-          new NetLogHttpRequestParameter(request_->url.spec(),
-                                         request_->extra_headers));
-    }
+      session_->network_delegate()->OnSendHttpRequest(&request_headers_);
   }
 
   headers_valid_ = false;
@@ -786,23 +683,6 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
     result = HandleCertificateRequest(result);
     if (result == OK)
       return result;
-  } else if ((result == ERR_SSL_DECOMPRESSION_FAILURE_ALERT ||
-              result == ERR_SSL_BAD_RECORD_MAC_ALERT) &&
-             ssl_config_.tls1_enabled &&
-             !SSLConfigService::IsKnownStrictTLSServer(request_->url.host())) {
-    // Some buggy servers select DEFLATE compression when offered and then
-    // fail to ever decompress anything. They will send a fatal alert telling
-    // us this. Normally we would pick this up during the handshake because
-    // our Finished message is compressed and we'll never get the server's
-    // Finished if it fails to process ours.
-    //
-    // However, with False Start, we'll believe that the handshake is
-    // complete as soon as we've /sent/ our Finished message. In this case,
-    // we only find out that the server is buggy here, when we try to read
-    // the initial reply.
-    session_->http_stream_factory()->AddTLSIntolerantServer(request_->url);
-    ResetConnectionAndRequestForResend();
-    return OK;
   }
 
   if (result < 0 && result != ERR_CONNECTION_CLOSED)
@@ -827,10 +707,10 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
       return rv;
   }
 
-  if (net_log_.IsLoggingAll()) {
+  if (net_log_.IsLoggingAllEvents()) {
     net_log_.AddEvent(
         NetLog::TYPE_HTTP_TRANSACTION_READ_RESPONSE_HEADERS,
-        new NetLogHttpResponseParameter(response_.headers));
+        make_scoped_refptr(new NetLogHttpResponseParameter(response_.headers)));
   }
 
   if (response_.headers->GetParsedHttpVersion() < HttpVersion(1, 0)) {
@@ -977,11 +857,11 @@ void HttpNetworkTransaction::LogTransactionConnectedMetrics() {
         100);
 
   static bool use_conn_impact_histogram(
-      FieldTrialList::Find("ConnCountImpact") &&
-      !FieldTrialList::Find("ConnCountImpact")->group_name().empty());
+      base::FieldTrialList::Find("ConnCountImpact") &&
+      !base::FieldTrialList::Find("ConnCountImpact")->group_name().empty());
   if (use_conn_impact_histogram) {
     UMA_HISTOGRAM_CLIPPED_TIMES(
-        FieldTrial::MakeName("Net.Transaction_Connected_New",
+        base::FieldTrial::MakeName("Net.Transaction_Connected_New",
             "ConnCountImpact"),
         total_duration,
         base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(10),
@@ -989,17 +869,19 @@ void HttpNetworkTransaction::LogTransactionConnectedMetrics() {
     }
   }
 
-  static bool use_spdy_histogram(FieldTrialList::Find("SpdyImpact") &&
-      !FieldTrialList::Find("SpdyImpact")->group_name().empty());
+  static bool use_spdy_histogram(base::FieldTrialList::Find("SpdyImpact") &&
+      !base::FieldTrialList::Find("SpdyImpact")->group_name().empty());
   if (use_spdy_histogram && response_.was_npn_negotiated) {
     UMA_HISTOGRAM_CLIPPED_TIMES(
-      FieldTrial::MakeName("Net.Transaction_Connected_Under_10", "SpdyImpact"),
+      base::FieldTrial::MakeName("Net.Transaction_Connected_Under_10",
+                                 "SpdyImpact"),
         total_duration, base::TimeDelta::FromMilliseconds(1),
         base::TimeDelta::FromMinutes(10), 100);
 
     if (!reused_socket) {
       UMA_HISTOGRAM_CLIPPED_TIMES(
-          FieldTrial::MakeName("Net.Transaction_Connected_New", "SpdyImpact"),
+          base::FieldTrial::MakeName("Net.Transaction_Connected_New",
+                                     "SpdyImpact"),
           total_duration, base::TimeDelta::FromMilliseconds(1),
           base::TimeDelta::FromMinutes(10), 100);
     }
@@ -1069,34 +951,87 @@ int HttpNetworkTransaction::HandleCertificateRequest(int error) {
     stream_.reset();
   }
 
-  if (stream_request_.get()) {
-    // The server is asking for a client certificate during the initial
-    // handshake.
-    stream_request_->Cancel();
-    stream_request_ = NULL;
-  }
+  // The server is asking for a client certificate during the initial
+  // handshake.
+  stream_request_.reset();
 
-  // If the user selected one of the certificate in client_certs for this
-  // server before, use it automatically.
-  X509Certificate* client_cert = session_->ssl_client_auth_cache()->
-                                 Lookup(GetHostAndPort(request_->url));
+  // If the user selected one of the certificates in client_certs or declined
+  // to provide one for this server before, use the past decision
+  // automatically.
+  scoped_refptr<X509Certificate> client_cert;
+  bool found_cached_cert = session_->ssl_client_auth_cache()->Lookup(
+      response_.cert_request_info->host_and_port, &client_cert);
+  if (!found_cached_cert)
+    return error;
+
+  // Check that the certificate selected is still a certificate the server
+  // is likely to accept, based on the criteria supplied in the
+  // CertificateRequest message.
   if (client_cert) {
     const std::vector<scoped_refptr<X509Certificate> >& client_certs =
         response_.cert_request_info->client_certs;
+    bool cert_still_valid = false;
     for (size_t i = 0; i < client_certs.size(); ++i) {
-      if (client_cert->fingerprint().Equals(client_certs[i]->fingerprint())) {
-        // TODO(davidben): Add a unit test which covers this path; we need to be
-        // able to send a legitimate certificate and also bypass/clear the
-        // SSL session cache.
-        ssl_config_.client_cert = client_cert;
-        ssl_config_.send_client_cert = true;
-        next_state_ = STATE_CREATE_STREAM;
-        // Reset the other member variables.
-        // Note: this is necessary only with SSL renegotiation.
-        ResetStateForRestart();
-        return OK;
+      if (client_cert->Equals(client_certs[i])) {
+        cert_still_valid = true;
+        break;
       }
     }
+
+    if (!cert_still_valid)
+      return error;
+  }
+
+  // TODO(davidben): Add a unit test which covers this path; we need to be
+  // able to send a legitimate certificate and also bypass/clear the
+  // SSL session cache.
+  ssl_config_.client_cert = client_cert;
+  ssl_config_.send_client_cert = true;
+  next_state_ = STATE_CREATE_STREAM;
+  // Reset the other member variables.
+  // Note: this is necessary only with SSL renegotiation.
+  ResetStateForRestart();
+  return OK;
+}
+
+// TODO(rch): This does not correctly handle errors when an SSL proxy is
+// being used, as all of the errors are handled as if they were generated
+// by the endpoint host, request_->url, rather than considering if they were
+// generated by the SSL proxy. http://crbug.com/66424
+int HttpNetworkTransaction::HandleSSLHandshakeError(int error) {
+  DCHECK(request_);
+  if (ssl_config_.send_client_cert &&
+      (error == ERR_SSL_PROTOCOL_ERROR ||
+       error == ERR_BAD_SSL_CLIENT_AUTH_CERT)) {
+    session_->ssl_client_auth_cache()->Remove(
+        GetHostAndPort(request_->url));
+  }
+
+  switch (error) {
+    case ERR_SSL_PROTOCOL_ERROR:
+    case ERR_SSL_VERSION_OR_CIPHER_MISMATCH:
+    case ERR_SSL_DECOMPRESSION_FAILURE_ALERT:
+    case ERR_SSL_BAD_RECORD_MAC_ALERT:
+      if (ssl_config_.tls1_enabled &&
+          !SSLConfigService::IsKnownStrictTLSServer(request_->url.host())) {
+        // This could be a TLS-intolerant server, an SSL 3.0 server that
+        // chose a TLS-only cipher suite or a server with buggy DEFLATE
+        // support. Turn off TLS 1.0, DEFLATE support and retry.
+        session_->http_stream_factory()->AddTLSIntolerantServer(request_->url);
+        ResetConnectionAndRequestForResend();
+        error = OK;
+      }
+      break;
+    case ERR_SSL_SNAP_START_NPN_MISPREDICTION:
+      // This means that we tried to Snap Start a connection, but we
+      // mispredicted the NPN result. This isn't a problem from the point of
+      // view of the SSL layer because the server will ignore the application
+      // data in the Snap Start extension. However, at the HTTP layer, we have
+      // already decided that it's a HTTP or SPDY connection and it's easier to
+      // abort and start again.
+      ResetConnectionAndRequestForResend();
+      error = OK;
+      break;
   }
   return error;
 }
@@ -1106,6 +1041,14 @@ int HttpNetworkTransaction::HandleCertificateRequest(int error) {
 // write errors or response header read errors.  It should not be used in
 // other cases, such as a Connect error.
 int HttpNetworkTransaction::HandleIOError(int error) {
+  // SSL errors may happen at any time during the stream and indicate issues
+  // with the underlying connection. Because the peer may request
+  // renegotiation at any time, check and handle any possible SSL handshake
+  // related errors. In addition to renegotiation, TLS False/Snap Start may
+  // cause SSL handshake errors to be delayed until the first Read on the
+  // underlying connection.
+  error = HandleSSLHandshakeError(error);
+
   switch (error) {
     // If we try to reuse a connection that the server is in the process of
     // closing, we may end up successfully writing out our request (or a
@@ -1124,12 +1067,16 @@ int HttpNetworkTransaction::HandleIOError(int error) {
 }
 
 void HttpNetworkTransaction::ResetStateForRestart() {
+  ResetStateForAuthRestart();
+  stream_.reset();
+}
+
+void HttpNetworkTransaction::ResetStateForAuthRestart() {
   pending_auth_target_ = HttpAuth::AUTH_NONE;
   read_buf_ = NULL;
   read_buf_len_ = 0;
-  stream_.reset();
   headers_valid_ = false;
-  request_headers_.clear();
+  request_headers_.Clear();
   response_ = HttpResponseInfo();
   establishing_tunnel_ = false;
 }
@@ -1159,7 +1106,7 @@ void HttpNetworkTransaction::ResetConnectionAndRequestForResend() {
   // We need to clear request_headers_ because it contains the real request
   // headers, but we may need to resend the CONNECT request first to recreate
   // the SSL tunnel.
-  request_headers_.clear();
+  request_headers_.Clear();
   next_state_ = STATE_CREATE_STREAM;  // Resend the request.
 }
 
@@ -1173,7 +1120,7 @@ bool HttpNetworkTransaction::ShouldApplyServerAuth() const {
 }
 
 int HttpNetworkTransaction::HandleAuthChallenge() {
-  scoped_refptr<HttpResponseHeaders> headers = GetResponseHeaders();
+  scoped_refptr<HttpResponseHeaders> headers(GetResponseHeaders());
   DCHECK(headers);
 
   int status = headers->response_code();
@@ -1182,6 +1129,11 @@ int HttpNetworkTransaction::HandleAuthChallenge() {
   HttpAuth::Target target = status == 407 ?
                             HttpAuth::AUTH_PROXY : HttpAuth::AUTH_SERVER;
   if (target == HttpAuth::AUTH_PROXY && proxy_info_.is_direct())
+    return ERR_UNEXPECTED_PROXY_AUTH;
+
+  // This case can trigger when an HTTPS server responds with a 407 status
+  // code through a non-authenticating proxy.
+  if (!auth_controllers_[target].get())
     return ERR_UNEXPECTED_PROXY_AUTH;
 
   int rv = auth_controllers_[target]->HandleAuthChallenge(

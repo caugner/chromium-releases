@@ -9,6 +9,7 @@
 #include "chrome/common/content_settings.h"
 #include "chrome/common/geoposition.h"
 #include "chrome/common/thumbnail_score.h"
+#include "chrome/common/web_apps.h"
 #include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/upload_data.h"
@@ -18,8 +19,6 @@
 #ifndef EXCLUDE_SKIA_DEPENDENCIES
 #include "third_party/skia/include/core/SkBitmap.h"
 #endif
-#include "webkit/blob/blob_data.h"
-#include "webkit/glue/dom_operations.h"
 #include "webkit/glue/password_form.h"
 
 namespace IPC {
@@ -139,7 +138,7 @@ bool ParamTraits<gfx::Point>::Read(const Message* m, void** iter,
 }
 
 void ParamTraits<gfx::Point>::Log(const gfx::Point& p, std::string* l) {
-  l->append(StringPrintf("(%d, %d)", p.x(), p.y()));
+  l->append(base::StringPrintf("(%d, %d)", p.x(), p.y()));
 }
 
 
@@ -165,8 +164,8 @@ bool ParamTraits<gfx::Rect>::Read(const Message* m, void** iter, gfx::Rect* r) {
 }
 
 void ParamTraits<gfx::Rect>::Log(const gfx::Rect& p, std::string* l) {
-  l->append(StringPrintf("(%d, %d, %d, %d)", p.x(), p.y(),
-                         p.width(), p.height()));
+  l->append(base::StringPrintf("(%d, %d, %d, %d)", p.x(), p.y(),
+                               p.width(), p.height()));
 }
 
 
@@ -186,7 +185,7 @@ bool ParamTraits<gfx::Size>::Read(const Message* m, void** iter, gfx::Size* r) {
 }
 
 void ParamTraits<gfx::Size>::Log(const gfx::Size& p, std::string* l) {
-  l->append(StringPrintf("(%d, %d)", p.width(), p.height()));
+  l->append(base::StringPrintf("(%d, %d)", p.width(), p.height()));
 }
 
 void ParamTraits<ContentSetting>::Write(Message* m, const param_type& p) {
@@ -228,8 +227,8 @@ void ParamTraits<ContentSettings>::Log(
   l->append("<ContentSettings>");
 }
 
-void ParamTraits<webkit_glue::WebApplicationInfo>::Write(
-    Message* m, const webkit_glue::WebApplicationInfo& p) {
+void ParamTraits<WebApplicationInfo>::Write(Message* m,
+                                            const WebApplicationInfo& p) {
   WriteParam(m, p.title);
   WriteParam(m, p.description);
   WriteParam(m, p.app_url);
@@ -238,11 +237,12 @@ void ParamTraits<webkit_glue::WebApplicationInfo>::Write(
     WriteParam(m, p.icons[i].url);
     WriteParam(m, p.icons[i].width);
     WriteParam(m, p.icons[i].height);
+    WriteParam(m, p.icons[i].data);
   }
 }
 
-bool ParamTraits<webkit_glue::WebApplicationInfo>::Read(
-    const Message* m, void** iter, webkit_glue::WebApplicationInfo* r) {
+bool ParamTraits<WebApplicationInfo>::Read(
+    const Message* m, void** iter, WebApplicationInfo* r) {
   size_t icon_count;
   bool result =
     ReadParam(m, iter, &r->title) &&
@@ -256,7 +256,8 @@ bool ParamTraits<webkit_glue::WebApplicationInfo>::Read(
     result =
         ReadParam(m, iter, &icon_info.url) &&
         ReadParam(m, iter, &icon_info.width) &&
-        ReadParam(m, iter, &icon_info.height);
+        ReadParam(m, iter, &icon_info.height) &&
+        ReadParam(m, iter, &icon_info.data);
     if (!result)
       return false;
     r->icons.push_back(icon_info);
@@ -264,8 +265,8 @@ bool ParamTraits<webkit_glue::WebApplicationInfo>::Read(
   return true;
 }
 
-void ParamTraits<webkit_glue::WebApplicationInfo>::Log(
-    const webkit_glue::WebApplicationInfo& p, std::string* l) {
+void ParamTraits<WebApplicationInfo>::Log(const WebApplicationInfo& p,
+                                          std::string* l) {
   l->append("<WebApplicationInfo>");
 }
 
@@ -410,106 +411,6 @@ void ParamTraits<scoped_refptr<net::UploadData> >::Log(const param_type& p,
   l->append("<net::UploadData>");
 }
 
-// Only the webkit_blob::BlobData ParamTraits<> definition needs this
-// definition, so keep this in the implementation file so we can forward declare
-// BlobData in the header.
-template <>
-struct ParamTraits<webkit_blob::BlobData::Item> {
-  typedef webkit_blob::BlobData::Item param_type;
-  static void Write(Message* m, const param_type& p) {
-    WriteParam(m, static_cast<int>(p.type()));
-    if (p.type() == webkit_blob::BlobData::TYPE_DATA) {
-      WriteParam(m, p.data());
-    } else if (p.type() == webkit_blob::BlobData::TYPE_FILE) {
-      WriteParam(m, p.file_path());
-      WriteParam(m, p.offset());
-      WriteParam(m, p.length());
-      WriteParam(m, p.expected_modification_time());
-    } else {
-      WriteParam(m, p.blob_url());
-      WriteParam(m, p.offset());
-      WriteParam(m, p.length());
-    }
-  }
-  static bool Read(const Message* m, void** iter, param_type* r) {
-    int type;
-    if (!ReadParam(m, iter, &type))
-      return false;
-    if (type == webkit_blob::BlobData::TYPE_DATA) {
-      std::string data;
-      if (!ReadParam(m, iter, &data))
-        return false;
-      r->SetToData(data);
-    } else if (type == webkit_blob::BlobData::TYPE_FILE) {
-      FilePath file_path;
-      uint64 offset, length;
-      base::Time expected_modification_time;
-      if (!ReadParam(m, iter, &file_path))
-        return false;
-      if (!ReadParam(m, iter, &offset))
-        return false;
-      if (!ReadParam(m, iter, &length))
-        return false;
-      if (!ReadParam(m, iter, &expected_modification_time))
-        return false;
-      r->SetToFile(file_path, offset, length, expected_modification_time);
-    } else {
-      DCHECK(type == webkit_blob::BlobData::TYPE_BLOB);
-      GURL blob_url;
-      uint64 offset, length;
-      if (!ReadParam(m, iter, &blob_url))
-        return false;
-      if (!ReadParam(m, iter, &offset))
-        return false;
-      if (!ReadParam(m, iter, &length))
-        return false;
-      r->SetToBlob(blob_url, offset, length);
-    }
-    return true;
-  }
-  static void Log(const param_type& p, std::string* l) {
-    l->append("<BlobData::Item>");
-  }
-};
-
-void ParamTraits<scoped_refptr<webkit_blob::BlobData> >::Write(
-    Message* m, const param_type& p) {
-  WriteParam(m, p.get() != NULL);
-  if (p) {
-    WriteParam(m, p->items());
-    WriteParam(m, p->content_type());
-    WriteParam(m, p->content_disposition());
-  }
-}
-
-bool ParamTraits<scoped_refptr<webkit_blob::BlobData> >::Read(
-    const Message* m, void** iter, param_type* r) {
-  bool has_object;
-  if (!ReadParam(m, iter, &has_object))
-    return false;
-  if (!has_object)
-    return true;
-  std::vector<webkit_blob::BlobData::Item> items;
-  if (!ReadParam(m, iter, &items))
-    return false;
-  std::string content_type;
-  if (!ReadParam(m, iter, &content_type))
-    return false;
-  std::string content_disposition;
-  if (!ReadParam(m, iter, &content_disposition))
-    return false;
-  *r = new webkit_blob::BlobData;
-  (*r)->swap_items(&items);
-  (*r)->set_content_type(content_type);
-  (*r)->set_content_disposition(content_disposition);
-  return true;
-}
-
-void ParamTraits<scoped_refptr<webkit_blob::BlobData> >::Log(
-    const param_type& p, std::string* l) {
-  l->append("<webkit_blob::BlobData>");
-}
-
 void ParamTraits<ThumbnailScore>::Write(Message* m, const param_type& p) {
   IPC::ParamTraits<double>::Write(m, p.boring_score);
   IPC::ParamTraits<bool>::Write(m, p.good_clipping);
@@ -536,8 +437,8 @@ bool ParamTraits<ThumbnailScore>::Read(const Message* m, void** iter,
 }
 
 void ParamTraits<ThumbnailScore>::Log(const param_type& p, std::string* l) {
-  l->append(StringPrintf("(%f, %d, %d)",
-                         p.boring_score, p.good_clipping, p.at_top));
+  l->append(base::StringPrintf("(%f, %d, %d)",
+                               p.boring_score, p.good_clipping, p.at_top));
 }
 
 template <>
@@ -555,7 +456,7 @@ struct ParamTraits<Geoposition::ErrorCode> {
   }
   static void Log(const param_type& p, std::string* l)  {
     int error_code = p;
-    l->append(StringPrintf("<Geoposition::ErrorCode>%d", error_code));
+    l->append(base::StringPrintf("<Geoposition::ErrorCode>%d", error_code));
   }
 };
 
@@ -589,7 +490,7 @@ bool ParamTraits<Geoposition>::Read(
 
 void ParamTraits<Geoposition>::Log(const Geoposition& p, std::string* l) {
   l->append(
-      StringPrintf(
+      base::StringPrintf(
           "<Geoposition>"
           "%.6f %.6f %.6f %.6f "
           "%.6f %.6f %.6f ",

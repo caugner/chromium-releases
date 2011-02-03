@@ -16,6 +16,7 @@
 #include "base/logging.h"
 #include "base/nss_util.h"
 #include "base/task.h"
+#include "base/thread_restrictions.h"
 #include "base/waitable_event.h"
 #include "base/worker_pool.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -76,7 +77,7 @@ TEST_F(KeygenHandlerTest, SmokeTest) {
   KeygenHandler handler(768, "some challenge", GURL("http://www.example.com"));
   handler.set_stores_key(false);  // Don't leave the key-pair behind
   std::string result = handler.GenKeyAndSignChallenge();
-  LOG(INFO) << "KeygenHandler produced: " << result;
+  VLOG(1) << "KeygenHandler produced: " << result;
   AssertValidSignedPublicKeyAndChallenge(result, "some challenge");
 }
 
@@ -90,6 +91,9 @@ class ConcurrencyTestTask : public Task {
   }
 
   virtual void Run() {
+    // We allow Singleton use on the worker thread here since we use a
+    // WaitableEvent to synchronize, so it's safe.
+    base::ThreadRestrictions::ScopedAllowSingleton scoped_allow_singleton;
     KeygenHandler handler(768, "some challenge",
                           GURL("http://www.example.com"));
     handler.set_stores_key(false); // Don't leave the key-pair behind.
@@ -134,7 +138,7 @@ TEST_F(KeygenHandlerTest, ConcurrencyTest) {
     delete events[i];
     events[i] = NULL;
 
-    LOG(INFO) << "KeygenHandler " << i << " produced: " << results[i];
+    VLOG(1) << "KeygenHandler " << i << " produced: " << results[i];
     AssertValidSignedPublicKeyAndChallenge(results[i], "some challenge");
   }
 }

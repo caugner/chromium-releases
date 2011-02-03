@@ -29,8 +29,12 @@
 #include "context.h"
 #include "image.h"
 #include "histogram.h"
-#include "glapi/dispatch.h"
+#include "macros.h"
+#include "main/dispatch.h"
 
+#if defined(_MSC_VER)
+#pragma optimize("", off)
+#endif
 
 #if FEATURE_histogram
 

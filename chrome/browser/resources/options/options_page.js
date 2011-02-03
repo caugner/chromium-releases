@@ -27,24 +27,35 @@ cr.define('options', function() {
   OptionsPage.registeredPages_ = {};
 
   /**
-   * Pages which are meant to have an entry in the nav, but
-   * not have a permanent entry.
+   * Pages which are nested under a main page.
    */
   OptionsPage.registeredSubPages_ = {};
 
   /**
-   * Pages which are meant to behave like model dialogs.
+   * Pages which are meant to behave like modal dialogs.
    */
   OptionsPage.registeredOverlayPages_ = {};
 
   /**
-   * Shows a registered page.
+   * Whether or not |initialize| has been called.
+   */
+  OptionsPage.initialized_ = false;
+
+  /**
+   * Shows a registered page. This handles both top-level pages and sub-pages.
    * @param {string} pageName Page name.
    */
   OptionsPage.showPageByName = function(pageName) {
     for (var name in OptionsPage.registeredPages_) {
       var page = OptionsPage.registeredPages_[name];
       page.visible = name == pageName;
+    }
+    for (var name in OptionsPage.registeredSubPages_) {
+      var pageInfo = OptionsPage.registeredSubPages_[name];
+      var match = name == pageName;
+      if (match && document.documentElement.getAttribute('hide-menu') != 'true')
+        pageInfo.parentPage.visible = true;
+      pageInfo.page.visible = match;
     }
   };
 
@@ -55,7 +66,11 @@ cr.define('options', function() {
    * @param {string} hash The value of the hash component of the URL.
    */
   OptionsPage.handleHashForPage = function(pageName, hash) {
-    OptionsPage.registeredPages_[pageName].handleHash(hash);
+    var page = OptionsPage.registeredPages_[pageName];
+    if (!page) {
+      page = OptionsPage.registeredSubPages_[pageName].page;
+    }
+    page.handleHash(hash);
   };
 
   /**
@@ -68,6 +83,9 @@ cr.define('options', function() {
     }
   };
 
+  /**
+   * Clears overlays (i.e. hide all overlays).
+   */
   OptionsPage.clearOverlays = function() {
      for (var name in OptionsPage.registeredOverlayPages_) {
        var page = OptionsPage.registeredOverlayPages_[name];
@@ -76,11 +94,43 @@ cr.define('options', function() {
   };
 
   /**
+   * Clears overlays if the key event is ESC.
+   * @param {Event} e Key event.
+   * @private
+   */
+  OptionsPage.clearOverlaysOnEsc_ = function(e) {
+    if (e.keyCode == 27) { // Esc
+      OptionsPage.clearOverlays();
+    }
+  };
+
+  /**
+   * Closes any currently-open subpage.
+   */
+  OptionsPage.closeSubPage = function() {
+    for (var name in OptionsPage.registeredSubPages_) {
+      var pageInfo = OptionsPage.registeredSubPages_[name];
+      if (pageInfo.page.visible) {
+        pageInfo.page.visible = false;
+        // Since the managed pref banner lives outside the overlay, and the
+        // parent is not changing visibility, update the banner explicitly.
+        pageInfo.parentPage.updateManagedBannerVisibility();
+      }
+    }
+  };
+
+  /**
   * Shows the tab contents for the given navigation tab.
   * @param {!Element} tab The tab that the user clicked.
   */
   OptionsPage.showTab = function(tab) {
-    if (!tab.classList.contains('inactive-tab'))
+    // Search parents until we find a tab, or the nav bar itself. This allows
+    // tabs to have child nodes, e.g. labels in separately-styled spans.
+    while (tab && !tab.classList.contains('subpages-nav-tabs') &&
+           !tab.classList.contains('inactive-tab')) {
+      tab = tab.parentNode;
+    }
+    if (!tab || !tab.classList.contains('inactive-tab'))
       return;
 
     if (this.activeNavTab != null) {
@@ -92,7 +142,7 @@ cr.define('options', function() {
     tab.classList.add('active-tab');
     $(tab.getAttribute('tab-contents')).classList.add('active-tab-contents');
     this.activeNavTab = tab;
-  }
+  };
 
   /**
    * Registers new options page.
@@ -126,17 +176,12 @@ cr.define('options', function() {
    * Registers a new Sub tab page.
    * @param {OptionsPage} page Page to register.
    */
-  OptionsPage.registerSubPage = function(page) {
-    OptionsPage.registeredPages_[page.name] = page;
-    var pageNav = document.createElement('li');
-    pageNav.id = page.name + 'PageNav';
-    pageNav.className = 'navbar-item hidden';
-    pageNav.setAttribute('pageName', page.name);
-    pageNav.textContent = page.title;
-    var subpagesnav = $('subpagesnav');
-    subpagesnav.appendChild(pageNav);
-    page.tab = pageNav;
-    page.initializePage();
+  OptionsPage.registerSubPage = function(subPage, parentPage) {
+    OptionsPage.registeredSubPages_[subPage.name] = {
+        page: subPage, parentPage: parentPage };
+    subPage.tab = undefined;
+    subPage.isSubPageSheet = true;
+    subPage.initializePage();
   };
 
   /**
@@ -167,7 +212,28 @@ cr.define('options', function() {
    */
   OptionsPage.initialize = function() {
     chrome.send('coreOptionsInitialize');
+    this.initialized_ = true;
+
+    // Set up the overlay sheet. Clicks on the visible part of the parent page
+    // should close the overlay, not fall through to the parent page.
+    $('subpage-sheet-container').onclick = function(event) {
+      if (!$('subpage-sheet').contains(event.target))
+        OptionsPage.closeSubPage();
+      event.stopPropagation();
+    }
   };
+
+  /**
+   * Re-initializes the C++ handlers if necessary. This is called if the
+   * handlers are torn down and recreated but the DOM may not have been (in
+   * which case |initialize| won't be called again). If |initialize| hasn't been
+   * called, this does nothing (since it will be later, once the DOM has
+   * finished loading).
+   */
+  OptionsPage.reinitializeCore = function() {
+    if (this.initialized_)
+      chrome.send('coreOptionsInitialize');
+  }
 
   OptionsPage.prototype = {
     __proto__: cr.EventTarget.prototype,
@@ -183,7 +249,18 @@ cr.define('options', function() {
     setManagedBannerVisibility: function(visible) {
       this.managed = visible;
       if (this.visible) {
-        $('managed-prefs-banner').style.display = visible ? 'block' : 'none';
+        this.updateManagedBannerVisibility();
+      }
+    },
+
+    /**
+     * Updates managed banner visibility state.
+     */
+    updateManagedBannerVisibility: function() {
+      if (this.managed) {
+        $('managed-prefs-banner').classList.remove('hidden');
+      } else {
+        $('managed-prefs-banner').classList.add('hidden');
       }
     },
 
@@ -204,33 +281,34 @@ cr.define('options', function() {
         return;
 
       if (visible) {
-        this.pageDiv.style.display = 'block';
+        this.pageDiv.classList.remove('hidden');
         if (this.isOverlay) {
-          var overlay = $('overlay');
-          overlay.classList.remove('hidden');
+          $('overlay').classList.remove('hidden');
+          document.addEventListener('keydown',
+                                    OptionsPage.clearOverlaysOnEsc_);
         } else {
-          var banner = $('managed-prefs-banner');
-          banner.style.display = this.managed ? 'block' : 'none';
+          if (this.isSubPageSheet)
+            $('subpage-sheet-container').classList.remove('hidden');
+
+          this.updateManagedBannerVisibility();
 
           // Recent webkit change no longer allows url change from "chrome://".
-          window.history.pushState({pageName: this.name},
-                                   this.title);
+          window.history.pushState({pageName: this.name}, this.title);
         }
         if (this.tab) {
           this.tab.classList.add('navbar-item-selected');
-          if (this.tab.parentNode && this.tab.parentNode.id == 'subpagesnav')
-            this.tab.classList.remove('hidden');
         }
       } else {
+        this.pageDiv.classList.add('hidden');
         if (this.isOverlay) {
-          var overlay = $('overlay');
-          overlay.classList.add('hidden');
+          $('overlay').classList.add('hidden');
+          document.removeEventListener('keydown',
+                                       OptionsPage.clearOverlaysOnEsc_);
+        } else if (this.isSubPageSheet) {
+          $('subpage-sheet-container').classList.add('hidden');
         }
-        this.pageDiv.style.display = 'none';
         if (this.tab) {
           this.tab.classList.remove('navbar-item-selected');
-          if (this.tab.parentNode && this.tab.parentNode.id == 'subpagesnav')
-            this.tab.classList.add('hidden');
         }
       }
 

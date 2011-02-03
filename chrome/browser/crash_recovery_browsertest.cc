@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/file_path.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/common/url_constants.h"
@@ -31,14 +31,8 @@ class CrashRecoveryBrowserTest : public InProcessBrowserTest {
 // be fixed before it can be enabled to not cause the bots issues.
 #if defined(OS_MACOSX)
 #define MAYBE_Reload DISABLED_Reload
-#define MAYBE_LoadInNewTab DISABLED_LoadInNewTab
-#elif defined(OS_WIN)
-// http://crbug.com/57158 - Times out sometimes on windows.
-#define MAYBE_LoadInNewTab DISABLED_LoadInNewTab
-#define MAYBE_Reload Reload
 #else
 #define MAYBE_Reload Reload
-#define MAYBE_LoadInNewTab LoadInNewTab
 #endif
 
 // Test that reload works after a crash.
@@ -65,7 +59,8 @@ IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, MAYBE_Reload) {
 // There was an earlier bug (1270510) in process-per-site in which the max page
 // ID of the RenderProcessHost was stale, so the NavigationEntry in the new tab
 // was not committed.  This prevents regression of that bug.
-IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, MAYBE_LoadInNewTab) {
+// http://crbug.com/57158 - Times out sometimes on all platforms.
+IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, DISABLED_LoadInNewTab) {
   const FilePath::CharType* kTitle2File = FILE_PATH_LITERAL("title2.html");
 
   ui_test_utils::NavigateToURL(browser(),

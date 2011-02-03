@@ -41,7 +41,6 @@ static void AddSocketPoolsToList(ListValue* list,
                                  const MapType& socket_pools,
                                  const std::string& type,
                                  bool include_nested_pools) {
-  typename MapType::const_iterator socket_pool_it = socket_pools.begin();
   for (typename MapType::const_iterator it = socket_pools.begin();
        it != socket_pools.end(); it++) {
     list->Append(it->second->GetInfoAsValue(it->first.ToString(),
@@ -57,12 +56,16 @@ ClientSocketPoolManager::ClientSocketPoolManager(
     ClientSocketFactory* socket_factory,
     HostResolver* host_resolver,
     DnsRRResolver* dnsrr_resolver,
+    DnsCertProvenanceChecker* dns_cert_checker,
+    SSLHostInfoFactory* ssl_host_info_factory,
     ProxyService* proxy_service,
     SSLConfigService* ssl_config_service)
     : net_log_(net_log),
       socket_factory_(socket_factory),
       host_resolver_(host_resolver),
       dnsrr_resolver_(dnsrr_resolver),
+      dns_cert_checker_(dns_cert_checker),
+      ssl_host_info_factory_(ssl_host_info_factory),
       proxy_service_(proxy_service),
       ssl_config_service_(ssl_config_service),
       tcp_pool_histograms_("TCP"),
@@ -78,6 +81,8 @@ ClientSocketPoolManager::ClientSocketPoolManager(
           &ssl_pool_histograms_,
           host_resolver,
           dnsrr_resolver,
+          dns_cert_checker,
+          ssl_host_info_factory,
           socket_factory,
           tcp_socket_pool_.get(),
           NULL /* no socks proxy */,
@@ -226,6 +231,8 @@ HttpProxyClientSocketPool* ClientSocketPoolManager::GetSocketPoolForHTTPProxy(
                   &ssl_for_https_proxy_pool_histograms_,
                   host_resolver_,
                   dnsrr_resolver_,
+                  dns_cert_checker_,
+                  ssl_host_info_factory_,
                   socket_factory_,
                   tcp_https_ret.first->second /* https proxy */,
                   NULL /* no socks proxy */,
@@ -260,6 +267,8 @@ SSLClientSocketPool* ClientSocketPoolManager::GetSocketPoolForSSLWithProxy(
       &ssl_pool_histograms_,
       host_resolver_,
       dnsrr_resolver_,
+      dns_cert_checker_,
+      ssl_host_info_factory_,
       socket_factory_,
       NULL, /* no tcp pool, we always go through a proxy */
       GetSocketPoolForSOCKSProxy(proxy_server),

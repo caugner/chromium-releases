@@ -38,6 +38,9 @@ const char* const kAliceUsername = "alice";
 const char* const kAlicePassword = "password";
 const char* const kBobUsername = "bob";
 const char* const kBobPassword = "secret";
+const char* const kCarolUsername = "Carol";
+const char* const kCarolPassword = "test";
+
 
 const char* const kFormHTML =
     "<FORM name='LoginTestForm' action='http://www.bidule.com'>"
@@ -68,14 +71,17 @@ class PasswordAutocompleteManagerTest : public RenderViewTest {
     password1_ = ASCIIToUTF16(kAlicePassword);
     username2_ = ASCIIToUTF16(kBobUsername);
     password2_ = ASCIIToUTF16(kBobPassword);
+    username3_ = ASCIIToUTF16(kCarolUsername);
+    password3_ = ASCIIToUTF16(kCarolPassword);
 
     fill_data_.basic_data.fields.push_back(
         FormField(string16(), ASCIIToUTF16(kUsernameName),
-                  username1_, string16(), 0));
+                  username1_, string16(), 0, false));
     fill_data_.basic_data.fields.push_back(
         FormField(string16(), ASCIIToUTF16(kPasswordName),
-                  password1_, string16(), 0));
+                  password1_, string16(), 0, false));
     fill_data_.additional_logins[username2_] = password2_;
+    fill_data_.additional_logins[username3_] = password3_;
 
     // We need to set the origin so it matches the frame URL and the action so
     // it matches the form action, otherwise we won't autocomplete.
@@ -141,8 +147,10 @@ class PasswordAutocompleteManagerTest : public RenderViewTest {
 
   string16 username1_;
   string16 username2_;
+  string16 username3_;
   string16 password1_;
   string16 password2_;
+  string16 password3_;
   PasswordFormFillData fill_data_;
 
   WebInputElement username_element_;
@@ -152,26 +160,9 @@ class PasswordAutocompleteManagerTest : public RenderViewTest {
   DISALLOW_COPY_AND_ASSIGN(PasswordAutocompleteManagerTest);
 };
 
-#if defined(WEBKIT_BUG_41283_IS_FIXED)
-#define MAYBE_InitialAutocomplete InitialAutocomplete
-#define MAYBE_NoInitialAutocompleteForReadOnly NoInitialAutocompleteForReadOnly
-#define MAYBE_PasswordClearOnEdit PasswordClearOnEdit
-#define MAYBE_WaitUsername WaitUsername
-#define MAYBE_InlineAutocomplete InlineAutocomplete
-#define MAYBE_SuggestionSelect SuggestionSelect
-#else
-#define MAYBE_InitialAutocomplete DISABLED_InitialAutocomplete
-#define MAYBE_NoInitialAutocompleteForReadOnly \
-    DISABLED_NoInitialAutocompleteForReadOnly
-#define MAYBE_PasswordClearOnEdit DISABLED_PasswordClearOnEdit
-#define MAYBE_WaitUsername DISABLED_WaitUsername
-#define MAYBE_InlineAutocomplete DISABLED_InlineAutocomplete
-#define MAYBE_SuggestionSelect DISABLED_SuggestionSelect
-#endif
-
 // Tests that the password login is autocompleted as expected when the browser
 // sends back the password info.
-TEST_F(PasswordAutocompleteManagerTest, MAYBE_InitialAutocomplete) {
+TEST_F(PasswordAutocompleteManagerTest, InitialAutocomplete) {
   /*
    * Right now we are not sending the message to the browser because we are
    * loading a data URL and the security origin canAccessPasswordManager()
@@ -203,8 +194,7 @@ TEST_F(PasswordAutocompleteManagerTest, MAYBE_InitialAutocomplete) {
 }
 
 // Tests that changing the username does not fill a read-only password field.
-TEST_F(PasswordAutocompleteManagerTest,
-       MAYBE_NoInitialAutocompleteForReadOnly) {
+TEST_F(PasswordAutocompleteManagerTest, NoInitialAutocompleteForReadOnly) {
   password_element_.setAttribute(WebString::fromUTF8("readonly"),
                                  WebString::fromUTF8("true"));
 
@@ -218,7 +208,7 @@ TEST_F(PasswordAutocompleteManagerTest,
 }
 
 // Tests that editing the password clears the autocompleted password field.
-TEST_F(PasswordAutocompleteManagerTest, MAYBE_PasswordClearOnEdit) {
+TEST_F(PasswordAutocompleteManagerTest, PasswordClearOnEdit) {
   // Simulate the browser sending back the login info, it triggers the
   // autocomplete.
   SimulateOnFillPasswordForm(fill_data_);
@@ -232,7 +222,7 @@ TEST_F(PasswordAutocompleteManagerTest, MAYBE_PasswordClearOnEdit) {
 
 // Tests that we only autocomplete on focus lost and with a full username match
 // when |wait_for_username| is true.
-TEST_F(PasswordAutocompleteManagerTest, MAYBE_WaitUsername) {
+TEST_F(PasswordAutocompleteManagerTest, WaitUsername) {
   // Simulate the browser sending back the login info.
   fill_data_.wait_for_username = true;
   SimulateOnFillPasswordForm(fill_data_);
@@ -265,7 +255,7 @@ TEST_F(PasswordAutocompleteManagerTest, MAYBE_WaitUsername) {
 }
 
 // Tests that inline autocompletion works properly.
-TEST_F(PasswordAutocompleteManagerTest, MAYBE_InlineAutocomplete) {
+TEST_F(PasswordAutocompleteManagerTest, InlineAutocomplete) {
   // Simulate the browser sending back the login info.
   SimulateOnFillPasswordForm(fill_data_);
 
@@ -308,10 +298,22 @@ TEST_F(PasswordAutocompleteManagerTest, MAYBE_InlineAutocomplete) {
   // The username and password fields should match the 'bob' entry.
   CheckTextFieldsState(kBobUsername, true, kBobPassword, true);
   CheckUsernameSelection(1, 3);
+
+  // Then, the user again removes all the text and types an uppercase 'C'.
+  SimulateUsernameChange("C", true);
+  // The username and password fields should match the 'Carol' entry.
+  CheckTextFieldsState(kCarolUsername, true, kCarolPassword, true);
+  CheckUsernameSelection(1, 5);
+  // Finally, the user removes all the text and types a lowercase 'c'.  We only
+  // want case-sensitive autocompletion, so the username and the selected range
+  // should be empty.
+  SimulateUsernameChange("c", true);
+  CheckTextFieldsState("c", false, "", false);
+  CheckUsernameSelection(1, 1);
 }
 
 // Tests that selecting and item in the suggestion drop-down works.
-TEST_F(PasswordAutocompleteManagerTest, MAYBE_SuggestionSelect) {
+TEST_F(PasswordAutocompleteManagerTest, SuggestionSelect) {
   // Simulate the browser sending back the login info.
   SimulateOnFillPasswordForm(fill_data_);
 
@@ -328,4 +330,4 @@ TEST_F(PasswordAutocompleteManagerTest, MAYBE_SuggestionSelect) {
   CheckTextFieldsState(kAliceUsername, true, kAlicePassword, true);
 }
 
-}  // namespace
+}

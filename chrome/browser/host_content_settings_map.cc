@@ -7,7 +7,7 @@
 #include "base/command_line.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
@@ -43,6 +43,11 @@ const char kDomainWildcard[] = "[*.]";
 // The length of kDomainWildcard (without the trailing '\0')
 const size_t kDomainWildcardLength = arraysize(kDomainWildcard) - 1;
 
+// Base pref path of the prefs that contain the managed default content
+// settings values.
+const std::string kManagedSettings =
+      "profile.managed_default_content_settings";
+
 // The preference keys where resource identifiers are stored for
 // ContentSettingsType values that support resource identifiers.
 const char* kResourceTypeNames[CONTENT_SETTINGS_NUM_TYPES] = {
@@ -62,6 +67,17 @@ const char* kTypeNames[CONTENT_SETTINGS_NUM_TYPES] = {
   "javascript",
   "plugins",
   "popups",
+  NULL,  // Not used for Geolocation
+  NULL,  // Not used for Notifications
+};
+
+// The preferences used to manage ContentSettingsTypes.
+const char* kPrefToManageType[CONTENT_SETTINGS_NUM_TYPES] = {
+  prefs::kManagedDefaultCookiesSetting,
+  prefs::kManagedDefaultImagesSetting,
+  prefs::kManagedDefaultJavaScriptSetting,
+  prefs::kManagedDefaultPluginsSetting,
+  prefs::kManagedDefaultPopupsSetting,
   NULL,  // Not used for Geolocation
   NULL,  // Not used for Notifications
 };
@@ -93,13 +109,34 @@ const bool kRequiresResourceIdentifier[CONTENT_SETTINGS_NUM_TYPES] = {
 // true for various internal objects like chrome:// URLs, so UI and other
 // things users think of as "not webpages" don't break.
 static bool ShouldAllowAllContent(const GURL& url) {
-  return url.SchemeIs(chrome::kChromeInternalScheme) ||
+  return url.SchemeIs(chrome::kChromeDevToolsScheme) ||
+         url.SchemeIs(chrome::kChromeInternalScheme) ||
          url.SchemeIs(chrome::kChromeUIScheme) ||
          url.SchemeIs(chrome::kExtensionScheme) ||
          url.SchemeIs(chrome::kGearsScheme) ||
          url.SchemeIs(chrome::kUserScriptScheme);
 }
+
+// Map ASK for the plugins content type to BLOCK if click-to-play is
+// not enabled.
+ContentSetting ClickToPlayFixup(ContentSettingsType content_type,
+                                ContentSetting setting) {
+  if (setting == CONTENT_SETTING_ASK &&
+      content_type == CONTENT_SETTINGS_TYPE_PLUGINS &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableClickToPlay)) {
+    return CONTENT_SETTING_BLOCK;
+  }
+  return setting;
+}
+
 }  // namespace
+
+
+struct HostContentSettingsMap::ExtendedContentSettings {
+  ContentSettings content_settings;
+  ResourceContentSettings content_settings_for_resources;
+};
 
 // static
 HostContentSettingsMap::Pattern HostContentSettingsMap::Pattern::FromURL(
@@ -145,65 +182,39 @@ bool HostContentSettingsMap::Pattern::Matches(const GURL& url) const {
          (match + pattern_.length() - kDomainWildcardLength == host.length());
 }
 
+std::string HostContentSettingsMap::Pattern::CanonicalizePattern() const {
+  if (!IsValid()) {
+    return "";
+  }
+
+  bool starts_with_wildcard = pattern_.length() > kDomainWildcardLength &&
+      StartsWithASCII(pattern_, kDomainWildcard, false);
+
+  const std::string host(starts_with_wildcard ?
+      pattern_.substr(kDomainWildcardLength) : pattern_);
+
+  std::string canonicalized_pattern =
+      starts_with_wildcard ? kDomainWildcard : "";
+
+  url_canon::CanonHostInfo host_info;
+  canonicalized_pattern += net::CanonicalizeHost(host, &host_info);
+
+  return canonicalized_pattern;
+}
+
 HostContentSettingsMap::HostContentSettingsMap(Profile* profile)
     : profile_(profile),
       block_third_party_cookies_(false),
+      is_block_third_party_cookies_managed_(false),
       is_off_the_record_(profile_->IsOffTheRecord()),
       updating_preferences_(false) {
   PrefService* prefs = profile_->GetPrefs();
 
-  // Migrate obsolete cookie pref.
-  if (prefs->HasPrefPath(prefs::kCookieBehavior)) {
-    int cookie_behavior = prefs->GetInteger(prefs::kCookieBehavior);
-    prefs->ClearPref(prefs::kCookieBehavior);
-    if (!prefs->HasPrefPath(prefs::kDefaultContentSettings)) {
-        SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES,
-            (cookie_behavior == net::StaticCookiePolicy::BLOCK_ALL_COOKIES) ?
-                CONTENT_SETTING_BLOCK : CONTENT_SETTING_ALLOW);
-    }
-    if (!prefs->HasPrefPath(prefs::kBlockThirdPartyCookies)) {
-      SetBlockThirdPartyCookies(cookie_behavior ==
-          net::StaticCookiePolicy::BLOCK_THIRD_PARTY_COOKIES);
-    }
-  }
+  MigrateObsoleteCookiePref(prefs);
 
-  // Migrate obsolete popups pref.
-  if (prefs->HasPrefPath(prefs::kPopupWhitelistedHosts)) {
-    const ListValue* whitelist_pref =
-        prefs->GetList(prefs::kPopupWhitelistedHosts);
-    for (ListValue::const_iterator i(whitelist_pref->begin());
-         i != whitelist_pref->end(); ++i) {
-      std::string host;
-      (*i)->GetAsString(&host);
-      SetContentSetting(Pattern(host), CONTENT_SETTINGS_TYPE_POPUPS, "",
-                        CONTENT_SETTING_ALLOW);
-    }
-    prefs->ClearPref(prefs::kPopupWhitelistedHosts);
-  }
+  MigrateObsoletePopupsPref(prefs);
 
-  // Migrate obsolete per-host pref.
-  if (prefs->HasPrefPath(prefs::kPerHostContentSettings)) {
-    const DictionaryValue* all_settings_dictionary =
-        prefs->GetDictionary(prefs::kPerHostContentSettings);
-    for (DictionaryValue::key_iterator i(all_settings_dictionary->begin_keys());
-         i != all_settings_dictionary->end_keys(); ++i) {
-      const std::string& host(*i);
-      Pattern pattern(std::string(kDomainWildcard) + host);
-      DictionaryValue* host_settings_dictionary = NULL;
-      bool found = all_settings_dictionary->GetDictionaryWithoutPathExpansion(
-          host, &host_settings_dictionary);
-      DCHECK(found);
-      ContentSettings settings;
-      GetSettingsFromDictionary(host_settings_dictionary, &settings);
-      for (int j = 0; j < CONTENT_SETTINGS_NUM_TYPES; ++j) {
-        if (settings.settings[j] != CONTENT_SETTING_DEFAULT &&
-            !RequiresResourceIdentifier(ContentSettingsType(j)))
-          SetContentSetting(
-              pattern, ContentSettingsType(j), "", settings.settings[j]);
-      }
-    }
-    prefs->ClearPref(prefs::kPerHostContentSettings);
-  }
+  MigrateObsoletePerhostPref(prefs);
 
   // Read global defaults.
   DCHECK_EQ(arraysize(kTypeNames),
@@ -213,6 +224,8 @@ HostContentSettingsMap::HostContentSettingsMap(Profile* profile)
   // Read misc. global settings.
   block_third_party_cookies_ =
       prefs->GetBoolean(prefs::kBlockThirdPartyCookies);
+  is_block_third_party_cookies_managed_ =
+      prefs->IsManagedPreference(prefs::kBlockThirdPartyCookies);
   block_nonsandboxed_plugins_ =
       prefs->GetBoolean(prefs::kBlockNonsandboxedPlugins);
 
@@ -235,6 +248,18 @@ HostContentSettingsMap::HostContentSettingsMap(Profile* profile)
   pref_change_registrar_.Add(prefs::kContentSettingsPatterns, this);
   pref_change_registrar_.Add(prefs::kBlockThirdPartyCookies, this);
   pref_change_registrar_.Add(prefs::kBlockNonsandboxedPlugins, this);
+  // The following preferences are only used to indicate if a
+  // default-content-setting is managed and to hold the managed default-setting
+  // value. If the value for any of the following perferences is set then the
+  // corresponding default-content-setting is managed. These preferences exist
+  // in parallel to the preference default-content-settings.  If a
+  // default-content-settings-type is managed any user defined excpetions
+  // (patterns) for this type are ignored.
+  pref_change_registrar_.Add(prefs::kManagedDefaultCookiesSetting, this);
+  pref_change_registrar_.Add(prefs::kManagedDefaultImagesSetting, this);
+  pref_change_registrar_.Add(prefs::kManagedDefaultJavaScriptSetting, this);
+  pref_change_registrar_.Add(prefs::kManagedDefaultPluginsSetting, this);
+  pref_change_registrar_.Add(prefs::kManagedDefaultPopupsSetting, this);
   notification_registrar_.Add(this, NotificationType::PROFILE_DESTROYED,
                               Source<Profile>(profile_));
 }
@@ -249,6 +274,19 @@ void HostContentSettingsMap::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kBlockNonsandboxedPlugins, false);
   prefs->RegisterIntegerPref(prefs::kContentSettingsWindowLastTabIndex, 0);
 
+  // Preferences for default content setting policies. A policy is not set of
+  // the corresponding preferences below is set to CONTENT_SETTING_DEFAULT.
+  prefs->RegisterIntegerPref(prefs::kManagedDefaultCookiesSetting,
+      CONTENT_SETTING_DEFAULT);
+  prefs->RegisterIntegerPref(prefs::kManagedDefaultImagesSetting,
+      CONTENT_SETTING_DEFAULT);
+  prefs->RegisterIntegerPref(prefs::kManagedDefaultJavaScriptSetting,
+      CONTENT_SETTING_DEFAULT);
+  prefs->RegisterIntegerPref(prefs::kManagedDefaultPluginsSetting,
+      CONTENT_SETTING_DEFAULT);
+  prefs->RegisterIntegerPref(prefs::kManagedDefaultPopupsSetting,
+      CONTENT_SETTING_DEFAULT);
+
   // Obsolete prefs, for migration:
   prefs->RegisterIntegerPref(prefs::kCookieBehavior,
                              net::StaticCookiePolicy::ALLOW_ALL_COOKIES);
@@ -259,6 +297,8 @@ void HostContentSettingsMap::RegisterUserPrefs(PrefService* prefs) {
 ContentSetting HostContentSettingsMap::GetDefaultContentSetting(
     ContentSettingsType content_type) const {
   AutoLock auto_lock(lock_);
+  if (IsDefaultContentSettingManaged(content_type))
+    return managed_default_content_settings_.settings[content_type];
   return default_content_settings_.settings[content_type];
 }
 
@@ -269,8 +309,10 @@ ContentSetting HostContentSettingsMap::GetContentSetting(
   ContentSetting setting = GetNonDefaultContentSetting(url,
                                                        content_type,
                                                        resource_identifier);
-  if (setting == CONTENT_SETTING_DEFAULT)
+  if (setting == CONTENT_SETTING_DEFAULT ||
+      IsDefaultContentSettingManaged(content_type)) {
     return GetDefaultContentSetting(content_type);
+  }
   return setting;
 }
 
@@ -287,6 +329,12 @@ ContentSetting HostContentSettingsMap::GetNonDefaultContentSetting(
   if (CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableResourceContentSettings)) {
     DCHECK(!resource_identifier.empty());
+  }
+
+  // Host content settings are ignored if the default_content_setting is
+  // managed.
+  if (IsDefaultContentSettingManaged(content_type)) {
+    return GetDefaultContentSetting(content_type);
   }
 
   AutoLock auto_lock(lock_);
@@ -348,12 +396,23 @@ ContentSettings HostContentSettingsMap::GetContentSettings(
 
   AutoLock auto_lock(lock_);
 
-  // Make the remaining defaults explicit.
-  for (int j = 0; j < CONTENT_SETTINGS_NUM_TYPES; ++j)
-    if (output.settings[j] == CONTENT_SETTING_DEFAULT ||
-        RequiresResourceIdentifier(ContentSettingsType(j)))
-      output.settings[j] = default_content_settings_.settings[j];
-
+  // If we require a resource identifier, set the content settings to default,
+  // otherwise make the defaults explicit.
+  for (int j = 0; j < CONTENT_SETTINGS_NUM_TYPES; ++j) {
+    if (RequiresResourceIdentifier(ContentSettingsType(j))) {
+      output.settings[j] = CONTENT_SETTING_DEFAULT;
+    } else {
+      if (output.settings[j] == CONTENT_SETTING_DEFAULT) {
+        output.settings[j] = default_content_settings_.settings[j];
+      }
+      // A managed default content setting has the highest priority and hence
+      // will overwrite any previously set value.
+      if (IsDefaultContentSettingManaged(ContentSettingsType(j))) {
+        output.settings[j] =
+            managed_default_content_settings_.settings[j];
+      }
+    }
+  }
   return output;
 }
 
@@ -450,6 +509,10 @@ void HostContentSettingsMap::SetDefaultContentSetting(
     ContentSetting setting) {
   DCHECK(kTypeNames[content_type] != NULL);  // Don't call this for Geolocation.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(content_type != CONTENT_SETTINGS_TYPE_PLUGINS ||
+         setting != CONTENT_SETTING_ASK ||
+         CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableClickToPlay));
   PrefService* prefs = profile_->GetPrefs();
 
   // The default settings may not be directly modified for OTR sessions.
@@ -484,7 +547,7 @@ void HostContentSettingsMap::SetDefaultContentSetting(
 }
 
 void HostContentSettingsMap::SetContentSetting(
-    const Pattern& pattern,
+    const Pattern& original_pattern,
     ContentSettingsType content_type,
     const std::string& resource_identifier,
     ContentSetting setting) {
@@ -492,6 +555,12 @@ void HostContentSettingsMap::SetContentSetting(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_NE(RequiresResourceIdentifier(content_type),
             resource_identifier.empty());
+  DCHECK(content_type != CONTENT_SETTINGS_TYPE_PLUGINS ||
+         setting != CONTENT_SETTING_ASK ||
+         CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableClickToPlay));
+
+  const Pattern pattern(original_pattern.CanonicalizePattern());
 
   bool early_exit = false;
   std::string pattern_str(pattern.AsString());
@@ -676,12 +745,19 @@ void HostContentSettingsMap::SetBlockThirdPartyCookies(bool block) {
     return;
   }
 
+  PrefService* prefs = profile_->GetPrefs();
+  // If the preference block-third-party-cookies is managed then do not allow to
+  // change it.
+  if (prefs->IsManagedPreference(prefs::kBlockThirdPartyCookies)) {
+    NOTREACHED();
+    return;
+  }
+
   {
     AutoLock auto_lock(lock_);
     block_third_party_cookies_ = block;
   }
 
-  PrefService* prefs = profile_->GetPrefs();
   if (block)
     prefs->SetBoolean(prefs::kBlockThirdPartyCookies, true);
   else
@@ -760,10 +836,33 @@ void HostContentSettingsMap::Observe(NotificationType type,
       AutoLock auto_lock(lock_);
       block_third_party_cookies_ = profile_->GetPrefs()->GetBoolean(
           prefs::kBlockThirdPartyCookies);
+      is_block_third_party_cookies_managed_ =
+          profile_->GetPrefs()->IsManagedPreference(
+              prefs::kBlockThirdPartyCookies);
     } else if (prefs::kBlockNonsandboxedPlugins == *name) {
       AutoLock auto_lock(lock_);
       block_nonsandboxed_plugins_ = profile_->GetPrefs()->GetBoolean(
           prefs::kBlockNonsandboxedPlugins);
+    } else if (prefs::kManagedDefaultCookiesSetting == *name) {
+      UpdateManagedDefaultSetting(CONTENT_SETTINGS_TYPE_COOKIES,
+                                  profile_->GetPrefs(),
+                                  &managed_default_content_settings_);
+    } else if (prefs::kManagedDefaultImagesSetting == *name) {
+      UpdateManagedDefaultSetting(CONTENT_SETTINGS_TYPE_IMAGES,
+                                  profile_->GetPrefs(),
+                                  &managed_default_content_settings_);
+    } else if (prefs::kManagedDefaultJavaScriptSetting == *name) {
+      UpdateManagedDefaultSetting(CONTENT_SETTINGS_TYPE_JAVASCRIPT,
+                                  profile_->GetPrefs(),
+                                  &managed_default_content_settings_);
+    } else if (prefs::kManagedDefaultPluginsSetting == *name) {
+      UpdateManagedDefaultSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
+                                  profile_->GetPrefs(),
+                                  &managed_default_content_settings_);
+    } else if (prefs::kManagedDefaultPopupsSetting == *name) {
+      UpdateManagedDefaultSetting(CONTENT_SETTINGS_TYPE_POPUPS,
+                                  profile_->GetPrefs(),
+                                  &managed_default_content_settings_);
     } else {
       NOTREACHED() << "Unexpected preference observed";
       return;
@@ -805,6 +904,10 @@ void HostContentSettingsMap::GetSettingsFromDictionary(
   if (settings->settings[CONTENT_SETTINGS_TYPE_COOKIES] ==
       CONTENT_SETTING_ASK)
     settings->settings[CONTENT_SETTINGS_TYPE_COOKIES] = CONTENT_SETTING_BLOCK;
+
+  settings->settings[CONTENT_SETTINGS_TYPE_PLUGINS] =
+      ClickToPlayFixup(CONTENT_SETTINGS_TYPE_PLUGINS,
+                       settings->settings[CONTENT_SETTINGS_TYPE_PLUGINS]);
 }
 
 void HostContentSettingsMap::GetResourceSettingsFromDictionary(
@@ -829,7 +932,8 @@ void HostContentSettingsMap::GetResourceSettingsFromDictionary(
           DCHECK(found);
           (*settings)[ContentSettingsTypeResourceIdentifierPair(
               ContentSettingsType(type), resource_identifier)] =
-                  ContentSetting(setting);
+                  ClickToPlayFixup(ContentSettingsType(type),
+                                   ContentSetting(setting));
         }
 
         break;
@@ -861,24 +965,72 @@ void HostContentSettingsMap::ReadDefaultSettings(bool overwrite) {
   PrefService* prefs = profile_->GetPrefs();
   const DictionaryValue* default_settings_dictionary =
       prefs->GetDictionary(prefs::kDefaultContentSettings);
+
   if (overwrite)
     default_content_settings_ = ContentSettings();
+
   // Careful: The returned value could be NULL if the pref has never been set.
   if (default_settings_dictionary != NULL) {
     GetSettingsFromDictionary(default_settings_dictionary,
                               &default_content_settings_);
   }
   ForceDefaultsToBeExplicit();
+
+  // Read managed default content settings.
+  ReadManagedDefaultSettings(prefs, &managed_default_content_settings_);
+}
+
+void HostContentSettingsMap::ReadManagedDefaultSettings (
+    const PrefService* prefs, ContentSettings* settings) {
+  for (size_t type = 0; type < arraysize(kPrefToManageType); ++type) {
+    if (kPrefToManageType[type] == NULL) {
+      // TODO(markusheintz): Handle Geolocation and notification separately.
+      continue;
+    }
+    UpdateManagedDefaultSetting(ContentSettingsType(type), prefs, settings);
+  }
+}
+
+void HostContentSettingsMap::UpdateManagedDefaultSetting(
+    ContentSettingsType type,
+    const PrefService* prefs,
+    ContentSettings* settings) {
+  // If a pref to manage a default-content-setting was not set (NOTICE:
+  // "HasPrefPath" returns false if no value was set for a registered pref) then
+  // the default value of the preference is used. The default value of a
+  // preference to manage a default-content-settings is
+  // CONTENT_SETTING_DEFAULT. This indicates that no managed value is set. If a
+  // pref was set, than it MUST be managed.
+  DCHECK(!prefs->HasPrefPath(kPrefToManageType[type]) ||
+          prefs->IsManagedPreference(kPrefToManageType[type]));
+  AutoLock auto_lock(lock_);
+  settings->settings[type] = IntToContentSetting(
+      prefs->GetInteger(kPrefToManageType[type]));
+}
+
+bool HostContentSettingsMap::IsDefaultContentSettingManaged(
+    ContentSettingsType content_type) const {
+  // All managed_default_content_settings_ are always set explicitly or
+  // initialized to CONTENT_SETTINGS_DEFAULT. Hence each content settings type
+  // that is set to CONTENT_SETTINGS_DEFAULT is not managed since it was not set
+  // explicitly.
+  return managed_default_content_settings_.settings[content_type] !=
+      CONTENT_SETTING_DEFAULT;
 }
 
 void HostContentSettingsMap::ReadExceptions(bool overwrite) {
   PrefService* prefs = profile_->GetPrefs();
-  const DictionaryValue* all_settings_dictionary =
+  DictionaryValue* all_settings_dictionary =
       prefs->GetMutableDictionary(prefs::kContentSettingsPatterns);
+
   if (overwrite)
     host_content_settings_.clear();
+
   // Careful: The returned value could be NULL if the pref has never been set.
   if (all_settings_dictionary != NULL) {
+    // Convert all Unicode patterns into punycode form, then read.
+    CanonicalizeContentSettingsExceptions(all_settings_dictionary);
+
     for (DictionaryValue::key_iterator i(all_settings_dictionary->begin_keys());
          i != all_settings_dictionary->end_keys(); ++i) {
       const std::string& pattern(*i);
@@ -914,4 +1066,104 @@ void HostContentSettingsMap::UnregisterObservers() {
   notification_registrar_.Remove(this, NotificationType::PROFILE_DESTROYED,
                                  Source<Profile>(profile_));
   profile_ = NULL;
+}
+
+void HostContentSettingsMap::MigrateObsoleteCookiePref(PrefService* prefs) {
+  if (prefs->HasPrefPath(prefs::kCookieBehavior)) {
+    int cookie_behavior = prefs->GetInteger(prefs::kCookieBehavior);
+    prefs->ClearPref(prefs::kCookieBehavior);
+    if (!prefs->HasPrefPath(prefs::kDefaultContentSettings)) {
+        SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES,
+            (cookie_behavior == net::StaticCookiePolicy::BLOCK_ALL_COOKIES) ?
+                CONTENT_SETTING_BLOCK : CONTENT_SETTING_ALLOW);
+    }
+    if (!prefs->HasPrefPath(prefs::kBlockThirdPartyCookies)) {
+      SetBlockThirdPartyCookies(cookie_behavior ==
+          net::StaticCookiePolicy::BLOCK_THIRD_PARTY_COOKIES);
+    }
+  }
+}
+
+void HostContentSettingsMap::MigrateObsoletePopupsPref(PrefService* prefs) {
+  if (prefs->HasPrefPath(prefs::kPopupWhitelistedHosts)) {
+    const ListValue* whitelist_pref =
+        prefs->GetList(prefs::kPopupWhitelistedHosts);
+    for (ListValue::const_iterator i(whitelist_pref->begin());
+         i != whitelist_pref->end(); ++i) {
+      std::string host;
+      (*i)->GetAsString(&host);
+      SetContentSetting(Pattern(host), CONTENT_SETTINGS_TYPE_POPUPS, "",
+                        CONTENT_SETTING_ALLOW);
+    }
+    prefs->ClearPref(prefs::kPopupWhitelistedHosts);
+  }
+}
+
+void HostContentSettingsMap::MigrateObsoletePerhostPref(PrefService* prefs) {
+  if (prefs->HasPrefPath(prefs::kPerHostContentSettings)) {
+    const DictionaryValue* all_settings_dictionary =
+        prefs->GetDictionary(prefs::kPerHostContentSettings);
+    for (DictionaryValue::key_iterator i(all_settings_dictionary->begin_keys());
+         i != all_settings_dictionary->end_keys(); ++i) {
+      const std::string& host(*i);
+      Pattern pattern(std::string(kDomainWildcard) + host);
+      DictionaryValue* host_settings_dictionary = NULL;
+      bool found = all_settings_dictionary->GetDictionaryWithoutPathExpansion(
+          host, &host_settings_dictionary);
+      DCHECK(found);
+      ContentSettings settings;
+      GetSettingsFromDictionary(host_settings_dictionary, &settings);
+      for (int j = 0; j < CONTENT_SETTINGS_NUM_TYPES; ++j) {
+        if (settings.settings[j] != CONTENT_SETTING_DEFAULT &&
+            !RequiresResourceIdentifier(ContentSettingsType(j)))
+          SetContentSetting(
+              pattern, ContentSettingsType(j), "", settings.settings[j]);
+      }
+    }
+    prefs->ClearPref(prefs::kPerHostContentSettings);
+  }
+}
+
+void HostContentSettingsMap::CanonicalizeContentSettingsExceptions(
+    DictionaryValue* all_settings_dictionary) {
+  DCHECK(all_settings_dictionary);
+
+  std::vector<std::string> remove_items;
+  std::vector<std::pair<std::string, std::string> > move_items;
+  for (DictionaryValue::key_iterator i(all_settings_dictionary->begin_keys());
+       i != all_settings_dictionary->end_keys(); ++i) {
+    const std::string& pattern(*i);
+    const std::string canonicalized_pattern =
+        Pattern(pattern).CanonicalizePattern();
+
+    if (canonicalized_pattern.empty() || canonicalized_pattern == pattern)
+      continue;
+
+    // Clear old pattern if prefs already have canonicalized pattern.
+    DictionaryValue* new_pattern_settings_dictionary = NULL;
+    if (all_settings_dictionary->GetDictionaryWithoutPathExpansion(
+            canonicalized_pattern, &new_pattern_settings_dictionary)) {
+      remove_items.push_back(pattern);
+      continue;
+    }
+
+    // Move old pattern to canonicalized pattern.
+    DictionaryValue* old_pattern_settings_dictionary = NULL;
+    if (all_settings_dictionary->GetDictionaryWithoutPathExpansion(
+            pattern, &old_pattern_settings_dictionary)) {
+      move_items.push_back(std::make_pair(pattern, canonicalized_pattern));
+    }
+  }
+
+  for (size_t i = 0; i < remove_items.size(); ++i) {
+    all_settings_dictionary->RemoveWithoutPathExpansion(remove_items[i], NULL);
+  }
+
+  for (size_t i = 0; i < move_items.size(); ++i) {
+    Value* pattern_settings_dictionary = NULL;
+    all_settings_dictionary->RemoveWithoutPathExpansion(
+        move_items[i].first, &pattern_settings_dictionary);
+    all_settings_dictionary->SetWithoutPathExpansion(
+        move_items[i].second, pattern_settings_dictionary);
+  }
 }

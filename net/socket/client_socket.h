@@ -6,12 +6,12 @@
 #define NET_SOCKET_CLIENT_SOCKET_H_
 #pragma once
 
+#include "net/base/net_log.h"
 #include "net/socket/socket.h"
 
 namespace net {
 
 class AddressList;
-class BoundNetLog;
 
 class ClientSocket : public Socket {
  public:
@@ -69,6 +69,10 @@ class ClientSocket : public Socket {
   // this call to the transport socket.
   virtual bool WasEverUsed() const = 0;
 
+  // Returns true if the underlying transport socket is using TCP FastOpen.
+  // TCP FastOpen is an experiment with sending data in the TCP SYN packet.
+  virtual bool UsingTCPFastOpen() const = 0;
+
  protected:
   // The following class is only used to gather statistics about the history of
   // a socket.  It is only instantiated and used in basic sockets, such as
@@ -79,6 +83,10 @@ class ClientSocket : public Socket {
    public:
     UseHistory();
     ~UseHistory();
+
+    // Resets the state of UseHistory and emits histograms for the
+    // current state.
+    void Reset();
 
     void set_was_ever_connected();
     void set_was_used_to_convey_data();
@@ -106,6 +114,12 @@ class ClientSocket : public Socket {
     bool subresource_speculation_;
     DISALLOW_COPY_AND_ASSIGN(UseHistory);
   };
+
+  // Logs a SOCKET_BYTES_RECEIVED or SOCKET_BYTES_SENT event to the NetLog.
+  // Determines whether to log the received bytes or not, based on the current
+  // logging level.
+  void LogByteTransfer(const BoundNetLog& net_log, NetLog::EventType event_type,
+                       int byte_count, char* bytes) const;
 };
 
 }  // namespace net

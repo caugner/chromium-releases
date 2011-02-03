@@ -7,8 +7,13 @@
 #include "remoting/base/mock_objects.h"
 #include "remoting/host/mock_objects.h"
 #include "remoting/host/session_manager.h"
+#include "remoting/proto/video.pb.h"
+#include "remoting/protocol/mock_objects.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using ::remoting::protocol::MockConnectionToClient;
+using ::remoting::protocol::MockVideoStub;
 
 using ::testing::_;
 using ::testing::AtLeast;
@@ -19,8 +24,9 @@ namespace remoting {
 
 static const int kWidth = 640;
 static const int kHeight = 480;
-static const PixelFormat kFormat = PixelFormatRgb32;
-static const UpdateStreamEncoding kEncoding = EncodingNone;
+static const media::VideoFrame::Format kFormat = media::VideoFrame::RGB32;
+static const VideoPacketFormat::Encoding kEncoding =
+    VideoPacketFormat::ENCODING_VERBATIM;
 
 class SessionManagerTest : public testing::Test {
  public:
@@ -31,16 +37,14 @@ class SessionManagerTest : public testing::Test {
   void Init() {
     capturer_ = new MockCapturer();
     encoder_ = new MockEncoder();
-    client_ = new MockClientConnection();
-    record_ = new SessionManager(&message_loop_,
-                                 &message_loop_,
-                                 &message_loop_,
-                                 capturer_,
-                                 encoder_);
+    connection_ = new MockConnectionToClient();
+    record_ = new SessionManager(
+        &message_loop_, &message_loop_, &message_loop_,
+        capturer_, encoder_);
   }
 
   scoped_refptr<SessionManager> record_;
-  scoped_refptr<MockClientConnection> client_;
+  scoped_refptr<MockConnectionToClient> connection_;
   MockCapturer* capturer_;
   MockEncoder* encoder_;
   MessageLoop message_loop_;
@@ -64,10 +68,7 @@ ACTION_P2(RunCallback, rects, data) {
 }
 
 ACTION_P(FinishEncode, msg) {
-  Encoder::EncodingState state = (Encoder::EncodingStarting |
-                                  Encoder::EncodingInProgress |
-                                  Encoder::EncodingEnded);
-  arg2->Run(msg, state);
+  arg2->Run(msg);
   delete arg2;
 }
 
@@ -90,23 +91,24 @@ TEST_F(SessionManagerTest, DISABLED_OneRecordCycle) {
   // Add the mock client connection to the session.
   EXPECT_CALL(*capturer_, width()).WillRepeatedly(Return(kWidth));
   EXPECT_CALL(*capturer_, height()).WillRepeatedly(Return(kHeight));
-  EXPECT_CALL(*client_, SendInitClientMessage(kWidth, kHeight));
-  record_->AddClient(client_);
+  record_->AddConnection(connection_);
 
   // First the capturer is called.
   EXPECT_CALL(*capturer_, CaptureInvalidRects(NotNull()))
       .WillOnce(RunCallback(update_rects, data));
 
   // Expect the encoder be called.
-  ChromotingHostMessage* msg = new ChromotingHostMessage();
+  VideoPacket* packet = new VideoPacket();
   EXPECT_CALL(*encoder_, Encode(data, false, NotNull()))
-      .WillOnce(FinishEncode(msg));
+      .WillOnce(FinishEncode(packet));
+
+  MockVideoStub video_stub;
+  EXPECT_CALL(*connection_, video_stub())
+      .WillRepeatedly(Return(&video_stub));
 
   // Expect the client be notified.
-  EXPECT_CALL(*client_, SendBeginUpdateStreamMessage());
-  EXPECT_CALL(*client_, SendUpdateStreamPacketMessage(_));
-  EXPECT_CALL(*client_, SendEndUpdateStreamMessage());
-  EXPECT_CALL(*client_, GetPendingUpdateStreamMessages())
+  EXPECT_CALL(video_stub, ProcessVideoPacket(_, _));
+  EXPECT_CALL(video_stub, GetPendingPackets())
       .Times(AtLeast(0))
       .WillRepeatedly(Return(0));
 

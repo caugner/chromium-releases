@@ -13,6 +13,8 @@
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "chrome/browser/chromeos/login/view_screen.h"
 #include "chrome/browser/chromeos/login/wizard_screen.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 #include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
@@ -48,7 +50,8 @@ class WidgetGtk;
 // Class that manages control flow between wizard screens. Wizard controller
 // interacts with screen controllers to move the user between screens.
 class WizardController : public chromeos::ScreenObserver,
-                         public WizardScreenDelegate {
+                         public WizardScreenDelegate,
+                         public NotificationObserver {
  public:
   WizardController();
   ~WizardController();
@@ -58,8 +61,14 @@ class WizardController : public chromeos::ScreenObserver,
     return default_controller_;
   }
 
+  // Returns true if EULA has been accepted.
+  static bool IsEulaAccepted();
+
   // Returns OOBE completion status.
   static bool IsOobeCompleted();
+
+  // Marks EULA status as accepted.
+  static void MarkEulaAccepted();
 
   // Marks OOBE process as completed.
   static void MarkOobeCompleted();
@@ -91,6 +100,9 @@ class WizardController : public chromeos::ScreenObserver,
   // Takes ownership of the specified background widget and view.
   void OwnBackground(views::Widget* background_widget,
                      chromeos::BackgroundView* background_view);
+
+  // Skips OOBE update screen if it's currently shown.
+  void CancelOOBEUpdate();
 
   // Lazy initializers and getters for screens.
   chromeos::NetworkScreen* GetNetworkScreen();
@@ -150,6 +162,11 @@ class WizardController : public chromeos::ScreenObserver,
   static const char kEulaScreenName[];
   static const char kHTMLPageScreenName[];
 
+  // NotificationObserver implementation:
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
  private:
   // Exit handlers:
   void OnLoginSignInSelected();
@@ -169,6 +186,9 @@ class WizardController : public chromeos::ScreenObserver,
   void OnRegistrationSuccess();
   void OnRegistrationSkipped();
   void OnOOBECompleted();
+
+  // Shows update screen and starts update process.
+  void InitiateOOBEUpdate();
 
   // Creates wizard screen window with the specified |bounds|.
   // If |initial_show| initial animation (window & background) is shown.
@@ -255,6 +275,8 @@ class WizardController : public chromeos::ScreenObserver,
 
   // URL to open on browser launch.
   GURL start_url_;
+
+  NotificationRegistrar registrar_;
 
   FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, ControlFlowErrorNetwork);
   FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, ControlFlowErrorUpdate);

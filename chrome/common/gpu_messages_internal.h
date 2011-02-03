@@ -10,6 +10,7 @@
 // from it via utility_messages.h.
 
 #include <vector>
+#include <string>
 
 #include "base/shared_memory.h"
 #include "chrome/common/gpu_video_common.h"
@@ -23,6 +24,7 @@ namespace IPC {
 struct ChannelHandle;
 }
 
+struct GPUCreateCommandBufferConfig;
 class GPUInfo;
 
 //------------------------------------------------------------------------------
@@ -38,6 +40,11 @@ IPC_BEGIN_MESSAGES(Gpu)
   IPC_MESSAGE_CONTROL1(GpuMsg_EstablishChannel,
                        int /* renderer_id */)
 
+  // Tells the GPU process to close the channel identified by IPC channel
+  // handle.  If no channel can be identified, do nothing.
+  IPC_MESSAGE_CONTROL1(GpuMsg_CloseChannel,
+                       IPC::ChannelHandle /* channel_handle */)
+
   // Provides a synchronization point to guarantee that the processing of
   // previous asynchronous messages (i.e., GpuMsg_EstablishChannel) has
   // completed. (This message can't be synchronous because the
@@ -45,13 +52,28 @@ IPC_BEGIN_MESSAGES(Gpu)
   // asynchronously.) Results in a GpuHostMsg_SynchronizeReply.
   IPC_MESSAGE_CONTROL0(GpuMsg_Synchronize)
 
-  IPC_MESSAGE_CONTROL2(GpuMsg_NewRenderWidgetHostView,
-                       GpuNativeWindowHandle, /* parent window */
-                       int32 /* view_id */)
-
   // Tells the GPU process to create a context for collecting graphics card
   // information.
   IPC_MESSAGE_CONTROL0(GpuMsg_CollectGraphicsInfo)
+
+#if defined(OS_MACOSX)
+  // Tells the GPU process that the browser process handled the swap
+  // buffers request with the given number. Note that it is possible
+  // for the browser process to coalesce frames; it is not guaranteed
+  // that every GpuHostMsg_AcceleratedSurfaceBuffersSwapped message
+  // will result in a buffer swap on the browser side.
+  IPC_MESSAGE_CONTROL3(GpuMsg_AcceleratedSurfaceBuffersSwappedACK,
+                       int /* renderer_id */,
+                       int32 /* route_id */,
+                       uint64 /* swap_buffers_count */)
+
+// Tells the GPU process that the IOSurface of the buffer belonging to
+// |renderer_route_id| a given id was destroyed, either by the user closing the
+// tab hosting the surface, or by the renderer navigating to a new page.
+IPC_MESSAGE_CONTROL2(GpuMsg_DidDestroyAcceleratedSurface,
+                     int /* renderer_id */,
+                     int32 /* renderer_route_id */)
+#endif
 
   // Tells the GPU process to crash.
   IPC_MESSAGE_CONTROL0(GpuMsg_Crash)
@@ -59,57 +81,12 @@ IPC_BEGIN_MESSAGES(Gpu)
   // Tells the GPU process to hang.
   IPC_MESSAGE_CONTROL0(GpuMsg_Hang)
 
-  // Creates a new backing store.
-  IPC_MESSAGE_ROUTED2(GpuMsg_NewBackingStore,
-                      int32, /* backing_store_routing_id */
-                      gfx::Size /* size */)
-
-  // Creates a new video layer.
-  IPC_MESSAGE_ROUTED2(GpuMsg_NewVideoLayer,
-                      int32, /* video_layer_routing_id */
-                      gfx::Size /* size */)
-
-  // Updates the backing store with the given bitmap. The GPU process will send
-  // back a GpuHostMsg_PaintToBackingStore_ACK after the paint is complete to
-  // let the caller know the TransportDIB can be freed or reused.
-  IPC_MESSAGE_ROUTED4(GpuMsg_PaintToBackingStore,
-                      base::ProcessId, /* process */
-                      TransportDIB::Id, /* bitmap */
-                      gfx::Rect, /* bitmap_rect */
-                      std::vector<gfx::Rect>) /* copy_rects */
-
-
-  IPC_MESSAGE_ROUTED4(GpuMsg_ScrollBackingStore,
-                      int, /* dx */
-                      int, /* dy */
-                      gfx::Rect, /* clip_rect */
-                      gfx::Size) /* view_size */
-
-  // Tells the GPU process that the RenderWidgetHost has painted the window.
-  // Depending on the platform, the accelerated content may need to be painted
-  // over the top.
-  IPC_MESSAGE_ROUTED0(GpuMsg_WindowPainted)
-
-  // Updates the video layer with the given YUV data. The GPU process will send
-  // back a GpuHostMsg_PaintToVideoLayer_ACK after the paint is complete to
-  // let the caller know the TransportDIB can be freed or reused.
-  IPC_MESSAGE_ROUTED3(GpuMsg_PaintToVideoLayer,
-                      base::ProcessId, /* process */
-                      TransportDIB::Id, /* bitmap */
-                      gfx::Rect) /* bitmap_rect */
-
 IPC_END_MESSAGES(Gpu)
 
 //------------------------------------------------------------------------------
 // GPU Host Messages
 // These are messages from the GPU process to the browser.
 IPC_BEGIN_MESSAGES(GpuHost)
-
-  // Sent in response to GpuMsg_PaintToBackingStore, see that for more.
-  IPC_MESSAGE_ROUTED0(GpuHostMsg_PaintToBackingStore_ACK)
-
-  // Sent in response to GpuMsg_PaintToVideoLayer, see that for more.
-  IPC_MESSAGE_ROUTED0(GpuHostMsg_PaintToVideoLayer_ACK)
 
   // Response to a GpuHostMsg_EstablishChannel message.
   IPC_MESSAGE_CONTROL2(GpuHostMsg_ChannelEstablished,
@@ -128,6 +105,17 @@ IPC_BEGIN_MESSAGES(GpuHost)
   IPC_SYNC_MESSAGE_CONTROL1_1(GpuHostMsg_GetViewXID,
                               gfx::NativeViewId, /* view */
                               unsigned long /* xid */)
+
+  // Release the lock on the window.
+  // If the associated view has been destroyed, destroy the window.
+  IPC_MESSAGE_CONTROL1(GpuHostMsg_ReleaseXID,
+                       unsigned long /* xid */)
+
+  IPC_SYNC_MESSAGE_CONTROL2_1(GpuHostMsg_ResizeXID,
+                              unsigned long, /* xid */
+                              gfx::Size, /* size */
+                              bool /* success */)
+
 #elif defined(OS_MACOSX)
   // This message, used on Mac OS X 10.6 and later (where IOSurface is
   // supported), is sent from the GPU process to the browser to indicate that a
@@ -140,10 +128,18 @@ IPC_BEGIN_MESSAGES(GpuHost)
   // This message notifies the browser process that the renderer
   // swapped the buffers associated with the given "window", which
   // should cause the browser to redraw the compositor's contents.
-  IPC_MESSAGE_CONTROL3(GpuHostMsg_AcceleratedSurfaceBuffersSwapped,
+  IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfaceBuffersSwapped,
+                       GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
+#elif defined(OS_WIN)
+  // Get the HWND for the compositor window and if necessary, create it
+  IPC_SYNC_MESSAGE_CONTROL2_1(GpuHostMsg_GetCompositorHostWindow,
+                              int32, /* renderer_id */
+                              int32, /* render_view_id */
+                              gfx::PluginWindowHandle /* compositor_host_id */)
+
+  IPC_MESSAGE_CONTROL2(GpuHostMsg_ScheduleComposite,
                        int32, /* renderer_id */
-                       int32, /* render_view_id */
-                       gfx::PluginWindowHandle /* window */)
+                       int32 /* render_view_id */)
 #endif
 
 IPC_END_MESSAGES(GpuHost)
@@ -157,9 +153,10 @@ IPC_BEGIN_MESSAGES(GpuChannel)
   // to a native view. The |render_view_id| is currently needed only on Mac OS
   // X in order to identify the window on the browser side into which the
   // rendering results go. A corresponding GpuCommandBufferStub is created.
-  IPC_SYNC_MESSAGE_CONTROL2_1(GpuChannelMsg_CreateViewCommandBuffer,
+  IPC_SYNC_MESSAGE_CONTROL3_1(GpuChannelMsg_CreateViewCommandBuffer,
                               gfx::NativeViewId, /* view */
                               int32, /* render_view_id */
+                              GPUCreateCommandBufferConfig, /* init_params */
                               int32 /* route_id */)
 
   // Tells the GPU process to create a new command buffer that renders to an
@@ -170,7 +167,7 @@ IPC_BEGIN_MESSAGES(GpuChannel)
   IPC_SYNC_MESSAGE_CONTROL4_1(GpuChannelMsg_CreateOffscreenCommandBuffer,
                               int32, /* parent_route_id */
                               gfx::Size, /* size */
-                              std::vector<int>, /* attribs */
+                              GPUCreateCommandBufferConfig, /* init_params */
                               uint32, /* parent_texture_id */
                               int32 /* route_id */)
 
@@ -270,13 +267,6 @@ IPC_BEGIN_MESSAGES(GpuCommandBuffer)
   // browser. This message is currently used only on 10.6 and later.
   IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_SetWindowSize,
                       gfx::Size /* size */)
-
-  // This message is sent from the GPU process to the renderer process (and
-  // from there the browser process) that the buffers associated with the
-  // given "window" were swapped, which should cause the browser to redraw
-  // the various accelerated surfaces.
-  IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_AcceleratedSurfaceBuffersSwapped,
-                      gfx::PluginWindowHandle /* window */)
 #endif
 
 IPC_END_MESSAGES(GpuCommandBuffer)

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -106,6 +106,10 @@ class MenuModel {
 
   // Called when the item at the specified index has been activated.
   virtual void ActivatedAt(int index) = 0;
+
+  // Called when the item has been activated with a given disposition (for the
+  // case where the activation involves a navigation).
+  virtual void ActivatedAtWithDisposition(int index, int disposition);
 
   // Called when the menu is about to be shown.
   virtual void MenuWillShow() {}

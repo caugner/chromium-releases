@@ -31,20 +31,25 @@ BlockedContentContainer::BlockedContentContainer(TabContents* owner)
     : owner_(owner) {
 }
 
+BlockedContentContainer::~BlockedContentContainer() {}
+
 void BlockedContentContainer::AddTabContents(TabContents* tab_contents,
                                              WindowOpenDisposition disposition,
                                              const gfx::Rect& bounds,
                                              bool user_gesture) {
   if (blocked_contents_.size() == (kImpossibleNumberOfPopups - 1)) {
     delete tab_contents;
-    LOG(INFO) << "Warning: Renderer is sending more popups to us than should "
-        "be possible. Renderer compromised?";
+    VLOG(1) << "Warning: Renderer is sending more popups to us than should be "
+               "possible. Renderer compromised?";
     return;
   }
 
   blocked_contents_.push_back(
       BlockedContent(tab_contents, disposition, bounds, user_gesture));
   tab_contents->set_delegate(this);
+  // Since the new tab_contents will not be showed, call WasHidden to change
+  // its status on both RenderViewHost and RenderView.
+  tab_contents->WasHidden();
   if (blocked_contents_.size() == 1)
     owner_->PopupNotificationVisibilityChanged(true);
 }
@@ -60,6 +65,8 @@ void BlockedContentContainer::LaunchForContents(TabContents* tab_contents) {
       blocked_contents_.erase(i);
       i = blocked_contents_.end();
       tab_contents->set_delegate(NULL);
+      // We needn't call WasRestored to change its status because the
+      // TabContents::AddNewContents will do it.
       owner_->AddNewContents(tab_contents, content.disposition, content.bounds,
                              content.user_gesture);
       break;

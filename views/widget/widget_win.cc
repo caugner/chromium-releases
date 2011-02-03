@@ -7,6 +7,7 @@
 #include "app/keyboard_code_conversion_win.h"
 #include "app/l10n_util_win.h"
 #include "app/system_monitor.h"
+#include "app/view_prop.h"
 #include "app/win_util.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
@@ -18,17 +19,23 @@
 #include "views/focus/focus_util_win.h"
 #include "views/views_delegate.h"
 #include "views/widget/aero_tooltip_manager.h"
+#include "views/widget/child_window_message_processor.h"
 #include "views/widget/default_theme_provider.h"
 #include "views/widget/drop_target_win.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_delegate.h"
+#include "views/widget/widget_utils.h"
 #include "views/window/window_win.h"
+
+using app::ViewProp;
 
 namespace views {
 
 // Property used to link the HWND to its RootView.
-static const wchar_t* const kRootViewWindowProperty = L"__ROOT_VIEW__";
-static const wchar_t* kWidgetKey = L"__VIEWS_WIDGET__";
+static const char* const kRootViewWindowProperty = "__ROOT_VIEW__";
+
+// Links the HWND to it's Widget (as a Widget, not a WidgetWin).
+static const char* const kWidgetKey = "__VIEWS_WIDGET__";
 
 bool WidgetWin::screen_reader_active_ = false;
 
@@ -36,17 +43,9 @@ bool WidgetWin::screen_reader_active_ = false;
 // listening for MSAA events.
 #define OBJID_CUSTOM 1
 
-bool SetRootViewForHWND(HWND hwnd, RootView* root_view) {
-  return SetProp(hwnd, kRootViewWindowProperty, root_view) ? true : false;
-}
-
 RootView* GetRootViewForHWND(HWND hwnd) {
-  return reinterpret_cast<RootView*>(::GetProp(hwnd, kRootViewWindowProperty));
-}
-
-NativeControlWin* GetNativeControlWinForHWND(HWND hwnd) {
-  return reinterpret_cast<NativeControlWin*>(
-      GetProp(hwnd, NativeControlWin::kNativeControlWinKey));
+  return reinterpret_cast<RootView*>(
+      ViewProp::GetValue(hwnd, kRootViewWindowProperty));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -168,7 +167,7 @@ void WidgetWin::Init(gfx::NativeView parent, const gfx::Rect& bounds) {
 
   default_theme_provider_.reset(new DefaultThemeProvider());
 
-  SetWindowSupportsRerouteMouseWheel(hwnd());
+  props_.push_back(SetWindowSupportsRerouteMouseWheel(hwnd()));
 
   drop_target_ = new DropTargetWin(root_view_.get());
 
@@ -183,7 +182,7 @@ void WidgetWin::Init(gfx::NativeView parent, const gfx::Rect& bounds) {
   }
 
   // Sets the RootView as a property, so the automation can introspect windows.
-  SetRootViewForHWND(hwnd(), root_view_.get());
+  SetNativeWindowProperty(kRootViewWindowProperty, root_view_.get());
 
   MessageLoopForUI::current()->AddObserver(this);
 
@@ -421,32 +420,25 @@ const Window* WidgetWin::GetWindow() const {
   return GetWindowImpl(hwnd());
 }
 
-void WidgetWin::SetNativeWindowProperty(const std::wstring& name,
-                                        void* value) {
+void WidgetWin::SetNativeWindowProperty(const char* name, void* value) {
+  // Remove the existing property (if any).
+  for (ViewProps::iterator i = props_.begin(); i != props_.end(); ++i) {
+    if ((*i)->Key() == name) {
+      props_.erase(i);
+      break;
+    }
+  }
+
   if (value)
-    SetProp(hwnd(), name.c_str(), value);
-  else
-    RemoveProp(hwnd(), name.c_str());
+    props_.push_back(new ViewProp(hwnd(), name, value));
 }
 
-void* WidgetWin::GetNativeWindowProperty(const std::wstring& name) {
-  return GetProp(hwnd(), name.c_str());
+void* WidgetWin::GetNativeWindowProperty(const char* name) {
+  return ViewProp::GetValue(hwnd(), name);
 }
 
 ThemeProvider* WidgetWin::GetThemeProvider() const {
-  Widget* widget = GetRootWidget();
-  if (widget && widget != this) {
-    // Attempt to get the theme provider, and fall back to the default theme
-    // provider if not found.
-    ThemeProvider* provider = widget->GetThemeProvider();
-    if (provider)
-      return provider;
-
-    provider = widget->GetDefaultThemeProvider();
-    if (provider)
-      return provider;
-  }
-  return default_theme_provider_.get();
+  return GetWidgetThemeProvider(this);
 }
 
 ThemeProvider* WidgetWin::GetDefaultThemeProvider() const {
@@ -583,14 +575,12 @@ LRESULT WidgetWin::OnCreate(CREATESTRUCT* create_struct) {
 }
 
 void WidgetWin::OnDestroy() {
-  SetNativeWindowProperty(kWidgetKey, NULL);
-
   if (drop_target_.get()) {
     RevokeDragDrop(hwnd());
     drop_target_ = NULL;
   }
 
-  RemoveProp(hwnd(), kRootViewWindowProperty);
+  props_.reset();
 }
 
 void WidgetWin::OnDisplayChange(UINT bits_per_pixel, CSize screen_size) {
@@ -631,39 +621,13 @@ LRESULT WidgetWin::OnGetObject(UINT uMsg, WPARAM w_param, LPARAM l_param) {
 
   // Accessibility readers will send an OBJID_CLIENT message
   if (OBJID_CLIENT == l_param) {
-    // If our MSAA root is already created, reuse that pointer. Otherwise,
-    // create a new one.
-    if (!accessibility_root_) {
-      CComObject<ViewAccessibility>* instance = NULL;
+    // Retrieve MSAA dispatch object for the root view.
+    ScopedComPtr<IAccessible> root(
+        ViewAccessibility::GetAccessibleForView(GetRootView()));
 
-      HRESULT hr = CComObject<ViewAccessibility>::CreateInstance(&instance);
-      DCHECK(SUCCEEDED(hr));
-
-      if (!instance) {
-        // Return with failure.
-        return static_cast<LRESULT>(0L);
-      }
-
-      ScopedComPtr<IAccessible> accessibility_instance(instance);
-
-      if (!SUCCEEDED(instance->Initialize(root_view_.get()))) {
-        // Return with failure.
-        return static_cast<LRESULT>(0L);
-      }
-
-      // All is well, assign the temp instance to the class smart pointer
-      accessibility_root_.Attach(accessibility_instance.Detach());
-
-      if (!accessibility_root_) {
-        // Return with failure.
-        return static_cast<LRESULT>(0L);
-      }
-    }
-
-    // Create a reference to ViewAccessibility that MSAA will marshall
-    // to the client.
+    // Create a reference that MSAA will marshall to the client.
     reference_result = LresultFromObject(IID_IAccessible, w_param,
-        static_cast<IAccessible*>(accessibility_root_));
+        static_cast<IAccessible*>(root.Detach()));
   }
 
   if (OBJID_CUSTOM == l_param) {
@@ -1199,7 +1163,9 @@ RootView* WidgetWin::GetFocusedViewRootView() {
 
 // Get the source HWND of the specified message. Depending on the message, the
 // source HWND is encoded in either the WPARAM or the LPARAM value.
-HWND GetControlHWNDForMessage(UINT message, WPARAM w_param, LPARAM l_param) {
+static HWND GetControlHWNDForMessage(UINT message,
+                                     WPARAM w_param,
+                                     LPARAM l_param) {
   // Each of the following messages can be sent by a child HWND and must be
   // forwarded to its associated NativeControlWin for handling.
   switch (message) {
@@ -1222,25 +1188,26 @@ HICON WidgetWin::GetDefaultWindowIcon() const {
   return NULL;
 }
 
-// Some messages may be sent to us by a child HWND managed by
-// NativeControlWin. If this is the case, this function will forward those
-// messages on to the object associated with the source HWND and return true,
-// in which case the window procedure must not do any further processing of
-// the message. If there is no associated NativeControlWin, the return value
-// will be false and the WndProc can continue processing the message normally.
-// |l_result| contains the result of the message processing by the control and
-// must be returned by the WndProc if the return value is true.
-bool ProcessNativeControlMessage(UINT message,
-                                 WPARAM w_param,
-                                 LPARAM l_param,
-                                 LRESULT* l_result) {
+// Some messages may be sent to us by a child HWND. If this is the case, this
+// function will forward those messages on to the object associated with the
+// source HWND and return true, in which case the window procedure must not do
+// any further processing of the message. If there is no associated
+// ChildWindowMessageProcessor, the return value will be false and the WndProc
+// can continue processing the message normally.  |l_result| contains the result
+// of the message processing by the control and must be returned by the WndProc
+// if the return value is true.
+static bool ProcessChildWindowMessage(UINT message,
+                                      WPARAM w_param,
+                                      LPARAM l_param,
+                                      LRESULT* l_result) {
   *l_result = 0;
 
   HWND control_hwnd = GetControlHWNDForMessage(message, w_param, l_param);
   if (IsWindow(control_hwnd)) {
-    NativeControlWin* wrapper = GetNativeControlWinForHWND(control_hwnd);
-    if (wrapper)
-      return wrapper->ProcessMessage(message, w_param, l_param, l_result);
+    ChildWindowMessageProcessor* processor =
+        ChildWindowMessageProcessor::Get(control_hwnd);
+    if (processor)
+      return processor->ProcessMessage(message, w_param, l_param, l_result);
   }
 
   return false;
@@ -1253,7 +1220,7 @@ LRESULT WidgetWin::OnWndProc(UINT message, WPARAM w_param, LPARAM l_param) {
   // First allow messages sent by child controls to be processed directly by
   // their associated views. If such a view is present, it will handle the
   // message *instead of* this WidgetWin.
-  if (ProcessNativeControlMessage(message, w_param, l_param, &result))
+  if (ProcessChildWindowMessage(message, w_param, l_param, &result))
     return result;
 
   // Otherwise we handle everything else.
@@ -1325,8 +1292,7 @@ Widget* Widget::CreatePopupWidget(TransparencyParam transparent,
 }
 
 static BOOL CALLBACK EnumChildProc(HWND hwnd, LPARAM l_param) {
-  RootView* root_view =
-      reinterpret_cast<RootView*>(GetProp(hwnd, kRootViewWindowProperty));
+  RootView* root_view = GetRootViewForHWND(hwnd);
   if (root_view) {
     *reinterpret_cast<RootView**>(l_param) = root_view;
     return FALSE;  // Stop enumerating.
@@ -1336,8 +1302,7 @@ static BOOL CALLBACK EnumChildProc(HWND hwnd, LPARAM l_param) {
 
 // static
 RootView* Widget::FindRootView(HWND hwnd) {
-  RootView* root_view =
-      reinterpret_cast<RootView*>(GetProp(hwnd, kRootViewWindowProperty));
+  RootView* root_view = GetRootViewForHWND(hwnd);
   if (root_view)
     return root_view;
 
@@ -1350,8 +1315,7 @@ RootView* Widget::FindRootView(HWND hwnd) {
 // Enumerate child windows as they could have RootView distinct from
 // the HWND's root view.
 BOOL CALLBACK EnumAllRootViewsChildProc(HWND hwnd, LPARAM l_param) {
-  RootView* root_view =
-      reinterpret_cast<RootView*>(GetProp(hwnd, kRootViewWindowProperty));
+  RootView* root_view = GetRootViewForHWND(hwnd);
   if (root_view) {
     std::set<RootView*>* root_views_set =
         reinterpret_cast<std::set<RootView*>*>(l_param);
@@ -1362,8 +1326,7 @@ BOOL CALLBACK EnumAllRootViewsChildProc(HWND hwnd, LPARAM l_param) {
 
 void Widget::FindAllRootViews(HWND window,
                               std::vector<RootView*>* root_views) {
-  RootView* root_view =
-      reinterpret_cast<RootView*>(GetProp(window, kRootViewWindowProperty));
+  RootView* root_view = GetRootViewForHWND(window);
   std::set<RootView*> root_views_set;
   if (root_view)
     root_views_set.insert(root_view);
@@ -1383,12 +1346,9 @@ void Widget::FindAllRootViews(HWND window,
 
 // static
 Widget* Widget::GetWidgetFromNativeView(gfx::NativeView native_view) {
-  if (IsWindow(native_view)) {
-    HANDLE raw_widget = GetProp(native_view, kWidgetKey);
-    if (raw_widget)
-      return reinterpret_cast<Widget*>(raw_widget);
-  }
-  return NULL;
+  return IsWindow(native_view) ?
+      reinterpret_cast<Widget*>(ViewProp::GetValue(native_view, kWidgetKey)) :
+      NULL;
 }
 
 // static

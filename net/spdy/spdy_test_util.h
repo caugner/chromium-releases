@@ -212,6 +212,11 @@ spdy::SpdyFrame* ConstructSpdyGet(const char* const extra_headers[],
                                   RequestPriority request_priority,
                                   bool direct);
 
+// Constructs a standard SPDY SYN_STREAM frame for a CONNECT request.
+spdy::SpdyFrame* ConstructSpdyConnect(const char* const extra_headers[],
+                                      int extra_header_count,
+                                      int stream_id);
+
 // Constructs a standard SPDY push SYN packet.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
@@ -224,15 +229,21 @@ spdy::SpdyFrame* ConstructSpdyPush(const char* const extra_headers[],
                                   int extra_header_count,
                                   int stream_id,
                                   int associated_stream_id,
-                                  const char* path);
+                                  const char* url);
 spdy::SpdyFrame* ConstructSpdyPush(const char* const extra_headers[],
                                   int extra_header_count,
                                   int stream_id,
                                   int associated_stream_id,
-                                  const char* path,
+                                  const char* url,
                                   const char* status,
-                                  const char* location,
+                                  const char* location);
+spdy::SpdyFrame* ConstructSpdyPush(int stream_id,
+                                  int associated_stream_id,
                                   const char* url);
+
+spdy::SpdyFrame* ConstructSpdyPushHeaders(int stream_id,
+                                          const char* const extra_headers[],
+                                          int extra_header_count);
 
 // Constructs a standard SPDY SYN_REPLY packet to match the SPDY GET.
 // |extra_headers| are the extra header-value pairs, which typically
@@ -247,6 +258,19 @@ spdy::SpdyFrame* ConstructSpdyGetSynReply(const char* const extra_headers[],
 // will vary the most between calls.
 // Returns a SpdyFrame.
 spdy::SpdyFrame* ConstructSpdyGetSynReplyRedirect(int stream_id);
+
+// Constructs a standard SPDY SYN_REPLY packet with an Internal Server
+// Error status code.
+// Returns a SpdyFrame.
+spdy::SpdyFrame* ConstructSpdySynReplyError(int stream_id);
+
+// Constructs a standard SPDY SYN_REPLY packet with the specified status code.
+// Returns a SpdyFrame.
+spdy::SpdyFrame* ConstructSpdySynReplyError(
+    const char* const status,
+    const char* const* const extra_headers,
+    int extra_header_count,
+    int stream_id);
 
 // Constructs a standard SPDY POST SYN packet.
 // |extra_headers| are the extra header-value pairs, which typically
@@ -270,6 +294,10 @@ spdy::SpdyFrame* ConstructSpdyBodyFrame(int stream_id,
 // Constructs a single SPDY data frame with the given content.
 spdy::SpdyFrame* ConstructSpdyBodyFrame(int stream_id, const char* data,
                                         uint32 len, bool fin);
+
+// Wraps |frame| in the payload of a data frame in stream |stream_id|.
+spdy::SpdyFrame* ConstructWrappedSpdyFrame(
+    const scoped_ptr<spdy::SpdyFrame>& frame, int stream_id);
 
 // Create an async MockWrite from the given SpdyFrame.
 MockWrite CreateMockWrite(const spdy::SpdyFrame& req);
@@ -336,6 +364,8 @@ class SpdySessionDependencies {
       SpdySessionDependencies* session_deps) {
     return new HttpNetworkSession(session_deps->host_resolver.get(),
                                   NULL /* dnsrr_resolver */,
+                                  NULL /* dns_cert_checker */,
+                                  NULL /* ssl_host_info_factory */,
                                   session_deps->proxy_service,
                                   session_deps->socket_factory.get(),
                                   session_deps->ssl_config_service,
@@ -348,6 +378,8 @@ class SpdySessionDependencies {
       SpdySessionDependencies* session_deps) {
     return new HttpNetworkSession(session_deps->host_resolver.get(),
                                   NULL /* dnsrr_resolver */,
+                                  NULL /* dns_cert_checker */,
+                                  NULL /* ssl_host_info_factory */,
                                   session_deps->proxy_service,
                                   session_deps->
                                       deterministic_socket_factory.get(),
@@ -371,6 +403,8 @@ class SpdyURLRequestContext : public URLRequestContext {
         new HttpNetworkLayer(&socket_factory_,
                              host_resolver_,
                              NULL /* dnsrr_resolver */,
+                             NULL /* dns_cert_checker */,
+                             NULL /* ssl_host_info_factory */,
                              proxy_service_,
                              ssl_config_service_,
                              new SpdySessionPool(NULL),

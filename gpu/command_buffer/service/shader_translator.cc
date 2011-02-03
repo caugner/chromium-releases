@@ -53,9 +53,7 @@ void GetVariableInfo(ShHandle compiler, ShShaderInfo var_type,
       default: NOTREACHED();
     }
 
-    ShaderTranslator::VariableInfo info = {0};
-    info.type = type;
-    info.size = size;
+    ShaderTranslator::VariableInfo info(type, size);
     (*var_map)[name.get()] = info;
   }
 }
@@ -73,16 +71,18 @@ ShaderTranslator::~ShaderTranslator() {
 }
 
 bool ShaderTranslator::Init(ShShaderType shader_type,
+                            ShShaderSpec shader_spec,
                             const ShBuiltInResources* resources) {
   // Make sure Init is called only once.
   DCHECK(compiler_ == NULL);
   DCHECK(shader_type == SH_FRAGMENT_SHADER || shader_type == SH_VERTEX_SHADER);
+  DCHECK(shader_spec == SH_GLES2_SPEC || shader_spec == SH_WEBGL_SPEC);
   DCHECK(resources != NULL);
 
   if (!InitializeShaderTranslator())
     return false;
 
-  compiler_ = ShConstructCompiler(shader_type, SH_GLES2_SPEC, resources);
+  compiler_ = ShConstructCompiler(shader_type, shader_spec, resources);
   return compiler_ != NULL;
 }
 

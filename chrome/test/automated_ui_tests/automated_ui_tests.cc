@@ -17,7 +17,7 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/time.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/view_ids.h"
@@ -153,7 +153,7 @@ void AutomatedUITest::RunReproduction() {
         &num_reproductions);
   }
   std::vector<std::string> actions;
-  SplitString(action_string, ',', &actions);
+  base::SplitString(action_string, ',', &actions);
   bool did_crash = false;
   bool command_complete = false;
 
@@ -379,8 +379,7 @@ bool AutomatedUITest::DoAction(const std::string& action) {
   } else if (LowerCaseEqualsASCII(action, "showbookmarks")) {
     did_complete_action = ShowBookmarkBar();
   } else if (LowerCaseEqualsASCII(action, "setup")) {
-    LaunchBrowserAndServer();
-    set_active_browser(automation()->GetBrowserWindow(0));
+    AutomatedUITestBase::SetUp();
     did_complete_action = true;
   } else if (LowerCaseEqualsASCII(action, "sleep")) {
     // This is for debugging, it probably shouldn't be used real tests.

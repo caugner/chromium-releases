@@ -142,8 +142,6 @@
         'base/network_config_watcher_mac.h',
         'base/nss_memio.c',
         'base/nss_memio.h',
-        'base/openssl_util.cc',
-        'base/openssl_util.h',
         'base/pem_tokenizer.cc',
         'base/pem_tokenizer.h',
         'base/platform_mime_util.h',
@@ -196,6 +194,8 @@
         'base/x509_cert_types.cc',
         'base/x509_cert_types.h',
         'base/x509_cert_types_mac.cc',
+        'base/x509_openssl_util.cc',
+        'base/x509_openssl_util.h',
         'third_party/mozilla_security_manager/nsKeygenHandler.cpp',
         'third_party/mozilla_security_manager/nsKeygenHandler.h',
         'third_party/mozilla_security_manager/nsNSSCertificateDB.cpp',
@@ -232,8 +232,18 @@
             'dependencies': [
               '../build/linux/system.gyp:gconf',
               '../build/linux/system.gyp:gdk',
-              '../build/linux/system.gyp:nss',
               '../build/linux/system.gyp:libresolv',
+            ],
+            'conditions': [
+              ['use_openssl==1', {
+                'dependencies': [
+                  '../build/linux/system.gyp:openssl',
+                ],
+              }, {  # else: not using openssl. Use NSS.
+                'dependencies': [
+                  '../build/linux/system.gyp:nss',
+                ],
+              }],
             ],
           },
           {  # else: OS is not in the above list
@@ -252,12 +262,14 @@
             ],
           },
         ],
-        [ 'use_openssl == 1 and OS == "linux"', {
-            # When building for OpenSSL, we need to exclude some NSS files.
-            # TODO(bulach): remove once we fully support OpenSSL.
+        [ 'use_openssl==1', {
             'sources!': [
               'base/cert_database_nss.cc',
+              'base/dnssec_keyset.cc',
+              'base/dnssec_keyset.h',
               'base/keygen_handler_nss.cc',
+              'base/nss_memio.c',
+              'base/nss_memio.h',
               'base/x509_certificate_nss.cc',
               'third_party/mozilla_security_manager/nsKeygenHandler.cpp',
               'third_party/mozilla_security_manager/nsKeygenHandler.h',
@@ -269,13 +281,13 @@
               'third_party/mozilla_security_manager/nsPKCS12Blob.h',
             ],
           },
-          { # else: not using openssl.
+          {  # else: not using openssl.
             'sources!': [
               'base/cert_database_openssl.cc',
               'base/keygen_handler_openssl.cc',
-              'base/openssl_util.cc',
-              'base/openssl_util.h',
               'base/x509_certificate_openssl.cc',
+              'base/x509_openssl_util.cc',
+              'base/x509_openssl_util.h',
              ],
           },
         ],
@@ -322,6 +334,7 @@
         '../third_party/zlib/zlib.gyp:zlib',
         'net_base',
         'net_resources',
+        'ssl_host_info',
       ],
       'sources': [
         'disk_cache/addr.cc',
@@ -336,6 +349,7 @@
         'disk_cache/cache_util_posix.cc',
         'disk_cache/cache_util_win.cc',
         'disk_cache/disk_cache.h',
+        'disk_cache/disk_format.cc',
         'disk_cache/disk_format.h',
         'disk_cache/entry_impl.cc',
         'disk_cache/entry_impl.h',
@@ -343,6 +357,7 @@
         'disk_cache/eviction.cc',
         'disk_cache/eviction.h',
         'disk_cache/experiments.h',
+        'disk_cache/file.cc',
         'disk_cache/file.h',
         'disk_cache/file_block.h',
         'disk_cache/file_lock.cc',
@@ -399,6 +414,7 @@
         'ftp/ftp_directory_listing_parser_windows.h',
         'ftp/ftp_network_layer.cc',
         'ftp/ftp_network_layer.h',
+        'ftp/ftp_network_session.cc',
         'ftp/ftp_network_session.h',
         'ftp/ftp_network_transaction.cc',
         'ftp/ftp_network_transaction.h',
@@ -454,6 +470,7 @@
         'http/http_cache_transaction.h',
         'http/http_chunked_decoder.cc',
         'http/http_chunked_decoder.h',
+        'http/http_net_log_params.cc',
         'http/http_net_log_params.h',
         'http/http_network_delegate.h',
         'http/http_network_layer.cc',
@@ -541,8 +558,9 @@
         'proxy/proxy_resolver_winhttp.cc',
         'proxy/proxy_resolver_winhttp.h',
         'proxy/proxy_retry_info.h',
-        'proxy/proxy_script_fetcher.cc',
         'proxy/proxy_script_fetcher.h',
+        'proxy/proxy_script_fetcher_impl.cc',
+        'proxy/proxy_script_fetcher_impl.h',
         'proxy/proxy_server.cc',
         'proxy/proxy_server_mac.cc',
         'proxy/proxy_server.h',
@@ -564,6 +582,8 @@
         'socket/client_socket_pool_histograms.h',
         'socket/client_socket_pool_manager.cc',
         'socket/client_socket_pool_manager.h',
+        'socket/dns_cert_provenance_checker.cc',
+        'socket/dns_cert_provenance_checker.h',
         'socket/socket.h',
         'socket/socks5_client_socket.cc',
         'socket/socks5_client_socket.h',
@@ -586,6 +606,9 @@
         'socket/ssl_client_socket_pool.h',
         'socket/ssl_client_socket_win.cc',
         'socket/ssl_client_socket_win.h',
+        'socket/ssl_error_params.cc',
+        'socket/ssl_error_params.h',
+        'socket/tcp_client_socket.cc',
         'socket/tcp_client_socket.h',
         'socket/tcp_client_socket_libevent.cc',
         'socket/tcp_client_socket_libevent.h',
@@ -662,6 +685,14 @@
         'url_request/url_request_status.h',
         'url_request/url_request_test_job.cc',
         'url_request/url_request_test_job.h',
+        'url_request/url_request_throttler_entry.cc',
+        'url_request/url_request_throttler_entry.h',
+        'url_request/url_request_throttler_entry_interface.h',
+        'url_request/url_request_throttler_header_adapter.h',
+        'url_request/url_request_throttler_header_adapter.cc',
+        'url_request/url_request_throttler_header_interface.h',
+        'url_request/url_request_throttler_manager.cc',
+        'url_request/url_request_throttler_manager.h',
         'url_request/view_cache_helper.cc',
         'url_request/view_cache_helper.h',
         'websockets/websocket.cc',
@@ -695,11 +726,12 @@
              'proxy/proxy_config_service_linux.h',
           ],
         }],
-        ['use_openssl==1 and OS == "linux"', {
-            'dependencies': [
-              '../build/linux/system.gyp:openssl',
-            ],
+        ['use_openssl==1', {
             'sources!': [
+              'ocsp/nss_ocsp.cc',
+              'ocsp/nss_ocsp.h',
+              'socket/dns_cert_provenance_check.cc',
+              'socket/dns_cert_provenance_check.h',
               'socket/ssl_client_socket_nss.cc',
               'socket/ssl_client_socket_nss.h',
               'socket/ssl_client_socket_nss_factory.cc',
@@ -717,7 +749,18 @@
             'dependencies': [
               '../build/linux/system.gyp:gconf',
               '../build/linux/system.gyp:gdk',
-              '../build/linux/system.gyp:nss',
+            ],
+            'conditions': [
+              ['use_openssl==1', {
+                'dependencies': [
+                  '../build/linux/system.gyp:openssl',
+                ],
+              },
+              {  # else use_openssl==0, use NSS
+                'dependencies': [
+                  '../build/linux/system.gyp:nss',
+                ],
+              }],
             ],
           },
           {  # else: OS is not in the above list
@@ -778,7 +821,6 @@
         'net_test_support',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
-        '../base/base.gyp:test_support_base',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../third_party/zlib/zlib.gyp:zlib',
@@ -828,11 +870,13 @@
         'base/test_completion_callback_unittest.cc',
         'base/upload_data_stream_unittest.cc',
         'base/x509_certificate_unittest.cc',
-        'base/x509_cert_types_unittest.cc',
+        'base/x509_cert_types_mac_unittest.cc',
+        'base/x509_openssl_util_unittest.cc',
         'disk_cache/addr_unittest.cc',
         'disk_cache/backend_unittest.cc',
         'disk_cache/bitmap_unittest.cc',
         'disk_cache/block_files_unittest.cc',
+        'disk_cache/cache_util_unittest.cc',
         'disk_cache/disk_cache_test_base.cc',
         'disk_cache/disk_cache_test_base.h',
         'disk_cache/entry_unittest.cc',
@@ -872,6 +916,7 @@
         'http/http_request_headers_unittest.cc',
         'http/http_response_body_drainer_unittest.cc',
         'http/http_response_headers_unittest.cc',
+        'http/http_stream_factory_unittest.cc',
         'http/http_transaction_unittest.cc',
         'http/http_transaction_unittest.h',
         'http/http_util_unittest.cc',
@@ -891,7 +936,7 @@
         'proxy/proxy_list_unittest.cc',
         'proxy/proxy_resolver_js_bindings_unittest.cc',
         'proxy/proxy_resolver_v8_unittest.cc',
-        'proxy/proxy_script_fetcher_unittest.cc',
+        'proxy/proxy_script_fetcher_impl_unittest.cc',
         'proxy/proxy_server_unittest.cc',
         'proxy/proxy_service_unittest.cc',
         'proxy/sync_host_resolver_bridge_unittest.cc',
@@ -923,6 +968,7 @@
         'tools/dump_cache/url_utilities.cc',
         'tools/dump_cache/url_utilities_unittest.cc',
         'url_request/url_request_job_tracker_unittest.cc',
+        'url_request/url_request_throttler_unittest.cc',
         'url_request/url_request_unittest.cc',
         'url_request/url_request_unittest.h',
         'url_request/view_cache_helper_unittest.cc',
@@ -931,6 +977,7 @@
         'websockets/websocket_handshake_handler_unittest.cc',
         'websockets/websocket_handshake_unittest.cc',
         'websockets/websocket_job_unittest.cc',
+        'websockets/websocket_net_log_params_unittest.cc',
         'websockets/websocket_throttle_unittest.cc',
         'websockets/websocket_unittest.cc',
       ],
@@ -964,13 +1011,20 @@
             }],
           ],
         }],
-        [ 'use_openssl == 1 and OS == "linux"', {
-            # When building for OpenSSL, we need to exclude some NSS files.
-            # TODO(bulach): remove once we fully support OpenSSL.
+        [ 'use_openssl==1', {
+            # When building for OpenSSL, we need to exclude NSS specific tests.
+            # TODO(bulach): Add equivalent tests when the underlying
+            #               functionality is ported to OpenSSL.
             'sources!': [
               'base/cert_database_nss_unittest.cc',
+              'base/dnssec_unittest.cc',
             ],
           },
+          { # else, remove openssl specific tests
+            'sources!': [
+              'base/x509_openssl_util_unittest.cc',
+            ],
+          }
         ],
         [ 'OS == "win"', {
             'sources!': [
@@ -986,6 +1040,46 @@
       ],
     },
     {
+      # This is a separate target in order to limit the scope of the protobuf
+      # includes.
+      'target_name': 'ssl_host_info',
+      'type': '<(library)',
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
+        '../third_party/protobuf/protobuf.gyp:protoc#host',
+      ],
+      'sources': [
+        'socket/ssl_host_info.proto',
+        'socket/ssl_host_info.cc',
+        'socket/ssl_host_info.h',
+      ],
+      'rules': [
+        {
+          'rule_name': 'genproto',
+          'extension': 'proto',
+          'inputs': [
+            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
+          ],
+          'outputs': [
+            '<(SHARED_INTERMEDIATE_DIR)/protoc_out/net/socket/<(RULE_INPUT_ROOT).pb.h',
+            '<(SHARED_INTERMEDIATE_DIR)/protoc_out/net/socket/<(RULE_INPUT_ROOT).pb.cc',
+          ],
+          'action': [
+            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
+            'socket/<(RULE_INPUT_ROOT)<(RULE_INPUT_EXT)',
+            '--cpp_out=<(SHARED_INTERMEDIATE_DIR)/protoc_out/net',
+          ],
+          'message': 'Generating C++ code from <(RULE_INPUT_PATH)',
+          'process_outputs_as_sources': 1,
+        },
+      ],
+      'include_dirs': [
+        '<(SHARED_INTERMEDIATE_DIR)/protoc_out/net',
+        '<(SHARED_INTERMEDIATE_DIR)/protoc_out',
+      ],
+    },
+    {
       'target_name': 'net_perftests',
       'type': 'executable',
       'dependencies': [
@@ -993,7 +1087,6 @@
         'net_test_support',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
-        '../base/base.gyp:test_support_base',
         '../base/base.gyp:test_support_perf',
         '../testing/gtest.gyp:gtest',
       ],
@@ -1072,6 +1165,7 @@
       'dependencies': [
         'net',
         '../base/base.gyp:base',
+        '../base/base.gyp:test_support_base',
         '../testing/gtest.gyp:gtest',
       ],
       'sources': [
@@ -1094,12 +1188,21 @@
         ['inside_chromium_build==1', {
           'dependencies': [
             '../chrome/browser/sync/protocol/sync_proto.gyp:sync_proto',
+            '../chrome/browser/policy/proto/device_management_proto.gyp:device_management_proto',
             '../third_party/protobuf/protobuf.gyp:py_proto',
           ],
         }],
         ['OS == "linux" or OS == "freebsd" or OS == "openbsd"', {
-          'dependencies': [
-            '../build/linux/system.gyp:nss',
+          'conditions': [
+            ['use_openssl==1', {
+              'dependencies': [
+                '../build/linux/system.gyp:openssl',
+              ]
+            }, {
+              'dependencies': [
+                '../build/linux/system.gyp:nss',
+              ],
+            }],
           ],
         }],
         ['OS == "linux"', {
@@ -1110,11 +1213,6 @@
               ],
             }],
           ],
-        }],
-        ['use_openssl == 1 and OS == "linux"', {
-            'dependencies': [
-              '../build/linux/system.gyp:openssl',
-            ]
         }],
       ],
     },
@@ -1207,6 +1305,7 @@
       'sources': [
         'server/http_listen_socket.cc',
         'server/http_listen_socket.h',
+        'server/http_server_request_info.cc',
         'server/http_server_request_info.h',
       ],
     },
@@ -1244,61 +1343,87 @@
     },
   ],
   'conditions': [
-    # ['OS=="linux"', {
-    #   'targets': [
-    #     {
-    #       'target_name': 'flip_in_mem_edsm_server',
-    #       'type': 'executable',
-    #       'dependencies': [
-    #         '../base/base.gyp:base',
-    #         'net.gyp:net',
-    #       ],
-    #       'link_settings': {
-    #         'ldflags': [
-    #           '-lssl'
-    #         ],
-    #         'libraries': [
-    #           '-lssl'
-    #         ],
-    #       },
-    #       'sources': [
-    #         'tools/dump_cache/url_to_filename_encoder.cc',
-    #         'tools/dump_cache/url_to_filename_encoder.h',
-    #         'tools/dump_cache/url_utilities.h',
-    #         'tools/dump_cache/url_utilities.cc',
+     ['OS=="linux"', {
+       'targets': [
+         {
+           'target_name': 'flip_in_mem_edsm_server',
+           'type': 'executable',
+           'cflags': [
+             '-Wno-deprecated',
+           ],
+           'dependencies': [
+             '../base/base.gyp:base',
+             'net.gyp:net',
+             '../third_party/openssl/openssl.gyp:openssl',
+           ],
+           'sources': [
+             'tools/dump_cache/url_to_filename_encoder.cc',
+             'tools/dump_cache/url_to_filename_encoder.h',
+             'tools/dump_cache/url_utilities.h',
+             'tools/dump_cache/url_utilities.cc',
 
-    #         'tools/flip_server/balsa_enums.h',
-    #         'tools/flip_server/balsa_frame.cc',
-    #         'tools/flip_server/balsa_frame.h',
-    #         'tools/flip_server/balsa_headers.cc',
-    #         'tools/flip_server/balsa_headers.h',
-    #         'tools/flip_server/balsa_headers_token_utils.cc',
-    #         'tools/flip_server/balsa_headers_token_utils.h',
-    #         'tools/flip_server/balsa_visitor_interface.h',
-    #         'tools/flip_server/buffer_interface.h',
-    #         'tools/flip_server/create_listener.cc',
-    #         'tools/flip_server/create_listener.h',
-    #         'tools/flip_server/epoll_server.cc',
-    #         'tools/flip_server/epoll_server.h',
-    #         'tools/flip_server/flip_in_mem_edsm_server.cc',
-    #         'tools/flip_server/http_message_constants.cc',
-    #         'tools/flip_server/http_message_constants.h',
-    #         'tools/flip_server/loadtime_measurement.h',
-    #         'tools/flip_server/porting.txt',
-    #         'tools/flip_server/ring_buffer.cc',
-    #         'tools/flip_server/ring_buffer.h',
-    #         'tools/flip_server/simple_buffer.cc',
-    #         'tools/flip_server/simple_buffer.h',
-    #         'tools/flip_server/split.h',
-    #         'tools/flip_server/split.cc',
-    #         'tools/flip_server/string_piece_utils.h',
-    #         'tools/flip_server/thread.h',
-    #         'tools/flip_server/url_to_filename_encoder.h',
-    #         'tools/flip_server/url_utilities.h',
-    #       ],
-    #     },
-    #   ]
-    # }],
+             'tools/flip_server/balsa_enums.h',
+             'tools/flip_server/balsa_frame.cc',
+             'tools/flip_server/balsa_frame.h',
+             'tools/flip_server/balsa_headers.cc',
+             'tools/flip_server/balsa_headers.h',
+             'tools/flip_server/balsa_headers_token_utils.cc',
+             'tools/flip_server/balsa_headers_token_utils.h',
+             'tools/flip_server/balsa_visitor_interface.h',
+             'tools/flip_server/buffer_interface.h',
+             'tools/flip_server/create_listener.cc',
+             'tools/flip_server/create_listener.h',
+             'tools/flip_server/epoll_server.cc',
+             'tools/flip_server/epoll_server.h',
+             'tools/flip_server/flip_in_mem_edsm_server.cc',
+             'tools/flip_server/http_message_constants.cc',
+             'tools/flip_server/http_message_constants.h',
+             'tools/flip_server/loadtime_measurement.h',
+             'tools/flip_server/porting.txt',
+             'tools/flip_server/ring_buffer.cc',
+             'tools/flip_server/ring_buffer.h',
+             'tools/flip_server/simple_buffer.cc',
+             'tools/flip_server/simple_buffer.h',
+             'tools/flip_server/split.h',
+             'tools/flip_server/split.cc',
+             'tools/flip_server/string_piece_utils.h',
+             'tools/flip_server/thread.h',
+             'tools/flip_server/url_to_filename_encoder.h',
+             'tools/flip_server/url_utilities.h',
+           ],
+         },
+       ]
+     }],
+    ['OS=="linux"', {
+      'targets': [
+        {
+          'target_name': 'snap_start_unittests',
+          'type': 'executable',
+          'dependencies': [
+            'net',
+            'net_test_support',
+            'openssl_helper',
+            '../build/linux/system.gyp:nss',
+            '../testing/gmock.gyp:gmock',
+            '../testing/gtest.gyp:gtest',
+          ],
+          'sources': [
+            'base/run_all_unittests.cc',
+            'socket/ssl_client_socket_snapstart_unittest.cc',
+          ]
+        },
+        {
+          'target_name': 'openssl_helper',
+          'type': 'executable',
+          'dependencies': [
+            '../third_party/openssl/openssl.gyp:openssl',
+          ],
+          'sources': [
+            'test/openssl_helper.cc',
+          ],
+        },
+      ],
+    }],
     ['OS=="win"', {
       'targets': [
         {

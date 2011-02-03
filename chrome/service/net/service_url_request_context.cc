@@ -4,6 +4,14 @@
 
 #include "chrome/service/net/service_url_request_context.h"
 
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#include <sys/utsname.h>
+#endif
+
+#include "base/message_loop_proxy.h"
+#include "base/string_util.h"
+#include "base/sys_info.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/service/service_process.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/cookie_policy.h"
@@ -16,15 +24,89 @@
 #include "net/http/http_network_layer.h"
 #include "net/proxy/proxy_service.h"
 
-ServiceURLRequestContextGetter::ServiceURLRequestContextGetter()
-    : io_message_loop_proxy_(
-          g_service_process->io_thread()->message_loop_proxy()) {
+namespace {
+// Copied from webkit/glue/user_agent.cc. We don't want to pull in a dependency
+// on webkit/glue which also pulls in the renderer. Also our user-agent is
+// totally different from the user-agent used by the browser, just the
+// OS-specific parts are common.
+std::string BuildOSCpuInfo() {
+  std::string os_cpu;
+
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+  int32 os_major_version = 0;
+  int32 os_minor_version = 0;
+  int32 os_bugfix_version = 0;
+  base::SysInfo::OperatingSystemVersionNumbers(&os_major_version,
+                                               &os_minor_version,
+                                               &os_bugfix_version);
+#endif
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+  // Should work on any Posix system.
+  struct utsname unixinfo;
+  uname(&unixinfo);
+
+  std::string cputype;
+  // special case for biarch systems
+  if (strcmp(unixinfo.machine, "x86_64") == 0 &&
+      sizeof(void*) == sizeof(int32)) {  // NOLINT
+    cputype.assign("i686 (x86_64)");
+  } else {
+    cputype.assign(unixinfo.machine);
+  }
+#endif
+
+  base::StringAppendF(
+      &os_cpu,
+#if defined(OS_WIN)
+      "Windows NT %d.%d",
+      os_major_version,
+      os_minor_version
+#elif defined(OS_MACOSX)
+      "Intel Mac OS X %d_%d_%d",
+      os_major_version,
+      os_minor_version,
+      os_bugfix_version
+#elif defined(OS_CHROMEOS)
+      "CrOS %s %d.%d.%d",
+      cputype.c_str(),  // e.g. i686
+      os_major_version,
+      os_minor_version,
+      os_bugfix_version
+#else
+      "%s %s",
+      unixinfo.sysname,  // e.g. Linux
+      cputype.c_str()    // e.g. i686
+#endif
+  );  // NOLINT
+
+  return os_cpu;
 }
 
-ServiceURLRequestContext::ServiceURLRequestContext() {
+std::string MakeUserAgentForServiceProcess() {
+  std::string user_agent;
+  chrome::VersionInfo version_info;
+  if (!version_info.is_valid()) {
+    DLOG(ERROR) << "Unable to create chrome::VersionInfo object";
+  }
+  std::string extra_version_info;
+  if (!version_info.IsOfficialBuild())
+    extra_version_info = "-devel";
+  base::StringAppendF(&user_agent,
+                      "Chrome Service %s(%s)%s %s ",
+                      version_info.Version().c_str(),
+                      version_info.LastChange().c_str(),
+                      extra_version_info.c_str(),
+                      BuildOSCpuInfo().c_str());
+  return user_agent;
+}
+
+}  // namespace
+
+ServiceURLRequestContext::ServiceURLRequestContext(
+    const std::string& user_agent) : user_agent_(user_agent) {
   host_resolver_ =
       net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
-                                    NULL);
+                                    NULL, NULL);
   DCHECK(g_service_process);
   // TODO(sanjeevr): Change CreateSystemProxyConfigService to accept a
   // MessageLoopProxy* instead of MessageLoop*.
@@ -33,9 +115,8 @@ ServiceURLRequestContext::ServiceURLRequestContext() {
       net::ProxyService::CreateSystemProxyConfigService(
           g_service_process->io_thread()->message_loop(),
           g_service_process->file_thread()->message_loop());
-  proxy_service_ =
-      net::ProxyService::Create(
-          proxy_config_service, false, 0u, this, NULL, NULL);
+  proxy_service_ = net::ProxyService::CreateUsingSystemProxyResolver(
+      proxy_config_service, 0u, NULL);
   dnsrr_resolver_ = new net::DnsRRResolver;
   ftp_transaction_factory_ = new net::FtpNetworkLayer(host_resolver_);
   ssl_config_service_ = new net::SSLConfigServiceDefaults;
@@ -44,6 +125,8 @@ ServiceURLRequestContext::ServiceURLRequestContext() {
   http_transaction_factory_ = new net::HttpCache(
       net::HttpNetworkLayer::CreateFactory(host_resolver_,
                                            dnsrr_resolver_,
+                                           NULL /* dns_cert_checker */,
+                                           NULL /* ssl_host_info_factory */,
                                            proxy_service_,
                                            ssl_config_service_,
                                            http_auth_handler_factory_,
@@ -62,3 +145,24 @@ ServiceURLRequestContext::~ServiceURLRequestContext() {
   delete http_auth_handler_factory_;
   delete dnsrr_resolver_;
 }
+
+ServiceURLRequestContextGetter::ServiceURLRequestContextGetter()
+    : io_message_loop_proxy_(
+          g_service_process->io_thread()->message_loop_proxy()) {
+  // Build the default user agent.
+  user_agent_ = MakeUserAgentForServiceProcess();
+}
+
+URLRequestContext*
+ServiceURLRequestContextGetter::GetURLRequestContext() {
+  if (!url_request_context_)
+    url_request_context_ = new ServiceURLRequestContext(user_agent_);
+  return url_request_context_;
+}
+
+scoped_refptr<base::MessageLoopProxy>
+ServiceURLRequestContextGetter::GetIOMessageLoopProxy() const {
+  return io_message_loop_proxy_;
+}
+
+ServiceURLRequestContextGetter::~ServiceURLRequestContextGetter() {}

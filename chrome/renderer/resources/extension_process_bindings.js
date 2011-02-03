@@ -70,7 +70,7 @@ var chrome = chrome || {};
         throw new Error("Parameter " + i + " is required.");
       }
     }
-  }
+  };
 
   // Callback handling.
   var requests = [];
@@ -82,7 +82,7 @@ var chrome = chrome || {};
         delete chrome.extension.lastError;
       } else {
         if (!error) {
-          error = "Unknown error."
+          error = "Unknown error.";
         }
         console.error("Error during " + name + ": " + error);
         chrome.extension.lastError = {
@@ -130,6 +130,8 @@ var chrome = chrome || {};
       delete requests[requestId];
       delete chrome.extension.lastError;
     }
+
+    return undefined;
   };
 
   chromeHidden.setViewType = function(type) {
@@ -238,7 +240,7 @@ var chrome = chrome || {};
   function setupPageActionEvents(extensionId) {
     var pageActions = GetCurrentPageActions(extensionId);
 
-    var oldStyleEventName = "pageActions/" + extensionId;
+    var oldStyleEventName = "pageActions";
     // TODO(EXTENSIONS_DEPRECATED): only one page action
     for (var i = 0; i < pageActions.length; ++i) {
       // Setup events for each extension_id/page_action_id string we find.
@@ -264,7 +266,7 @@ var chrome = chrome || {};
     chromeHidden.contextMenus = {};
     chromeHidden.contextMenus.nextId = 1;
     chromeHidden.contextMenus.handlers = {};
-    var eventName = "contextMenus/" + extensionId;
+    var eventName = "contextMenus";
     chromeHidden.contextMenus.event = new chrome.Event(eventName);
     chromeHidden.contextMenus.ensureListenerSetup = function() {
       if (chromeHidden.contextMenus.listening) {
@@ -283,12 +285,70 @@ var chrome = chrome || {};
     };
   }
 
+  // Parses the xml syntax supported by omnibox suggestion results. Returns an
+  // object with two properties: 'description', which is just the text content,
+  // and 'descriptionStyles', which is an array of style objects in a format
+  // understood by the C++ backend.
+  function parseOmniboxDescription(input) {
+    var domParser = new DOMParser();
+
+    // The XML parser requires a single top-level element, but we want to
+    // support things like 'hello, <match>world</match>!'. So we wrap the
+    // provided text in generated root level element.
+    var root = domParser.parseFromString(
+        '<fragment>' + input + '</fragment>', 'text/xml');
+
+    // DOMParser has a terrible error reporting facility. Errors come out nested
+    // inside the returned document.
+    var error = root.querySelector('parsererror div');
+    if (error) {
+      throw new Error(error.textContent);
+    }
+
+    // Otherwise, it's valid, so build up the result.
+    var result = {
+      description: '',
+      descriptionStyles: []
+    };
+
+    // Recursively walk the tree.
+    (function(node) {
+      for (var i = 0, child; child = node.childNodes[i]; i++) {
+        // Append text nodes to our description.
+        if (child.nodeType == Node.TEXT_NODE) {
+          result.description += child.nodeValue;
+          continue;
+        }
+
+        // Process and descend into a subset of recognized tags.
+        if (child.nodeType == Node.ELEMENT_NODE &&
+            (child.nodeName == 'dim' || child.nodeName == 'match' ||
+             child.nodeName == 'url')) {
+          var style = {
+            'type': child.nodeName,
+            'offset': result.description.length
+          };
+          result.descriptionStyles.push(style);
+          arguments.callee(child);
+          style.length = result.description.length - style.offset;
+          continue;
+        }
+
+        // Descend into all other nodes, even if they are unrecognized, for
+        // forward compat.
+        arguments.callee(child);
+      }
+    })(root);
+
+    return result;
+  }
+
   function setupOmniboxEvents(extensionId) {
-    chrome.experimental.omnibox.onInputChanged.dispatch =
+    chrome.omnibox.onInputChanged.dispatch =
         function(text, requestId) {
       var suggestCallback = function(suggestions) {
-        chrome.experimental.omnibox.sendSuggestions(requestId, suggestions);
-      }
+        chrome.omnibox.sendSuggestions(requestId, suggestions);
+      };
       chrome.Event.prototype.dispatch.apply(this, [text, suggestCallback]);
     };
   }
@@ -318,7 +378,7 @@ var chrome = chrome || {};
       for (var index = 0, name; name = namespaces[index]; index++) {
         module[name] = module[name] || {};
         module = module[name];
-      };
+      }
 
       // Add types to global validationTypes
       if (apiDef.types) {
@@ -342,16 +402,11 @@ var chrome = chrome || {};
 
           module[functionDef.name] = (function() {
             var args = arguments;
-            if (this.updateArguments) {
-              // Functions whose signature has changed can define an
-              // |updateArguments| function to transform old argument lists
-              // into the new form, preserving compatibility.
-              // TODO(skerner): Once optional args can be omitted (crbug/29215),
-              // this mechanism will become unnecessary.  Consider removing it
-              // when crbug/29215 is fixed.
-              args = this.updateArguments.apply(this, args);
-            }
+            if (this.updateArgumentsPreValidate)
+              args = this.updateArgumentsPreValidate.apply(this, args);
             chromeHidden.validate(args, this.definition.parameters);
+            if (this.updateArgumentsPostValidate)
+              args = this.updateArgumentsPostValidate.apply(this, args);
 
             var retval;
             if (this.handleRequest) {
@@ -382,8 +437,6 @@ var chrome = chrome || {};
             return;
 
           var eventName = apiDef.namespace + "." + eventDef.name;
-          if (eventDef.perExtensionEvent)
-            eventName = eventName + "/" + extensionId;
           module[eventDef.name] = new chrome.Event(eventName,
               eventDef.parameters);
         });
@@ -414,7 +467,7 @@ var chrome = chrome || {};
 
       // getTabContentses is retained for backwards compatibility
       // See http://crbug.com/21433
-      chrome.extension.getTabContentses = chrome.extension.getExtensionTabs
+      chrome.extension.getTabContentses = chrome.extension.getExtensionTabs;
     });
 
     apiFunctions["tabs.connect"].handleRequest = function(tabId, connectInfo) {
@@ -422,8 +475,7 @@ var chrome = chrome || {};
       if (connectInfo) {
         name = connectInfo.name || name;
       }
-      var portId = OpenChannelToTab(
-          tabId, chromeHidden.extensionId, name);
+      var portId = OpenChannelToTab(tabId, chromeHidden.extensionId, name);
       return chromeHidden.Port.createPort(portId, name);
     };
 
@@ -432,6 +484,11 @@ var chrome = chrome || {};
       var port = chrome.tabs.connect(tabId,
                                      {name: chromeHidden.kRequestChannel});
       port.postMessage(request);
+      port.onDisconnect.addListener(function() {
+        // For onDisconnects, we only notify the callback if there was an error.
+        if (chrome.extension.lastError && responseCallback)
+          responseCallback();
+      });
       port.onMessage.addListener(function(response) {
         if (responseCallback)
           responseCallback(response);
@@ -509,6 +566,18 @@ var chrome = chrome || {};
               type: "string",
               optional: true,
               enum: ["bubble", "rectangle"]
+            },
+            maxSize: {
+              type: "object",
+              optional: true,
+              properties: {
+                width: {
+                  type: "integer", optional: true, minimum: 32
+                },
+                height: {
+                  type: "integer", optional: true, minimum: 32
+                }
+              }
             }
           }
         },
@@ -519,7 +588,8 @@ var chrome = chrome || {};
                           {
                             domAnchor: getAbsoluteRect(showDetails.relativeTo),
                             giveFocus: showDetails.giveFocus,
-                            borderStyle: showDetails.borderStyle
+                            borderStyle: showDetails.borderStyle,
+                            maxSize: showDetails.maxSize
                           },
                           callback],
                          internalSchema);
@@ -567,7 +637,7 @@ var chrome = chrome || {};
         img.onerror = function() {
           console.error("Could not load " + actionType + " icon '" +
                         details.path + "'.");
-        }
+        };
         img.onload = function() {
           var canvas = document.createElement("canvas");
           canvas.width = img.width > iconSize ? iconSize : img.width;
@@ -580,7 +650,7 @@ var chrome = chrome || {};
           details.imageData = canvas_context.getImageData(0, 0, canvas.width,
                                                           canvas.height);
           sendCustomRequest(nativeFunction, name, [details], parameters);
-        }
+        };
         img.src = details.path;
       } else {
         throw new Error(
@@ -621,6 +691,12 @@ var chrome = chrome || {};
       sendRequest(this.name, args, this.definition.parameters,
                   this.customCallback);
       return id;
+    };
+
+    apiFunctions["omnibox.setDefaultSuggestion"].handleRequest =
+        function(details) {
+      var parseResult = parseOmniboxDescription(details.description);
+      sendRequest(this.name, [parseResult], this.definition.parameters);
     };
 
     apiFunctions["contextMenus.create"].customCallback =
@@ -667,7 +743,8 @@ var chrome = chrome || {};
       chromeHidden.contextMenus.handlers = {};
     };
 
-    apiFunctions["tabs.captureVisibleTab"].updateArguments = function() {
+    apiFunctions["tabs.captureVisibleTab"].updateArgumentsPreValidate =
+        function() {
       // Old signature:
       //    captureVisibleTab(int windowId, function callback);
       // New signature:
@@ -686,22 +763,17 @@ var chrome = chrome || {};
       return newArgs;
     };
 
-    apiFunctions["experimental.omnibox.styleNone"].handleRequest =
-        function(offset) {
-      return {type: "none", offset: offset};
-    }
-    apiFunctions["experimental.omnibox.styleUrl"].handleRequest =
-        function(offset) {
-      return {type: "url", offset: offset};
-    }
-    apiFunctions["experimental.omnibox.styleMatch"].handleRequest =
-        function(offset) {
-      return {type: "match", offset: offset};
-    }
-    apiFunctions["experimental.omnibox.styleDim"].handleRequest =
-        function(offset) {
-      return {type: "dim", offset: offset};
-    }
+    apiFunctions["omnibox.sendSuggestions"].updateArgumentsPostValidate =
+        function(requestId, userSuggestions) {
+      var suggestions = [];
+      for (var i = 0; i < userSuggestions.length; i++) {
+        var parseResult = parseOmniboxDescription(
+            userSuggestions[i].description);
+        parseResult.content = userSuggestions[i].content;
+        suggestions.push(parseResult);
+      }
+      return [requestId, suggestions];
+    };
 
     if (chrome.test) {
       chrome.test.getApiDefinitions = GetExtensionAPIDefinition;

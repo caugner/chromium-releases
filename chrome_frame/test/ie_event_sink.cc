@@ -4,14 +4,17 @@
 
 #include "chrome_frame/test/ie_event_sink.h"
 
-#include "base/scoped_bstr_win.h"
 #include "base/scoped_handle.h"
-#include "base/scoped_variant_win.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/scoped_bstr.h"
+#include "base/win/scoped_variant.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using base::win::ScopedBstr;
+using base::win::ScopedVariant;
 
 namespace chrome_frame_test {
 
@@ -421,7 +424,7 @@ STDMETHODIMP_(void) IEEventSink::OnNewWindow2(IDispatch** disp,
 
 STDMETHODIMP_(void) IEEventSink::OnNavigateError(IDispatch* dispatch,
     VARIANT* url, VARIANT* frame_name, VARIANT* status_code, VARIANT* cancel) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   if (listener_)
     listener_->OnNavigateError(dispatch, url, frame_name, status_code, cancel);
 }
@@ -430,8 +433,8 @@ STDMETHODIMP IEEventSink::OnBeforeNavigate2(
     IDispatch* dispatch, VARIANT* url, VARIANT* flags,
     VARIANT* target_frame_name, VARIANT* post_data, VARIANT* headers,
     VARIANT_BOOL* cancel) {
-  DLOG(INFO) << __FUNCTION__
-      << base::StringPrintf("%ls - 0x%08X", url->bstrVal, this);
+  DVLOG(1) << __FUNCTION__
+           << base::StringPrintf("%ls - 0x%08X", url->bstrVal, this);
   // Reset any existing reference to chrome frame since this is a new
   // navigation.
   DisconnectFromChromeFrame();
@@ -443,7 +446,7 @@ STDMETHODIMP IEEventSink::OnBeforeNavigate2(
 
 STDMETHODIMP_(void) IEEventSink::OnNavigateComplete2(
     IDispatch* dispatch, VARIANT* url) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   ConnectToChromeFrame();
   if (listener_)
     listener_->OnNavigateComplete2(dispatch, url);
@@ -451,7 +454,7 @@ STDMETHODIMP_(void) IEEventSink::OnNavigateComplete2(
 
 STDMETHODIMP_(void) IEEventSink::OnDocumentComplete(
     IDispatch* dispatch, VARIANT* url) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   EXPECT_TRUE(url);
   if (!url)
     return;
@@ -461,18 +464,19 @@ STDMETHODIMP_(void) IEEventSink::OnDocumentComplete(
 
 STDMETHODIMP_(void) IEEventSink::OnFileDownload(
     VARIANT_BOOL active_doc, VARIANT_BOOL* cancel) {
-  DLOG(INFO) << __FUNCTION__ << base::StringPrintf(" 0x%08X ad=%i", this,
-                                                   active_doc);
-  if (listener_)
+  DVLOG(1) << __FUNCTION__
+           << base::StringPrintf(" 0x%08X ad=%i", this, active_doc);
+  if (listener_) {
     listener_->OnFileDownload(active_doc, cancel);
-  // Always cancel file downloads in tests.
-  *cancel = VARIANT_TRUE;
+  } else {
+    *cancel = VARIANT_TRUE;
+  }
 }
 
 STDMETHODIMP_(void) IEEventSink::OnNewWindow3(
     IDispatch** dispatch, VARIANT_BOOL* cancel, DWORD flags, BSTR url_context,
     BSTR url) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   EXPECT_TRUE(dispatch);
   if (!dispatch)
     return;
@@ -497,7 +501,7 @@ STDMETHODIMP_(void) IEEventSink::OnNewWindow3(
 }
 
 STDMETHODIMP_(void) IEEventSink::OnQuit() {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
 
   did_receive_on_quit_ = true;
 
@@ -509,7 +513,7 @@ STDMETHODIMP_(void) IEEventSink::OnQuit() {
 }
 
 HRESULT IEEventSink::OnLoad(const VARIANT* param) {
-  DLOG(INFO) << __FUNCTION__ << " " << param->bstrVal;
+  DVLOG(1) << __FUNCTION__ << " " << param->bstrVal;
   ScopedVariant stack_object(*param);
   if (chrome_frame_) {
     if (listener_)
@@ -521,7 +525,7 @@ HRESULT IEEventSink::OnLoad(const VARIANT* param) {
 }
 
 HRESULT IEEventSink::OnLoadError(const VARIANT* param) {
-  DLOG(INFO) << __FUNCTION__ << " " << param->bstrVal;
+  DVLOG(1) << __FUNCTION__ << " " << param->bstrVal;
   if (chrome_frame_) {
     if (listener_)
       listener_->OnLoadError(param->bstrVal);
@@ -532,7 +536,7 @@ HRESULT IEEventSink::OnLoadError(const VARIANT* param) {
 }
 
 HRESULT IEEventSink::OnMessage(const VARIANT* param) {
-  DLOG(INFO) << __FUNCTION__ << " " << param;
+  DVLOG(1) << __FUNCTION__ << " " << param;
   if (!chrome_frame_.get()) {
     DLOG(WARNING) << "Invalid chrome frame pointer";
     return S_OK;

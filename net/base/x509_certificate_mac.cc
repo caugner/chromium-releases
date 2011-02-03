@@ -8,17 +8,22 @@
 #include <Security/Security.h>
 #include <time.h>
 
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/pickle.h"
-#include "base/scoped_cftyperef.h"
+#include "base/singleton.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "base/sys_string_conversions.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/cert_verify_result.h"
 #include "net/base/net_errors.h"
 
+using base::mac::ScopedCFTypeRef;
 using base::Time;
 
 namespace net {
+
+namespace {
 
 class MacTrustedCertificates {
  public:
@@ -46,7 +51,7 @@ class MacTrustedCertificates {
     OSStatus status = SecTrustCopyAnchorCertificates(&anchor_array);
     if (status)
       return NULL;
-    scoped_cftyperef<CFArrayRef> scoped_anchor_array(anchor_array);
+    ScopedCFTypeRef<CFArrayRef> scoped_anchor_array(anchor_array);
     CFMutableArrayRef merged_array = CFArrayCreateMutableCopy(
         kCFAllocatorDefault, 0, anchor_array);
     if (!merged_array)
@@ -56,7 +61,7 @@ class MacTrustedCertificates {
     return merged_array;
   }
  private:
-  friend struct DefaultSingletonTraits<MacTrustedCertificates>;
+  friend struct base::DefaultLazyInstanceTraits<MacTrustedCertificates>;
 
   // Obtain an instance of MacTrustedCertificates via the singleton
   // interface.
@@ -72,11 +77,9 @@ class MacTrustedCertificates {
   DISALLOW_COPY_AND_ASSIGN(MacTrustedCertificates);
 };
 
-void SetMacTestCertificate(X509Certificate* cert) {
-  Singleton<MacTrustedCertificates>::get()->SetTestCertificate(cert);
-}
-
-namespace {
+base::LazyInstance<MacTrustedCertificates,
+    base::LeakyLazyInstanceTraits<MacTrustedCertificates> >
+    g_mac_trusted_certificates(base::LINKER_INITIALIZED);
 
 typedef OSStatus (*SecTrustCopyExtendedResultFuncPtr)(SecTrustRef,
                                                       CFDictionaryRef*);
@@ -337,17 +340,17 @@ OSStatus CopyCertChain(SecCertificateRef cert_handle,
   OSStatus result = X509Certificate::CreateSSLClientPolicy(&ssl_policy);
   if (result)
     return result;
-  scoped_cftyperef<SecPolicyRef> scoped_ssl_policy(ssl_policy);
+  ScopedCFTypeRef<SecPolicyRef> scoped_ssl_policy(ssl_policy);
 
   // Create a SecTrustRef.
-  scoped_cftyperef<CFArrayRef> input_certs(
+  ScopedCFTypeRef<CFArrayRef> input_certs(
       CFArrayCreate(NULL, (const void**)&cert_handle, 1,
                     &kCFTypeArrayCallBacks));
   SecTrustRef trust_ref = NULL;
   result = SecTrustCreateWithCertificates(input_certs, ssl_policy, &trust_ref);
   if (result)
     return result;
-  scoped_cftyperef<SecTrustRef> trust(trust_ref);
+  ScopedCFTypeRef<SecTrustRef> trust(trust_ref);
 
   // Evaluate trust, which creates the cert chain.
   SecTrustResultType status;
@@ -396,7 +399,7 @@ void AddCertificatesFromBytes(const char* data, size_t length,
                               SecExternalFormat format,
                               X509Certificate::OSCertHandles* output) {
   SecExternalFormat input_format = format;
-  scoped_cftyperef<CFDataRef> local_data(CFDataCreateWithBytesNoCopy(
+  ScopedCFTypeRef<CFDataRef> local_data(CFDataCreateWithBytesNoCopy(
       kCFAllocatorDefault, reinterpret_cast<const UInt8*>(data),
       length, kCFAllocatorNull));
 
@@ -409,7 +412,7 @@ void AddCertificatesFromBytes(const char* data, size_t length,
     return;
   }
 
-  scoped_cftyperef<CFArrayRef> scoped_items(items);
+  ScopedCFTypeRef<CFArrayRef> scoped_items(items);
   CFTypeID cert_type_id = SecCertificateGetTypeID();
 
   for (CFIndex i = 0; i < CFArrayGetCount(items); ++i) {
@@ -441,6 +444,10 @@ void AddCertificatesFromBytes(const char* data, size_t length,
 }
 
 }  // namespace
+
+void SetMacTestCertificate(X509Certificate* cert) {
+  g_mac_trusted_certificates.Get().SetTestCertificate(cert);
+}
 
 void X509Certificate::Initialize() {
   const CSSM_X509_NAME* name;
@@ -513,7 +520,7 @@ int X509Certificate::Verify(const std::string& hostname, int flags,
                                  &ssl_policy);
   if (status)
     return NetErrorFromOSStatus(status);
-  scoped_cftyperef<SecPolicyRef> scoped_ssl_policy(ssl_policy);
+  ScopedCFTypeRef<SecPolicyRef> scoped_ssl_policy(ssl_policy);
 
   // Create and configure a SecTrustRef, which takes our certificate(s)
   // and our SSL SecPolicyRef. SecTrustCreateWithCertificates() takes an
@@ -524,7 +531,7 @@ int X509Certificate::Verify(const std::string& hostname, int flags,
                                                       &kCFTypeArrayCallBacks);
   if (!cert_array)
     return ERR_OUT_OF_MEMORY;
-  scoped_cftyperef<CFArrayRef> scoped_cert_array(cert_array);
+  ScopedCFTypeRef<CFArrayRef> scoped_cert_array(cert_array);
   CFArrayAppendValue(cert_array, cert_handle_);
   for (size_t i = 0; i < intermediate_ca_certs_.size(); ++i)
     CFArrayAppendValue(cert_array, intermediate_ca_certs_[i]);
@@ -539,13 +546,13 @@ int X509Certificate::Verify(const std::string& hostname, int flags,
   status = SecTrustCreateWithCertificates(cert_array, ssl_policy, &trust_ref);
   if (status)
     return NetErrorFromOSStatus(status);
-  scoped_cftyperef<SecTrustRef> scoped_trust_ref(trust_ref);
+  ScopedCFTypeRef<SecTrustRef> scoped_trust_ref(trust_ref);
 
   // Set the trusted anchor certificates for the SecTrustRef by merging the
   // system trust anchors and the test root certificate.
   CFArrayRef anchor_array =
-      Singleton<MacTrustedCertificates>::get()->CopyTrustedCertificateArray();
-  scoped_cftyperef<CFArrayRef> scoped_anchor_array(anchor_array);
+      g_mac_trusted_certificates.Get().CopyTrustedCertificateArray();
+  ScopedCFTypeRef<CFArrayRef> scoped_anchor_array(anchor_array);
   if (anchor_array) {
     status = SecTrustSetAnchorCertificates(trust_ref, anchor_array);
     if (status)
@@ -573,7 +580,7 @@ int X509Certificate::Verify(const std::string& hostname, int flags,
                      sizeof(tp_action_data));
     if (!action_data_ref)
       return ERR_OUT_OF_MEMORY;
-    scoped_cftyperef<CFDataRef> scoped_action_data_ref(action_data_ref);
+    ScopedCFTypeRef<CFDataRef> scoped_action_data_ref(action_data_ref);
     status = SecTrustSetParameters(trust_ref, CSSM_TP_ACTION_DEFAULT,
                                    action_data_ref);
     if (status)
@@ -594,7 +601,7 @@ int X509Certificate::Verify(const std::string& hostname, int flags,
                              &chain_info);
   if (status)
     return NetErrorFromOSStatus(status);
-  scoped_cftyperef<CFArrayRef> scoped_completed_chain(completed_chain);
+  ScopedCFTypeRef<CFArrayRef> scoped_completed_chain(completed_chain);
 
   // Evaluate the results
   OSStatus cssm_result;
@@ -693,6 +700,7 @@ int X509Certificate::Verify(const std::string& hostname, int flags,
     // Determine the certificate's EV status using SecTrustCopyExtendedResult(),
     // which we need to look up because the function wasn't added until
     // Mac OS X 10.5.7.
+    // Note: "ExtendedResult" means extended validation results.
     CFBundleRef bundle =
         CFBundleGetBundleWithIdentifier(CFSTR("com.apple.security"));
     if (bundle) {
@@ -864,17 +872,17 @@ bool X509Certificate::IsIssuedBy(
   result = CopyCertChain(os_cert_handle(), &cert_chain);
   if (result != noErr)
     return false;
-  scoped_cftyperef<CFArrayRef> scoped_cert_chain(cert_chain);
+  ScopedCFTypeRef<CFArrayRef> scoped_cert_chain(cert_chain);
 
   // Check all the certs in the chain for a match.
   int n = CFArrayGetCount(cert_chain);
   for (int i = 0; i < n; ++i) {
     SecCertificateRef cert_handle = reinterpret_cast<SecCertificateRef>(
         const_cast<void*>(CFArrayGetValueAtIndex(cert_chain, i)));
-    scoped_refptr<X509Certificate> cert = X509Certificate::CreateFromHandle(
+    scoped_refptr<X509Certificate> cert(X509Certificate::CreateFromHandle(
         cert_handle,
         X509Certificate::SOURCE_LONE_CERT_IMPORT,
-        X509Certificate::OSCertHandles());
+        X509Certificate::OSCertHandles()));
     for (unsigned j = 0; j < valid_issuers.size(); j++) {
       if (cert->issuer().Matches(valid_issuers[j]))
         return true;
@@ -902,10 +910,10 @@ bool X509Certificate::GetSSLClientCertificates (
     const std::string& server_domain,
     const std::vector<CertPrincipal>& valid_issuers,
     std::vector<scoped_refptr<X509Certificate> >* certs) {
-  scoped_cftyperef<SecIdentityRef> preferred_identity;
+  ScopedCFTypeRef<SecIdentityRef> preferred_identity;
   if (!server_domain.empty()) {
     // See if there's an identity preference for this domain:
-    scoped_cftyperef<CFStringRef> domain_str(
+    ScopedCFTypeRef<CFStringRef> domain_str(
         base::SysUTF8ToCFStringRef("https://" + server_domain));
     SecIdentityRef identity = NULL;
     if (SecIdentityCopyPreference(domain_str,
@@ -918,19 +926,19 @@ bool X509Certificate::GetSSLClientCertificates (
   // Now enumerate the identities in the available keychains.
   SecIdentitySearchRef search = nil;
   OSStatus err = SecIdentitySearchCreate(NULL, CSSM_KEYUSE_SIGN, &search);
-  scoped_cftyperef<SecIdentitySearchRef> scoped_search(search);
+  ScopedCFTypeRef<SecIdentitySearchRef> scoped_search(search);
   while (!err) {
     SecIdentityRef identity = NULL;
     err = SecIdentitySearchCopyNext(search, &identity);
     if (err)
       break;
-    scoped_cftyperef<SecIdentityRef> scoped_identity(identity);
+    ScopedCFTypeRef<SecIdentityRef> scoped_identity(identity);
 
     SecCertificateRef cert_handle;
     err = SecIdentityCopyCertificate(identity, &cert_handle);
     if (err != noErr)
       continue;
-    scoped_cftyperef<SecCertificateRef> scoped_cert_handle(cert_handle);
+    ScopedCFTypeRef<SecCertificateRef> scoped_cert_handle(cert_handle);
 
     scoped_refptr<X509Certificate> cert(
         CreateFromHandle(cert_handle, SOURCE_LONE_CERT_IMPORT,
@@ -983,7 +991,7 @@ CFArrayRef X509Certificate::CreateClientCertificateChain() const {
     LOG(ERROR) << "SecIdentityCreateWithCertificate error " << result;
     return NULL;
   }
-  scoped_cftyperef<CFMutableArrayRef> chain(
+  ScopedCFTypeRef<CFMutableArrayRef> chain(
       CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks));
   CFArrayAppendValue(chain, identity);
 

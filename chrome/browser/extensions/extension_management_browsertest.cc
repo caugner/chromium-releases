@@ -3,15 +3,17 @@
 // found in the LICENSE file.
 
 #include "base/ref_counted.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/extensions/autoupdate_interceptor.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/extension_updater.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/ui_test_utils.h"
 
@@ -25,7 +27,7 @@ class ExtensionManagementTest : public ExtensionBrowserTest {
   // in the extension's manifest. We use the version as reported by the
   // background page to test how overinstalling crx files with the same
   // manifest version works.
-  bool IsExtensionAtVersion(Extension* extension,
+  bool IsExtensionAtVersion(const Extension* extension,
                             const std::string& expected_version) {
     // Test that the extension's version from the manifest and reported by the
     // background page is correct.  This is to ensure that the processes are in
@@ -171,7 +173,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, DisableEnable) {
                     .AppendASCII("1.0")));
   ASSERT_EQ(size_before + 1, service->extensions()->size());
   EXPECT_EQ(0u, service->disabled_extensions()->size());
-  Extension* extension = service->extensions()->at(size_before);
+  const Extension* extension = service->extensions()->at(size_before);
   EXPECT_TRUE(manager->GetBackgroundHostForExtension(extension));
   ASSERT_TRUE(service->HasInstalledExtensions());
 
@@ -249,7 +251,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, AutoUpdate) {
 }
 
 // See http://crbug.com/57378 for flakiness details.
-IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, FLAKY_ExternalUrlUpdate) {
+IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalUrlUpdate) {
   ExtensionsService* service = browser()->profile()->GetExtensionsService();
   const char* kExtensionId = "ogjcoiohnmldgjemafoockdghcjciccf";
   // We don't want autoupdate blacklist checks.
@@ -274,7 +276,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, FLAKY_ExternalUrlUpdate) {
   // is race-prone, because instantating the ExtensionService starts a read
   // of external_extensions.json before this test function starts.
   service->AddPendingExtensionFromExternalUpdateUrl(
-      kExtensionId, GURL("http://localhost/autoupdate/manifest"));
+      kExtensionId, GURL("http://localhost/autoupdate/manifest"),
+      Extension::EXTERNAL_PREF_DOWNLOAD);
 
   // Run autoupdate and make sure version 2 of the extension was installed.
   service->updater()->CheckNow();
@@ -309,4 +312,49 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, FLAKY_ExternalUrlUpdate) {
   service->extension_prefs()->GetKilledExtensionIds(&killed_ids);
   EXPECT_TRUE(killed_ids.end() == killed_ids.find(kExtensionId))
       << "Uninstalling non-external extension should not set kill bit.";
+}
+
+// See http://crbug.com/57378 for flakiness details.
+IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalPolicyRefresh) {
+  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  const char* kExtensionId = "ogjcoiohnmldgjemafoockdghcjciccf";
+  // We don't want autoupdate blacklist checks.
+  service->updater()->set_blacklist_checks_enabled(false);
+
+  FilePath basedir = test_data_dir_.AppendASCII("autoupdate");
+
+  // Note: This interceptor gets requests on the IO thread.
+  scoped_refptr<AutoUpdateInterceptor> interceptor(new AutoUpdateInterceptor());
+  URLFetcher::enable_interception_for_tests(true);
+
+  interceptor->SetResponseOnIOThread("http://localhost/autoupdate/manifest",
+                                     basedir.AppendASCII("manifest_v2.xml"));
+  interceptor->SetResponseOnIOThread("http://localhost/autoupdate/v2.crx",
+                                     basedir.AppendASCII("v2.crx"));
+
+  const size_t size_before = service->extensions()->size();
+  ASSERT_TRUE(service->disabled_extensions()->empty());
+
+  // Set the policy as a user preference and fire notification observers.
+  PrefService* prefs = browser()->profile()->GetPrefs();
+  ListValue* forcelist =
+      prefs->GetMutableList(prefs::kExtensionInstallForceList);
+  ASSERT_TRUE(forcelist->empty());
+  forcelist->Append(Value::CreateStringValue(
+      "ogjcoiohnmldgjemafoockdghcjciccf;"
+      "http://localhost/autoupdate/manifest"));
+  prefs->pref_notifier()->FireObservers(prefs::kExtensionInstallForceList);
+
+  // Check if the extension got installed.
+  ASSERT_TRUE(WaitForExtensionInstall());
+  const ExtensionList* extensions = service->extensions();
+  ASSERT_EQ(size_before + 1, extensions->size());
+  ASSERT_EQ(kExtensionId, extensions->at(size_before)->id());
+  EXPECT_EQ("2.0", extensions->at(size_before)->VersionString());
+  EXPECT_EQ(Extension::EXTERNAL_POLICY_DOWNLOAD,
+            extensions->at(size_before)->location());
+
+  // Check that emptying the list doesn't cause any trouble.
+  prefs->ClearPref(prefs::kExtensionInstallForceList);
+  prefs->pref_notifier()->FireObservers(prefs::kExtensionInstallForceList);
 }

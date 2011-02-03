@@ -13,7 +13,7 @@
 
 #include "base/callback.h"
 #include "base/task.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 
@@ -310,6 +310,20 @@ inline void CallRenderViewHostContentSettingsDelegate(int render_process_id,
       render_view_id,
       method,
       MakeTuple(a, b, c, d));
+}
+
+template <typename Method,
+          typename A, typename B, typename C, typename D, typename E>
+inline void CallRenderViewHostContentSettingsDelegate(int render_process_id,
+                                                      int render_view_id,
+                                                      Method method,
+                                                      const A& a,
+                                                      const B& b,
+                                                      const C& c,
+                                                      const D& d,
+                                                      const E& e) {
+  internal::CallRenderViewHostContentSettingsDelegateHelper(
+      render_process_id, render_view_id, method, MakeTuple(a, b, c, d, e));
 }
 
 // ----------------------------------------------------------------------------

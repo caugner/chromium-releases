@@ -13,6 +13,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/history_quick_provider.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/autocomplete/history_contents_provider.h"
@@ -43,8 +44,10 @@ using base::TimeDelta;
 
 AutocompleteInput::AutocompleteInput()
   : type_(INVALID),
+    initial_prevent_inline_autocomplete_(false),
     prevent_inline_autocomplete_(false),
     prefer_keyword_(false),
+    allow_exact_keyword_match_(true),
     synchronous_only_(false) {
 }
 
@@ -52,10 +55,13 @@ AutocompleteInput::AutocompleteInput(const std::wstring& text,
                                      const std::wstring& desired_tld,
                                      bool prevent_inline_autocomplete,
                                      bool prefer_keyword,
+                                     bool allow_exact_keyword_match,
                                      bool synchronous_only)
     : desired_tld_(desired_tld),
+      initial_prevent_inline_autocomplete_(prevent_inline_autocomplete),
       prevent_inline_autocomplete_(prevent_inline_autocomplete),
       prefer_keyword_(prefer_keyword),
+      allow_exact_keyword_match_(allow_exact_keyword_match),
       synchronous_only_(synchronous_only) {
   // Trim whitespace from edges of input; don't inline autocomplete if there
   // was trailing whitespace.
@@ -76,11 +82,17 @@ AutocompleteInput::AutocompleteInput(const std::wstring& text,
       canonicalized_url_ = canonicalized_url;
   }
 
-  if (type_ == FORCED_QUERY && text_[0] == L'?')
-    text_.erase(0, 1);
+  RemoveForcedQueryStringIfNecessary(type_, &text_);
 }
 
 AutocompleteInput::~AutocompleteInput() {
+}
+
+// static
+void AutocompleteInput::RemoveForcedQueryStringIfNecessary(Type type,
+                                                           std::wstring* text) {
+  if (type == FORCED_QUERY && !text->empty() && (*text)[0] == L'?')
+    text->erase(0, 1);
 }
 
 // static
@@ -406,187 +418,6 @@ void AutocompleteInput::Clear() {
   prefer_keyword_ = false;
 }
 
-// AutocompleteMatch ----------------------------------------------------------
-
-AutocompleteMatch::AutocompleteMatch()
-    : provider(NULL),
-      relevance(0),
-      deletable(false),
-      inline_autocomplete_offset(std::wstring::npos),
-      transition(PageTransition::GENERATED),
-      is_history_what_you_typed_match(false),
-      type(SEARCH_WHAT_YOU_TYPED),
-      template_url(NULL),
-      starred(false) {
-}
-
-AutocompleteMatch::AutocompleteMatch(AutocompleteProvider* provider,
-                                     int relevance,
-                                     bool deletable,
-                                     Type type)
-    : provider(provider),
-      relevance(relevance),
-      deletable(deletable),
-      inline_autocomplete_offset(std::wstring::npos),
-      transition(PageTransition::TYPED),
-      is_history_what_you_typed_match(false),
-      type(type),
-      template_url(NULL),
-      starred(false) {
-}
-
-AutocompleteMatch::~AutocompleteMatch() {
-}
-
-// static
-std::string AutocompleteMatch::TypeToString(Type type) {
-  const char* strings[NUM_TYPES] = {
-    "url-what-you-typed",
-    "history-url",
-    "history-title",
-    "history-body",
-    "history-keyword",
-    "navsuggest",
-    "search-what-you-typed",
-    "search-history",
-    "search-suggest",
-    "search-other-engine",
-    "open-history-page",
-  };
-  DCHECK(arraysize(strings) == NUM_TYPES);
-  return strings[type];
-}
-
-// static
-int AutocompleteMatch::TypeToIcon(Type type) {
-  int icons[NUM_TYPES] = {
-    IDR_OMNIBOX_HTTP,
-    IDR_OMNIBOX_HTTP,
-    IDR_OMNIBOX_HISTORY,
-    IDR_OMNIBOX_HISTORY,
-    IDR_OMNIBOX_HISTORY,
-    IDR_OMNIBOX_HTTP,
-    IDR_OMNIBOX_SEARCH,
-    IDR_OMNIBOX_SEARCH,
-    IDR_OMNIBOX_SEARCH,
-    IDR_OMNIBOX_SEARCH,
-    IDR_OMNIBOX_MORE,
-  };
-  DCHECK(arraysize(icons) == NUM_TYPES);
-  return icons[type];
-}
-
-// static
-bool AutocompleteMatch::MoreRelevant(const AutocompleteMatch& elem1,
-                                     const AutocompleteMatch& elem2) {
-  // For equal-relevance matches, we sort alphabetically, so that providers
-  // who return multiple elements at the same priority get a "stable" sort
-  // across multiple updates.
-  if (elem1.relevance == elem2.relevance)
-    return elem1.contents > elem2.contents;
-
-  // A negative relevance indicates the real relevance can be determined by
-  // negating the value. If both relevances are negative, negate the result
-  // so that we end up with positive relevances, then negative relevances with
-  // the negative relevances sorted by absolute values.
-  const bool result = elem1.relevance > elem2.relevance;
-  return (elem1.relevance < 0 && elem2.relevance < 0) ? !result : result;
-}
-
-// static
-bool AutocompleteMatch::DestinationSortFunc(const AutocompleteMatch& elem1,
-                                            const AutocompleteMatch& elem2) {
-  // Sort identical destination_urls together.  Place the most relevant matches
-  // first, so that when we call std::unique(), these are the ones that get
-  // preserved.
-  return (elem1.destination_url != elem2.destination_url) ?
-      (elem1.destination_url < elem2.destination_url) :
-      MoreRelevant(elem1, elem2);
-}
-
-// static
-bool AutocompleteMatch::DestinationsEqual(const AutocompleteMatch& elem1,
-                                          const AutocompleteMatch& elem2) {
-  return elem1.destination_url == elem2.destination_url;
-}
-
-// static
-void AutocompleteMatch::ClassifyMatchInString(
-    const std::wstring& find_text,
-    const std::wstring& text,
-    int style,
-    ACMatchClassifications* classification) {
-  ClassifyLocationInString(text.find(find_text), find_text.length(),
-                           text.length(), style, classification);
-}
-
-void AutocompleteMatch::ClassifyLocationInString(
-    size_t match_location,
-    size_t match_length,
-    size_t overall_length,
-    int style,
-    ACMatchClassifications* classification) {
-  classification->clear();
-
-  // Don't classify anything about an empty string
-  // (AutocompleteMatch::Validate() checks this).
-  if (overall_length == 0)
-    return;
-
-  // Mark pre-match portion of string (if any).
-  if (match_location != 0) {
-    classification->push_back(ACMatchClassification(0, style));
-  }
-
-  // Mark matching portion of string.
-  if (match_location == std::wstring::npos) {
-    // No match, above classification will suffice for whole string.
-    return;
-  }
-  // Classifying an empty match makes no sense and will lead to validation
-  // errors later.
-  DCHECK(match_length > 0);
-  classification->push_back(ACMatchClassification(match_location,
-      (style | ACMatchClassification::MATCH) & ~ACMatchClassification::DIM));
-
-  // Mark post-match portion of string (if any).
-  const size_t after_match(match_location + match_length);
-  if (after_match < overall_length) {
-    classification->push_back(ACMatchClassification(after_match, style));
-  }
-}
-
-#ifndef NDEBUG
-void AutocompleteMatch::Validate() const {
-  ValidateClassifications(contents, contents_class);
-  ValidateClassifications(description, description_class);
-}
-
-void AutocompleteMatch::ValidateClassifications(
-    const std::wstring& text,
-    const ACMatchClassifications& classifications) const {
-  if (text.empty()) {
-    DCHECK(classifications.size() == 0);
-    return;
-  }
-
-  // The classifications should always cover the whole string.
-  DCHECK(classifications.size() > 0) << "No classification for text";
-  DCHECK(classifications[0].offset == 0) << "Classification misses beginning";
-  if (classifications.size() == 1)
-    return;
-
-  // The classifications should always be sorted.
-  size_t last_offset = classifications[0].offset;
-  for (ACMatchClassifications::const_iterator i(classifications.begin() + 1);
-       i != classifications.end(); ++i) {
-    DCHECK(i->offset > last_offset) << "Classification unsorted";
-    DCHECK(i->offset < text.length()) << "Classification out of bounds";
-    last_offset = i->offset;
-  }
-}
-#endif
-
 // AutocompleteProvider -------------------------------------------------------
 
 // static
@@ -752,6 +583,36 @@ void AutocompleteResult::SortAndCull(const AutocompleteInput& input) {
     alternate_nav_url_ = input.canonicalized_url();
 }
 
+size_t AutocompleteResult::size() const {
+  return matches_.size();
+}
+
+bool AutocompleteResult::empty() const {
+  return matches_.empty();
+}
+
+AutocompleteResult::const_iterator AutocompleteResult::begin() const {
+  return matches_.begin();
+}
+
+AutocompleteResult::iterator AutocompleteResult::begin() {
+  return matches_.begin();
+}
+
+AutocompleteResult::const_iterator AutocompleteResult::end() const {
+  return matches_.end();
+}
+
+AutocompleteResult::iterator AutocompleteResult::end() {
+  return matches_.end();
+}
+
+// Returns the match at the given index.
+const AutocompleteMatch& AutocompleteResult::match_at(size_t index) const {
+  DCHECK(index < matches_.size());
+  return matches_[index];
+}
+
 void AutocompleteResult::Reset() {
   matches_.clear();
   default_match_ = end();
@@ -779,11 +640,13 @@ AutocompleteController::AutocompleteController(Profile* profile)
       delay_interval_has_passed_(false),
       have_committed_during_this_query_(false),
       done_(true) {
-  providers_.push_back(new SearchProvider(this, profile));
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableInMemoryURLIndex))
+  search_provider_ = new SearchProvider(this, profile);
+  providers_.push_back(search_provider_);
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableHistoryQuickProvider))
     providers_.push_back(new HistoryQuickProvider(this, profile));
-  else
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableHistoryURLProvider))
     providers_.push_back(new HistoryURLProvider(this, profile));
   providers_.push_back(new KeywordProvider(this, profile));
   history_contents_provider_ = new HistoryContentsProvider(this, profile);
@@ -820,11 +683,12 @@ void AutocompleteController::Start(const std::wstring& text,
                                    const std::wstring& desired_tld,
                                    bool prevent_inline_autocomplete,
                                    bool prefer_keyword,
+                                   bool allow_exact_keyword_match,
                                    bool synchronous_only) {
   const std::wstring old_input_text(input_.text());
   const bool old_synchronous_only = input_.synchronous_only();
   input_ = AutocompleteInput(text, desired_tld, prevent_inline_autocomplete,
-                             prefer_keyword, synchronous_only);
+      prefer_keyword, allow_exact_keyword_match, synchronous_only);
 
   // See if we can avoid rerunning autocomplete when the query hasn't changed
   // much.  When the user presses or releases the ctrl key, the desired_tld

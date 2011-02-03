@@ -4,6 +4,7 @@
 
 #include "base/test/test_file_util.h"
 
+#include <shlwapi.h>
 #include <windows.h>
 
 #include <vector>
@@ -64,7 +65,7 @@ bool EvictFileFromSystemCache(const FilePath& file) {
   DWORD bytes_read, bytes_written;
   for (;;) {
     bytes_read = 0;
-    ReadFile(file_handle, buffer, kOneMB, &bytes_read, NULL);
+    ::ReadFile(file_handle, buffer, kOneMB, &bytes_read, NULL);
     if (bytes_read == 0)
       break;
 
@@ -82,7 +83,7 @@ bool EvictFileFromSystemCache(const FilePath& file) {
     // aligned, but that shouldn't happen here.
     DCHECK((total_bytes % kOneMB) == 0);
     SetFilePointer(file_handle, total_bytes, NULL, FILE_BEGIN);
-    if (!WriteFile(file_handle, buffer, kOneMB, &bytes_written, NULL) ||
+    if (!::WriteFile(file_handle, buffer, kOneMB, &bytes_written, NULL) ||
         bytes_written != kOneMB) {
       BOOL freed = VirtualFree(buffer, 0, MEM_RELEASE);
       DCHECK(freed);
@@ -171,6 +172,63 @@ bool CopyRecursiveDirNoCache(const FilePath& source_dir,
 
   FindClose(fh);
   return true;
+}
+
+// Checks if the volume supports Alternate Data Streams. This is required for
+// the Zone Identifier implementation.
+bool VolumeSupportsADS(const FilePath& path) {
+  wchar_t drive[MAX_PATH] = {0};
+  wcscpy_s(drive, MAX_PATH, path.value().c_str());
+
+  if (!PathStripToRootW(drive))
+    return false;
+
+  DWORD fs_flags = 0;
+  if (!GetVolumeInformationW(drive, NULL, 0, 0, NULL, &fs_flags, NULL, 0))
+    return false;
+
+  if (fs_flags & FILE_NAMED_STREAMS)
+    return true;
+
+  return false;
+}
+
+// Return whether the ZoneIdentifier is correctly set to "Internet" (3)
+bool HasInternetZoneIdentifier(const FilePath& full_path) {
+  std::wstring path = full_path.value() + L":Zone.Identifier";
+
+  // This polling and sleeping here is a very bad pattern. But due to how
+  // Windows file semantics work it's really hard to do it other way. We are
+  // reading a file written by a different process, using a different handle.
+  // Windows does not guarantee that we will get the same contents even after
+  // the other process closes the handle, flushes the buffers, etc.
+  for (int i = 0; i < 20; i++) {
+    PlatformThread::Sleep(1000);
+
+    const DWORD kShare = FILE_SHARE_READ |
+        FILE_SHARE_WRITE |
+        FILE_SHARE_DELETE;
+    HANDLE file = CreateFile(path.c_str(), GENERIC_READ, kShare, NULL,
+                             OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+      continue;
+
+    char buffer[100] = {0};
+    DWORD read = 0;
+    BOOL read_result = ::ReadFile(file, buffer, 100, &read, NULL);
+    CloseHandle(file);
+
+    if (!read_result)
+      continue;
+
+    const char kIdentifier[] = "[ZoneTransfer]\nZoneId=3";
+    if (read != arraysize(kIdentifier))
+      continue;
+
+    if (strcmp(kIdentifier, buffer) == 0)
+      return true;
+  }
+  return false;
 }
 
 }  // namespace file_util

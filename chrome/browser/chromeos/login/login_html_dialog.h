@@ -9,13 +9,18 @@
 #include <string>
 
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 #include "gfx/native_widget_types.h"
 #include "gfx/size.h"
 
 namespace chromeos {
 
+class BubbleFrameView;
+
 // Launches html dialog during OOBE/Login with specified URL and title.
-class LoginHtmlDialog : public HtmlDialogUIDelegate {
+class LoginHtmlDialog : public HtmlDialogUIDelegate,
+                        public NotificationObserver {
  public:
   // Delegate class to get notifications from the dialog.
   class Delegate {
@@ -29,7 +34,7 @@ class LoginHtmlDialog : public HtmlDialogUIDelegate {
   enum Style {
     STYLE_GENERIC, // Use generic CreateChromeWindow as a host.
     STYLE_BUBBLE   // Use chromeos::BubbleWindow as a host.
-  } style_;
+  };
 
   LoginHtmlDialog(Delegate* delegate,
                   gfx::NativeWindow parent_window,
@@ -46,6 +51,8 @@ class LoginHtmlDialog : public HtmlDialogUIDelegate {
 
   void set_url(const GURL& url) { url_ = url; }
 
+  bool is_open() const { return is_open_; }
+
  protected:
   // HtmlDialogUIDelegate implementation.
   virtual bool IsDialogModal() const { return true; }
@@ -57,6 +64,12 @@ class LoginHtmlDialog : public HtmlDialogUIDelegate {
   virtual std::string GetDialogArgs() const { return std::string(); }
   virtual void OnDialogClosed(const std::string& json_retval);
   virtual void OnCloseContents(TabContents* source, bool* out_close_dialog);
+  virtual bool ShouldShowDialogTitle() const { return true; }
+
+  // NotificationObserver implementation.
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
 
  private:
   // Notifications receiver.
@@ -65,6 +78,10 @@ class LoginHtmlDialog : public HtmlDialogUIDelegate {
   gfx::NativeWindow parent_window_;
   std::wstring title_;
   GURL url_;
+  Style style_;
+  NotificationRegistrar notification_registrar_;
+  BubbleFrameView* bubble_frame_view_;
+  bool is_open_;
 
   // Dialog display size.
   int width_;

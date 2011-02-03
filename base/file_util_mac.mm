@@ -4,12 +4,13 @@
 
 #include "base/file_util.h"
 
-#import <Cocoa/Cocoa.h>
+#import <Foundation/Foundation.h>
 #include <copyfile.h>
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/string_util.h"
+#include "base/thread_restrictions.h"
 
 namespace file_util {
 
@@ -26,6 +27,7 @@ bool GetShmemTempDir(FilePath* path) {
 }
 
 bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
+  base::ThreadRestrictions::AssertIOAllowed();
   return (copyfile(from_path.value().c_str(),
                    to_path.value().c_str(), NULL, COPYFILE_ALL) == 0);
 }

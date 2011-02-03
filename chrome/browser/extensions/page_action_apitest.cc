@@ -2,23 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_window.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/profile.h"
 #include "chrome/browser/location_bar.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/extensions/extension.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/test/ui_test_utils.h"
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageAction) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(RunExtensionTest("page_action/basics")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
   {
     // Tell the extension to update the page action state.
@@ -62,7 +62,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageAction) {
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageActionAddPopup) {
   // Load the extension, which has no default popup.
   ASSERT_TRUE(RunExtensionTest("page_action/add_popup")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedTabContents());
@@ -107,7 +107,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageActionAddPopup) {
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageActionRemovePopup) {
   // Load the extension, which has a page action with a default popup.
   ASSERT_TRUE(RunExtensionTest("page_action/remove_popup")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedTabContents());
@@ -136,7 +136,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PageActionRemovePopup) {
 // break.
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, OldPageActions) {
   ASSERT_TRUE(RunExtensionTest("page_action/old_api")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   // Have the extension enable the page action.
@@ -161,7 +161,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, OldPageActions) {
 // Tests popups in page actions.
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ShowPageActionPopup) {
   ASSERT_TRUE(RunExtensionTest("page_action/popup")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   ASSERT_TRUE(WaitForPageActionVisibilityChangeTo(1));

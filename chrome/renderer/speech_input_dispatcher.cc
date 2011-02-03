@@ -4,11 +4,12 @@
 
 #include "chrome/renderer/speech_input_dispatcher.h"
 
+#include "base/utf_string_conversions.h"
 #include "chrome/renderer/render_view.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCString.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSpeechInputListener.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 
 using WebKit::WebFrame;
@@ -34,46 +35,53 @@ bool SpeechInputDispatcher::OnMessageReceived(const IPC::Message& message) {
 }
 
 bool SpeechInputDispatcher::startRecognition(
-    int request_id, const WebKit::WebRect& element_rect) {
-  LOG(INFO) << "SpeechInputDispatcher::startRecognition enter";
+    int request_id,
+    const WebKit::WebRect& element_rect,
+    const WebKit::WebString& language,
+    const WebKit::WebString& grammar) {
+  VLOG(1) << "SpeechInputDispatcher::startRecognition enter";
   gfx::Size scroll = render_view_->webview()->mainFrame()->scrollOffset();
   gfx::Rect rect = element_rect;
   rect.Offset(-scroll.width(), -scroll.height());
   render_view_->Send(new ViewHostMsg_SpeechInput_StartRecognition(
-      render_view_->routing_id(), request_id, rect));
-  LOG(INFO) << "SpeechInputDispatcher::startRecognition exit";
+      render_view_->routing_id(), request_id, rect,
+      UTF16ToUTF8(language), UTF16ToUTF8(grammar)));
+  VLOG(1) << "SpeechInputDispatcher::startRecognition exit";
   return true;
 }
 
 void SpeechInputDispatcher::cancelRecognition(int request_id) {
-  LOG(INFO) << "SpeechInputDispatcher::cancelRecognition enter";
+  VLOG(1) << "SpeechInputDispatcher::cancelRecognition enter";
   render_view_->Send(new ViewHostMsg_SpeechInput_CancelRecognition(
       render_view_->routing_id(), request_id));
-  LOG(INFO) << "SpeechInputDispatcher::cancelRecognition exit";
+  VLOG(1) << "SpeechInputDispatcher::cancelRecognition exit";
 }
 
 void SpeechInputDispatcher::stopRecording(int request_id) {
-  LOG(INFO) << "SpeechInputDispatcher::stopRecording enter";
+  VLOG(1) << "SpeechInputDispatcher::stopRecording enter";
   render_view_->Send(new ViewHostMsg_SpeechInput_StopRecording(
       render_view_->routing_id(), request_id));
-  LOG(INFO) << "SpeechInputDispatcher::stopRecording exit";
+  VLOG(1) << "SpeechInputDispatcher::stopRecording exit";
 }
 
 void SpeechInputDispatcher::OnSpeechRecognitionResult(
-    int request_id, const string16& result) {
-  LOG(INFO) << "SpeechInputDispatcher::OnSpeechRecognitionResult enter";
-  listener_->setRecognitionResult(request_id, result);
-  LOG(INFO) << "SpeechInputDispatcher::OnSpeechRecognitionResult exit";
+    int request_id, const speech_input::SpeechInputResultArray& result) {
+  VLOG(1) << "SpeechInputDispatcher::OnSpeechRecognitionResult enter";
+  WebKit::WebSpeechInputResultArray webkit_result(result.size());
+  for (size_t i = 0; i < result.size(); ++i)
+    webkit_result[i].set(result[i].utterance, result[i].confidence);
+  listener_->setRecognitionResult(request_id, webkit_result);
+  VLOG(1) << "SpeechInputDispatcher::OnSpeechRecognitionResult exit";
 }
 
 void SpeechInputDispatcher::OnSpeechRecordingComplete(int request_id) {
-  LOG(INFO) << "SpeechInputDispatcher::OnSpeechRecordingComplete enter";
+  VLOG(1) << "SpeechInputDispatcher::OnSpeechRecordingComplete enter";
   listener_->didCompleteRecording(request_id);
-  LOG(INFO) << "SpeechInputDispatcher::OnSpeechRecordingComplete exit";
+  VLOG(1) << "SpeechInputDispatcher::OnSpeechRecordingComplete exit";
 }
 
 void SpeechInputDispatcher::OnSpeechRecognitionComplete(int request_id) {
-  LOG(INFO) << "SpeechInputDispatcher::OnSpeechRecognitionComplete enter";
+  VLOG(1) << "SpeechInputDispatcher::OnSpeechRecognitionComplete enter";
   listener_->didCompleteRecognition(request_id);
-  LOG(INFO) << "SpeechInputDispatcher::OnSpeechRecognitionComplete exit";
+  VLOG(1) << "SpeechInputDispatcher::OnSpeechRecognitionComplete exit";
 }

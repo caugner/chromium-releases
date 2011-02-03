@@ -8,16 +8,18 @@
 #include <set>
 
 #include "app/l10n_util.h"
+#include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/histogram.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/stl_util-inl.h"
 #include "base/string16.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -56,11 +58,14 @@ const char* ProfileSyncService::kSyncServerUrl =
 const char* ProfileSyncService::kDevServerUrl =
     "https://clients4.google.com/chrome-sync/dev";
 
+static const int kSyncClearDataTimeoutInSeconds = 60;  // 1 minute.
+
 ProfileSyncService::ProfileSyncService(ProfileSyncFactory* factory,
                                        Profile* profile,
                                        const std::string& cros_user)
     : last_auth_error_(AuthError::None()),
       observed_passphrase_required_(false),
+      passphrase_required_for_decryption_(false),
       factory_(factory),
       profile_(profile),
       cros_user_(cros_user),
@@ -71,7 +76,6 @@ ProfileSyncService::ProfileSyncService(ProfileSyncFactory* factory,
       unrecoverable_error_detected_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(scoped_runnable_method_factory_(this)),
       token_migrator_(NULL),
-
       clear_server_data_state_(CLEAR_NOT_STARTED) {
   DCHECK(factory);
   DCHECK(profile);
@@ -93,6 +97,8 @@ ProfileSyncService::ProfileSyncService(ProfileSyncFactory* factory,
     sync_service_url_ = GURL(kSyncServerUrl);
   }
 #endif
+
+  tried_implicit_gaia_remove_when_bug_62103_fixed_ = false;
 }
 
 ProfileSyncService::ProfileSyncService()
@@ -117,12 +123,8 @@ bool ProfileSyncService::AreCredentialsAvailable() {
     return false;
   }
 
-  if (profile_->GetPrefs()->GetBoolean(prefs::kSyncSuppressStart)) {
-    return false;
-  }
-
   // CrOS user is always logged in. Chrome uses signin_ to check logged in.
-  if (!cros_user_.empty() || !signin_.GetUsername().empty()) {
+  if (!cros_user_.empty() || !signin_->GetUsername().empty()) {
     // TODO(chron): Verify CrOS unit test behavior.
     if (profile()->GetTokenService() &&
         profile()->GetTokenService()->HasTokenForService(
@@ -135,7 +137,7 @@ bool ProfileSyncService::AreCredentialsAvailable() {
 
 void ProfileSyncService::LoadMigratedCredentials(const std::string& username,
                                                  const std::string& token) {
-  signin_.SetUsername(username);
+  signin_->SetUsername(username);
   profile()->GetPrefs()->SetString(prefs::kGoogleServicesUsername, username);
   profile()->GetTokenService()->OnIssueAuthTokenSuccess(
       GaiaConstants::kSyncService, token);
@@ -164,13 +166,20 @@ void ProfileSyncService::Initialize() {
   // for the TokenService.
   if (cros_user_.empty()) {
     // Will load tokens from DB and broadcast Token events after.
-    signin_.Initialize(profile_);
+    // Note: We rely on signin_ != NULL unless !cros_user_.empty().
+    signin_.reset(new SigninManager());
+    signin_->Initialize(profile_);
   }
 
   if (!HasSyncSetupCompleted()) {
     DisableForUser();  // Clean up in case of previous crash / setup abort.
-    if (!cros_user_.empty() && AreCredentialsAvailable()) {
-      StartUp();  // Under ChromeOS, just autostart it anyway if creds are here.
+
+    // Under ChromeOS, just autostart it anyway if creds are here and start
+    // is not being suppressed by preferences.
+    if (!cros_user_.empty() &&
+        !profile_->GetPrefs()->GetBoolean(prefs::kSyncSuppressStart) &&
+        AreCredentialsAvailable()) {
+      StartUp();
     }
   } else if (AreCredentialsAvailable()) {
     // If we have credentials and sync setup finished, autostart the backend.
@@ -202,10 +211,10 @@ void ProfileSyncService::RegisterAuthNotifications() {
                  Source<TokenService>(profile_->GetTokenService()));
   registrar_.Add(this,
                  NotificationType::GOOGLE_SIGNIN_SUCCESSFUL,
-                 Source<SigninManager>(&signin_));
+                 Source<Profile>(profile_));
   registrar_.Add(this,
                  NotificationType::GOOGLE_SIGNIN_FAILED,
-                 Source<SigninManager>(&signin_));
+                 Source<Profile>(profile_));
 }
 
 void ProfileSyncService::RegisterDataTypeController(
@@ -239,12 +248,37 @@ ProfileSyncService::ClearServerDataState
 
 void ProfileSyncService::GetDataTypeControllerStates(
   browser_sync::DataTypeController::StateMap* state_map) const {
-    browser_sync::DataTypeController::TypeMap::const_iterator iter
-        = data_type_controllers_.begin();
-    for ( ; iter != data_type_controllers_.end(); ++iter ) {
+    for (browser_sync::DataTypeController::TypeMap::const_iterator iter =
+         data_type_controllers_.begin(); iter != data_type_controllers_.end();
+         ++iter)
       (*state_map)[iter->first] = iter->second.get()->state();
-    }
 }
+
+namespace {
+
+// TODO(akalin): Figure out whether this should be a method of
+// HostPortPair.
+net::HostPortPair StringToHostPortPair(const std::string& host_port_str,
+                                       uint16 default_port) {
+  std::string::size_type colon_index = host_port_str.find(':');
+  if (colon_index == std::string::npos) {
+    return net::HostPortPair(host_port_str, default_port);
+  }
+
+  std::string host = host_port_str.substr(0, colon_index);
+  std::string port_str = host_port_str.substr(colon_index + 1);
+  int port = default_port;
+  if (!base::StringToInt(port_str, &port) ||
+      (port <= 0) || (port > kuint16max)) {
+    LOG(WARNING) << "Could not parse valid port from " << port_str
+                 << "; using port " << default_port;
+    return net::HostPortPair(host, default_port);
+  }
+
+  return net::HostPortPair(host, port);
+}
+
+}  // namespace
 
 void ProfileSyncService::InitSettings() {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -270,17 +304,28 @@ void ProfileSyncService::InitSettings() {
     std::string value(command_line.GetSwitchValueASCII(
         switches::kSyncNotificationHost));
     if (!value.empty()) {
-      notifier_options_.xmpp_host_port.set_host(value);
-      notifier_options_.xmpp_host_port.set_port(notifier::kDefaultXmppPort);
+      notifier_options_.xmpp_host_port =
+          StringToHostPortPair(value, notifier::kDefaultXmppPort);
     }
-    LOG(INFO) << "Using " << notifier_options_.xmpp_host_port.ToString()
-        << " for test sync notification server.";
+    VLOG(1) << "Using " << notifier_options_.xmpp_host_port.ToString()
+            << " for test sync notification server.";
   }
 
   notifier_options_.try_ssltcp_first =
-      command_line.HasSwitch(switches::kSyncUseSslTcp);
-  if (notifier_options_.try_ssltcp_first) {
-    LOG(INFO) << "Trying SSL/TCP port before XMPP port for notifications.";
+      command_line.HasSwitch(switches::kSyncTrySsltcpFirstForXmpp);
+  if (notifier_options_.try_ssltcp_first)
+    VLOG(1) << "Trying SSL/TCP port before XMPP port for notifications.";
+
+  notifier_options_.invalidate_xmpp_login =
+      command_line.HasSwitch(switches::kSyncInvalidateXmppLogin);
+  if (notifier_options_.invalidate_xmpp_login) {
+    VLOG(1) << "Invalidating sync XMPP login.";
+  }
+
+  notifier_options_.allow_insecure_connection =
+      command_line.HasSwitch(switches::kSyncAllowInsecureXmppConnection);
+  if (notifier_options_.allow_insecure_connection) {
+    VLOG(1) << "Allowing insecure XMPP connections.";
   }
 
   if (command_line.HasSwitch(switches::kSyncNotificationMethod)) {
@@ -324,8 +369,6 @@ void ProfileSyncService::RegisterPreferences() {
       enable_by_default);
   pref_service->RegisterBooleanPref(prefs::kSyncManaged, false);
   pref_service->RegisterStringPref(prefs::kEncryptionBootstrapToken, "");
-  pref_service->RegisterBooleanPref(prefs::kSyncUsingSecondaryPassphrase,
-      false);
 }
 
 void ProfileSyncService::ClearPreferences() {
@@ -333,6 +376,7 @@ void ProfileSyncService::ClearPreferences() {
   pref_service->ClearPref(prefs::kSyncLastSyncedTime);
   pref_service->ClearPref(prefs::kSyncHasSetupCompleted);
   pref_service->ClearPref(prefs::kEncryptionBootstrapToken);
+
   // TODO(nick): The current behavior does not clear e.g. prefs::kSyncBookmarks.
   // Is that really what we want?
   pref_service->ScheduleSavePersistentPrefs();
@@ -340,7 +384,7 @@ void ProfileSyncService::ClearPreferences() {
 
 SyncCredentials ProfileSyncService::GetCredentials() {
   SyncCredentials credentials;
-  credentials.email = !cros_user_.empty() ? cros_user_ : signin_.GetUsername();
+  credentials.email = !cros_user_.empty() ? cros_user_ : signin_->GetUsername();
   DCHECK(!credentials.email.empty());
   TokenService* service = profile_->GetTokenService();
   credentials.sync_token = service->GetTokenForService(
@@ -387,7 +431,7 @@ void ProfileSyncService::CreateBackend() {
 void ProfileSyncService::StartUp() {
   // Don't start up multiple times.
   if (backend_.get()) {
-    LOG(INFO) << "Skipping bringing up backend host.";
+    VLOG(1) << "Skipping bringing up backend host.";
     return;
   }
 
@@ -448,10 +492,14 @@ void ProfileSyncService::Shutdown(bool sync_disabled) {
   backend_initialized_ = false;
   observed_passphrase_required_ = false;
   last_attempted_user_email_.clear();
+  last_auth_error_ = GoogleServiceAuthError::None();
 }
 
 void ProfileSyncService::ClearServerData() {
   clear_server_data_state_ = CLEAR_CLEARING;
+  clear_server_data_timer_.Start(
+      base::TimeDelta::FromSeconds(kSyncClearDataTimeoutInSeconds), this,
+      &ProfileSyncService::OnClearServerDataTimeout);
   backend_->RequestClearServerData();
 }
 
@@ -461,8 +509,8 @@ void ProfileSyncService::DisableForUser() {
   ClearPreferences();
   Shutdown(true);
 
-  if (cros_user_.empty()) {
-    signin_.SignOut();
+  if (signin_.get()) {
+    signin_->SignOut();
   }
 
   FOR_EACH_OBSERVER(Observer, observers_, OnStateChanged());
@@ -613,14 +661,36 @@ void ProfileSyncService::OnStopSyncingPermanently() {
   DisableForUser();
 }
 
+void ProfileSyncService::OnClearServerDataTimeout() {
+  if (clear_server_data_state_ != CLEAR_SUCCEEDED &&
+      clear_server_data_state_ != CLEAR_FAILED) {
+    clear_server_data_state_ = CLEAR_FAILED;
+    FOR_EACH_OBSERVER(Observer, observers_, OnStateChanged());
+  }
+}
+
 void ProfileSyncService::OnClearServerDataFailed() {
-  clear_server_data_state_ = CLEAR_FAILED;
-  FOR_EACH_OBSERVER(Observer, observers_, OnStateChanged());
+  clear_server_data_timer_.Stop();
+
+  // Only once clear has succeeded there is no longer a need to transition to
+  // a failed state as sync is disabled locally.  Also, no need to fire off
+  // the observers if the state didn't change (i.e. it was FAILED before).
+  if (clear_server_data_state_ != CLEAR_SUCCEEDED &&
+      clear_server_data_state_ != CLEAR_FAILED) {
+    clear_server_data_state_ = CLEAR_FAILED;
+    FOR_EACH_OBSERVER(Observer, observers_, OnStateChanged());
+  }
 }
 
 void ProfileSyncService::OnClearServerDataSucceeded() {
-  clear_server_data_state_ = CLEAR_SUCCEEDED;
-  FOR_EACH_OBSERVER(Observer, observers_, OnStateChanged());
+  clear_server_data_timer_.Stop();
+
+  // Even if the timout fired, we still transition to the succeeded state as
+  // we want UI to update itself and no longer allow the user to press "clear"
+  if (clear_server_data_state_ != CLEAR_SUCCEEDED) {
+    clear_server_data_state_ = CLEAR_SUCCEEDED;
+    FOR_EACH_OBSERVER(Observer, observers_, OnStateChanged());
+  }
 }
 
 void ProfileSyncService::ShowLoginDialog(gfx::NativeWindow parent_window) {
@@ -730,26 +800,33 @@ void ProfileSyncService::OnUserSubmittedAuth(
 
   auth_start_time_ = base::TimeTicks::Now();
 
-  // TODO(chron): Mechanism for ChromeOS auth renewal?
-  // (maybe just run the dialog anyway?)
-  // or send it to the CrOS login somehow?
-  if (!cros_user_.empty()) {
-    LOG(WARNING) << "No mechanism on ChromeOS yet. See http://crbug.com/50292";
+  if (!signin_.get()) {
+    // In ChromeOS we sign in during login, so we do not instantiate signin_.
+    // If this function gets called, we need to re-authenticate (e.g. for
+    // two factor signin), so instantiante signin_ here.
+    signin_.reset(new SigninManager());
+    signin_->Initialize(profile_);
   }
 
   if (!access_code.empty()) {
-    signin_.ProvideSecondFactorAccessCode(access_code);
+    signin_->ProvideSecondFactorAccessCode(access_code);
     return;
   }
 
-  if (!signin_.GetUsername().empty()) {
-    signin_.SignOut();
+  if (!signin_->GetUsername().empty()) {
+    signin_->SignOut();
   }
 
-  signin_.StartSignIn(username,
-                      password,
-                      last_auth_error_.captcha().token,
-                      captcha);
+  // The user has submitted credentials, which indicates they don't
+  // want to suppress start up anymore.
+  PrefService* prefs = profile_->GetPrefs();
+  prefs->SetBoolean(prefs::kSyncSuppressStart, false);
+  prefs->ScheduleSavePersistentPrefs();
+
+  signin_->StartSignIn(username,
+                       password,
+                       last_auth_error_.captcha().token,
+                       captcha);
 }
 
 void ProfileSyncService::OnUserChoseDatatypes(bool sync_everything,
@@ -848,12 +925,9 @@ void ProfileSyncService::GetRegisteredDataTypes(
 }
 
 bool ProfileSyncService::IsUsingSecondaryPassphrase() const {
-  return profile_->GetPrefs()->GetBoolean(prefs::kSyncUsingSecondaryPassphrase);
-}
-
-void ProfileSyncService::SetSecondaryPassphrase(const std::string& passphrase) {
-  SetPassphrase(passphrase);
-  profile_->GetPrefs()->SetBoolean(prefs::kSyncUsingSecondaryPassphrase, true);
+  return backend_.get() && (backend_->IsUsingExplicitPassphrase() ||
+      (tried_implicit_gaia_remove_when_bug_62103_fixed_ &&
+       observed_passphrase_required_));
 }
 
 bool ProfileSyncService::IsCryptographerReady() const {
@@ -898,11 +972,13 @@ void ProfileSyncService::DeactivateDataType(
     backend_->DeactivateDataType(data_type_controller, change_processor);
 }
 
-void ProfileSyncService::SetPassphrase(const std::string& passphrase) {
+void ProfileSyncService::SetPassphrase(const std::string& passphrase,
+                                       bool is_explicit) {
   if (ShouldPushChanges() || observed_passphrase_required_) {
-    backend_->SetPassphrase(passphrase);
+    backend_->SetPassphrase(passphrase, is_explicit);
   } else {
-    cached_passphrase_ = passphrase;
+    cached_passphrase_.value = passphrase;
+    cached_passphrase_.is_explicit = is_explicit;
   }
 }
 
@@ -928,10 +1004,11 @@ void ProfileSyncService::Observe(NotificationType type,
         return;
       }
 
-      if (!cached_passphrase_.empty()) {
+      if (!cached_passphrase_.value.empty()) {
         // Don't hold on to the passphrase in raw form longer than needed.
-        SetPassphrase(cached_passphrase_);
-        cached_passphrase_.clear();
+        SetPassphrase(cached_passphrase_.value,
+                      cached_passphrase_.is_explicit);
+        cached_passphrase_ = CachedPassphrase();
       }
 
       // TODO(sync): Less wizard, more toast.
@@ -945,19 +1022,20 @@ void ProfileSyncService::Observe(NotificationType type,
       DCHECK(backend_.get());
       DCHECK(backend_->IsNigoriEnabled());
       observed_passphrase_required_ = true;
+      passphrase_required_for_decryption_ = *(Details<bool>(details).ptr());
 
-      if (!cached_passphrase_.empty()) {
-        SetPassphrase(cached_passphrase_);
-        cached_passphrase_.clear();
+      if (!cached_passphrase_.value.empty()) {
+        SetPassphrase(cached_passphrase_.value,
+                      cached_passphrase_.is_explicit);
+        cached_passphrase_ = CachedPassphrase();
         break;
       }
 
-      if (SetupInProgress()) {
+      if (WizardIsVisible()) {
         wizard_.Step(SyncSetupWizard::ENTER_PASSPHRASE);
-      } else {
-        UpdateAuthErrorState(GoogleServiceAuthError(
-            GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS));
       }
+
+      FOR_EACH_OBSERVER(Observer, observers_, OnStateChanged());
       break;
     }
     case NotificationType::SYNC_DATA_TYPES_UPDATED: {
@@ -977,6 +1055,7 @@ void ProfileSyncService::Observe(NotificationType type,
 
       FOR_EACH_OBSERVER(Observer, observers_, OnStateChanged());
       observed_passphrase_required_ = false;
+
       wizard_.Step(SyncSetupWizard::DONE);
       break;
     }
@@ -993,12 +1072,15 @@ void ProfileSyncService::Observe(NotificationType type,
       break;
     }
     case NotificationType::GOOGLE_SIGNIN_SUCCESSFUL: {
-      PrefService* prefs = profile_->GetPrefs();
-      if (!prefs->GetBoolean(prefs::kSyncUsingSecondaryPassphrase)) {
-        const GoogleServiceSigninSuccessDetails* successful =
-            (Details<const GoogleServiceSigninSuccessDetails>(details).ptr());
-        SetPassphrase(successful->password);
-      }
+      const GoogleServiceSigninSuccessDetails* successful =
+          (Details<const GoogleServiceSigninSuccessDetails>(details).ptr());
+      // We pass 'false' to SetPassphrase to denote that this is an implicit
+      // request and shouldn't override an explicit one.  Thus, we either
+      // update the implicit passphrase (idempotent if the passphrase didn't
+      // actually change), or the user has an explicit passphrase set so this
+      // becomes a no-op.
+      tried_implicit_gaia_remove_when_bug_62103_fixed_ = true;
+      SetPassphrase(successful->password, false);
       break;
     }
     case NotificationType::GOOGLE_SIGNIN_FAILED: {
@@ -1013,7 +1095,8 @@ void ProfileSyncService::Observe(NotificationType type,
           backend_->UpdateCredentials(GetCredentials());
         }
 
-        StartUp();
+        if (!profile_->GetPrefs()->GetBoolean(prefs::kSyncSuppressStart))
+          StartUp();
       }
       break;
     }
@@ -1021,7 +1104,7 @@ void ProfileSyncService::Observe(NotificationType type,
       // If not in Chrome OS, and we have a username without tokens,
       // the user will need to signin again, so sign out.
       if (cros_user_.empty() &&
-          !signin_.GetUsername().empty() &&
+          !signin_->GetUsername().empty() &&
           !AreCredentialsAvailable()) {
         DisableForUser();
       }
@@ -1039,6 +1122,10 @@ void ProfileSyncService::AddObserver(Observer* observer) {
 
 void ProfileSyncService::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
+}
+
+bool ProfileSyncService::HasObserver(Observer* observer) const {
+  return observers_.HasObserver(observer);
 }
 
 void ProfileSyncService::SyncEvent(SyncEventCodes code) {

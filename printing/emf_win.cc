@@ -5,8 +5,8 @@
 #include "printing/emf_win.h"
 
 #include "base/file_path.h"
-#include "base/histogram.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "gfx/codec/jpeg_codec.h"
@@ -58,7 +58,6 @@ bool Emf::Init(const void* src_buffer, uint32 src_buffer_size) {
   DCHECK(!emf_ && !hdc_);
   emf_ = SetEnhMetaFileBits(src_buffer_size,
                             reinterpret_cast<const BYTE*>(src_buffer));
-  DCHECK(emf_);
   return emf_ != NULL;
 }
 

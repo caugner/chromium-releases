@@ -10,13 +10,13 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/location_bar.h"
@@ -24,6 +24,7 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
@@ -31,6 +32,11 @@
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/mock_host_resolver.h"
 #include "views/event.h"
+
+#if defined(OS_LINUX)
+#include <gdk/gdk.h>
+#include <gtk/gtk.h>
+#endif
 
 using base::Time;
 using base::TimeDelta;
@@ -92,6 +98,19 @@ const struct TestHistoryEntry {
   // To trigger inline autocomplete.
   {"http://www.abc.com", "Page abc", kSearchText, 10000, 10000, true },
 };
+
+#if defined(OS_LINUX)
+// Returns the text stored in the PRIMARY clipboard.
+std::string GetPrimarySelectionText() {
+  GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_PRIMARY);
+  DCHECK(clipboard);
+
+  gchar* selection_text = gtk_clipboard_wait_for_text(clipboard);
+  std::string result(selection_text ? selection_text : "");
+  g_free(selection_text);
+  return result;
+}
+#endif
 
 }  // namespace
 
@@ -277,7 +296,7 @@ class AutocompleteEditViewTest : public InProcessBrowserTest,
 
 // Test if ctrl-* accelerators are workable in omnibox.
 // See http://crbug.com/19193: omnibox blocks ctrl-* commands
-// FAILS on windows, http://crbug.com/57965
+// Sometimes times out on Windows: http://crbug.com/57965
 #if defined(OS_WIN)
 #define MAYBE_BrowserAccelerators DISABLED_BrowserAccelerators
 #else
@@ -336,7 +355,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_BrowserAccelerators) {
 #endif
 }
 
-// FAILS on windows, http://crbug.com/57965
+// Sometimes times out on Windows: http://crbug.com/57965
 #if defined(OS_WIN)
 #define MAYBE_PopupAccelerators DISABLED_PopupAccelerators
 #else
@@ -389,7 +408,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_PopupAccelerators) {
 #endif
 }
 
-// FAILS on windows, http://crbug.com/57965
+// Sometimes times out on Windows: http://crbug.com/57965
 #if defined(OS_WIN)
 #define MAYBE_BackspaceInKeywordMode DISABLED_BackspaceInKeywordMode
 #else
@@ -447,7 +466,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_BackspaceInKeywordMode) {
             WideToUTF8(edit_view->GetText()));
 }
 
-// FAILS on windows, http://crbug.com/57965
+// Sometimes times out on Windows: http://crbug.com/57965
 #if defined(OS_WIN)
 #define MAYBE_Escape DISABLED_Escape
 #else
@@ -475,7 +494,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_Escape) {
   EXPECT_TRUE(edit_view->IsSelectAll());
 }
 
-// FAILS on windows, http://crbug.com/57965
+// Sometimes times out on Windows: http://crbug.com/57965
 #if defined(OS_WIN)
 #define MAYBE_DesiredTLD DISABLED_DesiredTLD
 #else
@@ -501,7 +520,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_DesiredTLD) {
   EXPECT_STREQ(kDesiredTLDHostname, url.host().c_str());
 }
 
-// FAILS on windows, http://crbug.com/57965
+// Sometimes times out on Windows: http://crbug.com/57965
 #if defined(OS_WIN)
 #define MAYBE_AltEnter DISABLED_AltEnter
 #else
@@ -521,7 +540,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_AltEnter) {
   ASSERT_NO_FATAL_FAILURE(WaitForTabOpenOrClose(tab_count + 1));
 }
 
-// FAILS on windows, http://crbug.com/57965
+// Sometimes times out on Windows: http://crbug.com/57965
 #if defined(OS_WIN)
 #define MAYBE_EnterToSearch DISABLED_EnterToSearch
 #else
@@ -571,7 +590,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_EnterToSearch) {
 
 // See http://crbug.com/20934: Omnibox keyboard behavior wrong for
 // "See recent pages in history"
-// FAILS on windows, http://crbug.com/57965
+// Sometimes times out on Windows: http://crbug.com/57965
 #if defined(OS_WIN)
 #define MAYBE_EnterToOpenHistoryPage DISABLED_EnterToOpenHistoryPage
 #else
@@ -614,7 +633,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_EnterToOpenHistoryPage) {
   EXPECT_STREQ(kHistoryPageURL, url.spec().c_str());
 }
 
-// FAILS on windows, http://crbug.com/57965
+// Sometimes times out on Windows: http://crbug.com/57965
 #if defined(OS_WIN)
 #define MAYBE_EscapeToDefaultMatch DISABLED_EscapeToDefaultMatch
 #else
@@ -658,3 +677,177 @@ IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_EscapeToDefaultMatch) {
   EXPECT_EQ(old_text, edit_view->GetText());
   EXPECT_EQ(old_selected_line, popup_model->selected_line());
 }
+
+// Sometimes times out on Windows: http://crbug.com/57965
+#if defined(OS_WIN)
+#define MAYBE_BasicTextOperations DISABLED_BasicTextOperations
+#else
+#define MAYBE_BasicTextOperations BasicTextOperations
+#endif
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_BasicTextOperations) {
+  ASSERT_NO_FATAL_FAILURE(SetupComponents());
+  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
+  browser()->FocusLocationBar();
+
+  AutocompleteEditView* edit_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+
+  std::wstring old_text = edit_view->GetText();
+  EXPECT_EQ(UTF8ToWide(chrome::kAboutBlankURL), old_text);
+  EXPECT_TRUE(edit_view->IsSelectAll());
+
+  std::wstring::size_type start, end;
+  edit_view->GetSelectionBounds(&start, &end);
+  EXPECT_EQ(0U, start);
+  EXPECT_EQ(old_text.size(), end);
+
+  // Move the cursor to the end.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_END, false, false, false));
+  EXPECT_FALSE(edit_view->IsSelectAll());
+
+  // Make sure the cursor is placed correctly.
+  edit_view->GetSelectionBounds(&start, &end);
+  EXPECT_EQ(old_text.size(), start);
+  EXPECT_EQ(old_text.size(), end);
+
+  // Insert one character at the end. Make sure we won't insert anything after
+  // the special ZWS mark used in gtk implementation.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_A, false, false, false));
+  EXPECT_EQ(old_text + L"a", edit_view->GetText());
+
+  // Delete one character from the end. Make sure we won't delete the special
+  // ZWS mark used in gtk implementation.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
+  EXPECT_EQ(old_text, edit_view->GetText());
+
+  edit_view->SelectAll(true);
+  EXPECT_TRUE(edit_view->IsSelectAll());
+  edit_view->GetSelectionBounds(&start, &end);
+  EXPECT_EQ(0U, start);
+  EXPECT_EQ(old_text.size(), end);
+
+  // Delete the content
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_DELETE, false, false, false));
+  EXPECT_TRUE(edit_view->IsSelectAll());
+  edit_view->GetSelectionBounds(&start, &end);
+  EXPECT_EQ(0U, start);
+  EXPECT_EQ(0U, end);
+  EXPECT_TRUE(edit_view->GetText().empty());
+
+  // Check if RevertAll() can set text and cursor correctly.
+  edit_view->RevertAll();
+  EXPECT_FALSE(edit_view->IsSelectAll());
+  EXPECT_EQ(old_text, edit_view->GetText());
+  edit_view->GetSelectionBounds(&start, &end);
+  EXPECT_EQ(old_text.size(), start);
+  EXPECT_EQ(old_text.size(), end);
+}
+
+#if defined(OS_LINUX)
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, UndoRedoLinux) {
+  ASSERT_NO_FATAL_FAILURE(SetupComponents());
+  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
+  browser()->FocusLocationBar();
+
+  AutocompleteEditView* edit_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+
+  std::wstring old_text = edit_view->GetText();
+  EXPECT_EQ(UTF8ToWide(chrome::kAboutBlankURL), old_text);
+  EXPECT_TRUE(edit_view->IsSelectAll());
+
+  // Undo should clear the omnibox.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, false, false));
+  EXPECT_TRUE(edit_view->GetText().empty());
+
+  // Nothing should happen if undo again.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, false, false));
+  EXPECT_TRUE(edit_view->GetText().empty());
+
+  // Redo should restore the original text.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, true, false));
+  EXPECT_EQ(old_text, edit_view->GetText());
+
+  // Looks like the undo manager doesn't support restoring selection.
+  EXPECT_FALSE(edit_view->IsSelectAll());
+
+  // The cursor should be at the end.
+  std::wstring::size_type start, end;
+  edit_view->GetSelectionBounds(&start, &end);
+  EXPECT_EQ(old_text.size(), start);
+  EXPECT_EQ(old_text.size(), end);
+
+  // Delete two characters.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
+  EXPECT_EQ(old_text.substr(0, old_text.size() - 2), edit_view->GetText());
+
+  // Undo delete.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, false, false));
+  EXPECT_EQ(old_text, edit_view->GetText());
+
+  // Redo delete.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, true, false));
+  EXPECT_EQ(old_text.substr(0, old_text.size() - 2), edit_view->GetText());
+
+  // Delete everything.
+  edit_view->SelectAll(true);
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
+  EXPECT_TRUE(edit_view->GetText().empty());
+
+  // Undo delete everything.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, false, false));
+  EXPECT_EQ(old_text.substr(0, old_text.size() - 2), edit_view->GetText());
+
+  // Undo delete two characters.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, false, false));
+  EXPECT_EQ(old_text, edit_view->GetText());
+
+  // Undo again.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, false, false));
+  EXPECT_TRUE(edit_view->GetText().empty());
+}
+
+// See http://crbug.com/63860
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, PrimarySelection) {
+  browser()->FocusLocationBar();
+  AutocompleteEditView* edit_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+  edit_view->SetUserText(L"Hello world");
+  EXPECT_FALSE(edit_view->IsSelectAll());
+
+  // Move the cursor to the end.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_END, false, false, false));
+
+  // Select all text by pressing Shift+Home
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_HOME, false, true, false));
+  EXPECT_TRUE(edit_view->IsSelectAll());
+
+  // The selected content should be saved to the PRIMARY clipboard.
+  EXPECT_EQ("Hello world", GetPrimarySelectionText());
+
+  // Move the cursor to the end.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_END, false, false, false));
+  EXPECT_FALSE(edit_view->IsSelectAll());
+
+  // The content in the PRIMARY clipboard should not be cleared.
+  EXPECT_EQ("Hello world", GetPrimarySelectionText());
+}
+
+// See http://crosbug.com/10306
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest,
+                       BackspaceDeleteHalfWidthKatakana) {
+  browser()->FocusLocationBar();
+  AutocompleteEditView* edit_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+  // Insert text: ﾀﾞ
+  edit_view->SetUserText(UTF8ToWide("\357\276\200\357\276\236"));
+
+  // Move the cursor to the end.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_END, false, false, false));
+
+  // Backspace should delete one character.
+  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
+  EXPECT_EQ(UTF8ToWide("\357\276\200"), edit_view->GetText());
+}
+#endif

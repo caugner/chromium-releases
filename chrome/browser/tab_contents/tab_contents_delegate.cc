@@ -7,6 +7,10 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "gfx/rect.h"
 
+std::string TabContentsDelegate::GetNavigationHeaders(const GURL& url) {
+  return std::string();
+}
+
 void TabContentsDelegate::DetachContents(TabContents* source) {
 }
 
@@ -18,7 +22,7 @@ TabContents* TabContentsDelegate::GetConstrainingContents(TabContents* source) {
   return source;
 }
 
-bool TabContentsDelegate::ShouldFocusConstrainedWindow(TabContents* source) {
+bool TabContentsDelegate::ShouldFocusConstrainedWindow() {
   return true;
 }
 
@@ -41,12 +45,15 @@ bool TabContentsDelegate::CanReloadContents(TabContents* source) const {
   return true;
 }
 
-gfx::Rect TabContentsDelegate::GetRootWindowResizerRect() const {
-  return gfx::Rect();
-}
-
 void TabContentsDelegate::ShowHtmlDialog(HtmlDialogUIDelegate* delegate,
                                          gfx::NativeWindow parent_window) {
+}
+
+void TabContentsDelegate::WillRunBeforeUnloadConfirm() {
+}
+
+bool TabContentsDelegate::ShouldSuppressDialogs() {
+  return false;
 }
 
 void TabContentsDelegate::BeforeUnloadFired(TabContents* tab,
@@ -70,13 +77,6 @@ bool TabContentsDelegate::ShouldFocusPageAfterCrash() {
 }
 
 void TabContentsDelegate::RenderWidgetShowing() {}
-
-ExtensionFunctionDispatcher*
-TabContentsDelegate::CreateExtensionFunctionDispatcher(
-    RenderViewHost* render_view_host,
-    const std::string& extension_id) {
-  return NULL;
-}
 
 bool TabContentsDelegate::TakeFocus(bool reverse) {
   return false;
@@ -173,6 +173,12 @@ void TabContentsDelegate::OnDidGetApplicationInfo(TabContents* tab_contents,
                                                   int32 page_id) {
 }
 
+// Notification when an application programmatically requests installation.
+void TabContentsDelegate::OnInstallApplication(
+    TabContents* tab_contents,
+    const WebApplicationInfo& app_info) {
+}
+
 gfx::NativeWindow TabContentsDelegate::GetFrameNativeWindow() {
   return NULL;
 }
@@ -191,8 +197,13 @@ bool TabContentsDelegate::ShouldEnablePreferredSizeNotifications() {
 void TabContentsDelegate::UpdatePreferredSize(const gfx::Size& pref_size) {
 }
 
-void TabContentsDelegate::OnSetSuggestResult(int32 page_id,
-                                             const std::string& result) {
+void TabContentsDelegate::OnSetSuggestions(
+    int32 page_id,
+    const std::vector<std::string>& suggestions) {
+}
+
+void TabContentsDelegate::OnInstantSupportDetermined(int32 page_id,
+                                                     bool result) {
 }
 
 void TabContentsDelegate::ContentRestrictionsChanged(TabContents* source) {

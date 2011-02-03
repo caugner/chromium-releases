@@ -9,11 +9,17 @@
 #include "base/logging.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/json_value_serializer.h"
-#include "chrome/test/automation/automation_constants.h"
-#include "chrome/test/automation/automation_messages.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "googleurl/src/gurl.h"
+
+TabProxy::TabProxy(AutomationMessageSender* sender,
+                   AutomationHandleTracker* tracker,
+                   int handle)
+    : AutomationResourceProxy(tracker, sender, handle) {
+}
+
 
 bool TabProxy::GetTabTitle(std::wstring* title) const {
   if (!is_valid())
@@ -599,7 +605,7 @@ bool TabProxy::GetSecurityState(SecurityStyle* security_style,
   return succeeded;
 }
 
-bool TabProxy::GetPageType(NavigationEntry::PageType* type) {
+bool TabProxy::GetPageType(PageType* type) {
   DCHECK(type);
 
   if (!is_valid())
@@ -722,6 +728,25 @@ bool TabProxy::OverrideEncoding(const std::string& encoding) {
   return succeeded;
 }
 
+bool TabProxy::LoadBlockedPlugins() {
+  if (!is_valid())
+    return false;
+
+  bool succeeded = false;
+  sender_->Send(new AutomationMsg_LoadBlockedPlugins(0, handle_, &succeeded));
+  return succeeded;
+}
+
+bool TabProxy::CaptureEntirePageAsPNG(const FilePath& path) {
+  if (!is_valid())
+    return false;
+
+  bool succeeded = false;
+  sender_->Send(new AutomationMsg_CaptureEntirePageAsPNG(0, handle_, path,
+                                                         &succeeded));
+  return succeeded;
+}
+
 #if defined(OS_WIN)
 void TabProxy::Reposition(HWND window, HWND window_insert_after, int left,
                           int top, int width, int height, int flags,
@@ -798,6 +823,8 @@ void TabProxy::OnChannelError() {
   AutoLock lock(list_lock_);
   FOR_EACH_OBSERVER(TabProxyDelegate, observers_list_, OnChannelError(this));
 }
+
+TabProxy::~TabProxy() {}
 
 bool TabProxy::ExecuteJavaScriptAndGetJSON(const std::string& script,
                                            std::string* json) {

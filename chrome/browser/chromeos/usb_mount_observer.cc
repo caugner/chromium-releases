@@ -1,17 +1,17 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/usb_mount_observer.h"
 
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_window.h"
+#include "base/command_line.h"
 #include "chrome/browser/dom_ui/filebrowse_ui.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/pref_names.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 
 namespace chromeos {
@@ -59,8 +59,8 @@ void USBMountObserver::OpenFileBrowse(const std::string& url,
     return;
   }
   profile = browser->profile();
-  PrefService* pref_service = profile->GetPrefs();
-  if (!pref_service->GetBoolean(prefs::kLabsAdvancedFilesystemEnabled)) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableAdvancedFileSystem)) {
     return;
   }
   if (small) {
@@ -105,13 +105,13 @@ void USBMountObserver::MountChanged(chromeos::MountLibrary* obj,
         }
       }
     }
-    LOG(INFO) << "Got added mount:" << path;
+    VLOG(1) << "Got added mount: " << path;
   } else if (evt == chromeos::DISK_REMOVED ||
              evt == chromeos::DEVICE_REMOVED) {
     RemoveBrowserFromVector(path);
   } else if (evt == chromeos::DISK_CHANGED) {
     BrowserIterator iter = FindBrowserForPath(path);
-    LOG(INFO) << "Got changed mount:" << path;
+    VLOG(1) << "Got changed mount: " << path;
     if (iter == browsers_.end()) {
       // We don't currently have this one, so it must have been
       // mounted
@@ -142,10 +142,10 @@ void USBMountObserver::MountChanged(chromeos::MountLibrary* obj,
       }
     }
   } else if (evt == chromeos::DEVICE_ADDED) {
-    LOG(INFO) << "Got device added" << path;
+    VLOG(1) << "Got device added: " << path;
     OpenFileBrowse(kFilebrowseScanning, path, true);
   } else if (evt == chromeos::DEVICE_SCANNED) {
-    LOG(INFO) << "Got device scanned:" << path;
+    VLOG(1) << "Got device scanned: " << path;
   }
 }
 

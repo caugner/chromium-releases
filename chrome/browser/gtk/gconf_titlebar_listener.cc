@@ -8,14 +8,10 @@
 
 #include "base/scoped_ptr.h"
 #include "base/environment.h"
-#include "base/xdg_util.h"
+#include "base/nix/xdg_util.h"
 #include "chrome/browser/gtk/browser_titlebar.h"
 
 namespace {
-
-// A default button order string for when we aren't asking gconf for the
-// metacity configuration.
-const char* kDefaultButtonPlacement = ":minimize,maximize,close";
 
 // The GConf key we read for the button placement string. Even through the key
 // has "metacity" in it, it's shared between metacity and compiz.
@@ -34,7 +30,7 @@ void GConfTitlebarListener::SetTitlebarButtons(BrowserTitlebar* titlebar) {
     titlebar->BuildButtons(current_value_);
     titlebars_.insert(titlebar);
   } else {
-    titlebar->BuildButtons(kDefaultButtonPlacement);
+    titlebar->BuildButtons(BrowserTitlebar::kDefaultButtonString);
   }
 }
 
@@ -42,12 +38,16 @@ void GConfTitlebarListener::RemoveObserver(BrowserTitlebar* titlebar) {
   titlebars_.erase(titlebar);
 }
 
+// Protected:
+
+GConfTitlebarListener::~GConfTitlebarListener() {}
+
 // Private:
 
 GConfTitlebarListener::GConfTitlebarListener() : client_(NULL) {
   scoped_ptr<base::Environment> env(base::Environment::Create());
-  if (base::GetDesktopEnvironment(env.get()) ==
-      base::DESKTOP_ENVIRONMENT_GNOME) {
+  if (base::nix::GetDesktopEnvironment(env.get()) ==
+      base::nix::DESKTOP_ENVIRONMENT_GNOME) {
     client_ = gconf_client_get_default();
     // If we fail to get a context, that's OK, since we'll just fallback on
     // not receiving gconf keys.
@@ -109,8 +109,8 @@ bool GConfTitlebarListener::HandleGError(GError* error, const char* key) {
 void GConfTitlebarListener::ParseAndStoreValue(GConfValue* gconf_value) {
   if (gconf_value) {
     const char* value = gconf_value_get_string(gconf_value);
-    current_value_ = value ? value : kDefaultButtonPlacement;
+    current_value_ = value ? value : BrowserTitlebar::kDefaultButtonString;
   } else {
-    current_value_ = kDefaultButtonPlacement;
+    current_value_ = BrowserTitlebar::kDefaultButtonString;
   }
 }

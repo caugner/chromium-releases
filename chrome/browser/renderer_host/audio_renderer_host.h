@@ -61,12 +61,11 @@
 #include <map>
 
 #include "base/gtest_prod_util.h"
-#include "base/lock.h"
 #include "base/process.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/shared_memory.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "ipc/ipc_message.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_output_controller.h"
@@ -83,12 +82,8 @@ class AudioRendererHost : public base::RefCountedThreadSafe<
   typedef std::pair<int32, int> AudioEntryId;
 
   struct AudioEntry {
-    AudioEntry()
-        : render_view_id(0),
-          stream_id(0),
-          pending_buffer_request(false),
-          pending_close(false) {
-    }
+    AudioEntry();
+    ~AudioEntry();
 
     // The AudioOutputController that manages the audio stream.
     scoped_refptr<media::AudioOutputController> controller;
@@ -148,7 +143,7 @@ class AudioRendererHost : public base::RefCountedThreadSafe<
 
  private:
   friend class AudioRendererHostTest;
-  friend class ChromeThread;
+  friend class BrowserThread;
   friend class DeleteTask<AudioRendererHost>;
   friend class MockAudioRendererHost;
   FRIEND_TEST_ALL_PREFIXES(AudioRendererHostTest, CreateMockStream);

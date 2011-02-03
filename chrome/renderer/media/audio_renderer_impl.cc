@@ -34,7 +34,9 @@ AudioRendererImpl::AudioRendererImpl(AudioMessageFilter* filter)
       shared_memory_size_(0),
       io_loop_(filter->message_loop()),
       stopped_(false),
-      pending_request_(false) {
+      pending_request_(false),
+      prerolling_(false),
+      preroll_bytes_(0) {
   DCHECK(io_loop_);
 }
 
@@ -47,14 +49,6 @@ base::TimeDelta AudioRendererImpl::ConvertToDuration(int bytes) {
         base::Time::kMicrosecondsPerSecond * bytes / bytes_per_second_);
   }
   return base::TimeDelta();
-}
-
-bool AudioRendererImpl::IsMediaFormatSupported(
-    const media::MediaFormat& media_format) {
-  int channels;
-  int sample_rate;
-  int sample_bits;
-  return ParseMediaFormat(media_format, &channels, &sample_rate, &sample_bits);
 }
 
 bool AudioRendererImpl::OnInitialize(const media::MediaFormat& media_format) {
@@ -88,7 +82,8 @@ void AudioRendererImpl::OnStop() {
       NewRunnableMethod(this, &AudioRendererImpl::DestroyTask));
 }
 
-void AudioRendererImpl::OnReadComplete(media::Buffer* buffer_in) {
+void AudioRendererImpl::ConsumeAudioSamples(
+    scoped_refptr<media::Buffer> buffer_in) {
   AutoLock auto_lock(lock_);
   if (stopped_)
     return;
@@ -260,7 +255,9 @@ void AudioRendererImpl::CreateStreamTask(AudioParameters audio_params) {
 
   ViewHostMsg_Audio_CreateStream_Params params;
   params.params = audio_params;
-  params.packet_size = 0;
+
+  // Let the browser choose packet size.
+  params.params.samples_per_packet = 0;
 
   filter_->Send(new ViewHostMsg_CreateAudioStream(0, stream_id_, params,
                                                   false));

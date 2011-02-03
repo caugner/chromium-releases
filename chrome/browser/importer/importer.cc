@@ -10,14 +10,15 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browsing_instance.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/importer/firefox_profile_lock.h"
 #include "chrome/browser/importer/importer_bridge.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/notification_service.h"
 #include "gfx/codec/png_codec.h"
@@ -200,15 +201,11 @@ void ImporterHost::StartImportSettings(
           MB_OK | MB_TOPMOST);
 
       GURL url("https://www.google.com/accounts/ServiceLogin");
-      Browser* browser = BrowserList::GetLastActive();
-      Browser::AddTabWithURLParams params(url, PageTransition::TYPED);
-      // BrowsingInstance is refcounted.
-      BrowsingInstance* instance = new BrowsingInstance(writer_->profile());
-      params.instance = instance->GetSiteInstanceForURL(url);
-      browser->AddTabWithURL(&params);
+      BrowserList::GetLastActive()->AddSelectedTabWithURL(
+          url, PageTransition::TYPED);
 
       MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &ImporterHost::OnLockViewEnd, false));
+          this, &ImporterHost::OnLockViewEnd, false));
 
       is_source_readable_ = false;
     }

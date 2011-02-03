@@ -13,7 +13,7 @@
 #include "base/file_path.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/search_engines/template_url_id.h"
 #include "webkit/glue/form_field.h"
 
@@ -70,7 +70,7 @@ typedef enum {
   AUTOFILL_VALUE_RESULT,       // WDResult<std::vector<string16>>
   AUTOFILL_CHANGES,            // WDResult<std::vector<AutofillChange>>
   AUTOFILL_PROFILE_RESULT,     // WDResult<AutoFillProfile>
-  AUTOFILL_PROFILES_RESULT,     // WDResult<std::vector<AutoFillProfile*>>
+  AUTOFILL_PROFILES_RESULT,    // WDResult<std::vector<AutoFillProfile*>>
   AUTOFILL_CREDITCARD_RESULT,  // WDResult<CreditCard>
   AUTOFILL_CREDITCARDS_RESULT  // WDResult<std::vector<CreditCard*>>
 } WDResultType;
@@ -90,6 +90,9 @@ struct WDAppImagesResult {
 };
 
 struct WDKeywordsResult {
+  WDKeywordsResult();
+  ~WDKeywordsResult();
+
   std::vector<TemplateURL*> keywords;
   // Identifies the ID of the TemplateURL that is the default search. A value of
   // 0 indicates there is no default search provider.
@@ -123,7 +126,7 @@ class WDTypedResult {
 template <class T> class WDResult : public WDTypedResult {
  public:
 
-  WDResult(WDResultType type, T v) : WDTypedResult(type), value_(v) {
+  WDResult(WDResultType type, const T& v) : WDTypedResult(type), value_(v) {
   }
 
   virtual ~WDResult() {
@@ -217,8 +220,9 @@ class WebDataService
     GenericRequest(WebDataService* service,
                    Handle handle,
                    WebDataServiceConsumer* consumer,
-                   T arg) : WebDataRequest(service, handle, consumer),
-                            arg_(arg) {
+                   const T& arg)
+        : WebDataRequest(service, handle, consumer),
+          arg_(arg) {
     }
 
     virtual ~GenericRequest() {
@@ -238,8 +242,8 @@ class WebDataService
     GenericRequest2(WebDataService* service,
                     Handle handle,
                     WebDataServiceConsumer* consumer,
-                    T arg1,
-                    U arg2)
+                    const T& arg1,
+                    const U& arg2)
         : WebDataRequest(service, handle, consumer),
           arg1_(arg1),
           arg2_(arg2) {
@@ -434,14 +438,14 @@ class WebDataService
                                      const string16& value);
 
   // Schedules a task to add an AutoFill profile to the web database.
-  void AddAutoFillProfile(const AutoFillProfile& profile);
+  void AddAutoFillProfileGUID(const AutoFillProfile& profile);
 
   // Schedules a task to update an AutoFill profile in the web database.
-  void UpdateAutoFillProfile(const AutoFillProfile& profile);
+  void UpdateAutoFillProfileGUID(const AutoFillProfile& profile);
 
   // Schedules a task to remove an AutoFill profile from the web database.
-  // |profile_id| is the unique ID of the profile to remove.
-  void RemoveAutoFillProfile(int profile_id);
+  // |guid| is the identifer of the profile to remove.
+  void RemoveAutoFillProfileGUID(const std::string& guid);
 
   // Initiates the request for all AutoFill profiles.  The method
   // OnWebDataServiceRequestDone of |consumer| gets called when the request is
@@ -450,20 +454,25 @@ class WebDataService
   Handle GetAutoFillProfiles(WebDataServiceConsumer* consumer);
 
   // Schedules a task to add credit card to the web database.
-  void AddCreditCard(const CreditCard& creditcard);
+  void AddCreditCardGUID(const CreditCard& credit_card);
 
   // Schedules a task to update credit card in the web database.
-  void UpdateCreditCard(const CreditCard& creditcard);
+  void UpdateCreditCardGUID(const CreditCard& credit_card);
 
   // Schedules a task to remove a credit card from the web database.
-  // |creditcard_id| is the unique ID of the credit card to remove.
-  void RemoveCreditCard(int creditcard_id);
+  // |guid| is identifer of the credit card to remove.
+  void RemoveCreditCardGUID(const std::string& guid);
 
   // Initiates the request for all credit cards.  The method
   // OnWebDataServiceRequestDone of |consumer| gets called when the request is
   // finished, with the credit cards included in the argument |result|.  The
   // consumer owns the credit cards.
   Handle GetCreditCards(WebDataServiceConsumer* consumer);
+
+  // Removes AutoFill records from the database.
+  void RemoveAutoFillProfilesAndCreditCardsModifiedBetween(
+      const base::Time& delete_begin,
+      const base::Time& delete_end);
 
   // Testing
 #ifdef UNIT_TEST
@@ -494,7 +503,7 @@ class WebDataService
   //////////////////////////////////////////////////////////////////////////////
  private:
   friend class base::RefCountedThreadSafe<WebDataService>;
-  friend class ChromeThread;
+  friend class BrowserThread;
   friend class DeleteTask<WebDataService>;
   friend class ShutdownTask;
 
@@ -590,14 +599,16 @@ class WebDataService
       GenericRequest2<base::Time, base::Time>* request);
   void RemoveFormValueForElementNameImpl(
       GenericRequest2<string16, string16>* request);
-  void AddAutoFillProfileImpl(GenericRequest<AutoFillProfile>* request);
-  void UpdateAutoFillProfileImpl(GenericRequest<AutoFillProfile>* request);
-  void RemoveAutoFillProfileImpl(GenericRequest<int>* request);
+  void AddAutoFillProfileGUIDImpl(GenericRequest<AutoFillProfile>* request);
+  void UpdateAutoFillProfileGUIDImpl(GenericRequest<AutoFillProfile>* request);
+  void RemoveAutoFillProfileGUIDImpl(GenericRequest<std::string>* request);
   void GetAutoFillProfilesImpl(WebDataRequest* request);
-  void AddCreditCardImpl(GenericRequest<CreditCard>* request);
-  void UpdateCreditCardImpl(GenericRequest<CreditCard>* request);
-  void RemoveCreditCardImpl(GenericRequest<int>* request);
+  void AddCreditCardGUIDImpl(GenericRequest<CreditCard>* request);
+  void UpdateCreditCardGUIDImpl(GenericRequest<CreditCard>* request);
+  void RemoveCreditCardGUIDImpl(GenericRequest<std::string>* request);
   void GetCreditCardsImpl(WebDataRequest* request);
+  void RemoveAutoFillProfilesAndCreditCardsModifiedBetweenImpl(
+      GenericRequest2<base::Time, base::Time>* request);
 
   // True once initialization has started.
   bool is_running_;

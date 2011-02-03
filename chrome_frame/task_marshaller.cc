@@ -1,6 +1,7 @@
 // Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 #include "chrome_frame/task_marshaller.h"
 #include "base/task.h"
 
@@ -14,34 +15,58 @@ TaskMarshallerThroughMessageQueue::~TaskMarshallerThroughMessageQueue() {
 }
 
 void TaskMarshallerThroughMessageQueue::PostTask(
-  const tracked_objects::Location& from_here, Task* task) {
-    task->SetBirthPlace(from_here);
-    lock_.Acquire();
-    bool has_work = !pending_tasks_.empty();
-    pending_tasks_.push(task);
-    lock_.Release();
+    const tracked_objects::Location& from_here, Task* task) {
+  DCHECK(wnd_ != NULL);
+  task->SetBirthPlace(from_here);
+  lock_.Acquire();
+  bool has_work = !pending_tasks_.empty();
+  pending_tasks_.push(task);
+  lock_.Release();
 
-    // Don't post message if there is already one.
-    if (has_work)
-      return;
+  // Don't post message if there is already one.
+  if (has_work)
+    return;
 
-    if (!::PostMessage(wnd_, msg_, 0, 0)) {
-      DLOG(INFO) << "Dropping MSG_EXECUTE_TASK message for destroyed window.";
-      DeleteAll();
-    }
+  if (!::PostMessage(wnd_, msg_, 0, 0)) {
+    DVLOG(1) << "Dropping MSG_EXECUTE_TASK message for destroyed window.";
+    DeleteAll();
+  }
 }
 
 void TaskMarshallerThroughMessageQueue::PostDelayedTask(
-  const tracked_objects::Location& source, Task* task,
-  base::TimeDelta& delay) {
-    AutoLock lock(lock_);
-    DelayedTask delayed_task(task, base::Time::Now() + delay);
-    delayed_tasks_.push(delayed_task);
-    // If we become the 'top' task - reschedule the timer.
-    if (delayed_tasks_.top().task == task) {
-      ::SetTimer(wnd_, reinterpret_cast<UINT_PTR>(this),
-        static_cast<DWORD>(delay.InMilliseconds()), NULL);
-    }
+    const tracked_objects::Location& source,
+    Task* task,
+    base::TimeDelta& delay) {
+  DCHECK(wnd_ != NULL);
+  AutoLock lock(lock_);
+  DelayedTask delayed_task(task, base::Time::Now() + delay);
+  delayed_tasks_.push(delayed_task);
+  // If we become the 'top' task - reschedule the timer.
+  if (delayed_tasks_.top().task == task) {
+    ::SetTimer(wnd_, reinterpret_cast<UINT_PTR>(this),
+      static_cast<DWORD>(delay.InMilliseconds()), NULL);
+  }
+}
+
+BOOL TaskMarshallerThroughMessageQueue::ProcessWindowMessage(HWND hWnd,
+                                                             UINT uMsg,
+                                                             WPARAM wParam,
+                                                             LPARAM lParam,
+                                                             LRESULT& lResult,
+                                                             DWORD dwMsgMapID) {
+  if (hWnd == wnd_ && uMsg == msg_) {
+    ExecuteQueuedTasks();
+    lResult = 0;
+    return TRUE;
+  }
+
+  if (hWnd == wnd_ && uMsg == WM_TIMER) {
+    ExecuteDelayedTasks();
+    lResult = 0;
+    return TRUE;
+  }
+
+  return FALSE;
 }
 
 Task* TaskMarshallerThroughMessageQueue::PopTask() {
@@ -94,8 +119,9 @@ void TaskMarshallerThroughMessageQueue::ExecuteDelayedTasks() {
 
 void TaskMarshallerThroughMessageQueue::DeleteAll() {
   AutoLock lock(lock_);
-  DLOG_IF(INFO, !pending_tasks_.empty()) <<
-    "Destroying " << pending_tasks_.size() << "  pending tasks.";
+  DVLOG_IF(1, !pending_tasks_.empty()) << "Destroying "
+                                       << pending_tasks_.size()
+                                       << " pending tasks.";
   while (!pending_tasks_.empty()) {
     Task* task = pending_tasks_.front();
     pending_tasks_.pop();

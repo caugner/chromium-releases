@@ -74,15 +74,15 @@
 #include "base/utf_string_conversions.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/browser_init.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #if defined(TOOLKIT_GTK)
 #include "chrome/browser/gtk/process_singleton_dialog.h"
 #endif
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
+#include "chrome/browser/ui/browser_init.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -710,7 +710,7 @@ void ProcessSingleton::LinuxWatcher::SocketReader::OnFileCanReadWithoutBlocking(
 
   std::string str(buf_, bytes_read_);
   std::vector<std::string> tokens;
-  SplitString(str, kTokenDelimiter, &tokens);
+  base::SplitString(str, kTokenDelimiter, &tokens);
 
   if (tokens.size() < 3 || tokens[0] != kStartToken) {
     LOG(ERROR) << "Wrong message format: " << str;

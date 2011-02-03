@@ -6,15 +6,18 @@
 
 #include <vector>
 
+#include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/test/test_timeouts.h"
+#include "base/values.h"
 #include "base/waitable_event.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
@@ -27,6 +30,7 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/network_change_notifier.h"
+#include "net/test/test_server.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_service.h"
@@ -86,6 +90,36 @@ class SetProxyConfigTask : public Task {
   net::ProxyConfig proxy_config_;
 };
 
+LiveSyncTest::LiveSyncTest(TestType test_type)
+    : sync_server_(net::TestServer::TYPE_SYNC, FilePath()),
+      test_type_(test_type),
+      num_clients_(-1),
+      test_server_handle_(base::kNullProcessHandle) {
+  InProcessBrowserTest::set_show_window(true);
+
+  // TODO(rsimha): Remove after investigating flaky and failing sync tests.
+  logging::SetMinLogLevel(logging::LOG_VERBOSE);
+
+  switch (test_type_) {
+    case SINGLE_CLIENT: {
+      num_clients_ = 1;
+      break;
+    }
+    case TWO_CLIENT: {
+      num_clients_ = 2;
+      break;
+    }
+    case MULTIPLE_CLIENT: {
+      num_clients_ = 3;
+      break;
+    }
+    case MANY_CLIENT: {
+      num_clients_ = 10;
+      break;
+    }
+  }
+}
+
 void LiveSyncTest::SetUp() {
   // At this point, the browser hasn't been launched, and no services are
   // available.  But we can verify our command line parameters and fail
@@ -103,19 +137,18 @@ void LiveSyncTest::SetUp() {
     LOG(FATAL) << "Cannot run sync tests without GAIA credentials.";
 
   // TODO(rsimha): Until we implement a fake Tango server against which tests
-  // can run, we need to set the --sync-notification-method to "transitional".
+  // can run, we need to set the --sync-notification-method to "p2p".
   if (!cl->HasSwitch(switches::kSyncNotificationMethod))
-    cl->AppendSwitchASCII(switches::kSyncNotificationMethod, "transitional");
+    cl->AppendSwitchASCII(switches::kSyncNotificationMethod, "p2p");
 
-  // TODO(akalin): Delete this block of code once a local python notification
-  // server is implemented.
-  // The chrome sync builders are behind a firewall that blocks port 5222, the
-  // default port for XMPP notifications. This causes the tests to spend up to a
-  // minute waiting for a connection on port 5222 before they fail over to port
-  // 443, the default SSL/TCP port. This switch causes the tests to use port 443
-  // by default, without having to try port 5222.
-  if (!cl->HasSwitch(switches::kSyncUseSslTcp)) {
-    cl->AppendSwitch(switches::kSyncUseSslTcp);
+  // TODO(sync): Remove this once sessions sync is enabled by default.
+  if (!cl->HasSwitch(switches::kEnableSyncSessions)) {
+    cl->AppendSwitch(switches::kEnableSyncSessions);
+  }
+
+  // TODO(sync): Remove this once passwords sync is enabled by default.
+  if (!cl->HasSwitch(switches::kEnableSyncPasswords)) {
+    cl->AppendSwitch(switches::kEnableSyncPasswords);
   }
 
   // Mock the Mac Keychain service.  The real Keychain can block on user input.
@@ -153,7 +186,7 @@ Profile* LiveSyncTest::GetProfile(int index) {
   return profiles_[index];
 }
 
-ProfileSyncServiceTestHarness* LiveSyncTest::GetClient(int index) {
+ProfileSyncServiceHarness* LiveSyncTest::GetClient(int index) {
   if (clients_.empty())
     LOG(FATAL) << "SetupClients() has not yet been called.";
   if (index < 0 || index >= static_cast<int>(clients_.size()))
@@ -181,8 +214,8 @@ bool LiveSyncTest::SetupClients() {
     profiles_.push_back(MakeProfile(
         StringPrintf(FILE_PATH_LITERAL("Profile%d"), i)));
     EXPECT_FALSE(GetProfile(i) == NULL) << "GetProfile(" << i << ") failed.";
-    clients_.push_back(new ProfileSyncServiceTestHarness(
-        GetProfile(i), username_, password_, i));
+    clients_.push_back(
+        new ProfileSyncServiceHarness(GetProfile(i), username_, password_, i));
     EXPECT_FALSE(GetClient(i) == NULL) << "GetClient(" << i << ") failed.";
   }
 
@@ -276,24 +309,39 @@ void LiveSyncTest::SetUpTestServerIfRequired() {
       LOG(FATAL) << "Failed to set up local python test server";
   } else if (!cl->HasSwitch(switches::kSyncServiceURL) &&
              cl->HasSwitch(switches::kSyncServerCommandLine)) {
-    LOG(FATAL)
-        << "Sync server command line must be accompanied by sync service URL.";
+    LOG(FATAL) << "Sync server command line must be accompanied by sync "
+                  "service URL.";
   }
 }
 
 bool LiveSyncTest::SetUpLocalPythonTestServer() {
-  EXPECT_TRUE(test_server()->Start())
+  EXPECT_TRUE(sync_server_.Start())
       << "Could not launch local python test server.";
 
   CommandLine* cl = CommandLine::ForCurrentProcess();
-  std::string sync_service_url = StringPrintf("http://%s:%d/chromiumsync",
-      test_server()->host_port_pair().host().c_str(),
-      test_server()->host_port_pair().port());
+  std::string sync_service_url = sync_server_.GetURL("chromiumsync").spec();
   cl->AppendSwitchASCII(switches::kSyncServiceURL, sync_service_url);
-  LOG(INFO) << "Started local python test server at " << sync_service_url;
+  VLOG(1) << "Started local python test server at " << sync_service_url;
 
-  // TODO(akalin): Set the kSyncNotificationHost switch here once a local python
-  // notification server is implemented.
+  int xmpp_port = 0;
+  if (!sync_server_.server_data().GetInteger("xmpp_port", &xmpp_port)) {
+    LOG(ERROR) << "Could not find valid xmpp_port value";
+    return false;
+  }
+  if ((xmpp_port <= 0) || (xmpp_port > kuint16max)) {
+    LOG(ERROR) << "Invalid xmpp port: " << xmpp_port;
+    return false;
+  }
+
+  net::HostPortPair xmpp_host_port_pair(sync_server_.host_port_pair());
+  xmpp_host_port_pair.set_port(xmpp_port);
+
+  if (!cl->HasSwitch(switches::kSyncNotificationHost)) {
+    cl->AppendSwitchASCII(switches::kSyncNotificationHost,
+                          xmpp_host_port_pair.ToString());
+    // The local XMPP server only supports insecure connections.
+    cl->AppendSwitch(switches::kSyncAllowInsecureXmppConnection);
+  }
 
   return true;
 }
@@ -316,8 +364,8 @@ bool LiveSyncTest::SetUpLocalTestServer() {
   const int kMaxWaitTime = TestTimeouts::live_operation_timeout_ms();
   const int kNumIntervals = 15;
   if (WaitForTestServerToStart(kMaxWaitTime, kNumIntervals)) {
-    LOG(INFO) << "Started local test server at "
-              << cl->GetSwitchValueASCII(switches::kSyncServiceURL) << ".";
+    VLOG(1) << "Started local test server at "
+            << cl->GetSwitchValueASCII(switches::kSyncServiceURL) << ".";
     return true;
   } else {
     LOG(ERROR) << "Could not start local test server at "
@@ -327,7 +375,7 @@ bool LiveSyncTest::SetUpLocalTestServer() {
 }
 
 bool LiveSyncTest::TearDownLocalPythonTestServer() {
-  if (!test_server()->Stop()) {
+  if (!sync_server_.Stop()) {
     LOG(ERROR) << "Could not stop local python test server.";
     return false;
   }
@@ -380,6 +428,10 @@ void LiveSyncTest::DisableNetwork(Profile* profile) {
   SetProxyConfig(profile->GetRequestContext(), config);
   // TODO(rsimha): Remove this line once http://crbug.com/53857 is fixed.
   net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
+}
+
+bool LiveSyncTest::AwaitQuiescence() {
+  return ProfileSyncServiceHarness::AwaitQuiescence(clients());
 }
 
 void LiveSyncTest::SetProxyConfig(URLRequestContextGetter* context_getter,

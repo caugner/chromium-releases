@@ -27,7 +27,6 @@
 #include "webkit/glue/webcursor.h"
 
 class RenderThreadBase;
-struct ViewHostMsg_ShowPopup_Params;
 
 namespace gfx {
 class Point;
@@ -68,10 +67,6 @@ class RenderWidget : public IPC::Channel::Listener,
   // Creates a WebWidget based on the popup type.
   static WebKit::WebWidget* CreateWebWidget(RenderWidget* render_widget);
 
-  // Called after Create to configure a RenderWidget to be rendered by the host
-  // as a popup menu with the given data.
-  void ConfigureAsExternalPopupMenu(const WebKit::WebPopupMenuInfo& info);
-
   // The routing ID assigned by the RenderProcess. Will be MSG_ROUTING_NONE if
   // not yet assigned a view ID, in which case, the process MUST NOT send
   // messages with this ID to the parent.
@@ -99,6 +94,7 @@ class RenderWidget : public IPC::Channel::Listener,
   // WebKit::WebWidgetClient
   virtual void didInvalidateRect(const WebKit::WebRect&);
   virtual void didScrollRect(int dx, int dy, const WebKit::WebRect& clipRect);
+  virtual void didActivateAcceleratedCompositing(bool active);
   virtual void scheduleComposite();
   virtual void didFocus();
   virtual void didBlur();
@@ -128,6 +124,8 @@ class RenderWidget : public IPC::Channel::Listener,
   // Friend RefCounted so that the dtor can be non-public. Using this class
   // without ref-counting is an error.
   friend class base::RefCounted<RenderWidget>;
+  // For unit tests.
+  friend class RenderWidgetTest;
 
   RenderWidget(RenderThreadBase* render_thread,
                WebKit::WebPopupType popup_type);
@@ -350,15 +348,14 @@ class RenderWidget : public IPC::Channel::Listener,
   int pending_window_rect_count_;
   WebKit::WebRect pending_window_rect_;
 
-  scoped_ptr<ViewHostMsg_ShowPopup_Params> popup_params_;
-
   scoped_ptr<IPC::Message> pending_input_event_ack_;
 
   // Indicates if the next sequence of Char events should be suppressed or not.
   bool suppress_next_char_events_;
 
-  // Set to true if painting to the window is handled by the GPU process.
-  bool is_gpu_rendering_active_;
+  // Set to true if painting to the window is handled by the accelerated
+  // compositor.
+  bool is_accelerated_compositing_active_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

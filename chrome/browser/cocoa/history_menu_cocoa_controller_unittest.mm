@@ -6,12 +6,12 @@
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/browser.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/cocoa/browser_test_helper.h"
 #include "chrome/browser/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/cocoa/history_menu_bridge.h"
 #include "chrome/browser/cocoa/history_menu_cocoa_controller.h"
+#include "chrome/browser/ui/browser.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 @interface FakeHistoryMenuController : HistoryMenuCocoaController {

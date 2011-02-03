@@ -18,7 +18,7 @@
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
-#include "base/histogram.h"
+#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
@@ -32,6 +32,7 @@
 #include "ipc/ipc_message_utils.h"
 #include "media/base/media.h"
 #include "media/base/media_switches.h"
+#include "native_client/src/shared/imc/nacl_imc.h"
 #include "native_client/src/trusted/plugin/nacl_entry_points.h"
 #include "skia/ext/platform_canvas.h"
 #include "webkit/glue/plugins/plugin_instance.h"
@@ -41,7 +42,11 @@
 #if defined(OS_MACOSX)
 #include "base/mac_util.h"
 #elif defined(OS_WIN)
-#include "base/iat_patch.h"
+#include "app/win/iat_patch_function.h"
+#endif
+
+#if defined(OS_LINUX)
+#include "chrome/renderer/renderer_sandbox_support_linux.h"
 #endif
 
 namespace {
@@ -80,7 +85,7 @@ bool LaunchNaClProcessMultiFD(const char* alleged_url,
 
 #if defined(OS_WIN)
 
-static iat_patch::IATPatchFunction g_iat_patch_createdca;
+static app::win::IATPatchFunction g_iat_patch_createdca;
 HDC WINAPI CreateDCAPatch(LPCSTR driver_name,
                           LPCSTR device_name,
                           LPCSTR output,
@@ -94,7 +99,7 @@ HDC WINAPI CreateDCAPatch(LPCSTR driver_name,
   return CreateCompatibleDC(NULL);
 }
 
-static iat_patch::IATPatchFunction g_iat_patch_get_font_data;
+static app::win::IATPatchFunction g_iat_patch_get_font_data;
 DWORD WINAPI GetFontDataPatch(HDC hdc,
                               DWORD table,
                               DWORD offset,
@@ -146,7 +151,7 @@ RenderProcessImpl::RenderProcessImpl()
   webkit_glue::SetJavaScriptFlags(
       "--debugger-auto-break"
       // Enable lazy in-memory profiling.
-      " --prof --prof-lazy --logfile=* --compress-log");
+      " --prof --prof-lazy --logfile=*");
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kJavaScriptFlags)) {
@@ -159,7 +164,7 @@ RenderProcessImpl::RenderProcessImpl()
   }
 
   if (command_line.HasSwitch(switches::kDumpHistogramsOnExit)) {
-    StatisticsRecorder::set_dump_on_exit(true);
+    base::StatisticsRecorder::set_dump_on_exit(true);
   }
 
 #if !defined(DISABLE_NACL)
@@ -168,12 +173,12 @@ RenderProcessImpl::RenderProcessImpl()
     funcs["launch_nacl_process_multi_fd"] =
         reinterpret_cast<uintptr_t>(LaunchNaClProcessMultiFD);
     RegisterInternalNaClPlugin(funcs);
+#if defined(OS_LINUX)
+    nacl::SetCreateMemoryObjectFunc(
+        renderer_sandbox_support::MakeSharedMemorySegmentViaIPC);
+#endif
   }
 #endif
-
-  if (!command_line.HasSwitch(switches::kDisableByteRangeSupport)) {
-    webkit_glue::SetMediaCacheEnabled(true);
-  }
 
 #if defined(OS_MACOSX)
   FilePath bundle_path = mac_util::MainAppBundlePath();

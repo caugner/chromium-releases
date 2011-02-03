@@ -44,17 +44,18 @@
 
 
 #ifndef MESSAGES_INTERNAL_FILE
-#error This file should only be included by X_messages.h, which needs to define MESSAGES_INTERNAL_FILE first.
+#error This file should only be included by X_messages.h, which needs to define\
+       MESSAGES_INTERNAL_FILE first.
 #endif
 
 // Trick scons and xcode into seeing the possible real dependencies since they
 // don't understand #include MESSAGES_INTERNAL_FILE. See http://crbug.com/7828
 #if 0
 #include "ipc/ipc_sync_message_unittest.h"
+#include "chrome/common/automation_messages_internal.h"
+#include "chrome/common/devtools_messages_internal.h"
 #include "chrome/common/plugin_messages_internal.h"
 #include "chrome/common/render_messages_internal.h"
-#include "chrome/common/devtools_messages_internal.h"
-#include "chrome/test/automation/automation_messages_internal.h"
 #include "chrome/common/worker_messages_internal.h"
 #endif
 
@@ -133,6 +134,7 @@
 #undef IPC_SYNC_MESSAGE_ROUTED3_1
 #undef IPC_SYNC_MESSAGE_ROUTED3_2
 #undef IPC_SYNC_MESSAGE_ROUTED3_3
+#undef IPC_SYNC_MESSAGE_ROUTED3_4
 #undef IPC_SYNC_MESSAGE_ROUTED4_0
 #undef IPC_SYNC_MESSAGE_ROUTED4_1
 #undef IPC_SYNC_MESSAGE_ROUTED4_2
@@ -296,6 +298,9 @@
 #define IPC_SYNC_MESSAGE_ROUTED3_3(msg_class, type1_in, type2_in, type3_in, type1_out, type2_out, type3_out) \
   msg_class##__ID,
 
+#define IPC_SYNC_MESSAGE_ROUTED3_4(msg_class, type1_in, type2_in, type3_in, type1_out, type2_out, type3_out, type4_out) \
+  msg_class##__ID,
+
 #define IPC_SYNC_MESSAGE_ROUTED4_0(msg_class, type1_in, type2_in, type3_in, type4_in) \
   msg_class##__ID,
 
@@ -368,7 +373,8 @@ void class_name::OnMessageReceived(const IPC::Message& msg) \
     break;
 
 #define IPC_MESSAGE_HANDLER_DELAY_REPLY(msg_class, member_func) \
-  IPC_MESSAGE_FORWARD_DELAY_REPLY(msg_class, this, _IpcMessageHandlerClass::member_func)
+  IPC_MESSAGE_FORWARD_DELAY_REPLY(msg_class, this, \
+                                  _IpcMessageHandlerClass::member_func)
 
 #define IPC_MESSAGE_HANDLER_GENERIC(msg_class, code) \
   case msg_class::ID: \
@@ -454,6 +460,7 @@ void class_name::OnMessageReceived(const IPC::Message& msg) \
 #undef IPC_SYNC_MESSAGE_ROUTED3_1
 #undef IPC_SYNC_MESSAGE_ROUTED3_2
 #undef IPC_SYNC_MESSAGE_ROUTED3_3
+#undef IPC_SYNC_MESSAGE_ROUTED3_4
 #undef IPC_SYNC_MESSAGE_ROUTED4_0
 #undef IPC_SYNC_MESSAGE_ROUTED4_1
 #undef IPC_SYNC_MESSAGE_ROUTED4_2
@@ -475,7 +482,8 @@ LogFunction g_log_function_mapping[LastMsgIndex];
 
 
 #define IPC_BEGIN_MESSAGES(label) \
-  void label##MsgLog(uint32 type, std::string* name, const IPC::Message* msg, std::string* params) { \
+  void label##MsgLog(uint32 type, std::string* name, const IPC::Message* msg, \
+                     std::string* params) { \
   switch (type) {
 
 #define IPC_END_MESSAGES(label) \
@@ -641,6 +649,9 @@ LogFunction g_log_function_mapping[LastMsgIndex];
 #define IPC_SYNC_MESSAGE_ROUTED3_3(msg_class, type1_in, type2_in, type3_in, type1_out, type2_out, type3_out) \
   IPC_MESSAGE_LOG(msg_class)
 
+#define IPC_SYNC_MESSAGE_ROUTED3_4(msg_class, type1_in, type2_in, type3_in, type1_out, type2_out, type3_out, type4_out) \
+  IPC_MESSAGE_LOG(msg_class)
+
 #define IPC_SYNC_MESSAGE_ROUTED4_0(msg_class, type1_in, type2_in, type3_in, type4_in) \
   IPC_MESSAGE_LOG(msg_class)
 
@@ -719,6 +730,7 @@ LogFunction g_log_function_mapping[LastMsgIndex];
 #undef IPC_SYNC_MESSAGE_ROUTED3_1
 #undef IPC_SYNC_MESSAGE_ROUTED3_2
 #undef IPC_SYNC_MESSAGE_ROUTED3_3
+#undef IPC_SYNC_MESSAGE_ROUTED3_4
 #undef IPC_SYNC_MESSAGE_ROUTED4_0
 #undef IPC_SYNC_MESSAGE_ROUTED4_1
 #undef IPC_SYNC_MESSAGE_ROUTED4_2
@@ -782,7 +794,8 @@ LogFunction g_log_function_mapping[LastMsgIndex];
 
 #define IPC_MESSAGE_CONTROL5(msg_class, type1, type2, type3, type4, type5) \
   class msg_class :                                                     \
-      public IPC::MessageWithTuple< Tuple5<type1, type2, type3, type4, type5> > { \
+      public IPC::MessageWithTuple< Tuple5<type1, type2, type3, type4,  \
+                                           type5> > { \
     public:                                                             \
       enum { ID = msg_class##__ID };                                    \
       msg_class(const type1& arg1, const type2& arg2,                   \
@@ -862,7 +875,7 @@ LogFunction g_log_function_mapping[LastMsgIndex];
   };
 
 #define IPC_SYNC_MESSAGE_CONTROL0_1(msg_class, type1_out)               \
-  class msg_class : public IPC::MessageWithReply<Tuple0, Tuple1<type1_out&> > { \
+  class msg_class : public IPC::MessageWithReply<Tuple0, Tuple1<type1_out&> > {\
     public:                                                             \
       enum { ID = msg_class##__ID };                                    \
       msg_class(type1_out* arg1);                                       \
@@ -1212,6 +1225,17 @@ LogFunction g_log_function_mapping[LastMsgIndex];
    public: \
    enum { ID = msg_class##__ID }; \
    msg_class(int routing_id, const type1_in& arg1, const type2_in& arg2, const type3_in& arg3, type1_out* arg4, type2_out* arg5, type3_out* arg6); \
+      ~msg_class();                                                     \
+      static void Log(const Message* msg, std::string* l);              \
+  };
+
+#define IPC_SYNC_MESSAGE_ROUTED3_4(msg_class, type1_in, type2_in, type3_in, type1_out, type2_out, type3_out, type4_out) \
+  class msg_class : \
+      public IPC::MessageWithReply<Tuple3<type1_in, type2_in, type3_in>, \
+          Tuple4<type1_out&, type2_out&, type3_out&, type4_out&> > { \
+   public: \
+   enum { ID = msg_class##__ID }; \
+   msg_class(int routing_id, const type1_in& arg1, const type2_in& arg2, const type3_in& arg3, type1_out* arg4, type2_out* arg5, type3_out* arg6, type4_out* arg7); \
       ~msg_class();                                                     \
       static void Log(const Message* msg, std::string* l);              \
   };

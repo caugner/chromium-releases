@@ -9,6 +9,7 @@ var LogEventType = null;
 var LogEventPhase = null;
 var ClientInfo = null;
 var LogSourceType = null;
+var LogLevelType = null;
 var NetError = null;
 var LoadFlag = null;
 var AddressFamily = null;
@@ -38,64 +39,71 @@ function onLoaded() {
                                   'sortByDescription',
 
                                   // IDs for the details view.
-                                  "detailsTabHandles",
-                                  "detailsLogTab",
-                                  "detailsTimelineTab",
-                                  "detailsLogBox",
-                                  "detailsTimelineBox",
+                                  'detailsTabHandles',
+                                  'detailsLogTab',
+                                  'detailsTimelineTab',
+                                  'detailsLogBox',
+                                  'detailsTimelineBox',
 
                                   // IDs for the layout boxes.
-                                  "filterBox",
-                                  "eventsBox",
-                                  "actionBox",
-                                  "splitterBox");
+                                  'filterBox',
+                                  'eventsBox',
+                                  'actionBox',
+                                  'splitterBox');
 
   // Create a view which will display info on the proxy setup.
-  var proxyView = new ProxyView("proxyTabContent",
-                                "proxyOriginalSettings",
-                                "proxyEffectiveSettings",
-                                "proxyReloadSettings",
-                                "badProxiesTableBody",
-                                "clearBadProxies");
+  var proxyView = new ProxyView('proxyTabContent',
+                                'proxyOriginalSettings',
+                                'proxyEffectiveSettings',
+                                'proxyReloadSettings',
+                                'badProxiesTableBody',
+                                'clearBadProxies',
+                                'proxyResolverLog');
 
   // Create a view which will display information on the host resolver.
-  var dnsView = new DnsView("dnsTabContent",
-                            "hostResolverCacheTbody",
-                            "clearHostResolverCache",
-                            "hostResolverDefaultFamily",
-                            "hostResolverIPv6Disabled",
-                            "hostResolverEnableIPv6",
-                            "hostResolverCacheCapacity",
-                            "hostResolverCacheTTLSuccess",
-                            "hostResolverCacheTTLFailure");
+  var dnsView = new DnsView('dnsTabContent',
+                            'hostResolverCacheTbody',
+                            'clearHostResolverCache',
+                            'hostResolverDefaultFamily',
+                            'hostResolverIPv6Disabled',
+                            'hostResolverEnableIPv6',
+                            'hostResolverCacheCapacity',
+                            'hostResolverCacheTTLSuccess',
+                            'hostResolverCacheTTLFailure');
 
   // Create a view which will display import/export options to control the
   // captured data.
-  var dataView = new DataView("dataTabContent", "exportedDataText",
-                              "exportToText", "securityStrippingCheckbox",
-                              "passivelyCapturedCount",
-                              "activelyCapturedCount",
-                              "dataViewDeleteAll");
+  var dataView = new DataView('dataTabContent', 'exportedDataText',
+                              'exportToText', 'securityStrippingCheckbox',
+                              'byteLoggingCheckbox',
+                              'passivelyCapturedCount',
+                              'activelyCapturedCount',
+                              'dataViewDeleteAll');
 
   // Create a view which will display the results and controls for connection
   // tests.
-  var testView = new TestView("testTabContent", "testUrlInput",
-                              "connectionTestsForm", "testSummary");
+  var testView = new TestView('testTabContent', 'testUrlInput',
+                              'connectionTestsForm', 'testSummary');
 
-  var httpCacheView = new HttpCacheView("httpCacheTabContent",
-                                        "httpCacheStats");
+  var httpCacheView = new HttpCacheView('httpCacheTabContent',
+                                        'httpCacheStats');
 
-  var socketsView = new SocketsView("socketsTabContent",
-                                    "socketPoolDiv",
-                                    "socketPoolGroupsDiv");
+  var socketsView = new SocketsView('socketsTabContent',
+                                    'socketPoolDiv',
+                                    'socketPoolGroupsDiv');
+
+  var spdyView = new SpdyView('spdyTabContent',
+                              'spdySessionNoneSpan',
+                              'spdySessionLinkSpan',
+                              'spdySessionDiv');
 
 
   var serviceView;
   if (g_browser.isPlatformWindows()) {
-    serviceView = new ServiceProvidersView("serviceProvidersTab",
-                                           "serviceProvidersTabContent",
-                                           "serviceProvidersTbody",
-                                           "namespaceProvidersTbody");
+    serviceView = new ServiceProvidersView('serviceProvidersTab',
+                                           'serviceProvidersTabContent',
+                                           'serviceProvidersTbody',
+                                           'namespaceProvidersTbody');
   }
 
   // Create a view which lets you tab between the different sub-views.
@@ -107,6 +115,7 @@ function onLoaded() {
   categoryTabSwitcher.addTab('proxyTab', proxyView, false);
   categoryTabSwitcher.addTab('dnsTab', dnsView, false);
   categoryTabSwitcher.addTab('socketsTab', socketsView, false);
+  categoryTabSwitcher.addTab('spdyTab', spdyView, false);
   categoryTabSwitcher.addTab('httpCacheTab', httpCacheView, false);
   categoryTabSwitcher.addTab('dataTab', dataView, false);
   if (g_browser.isPlatformWindows())
@@ -167,6 +176,9 @@ function BrowserBridge() {
   this.pollableDataHelpers_.socketPoolInfo =
       new PollableDataHelper('onSocketPoolInfoChanged',
                              this.sendGetSocketPoolInfo.bind(this));
+  this.pollableDataHelpers_.spdySessionInfo =
+      new PollableDataHelper('onSpdySessionInfoChanged',
+                             this.sendGetSpdySessionInfo.bind(this));
   if (this.isPlatformWindows()) {
     this.pollableDataHelpers_.serviceProviders =
         new PollableDataHelper('onServiceProvidersChanged',
@@ -275,6 +287,10 @@ BrowserBridge.prototype.sendGetSocketPoolInfo = function() {
   chrome.send('getSocketPoolInfo');
 };
 
+BrowserBridge.prototype.sendGetSpdySessionInfo = function() {
+  chrome.send('getSpdySessionInfo');
+};
+
 BrowserBridge.prototype.sendGetServiceProviders = function() {
   chrome.send('getServiceProviders');
 };
@@ -282,6 +298,10 @@ BrowserBridge.prototype.sendGetServiceProviders = function() {
 BrowserBridge.prototype.enableIPv6 = function() {
   chrome.send('enableIPv6');
 };
+
+BrowserBridge.prototype.setLogLevel = function(logLevel) {
+  chrome.send('setLogLevel', ['' + logLevel]);
+}
 
 //------------------------------------------------------------------------------
 // Messages received from the browser
@@ -320,6 +340,11 @@ function(constantsMap) {
   LogSourceType = constantsMap;
 };
 
+BrowserBridge.prototype.receivedLogLevelConstants =
+function(constantsMap) {
+  LogLevelType = constantsMap;
+};
+
 BrowserBridge.prototype.receivedLoadFlagConstants = function(constantsMap) {
   LoadFlag = constantsMap;
 };
@@ -352,6 +377,10 @@ function(hostResolverInfo) {
 
 BrowserBridge.prototype.receivedSocketPoolInfo = function(socketPoolInfo) {
   this.pollableDataHelpers_.socketPoolInfo.update(socketPoolInfo);
+};
+
+BrowserBridge.prototype.receivedSpdySessionInfo = function(spdySessionInfo) {
+  this.pollableDataHelpers_.spdySessionInfo.update(spdySessionInfo);
 };
 
 BrowserBridge.prototype.receivedServiceProviders = function(serviceProviders) {
@@ -472,6 +501,16 @@ BrowserBridge.prototype.addHostResolverInfoObserver = function(observer) {
  */
 BrowserBridge.prototype.addSocketPoolInfoObserver = function(observer) {
   this.pollableDataHelpers_.socketPoolInfo.addObserver(observer);
+};
+
+/**
+ * Adds a listener of the SPDY info. |observer| will be called back
+ * when data is received, through:
+ *
+ *   observer.onSpdySessionInfoChanged(spdySessionInfo)
+ */
+BrowserBridge.prototype.addSpdySessionInfoObserver = function(observer) {
+  this.pollableDataHelpers_.spdySessionInfo.addObserver(observer);
 };
 
 /**

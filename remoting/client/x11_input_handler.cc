@@ -17,7 +17,7 @@
 namespace remoting {
 
 X11InputHandler::X11InputHandler(ClientContext* context,
-                                 HostConnection* connection,
+                                 protocol::ConnectionToHost* connection,
                                  ChromotingView* view)
     : InputHandler(context, connection, view) {
 }

@@ -3,13 +3,20 @@
 
 # We ignore security libraries for now since their instrumentation is very slow.
 # TODO(timurrrr): investigate whether we need to instrument them
-obj:*CRYPT32.dll*
-obj:*RPCRT4.dll*
+obj:*CRYPT32.dll
+obj:*RPCRT4.dll
 fun_r:*SHA256*
 fun_r:*BCryptGenerateSymmetricKey*
+fun_r:*CryptAcquireContext*
 
-obj:*WINHTTP.dll*
-obj:*imagehlp.dll*
+obj:*WINHTTP.dll
+obj:*imagehlp.dll
+
+# Use less detailed instrumentation of STL
+fun_hist:*std::*<*
+# Don't instrument some stl internals - they shouldn't be useful
+fun_r:*std::_Debug*
+fun_r:*std::_Lockit*
 
 # Benign race on mutex unlock
 fun:_Mtxunlock
@@ -21,6 +28,7 @@ fun_r:*InitializeClock*
 fun_r:Ordinal_*
 fun:unnamedImageEntryPoint
 fun_r:RtlDestroyQueryDebugBuffer
+fun:_updatetlocinfoEx_nolock
 
 # Strange reports on net_unittests, maybe related to raising
 # a debug exception by PlatformThread

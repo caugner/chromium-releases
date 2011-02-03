@@ -45,6 +45,7 @@
 #include "base/crypto/scoped_nss_types.h"
 #include "base/logging.h"
 #include "base/nss_util_internal.h"
+#include "base/singleton.h"
 #include "base/string_util.h"
 #include "net/base/net_errors.h"
 #include "net/base/x509_certificate.h"
@@ -97,7 +98,7 @@ nickname_collision(SECItem *old_nick, PRBool *cancel, void *wincx)
   }
 
   if (!old_nick)
-    LOG(INFO) << "no nickname for cert in PKCS12 file.";
+    VLOG(1) << "no nickname for cert in PKCS12 file.";
 
   nick = CERT_MakeCANickname(cert);
   if (!nick) {
@@ -112,7 +113,7 @@ nickname_collision(SECItem *old_nick, PRBool *cancel, void *wincx)
     return NULL;
   }
 
-  LOG(INFO) << "using nickname " << nick;
+  VLOG(1) << "using nickname " << nick;
   ret_nick = PORT_ZNew(SECItem);
   if(ret_nick == NULL) {
     PORT_Free(nick);

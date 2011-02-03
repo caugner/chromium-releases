@@ -47,6 +47,13 @@ class TestWebKitClient : public webkit_glue::WebKitClientImpl {
   virtual void prefetchHostName(const WebKit::WebString&);
   virtual WebKit::WebURLLoader* createURLLoader();
   virtual WebKit::WebData loadResource(const char* name);
+  virtual WebKit::WebString queryLocalizedString(
+      WebKit::WebLocalizedString::Name name);
+  virtual WebKit::WebString queryLocalizedString(
+      WebKit::WebLocalizedString::Name name, const WebKit::WebString& value);
+  virtual WebKit::WebString queryLocalizedString(
+      WebKit::WebLocalizedString::Name name,
+      const WebKit::WebString& value1, const WebKit::WebString& value2);
   virtual WebKit::WebString defaultLocale();
   virtual WebKit::WebStorageNamespace* createLocalStorageNamespace(
       const WebKit::WebString& path, unsigned quota);
@@ -73,6 +80,10 @@ class TestWebKitClient : public webkit_glue::WebKitClientImpl {
     return &url_loader_factory_;
   }
 
+  const FilePath& file_system_root() const {
+    return file_system_root_.path();
+  }
+
  private:
   TestShellWebMimeRegistryImpl mime_registry_;
   MockWebClipboardImpl mock_clipboard_;
@@ -83,6 +94,7 @@ class TestWebKitClient : public webkit_glue::WebKitClientImpl {
   SimpleWebCookieJarImpl cookie_jar_;
   scoped_refptr<TestShellWebBlobRegistryImpl> blob_registry_;
   SimpleFileSystem file_system_;
+  ScopedTempDir file_system_root_;
   WebURLLoaderMockFactory url_loader_factory_;
   bool unit_test_mode_;
 

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "chrome/browser/dom_ui/options/options_ui.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/content_settings_types.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -41,15 +42,21 @@ class ContentSettingsHandler : public OptionsPageUIHandler {
 
   // Clobbers and rebuilds the specific content setting type exceptions table.
   void UpdateExceptionsViewFromModel(ContentSettingsType type);
-  // Clobbers and rebuilds all the exceptions tables in the page.
+  // Clobbers and rebuilds all the exceptions tables in the page (both normal
+  // and OTR tables).
   void UpdateAllExceptionsViewsFromModel();
+  // As above, but only OTR tables.
+  void UpdateAllOTRExceptionsViewsFromModel();
   // Clobbers and rebuilds just the geolocation exception table.
   void UpdateGeolocationExceptionsView();
   // Clobbers and rebuilds just the desktop notification exception table.
   void UpdateNotificationExceptionsView();
-  // Clobbers and rebuilds an exception table that's managed by the
-  // host content settings map.
+  // Clobbers and rebuilds an exception table that's managed by the host content
+  // settings map.
   void UpdateExceptionsViewFromHostContentSettingsMap(ContentSettingsType type);
+  // As above, but acts on the OTR table for the content setting type.
+  void UpdateExceptionsViewFromOTRHostContentSettingsMap(
+      ContentSettingsType type);
 
   // Callbacks used by the page ------------------------------------------------
 
@@ -92,6 +99,7 @@ class ContentSettingsHandler : public OptionsPageUIHandler {
   // Member variables ---------------------------------------------------------
 
   NotificationRegistrar notification_registrar_;
+  PrefChangeRegistrar pref_change_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingsHandler);
 };

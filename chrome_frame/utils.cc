@@ -2,28 +2,30 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome_frame/utils.h"
+
 #include <htiframe.h>
 #include <mshtml.h>
 #include <shlobj.h>
-#include <wininet.h>
 
 #include <atlsecurity.h>
 
 #include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/lazy_instance.h"
+#include "base/lock.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/registry.h"
-#include "base/scoped_bstr_win.h"
-#include "base/scoped_comptr_win.h"
-#include "base/scoped_variant_win.h"
 #include "base/string_number_conversions.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/thread_local.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/registry.h"
+#include "base/win/scoped_bstr.h"
+#include "base/win/scoped_comptr.h"
+#include "base/win/scoped_variant.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/chrome_frame_distribution.h"
@@ -31,13 +33,15 @@
 #include "chrome_frame/html_utils.h"
 #include "chrome_frame/policy_settings.h"
 #include "chrome_frame/simple_resource_loader.h"
-#include "chrome_frame/utils.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_canon.h"
-
 #include "grit/chromium_strings.h"
 #include "net/base/escape.h"
 #include "net/http/http_util.h"
+
+using base::win::RegKey;
+using base::win::ScopedComPtr;
+using base::win::ScopedVariant;
 
 // Note that these values are all lower case and are compared to
 // lower-case-transformed values.
@@ -58,8 +62,9 @@ const wchar_t kEnableGCFRendererByDefault[] = L"IsDefaultRenderer";
 const wchar_t kIexploreProfileName[] = L"iexplore";
 const wchar_t kRundllProfileName[] = L"rundll32";
 
-static const wchar_t kAllowUnsafeURLs[] = L"AllowUnsafeURLs";
-static const wchar_t kEnableBuggyBhoIntercept[] = L"EnableBuggyBhoIntercept";
+const wchar_t kAllowUnsafeURLs[] = L"AllowUnsafeURLs";
+const wchar_t kEnableBuggyBhoIntercept[] = L"EnableBuggyBhoIntercept";
+const wchar_t kEnableFirefoxPrivilegeMode[] = L"EnableFirefoxPrivilegeMode";
 
 static const wchar_t kChromeFrameNPAPIKey[] =
     L"Software\\MozillaPlugins\\@google.com/ChromeFrame,version=1.0";
@@ -407,37 +412,51 @@ BrowserType GetBrowserType() {
   return browser_type;
 }
 
-IEVersion GetIEVersion() {
-  static IEVersion ie_version = IE_INVALID;
+uint32 GetIEMajorVersion() {
+  static uint32 ie_major_version = UINT_MAX;
 
-  if (ie_version == IE_INVALID) {
+  if (ie_major_version == UINT_MAX) {
     wchar_t exe_path[MAX_PATH];
     HMODULE mod = GetModuleHandle(NULL);
     GetModuleFileName(mod, exe_path, arraysize(exe_path) - 1);
     std::wstring exe_name(file_util::GetFilenameFromPath(exe_path));
     if (!LowerCaseEqualsASCII(exe_name, kIEImageName)) {
-      ie_version = NON_IE;
+      ie_major_version = 0;
     } else {
       uint32 high = 0;
       uint32 low  = 0;
       if (GetModuleVersion(mod, &high, &low)) {
-        switch (HIWORD(high)) {
-          case 6:
-            ie_version = IE_6;
-            break;
-          case 7:
-            ie_version = IE_7;
-            break;
-          case 8:
-            ie_version = IE_8;
-            break;
-          default:
-            ie_version = HIWORD(high) >= 9 ? IE_9 : IE_UNSUPPORTED;
-            break;
-        }
+        ie_major_version = HIWORD(high);
       } else {
-        NOTREACHED() << "Can't get IE version";
+        ie_major_version = 0;
       }
+    }
+  }
+
+  return ie_major_version;
+}
+
+IEVersion GetIEVersion() {
+  static IEVersion ie_version = IE_INVALID;
+
+  if (ie_version == IE_INVALID) {
+    uint32 major_version = GetIEMajorVersion();
+    switch (major_version) {
+      case 0:
+        ie_version = NON_IE;
+        break;
+      case 6:
+        ie_version = IE_6;
+        break;
+      case 7:
+        ie_version = IE_7;
+        break;
+      case 8:
+        ie_version = IE_8;
+        break;
+      default:
+        ie_version = major_version >= 9 ? IE_9 : IE_UNSUPPORTED;
+        break;
     }
   }
 
@@ -460,7 +479,7 @@ FilePath GetIETemporaryFilesFolder() {
                                            SHGDN_NORMAL | SHGDN_FORPARSING,
                                            &path);
       DCHECK(SUCCEEDED(hr));
-      ScopedBstr temp_internet_files_bstr;
+      base::win::ScopedBstr temp_internet_files_bstr;
       StrRetToBSTR(&path, relative_pidl, temp_internet_files_bstr.Receive());
       FilePath temp_internet_files(static_cast<BSTR>(temp_internet_files_bstr));
       ILFree(tif_pidl);
@@ -754,7 +773,7 @@ RendererType RendererTypeForUrl(const std::wstring& url) {
   }
 
   bool match_found = false;
-  RegistryValueIterator url_list(config_key.Handle(), url_list_name);
+  base::win::RegistryValueIterator url_list(config_key.Handle(), url_list_name);
   while (!match_found && url_list.Valid()) {
     if (MatchPattern(url, url_list.Name())) {
       match_found = true;
@@ -843,7 +862,7 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
     // IE6
     LPOLESTR url = NULL;
     if (SUCCEEDED(hr = moniker->GetDisplayName(bind_ctx, NULL, &url))) {
-      DLOG(INFO) << __FUNCTION__ << " " << url;
+      DVLOG(1) << __FUNCTION__ << " " << url;
       ScopedComPtr<IWebBrowserPriv> browser_priv;
       if (SUCCEEDED(hr = browser_priv.QueryFrom(web_browser2))) {
         GURL target_url(url);
@@ -966,12 +985,12 @@ bool IsSubFrameRequest(IUnknown* service_provider) {
       // Only the top level window will return self when get_parent is called.
       current_frame->get_parent(parent_frame.Receive());
       if (parent_frame != current_frame) {
-        DLOG(INFO) << "Sub frame detected";
+        DVLOG(1) << "Sub frame detected";
         is_sub_frame_request = true;
       }
     }
   } else {
-    DLOG(INFO) << "IsSubFrameRequest - no IWebBrowser2";
+    DVLOG(1) << "IsSubFrameRequest - no IWebBrowser2";
     is_sub_frame_request = true;
   }
 
@@ -1122,7 +1141,7 @@ std::string GetHttpHeadersFromBinding(IBinding* binding) {
 }
 
 int GetHttpResponseStatusFromBinding(IBinding* binding) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   if (binding == NULL) {
     DLOG(WARNING) << "GetHttpResponseStatus - no binding_";
     return 0;
@@ -1160,18 +1179,6 @@ bool IsTextHtmlMimeType(const wchar_t* mime_type) {
 
 bool IsTextHtmlClipFormat(CLIPFORMAT cf) {
   return cf == GetTextHtmlClipboardFormat();
-}
-
-ProtocolPatchMethod GetPatchMethod() {
-  ProtocolPatchMethod patch_method =
-      static_cast<ProtocolPatchMethod>(
-          GetConfigInt(PATCH_METHOD_INET_PROTOCOL, kPatchProtocols));
-  return patch_method;
-}
-
-bool IsIBrowserServicePatchEnabled() {
-  ProtocolPatchMethod patch_method = GetPatchMethod();
-  return patch_method == PATCH_METHOD_IBROWSER;
 }
 
 bool IsSystemProcess() {
@@ -1515,13 +1522,63 @@ void WaitWithMessageLoop(HANDLE* handles, int count, DWORD timeout) {
   }
 }
 
+// Returns -1 if no directive is found, std::numeric_limits<int>::max() if the
+// directive matches all IE versions ('Chrome=1') or the maximum IE version
+// matched ('Chrome=IE7' => 7)
+int GetXUaCompatibleDirective(const std::string& directive, char delimiter) {
+  net::HttpUtil::NameValuePairsIterator name_value_pairs(directive.begin(),
+                                                         directive.end(),
+                                                         delimiter);
+
+  // Loop through the values until a valid 'Chrome=<FILTER>' entry is found
+  while (name_value_pairs.GetNext()) {
+    if (!LowerCaseEqualsASCII(name_value_pairs.name_begin(),
+                             name_value_pairs.name_end(),
+                             "chrome")) {
+      continue;
+    }
+    std::string::const_iterator filter_begin = name_value_pairs.value_begin();
+    std::string::const_iterator filter_end = name_value_pairs.value_end();
+
+    size_t filter_length = filter_end - filter_begin;
+
+    if (filter_length == 1 && *filter_begin == '1') {
+      return std::numeric_limits<int>::max();
+    }
+
+    if (filter_length < 3 ||
+        !LowerCaseEqualsASCII(filter_begin, filter_begin + 2, "ie") ||
+        !isdigit(*(filter_begin + 2))) {  // ensure no leading +/-
+      continue;
+    }
+
+    int header_ie_version = 0;
+    if (!base::StringToInt(filter_begin + 2, filter_end, &header_ie_version) ||
+        header_ie_version == 0) {  // ensure it's not a sequence of 0's
+      continue;
+    }
+
+    // The first valid directive we find wins, whether it matches or not
+    return header_ie_version;
+  }
+  return -1;
+}
+
+bool CheckXUaCompatibleDirective(const std::string& directive,
+                                 int ie_major_version) {
+  int header_ie_version = GetXUaCompatibleDirective(directive, ';');
+  if (header_ie_version == -1) {
+    header_ie_version = GetXUaCompatibleDirective(directive, ',');
+  }
+  return header_ie_version >= ie_major_version;
+}
+
 void EnumerateKeyValues(HKEY parent_key, const wchar_t* sub_key_name,
                         std::vector<std::wstring>* values) {
   DCHECK(values);
-  RegistryValueIterator url_list(parent_key, sub_key_name);
+  base::win::RegistryValueIterator url_list(parent_key, sub_key_name);
   while (url_list.Valid()) {
     values->push_back(url_list.Value());
     ++url_list;
   }
 }
-

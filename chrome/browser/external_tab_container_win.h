@@ -11,10 +11,11 @@
 #include <vector>
 
 #include "base/lazy_instance.h"
+#include "base/scoped_ptr.h"
 #include "chrome/browser/automation/automation_resource_message_filter.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/views/frame/browser_bubble_host.h"
 #include "chrome/browser/views/infobars/infobar_container.h"
 #include "chrome/browser/views/unhandled_keyboard_event_handler.h"
@@ -28,6 +29,10 @@ class AutomationProvider;
 class Profile;
 class TabContentsContainer;
 class RenderViewContextMenuViews;
+
+namespace app {
+class ViewProp;
+}
 
 namespace IPC {
 struct NavigationInfo;
@@ -331,6 +336,8 @@ class ExternalTabContainer : public TabContentsDelegate,
   // in this page. This typically applies to hosts which would render the new
   // page without chrome frame.
   bool route_all_top_level_navigations_;
+
+  scoped_ptr<app::ViewProp> prop_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalTabContainer);
 };

@@ -304,7 +304,7 @@ void CFUrlRequestUnittestRunner::Initialize() {
   // done by TestSuite::Initialize.  We can't call the base class
   // directly because it will attempt to initialize some things such as
   // ICU that have already been initialized for this process.
-  InitializeLogging();
+  CFUrlRequestUnittestRunner::InitializeLogging();
   base::Time::EnableHighResolutionTimer(true);
 
   SuppressErrorDialogs();
@@ -320,6 +320,7 @@ void CFUrlRequestUnittestRunner::Initialize() {
 void CFUrlRequestUnittestRunner::Shutdown() {
   DCHECK(::GetCurrentThreadId() == test_thread_id_);
   NetTestSuite::Shutdown();
+  OleUninitialize();
 }
 
 void CFUrlRequestUnittestRunner::OnConnectAutomationProviderToChannel(
@@ -342,6 +343,7 @@ void CFUrlRequestUnittestRunner::OnInitialTabLoaded() {
 void CFUrlRequestUnittestRunner::RunMainUIThread() {
   DCHECK(MessageLoop::current());
   DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
+  OleInitialize(NULL);
   MessageLoop::current()->Run();
 }
 
@@ -470,10 +472,19 @@ class ObligatoryModule: public CAtlExeModuleT<ObligatoryModule> {
 ObligatoryModule g_obligatory_atl_module;
 
 int main(int argc, char** argv) {
+  if (chrome_frame_test::GetInstalledIEVersion() == IE_9) {
+    // Adding this here as the command line and the logging stuff gets
+    // initialized in the NetTestSuite constructor. Did not want to break that.
+    base::AtExitManager at_exit_manager_;
+    CommandLine::Init(argc, argv);
+    CFUrlRequestUnittestRunner::InitializeLogging();
+    LOG(INFO) << "Not running ChromeFrame net tests on IE9";
+    return 0;
+  }
   WindowWatchdog watchdog;
   // See url_request_unittest.cc for these credentials.
   SupplyProxyCredentials credentials("user", "secret");
-  watchdog.AddObserver(&credentials, "Windows Security");
+  watchdog.AddObserver(&credentials, "Windows Security", "");
   testing::InitGoogleTest(&argc, argv);
   FilterDisabledTests();
   PluginService::EnableChromePlugins(false);

@@ -11,14 +11,20 @@
 #include <atlcrack.h>
 #include <atlmisc.h>
 
+#include <string>
 #include <vector>
 
 #include "base/message_loop.h"
 #include "base/scoped_comptr_win.h"
+#include "base/scoped_vector.h"
 #include "gfx/window_impl.h"
 #include "views/focus/focus_manager.h"
 #include "views/layout_manager.h"
 #include "views/widget/widget.h"
+
+namespace app {
+class ViewProp;
+}
 
 namespace gfx {
 class CanvasSkia;
@@ -34,7 +40,6 @@ class RootView;
 class TooltipManagerWin;
 class Window;
 
-bool SetRootViewForHWND(HWND hwnd, RootView* root_view);
 RootView* GetRootViewForHWND(HWND hwnd);
 
 // A Windows message reflected from other windows. This message is sent
@@ -227,9 +232,8 @@ class WidgetWin : public gfx::WindowImpl,
   virtual bool GetAccelerator(int cmd_id, menus::Accelerator* accelerator);
   virtual Window* GetWindow();
   virtual const Window* GetWindow() const;
-  virtual void SetNativeWindowProperty(const std::wstring& name,
-                                       void* value);
-  virtual void* GetNativeWindowProperty(const std::wstring& name);
+  virtual void SetNativeWindowProperty(const char* name, void* value);
+  virtual void* GetNativeWindowProperty(const char* name);
   virtual ThemeProvider* GetThemeProvider() const;
   virtual ThemeProvider* GetDefaultThemeProvider() const;
   virtual FocusManager* GetFocusManager();
@@ -480,6 +484,8 @@ class WidgetWin : public gfx::WindowImpl,
   bool is_window_;
 
  private:
+  typedef ScopedVector<app::ViewProp> ViewProps;
+
   // Implementation of GetWindow. Ascends the parents of |hwnd| returning the
   // first ancestor that is a Window.
   static Window* GetWindowImpl(HWND hwnd);
@@ -585,6 +591,10 @@ class WidgetWin : public gfx::WindowImpl,
   // The current position of the view events vector.  When incrementing,
   // we always mod this value with the max view events above .
   int accessibility_view_events_index_;
+
+  ViewProps props_;
+
+  DISALLOW_COPY_AND_ASSIGN(WidgetWin);
 };
 
 }  // namespace views

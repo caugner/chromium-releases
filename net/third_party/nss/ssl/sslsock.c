@@ -185,6 +185,7 @@ static sslOptions ssl_defaults = {
     2,          /* enableRenegotiation (default: requires extension) */
     PR_FALSE,   /* requireSafeNegotiation */
     PR_FALSE,   /* enableFalseStart   */
+    PR_FALSE,   /* enableOCSPStapling */
 };
 
 sslSessionIDLookupFunc  ssl_sid_lookup;
@@ -336,6 +337,10 @@ ssl_DupSocket(sslSocket *os)
 	    ss->authCertificateArg    = os->authCertificateArg;
 	    ss->getClientAuthData     = os->getClientAuthData;
 	    ss->getClientAuthDataArg  = os->getClientAuthDataArg;
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+	    ss->getPlatformClientAuthData    = os->getPlatformClientAuthData;
+	    ss->getPlatformClientAuthDataArg = os->getPlatformClientAuthDataArg;
+#endif
             ss->sniSocketConfig       = os->sniSocketConfig;
             ss->sniSocketConfigArg    = os->sniSocketConfigArg;
 	    ss->handleBadCert         = os->handleBadCert;
@@ -742,6 +747,10 @@ SSL_OptionSet(PRFileDesc *fd, PRInt32 which, PRBool on)
 	ss->opt.enableSnapStart = on;
 	break;
 
+      case SSL_ENABLE_OCSP_STAPLING:
+	ss->opt.enableOCSPStapling = on;
+	break;
+
       default:
 	PORT_SetError(SEC_ERROR_INVALID_ARGS);
 	rv = SECFailure;
@@ -807,6 +816,7 @@ SSL_OptionGet(PRFileDesc *fd, PRInt32 which, PRBool *pOn)
                                   on = ss->opt.requireSafeNegotiation; break;
     case SSL_ENABLE_FALSE_START:  on = ss->opt.enableFalseStart;   break;
     case SSL_ENABLE_SNAP_START:   on = ss->opt.enableSnapStart;    break;
+    case SSL_ENABLE_OCSP_STAPLING: on = ss->opt.enableOCSPStapling; break;
 
     default:
 	PORT_SetError(SEC_ERROR_INVALID_ARGS);
@@ -859,6 +869,9 @@ SSL_OptionGetDefault(PRInt32 which, PRBool *pOn)
 				  break;
     case SSL_ENABLE_FALSE_START:  on = ssl_defaults.enableFalseStart;   break;
     case SSL_ENABLE_SNAP_START:   on = ssl_defaults.enableSnapStart;   break;
+    case SSL_ENABLE_OCSP_STAPLING:
+	on = ssl_defaults.enableOCSPStapling;
+	break;
 
     default:
 	PORT_SetError(SEC_ERROR_INVALID_ARGS);
@@ -1008,6 +1021,10 @@ SSL_OptionSetDefault(PRInt32 which, PRBool on)
 
       case SSL_ENABLE_SNAP_START:
 	ssl_defaults.enableSnapStart = on;
+	break;
+
+      case SSL_ENABLE_OCSP_STAPLING:
+	ssl_defaults.enableOCSPStapling = on;
 	break;
 
       default:
@@ -1443,6 +1460,12 @@ SSL_ReconfigFD(PRFileDesc *model, PRFileDesc *fd)
         ss->getClientAuthData     = sm->getClientAuthData;
     if (sm->getClientAuthDataArg)
         ss->getClientAuthDataArg  = sm->getClientAuthDataArg;
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+    if (sm->getPlatformClientAuthData)
+        ss->getPlatformClientAuthData    = sm->getPlatformClientAuthData;
+    if (sm->getPlatformClientAuthDataArg)
+        ss->getPlatformClientAuthDataArg = sm->getPlatformClientAuthDataArg;
+#endif
     if (sm->sniSocketConfig)
         ss->sniSocketConfig       = sm->sniSocketConfig;
     if (sm->sniSocketConfigArg)
@@ -1461,6 +1484,36 @@ SSL_ReconfigFD(PRFileDesc *model, PRFileDesc *fd)
 loser:
     return NULL;
 #endif
+}
+
+SECStatus
+SSL_GetStapledOCSPResponse(PRFileDesc *fd, unsigned char *out_data,
+			   unsigned int *len) {
+    sslSocket *ss = ssl_FindSocket(fd);
+
+    if (!ss) {
+	SSL_DBG(("%d: SSL[%d]: bad socket in SSL_GetStapledOCSPResponse",
+		 SSL_GETPID(), fd));
+	return SECFailure;
+    }
+
+    ssl_Get1stHandshakeLock(ss);
+    ssl_GetSSL3HandshakeLock(ss);
+
+    if (ss->ssl3.hs.cert_status.data) {
+	unsigned int todo = ss->ssl3.hs.cert_status.len;
+	if (todo > *len)
+	    todo = *len;
+	*len = ss->ssl3.hs.cert_status.len;
+	PORT_Memcpy(out_data, ss->ssl3.hs.cert_status.data, todo);
+    } else {
+	*len = 0;
+    }
+
+    ssl_ReleaseSSL3HandshakeLock(ss);
+    ssl_Release1stHandshakeLock(ss);
+
+    return SECSuccess;
 }
 
 /************************************************************************/
@@ -2456,6 +2509,10 @@ ssl_NewSocket(PRBool makeLocks)
         ss->sniSocketConfig    = NULL;
         ss->sniSocketConfigArg = NULL;
 	ss->getClientAuthData  = NULL;
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+	ss->getPlatformClientAuthData = NULL;
+	ss->getPlatformClientAuthDataArg = NULL;
+#endif   /* NSS_PLATFORM_CLIENT_AUTH */
 	ss->handleBadCert      = NULL;
 	ss->badCertArg         = NULL;
 	ss->pkcs11PinArg       = NULL;

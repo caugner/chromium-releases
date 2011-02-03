@@ -16,10 +16,13 @@
 #include <string>
 #include <vector>
 
-#include "base/field_trial.h"
 #include "base/ref_counted.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/net/predictor.h"
+
+namespace base {
+class FieldTrial;
+}
 
 class PrefService;
 
@@ -78,22 +81,22 @@ void SavePredictorStateForNextStartupAndTrim(PrefService* prefs);
 // Helper class to handle global init and shutdown.
 class PredictorInit {
  public:
-  // Too many concurrent lookups negate benefits of prefetching by trashing
-  // the OS cache before all resource loading is complete.
-  // This is the default.
-  static const size_t kMaxPrefetchConcurrentLookups;
+  // Too many concurrent lookups performed in parallel may overload a resolver,
+  // or may cause problems for a local router.  The following limits that count.
+  static const size_t kMaxSpeculativeParallelResolves;
 
   // When prefetch requests are queued beyond some period of time, then the
   // system is congested, and we need to clear all queued requests to get out
   // of that state.  The following is the suggested default time limit.
-  static const int kMaxPrefetchQueueingDelayMs;
+  static const int kMaxSpeculativeResolveQueueDelayMs;
 
   PredictorInit(PrefService* user_prefs, PrefService* local_state,
                 bool preconnect_enabled);
+  ~PredictorInit();
 
  private:
   // Maintain a field trial instance when we do A/B testing.
-  scoped_refptr<FieldTrial> trial_;
+  scoped_refptr<base::FieldTrial> trial_;
 
   DISALLOW_COPY_AND_ASSIGN(PredictorInit);
 };

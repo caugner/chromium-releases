@@ -6,7 +6,6 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/debugger/devtools_client_host.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/debugger/devtools_window.h"
@@ -15,6 +14,7 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_registrar.h"
@@ -254,8 +254,15 @@ class DevToolsExtensionDebugTest : public DevToolsSanityTest,
   FilePath test_extensions_dir_;
 };
 
+// Fails after WebKit roll 69808:70011, http://crbug.com/59727.
+#if defined(OS_LINUX) || defined(OS_WIN)
+#define MAYBE_TestEnableResourcesTab DISABLED_TestEnableResourcesTab
+#else
+#define MAYBE_TestEnableResourcesTab TestEnableResourcesTab
+#endif  // defined(OS_LINUX) || defined(OS_WIN)
+
 // Tests resources panel enabling.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestEnableResourcesTab) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestEnableResourcesTab) {
   RunTest("testEnableResourcesTab", kSimplePage);
 }
 
@@ -266,24 +273,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestEnableResourcesTab) {
 #define MAYBE_TestResourceContentLength TestResourceContentLength
 #endif  // defined(OS_LINUX)
 
-// Tests resources have correct sizes.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestResourceContentLength) {
-  RunTest("testResourceContentLength", kResourceContentLengthTestPage);
-}
-
-// Tests resource headers.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestResourceHeaders) {
-  RunTest("testResourceHeaders", kResourceTestPage);
-}
-
-// Tests cached resource mime type.
-// @see http://crbug.com/27364
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestCachedResourceMimeType) {
-  RunTest("testCachedResourceMimeType", kResourceTestPage);
-}
-
+// Disabled because times out on builder: http://crbug.com/54592.
 // Tests profiler panel.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestProfilerTab) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestProfilerTab) {
   RunTest("testProfilerTab", kJsPage);
 }
 

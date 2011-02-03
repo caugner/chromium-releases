@@ -34,7 +34,6 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/histogram.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/time_formatting.h"
@@ -42,6 +41,7 @@
 #include "base/lock.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/singleton.h"
 #include "base/stl_util-inl.h"
@@ -176,7 +176,7 @@ STR GetSpecificHeaderT(const STR& headers, const STR& name) {
 
   typename STR::const_iterator begin =
       search(headers.begin(), headers.end(), match.begin(), match.end(),
-             CaseInsensitiveCompareASCII<typename STR::value_type>());
+             base::CaseInsensitiveCompareASCII<typename STR::value_type>());
 
   if (begin == headers.end())
     return STR();
@@ -369,9 +369,7 @@ bool DecodeWord(const std::string& encoded_word,
   // it should be Ok because we're not an email client but a
   // web browser.
 
-  // What IE6/7 does: %-escaped UTF-8. We could extend this to
-  // support a rudimentary form of RFC 2231 with charset label, but
-  // it'd gain us little in terms of compatibility.
+  // What IE6/7 does: %-escaped UTF-8.
   tmp = UnescapeURLComponent(encoded_word, UnescapeRule::SPACES);
   if (IsStringUTF8(tmp)) {
     output->swap(tmp);
@@ -420,11 +418,12 @@ bool DecodeParamValue(const std::string& input,
 // TODO(mpcomplete): This is a quick and dirty implementation for now.  I'm
 // sure this doesn't properly handle all (most?) cases.
 template<typename STR>
-STR GetHeaderParamValueT(const STR& header, const STR& param_name) {
+STR GetHeaderParamValueT(const STR& header, const STR& param_name,
+                         QuoteRule::Type quote_rule) {
   // This assumes args are formatted exactly like "bla; arg1=value; arg2=value".
   typename STR::const_iterator param_begin =
       search(header.begin(), header.end(), param_name.begin(), param_name.end(),
-             CaseInsensitiveCompareASCII<typename STR::value_type>());
+             base::CaseInsensitiveCompareASCII<typename STR::value_type>());
 
   if (param_begin == header.end())
     return STR();
@@ -443,7 +442,7 @@ STR GetHeaderParamValueT(const STR& header, const STR& param_name) {
     return STR();
 
   typename STR::const_iterator param_end;
-  if (*param_begin == '"') {
+  if (*param_begin == '"' && quote_rule == QuoteRule::REMOVE_OUTER_QUOTES) {
     param_end = find(param_begin+1, header.end(), '"');
     if (param_end == header.end())
       return STR();  // poorly formatted param?
@@ -1091,29 +1090,86 @@ std::string GetSpecificHeader(const std::string& headers,
   return GetSpecificHeaderT(headers, name);
 }
 
+bool DecodeCharset(const std::string& input,
+                   std::string* decoded_charset,
+                   std::string* value) {
+  StringTokenizer t(input, "'");
+  t.set_options(StringTokenizer::RETURN_DELIMS);
+  std::string temp_charset;
+  std::string temp_value;
+  int numDelimsSeen = 0;
+  while (t.GetNext()) {
+    if (t.token_is_delim()) {
+      ++numDelimsSeen;
+      continue;
+    } else {
+      switch (numDelimsSeen) {
+        case 0:
+          temp_charset = t.token();
+          break;
+        case 1:
+          // Language is ignored.
+          break;
+        case 2:
+          temp_value = t.token();
+          break;
+        default:
+          return false;
+      }
+    }
+  }
+  if (numDelimsSeen != 2)
+    return false;
+  if (temp_charset.empty() || temp_value.empty())
+    return false;
+  decoded_charset->swap(temp_charset);
+  value->swap(temp_value);
+  return true;
+}
+
 std::string GetFileNameFromCD(const std::string& header,
                               const std::string& referrer_charset) {
-  std::string param_value = GetHeaderParamValue(header, "filename");
+  std::string decoded;
+  std::string param_value = GetHeaderParamValue(header, "filename*",
+                                                QuoteRule::KEEP_OUTER_QUOTES);
+  if (!param_value.empty()) {
+    if (param_value.find('"') == std::string::npos) {
+      std::string charset;
+      std::string value;
+      if (DecodeCharset(param_value, &charset, &value)) {
+        // RFC 5987 value should be ASCII-only.
+        if (!IsStringASCII(value))
+          return std::string();
+        std::string tmp = UnescapeURLComponent(value, UnescapeRule::SPACES);
+        if (base::ConvertToUtf8AndNormalize(tmp, charset, &decoded))
+          return decoded;
+      }
+    }
+  }
+  param_value = GetHeaderParamValue(header, "filename",
+                                    QuoteRule::REMOVE_OUTER_QUOTES);
   if (param_value.empty()) {
     // Some servers use 'name' parameter.
-    param_value = GetHeaderParamValue(header, "name");
+    param_value = GetHeaderParamValue(header, "name",
+                                      QuoteRule::REMOVE_OUTER_QUOTES);
   }
   if (param_value.empty())
     return std::string();
-  std::string decoded;
   if (DecodeParamValue(param_value, referrer_charset, &decoded))
     return decoded;
   return std::string();
 }
 
 std::wstring GetHeaderParamValue(const std::wstring& field,
-                                 const std::wstring& param_name) {
-  return GetHeaderParamValueT(field, param_name);
+                                 const std::wstring& param_name,
+                                 QuoteRule::Type quote_rule) {
+  return GetHeaderParamValueT(field, param_name, quote_rule);
 }
 
 std::string GetHeaderParamValue(const std::string& field,
-                                const std::string& param_name) {
-  return GetHeaderParamValueT(field, param_name);
+                                const std::string& param_name,
+                                QuoteRule::Type quote_rule) {
+  return GetHeaderParamValueT(field, param_name, quote_rule);
 }
 
 // TODO(brettw) bug 734373: check the scripts for each host component and
@@ -1534,7 +1590,7 @@ std::string NetAddressToString(const struct addrinfo* net_address) {
       net_address->ai_addrlen, buffer, sizeof(buffer), NULL, 0, NI_NUMERICHOST);
 
   if (result != 0) {
-    DLOG(INFO) << "getnameinfo() failed with " << result;
+    DVLOG(1) << "getnameinfo() failed with " << result;
     buffer[0] = '\0';
   }
   return std::string(buffer);
@@ -1564,7 +1620,7 @@ std::string GetHostName() {
   char buffer[256];
   int result = gethostname(buffer, sizeof(buffer));
   if (result != 0) {
-    DLOG(INFO) << "gethostname() failed with " << result;
+    DVLOG(1) << "gethostname() failed with " << result;
     buffer[0] = '\0';
   }
   return std::string(buffer);
@@ -1676,10 +1732,11 @@ void SetExplicitlyAllowedPorts(const std::string& allowed_ports) {
         (allowed_ports[i] != kComma))
       return;
     if (i == size || allowed_ports[i] == kComma) {
-      size_t length = i - last;
-      if (length > 0) {
+      if (i > last) {
         int port;
-        base::StringToInt(allowed_ports.substr(last, length), &port);
+        base::StringToInt(allowed_ports.begin() + last,
+                          allowed_ports.begin() + i,
+                          &port);
         ports.insert(port);
       }
       last = i + 1;
@@ -1819,7 +1876,7 @@ bool HaveOnlyLoopbackAddresses() {
   struct ifaddrs* interface_addr = NULL;
   int rv = getifaddrs(&interface_addr);
   if (rv != 0) {
-    DLOG(INFO) << "getifaddrs() failed with errno = " << errno;
+    DVLOG(1) << "getifaddrs() failed with errno = " << errno;
     return false;
   }
 
@@ -1904,7 +1961,7 @@ bool ParseCIDRBlock(const std::string& cidr_literal,
   //   <IPv6-literal> "/" <number of bits>
 
   std::vector<std::string> parts;
-  SplitString(cidr_literal, '/', &parts);
+  base::SplitString(cidr_literal, '/', &parts);
   if (parts.size() != 2)
     return false;
 
@@ -1973,12 +2030,12 @@ bool IPNumberMatchesPrefix(const IPAddressNumber& ip_number,
 uint16* GetPortFieldFromAddrinfo(const struct addrinfo* info) {
   DCHECK(info);
   if (info->ai_family == AF_INET) {
-    DCHECK_EQ(sizeof(sockaddr_in), info->ai_addrlen);
+    DCHECK_EQ(sizeof(sockaddr_in), static_cast<size_t>(info->ai_addrlen));
     struct sockaddr_in* sockaddr =
         reinterpret_cast<struct sockaddr_in*>(info->ai_addr);
     return &sockaddr->sin_port;
   } else if (info->ai_family == AF_INET6) {
-    DCHECK_EQ(sizeof(sockaddr_in6), info->ai_addrlen);
+    DCHECK_EQ(sizeof(sockaddr_in6), static_cast<size_t>(info->ai_addrlen));
     struct sockaddr_in6* sockaddr =
         reinterpret_cast<struct sockaddr_in6*>(info->ai_addr);
     return &sockaddr->sin6_port;

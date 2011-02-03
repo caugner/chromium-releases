@@ -8,11 +8,11 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_details.h"
@@ -55,14 +55,16 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
     extensions_dir_ = profile_dir.AppendASCII("Extensions");
 
     if (enable_extensions_) {
-      FilePath src_dir;
-      PathService::Get(chrome::DIR_TEST_DATA, &src_dir);
-      src_dir = src_dir.AppendASCII("extensions").AppendASCII("good");
+      if (load_extension_.empty()) {
+        FilePath src_dir;
+        PathService::Get(chrome::DIR_TEST_DATA, &src_dir);
+        src_dir = src_dir.AppendASCII("extensions").AppendASCII("good");
 
-      file_util::CopyFile(src_dir.AppendASCII("Preferences"),
-                          preferences_file_);
-      file_util::CopyDirectory(src_dir.AppendASCII("Extensions"),
-                               profile_dir, true);  // recursive
+        file_util::CopyFile(src_dir.AppendASCII("Preferences"),
+                            preferences_file_);
+        file_util::CopyDirectory(src_dir.AppendASCII("Extensions"),
+                                 profile_dir, true);  // recursive
+      }
     } else {
       command_line->AppendSwitch(switches::kDisableExtensions);
     }
@@ -84,9 +86,6 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
   void WaitForServicesToStart(int num_expected_extensions,
                               bool expect_extensions_enabled) {
     ExtensionsService* service = browser()->profile()->GetExtensionsService();
-    if (!service->is_ready())
-      ui_test_utils::WaitForNotification(NotificationType::EXTENSIONS_READY);
-    ASSERT_TRUE(service->is_ready());
 
     // Count the number of non-component extensions.
     int found_extensions = 0;
@@ -190,6 +189,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionsStartupTest, MAYBE_NoFileAccess) {
 class ExtensionsLoadTest : public ExtensionStartupTestBase {
  public:
   ExtensionsLoadTest() {
+    enable_extensions_ = true;
     PathService::Get(chrome::DIR_TEST_DATA, &load_extension_);
     load_extension_ = load_extension_
         .AppendASCII("extensions")
@@ -200,13 +200,7 @@ class ExtensionsLoadTest : public ExtensionStartupTestBase {
   }
 };
 
-// Flaky (times out) on Mac/Windows. http://crbug.com/46301.
-#if defined(OS_MACOSX) || defined(OS_WIN)
-#define MAYBE_Test FLAKY_Test
-#else
-#define MAYBE_Test Test
-#endif
-IN_PROC_BROWSER_TEST_F(ExtensionsLoadTest, MAYBE_Test) {
-  WaitForServicesToStart(1, false);
+IN_PROC_BROWSER_TEST_F(ExtensionsLoadTest, Test) {
+  WaitForServicesToStart(1, true);
   TestInjection(true, true);
 }

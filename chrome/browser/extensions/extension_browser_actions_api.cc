@@ -5,8 +5,8 @@
 #include "chrome/browser/extensions/extension_browser_actions_api.h"
 
 #include "base/values.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
@@ -26,7 +26,7 @@ bool BrowserActionFunction::RunImpl() {
   if (details_->HasKey("tabId"))
     EXTENSION_FUNCTION_VALIDATE(details_->GetInteger("tabId", &tab_id_));
 
-  Extension* extension = GetExtension();
+  const Extension* extension = GetExtension();
   browser_action_ = extension->browser_action();
   if (!browser_action_) {
     error_ = kNoBrowserActionError;

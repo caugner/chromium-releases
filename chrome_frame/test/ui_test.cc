@@ -5,9 +5,11 @@
 #include <mshtmcid.h>
 #include <string>
 
-#include "base/scoped_variant_win.h"
 #include "base/test/test_file_util.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/scoped_bstr.h"
+#include "base/win/scoped_variant.h"
+#include "base/win/windows_version.h"
 #include "chrome/common/url_constants.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "chrome_frame/test/chrome_frame_ui_test_utils.h"
@@ -65,9 +67,12 @@ TEST_P(FullTabUITest, KeyboardInput) {
 }
 
 // Tests keyboard shortcuts for back and forward.
-// Marking this test FLAKY as it fails at times on the buildbot.
-// http://code.google.com/p/chromium/issues/detail?id=26549
-TEST_P(FullTabUITest, FLAKY_KeyboardBackForward) {
+TEST_P(FullTabUITest, KeyboardBackForward) {
+  if (IsWorkstationLocked()) {
+    LOG(ERROR) << "This test cannot be run in a locked workstation.";
+    return;
+  }
+
   std::wstring page1 = GetSimplePageUrl();
   std::wstring page2 = GetLinkPageUrl();
   bool in_cf = GetParam().invokes_cf();
@@ -87,7 +92,7 @@ TEST_P(FullTabUITest, FLAKY_KeyboardBackForward) {
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(page2)))
       .WillOnce(testing::DoAll(
           SetFocusToRenderer(&ie_mock_),
-          DelaySendScanCode(&loop_, 500, bkspace, simulate_input::NONE)));
+          DelaySendScanCode(&loop_, 1000, bkspace, simulate_input::NONE)));
 
   EXPECT_CALL(ie_mock_, OnLoad(in_cf, StrEq(page1)))
       .WillOnce(testing::DoAll(
@@ -102,7 +107,12 @@ TEST_P(FullTabUITest, FLAKY_KeyboardBackForward) {
 }
 
 // Tests new window behavior with ctrl+N.
-TEST_P(FullTabUITest, FLAKY_CtrlN) {
+TEST_P(FullTabUITest, CtrlN) {
+  if (IsWorkstationLocked()) {
+    LOG(ERROR) << "This test cannot be run in a locked workstation.";
+    return;
+  }
+
   bool is_cf = GetParam().invokes_cf();
   if (!is_cf) {
     LOG(ERROR) << "Test not implemented for this configuration.";
@@ -116,23 +126,32 @@ TEST_P(FullTabUITest, FLAKY_CtrlN) {
   const char* kNewWindowTitlePattern = "*Internet Explorer*";
   EXPECT_CALL(ie_mock_, OnLoad(is_cf, StrEq(GetSimplePageUrl())))
       .WillOnce(testing::DoAll(
-          WatchWindow(&win_observer_mock, kNewWindowTitlePattern),
+          WatchWindow(&win_observer_mock, kNewWindowTitlePattern, ""),
           SetFocusToRenderer(&ie_mock_),
           DelaySendChar(&loop_, 1000, 'n', simulate_input::CONTROL)));
 
   // Watch for new window. It appears that the window close message cannot be
   // reliably delivered immediately upon receipt of the window open event.
   EXPECT_CALL(win_observer_mock, OnWindowOpen(_))
-      .WillOnce(DelayDoCloseWindow(500));
+      .Times(testing::AtMost(2))
+      .WillOnce(DelayDoCloseWindow(500))
+      .WillOnce(testing::Return());
 
   EXPECT_CALL(win_observer_mock, OnWindowClose(_))
-      .WillOnce(CloseBrowserMock(&ie_mock_));
+      .Times(testing::AtMost(2))
+      .WillOnce(CloseBrowserMock(&ie_mock_))
+      .WillOnce(testing::Return());
 
   LaunchIEAndNavigate(GetSimplePageUrl());
 }
 
 // Test that Ctrl+F opens the Find dialog.
-TEST_P(FullTabUITest, FLAKY_CtrlF) {
+TEST_P(FullTabUITest, CtrlF) {
+  if (IsWorkstationLocked()) {
+    LOG(ERROR) << "This test cannot be run in a locked workstation.";
+    return;
+  }
+
   bool is_cf = GetParam().invokes_cf();
   if (!is_cf) {
     LOG(ERROR) << "Test not implemented for this configuration.";
@@ -145,7 +164,7 @@ TEST_P(FullTabUITest, FLAKY_CtrlF) {
   const char* kFindDialogCaption = "Find";
   EXPECT_CALL(ie_mock_, OnLoad(IN_CF, StrEq(GetSimplePageUrl())))
       .WillOnce(testing::DoAll(
-          WatchWindow(&win_observer_mock, kFindDialogCaption),
+          WatchWindow(&win_observer_mock, kFindDialogCaption, ""),
           SetFocusToRenderer(&ie_mock_),
           DelaySendChar(&loop_, 1500, 'f', simulate_input::CONTROL)));
 
@@ -161,25 +180,35 @@ TEST_P(FullTabUITest, FLAKY_CtrlF) {
 }
 
 // Test that ctrl+r does cause a refresh.
-TEST_P(FullTabUITest, FLAKY_CtrlR) {
-  InSequence expect_in_sequence_for_scope;
+TEST_P(FullTabUITest, CtrlR) {
+  if (IsWorkstationLocked()) {
+    LOG(ERROR) << "This test cannot be run in a locked workstation.";
+    return;
+  }
+
+  EXPECT_CALL(server_mock_, Get(_, UrlPathEq(GetSimplePageUrl()), _))
+      .Times(testing::AtMost(2))
+      .WillRepeatedly(SendResponse(&server_mock_, GetParam()));
 
   EXPECT_CALL(ie_mock_, OnLoad(GetParam().invokes_cf(),
                                StrEq(GetSimplePageUrl())))
+      .Times(testing::AtMost(2))
       .WillOnce(testing::DoAll(
           SetFocusToRenderer(&ie_mock_),
-          DelaySendChar(&loop_, 1000, 'r', simulate_input::CONTROL)));
-
-  EXPECT_CALL(server_mock_, Get(_, UrlPathEq(GetSimplePageUrl()), _))
-      .WillOnce(testing::DoAll(
-          SendResponse(&server_mock_, GetParam()),
-          CloseBrowserMock(&ie_mock_)));
+          DelaySendChar(&loop_, 1000, 'r', simulate_input::CONTROL),
+          DelayCloseBrowserMock(&loop_, 4000, &ie_mock_)))
+      .WillRepeatedly(testing::Return());
 
   LaunchIEAndNavigate(GetSimplePageUrl());
 }
 
 // Test window close with ctrl+w.
-TEST_P(FullTabUITest, FLAKY_CtrlW) {
+TEST_P(FullTabUITest, CtrlW) {
+  if (IsWorkstationLocked()) {
+    LOG(ERROR) << "This test cannot be run in a locked workstation.";
+    return;
+  }
+
   EXPECT_CALL(ie_mock_, OnLoad(GetParam().invokes_cf(),
                                StrEq(GetSimplePageUrl())))
       .WillOnce(testing::DoAll(
@@ -190,11 +219,12 @@ TEST_P(FullTabUITest, FLAKY_CtrlW) {
 }
 
 // Test address bar navigation with Alt+d and URL.
-TEST_P(FullTabUITest, FLAKY_AltD) {
-  if (IsIBrowserServicePatchEnabled()) {
-    LOG(ERROR) << "Not running test. IBrowserServicePatch is in place.";
+TEST_P(FullTabUITest, AltD) {
+  if (IsWorkstationLocked()) {
+    LOG(ERROR) << "This test cannot be run in a locked workstation.";
     return;
   }
+
   EXPECT_CALL(ie_mock_, OnLoad(GetParam().invokes_cf(),
                                StrEq(GetSimplePageUrl())))
       .WillOnce(testing::DoAll(
@@ -221,6 +251,14 @@ TEST_P(FullTabUITest, RendererHasFocus) {
 
 // Tests that view source works.
 TEST_P(FullTabUITest, ViewSource) {
+  // Please see http://code.google.com/p/chromium/issues/detail?id=60987
+  // for more information on why this test is disabled for Vista with IE7.
+  if (base::win::GetVersion() == base::win::VERSION_VISTA &&
+      GetInstalledIEVersion() == IE_7) {
+    LOG(INFO) << "Not running test on Vista with IE7";
+    return;
+  }
+
   bool in_cf = GetParam().invokes_cf();
   if (!in_cf) {
     LOG(ERROR) << "Test not implemented for this configuration.";
@@ -266,7 +304,7 @@ TEST_P(FullTabUITest, ViewSource) {
 void NavigateToCurrentUrl(MockIEEventSink* mock) {
   IWebBrowser2* browser = mock->event_sink()->web_browser2();
   DCHECK(browser);
-  ScopedBstr bstr;
+  base::win::ScopedBstr bstr;
   HRESULT hr = browser->get_LocationURL(bstr.Receive());
   EXPECT_HRESULT_SUCCEEDED(hr);
   if (SUCCEEDED(hr)) {
@@ -366,7 +404,7 @@ class ContextMenuTest : public MockIEEventSinkTest, public testing::Test {
     const char* kSaveDlgCaption = "Save As";
     EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
         .WillOnce(testing::DoAll(
-            WatchWindow(&win_observer_mock, kSaveDlgCaption),
+            WatchWindow(&win_observer_mock, kSaveDlgCaption, ""),
             AccRightClick(AccObjectMatcher(L"", role))));
     EXPECT_CALL(acc_observer_, OnMenuPopup(_))
         .WillOnce(AccLeftClick(AccObjectMatcher(menu_item_name)));
@@ -413,6 +451,13 @@ TEST_F(ContextMenuTest, CFReload) {
 
 // Test view source from the context menu.
 TEST_F(ContextMenuTest, CFViewSource) {
+  // Please see http://code.google.com/p/chromium/issues/detail?id=60987
+  // for more information on why this test is disabled for Vista with IE7.
+  if (base::win::GetVersion() == base::win::VERSION_VISTA &&
+      GetInstalledIEVersion() == IE_7) {
+    LOG(INFO) << "Not running test on Vista with IE7";
+    return;
+  }
   server_mock_.ExpectAndServeAnyRequests(CFInvocation::MetaTag());
   MockIEEventSink view_source_mock;
   view_source_mock.ExpectAnyNavigations();
@@ -454,18 +499,19 @@ TEST_F(ContextMenuTest, CFPageInfo) {
   InSequence expect_in_sequence_for_scope;
 
   // View page information.
-  const char* kPageInfoCaption = "Security Information";
   EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
       .WillOnce(testing::DoAll(
-          WatchWindow(&win_observer_mock, kPageInfoCaption),
+          WatchWindow(&win_observer_mock, "", "Chrome_WidgetWin_*"),
           OpenContextMenuAsync()));
   EXPECT_CALL(acc_observer_, OnMenuPopup(_))
       .WillOnce(AccLeftClick(AccObjectMatcher(L"View page info")));
 
+  EXPECT_CALL(win_observer_mock, OnWindowOpen(_)).Times(1);
   // Expect page info dialog to pop up. Dismiss the dialog with 'Esc' key
   EXPECT_CALL(win_observer_mock, OnWindowOpen(_))
       .WillOnce(DoCloseWindow());
 
+  EXPECT_CALL(win_observer_mock, OnWindowClose(_)).Times(1);
   EXPECT_CALL(win_observer_mock, OnWindowClose(_))
     .WillOnce(CloseBrowserMock(&ie_mock_));
 
@@ -483,7 +529,7 @@ TEST_F(ContextMenuTest, CFInspector) {
   const char* kPageInfoCaptionPattern = "Untitled*";
   EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
       .WillOnce(testing::DoAll(
-          WatchWindow(&win_observer_mock, kPageInfoCaptionPattern),
+          WatchWindow(&win_observer_mock, kPageInfoCaptionPattern, ""),
           OpenContextMenuAsync()));
   EXPECT_CALL(acc_observer_, OnMenuPopup(_))
       .WillOnce(AccLeftClick(AccObjectMatcher(L"Inspect element")));
@@ -498,15 +544,36 @@ TEST_F(ContextMenuTest, CFInspector) {
 }
 
 TEST_F(ContextMenuTest, CFSavePageAs) {
+  // Please see http://code.google.com/p/chromium/issues/detail?id=60987
+  // for more information on why this test is disabled for Vista with IE7.
+  if (base::win::GetVersion() == base::win::VERSION_VISTA &&
+      GetInstalledIEVersion() == IE_7) {
+    LOG(INFO) << "Not running test on Vista with IE7";
+    return;
+  }
   ASSERT_NO_FATAL_FAILURE(DoSaveAsTest(L"", L"Save as...", L".html"));
 }
 
 TEST_F(ContextMenuTest, CFSaveLinkAs) {
+  // Please see http://code.google.com/p/chromium/issues/detail?id=60987
+  // for more information on why this test is disabled for Vista with IE7.
+  if (base::win::GetVersion() == base::win::VERSION_VISTA &&
+      GetInstalledIEVersion() == IE_7) {
+    LOG(INFO) << "Not running test on Vista with IE7";
+    return;
+  }
   ASSERT_NO_FATAL_FAILURE(DoSaveAsTest(L"link", L"Save link as...", L".zip"));
 }
 
 // This tests that the about:version page can be opened via the CF context menu.
 TEST_F(ContextMenuTest, CFAboutVersionLoads) {
+  // Please see http://code.google.com/p/chromium/issues/detail?id=60987
+  // for more information on why this test is disabled for Vista with IE7.
+  if (base::win::GetVersion() == base::win::VERSION_VISTA &&
+      GetInstalledIEVersion() == IE_7) {
+    LOG(INFO) << "Not running test on Vista with IE7";
+    return;
+  }
   server_mock_.ExpectAndServeAnyRequests(CFInvocation::MetaTag());
   const wchar_t* kAboutVersionUrl = L"gcf:about:version";
   const wchar_t* kAboutVersionWithoutProtoUrl = L"about:version";
@@ -607,6 +674,76 @@ TEST_F(ContextMenuTest, IEBackForward) {
       .WillOnce(AccLeftClick(AccObjectMatcher(L"Forward")));
 
   EXPECT_CALL(ie_mock_, OnLoad(IN_IE, StrEq(page2)))
+      .WillOnce(CloseBrowserMock(&ie_mock_));
+
+  LaunchIEAndNavigate(page1);
+}
+
+TEST_F(ContextMenuTest, CFBackForward) {
+  std::wstring page1 = GetLinkPageUrl();
+  std::wstring page2 = GetSimplePageUrl();
+  std::wstring page3 = GetTestUrl(L"anchor.html");
+
+  server_mock_.ExpectAndServeRequestWithCardinality(
+      CFInvocation::MetaTag(), page1, testing::Exactly(2));
+
+  server_mock_.ExpectAndServeRequestWithCardinality(
+      CFInvocation::None(), page2, testing::Exactly(3));
+
+  server_mock_.ExpectAndServeRequestWithCardinality(
+      CFInvocation::MetaTag(), page3, testing::Exactly(2));
+
+  InSequence expect_in_sequence_for_scope;
+
+  // Navigate to second page.
+  EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
+      .WillOnce(testing::DoAll(
+          VerifyPageLoad(&ie_mock_, IN_CF, page1),
+          Navigate(&ie_mock_, page2)));
+
+  // Navigate to third page.
+  EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
+      .WillOnce(testing::DoAll(
+          VerifyPageLoad(&ie_mock_, IN_IE, page2),
+          Navigate(&ie_mock_, page3)));
+
+  // Go back.
+  EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
+      .WillOnce(testing::DoAll(
+          VerifyPageLoad(&ie_mock_, IN_CF, page3),
+          OpenContextMenuAsync()));
+
+  EXPECT_CALL(acc_observer_, OnMenuPopup(_))
+      .WillOnce(AccLeftClick(AccObjectMatcher(L"Back")));
+
+  // Go back
+  EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
+      .WillOnce(testing::DoAll(
+          VerifyPageLoad(&ie_mock_, IN_IE, page2),
+          OpenContextMenuAsync()));
+
+  EXPECT_CALL(acc_observer_, OnMenuPopup(_))
+      .WillOnce(AccLeftClick(AccObjectMatcher(L"Back")));
+
+  // Go forward.
+  EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
+      .WillOnce(testing::DoAll(
+          VerifyPageLoad(&ie_mock_, IN_CF, page1),
+          OpenContextMenuAsync()));
+
+  EXPECT_CALL(acc_observer_, OnMenuPopup(_))
+      .WillOnce(AccLeftClick(AccObjectMatcher(L"Forward")));
+
+  // Go forward.
+  EXPECT_CALL(acc_observer_, OnAccDocLoad(_))
+      .WillOnce(testing::DoAll(
+          VerifyPageLoad(&ie_mock_, IN_IE, page2),
+          OpenContextMenuAsync()));
+
+  EXPECT_CALL(acc_observer_, OnMenuPopup(_))
+      .WillOnce(AccLeftClick(AccObjectMatcher(L"Forward")));
+
+  EXPECT_CALL(ie_mock_, OnLoad(IN_CF, StrEq(page3)))
       .WillOnce(CloseBrowserMock(&ie_mock_));
 
   LaunchIEAndNavigate(page1);

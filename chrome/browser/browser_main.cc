@@ -14,11 +14,12 @@
 #include "app/system_monitor.h"
 #include "base/at_exit.h"
 #include "base/command_line.h"
-#include "base/field_trial.h"
+#include "base/debug/trace_event.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/histogram.h"
-#include "base/scoped_nsautorelease_pool.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/process_util.h"
@@ -27,14 +28,13 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
+#include "base/thread_restrictions.h"
 #include "base/time.h"
-#include "base/trace_event.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser.h"
+#include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_main_win.h"
-#include "chrome/browser/browser_init.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_impl.h"
@@ -50,8 +50,10 @@
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/blob_url_request_job_factory.h"
-#include "chrome/browser/net/predictor_api.h"
+#include "chrome/browser/net/chrome_dns_cert_provenance_checker.h"
+#include "chrome/browser/net/chrome_dns_cert_provenance_checker_factory.h"
 #include "chrome/browser/net/metadata_url_request.h"
+#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/net/websocket_experiment/websocket_experiment_runner.h"
 #include "chrome/browser/plugin_service.h"
@@ -62,13 +64,15 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/browser/search_engines/search_engine_type.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/service/service_process_control.h"
 #include "chrome/browser/service/service_process_control_manager.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/translate/translate_manager.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_init.h"
 #include "chrome/common/child_process.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -93,7 +97,10 @@
 #include "net/http/http_stream_factory.h"
 #include "net/socket/client_socket_pool_base.h"
 #include "net/socket/client_socket_pool_manager.h"
+#include "net/socket/tcp_client_socket.h"
+#include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
+#include "net/url_request/url_request.h"
 
 #if defined(USE_LINUX_BREAKPAD)
 #include "base/linux_util.h"
@@ -101,12 +108,14 @@
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
+#include <dbus/dbus-glib.h>
 #include "chrome/browser/browser_main_gtk.h"
 #include "chrome/browser/gtk/gtk_util.h"
 #endif
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/boot_times_loader.h"
+#include "chrome/browser/oom_priority_manager.h"
 #endif
 
 // TODO(port): several win-only methods have been pulled out of this, but
@@ -151,14 +160,18 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/screen_lock_library.h"
-#include "chrome/browser/chromeos/cros_settings_provider_stats.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/external_metrics.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/metrics_cros_settings_provider.h"
 #include "chrome/browser/views/browser_dialogs.h"
+#endif
+
+#if defined(TOOLKIT_USES_GTK)
+#include "gfx/gtk_util.h"
 #endif
 
 // BrowserMainParts ------------------------------------------------------------
@@ -192,8 +205,16 @@ void BrowserMainParts::EarlyInitialization() {
     net::SSLConfigService::DisableFalseStart();
   if (parsed_command_line().HasSwitch(switches::kAllowSSLMITMProxies))
     net::SSLConfigService::AllowMITMProxies();
-  if (parsed_command_line().HasSwitch(switches::kEnableSnapStart))
-    net::SSLConfigService::EnableSnapStart();
+  // Disabled to stop people playing with it.
+  // if (parsed_command_line().HasSwitch(switches::kEnableSnapStart))
+  //   net::SSLConfigService::EnableSnapStart();
+  if (parsed_command_line().HasSwitch(
+          switches::kEnableDNSCertProvenanceChecking)) {
+    net::SSLConfigService::EnableDNSCertProvenanceChecking();
+  }
+
+  if (parsed_command_line().HasSwitch(switches::kEnableTcpFastOpen))
+    net::set_tcp_fastopen_enabled(true);
 
   PostEarlyInitialization();
 }
@@ -205,11 +226,11 @@ void BrowserMainParts::EarlyInitialization() {
 // on browsing. Too large a value might cause us to run into SYN flood detection
 // mechanisms.
 void BrowserMainParts::ConnectionFieldTrial() {
-  const FieldTrial::Probability kConnectDivisor = 100;
-  const FieldTrial::Probability kConnectProbability = 1;  // 1% probability
+  const base::FieldTrial::Probability kConnectDivisor = 100;
+  const base::FieldTrial::Probability kConnectProbability = 1;  // 1% prob.
 
-  scoped_refptr<FieldTrial> connect_trial =
-      new FieldTrial("ConnCountImpact", kConnectDivisor);
+  scoped_refptr<base::FieldTrial> connect_trial(
+      new base::FieldTrial("ConnCountImpact", kConnectDivisor));
 
   const int connect_5 = connect_trial->AppendGroup("conn_count_5",
                                                    kConnectProbability);
@@ -224,7 +245,7 @@ void BrowserMainParts::ConnectionFieldTrial() {
   // probability value will be assigned to all the other groups, while
   // preserving the remainder of the of probability space to the default value.
   const int connect_6 = connect_trial->AppendGroup("conn_count_6",
-      FieldTrial::kAllRemainingProbability);
+      base::FieldTrial::kAllRemainingProbability);
 
   const int connect_trial_group = connect_trial->group();
 
@@ -249,12 +270,12 @@ void BrowserMainParts::ConnectionFieldTrial() {
 // result in more ERR_CONNECT_RESETs, requiring one RTT to receive the RST
 // packet and possibly another RTT to re-establish the connection.
 void BrowserMainParts::SocketTimeoutFieldTrial() {
-  const FieldTrial::Probability kIdleSocketTimeoutDivisor = 100;
+  const base::FieldTrial::Probability kIdleSocketTimeoutDivisor = 100;
   // 1% probability for all experimental settings.
-  const FieldTrial::Probability kSocketTimeoutProbability = 1;
+  const base::FieldTrial::Probability kSocketTimeoutProbability = 1;
 
-  scoped_refptr<FieldTrial> socket_timeout_trial =
-      new FieldTrial("IdleSktToImpact", kIdleSocketTimeoutDivisor);
+  scoped_refptr<base::FieldTrial> socket_timeout_trial(
+      new base::FieldTrial("IdleSktToImpact", kIdleSocketTimeoutDivisor));
 
   const int socket_timeout_5 =
       socket_timeout_trial->AppendGroup("idle_timeout_5",
@@ -267,7 +288,7 @@ void BrowserMainParts::SocketTimeoutFieldTrial() {
                                         kSocketTimeoutProbability);
   const int socket_timeout_60 =
       socket_timeout_trial->AppendGroup("idle_timeout_60",
-                                        FieldTrial::kAllRemainingProbability);
+          base::FieldTrial::kAllRemainingProbability);
 
   const int idle_to_trial_group = socket_timeout_trial->group();
 
@@ -285,12 +306,12 @@ void BrowserMainParts::SocketTimeoutFieldTrial() {
 }
 
 void BrowserMainParts::ProxyConnectionsFieldTrial() {
-  const FieldTrial::Probability kProxyConnectionsDivisor = 100;
+  const base::FieldTrial::Probability kProxyConnectionsDivisor = 100;
   // 25% probability
-  const FieldTrial::Probability kProxyConnectionProbability = 1;
+  const base::FieldTrial::Probability kProxyConnectionProbability = 1;
 
-  scoped_refptr<FieldTrial> proxy_connection_trial =
-      new FieldTrial("ProxyConnectionImpact", kProxyConnectionsDivisor);
+  scoped_refptr<base::FieldTrial> proxy_connection_trial(
+      new base::FieldTrial("ProxyConnectionImpact", kProxyConnectionsDivisor));
 
   // The number of max sockets per group cannot be greater than the max number
   // of sockets per proxy server.  We tried using 8, and it can easily
@@ -308,7 +329,7 @@ void BrowserMainParts::ProxyConnectionsFieldTrial() {
   // which allows for cleaner and quicker changes down the line if needed.
   const int proxy_connections_32 =
       proxy_connection_trial->AppendGroup("proxy_connections_32",
-                                          FieldTrial::kAllRemainingProbability);
+          base::FieldTrial::kAllRemainingProbability);
 
   const int proxy_connections_trial_group = proxy_connection_trial->group();
 
@@ -337,15 +358,16 @@ void BrowserMainParts::SpdyFieldTrial() {
         parsed_command_line().GetSwitchValueASCII(switches::kUseSpdy);
     net::HttpNetworkLayer::EnableSpdy(spdy_mode);
   } else {
-    const FieldTrial::Probability kSpdyDivisor = 100;
-    FieldTrial::Probability npnhttp_probability = 10;  // 10% to preclude SPDY.
-    scoped_refptr<FieldTrial> trial =
-        new FieldTrial("SpdyImpact", kSpdyDivisor);
+    const base::FieldTrial::Probability kSpdyDivisor = 100;
+    // 10% to preclude SPDY.
+    base::FieldTrial::Probability npnhttp_probability = 10;
+    scoped_refptr<base::FieldTrial> trial(
+        new base::FieldTrial("SpdyImpact", kSpdyDivisor));
     // npn with only http support, no spdy.
     int npn_http_grp = trial->AppendGroup("npn_with_http", npnhttp_probability);
     // npn with spdy support.
     int npn_spdy_grp = trial->AppendGroup("npn_with_spdy",
-                                          FieldTrial::kAllRemainingProbability);
+        base::FieldTrial::kAllRemainingProbability);
     int trial_grp = trial->group();
     if (trial_grp == npn_http_grp) {
       is_spdy_trial = true;
@@ -357,6 +379,14 @@ void BrowserMainParts::SpdyFieldTrial() {
       CHECK(!is_spdy_trial);
     }
   }
+  if (parsed_command_line().HasSwitch(switches::kMaxSpdyConcurrentStreams)) {
+    int value = 0;
+    base::StringToInt(parsed_command_line().GetSwitchValueASCII(
+            switches::kMaxSpdyConcurrentStreams),
+        &value);
+    if (value > 0)
+      net::SpdySession::set_max_concurrent_streams(value);
+  }
 }
 
 // If neither --enable-content-prefetch or --disable-content-prefetch
@@ -367,14 +397,14 @@ void BrowserMainParts::PrefetchFieldTrial() {
   else if (parsed_command_line().HasSwitch(switches::kDisableContentPrefetch)) {
     ResourceDispatcherHost::set_is_prefetch_enabled(false);
   } else {
-    const FieldTrial::Probability kPrefetchDivisor = 1000;
-    const FieldTrial::Probability no_prefetch_probability = 500;
-    scoped_refptr<FieldTrial> trial =
-        new FieldTrial("Prefetch", kPrefetchDivisor);
+    const base::FieldTrial::Probability kPrefetchDivisor = 1000;
+    const base::FieldTrial::Probability no_prefetch_probability = 970;
+    scoped_refptr<base::FieldTrial> trial(
+        new base::FieldTrial("Prefetch", kPrefetchDivisor));
     trial->AppendGroup("ContentPrefetchDisabled", no_prefetch_probability);
     const int yes_prefetch_grp =
         trial->AppendGroup("ContentPrefetchEnabled",
-                           FieldTrial::kAllRemainingProbability);
+                           base::FieldTrial::kAllRemainingProbability);
     const int trial_grp = trial->group();
     ResourceDispatcherHost::set_is_prefetch_enabled(
         trial_grp == yes_prefetch_grp);
@@ -393,16 +423,17 @@ void BrowserMainParts::ConnectBackupJobsFieldTrial() {
     net::internal::ClientSocketPoolBaseHelper::set_connect_backup_jobs_enabled(
         false);
   } else {
-    const FieldTrial::Probability kConnectBackupJobsDivisor = 100;
-    // 50% probability.
-    const FieldTrial::Probability kConnectBackupJobsProbability = 1;  // 1%.
-    scoped_refptr<FieldTrial> trial = new FieldTrial("ConnnectBackupJobs",
-                                                     kConnectBackupJobsDivisor);
+    const base::FieldTrial::Probability kConnectBackupJobsDivisor = 100;
+    // 1% probability.
+    const base::FieldTrial::Probability kConnectBackupJobsProbability = 1;
+    scoped_refptr<base::FieldTrial> trial(
+        new base::FieldTrial("ConnnectBackupJobs",
+                             kConnectBackupJobsDivisor));
     trial->AppendGroup("ConnectBackupJobsDisabled",
                        kConnectBackupJobsProbability);
     const int connect_backup_jobs_enabled =
         trial->AppendGroup("ConnectBackupJobsEnabled",
-                           FieldTrial::kAllRemainingProbability);
+                           base::FieldTrial::kAllRemainingProbability);
     const int trial_group = trial->group();
     net::internal::ClientSocketPoolBaseHelper::set_connect_backup_jobs_enabled(
         trial_group == connect_backup_jobs_enabled);
@@ -467,6 +498,14 @@ void HandleTestParameters(const CommandLine& command_line) {
 void RunUIMessageLoop(BrowserProcess* browser_process) {
   TRACE_EVENT_BEGIN("BrowserMain:MESSAGE_LOOP", 0, "");
 
+#if !defined(OS_CHROMEOS)
+  // If the UI thread blocks, the whole UI is unresponsive.
+  // Do not allow disk IO from the UI thread.
+  // TODO(evanm): turn this on for all platforms.
+  //   http://code.google.com/p/chromium/issues/detail?id=60211
+  base::ThreadRestrictions::SetIOAllowed(false);
+#endif
+
 #if defined(TOOLKIT_VIEWS)
   views::AcceleratorHandler accelerator_handler;
   MessageLoopForUI::current()->Run(&accelerator_handler);
@@ -474,6 +513,10 @@ void RunUIMessageLoop(BrowserProcess* browser_process) {
   MessageLoopForUI::current()->Run(NULL);
 #elif defined(OS_POSIX)
   MessageLoopForUI::current()->Run();
+#endif
+#if defined(OS_CHROMEOS)
+  chromeos::BootTimesLoader::Get()->AddLogoutTimeMarker("UIMessageLoopEnded",
+                                                        true);
 #endif
 
   TRACE_EVENT_END("BrowserMain:MESSAGE_LOOP", 0, "");
@@ -522,6 +565,8 @@ void InitializeNetworkOptions(const CommandLine& parsed_command_line) {
         &value);
     net::SpdySessionPool::set_max_sessions_per_domain(value);
   }
+
+  SetDnsCertProvenanceCheckerFactory(CreateChromeDnsCertProvenanceChecker);
 }
 
 // Creates key child threads. We need to do this explicitly since
@@ -550,7 +595,8 @@ PrefService* InitializeLocalState(const CommandLine& parsed_command_line,
   // Initialize ResourceBundle which handles files loaded from external
   // sources. This has to be done before uninstall code path and before prefs
   // are registered.
-  local_state->RegisterStringPref(prefs::kApplicationLocale, "");
+  local_state->RegisterStringPref(prefs::kApplicationLocale,
+                                  std::string());
 #if !defined(OS_CHROMEOS)
   local_state->RegisterBooleanPref(prefs::kMetricsReportingEnabled,
       GoogleUpdateSettings::GetCollectStatsConsent());
@@ -731,18 +777,104 @@ void MaybeChangeUIFont() {
 }
 #endif
 
+#if defined(TOOLKIT_USES_GTK)
+static void GLibLogHandler(const gchar* log_domain,
+                           GLogLevelFlags log_level,
+                           const gchar* message,
+                           gpointer userdata) {
+  if (!log_domain)
+    log_domain = "<unknown>";
+  if (!message)
+    message = "<no message>";
+
+  if (strstr(message, "Loading IM context type") ||
+      strstr(message, "wrong ELF class: ELFCLASS64")) {
+    // http://crbug.com/9643
+    // Until we have a real 64-bit build or all of these 32-bit package issues
+    // are sorted out, don't fatal on ELF 32/64-bit mismatch warnings and don't
+    // spam the user with more than one of them.
+    static bool alerted = false;
+    if (!alerted) {
+      LOG(ERROR) << "Bug 9643: " << log_domain << ": " << message;
+      alerted = true;
+    }
+  } else if (strstr(message, "gtk_widget_size_allocate(): attempt to "
+                             "allocate widget with width") &&
+             !GTK_CHECK_VERSION(2, 16, 1)) {
+    // This warning only occurs in obsolete versions of GTK and is harmless.
+    // http://crbug.com/11133
+  } else if (strstr(message, "Theme file for default has no") ||
+             strstr(message, "Theme directory") ||
+             strstr(message, "theme pixmap")) {
+    LOG(ERROR) << "GTK theme error: " << message;
+  } else if (strstr(message, "gtk_drag_dest_leave: assertion")) {
+    LOG(ERROR) << "Drag destination deleted: http://crbug.com/18557";
+  } else {
+#ifdef NDEBUG
+    LOG(ERROR) << log_domain << ": " << message;
+#else
+    LOG(FATAL) << log_domain << ": " << message;
+#endif
+  }
+}
+
+static void SetUpGLibLogHandler() {
+  // Register GLib-handled assertions to go through our logging system.
+  const char* kLogDomains[] = { NULL, "Gtk", "Gdk", "GLib", "GLib-GObject" };
+  for (size_t i = 0; i < arraysize(kLogDomains); i++) {
+    g_log_set_handler(kLogDomains[i],
+                      static_cast<GLogLevelFlags>(G_LOG_FLAG_RECURSION |
+                                                  G_LOG_FLAG_FATAL |
+                                                  G_LOG_LEVEL_ERROR |
+                                                  G_LOG_LEVEL_CRITICAL |
+                                                  G_LOG_LEVEL_WARNING),
+                      GLibLogHandler,
+                      NULL);
+  }
+}
+#endif
+
+void InitializeToolkit(const MainFunctionParams& parameters) {
+  // TODO(evan): this function is rather subtle, due to the variety
+  // of intersecting ifdefs we have.  To keep it easy to follow, there
+  // are no #else branches on any #ifs.
+
+#if defined(TOOLKIT_USES_GTK)
+  // We want to call g_thread_init(), but in some codepaths (tests) it
+  // is possible it has already been called.  In older versions of
+  // GTK, it is an error to call g_thread_init twice; unfortunately,
+  // the API to tell whether it has been called already was also only
+  // added in a newer version of GTK!  Thankfully, this non-intuitive
+  // check is actually equivalent and sufficient to work around the
+  // error.
+  if (!g_thread_supported())
+    g_thread_init(NULL);
+  // Glib type system initialization. Needed at least for gconf,
+  // used in net/proxy/proxy_config_service_linux.cc. Most likely
+  // this is superfluous as gtk_init() ought to do this. It's
+  // definitely harmless, so retained as a reminder of this
+  // requirement for gconf.
+  g_type_init();
+  // We use glib-dbus for geolocation and it's possible other libraries
+  // (e.g. gnome-keyring) will use it, so initialize its threading here
+  // as well.
+  dbus_g_thread_init();
+  gfx::GtkInitFromCommandLine(parameters.command_line_);
+  SetUpGLibLogHandler();
+#endif
+
 #if defined(TOOLKIT_GTK)
-void InitializeToolkit() {
   // It is important for this to happen before the first run dialog, as it
   // styles the dialog as well.
   gtk_util::InitRCStyles();
-}
-#elif defined(TOOLKIT_VIEWS)
-void InitializeToolkit() {
+#endif
+
+#if defined(TOOLKIT_VIEWS)
   // The delegate needs to be set before any UI is created so that windows
   // display the correct icon.
   if (!views::ViewsDelegate::views_delegate)
     views::ViewsDelegate::views_delegate = new ChromeViewsDelegate;
+#endif
 
 #if defined(OS_WIN)
   gfx::PlatformFontWin::adjust_font_callback = &AdjustUIFont;
@@ -755,10 +887,6 @@ void InitializeToolkit() {
   InitCommonControlsEx(&config);
 #endif
 }
-#else
-void InitializeToolkit() {
-}
-#endif
 
 #if defined(OS_CHROMEOS)
 
@@ -782,9 +910,10 @@ class StubLogin : public chromeos::LoginStatusConsumer {
   }
 
   void OnLoginSuccess(const std::string& username,
+                      const std::string& password,
                       const GaiaAuthConsumer::ClientLoginResult& credentials,
                       bool pending_requests) {
-    chromeos::LoginUtils::Get()->CompleteLogin(username, credentials);
+    chromeos::LoginUtils::Get()->CompleteLogin(username, password, credentials);
     delete this;
   }
 
@@ -803,7 +932,7 @@ void OptionallyRunChromeOSLoginManager(const CommandLine& parsed_command_line) {
     // default to the entire screen. This is mostly useful for testing.
     if (size_arg.size()) {
       std::vector<std::string> dimensions;
-      SplitString(size_arg, ',', &dimensions);
+      base::SplitString(size_arg, ',', &dimensions);
       if (dimensions.size() == 2) {
         int width, height;
         if (base::StringToInt(dimensions[0], &width) &&
@@ -814,6 +943,7 @@ void OptionallyRunChromeOSLoginManager(const CommandLine& parsed_command_line) {
     browser::ShowLoginWizard(first_screen, size);
   } else if (parsed_command_line.HasSwitch(switches::kLoginUser) &&
       parsed_command_line.HasSwitch(switches::kLoginPassword)) {
+    chromeos::BootTimesLoader::Get()->RecordLoginAttempted();
     new StubLogin(
         parsed_command_line.GetSwitchValueASCII(switches::kLoginUser),
         parsed_command_line.GetSwitchValueASCII(switches::kLoginPassword));
@@ -860,6 +990,31 @@ DLLEXPORT void __cdecl RelaunchChromeBrowserWithNewCommandLineIfNeeded() {
 }
 #endif
 
+#if defined(USE_LINUX_BREAKPAD)
+bool IsMetricsReportingEnabled(const PrefService* local_state) {
+  // Check whether we should initialize the crash reporter. It may be disabled
+  // through configuration policy or user preference.
+  // The kHeadless environment variable overrides the decision, but only if the
+  // crash service is under control of the user. It is used by QA testing
+  // infrastructure to switch on generation of crash reports.
+#if defined(OS_CHROMEOS)
+  bool breakpad_enabled =
+      chromeos::MetricsCrosSettingsProvider::GetMetricsStatus();
+  if (!breakpad_enabled)
+    breakpad_enabled = getenv(env_vars::kHeadless) != NULL;
+#else
+  const PrefService::Preference* metrics_reporting_enabled =
+      local_state->FindPreference(prefs::kMetricsReportingEnabled);
+  CHECK(metrics_reporting_enabled);
+  bool breakpad_enabled =
+      local_state->GetBoolean(prefs::kMetricsReportingEnabled);
+  if (!breakpad_enabled && metrics_reporting_enabled->IsUserModifiable())
+    breakpad_enabled = getenv(env_vars::kHeadless) != NULL;
+#endif  // #if defined(OS_CHROMEOS)
+  return breakpad_enabled;
+}
+#endif  // #if defined(USE_LINUX_BREAKPAD)
+
 // Main routine for running as the Browser process.
 int BrowserMain(const MainFunctionParams& parameters) {
   TRACE_EVENT_BEGIN("BrowserMain", 0, "");
@@ -867,6 +1022,10 @@ int BrowserMain(const MainFunctionParams& parameters) {
       parts(BrowserMainParts::CreateBrowserMainParts(parameters));
 
   parts->EarlyInitialization();
+
+  // Must happen before we try to use a message loop or display any UI.
+  InitializeToolkit(parameters);
+
   parts->MainMessageLoopStart();
 
   // WARNING: If we get a WM_ENDSESSION, objects created on the stack here
@@ -894,7 +1053,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   // TODO(viettrungluu): put the remainder into BrowserMainParts
   const CommandLine& parsed_command_line = parameters.command_line_;
-  base::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool_;
+  base::mac::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool_;
 
   FilePath user_data_dir;
 #if defined(OS_WIN)
@@ -941,7 +1100,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
   InitializeBrokerServices(parameters, parsed_command_line);
 
   // Initialize histogram statistics gathering system.
-  StatisticsRecorder statistics;
+  base::StatisticsRecorder statistics;
 
   PrefService* local_state = InitializeLocalState(parsed_command_line,
                                                   is_first_run);
@@ -952,27 +1111,9 @@ int BrowserMain(const MainFunctionParams& parameters) {
   g_browser_process->file_thread()->message_loop()->PostTask(FROM_HERE,
       new GetLinuxDistroTask());
 
-  // Check whether we should initialize the crash reporter. It may be disabled
-  // through configuration policy or user preference. The kHeadless environment
-  // variable overrides the decision, but only if the crash service is under
-  // control of the user.
-#if !defined(OS_CHROMEOS)
-  const PrefService::Preference* metrics_reporting_enabled =
-      local_state->FindPreference(prefs::kMetricsReportingEnabled);
-  CHECK(metrics_reporting_enabled);
-  bool breakpad_enabled =
-      local_state->GetBoolean(prefs::kMetricsReportingEnabled);
-  if (!breakpad_enabled && metrics_reporting_enabled->IsUserModifiable())
-    breakpad_enabled = getenv(env_vars::kHeadless) != NULL;
-#else
-  bool breakpad_enabled =
-      chromeos::MetricsCrosSettingsProvider::GetMetricsStatus();
-#endif  // #if !defined(OS_CHROMEOS)
-  if (breakpad_enabled)
+  if (IsMetricsReportingEnabled(local_state))
     InitCrashReporter();
 #endif
-
-  InitializeToolkit();  // Must happen before we try to display any UI.
 
   // If we're running tests (ui_task is non-null), then the ResourceBundle
   // has already been initialized.
@@ -987,9 +1128,12 @@ int BrowserMain(const MainFunctionParams& parameters) {
 #else
     // On a POSIX OS other than ChromeOS, the parameter that is passed to the
     // method InitSharedInstance is ignored.
-    std::string app_locale = ResourceBundle::InitSharedInstance(
-        local_state->GetString(prefs::kApplicationLocale));
-    g_browser_process->SetApplicationLocale(app_locale);
+    const std::string locale =
+        local_state->GetString(prefs::kApplicationLocale);
+    const std::string loaded_locale =
+        ResourceBundle::InitSharedInstance(locale);
+    CHECK(!loaded_locale.empty()) << "Locale could not be found for " << locale;
+    g_browser_process->SetApplicationLocale(loaded_locale);
 
     FilePath resources_pack_path;
     PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
@@ -1037,6 +1181,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
     // (first run) UI.
     if (!first_run_ui_bypass &&
         (parsed_command_line.HasSwitch(switches::kApp) ||
+         parsed_command_line.HasSwitch(switches::kAppId) ||
          parsed_command_line.HasSwitch(switches::kNoFirstRun)))
       first_run_ui_bypass = true;
   }
@@ -1051,8 +1196,8 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // for posting tasks via NewRunnableMethod. Its deleted when it goes out of
   // scope. Even though NewRunnableMethod does AddRef and Release, the object
   // will not be deleted after the Task is executed.
-  scoped_refptr<HistogramSynchronizer> histogram_synchronizer =
-      new HistogramSynchronizer();
+  scoped_refptr<HistogramSynchronizer> histogram_synchronizer(
+      new HistogramSynchronizer());
 
   // Initialize the prefs of the local state.
   browser::RegisterLocalState(local_state);
@@ -1159,6 +1304,10 @@ int BrowserMain(const MainFunctionParams& parameters) {
   }
 #endif
 
+#if defined(USE_X11)
+  SetBrowserX11ErrorHandlers();
+#endif
+
   // Profile creation ----------------------------------------------------------
 
 #if defined(OS_CHROMEOS)
@@ -1174,6 +1323,11 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // notification it needs to track the logged in user.
   g_browser_process->profile_manager()->GetDefaultProfile();
 
+  // Allow access to file:// on ChromeOS for tests.
+  if (parsed_command_line.HasSwitch(switches::kAllowFileAccess)) {
+    URLRequest::AllowFileAccess();
+  }
+
   // There are two use cases for kLoginUser:
   //   1) if passed in tandem with kLoginPassword, to drive a "StubLogin"
   //   2) if passed alone, to signal that the indicated user has already
@@ -1183,25 +1337,12 @@ int BrowserMain(const MainFunctionParams& parameters) {
       !parsed_command_line.HasSwitch(switches::kLoginPassword)) {
     std::string username =
         parsed_command_line.GetSwitchValueASCII(switches::kLoginUser);
-    LOG(INFO) << "Relaunching browser for user: " << username;
+    VLOG(1) << "Relaunching browser for user: " << username;
     chromeos::UserManager::Get()->UserLoggedIn(username);
 
-    // Redirect logs.
-    FilePath user_data_dir;
-    PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
-    ProfileManager* profile_manager = g_browser_process->profile_manager();
-    // The default profile will have been changed because the ProfileManager
-    // will process the notification that the UserManager sends out.
-
-    logging::RedirectChromeLogging(
-        user_data_dir.Append(profile_manager->GetCurrentProfileDir()),
-        *(CommandLine::ForCurrentProcess()),
-        logging::DELETE_OLD_LOG_FILE);
+    // Redirects Chrome logging to the user data dir.
+    logging::RedirectChromeLogging(parsed_command_line);
   }
-#endif
-
-#if defined(USE_X11)
-  SetBrowserX11ErrorHandlers();
 #endif
 
   // Modifies the current command line based on active experiments on
@@ -1354,10 +1495,10 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // Perform A/B test to measure global impact of SDCH support.
   // Set up a field trial to see what disabling SDCH does to latency of page
   // layout globally.
-  FieldTrial::Probability kSDCH_DIVISOR = 1000;
-  FieldTrial::Probability kSDCH_DISABLE_PROBABILITY = 1;  // 0.1% probability.
-  scoped_refptr<FieldTrial> sdch_trial =
-      new FieldTrial("GlobalSdch", kSDCH_DIVISOR);
+  base::FieldTrial::Probability kSDCH_DIVISOR = 1000;
+  base::FieldTrial::Probability kSDCH_DISABLE_PROBABILITY = 1;  // 0.1% prob.
+  scoped_refptr<base::FieldTrial> sdch_trial(
+      new base::FieldTrial("GlobalSdch", kSDCH_DIVISOR));
 
   // Use default of "" so that all domains are supported.
   std::string sdch_supported_domain("");
@@ -1368,7 +1509,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
     sdch_trial->AppendGroup("global_disable_sdch",
                             kSDCH_DISABLE_PROBABILITY);
     int sdch_enabled = sdch_trial->AppendGroup("global_enable_sdch",
-        FieldTrial::kAllRemainingProbability);
+        base::FieldTrial::kAllRemainingProbability);
     if (sdch_enabled != sdch_trial->group())
       sdch_supported_domain = "never_enabled_sdch_for_any_domain";
   }
@@ -1390,6 +1531,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   HandleTestParameters(parsed_command_line);
   RecordBreakpadStatusUMA(metrics);
+  about_flags::RecordUMAStatistics(user_prefs);
 
   // Stat the directory with the inspector's files so that we can know if we
   // should display the entry in the context menu or not.
@@ -1399,6 +1541,9 @@ int BrowserMain(const MainFunctionParams& parameters) {
   metrics->StartExternalMetrics();
 #endif
 
+  // Initialize extension event routers. Note that on Chrome OS, this will
+  // not succeed if the user has not logged in yet, in which case the
+  // event routers are initialized in LoginUtilsImpl::CompleteLogin instead.
   if (profile->GetExtensionsService()) {
     // This will initialize bookmarks. Call it after bookmark import is done.
     // See issue 40144.
@@ -1423,9 +1568,9 @@ int BrowserMain(const MainFunctionParams& parameters) {
   bool record_search_engine = is_first_run && !profile->IsOffTheRecord();
 #endif
 
-    // ChildProcess:: is a misnomer unless you consider context.  Use
-    // of --wait-for-debugger only makes sense when Chrome itself is a
-    // child process (e.g. when launched by PyAuto).
+  // ChildProcess:: is a misnomer unless you consider context.  Use
+  // of --wait-for-debugger only makes sense when Chrome itself is a
+  // child process (e.g. when launched by PyAuto).
   if (parsed_command_line.HasSwitch(switches::kWaitForDebugger)) {
     ChildProcess::WaitForDebugger(L"Browser");
   }
@@ -1439,9 +1584,20 @@ int BrowserMain(const MainFunctionParams& parameters) {
     if (user_prefs->GetBoolean(prefs::kRemotingHasSetupCompleted)) {
       ServiceProcessControl* control = ServiceProcessControlManager::instance()
           ->GetProcessControl(profile);
-       control->Launch(NULL);
+       control->Launch(NULL, NULL);
     }
   }
+
+#if defined(OS_CHROMEOS)
+  // Run the Out of Memory priority manager while in this scope.  Wait
+  // until here to start so that we give the most amount of time for
+  // the other services to start up before we start adjusting the oom
+  // priority.  In reality, it doesn't matter much where in this scope
+  // this is started, but it must be started in this scope so it will
+  // also be terminated when this scope exits.
+  scoped_ptr<browser::OomPriorityManager> oom_priority_manager(
+      new browser::OomPriorityManager);
+#endif
 
   // Create the instance of the cloud print proxy service so that it can launch
   // the service process if needed. This is needed because the service process
@@ -1496,15 +1652,15 @@ int BrowserMain(const MainFunctionParams& parameters) {
         profile->GetTemplateURLModel()->GetDefaultSearchProvider();
     // The default engine can be NULL if the administrator has disabled
     // default search.
-    TemplateURLPrepopulateData::SearchEngineType search_engine_type =
+    SearchEngineType search_engine_type =
         default_search_engine ? default_search_engine->search_engine_type() :
-                                TemplateURLPrepopulateData::SEARCH_ENGINE_OTHER;
+                                SEARCH_ENGINE_OTHER;
     // Record the search engine chosen.
     if (master_prefs.run_search_engine_experiment) {
       UMA_HISTOGRAM_ENUMERATION(
           "Chrome.SearchSelectExperiment",
           search_engine_type,
-          TemplateURLPrepopulateData::SEARCH_ENGINE_MAX);
+          SEARCH_ENGINE_MAX);
       // If the selection has been randomized, also record the winner by slot.
       if (master_prefs.randomize_search_engine_experiment) {
         size_t engine_pos = profile->GetTemplateURLModel()->
@@ -1516,7 +1672,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
           UMA_HISTOGRAM_ENUMERATION(
               experiment_type,
               search_engine_type,
-              TemplateURLPrepopulateData::SEARCH_ENGINE_MAX);
+              SEARCH_ENGINE_MAX);
         } else {
           NOTREACHED() << "Invalid search engine selection slot.";
         }
@@ -1525,7 +1681,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
       UMA_HISTOGRAM_ENUMERATION(
           "Chrome.SearchSelectExempt",
           search_engine_type,
-          TemplateURLPrepopulateData::SEARCH_ENGINE_MAX);
+          SEARCH_ENGINE_MAX);
     }
   }
 #endif
@@ -1541,6 +1697,13 @@ int BrowserMain(const MainFunctionParams& parameters) {
   ignore_result(browser_process.release());
   browser_shutdown::Shutdown();
 
+#if defined(OS_CHROMEOS)
+  // To be precise, logout (browser shutdown) is not yet done, but the
+  // remaining work is negligible, hence we say LogoutDone here.
+  chromeos::BootTimesLoader::Get()->AddLogoutTimeMarker("LogoutDone",
+                                                        false);
+  chromeos::BootTimesLoader::Get()->WriteLogoutTimes();
+#endif
   TRACE_EVENT_END("BrowserMain", 0, 0);
   return result_code;
 }

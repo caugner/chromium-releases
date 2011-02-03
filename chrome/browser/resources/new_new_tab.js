@@ -73,8 +73,12 @@ function addClosedMenuFooter(menu, sectionId, mask, opt_section) {
   var span = document.createElement('span');
   var a = span.appendChild(document.createElement('a'));
   a.href = '';
-  a.textContent =
-      localStrings.getString(getSectionMenuButtonTextId(sectionId));
+  if (cr.isChromeOS) {
+    a.textContent = localStrings.getString('expandMenu');
+  } else {
+    a.textContent =
+        localStrings.getString(getSectionMenuButtonTextId(sectionId));
+  }
   a.className = 'item';
   a.addEventListener(
       'click',
@@ -112,6 +116,77 @@ function updateSimpleSection(id, section) {
   }
 }
 
+var sessionItems = [];
+
+function foreignSessions(data) {
+  logEvent('received foreign sessions');
+  // We need to store the foreign sessions so we can update the layout on a
+  // resize.
+  sessionItems = data;
+  renderForeignSessions();
+  layoutSections();
+}
+
+function renderForeignSessions() {
+  // Remove all existing items and create new items.
+  var sessionElement = $('foreign-sessions');
+  var parentSessionElement = sessionElement.lastElementChild;
+  parentSessionElement.textContent = '';
+
+  // For each client, create entries and append the lists together.
+  sessionItems.forEach(function(item, i) {
+    // TODO(zea): Get real client names. See issue 59672
+    var name = 'Client ' + i;
+    parentSessionElement.appendChild(createForeignSession(item, name));
+  });
+
+  layoutForeignSessions();
+}
+
+function layoutForeignSessions() {
+  var sessionElement = $('foreign-sessions');
+  // We cannot use clientWidth here since the width has a transition.
+  var availWidth = useSmallGrid() ? 692 : 920;
+  var parentSessEl = sessionElement.lastElementChild;
+
+  if (parentSessEl.hasChildNodes()) {
+    sessionElement.classList.remove('disabled');
+  } else {
+    sessionElement.classList.add('disabled');
+  }
+}
+
+function createForeignSession(client, name) {
+  // Vertically stack the windows in a client.
+  var stack = document.createElement('div');
+  stack.className = 'foreign-session-client';
+  stack.textContent = name;
+
+  client.forEach(function(win) {
+    // We know these are lists of multiple tabs, don't need the special case for
+    // single url + favicon.
+    var el = document.createElement('p');
+    el.className = 'item link window';
+    el.tabItems = win.tabs;
+    el.tabIndex = 0;
+    el.textContent = formatTabsText(win.tabs.length);
+
+    el.sessionId = win.sessionId;
+    el.xtitle = win.title;
+    el.sessionTag = win.sessionTag;
+
+    // Add the actual tab listing.
+    stack.appendChild(el);
+
+    // TODO(zea): Should there be a clickHandler as well? We appear to be
+    // breaking windowTooltip's hide: removeEventListener(onMouseOver) when we
+    // click.
+  });
+  return stack;
+}
+
+var recentItems = [];
+
 function recentlyClosedTabs(data) {
   logEvent('received recently closed tabs');
   // We need to store the recent items so we can update the layout on a resize.
@@ -119,8 +194,6 @@ function recentlyClosedTabs(data) {
   renderRecentlyClosed();
   layoutSections();
 }
-
-var recentItems = [];
 
 function renderRecentlyClosed() {
   // Remove all existing items and create new items.
@@ -158,6 +231,7 @@ function createRecentItem(data) {
   }
   el.sessionId = data.sessionId;
   el.xtitle = data.title;
+  el.sessionTag = data.sessionTag;
   var wrapperEl = document.createElement('span');
   wrapperEl.appendChild(el);
   return wrapperEl;
@@ -202,12 +276,13 @@ function handleWindowResize() {
 
   var oldLayoutMode = layoutMode;
   var b = useSmallGrid();
-  layoutMode = b ? LayoutMode.SMALL : LayoutMode.NORMAL
+  layoutMode = b ? LayoutMode.SMALL : LayoutMode.NORMAL;
 
   if (layoutMode != oldLayoutMode){
     mostVisited.useSmallGrid = b;
     mostVisited.layout();
     renderRecentlyClosed();
+    renderForeignSessions();
     updateAllMiniviewClippings();
   }
 
@@ -218,8 +293,8 @@ function handleWindowResize() {
 // instance is constructed for each section on each layout.
 function SectionLayoutInfo(section) {
   this.section = section;
-  this.header = section.getElementsByTagName('h2')[0];
-  this.miniview = section.getElementsByClassName('miniview')[0];
+  this.header = section.querySelector('h2');
+  this.miniview = section.querySelector('.miniview');
   this.maxiview = getSectionMaxiview(section);
   this.expanded = this.maxiview && !section.classList.contains('hidden');
   this.fixedHeight = this.section.offsetHeight;
@@ -346,6 +421,10 @@ function layoutSections() {
       expandedSectionHeight = expandedSection.scrollingHeight;
       document.body.style.height = '';
     }
+  } else {
+    // We only set the document height when a section is expanded. If
+    // all sections are minimized, then get rid of the previous height.
+    document.body.style.height = '';
   }
 
   // Now position all the elements.
@@ -362,6 +441,8 @@ function layoutSections() {
     if (section == expandedSection)
       y += expandedSectionHeight;
   }
+  if (cr.isChromeOS)
+    $('closed-sections-bar').style.top = y + 'px';
 
   updateAttributionDisplay(y);
 }
@@ -473,9 +554,9 @@ function hideSection(section) {
 
       var maxiview = getSectionMaxiview(el);
       if (maxiview)
-        maxiview.classList.add('hiding');
+        maxiview.classList.add(isDoneLoading() ? 'hiding' : 'hidden');
 
-      var miniview = el.getElementsByClassName('miniview')[0];
+      var miniview = el.querySelector('.miniview');
       if (miniview)
         updateMiniviewClipping(miniview);
     }
@@ -518,7 +599,7 @@ function setShownSections(newShownSections) {
 
 function layoutRecentlyClosed() {
   var recentElement = $('recently-closed');
-  var miniview = recentElement.getElementsByClassName('miniview')[0];
+  var miniview = recentElement.querySelector('.miniview');
 
   updateMiniviewClipping(miniview);
 
@@ -723,7 +804,17 @@ function afterTransition(f) {
 
 var notificationTimeout;
 
-function showNotification(text, actionText, opt_f, opt_delay) {
+/*
+ * Displays a message (either a string or a document fragment) in the
+ * notification slot at the top of the NTP.
+ * @param {string|Node} message String or node to use as message.
+ * @param {string} actionText The text to show as a link next to the message.
+ * @param {function=} opt_f Function to call when the user clicks the action
+ *                          link.
+ * @param {number=} opt_delay The time in milliseconds before hiding the
+ * i                          notification.
+ */
+function showNotification(message, actionText, opt_f, opt_delay) {
   var notificationElement = $('notification');
   var f = opt_f || function() {};
   var delay = opt_delay || 10000;
@@ -743,11 +834,20 @@ function showNotification(text, actionText, opt_f, opt_delay) {
     hideNotification();
   }
 
-  // Remove any possible first-run trails.
+  // Remove classList entries from previous notifications.
   notification.classList.remove('first-run');
+  notification.classList.remove('promo');
+
+  var notificationNode = notificationElement.firstElementChild;
+  notificationNode.removeChild(notificationNode.firstChild);
 
   var actionLink = notificationElement.querySelector('.link-color');
-  notificationElement.firstElementChild.textContent = text;
+
+  if (typeof message == 'string')
+    notificationElement.firstElementChild.textContent = message;
+  else
+    notificationElement.firstElementChild.appendChild(message);
+
   actionLink.textContent = actionText;
 
   actionLink.onclick = doAction;
@@ -786,6 +886,15 @@ function showFirstRunNotification() {
                    null, 30000);
   var notificationElement = $('notification');
   notification.classList.add('first-run');
+}
+
+function showPromoNotification() {
+  showNotification(parseHtmlSubset(localStrings.getString('serverpromo')),
+                   localStrings.getString('closefirstrunnotification'),
+                   function () { chrome.send('closePromo'); },
+                   60000);
+  var notificationElement = $('notification');
+  notification.classList.add('promo');
 }
 
 $('main').addEventListener('click', function(e) {
@@ -845,13 +954,28 @@ function maybeReopenTab(e) {
     chrome.send('reopenTab', [String(el.sessionId)]);
     e.preventDefault();
 
-    // HACK(arv): After the window onblur event happens we get a mouseover event
-    // on the next item and we want to make sure that we do not show a tooltip
-    // for that.
-    window.setTimeout(function() {
-      windowTooltip.hide();
-    }, 2 * WindowTooltip.DELAY);
+    setWindowTooltipTimeout();
   }
+}
+
+function maybeReopenSession(e) {
+  var el = findAncestor(e.target, function(el) {
+    return el.sessionId;
+  });
+  if (el) {
+    chrome.send('reopenForeignSession', [String(el.sessionTag)]);
+
+    setWindowTooltipTimeout();
+  }
+}
+
+// HACK(arv): After the window onblur event happens we get a mouseover event
+// on the next item and we want to make sure that we do not show a tooltip
+// for that.
+function setWindowTooltipTimeout(e) {
+  window.setTimeout(function() {
+    windowTooltip.hide();
+  }, 2 * WindowTooltip.DELAY);
 }
 
 function maybeShowWindowTooltip(e) {
@@ -874,6 +998,15 @@ recentlyClosedElement.addEventListener('keydown',
 
 recentlyClosedElement.addEventListener('mouseover', maybeShowWindowTooltip);
 recentlyClosedElement.addEventListener('focus', maybeShowWindowTooltip, true);
+
+var foreignSessionElement = $('foreign-sessions');
+
+foreignSessionElement.addEventListener('click', maybeReopenSession);
+foreignSessionElement.addEventListener('keydown',
+                                       handleIfEnterKey(maybeReopenSession));
+
+foreignSessionElement.addEventListener('mouseover', maybeShowWindowTooltip);
+foreignSessionElement.addEventListener('focus', maybeShowWindowTooltip, true);
 
 /**
  * This object represents a tooltip representing a closed window. It is
@@ -1064,12 +1197,10 @@ function initializeLogin() {
 }
 
 function updateLogin(login) {
-  if (login) {
-    document.getElementById("login-username").innerText = login;
-    document.getElementById("login").style.display = 'block';
-  } else {
-    document.getElementById("login").style.display = 'none';
-  }
+  $('login-container').style.display = login ? 'block' : '';
+  if (login)
+    $('login-username').textContent = login;
+
 }
 
 var mostVisited = new MostVisited(
@@ -1097,6 +1228,8 @@ function mostVisitedPages(data, firstRun, hasBlacklistedUrls) {
   // Only show the first run notification if first run.
   if (firstRun) {
     showFirstRunNotification();
+  } else if (localStrings.getString('serverpromo')) {
+    showPromoNotification();
   }
 }
 
@@ -1111,9 +1244,9 @@ function isDoneLoading() {
 
 // Initialize the apps promo.
 document.addEventListener('DOMContentLoaded', function() {
-  var promoText1 = $('apps-promo-text1');
-  promoText1.innerHTML = promoText1.textContent;
-  promoText1.querySelector('a').href = localStrings.getString('web_store_url');
+  var promoLink = document.querySelector('#apps-promo-text1 a');
+  promoLink.id = 'apps-promo-link';
+  promoLink.href = localStrings.getString('web_store_url');
 
   $('apps-promo-hide').addEventListener('click', function() {
     chrome.send('hideAppsPromo', []);

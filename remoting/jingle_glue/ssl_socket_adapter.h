@@ -12,8 +12,8 @@
 #include "net/base/net_log.h"
 #include "net/socket/client_socket.h"
 #include "net/socket/ssl_client_socket.h"
-#include "talk/base/asyncsocket.h"
-#include "talk/base/ssladapter.h"
+#include "third_party/libjingle/source/talk/base/asyncsocket.h"
+#include "third_party/libjingle/source/talk/base/ssladapter.h"
 
 namespace remoting {
 
@@ -46,6 +46,7 @@ class TransportSocket : public net::ClientSocket, public sigslot::has_slots<> {
   virtual void SetSubresourceSpeculation();
   virtual void SetOmniboxSpeculation();
   virtual bool WasEverUsed() const;
+  virtual bool UsingTCPFastOpen() const;
 
   // net::Socket implementation
 

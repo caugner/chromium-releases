@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "base/string16.h"
 #include "gfx/canvas.h"
 #include "skia/ext/platform_canvas.h"
 
@@ -48,7 +49,7 @@ class CanvasSkia : public skia::PlatformCanvas,
   // Attempts to fit the text with the provided width and height. Increases
   // height and then width as needed to make the text fit. This method
   // supports multiple lines.
-  static void SizeStringInt(const std::wstring& text,
+  static void SizeStringInt(const string16& text,
                             const gfx::Font& font,
                             int* width, int* height,
                             int flags);
@@ -67,11 +68,13 @@ class CanvasSkia : public skia::PlatformCanvas,
   void DrawGdkPixbuf(GdkPixbuf* pixbuf, int x, int y);
 #endif
 
-#ifdef OS_WIN  // Only implemented on Windows for now.
-  // Draws text with a 1-pixel halo around it of the given color. It allows
-  // ClearType to be drawn to an otherwise transparenct bitmap for drag images.
-  // Drag images have only 1-bit of transparency, so we don't do any fancy
-  // blurring.
+#if defined(OS_WIN) || (defined(OS_POSIX) && !defined(OS_MACOSX))
+  // Draws text with a 1-pixel halo around it of the given color.
+  // On Windows, it allows ClearType to be drawn to an otherwise transparenct
+  //   bitmap for drag images. Drag images have only 1-bit of transparency, so
+  //   we don't do any fancy blurring.
+  // On Linux, text with halo is created by stroking it with 2px |halo_color|
+  //   then filling it with |text_color|.
   void DrawStringWithHalo(const std::wstring& text,
                           const gfx::Font& font,
                           const SkColor& text_color,
@@ -92,6 +95,8 @@ class CanvasSkia : public skia::PlatformCanvas,
   virtual void TranslateInt(int x, int y);
   virtual void ScaleInt(int x, int y);
   virtual void FillRectInt(const SkColor& color, int x, int y, int w, int h);
+  virtual void FillRectInt(const SkColor& color, int x, int y, int w, int h,
+                           SkXfermode::Mode mode);
   virtual void FillRectInt(const gfx::Brush* brush, int x, int y, int w, int h);
   virtual void DrawRectInt(const SkColor& color, int x, int y, int w, int h);
   virtual void DrawRectInt(const SkColor& color,

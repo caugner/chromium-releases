@@ -25,9 +25,11 @@
 #include "chrome/test/webdriver/session_manager.h"
 #include "chrome/test/webdriver/utility_functions.h"
 #include "chrome/test/webdriver/commands/create_session.h"
+#include "chrome/test/webdriver/commands/execute_command.h"
 #include "chrome/test/webdriver/commands/navigate_commands.h"
 #include "chrome/test/webdriver/commands/session_with_id.h"
 #include "chrome/test/webdriver/commands/source_command.h"
+#include "chrome/test/webdriver/commands/speed_command.h"
 #include "chrome/test/webdriver/commands/title_command.h"
 #include "chrome/test/webdriver/commands/url_command.h"
 
@@ -58,11 +60,13 @@ void SetCallback(struct mg_context* ctx, const char* pattern) {
 void InitCallbacks(struct mg_context* ctx) {
   SetCallback<CreateSession>(ctx,   "/session");
   SetCallback<BackCommand>(ctx,     "/session/*/back");
+  SetCallback<ExecuteCommand>(ctx,  "/session/*/execute");
   SetCallback<ForwardCommand>(ctx,  "/session/*/forward");
   SetCallback<RefreshCommand>(ctx,  "/session/*/refresh");
   SetCallback<SourceCommand>(ctx,   "/session/*/source");
   SetCallback<TitleCommand>(ctx,    "/session/*/title");
   SetCallback<URLCommand>(ctx,      "/session/*/url");
+  SetCallback<SpeedCommand>(ctx,    "/session/*/speed");
 
   // Since the /session/* is a wild card that would match the above URIs, this
   // line MUST be the last registered URI with the server.
@@ -81,6 +85,7 @@ int main(int argc, char *argv[]) {
   CommandLine cmd_line = CommandLine(argc, argv);
 #elif OS_WIN
   std::string c;
+
   for (int i = 0; i < argc; ++i) {
     c += std::string(argv[i]);
   }
@@ -100,7 +105,7 @@ int main(int argc, char *argv[]) {
     port = cmd_line.GetSwitchValueASCII(std::string("port"));
   }
 
-  LOG(INFO) << "Using port: " << port;
+  VLOG(1) << "Using port: " << port;
   webdriver::SessionManager* session =
       Singleton<webdriver::SessionManager>::get();
   session->SetIPAddress(port);
@@ -115,9 +120,8 @@ int main(int argc, char *argv[]) {
 
   std::cout << "Starting server" << std::endl;
   // The default behavior is to run this service forever.
-  while (true) {
+  while (true)
     PlatformThread::Sleep(3600);
-  }
 
   // We should not reach here since the service should never quit.
   // TODO(jmikhail): register a listener for SIGTERM and break the

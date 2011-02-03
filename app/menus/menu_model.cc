@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,11 @@ bool MenuModel::GetModelAndIndexForCommandId(int command_id,
     }
   }
   return false;
+}
+
+// Default implementation ignores the disposition.
+void MenuModel::ActivatedAtWithDisposition(int index, int disposition) {
+  ActivatedAt(index);
 }
 
 }  // namespace

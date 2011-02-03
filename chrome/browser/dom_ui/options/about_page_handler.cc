@@ -15,10 +15,11 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/platform_util.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/common/chrome_version_info.h"
 #include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -33,7 +34,9 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/power_library.h"
 #include "chrome/browser/chromeos/cros/update_library.h"
+#include "chrome/browser/chromeos/login/wizard_controller.h"
 #endif
 
 namespace {
@@ -66,6 +69,7 @@ const LocalizeEntry localize_table[] = {
     { "loading", IDS_ABOUT_PAGE_LOADING },
     { "check_now", IDS_ABOUT_PAGE_CHECK_NOW },
     { "update_status", IDS_UPGRADE_CHECK_STARTED },
+    { "restart_now", IDS_RESTART_AND_UPDATE },
 #else
     { "product", IDS_PRODUCT_NAME },
     { "check_now", IDS_ABOUT_CHROME_UPDATE_CHECK },
@@ -77,6 +81,9 @@ const LocalizeEntry localize_table[] = {
     { "release", IDS_ABOUT_PAGE_CHANNEL_RELEASE },
     { "beta", IDS_ABOUT_PAGE_CHANNEL_BETA },
     { "development", IDS_ABOUT_PAGE_CHANNEL_DEVELOPMENT },
+    { "canary", IDS_ABOUT_PAGE_CHANNEL_CANARY },
+    { "channel_warning_header", IDS_ABOUT_PAGE_CHANNEL_WARNING_HEADER },
+    { "channel_warning_text", IDS_ABOUT_PAGE_CHANNEL_WARNING_TEXT },
     { "user_agent", IDS_ABOUT_VERSION_USER_AGENT },
     { "command_line", IDS_ABOUT_VERSION_COMMAND_LINE },
     { "aboutPage", IDS_ABOUT_PAGE_TITLE }
@@ -235,10 +242,14 @@ void AboutPageHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
 void AboutPageHandler::RegisterMessages() {
   dom_ui_->RegisterMessageCallback("PageReady",
       NewCallback(this, &AboutPageHandler::PageReady));
+  dom_ui_->RegisterMessageCallback("SetReleaseTrack",
+      NewCallback(this, &AboutPageHandler::SetReleaseTrack));
 
 #if defined(OS_CHROMEOS)
   dom_ui_->RegisterMessageCallback("CheckNow",
       NewCallback(this, &AboutPageHandler::CheckNow));
+  dom_ui_->RegisterMessageCallback("RestartNow",
+      NewCallback(this, &AboutPageHandler::RestartNow));
 #endif
 }
 
@@ -246,21 +257,52 @@ void AboutPageHandler::PageReady(const ListValue* args) {
 #if defined(OS_CHROMEOS)
   // Version information is loaded from a callback
   loader_.GetVersion(&consumer_,
-                     NewCallback(this, &AboutPageHandler::OnOSVersion));
+                     NewCallback(this, &AboutPageHandler::OnOSVersion),
+                     chromeos::VersionLoader::VERSION_FULL);
+
+  chromeos::UpdateLibrary* update_library =
+      chromeos::CrosLibrary::Get()->GetUpdateLibrary();
+
+  // Update the channel information.
+  std::string channel = update_library->GetReleaseTrack();
+  scoped_ptr<Value> channel_string(Value::CreateStringValue(channel));
+  dom_ui_->CallJavascriptFunction(L"AboutPage.updateSelectedOptionCallback",
+                                  *channel_string);
 
   update_observer_.reset(new UpdateObserver(this));
-  chromeos::CrosLibrary::Get()->GetUpdateLibrary()->
-      AddObserver(update_observer_.get());
+  update_library->AddObserver(update_observer_.get());
 
+  // Update the DOMUI page with the current status. See comments below.
+  UpdateStatus(update_library->status());
+
+  // Initiate update check. UpdateStatus() below will be called when we
+  // get update status via update_observer_. If the update has been
+  // already complete, update_observer_ won't receive a notification.
+  // This is why we manually update the DOMUI page above.
   CheckNow(NULL);
+#endif
+}
+
+void AboutPageHandler::SetReleaseTrack(const ListValue* args) {
+#if defined(OS_CHROMEOS)
+  const std::string channel = WideToUTF8(ExtractStringValue(args));
+  chromeos::CrosLibrary::Get()->GetUpdateLibrary()->SetReleaseTrack(channel);
 #endif
 }
 
 #if defined(OS_CHROMEOS)
 
 void AboutPageHandler::CheckNow(const ListValue* args) {
-  if (chromeos::InitiateUpdateCheck)
-    chromeos::InitiateUpdateCheck();
+  // Make sure that libcros is loaded and OOBE is complete.
+  if (chromeos::CrosLibrary::Get()->EnsureLoaded() &&
+      (!WizardController::default_controller() ||
+        WizardController::IsDeviceRegistered())) {
+    chromeos::CrosLibrary::Get()->GetUpdateLibrary()->CheckForUpdate();
+  }
+}
+
+void AboutPageHandler::RestartNow(const ListValue* args) {
+  chromeos::CrosLibrary::Get()->GetPowerLibrary()->RequestRestart();
 }
 
 void AboutPageHandler::UpdateStatus(
@@ -326,9 +368,13 @@ void AboutPageHandler::UpdateStatus(
       break;
   }
   if (message.size()) {
-    scoped_ptr<Value> version_string(Value::CreateStringValue(message));
+    scoped_ptr<Value> update_message(Value::CreateStringValue(message));
+    // "Checking for update..." needs to be shown for a while, so users
+    // can read it, hence insert delay for this.
+    scoped_ptr<Value> insert_delay(Value::CreateBooleanValue(
+        status.status == chromeos::UPDATE_STATUS_CHECKING_FOR_UPDATE));
     dom_ui_->CallJavascriptFunction(L"AboutPage.updateStatusCallback",
-                                    *version_string);
+                                    *update_message, *insert_delay);
 
     scoped_ptr<Value> enabled_value(Value::CreateBooleanValue(enabled));
     dom_ui_->CallJavascriptFunction(L"AboutPage.updateEnableCallback",
@@ -337,6 +383,10 @@ void AboutPageHandler::UpdateStatus(
     scoped_ptr<Value> image_string(Value::CreateStringValue(image));
     dom_ui_->CallJavascriptFunction(L"AboutPage.setUpdateImage",
                                     *image_string);
+  }
+  // We'll change the "Check For Update" button to "Restart" button.
+  if (status.status == chromeos::UPDATE_STATUS_UPDATED_NEED_REBOOT) {
+    dom_ui_->CallJavascriptFunction(L"AboutPage.changeToRestartButton");
   }
 }
 
@@ -349,4 +399,3 @@ void AboutPageHandler::OnOSVersion(chromeos::VersionLoader::Handle handle,
   }
 }
 #endif
-

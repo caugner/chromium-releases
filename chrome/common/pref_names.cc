@@ -119,6 +119,10 @@ const char kFormAutofillEnabled[] = "profile.form_autofill_enabled";
 // Boolean that is true when SafeBrowsing is enabled.
 const char kSafeBrowsingEnabled[] = "safebrowsing.enabled";
 
+// Boolean that is true when SafeBrowsing Malware Report is enabled.
+const char kSafeBrowsingReportingEnabled[] =
+    "safebrowsing.reporting_enabled";
+
 // Boolean that is true when Suggest support is enabled.
 const char kSearchSuggestEnabled[] = "search.suggest_enabled";
 
@@ -194,6 +198,9 @@ const char kDnsPrefetchingEnabled[] = "dns_prefetching.enabled";
 // next startup, based on what was actually needed during this startup.
 const char kDnsStartupPrefetchList[] = "StartupDNSPrefetchList";
 
+// Disables the SPDY protocol.
+const char kDisableSpdy[] = "spdy.disabled";
+
 // A list of host names used to fetch web pages, and their commonly used
 // sub-resource hostnames (and expected latency benefits from pre-resolving, or
 // preconnecting to, such sub-resource hostnames).
@@ -209,9 +216,19 @@ const char kInstantConfirmDialogShown[] = "instant.confirm_dialog_shown";
 // Boolean pref indicating if instant is enabled.
 const char kInstantEnabled[] = "instant.enabled";
 
-#if defined(USE_NSS)
+// Boolean pref indicating if instant was ever enabled.
+const char kInstantEnabledOnce[] = "instant.enabled_once";
+
+// Time when instant was last enabled.
+const char kInstantEnabledTime[] = "instant.enabled_time";
+
+// Used to maintain instant promo keys. See PromoCounter for details of subkeys
+// that are used.
+const char kInstantPromo[] = "instant.promo";
+
+#if defined(USE_NSS) || defined(USE_OPENSSL)
 // Prefs for SSLConfigServicePref.  Currently, these are only present on
-// and used by NSS-using OSes.
+// and used by NSS/OpenSSL using OSes.
 const char kCertRevocationCheckingEnabled[] = "ssl.rev_checking.enabled";
 const char kSSL2Enabled[] = "ssl.ssl2.enabled";
 const char kSSL3Enabled[] = "ssl.ssl3.enabled";
@@ -394,12 +411,12 @@ const char kLabsAdvancedFilesystemEnabled[] =
 // A boolean pref which turns on the mediaplayer.
 const char kLabsMediaplayerEnabled[] = "settings.labs.mediaplayer";
 
-// An integer pref which maps to the extension state for Talk.
-const char kLabsTalkEnabled[] =
-    "extensions.settings.ggnioahjipcehijkhpdjekioddnjoben.state";
-
 // A boolean pref that turns on screen locker.
 const char kEnableScreenLock[] = "settings.enable_screen_lock";
+
+// A boolean pref of whether to show mobile plan notifications.
+const char kShowPlanNotifications[] =
+    "settings.internet.mobile.show_plan_notifications";
 
 #endif  // defined(OS_CHROMEOS)
 
@@ -481,7 +498,7 @@ const char kPluginsPluginsBlacklist[] = "plugins.plugins_blacklist";
 
 // When first shipped, the pdf plugin will be disabled by default.  When we
 // enable it by default, we'll want to do so only once.
-const char kPluginsEnabledInternalPDF[] = "plugins.enabled_internal_pdf2";
+const char kPluginsEnabledInternalPDF[] = "plugins.enabled_internal_pdf3";
 
 // Boolean that indicates whether we should check if we are the default browser
 // on start-up.
@@ -538,6 +555,9 @@ const char kBlockNonsandboxedPlugins[] = "profile.block_nonsandboxed_plugins";
 // storage, etc..) should be deleted on exit.
 const char kClearSiteDataOnExit[] = "profile.clear_site_data_on_exit";
 
+// Double that indicates the default zoom level.
+const char kDefaultZoomLevel[] = "profile.default_zoom_level";
+
 // Dictionary that maps hostnames to zoom levels.  Hosts not in this pref will
 // be displayed at the default zoom level.
 const char kPerHostZoomLevels[] = "profile.per_host_zoom_levels";
@@ -577,6 +597,9 @@ const char kGeolocationDefaultContentSetting[] =
 
 // Dictionary that maps [frame, toplevel] to their Geolocation content setting.
 const char kGeolocationContentSettings[] = "geolocation.content_settings";
+
+// Preference to disable 3D APIs (WebGL, Pepper 3D).
+const char kDisable3DAPIs[] = "disable_3d_apis";
 
 // *************** LOCAL STATE ***************
 // These are attached to the machine/installation
@@ -728,10 +751,6 @@ const char kBrowserWindowPlacement[] = "browser.window_placement";
 // manager window to restore on startup.
 const char kTaskManagerWindowPlacement[] = "task_manager.window_placement";
 
-// A collection of position, size, and other data relating to the page info
-// window to restore on startup.
-const char kPageInfoWindowPlacement[] = "page_info.window_placement";
-
 // A collection of position, size, and other data relating to the keyword
 // editor window to restore on startup.
 const char kKeywordEditorWindowPlacement[] = "keyword_editor.window_placement";
@@ -743,10 +762,6 @@ const char kPreferencesWindowPlacement[] = "preferences.window_placement";
 // An integer specifying the total number of bytes to be used by the
 // renderer's in-memory cache of objects.
 const char kMemoryCacheSize[] = "renderer.memory_cache.size";
-
-// Boolean that records if chrome should run in background mode when background
-// apps are installed.
-const char kBackgroundModeEnabled[] = "background_mode.enabled";
 
 // Boolean that records if chrome has set "launch on startup" property for
 // itself earlier and is allowed to reset it later, reducing likelihood of
@@ -765,7 +780,7 @@ const char kSaveFileDefaultDirectory[] = "savefile.default_directory";
 
 // String which specifies the last directory that was chosen for uploading
 // or opening a file.
-extern const char kSelectFileLastDirectory[] = "selectfile.last_directory";
+const char kSelectFileLastDirectory[] = "selectfile.last_directory";
 
 // Extensions which should be opened upon completion.
 const char kDownloadExtensionsToOpen[] = "download.extensions_to_open";
@@ -837,7 +852,7 @@ const char kLastPromptedGoogleURL[] = "browser.last_prompted_google_url";
 
 // String containing the last known intranet redirect URL, if any.  See
 // intranet_redirect_detector.h for more information.
-const char kLastKnownIntranetRedirectOrigin[] = "";
+const char kLastKnownIntranetRedirectOrigin[] = "browser.last_redirect_origin";
 
 // Integer containing the system Country ID the first time we checked the
 // template URL prepopulate data.  This is used to avoid adding a whole bunch of
@@ -885,13 +900,21 @@ const char kDisableExtensions[] = "extensions.disabled";
 const char kBrowserActionContainerWidth[] =
     "extensions.browseractions.container.width";
 
-// A whitelist of extension the user can install. This is controlled by the
-// administrator.
+// A whitelist of extension ids the user can install: exceptions from the
+// following blacklist. This is controlled by the administrator.
 const char kExtensionInstallAllowList[] = "extensions.install.allowlist";
-// A blacklist, containing extensions the user cannot install.  This is
-// controlled by the administrator. This list should not be confused with
-// the extension blacklist, which is Google controlled.
+// A blacklist, containing extensions the user cannot install. This list can
+// conatin "*" meaning all extensions. This is controlled by the administrator.
+// This list should not be confused with the extension blacklist, which is
+// Google controlled.
 const char kExtensionInstallDenyList[] = "extensions.install.denylist";
+
+// A list containing extensions that Chrome will silently install
+// at startup time. It is a list of strings, each string contains
+// an extension ID and an update URL, delimited by a semicolon.
+// This preference is set by an admin policy, and meant to be only
+// accessed through ExternalPolicyExtensionProvider.
+const char kExtensionInstallForceList[] = "extensions.install.forcelist";
 
 // Time of the last, and next scheduled, extensions auto-update checks.
 const char kLastExtensionsUpdateCheck[] = "extensions.autoupdate.last_check";
@@ -916,11 +939,14 @@ const char kNTPWebResourceCache[] = "ntp.web_resource_cache";
 // Last time of update of web_resource_cache.
 const char kNTPWebResourceCacheUpdate[] = "ntp.web_resource_cache_update";
 
-// Last server used to fill tips.
+// Serves resources for the NTP.
+const char kNTPWebResourceServer[] = "ntp.web_resource_server";
+
+// Serves tips for the NTP.
 const char kNTPTipsResourceServer[] = "ntp.tips_resource_server";
 
-// Last server used to fill logo_resource_cache.
-const char kNTPLogoResourceServer[] = "ntp.alt_logo_resource_server";
+// Serves dates to determine display of elements on the NTP.
+const char kNTPDateResourceServer[] = "ntp.date_resource_server";
 
 // Which sections should be visible on the new tab page
 // 1 - Show the most visited sites in a grid
@@ -937,6 +963,19 @@ const char kNTPPrefVersion[] = "ntp.pref_version";
 // standard one.
 const char kNTPCustomLogoStart[] = "ntp.alt_logo_start";
 const char kNTPCustomLogoEnd[] = "ntp.alt_logo_end";
+
+// Dates between which the NTP should show a promotional line downloaded
+// from the promo server.
+const char kNTPPromoStart[] = "ntp.promo_start";
+const char kNTPPromoEnd[] = "ntp.promo_end";
+
+// Promo line from server.
+const char kNTPPromoLine[] = "ntp.promo_line";
+
+// True if user has explicitly closed the promo line.
+const char kNTPPromoClosed[] = "ntp.promo_closed";
+
+const char kDevToolsDisabled[] = "devtools.disabled";
 
 // A boolean specifying whether dev tools window should be opened docked.
 const char kDevToolsOpenDocked[] = "devtools.open_docked";
@@ -1007,11 +1046,40 @@ const char kLoginDatabaseMigrated[] = "login_database.migrated";
 // The root URL of the cloud print service.
 const char kCloudPrintServiceURL[] = "cloud_print.service_url";
 
+// The last requested size of the dialog as it was closed.
+const char kCloudPrintDialogWidth[] = "cloud_print.dialog_size.width";
+const char kCloudPrintDialogHeight[] = "cloud_print.dialog_size.height";
+
 const char kRemotingHasSetupCompleted[] = "remoting.has_setup_completed";
 
 // The list of BackgroundContents that should be loaded when the browser
 // launches.
 const char kRegisteredBackgroundContents[] = "background_contents.registered";
+
+// String that lists supported HTTP authentication schemes.
+const char kAuthSchemes[] = "auth.schemes";
+
+// Boolean that specifies whether to disable CNAME lookups when generating
+// Kerberos SPN.
+const char kDisableAuthNegotiateCnameLookup[] =
+    "auth.disable_negotiate_cname_lookup";
+// Boolean that specifies whether to include the port in a generated Kerberos
+// SPN.
+const char kEnableAuthNegotiatePort[] = "auth.enable_negotiate_port";
+// Whitelist containing servers for which Integrated Authentication is enabled.
+const char kAuthServerWhitelist[] = "auth.server_whitelist";
+// Whitelist containing servers Chrome is allowed to do Kerberos delegation
+// with.
+const char kAuthNegotiateDelegateWhitelist[] =
+    "auth.negotiate_delegate_whitelist";
+// String that specifies the name of a custom GSSAPI library to load.
+const char kGSSAPILibraryName[] = "auth.gssapi_library_name";
+
+#if defined(OS_CHROMEOS)
+// Dictionary for transient storage of settings that should go into signed
+// settings storage before owner has been assigned.
+const char kSignedSettingsTempStorage[] = "signed_settings_temp_storage";
+#endif
 
 // *************** SERVICE PREFS ***************
 // These are attached to the service process.
@@ -1026,9 +1094,9 @@ const char kCloudPrintAuthToken[] = "cloud_print.auth_token";
 const char kCloudPrintXMPPAuthToken[] = "cloud_print.xmpp_auth_token";
 // The email address of the account used to authenticate with the Cloud Print
 // server.
-extern const char kCloudPrintEmail[] = "cloud_print.email";
+const char kCloudPrintEmail[] = "cloud_print.email";
 // Settings specific to underlying print system.
-extern const char kCloudPrintPrintSystemSettings[] =
+const char kCloudPrintPrintSystemSettings[] =
     "cloud_print.print_system_settings";
 
 // Used by the service process to determine if the remoting host is enabled.
@@ -1048,4 +1116,21 @@ const char kProxyPacUrl[] = "proxy.pac_url";
 // expected syntax see net::ProxyBypassRules::ParseFromString().
 const char kProxyBypassList[] = "proxy.bypass_list";
 
+// Preferences that are exclusivly used to store managed values for default
+// content settings.
+const char kManagedDefaultCookiesSetting[] =
+    "profile.managed_default_content_settings.cookies";
+const char kManagedDefaultImagesSetting[] =
+    "profile.managed_default_content_settings.images";
+const char kManagedDefaultJavaScriptSetting[] =
+    "profile.managed_default_content_settings.javascript";
+const char kManagedDefaultPluginsSetting[] =
+    "profile.managed_default_content_settings.plugins";
+const char kManagedDefaultPopupsSetting[] =
+    "profile.managed_default_content_settings.popups";
+
+// Dictionary for storing the set of known background pages (keys are extension
+// IDs of background page owners, value is a boolean that is true if the user
+// needs to acknowledge this page.
+const char kKnownBackgroundPages[] = "background_pages.known";
 }  // namespace prefs

@@ -9,9 +9,8 @@
 #include <gtk/gtk.h>
 #include <map>
 
-#include "app/animation.h"
+#include "app/animation_delegate.h"
 #include "app/gtk_signal.h"
-#include "app/slide_animation.h"
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
@@ -29,6 +28,7 @@ class Size;
 
 class CustomDrawButton;
 class GtkThemeProvider;
+class SlideAnimation;
 class TabContents;
 class ThemeProvider;
 class ThrobAnimation;
@@ -60,6 +60,8 @@ class TabRendererGtk : public AnimationDelegate,
 
     // Used in unit tests to inject specific data.
     explicit LoadingAnimation(const LoadingAnimation::Data& data);
+
+    virtual ~LoadingAnimation();
 
     // Advance the loading animation to the next frame, or hide the animation if
     // the tab isn't loading. Returns |true| if the icon area needs to be
@@ -168,6 +170,9 @@ class TabRendererGtk : public AnimationDelegate,
 
   // Repaint only the area of the tab that contains the favicon.
   void PaintFavIconArea(GdkEventExpose* event);
+
+  // Returns whether the Tab should display a favicon.
+  bool ShouldShowIcon() const;
 
   // Returns the minimum possible size of a single unselected Tab.
   static gfx::Size GetMinimumUnselectedSize();
@@ -338,8 +343,6 @@ class TabRendererGtk : public AnimationDelegate,
   // current size.
   int IconCapacity() const;
 
-  // Returns whether the Tab should display a favicon.
-  bool ShouldShowIcon() const;
 
   // Returns whether the Tab should display a close button.
   bool ShouldShowCloseBox() const;

@@ -9,13 +9,21 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/string_util.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/net/load_timing_observer.h"
 #include "chrome/browser/net/net_log_logger.h"
 #include "chrome/browser/net/passive_log_collector.h"
 #include "chrome/common/chrome_switches.h"
 
 ChromeNetLog::Observer::Observer(LogLevel log_level) : log_level_(log_level) {}
+
+net::NetLog::LogLevel ChromeNetLog::Observer::log_level() const {
+  return log_level_;
+}
+
+void ChromeNetLog::Observer::set_log_level(net::NetLog::LogLevel log_level) {
+  log_level_ = log_level;
+}
 
 ChromeNetLog::ChromeNetLog()
     : next_id_(1),

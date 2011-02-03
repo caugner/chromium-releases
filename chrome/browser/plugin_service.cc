@@ -14,10 +14,9 @@
 #include "base/values.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chrome_plugin_host.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/plugin_process_host.h"
 #include "chrome/browser/plugin_updater.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
@@ -61,17 +60,9 @@ static void NotifyPluginsOfActivation() {
 // static
 bool PluginService::enable_chrome_plugins_ = true;
 
-void LoadPluginsFromDiskHook() {
-  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI) &&
-         !BrowserThread::CurrentlyOn(BrowserThread::IO)) <<
-         "Can't load plugins on the IO/UI threads since it's very slow.";
-}
-
 // static
 void PluginService::InitGlobalInstance(Profile* profile) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  NPAPI::PluginList::Singleton()->SetPluginLoadHook(LoadPluginsFromDiskHook);
 
   // We first group the plugins and then figure out which groups to disable.
   PluginUpdater::GetPluginUpdater()->DisablePluginGroupsFromPrefs(profile);
@@ -208,11 +199,6 @@ PluginProcessHost* PluginService::FindPluginProcess(
     const FilePath& plugin_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (plugin_path.value().empty()) {
-    NOTREACHED() << "should only be called if we have a plugin to load";
-    return NULL;
-  }
-
   for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::PLUGIN_PROCESS);
        !iter.Done(); ++iter) {
     PluginProcessHost* plugin = static_cast<PluginProcessHost*>(*iter);
@@ -227,47 +213,44 @@ PluginProcessHost* PluginService::FindOrStartPluginProcess(
     const FilePath& plugin_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  PluginProcessHost *plugin_host = FindPluginProcess(plugin_path);
+  PluginProcessHost* plugin_host = FindPluginProcess(plugin_path);
   if (plugin_host)
     return plugin_host;
 
   WebPluginInfo info;
   if (!NPAPI::PluginList::Singleton()->GetPluginInfoByPath(
-          plugin_path, &info)) {
-    DCHECK(false);
+      plugin_path, &info)) {
+    NOTREACHED();
     return NULL;
   }
 
   // This plugin isn't loaded by any plugin process, so create a new process.
-  plugin_host = new PluginProcessHost();
-  if (!plugin_host->Init(info, ui_locale_)) {
-    DCHECK(false);  // Init is not expected to fail
-    delete plugin_host;
+  scoped_ptr<PluginProcessHost> new_host(new PluginProcessHost());
+  if (!new_host->Init(info, ui_locale_)) {
+    NOTREACHED();  // Init is not expected to fail
     return NULL;
   }
 
-  return plugin_host;
+  return new_host.release();
 }
 
 void PluginService::OpenChannelToPlugin(
-    ResourceMessageFilter* renderer_msg_filter,
     const GURL& url,
     const std::string& mime_type,
-    IPC::Message* reply_msg) {
+    PluginProcessHost::Client* client) {
   // The PluginList::GetFirstAllowedPluginInfo may need to load the
   // plugins.  Don't do it on the IO thread.
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(
           this, &PluginService::GetAllowedPluginForOpenChannelToPlugin,
-          renderer_msg_filter, url, mime_type, reply_msg));
+          url, mime_type, client));
 }
 
 void PluginService::GetAllowedPluginForOpenChannelToPlugin(
-    ResourceMessageFilter* renderer_msg_filter,
     const GURL& url,
     const std::string& mime_type,
-    IPC::Message* reply_msg) {
+    PluginProcessHost::Client* client) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   WebPluginInfo info;
   bool found = GetFirstAllowedPluginInfo(url, mime_type, &info, NULL);
@@ -280,23 +263,19 @@ void PluginService::GetAllowedPluginForOpenChannelToPlugin(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
           this, &PluginService::FinishOpenChannelToPlugin,
-          renderer_msg_filter, mime_type, plugin_path, reply_msg));
+          plugin_path, client));
 }
 
 void PluginService::FinishOpenChannelToPlugin(
-    ResourceMessageFilter* renderer_msg_filter,
-    const std::string& mime_type,
     const FilePath& plugin_path,
-    IPC::Message* reply_msg) {
+    PluginProcessHost::Client* client) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   PluginProcessHost* plugin_host = FindOrStartPluginProcess(plugin_path);
-  if (plugin_host) {
-    plugin_host->OpenChannelToPlugin(renderer_msg_filter, mime_type, reply_msg);
-  } else {
-    PluginProcessHost::ReplyToRenderer(
-        renderer_msg_filter, IPC::ChannelHandle(), WebPluginInfo(), reply_msg);
-  }
+  if (plugin_host)
+    plugin_host->OpenChannelToPlugin(client);
+  else
+    client->OnError();
 }
 
 bool PluginService::GetFirstAllowedPluginInfo(
@@ -363,7 +342,7 @@ void PluginService::Observe(NotificationType type,
                             const NotificationDetails& details) {
   switch (type.value) {
     case NotificationType::EXTENSION_LOADED: {
-      Extension* extension = Details<Extension>(details).ptr();
+      const Extension* extension = Details<const Extension>(details).ptr();
       bool plugins_changed = false;
       for (size_t i = 0; i < extension->plugins().size(); ++i) {
         const Extension::PluginInfo& plugin = extension->plugins()[i];
@@ -379,7 +358,7 @@ void PluginService::Observe(NotificationType type,
     }
 
     case NotificationType::EXTENSION_UNLOADED: {
-      Extension* extension = Details<Extension>(details).ptr();
+      const Extension* extension = Details<const Extension>(details).ptr();
       bool plugins_changed = false;
       for (size_t i = 0; i < extension->plugins().size(); ++i) {
         const Extension::PluginInfo& plugin = extension->plugins()[i];

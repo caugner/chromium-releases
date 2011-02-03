@@ -243,9 +243,10 @@ IPC_BEGIN_MESSAGES(Plugin)
                       string16 /* text */)
 #endif
 
-  IPC_SYNC_MESSAGE_ROUTED2_0(PluginMsg_WillSendRequest,
+  IPC_SYNC_MESSAGE_ROUTED3_0(PluginMsg_WillSendRequest,
                              unsigned long /* id */,
-                             GURL /* url */)
+                             GURL /* url */,
+                             int  /* http_status_code */)
 
   IPC_MESSAGE_ROUTED1(PluginMsg_DidReceiveResponse,
                       PluginMsg_DidReceiveResponseParams)
@@ -307,6 +308,11 @@ IPC_BEGIN_MESSAGES(Plugin)
   IPC_MESSAGE_ROUTED1(PluginMsg_SetFakeAcceleratedSurfaceWindowHandle,
                       gfx::PluginWindowHandle /* window */)
 #endif
+
+  IPC_MESSAGE_CONTROL3(PluginMsg_ClearSiteData,
+                       uint64, /* flags */
+                       std::string, /* domain */
+                       base::Time /* begin_time */)
 
 IPC_END_MESSAGES(Plugin)
 
@@ -438,7 +444,7 @@ IPC_BEGIN_MESSAGES(PluginHost)
                       gfx::PluginWindowHandle /* window */,
                       int32 /* width */,
                       int32 /* height */,
-                      uint64 /* identifier for IOSurface */)
+                      uint64 /* surface_id */)
 
 
   // On the Mac, shared memory can't be allocated in the sandbox, so
@@ -458,9 +464,17 @@ IPC_BEGIN_MESSAGES(PluginHost)
   // browser process) that the plug-in swapped the buffers associated
   // with the given "window", which should cause the browser to redraw
   // the various plug-ins' contents.
-  IPC_MESSAGE_ROUTED1(PluginHostMsg_AcceleratedSurfaceBuffersSwapped,
-                      gfx::PluginWindowHandle /* window */)
+  IPC_MESSAGE_ROUTED2(PluginHostMsg_AcceleratedSurfaceBuffersSwapped,
+                      gfx::PluginWindowHandle /* window */,
+                      uint64 /* surface_id */)
 #endif
+
+  IPC_MESSAGE_CONTROL1(PluginHostMsg_ClearSiteDataResult,
+                       bool /* success */)
+
+  IPC_MESSAGE_ROUTED2(PluginHostMsg_URLRedirectResponse,
+                      bool /* allow */,
+                      int  /* resource_id */)
 
 IPC_END_MESSAGES(PluginHost)
 

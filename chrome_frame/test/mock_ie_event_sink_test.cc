@@ -32,7 +32,7 @@ void MockIEEventSink::OnDocumentComplete(IDispatch* dispatch, VARIANT* url) {
                        renderer_window,
                        OBJID_CLIENT, 0L);
     } else {
-      DLOG(INFO) << "Browser does not have renderer window";
+      DVLOG(1) << "Browser does not have renderer window";
     }
     OnLoad(IN_IE, V_BSTR(url));
   }
@@ -62,13 +62,14 @@ ExpectationSet MockIEEventSink::ExpectNavigationCardinality(
   // InSequence.
   DLOG_IF(WARNING, complete_cardinality.ConservativeUpperBound() > 1000)
       << "Cardinality upper bound may be too great to be split up into single "
-      << "expect statements. If you do not require this navigation to be in "
-      << "sequence, do not call this method.";
+         "expect statements. If you do not require this navigation to be in "
+         "sequence, do not call this method.";
   int call_count = 0;
   InSequence expect_in_sequence_for_scope;
   while (!complete_cardinality.IsSaturatedByCallCount(call_count)) {
     navigation += EXPECT_CALL(*this, OnFileDownload(_, _))
         .Times(testing::AtMost(1))
+        .WillOnce(testing::SetArgumentPointee<1>(VARIANT_TRUE))
         .RetiresOnSaturation();
 
     Cardinality split_complete_cardinality = testing::Exactly(1);
@@ -174,6 +175,13 @@ void MockIEEventSink::ExpectDocumentReadystate(int ready_state) {
 // MockIEEventSinkTest methods
 MockIEEventSinkTest::MockIEEventSinkTest() : server_mock_(1337, L"127.0.0.1",
                                                           GetTestDataFolder()) {
+  EXPECT_CALL(server_mock_, Get(_, StrCaseEq(L"/favicon.ico"), _))
+      .WillRepeatedly(SendFast("HTTP/1.1 404 Not Found", ""));
+}
+
+MockIEEventSinkTest::MockIEEventSinkTest(int port, const std::wstring& address,
+                                         const FilePath& root_dir)
+    : server_mock_(port, address, root_dir) {
   EXPECT_CALL(server_mock_, Get(_, StrCaseEq(L"/favicon.ico"), _))
       .WillRepeatedly(SendFast("HTTP/1.1 404 Not Found", ""));
 }

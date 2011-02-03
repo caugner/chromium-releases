@@ -8,7 +8,6 @@
 
 #include <string>
 
-#include "app/gtk_util.h"
 #include "app/keyboard_codes.h"
 #include "app/l10n_util.h"
 #include "base/base_paths.h"
@@ -21,14 +20,14 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/app_modal_dialog_queue.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/dom_ui/bug_report_ui.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/find_bar_controller.h"
@@ -70,19 +69,17 @@
 #include "chrome/browser/page_info_window.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/window_sizer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "gfx/canvas_skia_paint.h"
-#include "gfx/color_utils.h"
 #include "gfx/gtk_util.h"
 #include "gfx/rect.h"
 #include "gfx/skia_utils_gtk.h"
@@ -90,7 +87,6 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "third_party/skia/include/effects/SkGradientShader.h"
 
 namespace {
 
@@ -100,6 +96,8 @@ const int kLoadingAnimationFrameTimeMs = 30;
 // Default height of dev tools pane when docked to the browser window.  This
 // matches the value in Views.
 const int kDefaultDevToolsHeight = 200;
+
+const int kMinDevToolsHeight = 50;
 
 const char* kBrowserWindowKey = "__BROWSER_WINDOW_GTK__";
 
@@ -261,10 +259,6 @@ GdkCursorType GdkWindowEdgeToGdkCursorType(GdkWindowEdge edge) {
   return GDK_LAST_CURSOR;
 }
 
-GdkColor SkColorToGdkColor(const SkColor& color) {
-  return gfx::SkColorToGdkColor(color);
-}
-
 // A helper method for setting the GtkWindow size that should be used in place
 // of calling gtk_window_resize directly.  This is done to avoid a WM "feature"
 // where setting the window size to the monitor size causes the WM to set the
@@ -311,26 +305,6 @@ bool ShouldExecuteReservedCommandImmediately(
   return true;
 }
 
-// Performs Cut/Copy/Paste operation on the |window|.
-// If the current render view is focused, then just call the specified |method|
-// against the current render view host, otherwise emit the specified |signal|
-// against the focused widget.
-// TODO(suzhe): This approach does not work for plugins.
-void DoCutCopyPaste(BrowserWindowGtk* window, void (RenderViewHost::*method)(),
-                    const char* signal) {
-  TabContents* current_tab_contents =
-      window->browser()->tabstrip_model()->GetSelectedTabContents();
-  if (current_tab_contents && current_tab_contents->GetContentNativeView() &&
-      gtk_widget_is_focus(current_tab_contents->GetContentNativeView())) {
-    (current_tab_contents->render_view_host()->*method)();
-  } else {
-    GtkWidget* widget = gtk_window_get_focus(window->window());
-    guint id;
-    if (widget && (id = g_signal_lookup(signal, G_OBJECT_TYPE(widget))) != 0)
-      g_signal_emit(widget, id, 0);
-  }
-}
-
 }  // namespace
 
 std::map<XID, GtkWindow*> BrowserWindowGtk::xid_map_;
@@ -345,7 +319,7 @@ BrowserWindowGtk::BrowserWindowGtk(Browser* browser)
        maximize_after_show_(false),
        suppress_window_raise_(false),
        accel_group_(NULL),
-       infobar_animation_(this) {
+       infobar_arrow_model_(this) {
   // We register first so that other views like the toolbar can use the
   // is_active() function in their ActiveWindowChanged() handlers.
   ActiveWindowWatcherX::AddObserver(this);
@@ -389,8 +363,6 @@ BrowserWindowGtk::BrowserWindowGtk(Browser* browser)
   SetBackgroundColor();
   HideUnsupportedWindowFeatures();
 
-  infobar_animation_.SetTweenType(Tween::LINEAR);
-
   registrar_.Add(this, NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
                  NotificationService::AllSources());
 }
@@ -399,11 +371,6 @@ BrowserWindowGtk::~BrowserWindowGtk() {
   ActiveWindowWatcherX::RemoveObserver(this);
 
   browser_->tabstrip_model()->RemoveObserver(this);
-
-  if (frame_cursor_) {
-    gdk_cursor_unref(frame_cursor_);
-    frame_cursor_ = NULL;
-  }
 }
 
 gboolean BrowserWindowGtk::OnCustomFrameExpose(GtkWidget* widget,
@@ -580,8 +547,7 @@ void BrowserWindowGtk::DrawPopupFrame(cairo_t* cr,
   int image_name = GetThemeFrameResource();
   CairoCachedSurface* surface = theme_provider->GetUnthemedSurfaceNamed(
       image_name, widget);
-  surface->SetSource(
-      cr, 0, UseCustomFrame() ? 0 : -kCustomFrameBackgroundVerticalOffset);
+  surface->SetSource(cr, 0, GetVerticalOffset());
   cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REFLECT);
   cairo_rectangle(cr, event->area.x, event->area.y,
                   event->area.width, event->area.height);
@@ -599,9 +565,8 @@ void BrowserWindowGtk::DrawCustomFrame(cairo_t* cr,
   CairoCachedSurface* surface = theme_provider->GetSurfaceNamed(
       image_name, widget);
   if (event->area.y < surface->Height()) {
-    surface->SetSource(cr,
-        0,
-        UseCustomFrame() ? 0 : -kCustomFrameBackgroundVerticalOffset);
+    surface->SetSource(cr, 0, GetVerticalOffset());
+
     // The frame background isn't tiled vertically.
     cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
     cairo_rectangle(cr, event->area.x, event->area.y,
@@ -614,9 +579,14 @@ void BrowserWindowGtk::DrawCustomFrame(cairo_t* cr,
     CairoCachedSurface* theme_overlay = theme_provider->GetSurfaceNamed(
         IsActive() ? IDR_THEME_FRAME_OVERLAY
         : IDR_THEME_FRAME_OVERLAY_INACTIVE, widget);
-    theme_overlay->SetSource(cr, 0, 0);
+    theme_overlay->SetSource(cr, 0, GetVerticalOffset());
     cairo_paint(cr);
   }
+}
+
+int BrowserWindowGtk::GetVerticalOffset() {
+  return (IsMaximized() || (!UseCustomFrame())) ?
+      -kCustomFrameBackgroundVerticalOffset : 0;
 }
 
 int BrowserWindowGtk::GetThemeFrameResource() {
@@ -762,12 +732,12 @@ void BrowserWindowGtk::UpdateTitleBar() {
 }
 
 void BrowserWindowGtk::ShelfVisibilityChanged() {
-  MaybeShowBookmarkBar(browser_->GetSelectedTabContents(), false);
+  MaybeShowBookmarkBar(false);
 }
 
 void BrowserWindowGtk::UpdateDevTools() {
   UpdateDevToolsForContents(
-      browser_->tabstrip_model()->GetSelectedTabContents());
+      browser_->GetSelectedTabContents());
 }
 
 void BrowserWindowGtk::UpdateLoadingAnimations(bool should_animate) {
@@ -867,9 +837,9 @@ void BrowserWindowGtk::UpdateReloadStopState(bool is_loading, bool force) {
       force);
 }
 
-void BrowserWindowGtk::UpdateToolbar(TabContents* contents,
+void BrowserWindowGtk::UpdateToolbar(TabContentsWrapper* contents,
                                      bool should_restore_state) {
-  toolbar_->UpdateTabContents(contents, should_restore_state);
+  toolbar_->UpdateTabContents(contents->tab_contents(), should_restore_state);
 }
 
 void BrowserWindowGtk::FocusToolbar() {
@@ -906,10 +876,6 @@ bool BrowserWindowGtk::IsBookmarkBarAnimating() const {
 
 bool BrowserWindowGtk::IsToolbarVisible() const {
   return IsToolbarSupported();
-}
-
-gfx::Rect BrowserWindowGtk::GetRootWindowResizerRect() const {
-  return gfx::Rect();
 }
 
 void BrowserWindowGtk::ConfirmAddSearchProvider(const TemplateURL* template_url,
@@ -951,7 +917,7 @@ DownloadShelf* BrowserWindowGtk::GetDownloadShelf() {
 }
 
 void BrowserWindowGtk::ShowReportBugDialog() {
-  NOTIMPLEMENTED();
+  browser::ShowHtmlBugReportView(window_, bounds_, browser_.get());
 }
 
 void BrowserWindowGtk::ShowClearBrowsingDataDialog() {
@@ -1030,11 +996,7 @@ void BrowserWindowGtk::ShowPageInfo(Profile* profile,
                                     const GURL& url,
                                     const NavigationEntry::SSLStatus& ssl,
                                     bool show_history) {
-  const CommandLine* command_line(CommandLine::ForCurrentProcess());
-  if (!command_line->HasSwitch(switches::kDisableNewPageInfoBubble))
-    browser::ShowPageInfoBubble(window_, profile, url, ssl, show_history);
-  else
-    browser::ShowPageInfo(window_, profile, url, ssl, show_history);
+  browser::ShowPageInfoBubble(window_, profile, url, ssl, show_history);
 }
 
 void BrowserWindowGtk::ShowAppMenu() {
@@ -1124,36 +1086,58 @@ void BrowserWindowGtk::HandleKeyboardEvent(
     gtk_window_activate_key(window_, os_event);
 }
 
-void BrowserWindowGtk::ShowCreateShortcutsDialog(TabContents* tab_contents) {
-  CreateApplicationShortcutsDialogGtk::Show(window_, tab_contents);
+void BrowserWindowGtk::ShowCreateWebAppShortcutsDialog(
+    TabContents* tab_contents) {
+  CreateWebApplicationShortcutsDialogGtk::Show(window_, tab_contents);
+}
+
+void BrowserWindowGtk::ShowCreateChromeAppShortcutsDialog(
+    Profile* profile, const Extension* app) {
+  CreateChromeApplicationShortcutsDialogGtk::Show(window_, app);
 }
 
 void BrowserWindowGtk::Cut() {
-  DoCutCopyPaste(this, &RenderViewHost::Cut, "cut-clipboard");
+  gtk_util::DoCut(this);
 }
 
 void BrowserWindowGtk::Copy() {
-  DoCutCopyPaste(this, &RenderViewHost::Copy, "copy-clipboard");
+  gtk_util::DoCopy(this);
 }
 
 void BrowserWindowGtk::Paste() {
-  DoCutCopyPaste(this, &RenderViewHost::Paste, "paste-clipboard");
+  gtk_util::DoPaste(this);
+}
+
+void BrowserWindowGtk::PrepareForInstant() {
+  TabContents* contents = contents_container_->GetTabContents();
+  if (contents)
+    contents->FadeForInstant(true);
 }
 
 void BrowserWindowGtk::ShowInstant(TabContents* preview_contents) {
-  // TODO: implement me
-  NOTIMPLEMENTED();
+  contents_container_->SetPreviewContents(preview_contents);
+  MaybeShowBookmarkBar(false);
+
+  TabContents* contents = contents_container_->GetTabContents();
+  if (contents)
+    contents->CancelInstantFade();
 }
 
-void BrowserWindowGtk::HideInstant() {
-  // TODO: implement me
-  NOTIMPLEMENTED();
+void BrowserWindowGtk::HideInstant(bool instant_is_active) {
+  contents_container_->PopPreviewContents();
+  MaybeShowBookmarkBar(false);
+
+  TabContents* contents = contents_container_->GetTabContents();
+  if (contents) {
+    if (instant_is_active)
+      contents->FadeForInstant(false);
+    else
+      contents->CancelInstantFade();
+  }
 }
 
 gfx::Rect BrowserWindowGtk::GetInstantBounds() {
-  // TODO: implement me
-  NOTIMPLEMENTED();
-  return gfx::Rect();
+  return gtk_util::GetWidgetScreenBounds(contents_container_->widget());
 }
 
 void BrowserWindowGtk::ConfirmBrowserCloseWithPendingDownloads() {
@@ -1165,7 +1149,7 @@ void BrowserWindowGtk::Observe(NotificationType type,
                                const NotificationDetails& details) {
   switch (type.value) {
     case NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED:
-      MaybeShowBookmarkBar(browser_->GetSelectedTabContents(), true);
+      MaybeShowBookmarkBar(true);
       break;
 
     case NotificationType::PREF_CHANGED: {
@@ -1183,48 +1167,44 @@ void BrowserWindowGtk::Observe(NotificationType type,
   }
 }
 
-void BrowserWindowGtk::TabDetachedAt(TabContents* contents, int index) {
+void BrowserWindowGtk::TabDetachedAt(TabContentsWrapper* contents, int index) {
   // We use index here rather than comparing |contents| because by this time
   // the model has already removed |contents| from its list, so
   // browser_->GetSelectedTabContents() will return NULL or something else.
   if (index == browser_->tabstrip_model()->selected_index())
     infobar_container_->ChangeTabContents(NULL);
-  contents_container_->DetachTabContents(contents);
+  contents_container_->DetachTabContents(contents->tab_contents());
   UpdateDevToolsForContents(NULL);
 }
 
-void BrowserWindowGtk::TabSelectedAt(TabContents* old_contents,
-                                     TabContents* new_contents,
+void BrowserWindowGtk::TabSelectedAt(TabContentsWrapper* old_contents,
+                                     TabContentsWrapper* new_contents,
                                      int index,
                                      bool user_gesture) {
   DCHECK(old_contents != new_contents);
 
-  if (old_contents && !old_contents->is_being_destroyed())
+  if (old_contents && !old_contents->tab_contents()->is_being_destroyed())
     old_contents->view()->StoreFocus();
 
   // Update various elements that are interested in knowing the current
   // TabContents.
-  infobar_container_->ChangeTabContents(new_contents);
-  contents_container_->SetTabContents(new_contents);
-  UpdateDevToolsForContents(new_contents);
+  infobar_container_->ChangeTabContents(new_contents->tab_contents());
+  contents_container_->SetTabContents(new_contents->tab_contents());
+  UpdateDevToolsForContents(new_contents->tab_contents());
 
-  new_contents->DidBecomeSelected();
+  new_contents->tab_contents()->DidBecomeSelected();
   // TODO(estade): after we manage browser activation, add a check to make sure
   // we are the active browser before calling RestoreFocus().
   if (!browser_->tabstrip_model()->closing_all()) {
     new_contents->view()->RestoreFocus();
-    if (new_contents->find_ui_active())
+    if (new_contents->tab_contents()->find_ui_active())
       browser_->GetFindBarController()->find_bar()->SetFocusAndSelection();
   }
 
   // Update all the UI bits.
   UpdateTitleBar();
   UpdateToolbar(new_contents, true);
-  UpdateUIForContents(new_contents);
-}
-
-void BrowserWindowGtk::TabStripEmpty() {
-  UpdateUIForContents(NULL);
+  MaybeShowBookmarkBar(false);
 }
 
 void BrowserWindowGtk::ActiveWindowChanged(GdkWindow* active_window) {
@@ -1255,11 +1235,11 @@ void BrowserWindowGtk::ActiveWindowChanged(GdkWindow* active_window) {
   }
 }
 
-void BrowserWindowGtk::MaybeShowBookmarkBar(TabContents* contents,
-                                            bool animate) {
+void BrowserWindowGtk::MaybeShowBookmarkBar(bool animate) {
   if (!IsBookmarkBarSupported())
     return;
 
+  TabContents* contents = GetDisplayedTabContents();
   bool show_bar = false;
 
   if (IsBookmarkBarSupported() && contents) {
@@ -1312,10 +1292,6 @@ void BrowserWindowGtk::UpdateDevToolsForContents(TabContents* contents) {
         prefs::kDevToolsSplitLocation, divider_offset);
     gtk_widget_hide(devtools_container_->widget());
   }
-}
-
-void BrowserWindowGtk::UpdateUIForContents(TabContents* contents) {
-  MaybeShowBookmarkBar(contents, false);
 }
 
 void BrowserWindowGtk::DestroyBrowser() {
@@ -1446,7 +1422,6 @@ void BrowserWindowGtk::ResetCustomFrameCursor() {
   if (!frame_cursor_)
     return;
 
-  gdk_cursor_unref(frame_cursor_);
   frame_cursor_ = NULL;
   gdk_window_set_cursor(GTK_WIDGET(window_)->window, NULL);
 }
@@ -1489,6 +1464,10 @@ void BrowserWindowGtk::BookmarkBarIsFloating(bool is_floating) {
   // This can be NULL during initialization of the bookmark bar.
   if (bookmark_bar_.get())
     PlaceBookmarkBar(is_floating);
+}
+
+TabContents* BrowserWindowGtk::GetDisplayedTabContents() {
+  return contents_container_->GetVisibleTabContents();
 }
 
 void BrowserWindowGtk::QueueToolbarRedraw() {
@@ -1625,6 +1604,8 @@ void BrowserWindowGtk::InitWidgets() {
   int split_offset = g_browser_process->local_state()->GetInteger(
       prefs::kDevToolsSplitLocation);
   if (split_offset != -1) {
+    if (split_offset < kMinDevToolsHeight)
+      split_offset = kMinDevToolsHeight;
     gtk_paned_set_position(GTK_PANED(contents_split_), split_offset);
   } else {
     gtk_widget_set_size_request(devtools_container_->widget(), -1,
@@ -1636,7 +1617,7 @@ void BrowserWindowGtk::InitWidgets() {
   // Set a white background so during startup the user sees white in the
   // content area before we get a TabContents in place.
   gtk_widget_modify_bg(render_area_event_box_, GTK_STATE_NORMAL,
-                       &gfx::kGdkWhite);
+                       &gtk_util::kGdkWhite);
   gtk_container_add(GTK_CONTAINER(render_area_event_box_),
                     render_area_floating_container_);
   gtk_widget_show(render_area_event_box_);
@@ -1688,7 +1669,7 @@ void BrowserWindowGtk::SetBackgroundColor() {
   SkColor frame_color = theme_provider->GetColor(frame_color_id);
 
   // Paint the frame color on the left, right and bottom.
-  GdkColor frame_color_gdk = SkColorToGdkColor(frame_color);
+  GdkColor frame_color_gdk = gfx::SkColorToGdkColor(frame_color);
   gtk_widget_modify_bg(GTK_WIDGET(window_), GTK_STATE_NORMAL,
                        &frame_color_gdk);
 
@@ -1700,7 +1681,8 @@ void BrowserWindowGtk::SetBackgroundColor() {
   // color, override the prelight also.
   color_utils::HSL hsl = { -1, 0.5, 0.65 };
   SkColor frame_prelight_color = color_utils::HSLShift(frame_color, hsl);
-  GdkColor frame_prelight_color_gdk = SkColorToGdkColor(frame_prelight_color);
+  GdkColor frame_prelight_color_gdk =
+      gfx::SkColorToGdkColor(frame_prelight_color);
   gtk_widget_modify_bg(contents_split_, GTK_STATE_PRELIGHT,
       &frame_prelight_color_gdk);
 
@@ -1806,179 +1788,74 @@ void BrowserWindowGtk::SaveWindowPosition() {
   window_preferences->SetInteger("work_area_bottom", work_area.bottom());
 }
 
-void BrowserWindowGtk::AnimationEnded(const Animation* animation) {
-  InvalidateInfoBarBits();
+void BrowserWindowGtk::SetInfoBarShowing(InfoBar* bar, bool animate) {
+  infobar_arrow_model_.ShowArrowFor(bar, animate);
 }
 
-void BrowserWindowGtk::AnimationProgressed(const Animation* animation) {
+void BrowserWindowGtk::PaintStateChanged() {
   InvalidateInfoBarBits();
-}
-
-void BrowserWindowGtk::AnimationCanceled(const Animation* animation) {
-  InvalidateInfoBarBits();
-}
-
-void BrowserWindowGtk::SetInfoBarShowing(
-    const std::pair<SkColor, SkColor>* colors,
-    bool animate) {
-  if (colors) {
-    infobar_colors_ = *colors;
-
-    if (animate)
-      infobar_animation_.Show();
-    else
-      infobar_animation_.Reset(1.0);
-  } else {
-    if (animate)
-      infobar_animation_.Hide();
-    else
-      infobar_animation_.Reset();
-  }
-
-  InvalidateInfoBarBits();
-}
-
-bool BrowserWindowGtk::ShouldDrawInfobarDropShadowOnRenderView() {
-  return infobar_animation_.GetCurrentValue() != 0.0 &&
-      !(bookmark_bar_.get() && bookmark_bar_is_floating_);
 }
 
 void BrowserWindowGtk::InvalidateInfoBarBits() {
   gtk_widget_queue_draw(toolbar_border_);
   gtk_widget_queue_draw(toolbar_->widget());
-  if (bookmark_bar_.get())
+  if (bookmark_bar_.get() && !bookmark_bar_is_floating_)
     gtk_widget_queue_draw(bookmark_bar_->widget());
+}
 
-  // Redraw the top bit of the render view area.
-  int width = contents_container_->widget()->allocation.width;
-  int height = gtk_util::kInfoBarDropShadowHeight;
-  gtk_widget_queue_draw_area(contents_container_->widget(),
-                             0, 0, width, height);
+int BrowserWindowGtk::GetXPositionOfLocationIcon(GtkWidget* relative_to) {
+  GtkWidget* location_icon = toolbar_->GetLocationBarView()->
+      location_icon_widget();
+  int x = 0;
+  gtk_widget_translate_coordinates(
+      location_icon, relative_to,
+      (location_icon->allocation.width + 1) / 2,
+      0, &x, NULL);
+
+  if (GTK_WIDGET_NO_WINDOW(relative_to))
+    x += relative_to->allocation.x;
+
+  return x;
 }
 
 gboolean BrowserWindowGtk::OnExposeDrawInfobarBits(GtkWidget* sender,
                                                    GdkEventExpose* expose) {
-  double alpha = infobar_animation_.GetCurrentValue();
-  if (alpha == 0.0)
+  if (!infobar_arrow_model_.NeedToDrawInfoBarArrow())
     return FALSE;
 
-  GtkWidget* location_icon = toolbar_->GetLocationBarView()->
-      location_icon_widget();
-  int x = 0;
-  int top_y = 0;
-  // The offset between the vertical center of the location icon and the top
-  // of the arrow.
-  const int kArrowVerticalOffset = 4;
-  gtk_widget_translate_coordinates(
-      location_icon, sender,
-      location_icon->allocation.width / 2,
-      location_icon->allocation.height / 2 + kArrowVerticalOffset,
-      &x, &top_y);
+  int x = GetXPositionOfLocationIcon(sender);
 
   gfx::Rect toolbar_border(toolbar_border_->allocation);
   int y = 0;
   gtk_widget_translate_coordinates(toolbar_border_, sender,
                                    0, toolbar_border.bottom(),
                                    NULL, &y);
-
-  int arrow_height = y - top_y;
-  // The width of half the arrow.
-  const int kArrowWidth = 15;
-
-  if (GTK_WIDGET_NO_WINDOW(sender)) {
-    x += sender->allocation.x;
+  if (GTK_WIDGET_NO_WINDOW(sender))
     y += sender->allocation.y;
-  }
 
-  SkPath path;
-  path.moveTo(SkPoint::Make(x - kArrowWidth, y));
-  path.lineTo(SkPoint::Make(x, y - arrow_height));
-  path.lineTo(SkPoint::Make(x + kArrowWidth, y));
-  path.close();
-
-  SkPaint paint;
-  paint.setStyle(SkPaint::kFill_Style);
-
-  SkPoint grad_points[2];
-  grad_points[0].set(SkIntToScalar(0), SkIntToScalar(y));
-  grad_points[1].set(SkIntToScalar(0),
-                     SkIntToScalar(y + InfoBar::kInfoBarHeight));
-
-  SkColor grad_colors[2];
-  grad_colors[0] = SkColorSetA(infobar_colors_.first, alpha * 0xff);
-  grad_colors[1] = SkColorSetA(infobar_colors_.second, alpha * 0xff);
-
-  SkShader* gradient_shader = SkGradientShader::CreateLinear(
-      grad_points, grad_colors, NULL, 2, SkShader::kMirror_TileMode);
-  paint.setShader(gradient_shader);
-  gradient_shader->unref();
-
-  gfx::CanvasSkiaPaint canvas(expose, false);
-  canvas.drawPath(path, paint);
-
-  paint.setShader(NULL);
-  paint.setStyle(SkPaint::kStroke_Style);
-  // Smooth out the shadow.
-  paint.setAntiAlias(true);
-
-  const int kMaxShading = 100;
-  const int kShadingPixels = 5;
-
-  // The goal of all this mathematical trickery is to create a shadow for the
-  // arrow that looks decent. We want a shadow of a set width, and the thickest
-  // direction of that shadow needs to be perpendicular to the sides of the
-  // arrow.
-  double scale_factor = sqrt(static_cast<double>(
-      (arrow_height * arrow_height + kArrowWidth * kArrowWidth))) /
-      kShadingPixels;
-  double x_scale = arrow_height / scale_factor / kShadingPixels;
-  double y_scale = kArrowWidth / scale_factor / kShadingPixels;
-  for (int i = 1; i <= kShadingPixels; ++i) {
-    double x_backoff = x_scale * i;
-    double y_backoff = y_scale * i;
-    SkPath shadow_path;
-    shadow_path.moveTo(0, y - i);
-    // The +1 below makes sure the shadow hugs the left side of the arrow.
-    shadow_path.rLineTo(x - kArrowWidth - x_backoff + 1, 0);
-    shadow_path.rMoveTo(0, i - y_backoff);
-    shadow_path.rLineTo(kArrowWidth, -arrow_height);
-    // The -1.5 below makes sure the shadow hugs the right side of the arrow.
-    shadow_path.rLineTo(2 * x_backoff - 1.5, 0);
-    shadow_path.rLineTo(kArrowWidth, arrow_height);
-    shadow_path.rMoveTo(0, y_backoff - i);
-    shadow_path.rLineTo(sender->allocation.width, 0);
-
-    int shading = (kShadingPixels - i + 1) * kMaxShading / kShadingPixels;
-    paint.setColor(SkColorSetARGB(alpha * shading, 0, 0, 0));
-    canvas.drawPath(shadow_path, paint);
-  }
-
+  Profile* profile = browser()->profile();
+  infobar_arrow_model_.Paint(
+      sender, expose, gfx::Point(x, y),
+      GtkThemeProvider::GetFrom(profile)->GetBorderColor());
   return FALSE;
 }
 
 gboolean BrowserWindowGtk::OnBookmarkBarExpose(GtkWidget* sender,
                                                GdkEventExpose* expose) {
-  if (infobar_animation_.GetCurrentValue() == 0.0)
+  if (!infobar_arrow_model_.NeedToDrawInfoBarArrow())
     return FALSE;
 
-  // This shares the same draw path as the other widgets when it's not floating.
-  if (!bookmark_bar_is_floating_)
-    return OnExposeDrawInfobarBits(sender, expose);
+  if (bookmark_bar_is_floating_)
+    return FALSE;
 
-  gfx::Point origin;
-  if (GTK_WIDGET_NO_WINDOW(sender))
-    origin = gfx::Point(sender->allocation.x, sender->allocation.y);
-  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(expose->window));
-  gtk_util::DrawTopDropShadowForRenderView(cr, origin, gfx::Rect(expose->area));
-  cairo_destroy(cr);
-  return FALSE;
+  return OnExposeDrawInfobarBits(sender, expose);
 }
 
 void BrowserWindowGtk::OnBookmarkBarSizeAllocate(GtkWidget* sender,
                                                  GtkAllocation* allocation) {
   // The size of the bookmark bar affects how the infobar arrow is drawn on
   // the toolbar.
-  if (infobar_animation_.GetCurrentValue() != 0.0)
+  if (infobar_arrow_model_.NeedToDrawInfoBarArrow())
     gtk_widget_queue_draw(toolbar_->widget());
 }
 
@@ -2001,7 +1878,7 @@ gboolean BrowserWindowGtk::OnKeyPress(GtkWidget* widget, GdkEventKey* event) {
   // If a widget besides the native view is focused, we have to try to handle
   // the custom accelerators before letting it handle them.
   TabContents* current_tab_contents =
-      browser()->tabstrip_model()->GetSelectedTabContents();
+      browser()->GetSelectedTabContents();
   // The current tab might not have a render view if it crashed.
   if (!current_tab_contents || !current_tab_contents->GetContentNativeView() ||
       !gtk_widget_is_focus(current_tab_contents->GetContentNativeView())) {
@@ -2036,7 +1913,6 @@ gboolean BrowserWindowGtk::OnMouseMoveEvent(GtkWidget* widget,
   if (!UseCustomFrame() || event->window != widget->window) {
     // Reset the cursor.
     if (frame_cursor_) {
-      gdk_cursor_unref(frame_cursor_);
       frame_cursor_ = NULL;
       gdk_window_set_cursor(GTK_WIDGET(window_)->window, NULL);
     }
@@ -2056,17 +1932,12 @@ gboolean BrowserWindowGtk::OnMouseMoveEvent(GtkWidget* widget,
     last_cursor = frame_cursor_->type;
 
   if (last_cursor != new_cursor) {
-    if (frame_cursor_) {
-      gdk_cursor_unref(frame_cursor_);
+    if (has_hit_edge) {
+      frame_cursor_ = gfx::GetCursor(new_cursor);
+    } else {
       frame_cursor_ = NULL;
     }
-    if (has_hit_edge) {
-      frame_cursor_ = gtk_util::GetCursor(new_cursor);
-      gdk_window_set_cursor(GTK_WIDGET(window_)->window,
-                            frame_cursor_);
-    } else {
-      gdk_window_set_cursor(GTK_WIDGET(window_)->window, NULL);
-    }
+    gdk_window_set_cursor(GTK_WIDGET(window_)->window, frame_cursor_);
   }
   return FALSE;
 }
@@ -2235,7 +2106,7 @@ void BrowserWindowGtk::ShowSupportedWindowFeatures() {
   }
 
   if (IsBookmarkBarSupported())
-    MaybeShowBookmarkBar(browser_->GetSelectedTabContents(), false);
+    MaybeShowBookmarkBar(false);
 }
 
 void BrowserWindowGtk::HideUnsupportedWindowFeatures() {

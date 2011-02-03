@@ -17,16 +17,17 @@
 #include "media/ffmpeg/ffmpeg_util.h"
 #include "media/filters/ffmpeg_interfaces.h"
 #include "media/video/ffmpeg_video_decode_engine.h"
-#include "media/video/video_decode_engine.h"
+#include "media/video/video_decode_context.h"
 
 namespace media {
 
-FFmpegVideoDecoder::FFmpegVideoDecoder(VideoDecodeEngine* engine)
+FFmpegVideoDecoder::FFmpegVideoDecoder(VideoDecodeContext* decode_context)
     : width_(0),
       height_(0),
       time_base_(new AVRational()),
       state_(kUnInitialized),
-      decode_engine_(engine) {
+      decode_engine_(new FFmpegVideoDecodeEngine()),
+      decode_context_(decode_context) {
   memset(&info_, 0, sizeof(info_));
 }
 
@@ -36,11 +37,12 @@ FFmpegVideoDecoder::~FFmpegVideoDecoder() {
 void FFmpegVideoDecoder::Initialize(DemuxerStream* demuxer_stream,
                                     FilterCallback* callback) {
   if (MessageLoop::current() != message_loop()) {
-    message_loop()->PostTask(FROM_HERE,
-                             NewRunnableMethod(this,
-                                               &FFmpegVideoDecoder::Initialize,
-                                               demuxer_stream,
-                                               callback));
+    message_loop()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(this,
+                          &FFmpegVideoDecoder::Initialize,
+                          make_scoped_refptr(demuxer_stream),
+                          callback));
     return;
   }
 
@@ -95,6 +97,7 @@ void FFmpegVideoDecoder::Initialize(DemuxerStream* demuxer_stream,
   config.opaque_context = av_stream;
   config.width = width_;
   config.height = height_;
+  state_ = kInitializing;
   decode_engine_->Initialize(message_loop(), this, NULL, config);
 }
 
@@ -137,7 +140,10 @@ void FFmpegVideoDecoder::Stop(FilterCallback* callback) {
   DCHECK(!uninitialize_callback_.get());
 
   uninitialize_callback_.reset(callback);
-  decode_engine_->Uninitialize();
+  if (state_ != kUnInitialized)
+    decode_engine_->Uninitialize();
+  else
+    OnUninitializeComplete();
 }
 
 void FFmpegVideoDecoder::OnUninitializeComplete() {
@@ -146,6 +152,8 @@ void FFmpegVideoDecoder::OnUninitializeComplete() {
 
   AutoCallbackRunner done_runner(uninitialize_callback_.release());
   state_ = kStopped;
+
+  // TODO(jiesun): Destroy the decoder context.
 }
 
 void FFmpegVideoDecoder::Pause(FilterCallback* callback) {
@@ -230,7 +238,7 @@ void FFmpegVideoDecoder::OnFormatChange(VideoStreamInfo stream_info) {
 }
 
 void FFmpegVideoDecoder::OnReadComplete(Buffer* buffer_in) {
-  scoped_refptr<Buffer> buffer = buffer_in;
+  scoped_refptr<Buffer> buffer(buffer_in);
   message_loop()->PostTask(
       FROM_HERE,
       NewRunnableMethod(this,
@@ -279,7 +287,7 @@ void FFmpegVideoDecoder::OnReadCompleteTask(scoped_refptr<Buffer> buffer) {
   // TODO(ajwong): This push logic, along with the pop logic below needs to
   // be reevaluated to correctly handle decode errors.
   if (state_ == kNormal && !buffer->IsEndOfStream() &&
-      buffer->GetTimestamp() != StreamSample::kInvalidTimestamp) {
+      buffer->GetTimestamp() != kNoTimestamp) {
     pts_heap_.Push(buffer->GetTimestamp());
   }
 
@@ -376,7 +384,7 @@ FFmpegVideoDecoder::TimeTuple FFmpegVideoDecoder::FindPtsAndDuration(
   // situation and set the timestamp to kInvalidTimestamp.
   DCHECK(frame);
   base::TimeDelta timestamp = frame->GetTimestamp();
-  if (timestamp != StreamSample::kInvalidTimestamp &&
+  if (timestamp != kNoTimestamp &&
       timestamp.ToInternalValue() != 0) {
     pts.timestamp = timestamp;
     // We need to clean up the timestamp we pushed onto the |pts_heap|.
@@ -386,19 +394,19 @@ FFmpegVideoDecoder::TimeTuple FFmpegVideoDecoder::FindPtsAndDuration(
     // If the frame did not have pts, try to get the pts from the |pts_heap|.
     pts.timestamp = pts_heap->Top();
     pts_heap->Pop();
-  } else if (last_pts.timestamp != StreamSample::kInvalidTimestamp &&
-             last_pts.duration != StreamSample::kInvalidTimestamp) {
+  } else if (last_pts.timestamp != kNoTimestamp &&
+             last_pts.duration != kNoTimestamp) {
     // Guess assuming this frame was the same as the last frame.
     pts.timestamp = last_pts.timestamp + last_pts.duration;
   } else {
     // Now we really have no clue!!!  Mark an invalid timestamp and let the
     // video renderer handle it (i.e., drop frame).
-    pts.timestamp = StreamSample::kInvalidTimestamp;
+    pts.timestamp = kNoTimestamp;
   }
 
   // Fill in the duration, using the frame itself as the authoratative source.
   base::TimeDelta duration = frame->GetDuration();
-  if (duration != StreamSample::kInvalidTimestamp &&
+  if (duration != kNoTimestamp &&
       duration.ToInternalValue() != 0) {
     pts.duration = duration;
   } else {
@@ -432,19 +440,6 @@ void FFmpegVideoDecoder::FlushBuffers() {
 void FFmpegVideoDecoder::SetVideoDecodeEngineForTest(
     VideoDecodeEngine* engine) {
   decode_engine_.reset(engine);
-}
-
-// static
-FilterFactory* FFmpegVideoDecoder::CreateFactory() {
-  return new FilterFactoryImpl1<FFmpegVideoDecoder, FFmpegVideoDecodeEngine*>(
-      new FFmpegVideoDecodeEngine());
-}
-
-// static
-bool FFmpegVideoDecoder::IsMediaFormatSupported(const MediaFormat& format) {
-  std::string mime_type;
-  return format.GetAsString(MediaFormat::kMimeType, &mime_type) &&
-      mime_type::kFFmpegVideo == mime_type;
 }
 
 }  // namespace media

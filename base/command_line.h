@@ -30,9 +30,10 @@ class InProcessBrowserTest;
 
 class CommandLine {
  public:
-  // A constructor for CommandLines that are used only to carry arguments.
-  enum ArgumentsOnly { ARGUMENTS_ONLY };
-  explicit CommandLine(ArgumentsOnly args_only);
+  // A constructor for CommandLines that are used only to carry switches and
+  // arguments.
+  enum NoProgram { NO_PROGRAM };
+  explicit CommandLine(NoProgram no_program);
   ~CommandLine();
 
 #if defined(OS_WIN)
@@ -164,7 +165,6 @@ class CommandLine {
   // TODO(evanm): remove all of these.
 #if defined(OS_WIN)
   // Deprecated on non-Windows.
-  std::wstring program() const;
   bool HasSwitch(const std::wstring& switch_string) const;
 #endif
 

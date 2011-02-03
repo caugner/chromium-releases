@@ -6,8 +6,8 @@
 #define CHROME_TEST_TEST_BROWSER_WINDOW_H_
 #pragma once
 
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/test/test_location_bar.h"
 
 // An implementation of BrowserWindow used for testing. TestBrowserWindow only
@@ -45,7 +45,7 @@ class TestBrowserWindow : public BrowserWindow {
   }
   virtual void SetFocusToLocationBar(bool select_all) {}
   virtual void UpdateReloadStopState(bool is_loading, bool force) {}
-  virtual void UpdateToolbar(TabContents* contents,
+  virtual void UpdateToolbar(TabContentsWrapper* contents,
                              bool should_restore_state) {}
   virtual void FocusToolbar() {}
   virtual void FocusAppMenu() {}
@@ -58,7 +58,9 @@ class TestBrowserWindow : public BrowserWindow {
     return false;
   }
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {}
-  virtual void ShowCreateShortcutsDialog(TabContents* tab_contents) {}
+  virtual void ShowCreateWebAppShortcutsDialog(TabContents* tab_contents) {}
+  virtual void ShowCreateChromeAppShortcutsDialog(Profile* profile,
+                                                  const Extension* app) {}
 #if defined(TOOLKIT_VIEWS)
   virtual void ToggleCompactNavigationBar() {}
 #endif  // defined(TOOLKIT_VIEWS)
@@ -66,7 +68,6 @@ class TestBrowserWindow : public BrowserWindow {
   virtual bool IsBookmarkBarVisible() const { return false; }
   virtual bool IsBookmarkBarAnimating() const { return false; }
   virtual bool IsToolbarVisible() const { return false; }
-  virtual gfx::Rect GetRootWindowResizerRect() const { return gfx::Rect(); }
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) {}
   virtual void ToggleBookmarkBar() {}
@@ -103,8 +104,9 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void Paste() {}
   virtual void ToggleTabStripMode() {}
   virtual void OpenTabpose() {}
+  virtual void PrepareForInstant() {}
   virtual void ShowInstant(TabContents* preview_contents) {}
-  virtual void HideInstant() {}
+  virtual void HideInstant(bool instant_is_active) {}
   virtual gfx::Rect GetInstantBounds() { return gfx::Rect(); }
 
  protected:

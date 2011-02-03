@@ -7,19 +7,25 @@
 
 #include <vector>
 
+#include "base/basictypes.h"
 #include "remoting/host/event_executor.h"
+#include "remoting/protocol/input_stub.h"
 
 namespace remoting {
 
 // A class to generate events on Mac.
-class EventExecutorMac : public EventExecutor {
+class EventExecutorMac : public protocol::InputStub {
  public:
-  EventExecutorMac(Capturer* capturer);
+  EventExecutorMac(MessageLoop* message_loop, Capturer* capturer);
   virtual ~EventExecutorMac();
 
-  virtual void HandleInputEvent(ChromotingClientMessage* message);
+  virtual void InjectKeyEvent(const KeyEvent* event, Task* done);
+  virtual void InjectMouseEvent(const MouseEvent* event, Task* done);
 
  private:
+  MessageLoop* message_loop_;
+  Capturer* capturer_;
+
   DISALLOW_COPY_AND_ASSIGN(EventExecutorMac);
 };
 

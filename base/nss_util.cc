@@ -14,14 +14,15 @@
 #include <secmod.h>
 
 #if defined(OS_LINUX)
-#include <linux/magic.h>
+#include <linux/nfs_fs.h>
 #include <sys/vfs.h>
 #endif
 
 #include "base/file_util.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/singleton.h"
 #include "base/stringprintf.h"
+#include "base/thread_restrictions.h"
 
 // USE_NSS means we use NSS for everything crypto-related.  If USE_NSS is not
 // defined, such as on Mac and Windows, we use NSS for SSL only -- we don't
@@ -82,7 +83,7 @@ void UseLocalCacheOfNSSDatabaseIfNFS(const FilePath& database_dir) {
   struct statfs buf;
   if (statfs(database_dir.value().c_str(), &buf) == 0) {
     if (buf.f_type == NFS_SUPER_MAGIC) {
-      scoped_ptr<base::Environment> env(base::Environment::Create());
+      scoped_ptr<Environment> env(Environment::Create());
       const char* use_cache_env_var = "NSS_SDB_USE_CACHE";
       if (!env->HasVar(use_cache_env_var))
         env->SetVar(use_cache_env_var, "yes");
@@ -110,12 +111,19 @@ SECMODModule *InitDefaultRootCerts() {
 
 // A singleton to initialize/deinitialize NSPR.
 // Separate from the NSS singleton because we initialize NSPR on the UI thread.
+// Now that we're leaking the singleton, we could merge back with the NSS
+// singleton.
 class NSPRInitSingleton {
- public:
+ private:
+  friend struct DefaultLazyInstanceTraits<NSPRInitSingleton>;
+
   NSPRInitSingleton() {
     PR_Init(PR_USER_THREAD, PR_PRIORITY_NORMAL, 0);
   }
 
+  // NOTE(willchan): We don't actually execute this code since we leak NSS to
+  // prevent non-joinable threads from using NSS after it's already been shut
+  // down.
   ~NSPRInitSingleton() {
     PL_ArenaFinish();
     PRStatus prstatus = PR_Cleanup();
@@ -125,14 +133,59 @@ class NSPRInitSingleton {
   }
 };
 
+LazyInstance<NSPRInitSingleton, LeakyLazyInstanceTraits<NSPRInitSingleton> >
+    g_nspr_singleton(LINKER_INITIALIZED);
+
 class NSSInitSingleton {
  public:
+#if defined(OS_CHROMEOS)
+  void OpenPersistentNSSDB() {
+    if (!chromeos_user_logged_in_) {
+      chromeos_user_logged_in_ = true;
+      real_db_slot_ = OpenUserDB(GetDefaultConfigDirectory(),
+                                 "Real NSS database");
+    }
+  }
+#endif  // defined(OS_CHROMEOS)
+
+  bool OpenTestNSSDB(const FilePath& path, const char* description) {
+    test_db_slot_ = OpenUserDB(path, description);
+    return !!test_db_slot_;
+  }
+
+  void CloseTestNSSDB() {
+    if (test_db_slot_) {
+      SECStatus status = SECMOD_CloseUserDB(test_db_slot_);
+      if (status != SECSuccess)
+        LOG(ERROR) << "SECMOD_CloseUserDB failed: " << PORT_GetError();
+      PK11_FreeSlot(test_db_slot_);
+      test_db_slot_ = NULL;
+    }
+  }
+
+  PK11SlotInfo* GetDefaultKeySlot() {
+    if (test_db_slot_)
+      return PK11_ReferenceSlot(test_db_slot_);
+    if (real_db_slot_)
+      return PK11_ReferenceSlot(real_db_slot_);
+    return PK11_GetInternalKeySlot();
+  }
+
+#if defined(USE_NSS)
+  Lock* write_lock() {
+    return &write_lock_;
+  }
+#endif  // defined(USE_NSS)
+
+ private:
+  friend struct DefaultLazyInstanceTraits<NSSInitSingleton>;
+
   NSSInitSingleton()
       : real_db_slot_(NULL),
         test_db_slot_(NULL),
         root_(NULL),
         chromeos_user_logged_in_(false) {
-    base::EnsureNSPRInit();
+    EnsureNSPRInit();
 
     // We *must* have NSS >= 3.12.3.  See bug 26448.
     COMPILE_ASSERT(
@@ -206,15 +259,13 @@ class NSSInitSingleton {
       PK11_FreeSlot(slot);
     }
 
-    // TODO(davidben): When https://bugzilla.mozilla.org/show_bug.cgi?id=564011
-    // is fixed, we will no longer need the lock. We should detect this and not
-    // initialize a Lock here.
-    write_lock_.reset(new Lock());
-
     root_ = InitDefaultRootCerts();
 #endif  // !defined(USE_NSS)
   }
 
+  // NOTE(willchan): We don't actually execute this code since we leak NSS to
+  // prevent non-joinable threads from using NSS after it's already been shut
+  // down.
   ~NSSInitSingleton() {
     if (real_db_slot_) {
       SECMOD_CloseUserDB(real_db_slot_);
@@ -230,53 +281,13 @@ class NSSInitSingleton {
 
     SECStatus status = NSS_Shutdown();
     if (status != SECSuccess) {
-      // We LOG(INFO) because this failure is relatively harmless
-      // (leaking, but we're shutting down anyway).
-      LOG(INFO) << "NSS_Shutdown failed; see "
-                   "http://code.google.com/p/chromium/issues/detail?id=4609";
+      // We VLOG(1) because this failure is relatively harmless (leaking, but
+      // we're shutting down anyway).
+      VLOG(1) << "NSS_Shutdown failed; see "
+                 "http://code.google.com/p/chromium/issues/detail?id=4609";
     }
   }
 
-#if defined(OS_CHROMEOS)
-  void OpenPersistentNSSDB() {
-    if (!chromeos_user_logged_in_) {
-      chromeos_user_logged_in_ = true;
-      real_db_slot_ = OpenUserDB(GetDefaultConfigDirectory(),
-                                 "Real NSS database");
-    }
-  }
-#endif  // defined(OS_CHROMEOS)
-
-  bool OpenTestNSSDB(const FilePath& path, const char* description) {
-    test_db_slot_ = OpenUserDB(path, description);
-    return !!test_db_slot_;
-  }
-
-  void CloseTestNSSDB() {
-    if (test_db_slot_) {
-      SECStatus status = SECMOD_CloseUserDB(test_db_slot_);
-      if (status != SECSuccess)
-        LOG(ERROR) << "SECMOD_CloseUserDB failed: " << PORT_GetError();
-      PK11_FreeSlot(test_db_slot_);
-      test_db_slot_ = NULL;
-    }
-  }
-
-  PK11SlotInfo* GetDefaultKeySlot() {
-    if (test_db_slot_)
-      return PK11_ReferenceSlot(test_db_slot_);
-    if (real_db_slot_)
-      return PK11_ReferenceSlot(real_db_slot_);
-    return PK11_GetInternalKeySlot();
-  }
-
-#if defined(USE_NSS)
-  Lock* write_lock() {
-    return write_lock_.get();
-  }
-#endif  // defined(USE_NSS)
-
- private:
   static PK11SlotInfo* OpenUserDB(const FilePath& path,
                                   const char* description) {
     const std::string modspec =
@@ -299,31 +310,40 @@ class NSSInitSingleton {
   SECMODModule *root_;
   bool chromeos_user_logged_in_;
 #if defined(USE_NSS)
-  scoped_ptr<Lock> write_lock_;
+  // TODO(davidben): When https://bugzilla.mozilla.org/show_bug.cgi?id=564011
+  // is fixed, we will no longer need the lock.
+  Lock write_lock_;
 #endif  // defined(USE_NSS)
 };
+
+LazyInstance<NSSInitSingleton, LeakyLazyInstanceTraits<NSSInitSingleton> >
+    g_nss_singleton(LINKER_INITIALIZED);
 
 }  // namespace
 
 void EnsureNSPRInit() {
-  Singleton<NSPRInitSingleton>::get();
+  g_nspr_singleton.Get();
 }
 
 void EnsureNSSInit() {
-  Singleton<NSSInitSingleton>::get();
+  // Initializing SSL causes us to do blocking IO.
+  // Temporarily allow it until we fix
+  //   http://code.google.com/p/chromium/issues/detail?id=59847
+  ThreadRestrictions::ScopedAllowIO allow_io;
+  g_nss_singleton.Get();
 }
 
 #if defined(USE_NSS)
 bool OpenTestNSSDB(const FilePath& path, const char* description) {
-  return Singleton<NSSInitSingleton>::get()->OpenTestNSSDB(path, description);
+  return g_nss_singleton.Get().OpenTestNSSDB(path, description);
 }
 
 void CloseTestNSSDB() {
-  Singleton<NSSInitSingleton>::get()->CloseTestNSSDB();
+  g_nss_singleton.Get().CloseTestNSSDB();
 }
 
 Lock* GetNSSWriteLock() {
-  return Singleton<NSSInitSingleton>::get()->write_lock();
+  return g_nss_singleton.Get().write_lock();
 }
 
 AutoNSSWriteLock::AutoNSSWriteLock() : lock_(GetNSSWriteLock()) {
@@ -342,7 +362,7 @@ AutoNSSWriteLock::~AutoNSSWriteLock() {
 
 #if defined(OS_CHROMEOS)
 void OpenPersistentNSSDB() {
-  Singleton<NSSInitSingleton>::get()->OpenPersistentNSSDB();
+  g_nss_singleton.Get().OpenPersistentNSSDB();
 }
 #endif
 
@@ -352,7 +372,7 @@ Time PRTimeToBaseTime(PRTime prtime) {
   PRExplodedTime prxtime;
   PR_ExplodeTime(prtime, PR_GMTParameters, &prxtime);
 
-  base::Time::Exploded exploded;
+  Time::Exploded exploded;
   exploded.year         = prxtime.tm_year;
   exploded.month        = prxtime.tm_month + 1;
   exploded.day_of_week  = prxtime.tm_wday;
@@ -366,7 +386,7 @@ Time PRTimeToBaseTime(PRTime prtime) {
 }
 
 PK11SlotInfo* GetDefaultNSSKeySlot() {
-  return Singleton<NSSInitSingleton>::get()->GetDefaultKeySlot();
+  return g_nss_singleton.Get().GetDefaultKeySlot();
 }
 
 }  // namespace base

@@ -93,6 +93,7 @@ class RendererWebKitClientImpl::MimeRegistry
 class RendererWebKitClientImpl::FileUtilities
     : public webkit_glue::WebFileUtilitiesImpl {
  public:
+  virtual void revealFolderInOS(const WebKit::WebString& path);
   virtual bool getFileSize(const WebKit::WebString& path, long long& result);
   virtual bool getFileModificationTime(const WebKit::WebString& path,
                                        double& result);
@@ -180,8 +181,8 @@ bool RendererWebKitClientImpl::SendSyncMessageFromAnyThread(
   if (render_thread)
     return render_thread->Send(msg);
 
-  scoped_refptr<IPC::SyncMessageFilter> sync_msg_filter =
-      ChildThread::current()->sync_message_filter();
+  scoped_refptr<IPC::SyncMessageFilter> sync_msg_filter(
+      ChildThread::current()->sync_message_filter());
   return sync_msg_filter->Send(msg);
 }
 
@@ -372,6 +373,13 @@ bool RendererWebKitClientImpl::FileUtilities::getFileSize(const WebString& path,
   return false;
 }
 
+void RendererWebKitClientImpl::FileUtilities::revealFolderInOS(
+    const WebString& path) {
+  FilePath file_path(webkit_glue::WebStringToFilePath(path));
+  file_util::AbsolutePath(&file_path);
+  RenderThread::current()->Send(new ViewHostMsg_RevealFolderInOS(file_path));
+}
+
 bool RendererWebKitClientImpl::FileUtilities::getFileModificationTime(
     const WebString& path,
     double& result) {
@@ -493,8 +501,9 @@ RendererWebKitClientImpl::sharedWorkerRepository() {
 
 WebKit::WebGraphicsContext3D*
 RendererWebKitClientImpl::createGraphicsContext3D() {
-  // TODO(kbr): remove the WebGraphicsContext3D::createDefault code path
-  // completely.
+  // The WebGraphicsContext3D::createDefault code path is used for
+  // layout tests (though not through this code) as well as for
+  // debugging and bringing up new ports.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessWebGL)) {
     return WebKit::WebGraphicsContext3D::createDefault();
   } else {

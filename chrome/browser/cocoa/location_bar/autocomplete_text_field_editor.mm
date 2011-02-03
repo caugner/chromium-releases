@@ -8,7 +8,7 @@
 #include "base/string_util.h"
 #include "grit/generated_resources.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"  // IDC_*
+#include "chrome/app/chrome_command_ids.h"  // IDC_*
 #include "chrome/browser/browser_list.h"
 #import "chrome/browser/cocoa/browser_window_controller.h"
 #import "chrome/browser/cocoa/location_bar/autocomplete_text_field.h"
@@ -270,6 +270,19 @@
   // we need to treat the change to marked text as content change as well.
   [self didChangeText];
 }
+
+- (NSRange)selectionRangeForProposedRange:(NSRange)proposedSelRange
+                              granularity:(NSSelectionGranularity)granularity {
+  AutocompleteTextFieldObserver* observer = [self observer];
+  NSRange modifiedRange = [super selectionRangeForProposedRange:proposedSelRange
+                                                    granularity:granularity];
+  if (observer)
+    return observer->SelectionRangeForProposedRange(modifiedRange);
+  return modifiedRange;
+}
+
+
+
 
 - (void)setSelectedRange:(NSRange)charRange
                 affinity:(NSSelectionAffinity)affinity

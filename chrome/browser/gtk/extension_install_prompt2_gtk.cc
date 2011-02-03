@@ -4,7 +4,6 @@
 
 #include <gtk/gtk.h>
 
-#include "app/gtk_util.h"
 #include "app/l10n_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -54,7 +53,7 @@ void OnDialogResponse(GtkDialog* dialog, int response_id,
 }
 
 void ShowInstallPromptDialog2(GtkWindow* parent, SkBitmap* skia_icon,
-                              Extension* extension,
+                              const Extension* extension,
                               ExtensionInstallUI::Delegate *delegate,
                               const std::vector<string16>& permissions) {
   // Build the dialog.
@@ -108,11 +107,8 @@ void ShowInstallPromptDialog2(GtkWindow* parent, SkBitmap* skia_icon,
                      !show_permissions, !show_permissions, 0);
 
   if (show_permissions) {
-    int label = extension->is_app() ?
-                IDS_EXTENSION_PROMPT2_APP_WILL_HAVE_ACCESS_TO :
-                IDS_EXTENSION_PROMPT2_WILL_HAVE_ACCESS_TO;
     GtkWidget* warning_label = gtk_label_new(l10n_util::GetStringUTF8(
-        label).c_str());
+        IDS_EXTENSION_PROMPT_WILL_HAVE_ACCESS_TO).c_str());
     gtk_misc_set_alignment(GTK_MISC(warning_label), 0.0, 0.5);
     gtk_util::SetLabelWidth(warning_label, kRightColumnMinWidth);
 
@@ -173,7 +169,10 @@ void ShowInstallPromptDialog2(GtkWindow* parent, SkBitmap* skia_icon,
 }  // namespace
 
 void ExtensionInstallUI::ShowExtensionInstallUIPrompt2Impl(
-    Profile* profile, Delegate* delegate, Extension* extension, SkBitmap* icon,
+    Profile* profile,
+    Delegate* delegate,
+    const Extension* extension,
+    SkBitmap* icon,
     const std::vector<string16>& permissions) {
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
   if (!browser) {

@@ -12,17 +12,19 @@
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
 #include "webkit/fileapi/file_system_operation.h"
 
+namespace fileapi {
+
 const int kInvalidRequestId = -1;
 const int kFileOperationStatusNotSet = 0;
 const int kFileOperationSucceeded = 1;
 
 static int last_request_id = -1;
 
-bool FileExists(FilePath path) {
+static bool FileExists(FilePath path) {
   return file_util::PathExists(path) && !file_util::DirectoryExists(path);
 }
 
-class MockDispatcher : public fileapi::FileSystemCallbackDispatcher {
+class MockDispatcher : public FileSystemCallbackDispatcher {
  public:
   MockDispatcher(int request_id)
       : status_(kFileOperationStatusNotSet),
@@ -43,7 +45,7 @@ class MockDispatcher : public fileapi::FileSystemCallbackDispatcher {
   }
 
   virtual void DidReadDirectory(
-      const std::vector<base::file_util_proxy::Entry>& entries,
+      const std::vector<base::FileUtilProxy::Entry>& entries,
       bool /* has_more */) {
     entries_ = entries;
   }
@@ -60,7 +62,7 @@ class MockDispatcher : public fileapi::FileSystemCallbackDispatcher {
   int status() const { return status_; }
   int request_id() const { return request_id_; }
   const base::PlatformFileInfo& info() const { return info_; }
-  const std::vector<base::file_util_proxy::Entry>& entries() const {
+  const std::vector<base::FileUtilProxy::Entry>& entries() const {
     return entries_;
   }
 
@@ -68,7 +70,7 @@ class MockDispatcher : public fileapi::FileSystemCallbackDispatcher {
   int status_;
   int request_id_;
   base::PlatformFileInfo info_;
-  std::vector<base::file_util_proxy::Entry> entries_;
+  std::vector<base::FileUtilProxy::Entry> entries_;
 };
 
 class FileSystemOperationTest : public testing::Test {
@@ -80,10 +82,10 @@ class FileSystemOperationTest : public testing::Test {
     EXPECT_TRUE(base_.IsValid());
   }
 
-  fileapi::FileSystemOperation* operation() {
+  FileSystemOperation* operation() {
     request_id_ = ++last_request_id;
     mock_dispatcher_ = new MockDispatcher(request_id_);
-    operation_.reset(new fileapi::FileSystemOperation(
+    operation_.reset(new FileSystemOperation(
         mock_dispatcher_, base::MessageLoopProxy::CreateForCurrentThread()));
     return operation_.get();
   }
@@ -93,7 +95,7 @@ class FileSystemOperationTest : public testing::Test {
   ScopedTempDir base_;
 
   int request_id_;
-  scoped_ptr<fileapi::FileSystemOperation> operation_;
+  scoped_ptr<FileSystemOperation> operation_;
 
   // Owned by |operation_|.
   MockDispatcher* mock_dispatcher_;
@@ -461,6 +463,34 @@ TEST_F(FileSystemOperationTest, TestCreateFileFailure) {
   EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
 }
 
+TEST_F(FileSystemOperationTest, TestCreateVeryLongName) {
+  ScopedTempDir dir;
+  ASSERT_TRUE(dir.CreateUniqueTempDir());
+
+#if defined(OS_WIN)
+  FilePath dir_path(FILE_PATH_LITERAL("\\\\?\\") + dir.path().value());
+#else
+  FilePath dir_path = dir.path();
+#endif
+
+  // TODO(kkanetkar): Once each platform's limitations have been enforced
+  // consider that in this test. Currently this test is for
+  // windows primarily.
+  FilePath dir1 = dir_path.AppendASCII(
+      "012345678901234567890123456789012345678901234567890123456789"
+      "012345678901234567890123456789012345678901234567890123456789"
+      "0123456789012345678901234567890123456789");
+  FilePath file = dir1.AppendASCII(
+      "012345678901234567890123456789012345678901234567890123456789"
+      "012345678901234567890123456789012345678901234567890123456789"
+      "0123456789012345678901234567890123456789");
+  operation()->CreateDirectory(dir1, false, true);
+  MessageLoop::current()->RunAllPending();
+  operation()->CreateFile(file, true);
+  MessageLoop::current()->RunAllPending();
+  EXPECT_TRUE(file_util::PathExists(file));
+}
+
 TEST_F(FileSystemOperationTest, TestCreateFileSuccessFileExists) {
   // Already existing file and exclusive false.
   ScopedTempDir dir;
@@ -784,3 +814,5 @@ TEST_F(FileSystemOperationTest, TestTruncate) {
   for (int i = 0; i < length; ++i)
     EXPECT_EQ(test_data[i], data[i]);
 }
+
+}  // namespace fileapi

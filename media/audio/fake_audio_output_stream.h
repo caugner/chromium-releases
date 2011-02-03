@@ -13,13 +13,14 @@
 
 #include "base/scoped_ptr.h"
 #include "media/audio/audio_io.h"
+#include "media/audio/audio_parameters.h"
 
 class FakeAudioOutputStream : public AudioOutputStream {
  public:
-  static AudioOutputStream* MakeFakeStream();
+  static AudioOutputStream* MakeFakeStream(AudioParameters params);
   static FakeAudioOutputStream* GetLastFakeStream();
 
-  virtual bool Open(uint32 packet_size);
+  virtual bool Open();
   virtual void Start(AudioSourceCallback* callback);
   virtual void Stop();
   virtual void SetVolume(double volume);
@@ -30,8 +31,8 @@ class FakeAudioOutputStream : public AudioOutputStream {
   double volume() { return volume_; }
 
  private:
-  FakeAudioOutputStream();
-  virtual ~FakeAudioOutputStream() {}
+  explicit FakeAudioOutputStream(AudioParameters params);
+  virtual ~FakeAudioOutputStream();
 
   static void DestroyLastFakeStream(void* param);
   static bool has_created_fake_stream_;

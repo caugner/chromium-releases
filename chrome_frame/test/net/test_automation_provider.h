@@ -4,11 +4,15 @@
 #ifndef CHROME_FRAME_TEST_NET_TEST_AUTOMATION_PROVIDER_H_
 #define CHROME_FRAME_TEST_NET_TEST_AUTOMATION_PROVIDER_H_
 
+#include <string>
 #include "chrome/browser/automation/automation_provider.h"
 
-class TestAutomationResourceMessageFilter;
+namespace net {
 class URLRequest;
 class URLRequestJob;
+}  // namespace net
+
+class TestAutomationResourceMessageFilter;
 
 // Callback interface for TestAutomationProvider.
 class TestAutomationProviderDelegate {
@@ -36,8 +40,8 @@ class TestAutomationProvider
   virtual bool Send(IPC::Message* msg);
 
   // Protocol factory for handling http/https requests over automation.
-  static URLRequestJob* Factory(URLRequest* request,
-                                const std::string& scheme);
+  static net::URLRequestJob* Factory(net::URLRequest* request,
+                                     const std::string& scheme);
 
   // Call to instantiate and initialize a new instance of
   // TestAutomationProvider.
@@ -47,7 +51,8 @@ class TestAutomationProvider
       TestAutomationProviderDelegate* delegate);
 
  protected:
-  scoped_refptr<TestAutomationResourceMessageFilter> filter_;
+  virtual std::string GetProtocolVersion();
+
   int tab_handle_;
   TestAutomationProviderDelegate* delegate_;
 

@@ -4,11 +4,12 @@
 
 #include "chrome_frame/cfproxy_private.h"
 
+#include <vector>
 #include "base/atomic_sequence_num.h"
 #include "base/command_line.h"
 #include "base/process_util.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/automation/automation_messages.h"
 #include "chrome_frame/chrome_launcher_utils.h"
 #include "chrome_frame/utils.h"  // for IsHeadlessMode();
 
@@ -19,10 +20,10 @@ void DispatchReplyFail(uint32 type,
                        SyncMessageContext* ctx) {
   switch (type) {
     case AutomationMsg_CreateExternalTab::ID:
-      delegate->Completed_CreateTab(false, NULL, NULL, NULL);
+      delegate->Completed_CreateTab(false, NULL, NULL, 0, 0);
       break;
     case AutomationMsg_ConnectExternalTab::ID:
-      delegate->Completed_ConnectToTab(false, NULL, NULL, NULL);
+      delegate->Completed_ConnectToTab(false, NULL, NULL, 0, 0);
       break;
     case AutomationMsg_InstallExtension::ID:
       delegate->Completed_InstallExtension(false,
@@ -37,23 +38,23 @@ bool DispatchReplyOk(const IPC::Message* reply_msg, uint32 type,
   void* iter = IPC::SyncMessage::GetDataIterator(reply_msg);
   switch (type) {
     case AutomationMsg_CreateExternalTab::ID: {
-      // Tuple3<HWND, HWND, int> out;
+      // Tuple4<HWND, HWND, int, int> out;
       TupleTypes<AutomationMsg_CreateExternalTab::ReplyParam>::ValueTuple out;
       if (ReadParam(reply_msg, &iter, &out)) {
         DCHECK(tab2delegate->find(out.c) == tab2delegate->end());
         (*tab2delegate)[out.c] = delegate;
-        delegate->Completed_CreateTab(true, out.a, out.b, out.c);
+        delegate->Completed_CreateTab(true, out.a, out.b, out.c, out.d);
       }
       return true;
     }
 
     case AutomationMsg_ConnectExternalTab::ID: {
-      // Tuple3<HWND, HWND, int> out;
+      // Tuple4<HWND, HWND, int, int> out;
       TupleTypes<AutomationMsg_ConnectExternalTab::ReplyParam>::ValueTuple out;
       if (ReadParam(reply_msg, &iter, &out)) {
         DCHECK(tab2delegate->find(out.c) == tab2delegate->end());
         (*tab2delegate)[out.c] = delegate;
-        delegate->Completed_ConnectToTab(true, out.a, out.b, out.c);
+        delegate->Completed_ConnectToTab(true, out.a, out.b, out.c, out.d);
       }
       return true;
     }
@@ -227,9 +228,29 @@ void SyncMsgSender::QueueSyncMessage(const IPC::SyncMessage* msg,
   }
 }
 
+// Cancel all outgoing calls for this delegate.
 void SyncMsgSender::Cancel(ChromeProxyDelegate* delegate) {
-  // TODO(stoyan): Cancel all outgoing calls for this delegate
-  // We may not need this. :)
+  std::vector<SingleSentMessage*> cancelled;
+  {
+    AutoLock lock(messages_lock_);
+    SentMessages::iterator it = messages_.begin();
+    for (; it != messages_.end(); ) {
+      SingleSentMessage* origin = it->second;
+      if (origin->delegate_ == delegate) {
+        cancelled.push_back(origin);
+        it = messages_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  for (std::vector<SingleSentMessage*>::iterator it = cancelled.begin();
+       it != cancelled.end(); ++it) {
+    SingleSentMessage* origin = *it;
+    DispatchReplyFail(origin->type_, delegate, origin->ctx_);
+    delete origin;
+  }
 }
 
 SyncMsgSender::SingleSentMessage* SyncMsgSender::RemoveMessage(int id) {

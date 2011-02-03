@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 #include "base/auto_reset.h"
 #include "base/eintr_wrapper.h"
 #include "base/logging.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/observer_list.h"
-#include "base/scoped_nsautorelease_pool.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #if defined(USE_SYSTEM_LIBEVENT)
@@ -265,7 +265,7 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
   scoped_ptr<event> timer_event(new event);
 
   for (;;) {
-    ScopedNSAutoreleasePool autorelease_pool;
+    mac::ScopedNSAutoreleasePool autorelease_pool;
 
     bool did_work = delegate->DoWork();
     if (!keep_running_)
@@ -290,7 +290,7 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
     if (delayed_work_time_.is_null()) {
       event_base_loop(event_base_, EVLOOP_ONCE);
     } else {
-      TimeDelta delay = delayed_work_time_ - Time::Now();
+      TimeDelta delay = delayed_work_time_ - TimeTicks::Now();
       if (delay > TimeDelta()) {
         struct timeval poll_tv;
         poll_tv.tv_sec = delay.InSeconds();
@@ -303,7 +303,7 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
       } else {
         // It looks like delayed_work_time_ indicates a time in the past, so we
         // need to call DoDelayedWork now.
-        delayed_work_time_ = Time();
+        delayed_work_time_ = TimeTicks();
       }
     }
   }
@@ -326,7 +326,8 @@ void MessagePumpLibevent::ScheduleWork() {
       << "[nwrite:" << nwrite << "] [errno:" << errno << "]";
 }
 
-void MessagePumpLibevent::ScheduleDelayedWork(const Time& delayed_work_time) {
+void MessagePumpLibevent::ScheduleDelayedWork(
+    const TimeTicks& delayed_work_time) {
   // We know that we can't be blocked on Wait right now since this method can
   // only be called on the same thread as Run, so we only need to update our
   // record of how long to sleep when we do sleep.

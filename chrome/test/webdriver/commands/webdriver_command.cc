@@ -12,7 +12,7 @@
 #include "base/values.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/automation_proxy.h"
@@ -50,7 +50,7 @@ bool WebDriverCommand::Init(Response* const response) {
     return false;
   }
 
-  LOG(INFO) << "Fetching session: " << session_id;
+  VLOG(1) << "Fetching session: " << session_id;
   session_ = Singleton<SessionManager>::get()->GetSession(session_id);
   if (session_ == NULL) {
     response->set_value(Value::CreateStringValue(

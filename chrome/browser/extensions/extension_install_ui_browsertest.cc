@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/browser.h"
-#include "chrome/browser/profile.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/theme_installed_infobar_delegate.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/test/ui_test_utils.h"
 
 namespace {
@@ -39,7 +39,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
   // Install theme once and undo to verify we go back to default theme.
   FilePath theme_path = test_data_dir_.AppendASCII("theme.crx");
   ASSERT_TRUE(InstallExtensionWithUI(theme_path, 1));
-  Extension* theme = browser()->profile()->GetTheme();
+  const Extension* theme = browser()->profile()->GetTheme();
   ASSERT_TRUE(theme);
   ASSERT_EQ(theme_crx, theme->id());
   VerifyThemeInfoBarAndUndoInstall();

@@ -10,12 +10,12 @@
 
 #import <Foundation/Foundation.h>
 
-#include "base/scoped_nsautorelease_pool.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "testing/gtest/include/gtest/internal/gtest-port.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 TEST(GTestMac, ExpectNSEQ) {
-  base::ScopedNSAutoreleasePool pool;
+  base::mac::ScopedNSAutoreleasePool pool;
 
   EXPECT_NSEQ(@"a", @"a");
 
@@ -26,7 +26,7 @@ TEST(GTestMac, ExpectNSEQ) {
 }
 
 TEST(GTestMac, AssertNSEQ) {
-  base::ScopedNSAutoreleasePool pool;
+  base::mac::ScopedNSAutoreleasePool pool;
 
   NSNumber* n1 = [NSNumber numberWithInt:42];
   NSNumber* n2 = [NSNumber numberWithInt:42];
@@ -35,13 +35,23 @@ TEST(GTestMac, AssertNSEQ) {
 }
 
 TEST(GTestMac, ExpectNSNE) {
-  base::ScopedNSAutoreleasePool pool;
+  base::mac::ScopedNSAutoreleasePool pool;
 
   EXPECT_NSNE([NSNumber numberWithInt:2], [NSNumber numberWithInt:42]);
 }
 
 TEST(GTestMac, AssertNSNE) {
-  base::ScopedNSAutoreleasePool pool;
+  base::mac::ScopedNSAutoreleasePool pool;
 
   ASSERT_NSNE(@"a", @"b");
+}
+
+TEST(GTestMac, ExpectNSNil) {
+  base::mac::ScopedNSAutoreleasePool pool;
+
+  EXPECT_NSEQ(nil, nil);
+  EXPECT_NSNE(nil, @"a");
+  EXPECT_NSNE(@"a", nil);
+
+  // TODO(shess): Test that EXPECT_NSNE(nil, nil) fails.
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,31 +12,34 @@
 
 class MessageLoop;
 class ResourceDispatcherHost;
+
+namespace net {
 class URLRequest;
+}  // namespace net
 
 // Used to buffer a request until enough data has been received.
 class BufferedResourceHandler : public ResourceHandler {
  public:
   BufferedResourceHandler(ResourceHandler* handler,
                           ResourceDispatcherHost* host,
-                          URLRequest* request);
+                          net::URLRequest* request);
 
   // ResourceHandler implementation:
-  bool OnUploadProgress(int request_id, uint64 position, uint64 size);
-  bool OnRequestRedirected(int request_id, const GURL& new_url,
-                           ResourceResponse* response, bool* defer);
-  bool OnResponseStarted(int request_id, ResourceResponse* response);
-  bool OnWillStart(int request_id, const GURL& url, bool* defer);
-  bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
-                  int min_size);
-  bool OnReadCompleted(int request_id, int* bytes_read);
-  bool OnResponseCompleted(int request_id,
-                           const URLRequestStatus& status,
-                           const std::string& security_info);
-  void OnRequestClosed();
+  virtual bool OnUploadProgress(int request_id, uint64 position, uint64 size);
+  virtual bool OnRequestRedirected(int request_id, const GURL& new_url,
+                                   ResourceResponse* response, bool* defer);
+  virtual bool OnResponseStarted(int request_id, ResourceResponse* response);
+  virtual bool OnWillStart(int request_id, const GURL& url, bool* defer);
+  virtual bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
+                          int min_size);
+  virtual bool OnReadCompleted(int request_id, int* bytes_read);
+  virtual bool OnResponseCompleted(int request_id,
+                                   const URLRequestStatus& status,
+                                   const std::string& security_info);
+  virtual void OnRequestClosed();
 
  private:
-  ~BufferedResourceHandler() {}
+  virtual ~BufferedResourceHandler();
 
   // Returns true if we should delay OnResponseStarted forwarding.
   bool DelayResponse();
@@ -79,7 +82,7 @@ class BufferedResourceHandler : public ResourceHandler {
   scoped_refptr<ResourceHandler> real_handler_;
   scoped_refptr<ResourceResponse> response_;
   ResourceDispatcherHost* host_;
-  URLRequest* request_;
+  net::URLRequest* request_;
   scoped_refptr<net::IOBuffer> read_buffer_;
   scoped_refptr<net::IOBuffer> my_buffer_;
   int read_buffer_size_;

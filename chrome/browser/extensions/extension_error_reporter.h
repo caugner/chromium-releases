@@ -28,7 +28,7 @@ class ExtensionErrorReporter {
   // Get the singleton instance.
   static ExtensionErrorReporter* GetInstance();
 
-  // Report an error. Errors always go to LOG(INFO). Optionally, they can also
+  // Report an error. Errors always go to VLOG(1). Optionally, they can also
   // cause a noisy alert box. This method can be called from any thread.
   void ReportError(const std::string& message, bool be_noisy);
 
@@ -42,6 +42,7 @@ class ExtensionErrorReporter {
   static ExtensionErrorReporter* instance_;
 
   explicit ExtensionErrorReporter(bool enable_noisy_errors);
+  ~ExtensionErrorReporter();
 
   MessageLoop* ui_loop_;
   std::vector<std::string> errors_;

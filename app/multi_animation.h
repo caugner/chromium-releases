@@ -13,8 +13,8 @@
 
 // MultiAnimation is an animation that consists of a number of sub animations.
 // To create a MultiAnimation pass in the parts, invoke Start() and the delegate
-// is notified as the animation progresses. MultiAnimation runs until Stop is
-// invoked.
+// is notified as the animation progresses. By default MultiAnimation runs until
+// Stop is invoked, see |set_continuous()| for details.
 class MultiAnimation : public Animation {
  public:
   // Defines part of the animation. Each part consists of the following:
@@ -45,6 +45,11 @@ class MultiAnimation : public Animation {
   typedef std::vector<Part> Parts;
 
   explicit MultiAnimation(const Parts& parts);
+  virtual ~MultiAnimation();
+
+  // Sets whether the animation continues after it reaches the end. If true, the
+  // animation runs until explicitly stopped. The default is true.
+  void set_continuous(bool continuous) { continuous_ = continuous; }
 
   // Returns the current value. The current value for a MultiAnimation is
   // determined from the tween type of the current part.
@@ -56,6 +61,7 @@ class MultiAnimation : public Animation {
  protected:
   // Animation overrides.
   virtual void Step(base::TimeTicks time_now);
+  virtual void SetStartTime(base::TimeTicks start_time);
 
  private:
   // Returns the part containing the specified time. |time_ms| is reset to be
@@ -74,6 +80,9 @@ class MultiAnimation : public Animation {
 
   // Index of the current part.
   size_t current_part_index_;
+
+  // See description above setter.
+  bool continuous_;
 
   DISALLOW_COPY_AND_ASSIGN(MultiAnimation);
 };

@@ -5,7 +5,7 @@
 #include "chrome/browser/in_process_webkit/webkit_context.h"
 
 #include "base/command_line.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/chrome_switches.h"
 
@@ -39,10 +39,9 @@ WebKitContext::~WebKitContext() {
 
 void WebKitContext::PurgeMemory() {
   if (!BrowserThread::CurrentlyOn(BrowserThread::WEBKIT)) {
-    bool result = BrowserThread::PostTask(
+    BrowserThread::PostTask(
         BrowserThread::WEBKIT, FROM_HERE,
         NewRunnableMethod(this, &WebKitContext::PurgeMemory));
-    DCHECK(result);
     return;
   }
 
@@ -54,11 +53,10 @@ void WebKitContext::DeleteDataModifiedSince(
     const char* url_scheme_to_be_skipped,
     const std::vector<string16>& protected_origins) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::WEBKIT)) {
-    bool result = BrowserThread::PostTask(
+    BrowserThread::PostTask(
         BrowserThread::WEBKIT, FROM_HERE,
         NewRunnableMethod(this, &WebKitContext::DeleteDataModifiedSince,
                           cutoff, url_scheme_to_be_skipped, protected_origins));
-    DCHECK(result);
     return;
   }
 

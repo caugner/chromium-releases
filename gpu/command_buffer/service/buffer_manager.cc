@@ -10,6 +10,10 @@
 namespace gpu {
 namespace gles2 {
 
+BufferManager::BufferManager()
+    : allow_buffers_on_multiple_targets_(false) {
+}
+
 BufferManager::~BufferManager() {
   DCHECK(buffer_infos_.empty());
 }
@@ -50,6 +54,15 @@ void BufferManager::RemoveBufferInfo(GLuint client_id) {
   }
 }
 
+BufferManager::BufferInfo::BufferInfo(GLuint service_id)
+    : service_id_(service_id),
+      target_(0),
+      size_(0),
+      shadowed_(false) {
+}
+
+BufferManager::BufferInfo::~BufferInfo() { }
+
 void BufferManager::BufferInfo::SetSize(GLsizeiptr size, bool shadow) {
   DCHECK(!IsDeleted());
   if (size != size_ || shadow != shadowed_) {
@@ -66,8 +79,7 @@ void BufferManager::BufferInfo::SetSize(GLsizeiptr size, bool shadow) {
 bool BufferManager::BufferInfo::SetRange(
     GLintptr offset, GLsizeiptr size, const GLvoid * data) {
   DCHECK(!IsDeleted());
-  if (offset + size < offset ||
-        offset + size > size_) {
+  if (offset + size < offset || offset + size > size_) {
     return false;
   }
   if (shadowed_) {
@@ -75,6 +87,14 @@ bool BufferManager::BufferInfo::SetRange(
     ClearCache();
   }
   return true;
+}
+
+const void* BufferManager::BufferInfo::GetRange(
+    GLintptr offset, GLsizeiptr size) const {
+  if (!shadowed_ || (offset + size < offset || offset + size > size_)) {
+    return NULL;
+  }
+  return shadow_.get() + offset;
 }
 
 void BufferManager::BufferInfo::ClearCache() {

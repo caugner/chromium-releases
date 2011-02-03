@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,11 +19,9 @@
 
 #include <deque>
 
-#include "base/lock.h"
 #include "base/platform_thread.h"
 #include "base/scoped_ptr.h"
 #include "media/base/buffers.h"
-#include "media/base/factory.h"
 #include "media/base/filters.h"
 #include "media/filters/audio_renderer_base.h"
 
@@ -31,13 +29,8 @@ namespace media {
 
 class NullAudioRenderer : public AudioRendererBase, PlatformThread::Delegate {
  public:
-  // FilterFactory provider.
-  static FilterFactory* CreateFilterFactory() {
-    return new FilterFactoryImpl0<NullAudioRenderer>();
-  }
-
-  // Compatible with any audio/x-uncompressed MediaFormat.
-  static bool IsMediaFormatSupported(const MediaFormat& media_format);
+  NullAudioRenderer();
+  virtual ~NullAudioRenderer();
 
   // AudioRenderer implementation.
   virtual void SetVolume(float volume);
@@ -46,11 +39,6 @@ class NullAudioRenderer : public AudioRendererBase, PlatformThread::Delegate {
   virtual void ThreadMain();
 
  protected:
-  // Only allow a factory to create this class.
-  friend class FilterFactoryImpl0<NullAudioRenderer>;
-  NullAudioRenderer();
-  virtual ~NullAudioRenderer();
-
   // AudioRendererBase implementation.
   virtual bool OnInitialize(const MediaFormat& media_format);
   virtual void OnStop();

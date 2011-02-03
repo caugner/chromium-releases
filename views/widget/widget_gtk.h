@@ -186,9 +186,8 @@ class WidgetGtk
   virtual bool GetAccelerator(int cmd_id, menus::Accelerator* accelerator);
   virtual Window* GetWindow();
   virtual const Window* GetWindow() const;
-  virtual void SetNativeWindowProperty(const std::wstring& name,
-                                       void* value);
-  virtual void* GetNativeWindowProperty(const std::wstring& name);
+  virtual void SetNativeWindowProperty(const char* name, void* value);
+  virtual void* GetNativeWindowProperty(const char* name);
   virtual ThemeProvider* GetThemeProvider() const;
   virtual ThemeProvider* GetDefaultThemeProvider() const;
   virtual FocusManager* GetFocusManager();
@@ -207,6 +206,9 @@ class WidgetGtk
   // Handles a keyboard event by sending it to our focus manager.
   // Returns true if it's handled by the focus manager.
   bool HandleKeyboardEvent(GdkEventKey* event);
+
+  // Returns the view::Event::flags for a GdkEventButton.
+  static int GetFlagsForEventButton(const GdkEventButton& event);
 
  protected:
   // If widget containes another widget, translates event coordinates to the
@@ -228,9 +230,6 @@ class WidgetGtk
     }
     return false;
   }
-
-  // Returns the view::Event::flags for a GdkEventButton.
-  static int GetFlagsForEventButton(const GdkEventButton& event);
 
   // Event handlers:
   CHROMEGTK_CALLBACK_1(WidgetGtk, gboolean, OnButtonPress, GdkEventButton*);

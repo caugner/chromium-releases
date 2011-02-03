@@ -3,8 +3,9 @@
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/feature_info.h"
-#include "app/gfx/gl/gl_mock.h"
+
 #include "base/scoped_ptr.h"
+#include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "gpu/GLES2/gles2_command_buffer.h"
@@ -53,21 +54,31 @@ class FeatureInfoTest : public testing::Test {
 
 TEST_F(FeatureInfoTest, Basic) {
   // Test it starts off uninitialized.
-  EXPECT_FALSE(info_.feature_flags().ext_framebuffer_multisample);
+  EXPECT_FALSE(info_.feature_flags().chromium_framebuffer_multisample);
   EXPECT_FALSE(info_.feature_flags().oes_standard_derivatives);
   EXPECT_FALSE(info_.feature_flags().npot_ok);
   EXPECT_FALSE(info_.feature_flags().enable_texture_float_linear);
   EXPECT_FALSE(info_.feature_flags().enable_texture_half_float_linear);
+  EXPECT_FALSE(info_.feature_flags().chromium_webglsl);
 }
 
 TEST_F(FeatureInfoTest, InitializeNoExtensions) {
   SetupInitExpectations("");
   info_.Initialize(NULL);
+  // Check default extensions are there
+  EXPECT_THAT(info_.extensions(), HasSubstr("GL_CHROMIUM_map_sub"));
+  EXPECT_THAT(info_.extensions(),
+              HasSubstr("GL_CHROMIUM_copy_texture_to_parent_texture"));
+  EXPECT_THAT(info_.extensions(), HasSubstr("GL_CHROMIUM_resource_safe"));
+  EXPECT_THAT(info_.extensions(), HasSubstr("GL_CHROMIUM_strict_attribs"));
+
   // Check a couple of random extensions that should not be there.
+  EXPECT_THAT(info_.extensions(), Not(HasSubstr("GL_CHROMIUM_webglsl")));
   EXPECT_THAT(info_.extensions(), Not(HasSubstr("GL_OES_texture_npot")));
   EXPECT_THAT(info_.extensions(),
               Not(HasSubstr("GL_EXT_texture_compression_dxt1")));
   EXPECT_FALSE(info_.feature_flags().npot_ok);
+  EXPECT_FALSE(info_.feature_flags().chromium_webglsl);
   EXPECT_FALSE(info_.validators()->compressed_texture_format.IsValid(
       GL_COMPRESSED_RGB_S3TC_DXT1_EXT));
   EXPECT_FALSE(info_.validators()->compressed_texture_format.IsValid(
@@ -266,9 +277,9 @@ TEST_F(FeatureInfoTest, InitializeOES_texture_half_float_linearGLES2) {
 TEST_F(FeatureInfoTest, InitializeEXT_framebuffer_multisample) {
   SetupInitExpectations("GL_EXT_framebuffer_multisample");
   info_.Initialize(NULL);
-  EXPECT_TRUE(info_.feature_flags().ext_framebuffer_multisample);
-  EXPECT_THAT(info_.extensions(), HasSubstr("GL_EXT_framebuffer_multisample"));
-  EXPECT_THAT(info_.extensions(), HasSubstr("GL_EXT_framebuffer_blit"));
+  EXPECT_TRUE(info_.feature_flags().chromium_framebuffer_multisample);
+  EXPECT_THAT(info_.extensions(),
+              HasSubstr("GL_CHROMIUM_framebuffer_multisample"));
   EXPECT_TRUE(info_.validators()->frame_buffer_target.IsValid(
       GL_READ_FRAMEBUFFER_EXT));
   EXPECT_TRUE(info_.validators()->frame_buffer_target.IsValid(
@@ -371,6 +382,17 @@ TEST_F(FeatureInfoTest, InitializeOES_standard_derivatives) {
   info_.Initialize(NULL);
   EXPECT_THAT(info_.extensions(), HasSubstr("GL_OES_standard_derivatives"));
   EXPECT_TRUE(info_.feature_flags().oes_standard_derivatives);
+  EXPECT_TRUE(info_.validators()->hint_target.IsValid(
+      GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES));
+  EXPECT_TRUE(info_.validators()->g_l_state.IsValid(
+      GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES));
+}
+
+TEST_F(FeatureInfoTest, InitializeCHROMIUM_webglsl) {
+  SetupInitExpectations("");
+  info_.Initialize("GL_CHROMIUM_webglsl");
+  EXPECT_THAT(info_.extensions(), HasSubstr("GL_CHROMIUM_webglsl"));
+  EXPECT_TRUE(info_.feature_flags().chromium_webglsl);
 }
 
 }  // namespace gles2

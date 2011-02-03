@@ -10,36 +10,34 @@
 #include <utility>
 
 #include "base/stl_util-inl.h"
-#include "chrome/browser/policy/configuration_policy_store.h"
+#include "base/values.h"
+#include "chrome/browser/policy/configuration_policy_store_interface.h"
+#include "testing/gmock/include/gmock/gmock.h"
 
 namespace policy {
 
 // Mock ConfigurationPolicyStore implementation that records values for policy
 // settings as they get set.
-class MockConfigurationPolicyStore : public ConfigurationPolicyStore {
+class MockConfigurationPolicyStore : public ConfigurationPolicyStoreInterface {
  public:
-  MockConfigurationPolicyStore() {}
-  ~MockConfigurationPolicyStore() {
-    STLDeleteValues(&policy_map_);
-  }
+  typedef std::map<ConfigurationPolicyType, Value*> PolicyMap;
 
-  typedef std::map<ConfigurationPolicyStore::PolicyType, Value*> PolicyMap;
-  const PolicyMap& policy_map() { return policy_map_; }
+  MockConfigurationPolicyStore();
+  virtual ~MockConfigurationPolicyStore();
+
+  const PolicyMap& policy_map() const { return policy_map_; }
 
   // Get a value for the given policy. Returns NULL if that key doesn't exist.
-  const Value* Get(ConfigurationPolicyStore::PolicyType type) const {
-    PolicyMap::const_iterator entry(policy_map_.find(type));
-    return entry == policy_map_.end() ? NULL : entry->second;
-  }
-
+  const Value* Get(ConfigurationPolicyType type) const;
   // ConfigurationPolicyStore implementation.
-  virtual void Apply(PolicyType policy, Value* value) {
-    std::swap(policy_map_[policy], value);
-    delete value;
-  }
+  void ApplyToMap(ConfigurationPolicyType policy, Value* value);
+
+  MOCK_METHOD2(Apply, void(ConfigurationPolicyType policy, Value* value));
 
  private:
   PolicyMap policy_map_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockConfigurationPolicyStore);
 };
 
 }  // namespace policy

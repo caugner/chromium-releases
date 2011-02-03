@@ -8,11 +8,12 @@
 
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/registry.h"
+#include "base/scoped_handle.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
+#include "base/win/registry.h"
+#include "base/win/windows_version.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
@@ -29,6 +30,8 @@
 
 // Build-time generated include file.
 #include "registered_dlls.h"  // NOLINT
+
+using base::win::RegKey;
 
 namespace {
 
@@ -67,10 +70,35 @@ void CloseAllChromeProcesses() {
 
 // Attempts to close the Chrome Frame helper process by sending WM_CLOSE
 // messages to its window, or just killing it if that doesn't work.
-void CloseAllChromeFrameHelperProcesses() {
+void CloseChromeFrameHelperProcess() {
   HWND window = FindWindow(installer_util::kChromeFrameHelperWndClass, NULL);
-  if (window &&
-      !SendMessageTimeout(window, WM_CLOSE, 0, 0, SMTO_BLOCK, 3000, NULL)) {
+  if (!::IsWindow(window))
+    return;
+
+  const DWORD kWaitMs = 3000;
+
+  DWORD pid = 0;
+  ::GetWindowThreadProcessId(window, &pid);
+  DCHECK_NE(pid, 0U);
+  ScopedHandle process(::OpenProcess(SYNCHRONIZE, FALSE, pid));
+  PLOG_IF(INFO, !process) << "Failed to open process: " << pid;
+
+  bool kill = true;
+  if (SendMessageTimeout(window, WM_CLOSE, 0, 0, SMTO_BLOCK, kWaitMs, NULL) &&
+      process) {
+    VLOG(1) << "Waiting for " << installer_util::kChromeFrameHelperExe;
+    DWORD wait = ::WaitForSingleObject(process, kWaitMs);
+    if (wait != WAIT_OBJECT_0) {
+      LOG(WARNING) << "Wait for " << installer_util::kChromeFrameHelperExe
+          << " to exit failed or timed out.";
+    } else {
+      kill = false;
+      VLOG(1) << installer_util::kChromeFrameHelperExe << " exited normally.";
+    }
+  }
+
+  if (kill) {
+    VLOG(1) << installer_util::kChromeFrameHelperExe << " hung.  Killing.";
     base::CleanupProcesses(installer_util::kChromeFrameHelperExe, 0,
                            ResultCodes::HUNG, NULL);
   }
@@ -92,7 +120,7 @@ bool CurrentUserHasDefaultBrowser(bool system_uninstall) {
     reg_exe = reg_exe.substr(1, reg_exe.length() - 2);
     if ((reg_exe.size() == chrome_exe.size()) &&
         (std::equal(chrome_exe.begin(), chrome_exe.end(),
-                    reg_exe.begin(), CaseInsensitiveCompare<wchar_t>())))
+                    reg_exe.begin(), base::CaseInsensitiveCompare<wchar_t>())))
       return true;
   }
 
@@ -128,7 +156,7 @@ void DeleteChromeShortcuts(bool system_uninstall) {
   } else {
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
     shortcut_path = shortcut_path.Append(dist->GetAppShortCutName());
-    LOG(INFO) << "Deleting shortcut " << shortcut_path.value();
+    VLOG(1) << "Deleting shortcut " << shortcut_path.value();
     if (!file_util::Delete(shortcut_path, true))
       LOG(ERROR) << "Failed to delete folder: " << shortcut_path.value();
   }
@@ -193,9 +221,8 @@ DeleteResult DeleteFilesAndFolders(const std::wstring& exe_path,
   if (install_path.empty()) {
     LOG(ERROR) << "Could not get installation destination path.";
     return DELETE_FAILED;  // Nothing else we can do to uninstall, so we return.
-  } else {
-    LOG(INFO) << "install destination path: " << install_path;
   }
+  VLOG(1) << "install destination path: " << install_path;
 
   // Move setup.exe to the temp path.
   std::wstring setup_exe(installer::GetInstallerPathUnderChrome(
@@ -225,18 +252,20 @@ DeleteResult DeleteFilesAndFolders(const std::wstring& exe_path,
   if (got_local_state) {
     FilePath user_local_file(
         user_local_state.Append(chrome::kLocalStateFilename));
-    FilePath path = FilePath::FromWStringHack(*local_state_path);
-    if (!file_util::CreateTemporaryFile(&path))
+    FilePath path;
+    if (!file_util::CreateTemporaryFile(&path)) {
       LOG(ERROR) << "Failed to create temporary file for Local State.";
-    else
+    } else {
+      *local_state_path = path.value();
       file_util::CopyFile(user_local_file, path);
+    }
   } else {
     LOG(ERROR) << "Could not retrieve user's profile directory.";
   }
 
   DeleteResult result = DELETE_SUCCEEDED;
 
-  LOG(INFO) << "Deleting install path " << install_path;
+  VLOG(1) << "Deleting install path " << install_path;
   if (!file_util::Delete(install_path, true)) {
     LOG(ERROR) << "Failed to delete folder (1st try): " << install_path;
     if (InstallUtil::IsChromeFrameProcess()) {
@@ -256,7 +285,7 @@ DeleteResult DeleteFilesAndFolders(const std::wstring& exe_path,
   }
 
   if (delete_profile && got_local_state) {
-    LOG(INFO) << "Deleting user profile" << user_local_state.value();
+    VLOG(1) << "Deleting user profile" << user_local_state.value();
     if (!file_util::Delete(user_local_state, true)) {
       LOG(ERROR) << "Failed to delete user profile dir: "
                  << user_local_state.value();
@@ -304,19 +333,18 @@ installer_util::InstallStatus IsChromeActiveOrUserCancelled(
   // - HUNG - chrome.exe was killed by HuntForZombieProcesses() (until we can
   //          give this method some brains and not kill chrome.exe launched
   //          by us, we will not uninstall if we get this return code).
-  LOG(INFO) << "Launching Chrome to do uninstall tasks.";
+  VLOG(1) << "Launching Chrome to do uninstall tasks.";
   if (installer::LaunchChromeAndWaitForResult(system_uninstall,
                                               kCmdLineOptions,
                                               &exit_code)) {
-    LOG(INFO) << "chrome.exe launched for uninstall confirmation returned: "
-              << exit_code;
+    VLOG(1) << "chrome.exe launched for uninstall confirmation returned: "
+            << exit_code;
     if ((exit_code == ResultCodes::UNINSTALL_CHROME_ALIVE) ||
         (exit_code == ResultCodes::UNINSTALL_USER_CANCEL) ||
-        (exit_code == ResultCodes::HUNG)) {
+        (exit_code == ResultCodes::HUNG))
       return installer_util::UNINSTALL_CANCELLED;
-    } else if (exit_code == ResultCodes::UNINSTALL_DELETE_PROFILE) {
+    if (exit_code == ResultCodes::UNINSTALL_DELETE_PROFILE)
       return installer_util::UNINSTALL_DELETE_PROFILE;
-    }
   } else {
     LOG(ERROR) << "Failed to launch chrome.exe for uninstall confirmation.";
   }
@@ -444,7 +472,7 @@ const wchar_t kChromeExtProgId[] = L"ChromiumExt";
 installer_util::InstallStatus installer_setup::UninstallChrome(
     const std::wstring& exe_path, bool system_uninstall,
     bool remove_all, bool force_uninstall,
-    const CommandLine& cmd_line, const wchar_t* cmd_params) {
+    const CommandLine& cmd_line) {
   installer_util::InstallStatus status = installer_util::UNINSTALL_CONFIRMED;
   std::wstring suffix;
   if (!ShellUtil::GetUserSpecificDefaultBrowserSuffix(&suffix))
@@ -468,25 +496,21 @@ installer_util::InstallStatus installer_setup::UninstallChrome(
     if (remove_all &&
         (!suffix.empty() || CurrentUserHasDefaultBrowser(system_uninstall)) &&
         !::IsUserAnAdmin() &&
-        (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA) &&
+        (base::win::GetVersion() >= base::win::VERSION_VISTA) &&
         !cmd_line.HasSwitch(installer_util::switches::kRunAsAdmin)) {
-      std::wstring exe = cmd_line.program();
-      std::wstring params(cmd_params);
+      CommandLine new_cmd(CommandLine::NO_PROGRAM);
+      new_cmd.AppendArguments(cmd_line, true);
       // Append --run-as-admin flag to let the new instance of setup.exe know
       // that we already tried to launch ourselves as admin.
-      params.append(L" --");
-      params.append(installer_util::switches::kRunAsAdmin);
+      new_cmd.AppendSwitch(installer_util::switches::kRunAsAdmin);
       // Append --remove-chrome-registration to remove registry keys only.
-      params.append(L" --");
-      params.append(installer_util::switches::kRemoveChromeRegistration);
+      new_cmd.AppendSwitch(installer_util::switches::kRemoveChromeRegistration);
       if (!suffix.empty()) {
-        params.append(L" --");
-        params.append(ASCIIToWide(
-            installer_util::switches::kRegisterChromeBrowserSuffix));
-        params.append(L"=\"" + suffix + L"\"");
+        new_cmd.AppendSwitchNative(
+            installer_util::switches::kRegisterChromeBrowserSuffix, suffix);
       }
       DWORD exit_code = installer_util::UNKNOWN_STATUS;
-      InstallUtil::ExecuteExeAsAdmin(exe, params, &exit_code);
+      InstallUtil::ExecuteExeAsAdmin(new_cmd, &exit_code);
     }
   }
 
@@ -563,7 +587,8 @@ installer_util::InstallStatus installer_setup::UninstallChrome(
 
   // Close any Chrome Frame helper processes that may be running.
   if (InstallUtil::IsChromeFrameProcess()) {
-    CloseAllChromeFrameHelperProcesses();
+    VLOG(1) << "Closing the Chrome Frame helper process";
+    CloseChromeFrameHelperProcess();
   }
 
   if (!installed_version.get())
@@ -584,7 +609,7 @@ installer_util::InstallStatus installer_setup::UninstallChrome(
   }
 
   if (!force_uninstall) {
-    LOG(INFO) << "Uninstallation complete. Launching Uninstall survey.";
+    VLOG(1) << "Uninstallation complete. Launching Uninstall survey.";
     dist->DoPostUninstallOperations(*installed_version, local_state_path,
                                     distribution_data);
   }

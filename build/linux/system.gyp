@@ -46,6 +46,11 @@
               '<!@(<(pkg-config) --libs-only-l gtk+-2.0 gthread-2.0)',
             ],
           },
+      }],
+      [ 'chromeos==1', {
+        'link_settings': {
+          'libraries': [ '-lXtst' ]
+        }
       }]]
     },
     {
@@ -188,10 +193,13 @@
       'target_name': 'gconf',
       'type': 'settings',
       'conditions': [
-        ['_toolset=="target"', {
+        ['use_gconf==1 and _toolset=="target"', {
           'direct_dependent_settings': {
             'cflags': [
               '<!@(<(pkg-config) --cflags gconf-2.0)',
+            ],
+            'defines': [
+              'USE_GCONF',
             ],
           },
           'link_settings': {
@@ -222,7 +230,25 @@
               '<!@(<(pkg-config) --libs-only-l x11)',
             ],
           },
-      }]]
+      }],
+      # When XInput2 is available (i.e. inputproto version is 2.0), the
+      # pkg-config command will succeed, so the output will be empty.
+      ['"<!@(<(pkg-config) --atleast-version=2.0 inputproto || echo $?)"==""', {
+        'direct_dependent_settings': {
+          'defines': [
+            'HAVE_XINPUT2',
+          ],
+        },
+        'link_settings': {
+          'ldflags': [
+            '<!@(<(pkg-config) --libs-only-L --libs-only-other xi)',
+          ],
+          'libraries': [
+            '<!@(<(pkg-config) --libs-only-l xi)',
+          ],
+        }
+      }],
+      ],
     },
     {
       'target_name': 'xext',
@@ -328,11 +354,8 @@
         ['use_openssl==1', {
           'direct_dependent_settings': {
             'defines': [
-              # OpenSSL support is in development.
-              # eventually USE_OPENSSL and USE_NSS will be mutually exclusive.
-              # During the transitional period, a use_openssl=1 build still
-              # needs to define USE_NSS, so it is necessary to test the
-              # USE_OPENSSL macro before testing USE_NSS.
+              # OpenSSL support is incomplete: http://crbug.com/62803.
+              # Defining USE_OPENSSL disables USE_NSS.
               'USE_OPENSSL',
             ],
             'include_dirs': [

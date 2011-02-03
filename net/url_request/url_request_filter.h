@@ -27,7 +27,10 @@
 #include "net/url_request/url_request.h"
 
 class GURL;
+
+namespace net {
 class URLRequestJob;
+}  // namespace net
 
 class URLRequestFilter {
  public:
@@ -41,6 +44,8 @@ class URLRequestFilter {
   static URLRequestFilter* GetInstance();
 
   static URLRequest::ProtocolFactory Factory;
+
+  ~URLRequestFilter();
 
   void AddHostnameHandler(const std::string& scheme,
                           const std::string& hostname,
@@ -62,11 +67,11 @@ class URLRequestFilter {
   int hit_count() const { return hit_count_; }
 
  protected:
-  URLRequestFilter() : hit_count_(0) { }
+  URLRequestFilter();
 
   // Helper method that looks up the request in the url_handler_map_.
-  URLRequestJob* FindRequestHandler(URLRequest* request,
-                                    const std::string& scheme);
+  net::URLRequestJob* FindRequestHandler(URLRequest* request,
+                                         const std::string& scheme);
 
   // Maps hostnames to factories.  Hostnames take priority over URLs.
   HostnameHandlerMap hostname_handler_map_;

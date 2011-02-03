@@ -9,7 +9,6 @@
 #include "net/base/file_stream.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/extensions/extension_bookmark_manager_api.h"
@@ -19,13 +18,14 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/bindings_policy.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/page_transition_types.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/page_transition_types.h"
 #include "chrome/common/url_constants.h"
 #include "gfx/codec/png_codec.h"
 #include "gfx/favicon_size.h"
@@ -112,7 +112,7 @@ class ExtensionDOMUIImageLoadingTracker : public ImageLoadingTracker::Observer {
 
   ImageLoadingTracker tracker_;
   scoped_refptr<FaviconService::GetFaviconRequest> request_;
-  Extension* extension_;
+  const Extension* extension_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionDOMUIImageLoadingTracker);
 };
@@ -122,10 +122,11 @@ class ExtensionDOMUIImageLoadingTracker : public ImageLoadingTracker::Observer {
 const char ExtensionDOMUI::kExtensionURLOverrides[] =
     "extensions.chrome_url_overrides";
 
-ExtensionDOMUI::ExtensionDOMUI(TabContents* tab_contents, GURL url)
-    : DOMUI(tab_contents) {
+ExtensionDOMUI::ExtensionDOMUI(TabContents* tab_contents, const GURL& url)
+    : DOMUI(tab_contents),
+      url_(url) {
   ExtensionsService* service = tab_contents->profile()->GetExtensionsService();
-  Extension* extension = service->GetExtensionByURL(url);
+  const Extension* extension = service->GetExtensionByURL(url);
   if (!extension)
     extension = service->GetExtensionByWebExtent(url);
   DCHECK(extension);
@@ -146,14 +147,14 @@ ExtensionDOMUI::ExtensionDOMUI(TabContents* tab_contents, GURL url)
   }
 }
 
+ExtensionDOMUI::~ExtensionDOMUI() {}
+
 void ExtensionDOMUI::ResetExtensionFunctionDispatcher(
     RenderViewHost* render_view_host) {
-  // Use the NavigationController to get the URL rather than the TabContents
-  // since this is the real underlying URL (see HandleChromeURLOverride).
-  NavigationController& controller = tab_contents()->controller();
-  const GURL& url = controller.GetActiveEntry()->url();
+  // TODO(jcivelli): http://crbug.com/60608 we should get the URL out of the
+  //                 active entry of the navigation controller.
   extension_function_dispatcher_.reset(
-      ExtensionFunctionDispatcher::Create(render_view_host, this, url));
+      ExtensionFunctionDispatcher::Create(render_view_host, this, url_));
   DCHECK(extension_function_dispatcher_.get());
 }
 
@@ -184,13 +185,23 @@ void ExtensionDOMUI::ProcessDOMUIMessage(
 }
 
 Browser* ExtensionDOMUI::GetBrowser() const {
-  // TODO(beng): This is an improper direct dependency on Browser. Route this
-  // through some sort of delegate.
-  return BrowserList::FindBrowserWithProfile(DOMUI::GetProfile());
+  TabContents* contents = tab_contents();
+  TabContentsIterator tab_iterator;
+  for (; !tab_iterator.done(); ++tab_iterator) {
+    if (contents == *tab_iterator)
+      return tab_iterator.browser();
+  }
+
+  return NULL;
 }
 
-Profile* ExtensionDOMUI::GetProfile() {
-  return DOMUI::GetProfile();
+TabContents* ExtensionDOMUI::associated_tab_contents() const {
+  return tab_contents();
+}
+
+ExtensionBookmarkManagerEventRouter*
+ExtensionDOMUI::extension_bookmark_manager_event_router() {
+  return extension_bookmark_manager_event_router_.get();
 }
 
 gfx::NativeWindow ExtensionDOMUI::GetCustomFrameNativeWindow() {
@@ -232,13 +243,6 @@ bool ExtensionDOMUI::HandleChromeURLOverride(GURL* url, Profile* profile) {
     return false;
 
   ExtensionsService* service = profile->GetExtensionsService();
-  if (!service->is_ready()) {
-    // TODO(erikkay) So far, it looks like extensions load before the new tab
-    // page.  I don't know if we have anything that enforces this, so add this
-    // check for safety.
-    NOTREACHED() << "Chrome URL override requested before extensions loaded";
-    return false;
-  }
 
   size_t i = 0;
   while (i < url_list->GetSize()) {
@@ -261,7 +265,7 @@ bool ExtensionDOMUI::HandleChromeURLOverride(GURL* url, Profile* profile) {
     }
 
     // Verify that the extension that's being referred to actually exists.
-    Extension* extension = service->GetExtensionByURL(extension_url);
+    const Extension* extension = service->GetExtensionByURL(extension_url);
     if (!extension) {
       // This can currently happen if you use --load-extension one run, and
       // then don't use it the next.  It could also happen if an extension

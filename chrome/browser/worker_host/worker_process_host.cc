@@ -9,14 +9,15 @@
 
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/debug_util.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/appcache/appcache_dispatcher_host.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/child_process_security_policy.h"
 #include "chrome/browser/file_system/file_system_dispatcher_host.h"
+#include "chrome/browser/host_content_settings_map.h"
+#include "chrome/browser/mime_registry_dispatcher.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/blob_dispatcher_host.h"
@@ -24,6 +25,7 @@
 #include "chrome/browser/renderer_host/file_utilities_dispatcher_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
+#include "chrome/browser/renderer_host/render_view_host_notification_task.h"
 #include "chrome/browser/renderer_host/resource_message_filter.h"
 #include "chrome/browser/worker_host/message_port_dispatcher.h"
 #include "chrome/browser/worker_host/worker_service.h"
@@ -37,6 +39,7 @@
 #include "net/base/mime_util.h"
 #include "ipc/ipc_switches.h"
 #include "net/base/registry_controlled_domain.h"
+#include "webkit/fileapi/file_system_path_manager.h"
 
 // Notifies RenderViewHost that one or more worker objects crashed.
 class WorkerCrashTask : public Task {
@@ -74,7 +77,9 @@ WorkerProcessHost::WorkerProcessHost(
       ALLOW_THIS_IN_INITIALIZER_LIST(file_system_dispatcher_host_(
           new FileSystemDispatcherHost(this, request_context))),
       ALLOW_THIS_IN_INITIALIZER_LIST(file_utilities_dispatcher_host_(
-          new FileUtilitiesDispatcherHost(this, this->id()))) {
+          new FileUtilitiesDispatcherHost(this, this->id()))),
+      ALLOW_THIS_IN_INITIALIZER_LIST(mime_registry_dispatcher_(
+          new MimeRegistryDispatcher(this))) {
   next_route_id_callback_.reset(NewCallbackWithReturnValue(
       WorkerService::GetInstance(), &WorkerService::next_worker_route_id));
   db_dispatcher_host_ = new DatabaseDispatcherHost(
@@ -95,6 +100,9 @@ WorkerProcessHost::~WorkerProcessHost() {
 
   // Shut down the file utilities dispatcher host.
   file_utilities_dispatcher_host_->Shutdown();
+
+  // Shut down the mime registry dispatcher host.
+  mime_registry_dispatcher_->Shutdown();
 
   // Let interested observers know we are being deleted.
   NotificationService::current()->Notify(
@@ -184,6 +192,28 @@ bool WorkerProcessHost::Init() {
       cmd_line);
 
   ChildProcessSecurityPolicy::GetInstance()->Add(id());
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableFileSystem)) {
+      // Grant most file permissions to this worker.
+      // PLATFORM_FILE_TEMPORARY, PLATFORM_FILE_HIDDEN and
+      // PLATFORM_FILE_DELETE_ON_CLOSE are not granted, because no existing API
+      // requests them.
+      ChildProcessSecurityPolicy::GetInstance()->GrantPermissionsForFile(
+          id(),
+          request_context_->browser_file_system_context()->
+              path_manager()->base_path(),
+          base::PLATFORM_FILE_OPEN |
+          base::PLATFORM_FILE_CREATE |
+          base::PLATFORM_FILE_OPEN_ALWAYS |
+          base::PLATFORM_FILE_CREATE_ALWAYS |
+          base::PLATFORM_FILE_READ |
+          base::PLATFORM_FILE_WRITE |
+          base::PLATFORM_FILE_EXCLUSIVE_READ |
+          base::PLATFORM_FILE_EXCLUSIVE_WRITE |
+          base::PLATFORM_FILE_ASYNC |
+          base::PLATFORM_FILE_TRUNCATE |
+          base::PLATFORM_FILE_WRITE_ATTRIBUTES);
+  }
 
   return true;
 }
@@ -256,7 +286,8 @@ void WorkerProcessHost::OnMessageReceived(const IPC::Message& message) {
       db_dispatcher_host_->OnMessageReceived(message, &msg_is_ok) ||
       blob_dispatcher_host_->OnMessageReceived(message, &msg_is_ok) ||
       file_system_dispatcher_host_->OnMessageReceived(message, &msg_is_ok) ||
-      file_utilities_dispatcher_host_->OnMessageReceived(message, &msg_is_ok) ||
+      file_utilities_dispatcher_host_->OnMessageReceived(message) ||
+      mime_registry_dispatcher_->OnMessageReceived(message) ||
       MessagePortDispatcher::GetInstance()->OnMessageReceived(
           message, this, next_route_id_callback_.get(), &msg_is_ok);
 
@@ -271,12 +302,8 @@ void WorkerProcessHost::OnMessageReceived(const IPC::Message& message) {
                           OnWorkerContextClosed);
       IPC_MESSAGE_HANDLER(ViewHostMsg_ForwardToWorker,
                           OnForwardToWorker)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_GetMimeTypeFromExtension,
-                          OnGetMimeTypeFromExtension)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_GetMimeTypeFromFile,
-                          OnGetMimeTypeFromFile)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_GetPreferredExtensionForMimeType,
-                          OnGetPreferredExtensionForMimeType)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(WorkerProcessHostMsg_AllowDatabase,
+                                      OnAllowDatabase)
       IPC_MESSAGE_UNHANDLED(handled = false)
     IPC_END_MESSAGE_MAP_EX()
   }
@@ -502,19 +529,34 @@ void WorkerProcessHost::OnForwardToWorker(const IPC::Message& message) {
   WorkerService::GetInstance()->ForwardMessage(message, this);
 }
 
-void WorkerProcessHost::OnGetMimeTypeFromExtension(
-    const FilePath::StringType& ext, std::string* mime_type) {
-  net::GetMimeTypeFromExtension(ext, mime_type);
-}
+void WorkerProcessHost::OnAllowDatabase(const GURL& url,
+                                        const string16& name,
+                                        const string16& display_name,
+                                        unsigned long estimated_size,
+                                        IPC::Message* reply_msg) {
+  ContentSetting content_setting =
+      request_context_->host_content_settings_map()->GetContentSetting(
+          url, CONTENT_SETTINGS_TYPE_COOKIES, "");
 
-void WorkerProcessHost::OnGetMimeTypeFromFile(
-    const FilePath& file_path, std::string* mime_type) {
-  net::GetMimeTypeFromFile(file_path, mime_type);
-}
+  bool allowed = content_setting != CONTENT_SETTING_BLOCK;
 
-void WorkerProcessHost::OnGetPreferredExtensionForMimeType(
-    const std::string& mime_type, FilePath::StringType* ext) {
-  net::GetPreferredExtensionForMimeType(mime_type, ext);
+  // Find the worker instance and forward the message to all attached documents.
+  for (Instances::iterator i = instances_.begin(); i != instances_.end(); ++i) {
+    if (i->worker_route_id() != reply_msg->routing_id())
+      continue;
+    const WorkerDocumentSet::DocumentInfoSet& documents =
+        i->worker_document_set()->documents();
+    for (WorkerDocumentSet::DocumentInfoSet::const_iterator doc =
+         documents.begin(); doc != documents.end(); ++doc) {
+      CallRenderViewHostContentSettingsDelegate(
+          doc->renderer_id(), doc->render_view_route_id(),
+          &RenderViewHostDelegate::ContentSettings::OnWebDatabaseAccessed,
+          url, name, display_name, estimated_size, !allowed);
+    }
+    break;
+  }
+  WorkerProcessHostMsg_AllowDatabase::WriteReplyParams(reply_msg, allowed);
+  Send(reply_msg);
 }
 
 void WorkerProcessHost::DocumentDetached(IPC::Message::Sender* parent,

@@ -55,7 +55,7 @@ bool IsBlacklistedBySha1sum(const FilePath& path) {
     std::string sha1 = base::SHA1HashString(file_content);
     std::string sha1_readable;
     for (size_t j = 0; j < sha1.size(); j++)
-      StringAppendF(&sha1_readable, "%02x", sha1[j] & 0xFF);
+      base::StringAppendF(&sha1_readable, "%02x", sha1[j] & 0xFF);
     if (bad_entries[i].sha1 == sha1_readable)
       return true;
   }
@@ -133,7 +133,7 @@ void PluginList::GetPluginDirectories(std::vector<FilePath>* plugin_dirs) {
   const char* moz_plugin_path = getenv("MOZ_PLUGIN_PATH");
   if (moz_plugin_path) {
     std::vector<std::string> paths;
-    SplitString(moz_plugin_path, ':', &paths);
+    base::SplitString(moz_plugin_path, ':', &paths);
     for (size_t i = 0; i < paths.size(); ++i)
       plugin_dirs->push_back(FilePath(paths[i]));
   }
@@ -262,8 +262,7 @@ bool PluginList::ShouldLoadPlugin(const WebPluginInfo& info,
 
   // TODO(evanm): prefer the newest version of flash, etc. here?
 
-  LOG_IF(INFO, PluginList::DebugPluginLoading())
-      << "Using " << info.path.value();
+  VLOG_IF(1, PluginList::DebugPluginLoading()) << "Using " << info.path.value();
 
   return true;
 }

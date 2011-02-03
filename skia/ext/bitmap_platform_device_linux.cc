@@ -37,6 +37,14 @@ void LoadClipToContext(cairo_t* context, const SkRegion& clip) {
 
 }  // namespace
 
+SkDevice* BitmapPlatformDeviceFactory::newDevice(SkBitmap::Config config,
+                                                 int width, int height,
+                                                 bool isOpaque,
+                                                 bool isForLayer) {
+  SkASSERT(config == SkBitmap::kARGB_8888_Config);
+  return BitmapPlatformDevice::Create(width, height, isOpaque);
+}
+
 BitmapPlatformDevice::BitmapPlatformDeviceData::BitmapPlatformDeviceData(
     cairo_surface_t* surface)
     : surface_(surface),

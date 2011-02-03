@@ -26,13 +26,14 @@
 //       pyautolib_sources in chrome_tests.gypi.
 
 // Headers that can be swigged directly.
+%include "chrome/app/chrome_command_ids.h"
 %include "chrome/app/chrome_dll_resource.h"
+%include "chrome/common/automation_constants.h"
 %include "chrome/common/pref_names.h"
-%include "chrome/test/automation/automation_constants.h"
 
 %{
+#include "chrome/common/automation_constants.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/automation/automation_constants.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/pyautolib/pyautolib.h"
@@ -220,6 +221,11 @@ class PyUITestBase {
       NavigateToURL;
   void NavigateToURL(const char* url_string);
   void NavigateToURL(const char* url_string, int window_index, int tab_index);
+
+  %feature("docstring", "Reload the active tab in the given window (or first "
+           "window if index not given). Blocks until page has reloaded.")
+      ReloadActiveTab;
+  void ReloadActiveTab(int window_index = 0);
 
   // BrowserProxy methods
   %feature("docstring", "Apply the accelerator with given id "

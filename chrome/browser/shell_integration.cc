@@ -9,9 +9,17 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/browser/chrome_thread.h"
+
+ShellIntegration::ShortcutInfo::ShortcutInfo()
+    : create_on_desktop(false),
+      create_in_applications_menu(false),
+      create_in_quick_launch_bar(false) {
+}
+
+ShellIntegration::ShortcutInfo::~ShortcutInfo() {}
 
 std::string ShellIntegration::GetCommandLineArgumentsCommon(const GURL& url,
     const string16& extension_app_id) {
@@ -44,7 +52,7 @@ std::string ShellIntegration::GetCommandLineArgumentsCommon(const GURL& url,
   // during launch.
   if (!extension_app_id.empty()) {
     arguments_w += std::wstring(L"--") + ASCIIToWide(switches::kAppId) +
-        L"=\"" + ASCIIToWide(UTF16ToASCII(extension_app_id));
+        L"=\"" + ASCIIToWide(UTF16ToASCII(extension_app_id)) + L"\"";
   } else {
     // Use '--app=url' instead of just 'url' to launch the browser with minimal
     // chrome.

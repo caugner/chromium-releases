@@ -171,6 +171,10 @@ spdy::SpdyFrame* ConstructSpdyPacket(const SpdyHeaderInfo& header_info,
     case spdy::RST_STREAM:
       frame = framer.CreateRstStream(header_info.id, header_info.status);
       break;
+    case spdy::HEADERS:
+      frame = framer.CreateHeaders(header_info.id, header_info.control_flags,
+                                   header_info.compressed, &headers);
+      break;
     default:
       frame = framer.CreateDataFrame(header_info.id, header_info.data,
                                      header_info.data_length,
@@ -330,7 +334,11 @@ spdy::SpdyFrame* ConstructSpdyGet(const char* const url,
   // This is so ugly.  Why are we using char* in here again?
   std::string str_path = gurl.PathForRequest();
   std::string str_scheme = gurl.scheme();
-  std::string str_host = gurl.host();  // TODO(mbelshe): should have a port.
+  std::string str_host = gurl.host();
+  if (gurl.has_port()) {
+    str_host += ":";
+    str_host += gurl.port();
+  }
   scoped_array<char> req(new char[str_path.size() + 1]);
   scoped_array<char> scheme(new char[str_scheme.size() + 1]);
   scoped_array<char> host(new char[str_host.size() + 1]);
@@ -407,6 +415,27 @@ spdy::SpdyFrame* ConstructSpdyGet(const char* const extra_headers[],
                                    arraysize(kStandardGetHeaders));
 }
 
+// Constructs a standard SPDY SYN_STREAM frame for a CONNECT request.
+spdy::SpdyFrame* ConstructSpdyConnect(const char* const extra_headers[],
+                                      int extra_header_count,
+                                      int stream_id) {
+  const char* const kConnectHeaders[] = {
+    "method", "CONNECT",
+    "url", "www.google.com:443",
+    "host", "www.google.com",
+    "version", "HTTP/1.1",
+  };
+  return ConstructSpdyControlFrame(extra_headers,
+                                   extra_header_count,
+                                   /*compressed*/ false,
+                                   stream_id,
+                                   LOWEST,
+                                   spdy::SYN_STREAM,
+                                   spdy::CONTROL_FLAG_NONE,
+                                   kConnectHeaders,
+                                   arraysize(kConnectHeaders));
+}
+
 // Constructs a standard SPDY push SYN packet.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
@@ -439,16 +468,14 @@ spdy::SpdyFrame* ConstructSpdyPush(const char* const extra_headers[],
                                    int extra_header_count,
                                    int stream_id,
                                    int associated_stream_id,
-                                   const char* path) {
+                                   const char* url) {
   const char* const kStandardGetHeaders[] = {
     "hello",
     "bye",
-    "path",
-    path,
     "status",
     "200 OK",
     "url",
-    path,
+    url,
     "version",
     "HTTP/1.1"
   };
@@ -468,15 +495,12 @@ spdy::SpdyFrame* ConstructSpdyPush(const char* const extra_headers[],
                                    int extra_header_count,
                                    int stream_id,
                                    int associated_stream_id,
-                                   const char* path,
+                                   const char* url,
                                    const char* status,
-                                   const char* location,
-                                   const char* url) {
+                                   const char* location) {
   const char* const kStandardGetHeaders[] = {
     "hello",
     "bye",
-    "path",
-    path,
     "status",
     status,
     "location",
@@ -498,23 +522,62 @@ spdy::SpdyFrame* ConstructSpdyPush(const char* const extra_headers[],
                                    associated_stream_id);
 }
 
-// Constructs a standard SPDY SYN_REPLY packet to match the SPDY GET.
-// |extra_headers| are the extra header-value pairs, which typically
-// will vary the most between calls.
-// Returns a SpdyFrame.
-spdy::SpdyFrame* ConstructSpdyGetSynReplyRedirect(int stream_id) {
-  static const char* const kStandardGetHeaders[] = {
-    "hello",
-    "bye",
+spdy::SpdyFrame* ConstructSpdyPush(int stream_id,
+                                  int associated_stream_id,
+                                  const char* url) {
+  const char* const kStandardGetHeaders[] = {
+    "url",
+    url
+  };
+  return ConstructSpdyControlFrame(0,
+                                   0,
+                                   false,
+                                   stream_id,
+                                   LOWEST,
+                                   spdy::SYN_STREAM,
+                                   spdy::CONTROL_FLAG_NONE,
+                                   kStandardGetHeaders,
+                                   arraysize(kStandardGetHeaders),
+                                   associated_stream_id);
+}
+
+spdy::SpdyFrame* ConstructSpdyPushHeaders(int stream_id,
+                                          const char* const extra_headers[],
+                                          int extra_header_count) {
+  const char* const kStandardGetHeaders[] = {
     "status",
-    "301 Moved Permanently",
-    "location",
-    "http://www.foo.com/index.php",
+    "200 OK",
     "version",
     "HTTP/1.1"
   };
-  return ConstructSpdyControlFrame(NULL,
-                                   0,
+  return ConstructSpdyControlFrame(extra_headers,
+                                   extra_header_count,
+                                   false,
+                                   stream_id,
+                                   LOWEST,
+                                   spdy::HEADERS,
+                                   spdy::CONTROL_FLAG_NONE,
+                                   kStandardGetHeaders,
+                                   arraysize(kStandardGetHeaders));
+}
+
+// Constructs a standard SPDY SYN_REPLY packet with the specified status code.
+// Returns a SpdyFrame.
+spdy::SpdyFrame* ConstructSpdySynReplyError(
+    const char* const status,
+    const char* const* const extra_headers,
+    int extra_header_count,
+    int stream_id) {
+  const char* const kStandardGetHeaders[] = {
+    "hello",
+    "bye",
+    "status",
+    status,
+    "version",
+    "HTTP/1.1"
+  };
+  return ConstructSpdyControlFrame(extra_headers,
+                                   extra_header_count,
                                    false,
                                    stream_id,
                                    LOWEST,
@@ -528,6 +591,29 @@ spdy::SpdyFrame* ConstructSpdyGetSynReplyRedirect(int stream_id) {
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
 // Returns a SpdyFrame.
+spdy::SpdyFrame* ConstructSpdyGetSynReplyRedirect(int stream_id) {
+  static const char* const kExtraHeaders[] = {
+    "location",
+    "http://www.foo.com/index.php",
+  };
+  return ConstructSpdySynReplyError("301 Moved Permanently", kExtraHeaders,
+                                    arraysize(kExtraHeaders)/2, stream_id);
+}
+
+// Constructs a standard SPDY SYN_REPLY packet with an Internal Server
+// Error status code.
+// Returns a SpdyFrame.
+spdy::SpdyFrame* ConstructSpdySynReplyError(int stream_id) {
+  return ConstructSpdySynReplyError("500 Internal Server Error", NULL, 0, 1);
+}
+
+
+
+
+// Constructs a standard SPDY SYN_REPLY packet to match the SPDY GET.
+// |extra_headers| are the extra header-value pairs, which typically
+// will vary the most between calls.
+// Returns a SpdyFrame.
 spdy::SpdyFrame* ConstructSpdyGetSynReply(const char* const extra_headers[],
                                           int extra_header_count,
                                           int stream_id) {
@@ -536,8 +622,6 @@ spdy::SpdyFrame* ConstructSpdyGetSynReply(const char* const extra_headers[],
     "bye",
     "status",
     "200",
-    "url",
-    "/index.php",
     "version",
     "HTTP/1.1"
   };
@@ -627,6 +711,15 @@ spdy::SpdyFrame* ConstructSpdyBodyFrame(int stream_id, const char* data,
   spdy::SpdyFramer framer;
   return framer.CreateDataFrame(
       stream_id, data, len, fin ? spdy::DATA_FLAG_FIN : spdy::DATA_FLAG_NONE);
+}
+
+// Wraps |frame| in the payload of a data frame in stream |stream_id|.
+spdy::SpdyFrame* ConstructWrappedSpdyFrame(
+    const scoped_ptr<spdy::SpdyFrame>& frame,
+    int stream_id) {
+  return ConstructSpdyBodyFrame(stream_id, frame->data(),
+                                frame->length() + spdy::SpdyFrame::size(),
+                                false);
 }
 
 // Construct an expected SPDY reply string.

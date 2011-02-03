@@ -232,9 +232,11 @@ void PrintedDocument::PrintHeaderFooter(gfx::NativeDrawingContext context,
 
   if (string_size.width() > bounding.width()) {
     if (line == PageOverlays::kUrl) {
-      output = gfx::ElideUrl(url(), font, bounding.width(), std::wstring());
+      output = UTF16ToWideHack(gfx::ElideUrl(url(), font, bounding.width(),
+                                             std::wstring()));
     } else {
-      output = gfx::ElideText(output, font, bounding.width(), false);
+      output = UTF16ToWideHack(gfx::ElideText(WideToUTF16Hack(output),
+          font, bounding.width(), false));
     }
   }
 

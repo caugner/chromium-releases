@@ -4,107 +4,107 @@
 
 #include "net/http/http_basic_stream.h"
 
+#include "base/stringprintf.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_request_headers.h"
+#include "net/http/http_request_info.h"
 #include "net/http/http_stream_parser.h"
+#include "net/http/http_util.h"
 #include "net/socket/client_socket_handle.h"
 
 namespace net {
 
-HttpBasicStream::HttpBasicStream(ClientSocketHandle* connection)
+HttpBasicStream::HttpBasicStream(ClientSocketHandle* connection,
+                                 bool using_proxy)
     : read_buf_(new GrowableIOBuffer()),
-      connection_(connection) {
+      connection_(connection),
+      using_proxy_(using_proxy),
+      request_info_(NULL) {
 }
 
 int HttpBasicStream::InitializeStream(const HttpRequestInfo* request_info,
                                       const BoundNetLog& net_log,
                                       CompletionCallback* callback) {
-  DCHECK(!IsDetached());
+  request_info_ = request_info;
   parser_.reset(new HttpStreamParser(connection_.get(), request_info,
                                      read_buf_, net_log));
   return OK;
 }
 
 
-int HttpBasicStream::SendRequest(const std::string& headers,
+int HttpBasicStream::SendRequest(const HttpRequestHeaders& headers,
                                  UploadDataStream* request_body,
                                  HttpResponseInfo* response,
                                  CompletionCallback* callback) {
   DCHECK(parser_.get());
-  DCHECK(!IsDetached());
-  return parser_->SendRequest(headers, request_body, response, callback);
+  const std::string path = using_proxy_ ?
+                           HttpUtil::SpecForRequest(request_info_->url) :
+                           HttpUtil::PathForRequest(request_info_->url);
+  request_line_ = base::StringPrintf("%s %s HTTP/1.1\r\n",
+                                     request_info_->method.c_str(),
+                                     path.c_str());
+  return parser_->SendRequest(request_line_, headers, request_body, response,
+                              callback);
 }
 
 HttpBasicStream::~HttpBasicStream() {}
 
 uint64 HttpBasicStream::GetUploadProgress() const {
-  DCHECK(!IsDetached());
   return parser_->GetUploadProgress();
 }
 
 int HttpBasicStream::ReadResponseHeaders(CompletionCallback* callback) {
-  DCHECK(!IsDetached());
   return parser_->ReadResponseHeaders(callback);
 }
 
 const HttpResponseInfo* HttpBasicStream::GetResponseInfo() const {
-  DCHECK(!IsDetached());
   return parser_->GetResponseInfo();
 }
 
 int HttpBasicStream::ReadResponseBody(IOBuffer* buf, int buf_len,
                                       CompletionCallback* callback) {
-  DCHECK(!IsDetached());
   return parser_->ReadResponseBody(buf, buf_len, callback);
 }
 
 void HttpBasicStream::Close(bool not_reusable) {
-  DCHECK(!IsDetached());
   parser_->Close(not_reusable);
 }
 
+HttpStream* HttpBasicStream::RenewStreamForAuth() {
+  DCHECK(IsResponseBodyComplete());
+  DCHECK(!IsMoreDataBuffered());
+  parser_.reset();
+  return new HttpBasicStream(connection_.release(), using_proxy_);
+}
+
 bool HttpBasicStream::IsResponseBodyComplete() const {
-  DCHECK(!IsDetached());
   return parser_->IsResponseBodyComplete();
 }
 
 bool HttpBasicStream::CanFindEndOfResponse() const {
-  DCHECK(!IsDetached());
   return parser_->CanFindEndOfResponse();
 }
 
 bool HttpBasicStream::IsMoreDataBuffered() const {
-  DCHECK(!IsDetached());
   return parser_->IsMoreDataBuffered();
 }
 
 bool HttpBasicStream::IsConnectionReused() const {
-  DCHECK(!IsDetached());
   return parser_->IsConnectionReused();
 }
 
 void HttpBasicStream::SetConnectionReused() {
-  DCHECK(!IsDetached());
   parser_->SetConnectionReused();
 }
 
-ClientSocketHandle* HttpBasicStream::DetachConnection() {
-  return connection_.release();
-}
-
 void HttpBasicStream::GetSSLInfo(SSLInfo* ssl_info) {
-  DCHECK(!IsDetached());
   parser_->GetSSLInfo(ssl_info);
 }
 
 void HttpBasicStream::GetSSLCertRequestInfo(
     SSLCertRequestInfo* cert_request_info) {
-  DCHECK(!IsDetached());
   parser_->GetSSLCertRequestInfo(cert_request_info);
-}
-
-bool HttpBasicStream::IsDetached() const {
-  return connection_.get() == NULL;
 }
 
 }  // namespace net

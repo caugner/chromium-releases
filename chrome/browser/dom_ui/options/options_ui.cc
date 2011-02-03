@@ -32,6 +32,7 @@
 #include "chrome/browser/dom_ui/options/passwords_exceptions_handler.h"
 #include "chrome/browser/dom_ui/options/personal_options_handler.h"
 #include "chrome/browser/dom_ui/options/search_engine_manager_handler.h"
+#include "chrome/browser/dom_ui/options/stop_syncing_handler.h"
 #include "chrome/browser/dom_ui/options/sync_options_handler.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -57,7 +58,6 @@
 #include "chrome/browser/chromeos/dom_ui/core_chromeos_options_handler.h"
 #include "chrome/browser/chromeos/dom_ui/cros_personal_options_handler.h"
 #include "chrome/browser/chromeos/dom_ui/internet_options_handler.h"
-#include "chrome/browser/chromeos/dom_ui/labs_handler.h"
 #include "chrome/browser/chromeos/dom_ui/language_chewing_options_handler.h"
 #include "chrome/browser/chromeos/dom_ui/language_customize_modifier_keys_handler.h"
 #include "chrome/browser/chromeos/dom_ui/language_hangul_options_handler.h"
@@ -85,6 +85,8 @@ OptionsUIHTMLSource::OptionsUIHTMLSource(DictionaryValue* localized_strings)
   localized_strings_.reset(localized_strings);
 }
 
+OptionsUIHTMLSource::~OptionsUIHTMLSource() {}
+
 void OptionsUIHTMLSource::StartDataRequest(const std::string& path,
                                            bool is_off_the_record,
                                            int request_id) {
@@ -101,6 +103,10 @@ void OptionsUIHTMLSource::StartDataRequest(const std::string& path,
   std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
 
   SendResponse(request_id, html_bytes);
+}
+
+std::string OptionsUIHTMLSource::GetMimeType(const std::string&) const {
+  return "text/html";
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -148,13 +154,13 @@ OptionsUI::OptionsUI(TabContents* contents) : DOMUI(contents) {
   AddOptionsPageUIHandler(localized_strings, new PersonalOptionsHandler());
   AddOptionsPageUIHandler(localized_strings, new SearchEngineManagerHandler());
   AddOptionsPageUIHandler(localized_strings, new ImportDataHandler());
+  AddOptionsPageUIHandler(localized_strings, new StopSyncingHandler());
   AddOptionsPageUIHandler(localized_strings, new SyncOptionsHandler());
 #if defined(OS_CHROMEOS)
   AddOptionsPageUIHandler(localized_strings, new AboutPageHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::AccountsOptionsHandler());
   AddOptionsPageUIHandler(localized_strings, new InternetOptionsHandler());
-  AddOptionsPageUIHandler(localized_strings, new LabsHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::LanguageChewingOptionsHandler());
   AddOptionsPageUIHandler(localized_strings,
@@ -225,6 +231,18 @@ void OptionsUI::RenderViewCreated(RenderViewHost* render_view_host) {
   DOMUI::RenderViewCreated(render_view_host);
 }
 
+void OptionsUI::DidBecomeActiveForReusedRenderView() {
+  // When the renderer is re-used (e.g., for back/forward navigation within
+  // options), the handlers are torn down and rebuilt, so are no longer
+  // initialized, but the web page's DOM may remain intact, in which case onload
+  // won't fire to initilize the handlers. To make sure initialization always
+  // happens, call reinitializeCore (which is a no-op unless the DOM was already
+  // initialized).
+  CallJavascriptFunction(L"OptionsPage.reinitializeCore");
+
+  DOMUI::DidBecomeActiveForReusedRenderView();
+}
+
 // static
 RefCountedMemory* OptionsUI::GetFaviconResourceBytes() {
   return ResourceBundle::GetSharedInstance().
@@ -232,6 +250,8 @@ RefCountedMemory* OptionsUI::GetFaviconResourceBytes() {
 }
 
 void OptionsUI::InitializeHandlers() {
+  DCHECK(!GetProfile()->IsOffTheRecord());
+
   std::vector<DOMMessageHandler*>::iterator iter;
   for (iter = handlers_.begin(); iter != handlers_.end(); ++iter) {
     (static_cast<OptionsPageUIHandler*>(*iter))->Initialize();

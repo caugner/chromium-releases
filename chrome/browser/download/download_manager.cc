@@ -12,11 +12,11 @@
 #include "base/path_service.h"
 #include "base/rand_util.h"
 #include "base/stl_util-inl.h"
+#include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
@@ -36,6 +36,7 @@
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
@@ -66,6 +67,8 @@ DownloadManager::~DownloadManager() {
 }
 
 void DownloadManager::Shutdown() {
+  VLOG(20) << __FUNCTION__ << "()"
+           << " shutdown_needed_ = " << shutdown_needed_;
   if (!shutdown_needed_)
     return;
   shutdown_needed_ = false;
@@ -135,6 +138,8 @@ void DownloadManager::Shutdown() {
     select_file_dialog_->ListenerDestroyed();
 
   download_history_.reset();
+
+  request_context_getter_ = NULL;
 
   shutdown_needed_ = false;
 }
@@ -326,6 +331,7 @@ void DownloadManager::CheckIfSuggestedPathExists(DownloadCreateInfo* info,
   FilePath dir = info->suggested_path.DirName();
   FilePath filename = info->suggested_path.BaseName();
   if (!file_util::PathIsWritable(dir)) {
+    VLOG(1) << "Unable to write to directory \"" << dir.value() << "\"";
     info->prompt_user_for_save_location = true;
     PathService::Get(chrome::DIR_USER_DOCUMENTS, &info->suggested_path);
     info->suggested_path = info->suggested_path.Append(filename);
@@ -339,8 +345,10 @@ void DownloadManager::CheckIfSuggestedPathExists(DownloadCreateInfo* info,
     FilePath::StringType file_name;
     FilePath path;
     while (path.empty()) {
-      SStringPrintf(&file_name, FILE_PATH_LITERAL("unconfirmed %d.crdownload"),
-                    base::RandInt(0, 100000));
+      base::SStringPrintf(
+          &file_name,
+          FILE_PATH_LITERAL("unconfirmed %d.crdownload"),
+          base::RandInt(0, 100000));
       path = dir.Append(file_name);
       if (file_util::PathExists(path))
         path = FilePath();
@@ -362,6 +370,8 @@ void DownloadManager::CheckIfSuggestedPathExists(DownloadCreateInfo* info,
       info->path_uniquifier = 0;
     } else if (info->path_uniquifier == -1) {
       // We failed to find a unique path.  We have to prompt the user.
+      VLOG(1) << "Unable to find a unique path for suggested path \""
+                   << info->suggested_path.value() << "\"";
       info->prompt_user_for_save_location = true;
     }
   }
@@ -386,6 +396,7 @@ void DownloadManager::CheckIfSuggestedPathExists(DownloadCreateInfo* info,
 }
 
 void DownloadManager::OnPathExistenceAvailable(DownloadCreateInfo* info) {
+  VLOG(20) << __FUNCTION__ << "()" << " info = " << info->DebugString();
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(info);
 
@@ -409,6 +420,7 @@ void DownloadManager::OnPathExistenceAvailable(DownloadCreateInfo* info) {
                                     info->suggested_path,
                                     &file_type_info, 0, FILE_PATH_LITERAL(""),
                                     owning_window, info);
+    FOR_EACH_OBSERVER(Observer, observers_, SelectFileDialogDisplayed());
   } else {
     // No prompting for download, just continue with the suggested name.
     CreateDownloadItem(info, info->suggested_path);
@@ -430,6 +442,10 @@ void DownloadManager::CreateDownloadItem(DownloadCreateInfo* info,
   bool download_finished = ContainsKey(pending_finished_downloads_,
                                        info->download_id);
 
+  VLOG(20) << __FUNCTION__ << "()"
+           << " download_finished = " << download_finished
+           << " info = " << info->DebugString();
+
   if (download_finished || info->is_dangerous) {
     // The download has already finished or the download is not safe.
     // We can now rename the file to its final name (or its tentative name
@@ -448,7 +464,7 @@ void DownloadManager::CreateDownloadItem(DownloadCreateInfo* info,
         NewRunnableMethod(
             file_manager_, &DownloadFileManager::OnIntermediateDownloadName,
             download->id(), download_path, this));
-    download->set_need_final_rename(true);
+    download->Rename(download_path);
   }
 
   if (download_finished) {
@@ -457,8 +473,6 @@ void DownloadManager::CreateDownloadItem(DownloadCreateInfo* info,
     OnAllDataSaved(info->download_id,
                    pending_finished_downloads_[info->download_id]);
   }
-
-  download->Rename(target_path);
 
   download_history_->AddEntry(*info, download,
       NewCallback(this, &DownloadManager::OnCreateDownloadEntryComplete));
@@ -477,6 +491,8 @@ void DownloadManager::UpdateDownload(int32 download_id, int64 size) {
 }
 
 void DownloadManager::OnAllDataSaved(int32 download_id, int64 size) {
+  VLOG(20) << __FUNCTION__ << "()" << " download_id = " << download_id
+           << " size = " << size;
   DownloadMap::iterator it = in_progress_.find(download_id);
   if (it == in_progress_.end()) {
     // The download is done, but the user hasn't selected a final location for
@@ -487,16 +503,25 @@ void DownloadManager::OnAllDataSaved(int32 download_id, int64 size) {
         pending_finished_downloads_.find(download_id);
     DCHECK(erase_it == pending_finished_downloads_.end());
     pending_finished_downloads_[download_id] = size;
+    VLOG(20) << __FUNCTION__ << "()" << " Added download_id = " << download_id
+             << " to pending_finished_downloads_";
     return;
   }
 
   // Remove the id from the list of pending ids.
   PendingFinishedMap::iterator erase_it =
       pending_finished_downloads_.find(download_id);
-  if (erase_it != pending_finished_downloads_.end())
+  if (erase_it != pending_finished_downloads_.end()) {
     pending_finished_downloads_.erase(erase_it);
+    VLOG(20) << __FUNCTION__ << "()" << " Removed download_id = " << download_id
+             << " from pending_finished_downloads_";
+  }
 
   DownloadItem* download = it->second;
+
+  VLOG(20) << __FUNCTION__ << "()"
+           << " download = " << download->DebugString(true);
+
   download->OnAllDataSaved(size);
 
   // Clean up will happen when the history system create callback runs if we
@@ -524,40 +549,27 @@ void DownloadManager::OnAllDataSaved(int32 download_id, int64 size) {
         NewRunnableMethod(
             this, &DownloadManager::ProceedWithFinishedDangerousDownload,
             download->db_handle(),
-            download->full_path(), download->original_name()));
+            download->full_path(), download->target_name()));
     return;
   }
 
-  if (download->need_final_rename()) {
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(
-            file_manager_, &DownloadFileManager::OnFinalDownloadName,
-            download->id(), download->full_path(), false, this));
-    return;
-  }
-
-  ContinueDownloadFinished(download);
+  download->OnSafeDownloadFinished(file_manager_);
 }
 
 void DownloadManager::DownloadRenamedToFinalName(int download_id,
                                                  const FilePath& full_path) {
+  VLOG(20) << __FUNCTION__ << "()" << " download_id = " << download_id
+           << " full_path = \"" << full_path.value() << "\"";
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
   DownloadItem* item = GetDownloadItem(download_id);
   if (!item)
     return;
-  item->OnNameFinalized();
-
-  // This was called from DownloadFinished; continue to call
-  // ContinueDownloadFinished.
-  if (item->need_final_rename()) {
-    item->set_need_final_rename(false);
-    ContinueDownloadFinished(item);
-  }
+  item->OnDownloadRenamedToFinalName(full_path);
 }
 
-void DownloadManager::ContinueDownloadFinished(DownloadItem* download) {
+void DownloadManager::DownloadFinished(DownloadItem* download) {
+  VLOG(20) << __FUNCTION__ << "()"
+           << " download = " << download->DebugString(true);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // If this was a dangerous download, it has now been approved and must be
@@ -601,6 +613,10 @@ void DownloadManager::DangerousDownloadRenamed(int64 download_handle,
                                                bool success,
                                                const FilePath& new_path,
                                                int new_path_uniquifier) {
+  VLOG(20) << __FUNCTION__ << "()" << " download_handle = " << download_handle
+           << " success = " << success
+           << " new_path = \"" << new_path.value() << "\""
+           << " new_path_uniquifier = " << new_path_uniquifier;
   DownloadMap::iterator it = downloads_.find(download_handle);
   if (it == downloads_.end()) {
     NOTREACHED();
@@ -611,13 +627,13 @@ void DownloadManager::DangerousDownloadRenamed(int64 download_handle,
   // If we failed to rename the file, we'll just keep the name as is.
   if (success) {
     // We need to update the path uniquifier so that the UI shows the right
-    // name when calling GetFileName().
+    // name when calling GetFileNameToReportUser().
     download->set_path_uniquifier(new_path_uniquifier);
     RenameDownload(download, new_path);
   }
 
   // Continue the download finished sequence.
-  ContinueDownloadFinished(download);
+  DownloadFinished(download);
 }
 
 void DownloadManager::DownloadCancelled(int32 download_id) {
@@ -625,6 +641,9 @@ void DownloadManager::DownloadCancelled(int32 download_id) {
   if (it == in_progress_.end())
     return;
   DownloadItem* download = it->second;
+
+  VLOG(20) << __FUNCTION__ << "()" << " download_id = " << download_id
+           << " download = " << download->DebugString(true);
 
   // Clean up will happen when the history system create callback runs if we
   // don't have a valid db_handle yet.
@@ -892,7 +911,7 @@ void DownloadManager::DangerousDownloadValidated(DownloadItem* download) {
       NewRunnableMethod(
           this, &DownloadManager::ProceedWithFinishedDangerousDownload,
           download->db_handle(), download->full_path(),
-          download->original_name()));
+          download->target_name()));
 }
 
 // Operations posted to us from the history service ----------------------------
@@ -905,6 +924,8 @@ void DownloadManager::OnQueryDownloadEntriesComplete(
     DownloadItem* download = new DownloadItem(this, entries->at(i));
     DCHECK(!ContainsKey(downloads_, download->db_handle()));
     downloads_[download->db_handle()] = download;
+    VLOG(20) << __FUNCTION__ << "()" << i << ">"
+             << " download = " << download->DebugString(true);
   }
   NotifyModelChanged();
 }
@@ -912,12 +933,16 @@ void DownloadManager::OnQueryDownloadEntriesComplete(
 // Once the new DownloadItem's creation info has been committed to the history
 // service, we associate the DownloadItem with the db handle, update our
 // 'downloads_' map and inform observers.
-void DownloadManager::OnCreateDownloadEntryComplete(DownloadCreateInfo info,
-                                                    int64 db_handle) {
+void DownloadManager::OnCreateDownloadEntryComplete(
+    DownloadCreateInfo info,
+    int64 db_handle) {
   DownloadMap::iterator it = in_progress_.find(info.download_id);
   DCHECK(it != in_progress_.end());
 
   DownloadItem* download = it->second;
+  VLOG(20) << __FUNCTION__ << "()" << " db_handle = " << db_handle
+           << " download_id = " << info.download_id
+           << " download = " << download->DebugString(true);
 
   // It's not immediately obvious, but HistoryBackend::CreateDownload() can
   // call this function with an invalid |db_handle|. For instance, this can

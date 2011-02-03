@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,15 @@
 #include <map>
 #include <string>
 
+#include "base/metrics/field_trial.h"
 #include "base/singleton.h"
-#include "base/stats_counters.h"
 #include "base/stl_util-inl.h"
 #include "base/string_number_conversions.h"
 #include "base/thread.h"
 #include "base/values.h"
 #include "base/waitable_event.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/preconnect.h"
 #include "chrome/browser/net/referrer.h"
@@ -24,6 +23,7 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
@@ -41,11 +41,35 @@ static void DnsPrefetchMotivatedList(const UrlList& urls,
 static UrlList GetPredictedUrlListAtStartup(PrefService* user_prefs,
                                             PrefService* local_state);
 
+// Given that the underlying Chromium resolver defaults to a total maximum of
+// 8 paralell resolutions, we will avoid any chance of starving navigational
+// resolutions by limiting the number of paralell speculative resolutions.
+// TODO(jar): Move this limitation into the resolver.
 // static
-const size_t PredictorInit::kMaxPrefetchConcurrentLookups = 8;
+const size_t PredictorInit::kMaxSpeculativeParallelResolves = 3;
 
+// To control our congestion avoidance system, which discards a queue when
+// resolutions are "taking too long," we need an expected resolution time.
+// Common average is in the range of 300-500ms.
+static const int kExpectedResolutionTimeMs = 500;
+
+// To control the congestion avoidance system, we need an estimate of how many
+// speculative requests may arrive at once.  Since we currently only keep 8
+// subresource names for each frame, we'll use that as our basis.  Note that
+// when scanning search results lists, we might actually get 10 at a time, and
+// wikipedia can often supply (during a page scan) upwards of 50.  In those odd
+// cases, we may discard some of the later speculative requests mistakenly
+// assuming that the resolutions took too long.
+static const int kTypicalSpeculativeGroupSize = 8;
+
+// The next constant specifies an amount of queueing delay that is "too large,"
+// and indicative of problems with resolutions (perhaps due to an overloaded
+// router, or such).  When we exceed this delay, congestion avoidance will kick
+// in and all speculations in the queue will be discarded.
 // static
-const int PredictorInit::kMaxPrefetchQueueingDelayMs = 500;
+const int PredictorInit::kMaxSpeculativeResolveQueueDelayMs =
+    (kExpectedResolutionTimeMs * kTypicalSpeculativeGroupSize) /
+    kMaxSpeculativeParallelResolves;
 
 // A version number for prefs that are saved. This should be incremented when
 // we change the format so that we discard old data.
@@ -351,8 +375,10 @@ void PredictorGetHtmlInfo(std::string* output) {
 //------------------------------------------------------------------------------
 
 static void InitNetworkPredictor(TimeDelta max_dns_queue_delay,
-    size_t max_concurrent, PrefService* user_prefs, PrefService* local_state,
-    bool preconnect_enabled) {
+                                 size_t max_parallel_resolves,
+                                 PrefService* user_prefs,
+                                 PrefService* local_state,
+                                 bool preconnect_enabled) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   bool prefetching_enabled =
@@ -367,7 +393,7 @@ static void InitNetworkPredictor(TimeDelta max_dns_queue_delay,
           local_state->GetMutableList(prefs::kDnsHostReferralList)->DeepCopy());
 
   g_browser_process->io_thread()->InitNetworkPredictor(
-      prefetching_enabled, max_dns_queue_delay, max_concurrent, urls,
+      prefetching_enabled, max_dns_queue_delay, max_parallel_resolves, urls,
       referral_list, preconnect_enabled);
 }
 
@@ -506,11 +532,11 @@ PredictorInit::PredictorInit(PrefService* user_prefs,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Set up a field trial to see what disabling DNS pre-resolution does to
   // latency of page loads.
-  FieldTrial::Probability kDivisor = 1000;
+  base::FieldTrial::Probability kDivisor = 1000;
   // For each option (i.e., non-default), we have a fixed probability.
-  FieldTrial::Probability kProbabilityPerGroup = 1;  // 0.1% probability.
+  base::FieldTrial::Probability kProbabilityPerGroup = 100;  // 10% probability.
 
-  trial_ = new FieldTrial("DnsImpact", kDivisor);
+  trial_ = new base::FieldTrial("DnsImpact", kDivisor);
 
   // First option is to disable prefetching completely.
   int disabled_prefetch = trial_->AppendGroup("disabled_prefetch",
@@ -546,7 +572,7 @@ PredictorInit::PredictorInit(PrefService* user_prefs,
       "max_6 concurrent_prefetch", kProbabilityPerGroup);
 
   trial_->AppendGroup("default_enabled_prefetch",
-      FieldTrial::kAllRemainingProbability);
+      base::FieldTrial::kAllRemainingProbability);
 
   // We will register the incognito observer regardless of whether prefetching
   // is enabled, as it is also used to clear the host cache.
@@ -554,36 +580,40 @@ PredictorInit::PredictorInit(PrefService* user_prefs,
 
   if (trial_->group() != disabled_prefetch) {
     // Initialize the DNS prefetch system.
-    size_t max_concurrent = kMaxPrefetchConcurrentLookups;
-    int max_queueing_delay_ms = kMaxPrefetchQueueingDelayMs;
+    size_t max_parallel_resolves = kMaxSpeculativeParallelResolves;
+    int max_queueing_delay_ms = kMaxSpeculativeResolveQueueDelayMs;
 
-    if (trial_->group() == max_250ms_prefetch)
-      max_queueing_delay_ms = 250;
-    else if (trial_->group() == max_500ms_prefetch)
-      max_queueing_delay_ms = 500;
-    else if (trial_->group() == max_750ms_prefetch)
-      max_queueing_delay_ms = 750;
-    else if (trial_->group() == max_2s_prefetch)
-      max_queueing_delay_ms = 2000;
     if (trial_->group() == max_2_concurrent_prefetch)
-      max_concurrent = 2;
+      max_parallel_resolves = 2;
     else if (trial_->group() == max_4_concurrent_prefetch)
-      max_concurrent = 4;
+      max_parallel_resolves = 4;
     else if (trial_->group() == max_6_concurrent_prefetch)
-      max_concurrent = 6;
-    // Scale acceptable delay so we don't cause congestion limits to fire as
-    // we modulate max_concurrent (*if* we are modulating it at all).
-    max_queueing_delay_ms = (kMaxPrefetchQueueingDelayMs *
-                             kMaxPrefetchConcurrentLookups) / max_concurrent;
+      max_parallel_resolves = 6;
+
+    if (trial_->group() == max_250ms_prefetch) {
+      max_queueing_delay_ms =
+         (250 * kTypicalSpeculativeGroupSize) /  max_parallel_resolves;
+    } else if (trial_->group() == max_500ms_prefetch) {
+      max_queueing_delay_ms =
+          (500 * kTypicalSpeculativeGroupSize) /  max_parallel_resolves;
+    } else if (trial_->group() == max_750ms_prefetch) {
+      max_queueing_delay_ms =
+          (750 * kTypicalSpeculativeGroupSize) /  max_parallel_resolves;
+    } else if (trial_->group() == max_2s_prefetch) {
+      max_queueing_delay_ms =
+          (2000 * kTypicalSpeculativeGroupSize) /  max_parallel_resolves;
+    }
 
     TimeDelta max_queueing_delay(
         TimeDelta::FromMilliseconds(max_queueing_delay_ms));
 
     DCHECK(!g_predictor);
-    InitNetworkPredictor(max_queueing_delay, max_concurrent, user_prefs,
+    InitNetworkPredictor(max_queueing_delay, max_parallel_resolves, user_prefs,
                          local_state, preconnect_enabled);
   }
 }
 
+PredictorInit::~PredictorInit() {
+}
 
 }  // namespace chrome_browser_net

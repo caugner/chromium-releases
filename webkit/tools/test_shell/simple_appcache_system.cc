@@ -4,8 +4,10 @@
 
 #include "webkit/tools/test_shell/simple_appcache_system.h"
 
+#include <string>
+#include <vector>
+
 #include "base/callback.h"
-#include "base/lock.h"
 #include "base/task.h"
 #include "base/waitable_event.h"
 #include "webkit/appcache/appcache_interceptor.h"
@@ -63,15 +65,15 @@ class SimpleFrontendProxy
       const appcache::AppCacheInfo& info) {
     if (!system_)
       return;
-    if (system_->is_io_thread())
+    if (system_->is_io_thread()) {
       system_->ui_message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
           this, &SimpleFrontendProxy::OnCacheSelected,
           host_id, info));
-    else if (system_->is_ui_thread()) {
+    } else if (system_->is_ui_thread()) {
       system_->frontend_impl_.OnCacheSelected(host_id, info);
-    }
-    else
+    } else {
       NOTREACHED();
+    }
   }
 
   virtual void OnStatusChanged(const std::vector<int>& host_ids,
@@ -390,7 +392,6 @@ void SimpleAppCacheSystem::InitOnIOThread(URLRequestContext* request_context) {
 
   DCHECK(!io_message_loop_);
   io_message_loop_ = MessageLoop::current();
-  io_message_loop_->AddDestructionObserver(this);
 
   if (!db_thread_.IsRunning())
     db_thread_.Start();
@@ -404,6 +405,19 @@ void SimpleAppCacheSystem::InitOnIOThread(URLRequestContext* request_context) {
   backend_impl_->Initialize(service_, frontend_proxy_.get(), kSingleProcessId);
 
   AppCacheInterceptor::EnsureRegistered();
+}
+
+void SimpleAppCacheSystem::CleanupIOThread() {
+  DCHECK(is_io_thread());
+
+  delete backend_impl_;
+  delete service_;
+  backend_impl_ = NULL;
+  service_ = NULL;
+  io_message_loop_ = NULL;
+
+  // Just in case the main thread is waiting on it.
+  backend_proxy_->SignalEvent();
 }
 
 WebApplicationCacheHost* SimpleAppCacheSystem::CreateCacheHostForWebKit(
@@ -437,17 +451,4 @@ void SimpleAppCacheSystem::GetExtraResponseBits(
     AppCacheInterceptor::GetExtraResponseInfo(
         request, cache_id, manifest_url);
   }
-}
-
-void SimpleAppCacheSystem::WillDestroyCurrentMessageLoop() {
-  DCHECK(is_io_thread());
-
-  delete backend_impl_;
-  delete service_;
-  backend_impl_ = NULL;
-  service_ = NULL;
-  io_message_loop_ = NULL;
-
-  // Just in case the main thread is waiting on it.
-  backend_proxy_->SignalEvent();
 }

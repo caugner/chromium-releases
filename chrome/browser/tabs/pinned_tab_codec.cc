@@ -5,12 +5,13 @@
 #include "chrome/browser/tabs/pinned_tab_codec.h"
 
 #include "base/values.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/common/pref_names.h"
@@ -41,9 +42,9 @@ static void EncodePinnedTab(TabStripModel* model,
                             ListValue* values) {
   scoped_ptr<DictionaryValue> value(new DictionaryValue());
 
-  TabContents* tab_contents = model->GetTabContentsAt(index);
+  TabContentsWrapper* tab_contents = model->GetTabContentsAt(index);
   if (model->IsAppTab(index)) {
-    Extension* extension = tab_contents->extension_app();
+    const Extension* extension = tab_contents->extension_app();
     DCHECK(extension);
     value->SetString(kAppID, extension->id());
     // For apps we use the launch url. We do this for the following reason:

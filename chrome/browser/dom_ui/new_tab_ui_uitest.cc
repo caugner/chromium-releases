@@ -4,13 +4,14 @@
 
 #include "chrome/test/ui/ui_test.h"
 
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/browser/sync/signin_manager.h"
 #include "chrome/common/json_pref_store.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
@@ -81,6 +82,30 @@ TEST_F(NewTabUITest, NTPHasLoginName) {
       &displayed_username));
 
   EXPECT_EQ(L"user@gmail.com", displayed_username);
+}
+
+// Loads about:hang into two NTP tabs, ensuring we don't crash.
+// See http://crbug.com/59859.
+TEST_F(NewTabUITest, AboutHangInNTP) {
+  scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(window.get());
+
+  // Bring up a new tab page.
+  ASSERT_TRUE(window->RunCommand(IDC_NEW_TAB));
+  int load_time;
+  ASSERT_TRUE(automation()->WaitForInitialNewTabUILoad(&load_time));
+  scoped_refptr<TabProxy> tab = window->GetActiveTab();
+  ASSERT_TRUE(tab.get());
+
+  // Navigate to about:hang to stall the process.
+  ASSERT_TRUE(tab->NavigateToURLAsync(GURL(chrome::kAboutHangURL)));
+
+  // Visit about:hang again in another NTP.  Don't bother waiting for the
+  // NTP to load, because it's hung.
+  ASSERT_TRUE(window->RunCommand(IDC_NEW_TAB));
+  scoped_refptr<TabProxy> tab2 = window->GetActiveTab();
+  ASSERT_TRUE(tab2.get());
+  ASSERT_TRUE(tab2->NavigateToURLAsync(GURL(chrome::kAboutHangURL)));
 }
 
 // Fails about ~5% of the time on all platforms. http://crbug.com/45001

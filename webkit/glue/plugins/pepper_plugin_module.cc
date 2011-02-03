@@ -12,43 +12,49 @@
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
-#include "third_party/ppapi/c/dev/ppb_buffer_dev.h"
-#include "third_party/ppapi/c/dev/ppb_char_set_dev.h"
-#include "third_party/ppapi/c/dev/ppb_cursor_control_dev.h"
-#include "third_party/ppapi/c/dev/ppb_directory_reader_dev.h"
-#include "third_party/ppapi/c/dev/ppb_file_io_dev.h"
-#include "third_party/ppapi/c/dev/ppb_file_io_trusted_dev.h"
-#include "third_party/ppapi/c/dev/ppb_file_system_dev.h"
-#include "third_party/ppapi/c/dev/ppb_find_dev.h"
-#include "third_party/ppapi/c/dev/ppb_font_dev.h"
-#include "third_party/ppapi/c/dev/ppb_fullscreen_dev.h"
-#include "third_party/ppapi/c/dev/ppb_graphics_3d_dev.h"
-#include "third_party/ppapi/c/dev/ppb_opengles_dev.h"
-#include "third_party/ppapi/c/dev/ppb_scrollbar_dev.h"
-#include "third_party/ppapi/c/dev/ppb_testing_dev.h"
-#include "third_party/ppapi/c/dev/ppb_transport_dev.h"
-#include "third_party/ppapi/c/dev/ppb_url_loader_dev.h"
-#include "third_party/ppapi/c/dev/ppb_url_loader_trusted_dev.h"
-#include "third_party/ppapi/c/dev/ppb_url_request_info_dev.h"
-#include "third_party/ppapi/c/dev/ppb_url_response_info_dev.h"
-#include "third_party/ppapi/c/dev/ppb_url_util_dev.h"
-#include "third_party/ppapi/c/dev/ppb_var_deprecated.h"
-#include "third_party/ppapi/c/dev/ppb_video_decoder_dev.h"
-#include "third_party/ppapi/c/dev/ppb_widget_dev.h"
-#include "third_party/ppapi/c/dev/ppb_zoom_dev.h"
-#include "third_party/ppapi/c/trusted/ppb_image_data_trusted.h"
-#include "third_party/ppapi/c/pp_module.h"
-#include "third_party/ppapi/c/pp_resource.h"
-#include "third_party/ppapi/c/pp_var.h"
-#include "third_party/ppapi/c/ppb_core.h"
-#include "third_party/ppapi/c/ppb_graphics_2d.h"
-#include "third_party/ppapi/c/ppb_image_data.h"
-#include "third_party/ppapi/c/ppb_instance.h"
-#include "third_party/ppapi/c/ppp.h"
-#include "third_party/ppapi/c/ppp_instance.h"
+#include "ppapi/c/dev/ppb_buffer_dev.h"
+#include "ppapi/c/dev/ppb_char_set_dev.h"
+#include "ppapi/c/dev/ppb_cursor_control_dev.h"
+#include "ppapi/c/dev/ppb_directory_reader_dev.h"
+#include "ppapi/c/dev/ppb_file_io_dev.h"
+#include "ppapi/c/dev/ppb_file_io_trusted_dev.h"
+#include "ppapi/c/dev/ppb_file_system_dev.h"
+#include "ppapi/c/dev/ppb_find_dev.h"
+#include "ppapi/c/dev/ppb_font_dev.h"
+#include "ppapi/c/dev/ppb_fullscreen_dev.h"
+#include "ppapi/c/dev/ppb_graphics_3d_dev.h"
+#include "ppapi/c/dev/ppb_opengles_dev.h"
+#include "ppapi/c/dev/ppb_scrollbar_dev.h"
+#include "ppapi/c/dev/ppb_testing_dev.h"
+#include "ppapi/c/dev/ppb_transport_dev.h"
+#include "ppapi/c/dev/ppb_url_util_dev.h"
+#include "ppapi/c/dev/ppb_var_deprecated.h"
+#include "ppapi/c/dev/ppb_video_decoder_dev.h"
+#include "ppapi/c/dev/ppb_widget_dev.h"
+#include "ppapi/c/dev/ppb_zoom_dev.h"
+#include "ppapi/c/pp_module.h"
+#include "ppapi/c/pp_resource.h"
+#include "ppapi/c/pp_var.h"
+#include "ppapi/c/ppb_class.h"
+#include "ppapi/c/ppb_core.h"
+#include "ppapi/c/ppb_graphics_2d.h"
+#include "ppapi/c/ppb_image_data.h"
+#include "ppapi/c/ppb_instance.h"
+#include "ppapi/c/ppb_url_loader.h"
+#include "ppapi/c/ppb_url_request_info.h"
+#include "ppapi/c/ppb_url_response_info.h"
+#include "ppapi/c/ppb_var.h"
+#include "ppapi/c/ppp.h"
+#include "ppapi/c/ppp_instance.h"
+#include "ppapi/c/trusted/ppb_image_data_trusted.h"
+#include "ppapi/c/trusted/ppb_url_loader_trusted.h"
+#include "ppapi/proxy/host_dispatcher.h"
+#include "ppapi/proxy/ppapi_messages.h"
 #include "webkit/glue/plugins/pepper_audio.h"
 #include "webkit/glue/plugins/pepper_buffer.h"
+#include "webkit/glue/plugins/pepper_common.h"
 #include "webkit/glue/plugins/pepper_char_set.h"
+#include "webkit/glue/plugins/pepper_class.h"
 #include "webkit/glue/plugins/pepper_cursor_control.h"
 #include "webkit/glue/plugins/pepper_directory_reader.h"
 #include "webkit/glue/plugins/pepper_file_chooser.h"
@@ -78,6 +84,10 @@
 #ifdef ENABLE_GPU
 #include "webkit/glue/plugins/pepper_graphics_3d.h"
 #endif  // ENABLE_GPU
+
+#if defined(OS_POSIX)
+#include "ipc/ipc_channel_posix.h"
+#endif
 
 namespace pepper {
 
@@ -140,8 +150,8 @@ void CallOnMainThread(int delay_in_msec,
       delay_in_msec);
 }
 
-bool IsMainThread() {
-  return GetMainThreadMessageLoop()->BelongsToCurrentThread();
+PP_Bool IsMainThread() {
+  return BoolToPPBool(GetMainThreadMessageLoop()->BelongsToCurrentThread());
 }
 
 const PPB_Core core_interface = {
@@ -157,14 +167,14 @@ const PPB_Core core_interface = {
 
 // PPB_Testing -----------------------------------------------------------------
 
-bool ReadImageData(PP_Resource device_context_2d,
+PP_Bool ReadImageData(PP_Resource device_context_2d,
                    PP_Resource image,
                    const PP_Point* top_left) {
   scoped_refptr<Graphics2D> context(
       Resource::GetAs<Graphics2D>(device_context_2d));
   if (!context.get())
-    return false;
-  return context->ReadImageData(image, top_left);
+    return PP_FALSE;
+  return BoolToPPBool(context->ReadImageData(image, top_left));
 }
 
 void RunMessageLoop() {
@@ -185,27 +195,11 @@ uint32_t GetLiveObjectCount(PP_Module module_id) {
   return ResourceTracker::Get()->GetLiveObjectsForModule(module);
 }
 
-PP_Resource GetInaccessibleFileRef(PP_Module module_id) {
-  PluginModule* module = ResourceTracker::Get()->GetModule(module_id);
-  if (!module)
-    return static_cast<uint32_t>(-1);
-  return FileRef::GetInaccessibleFileRef(module)->GetReference();
-}
-
-PP_Resource GetNonexistentFileRef(PP_Module module_id) {
-  PluginModule* module = ResourceTracker::Get()->GetModule(module_id);
-  if (!module)
-    return static_cast<uint32_t>(-1);
-  return FileRef::GetNonexistentFileRef(module)->GetReference();
-}
-
 const PPB_Testing_Dev testing_interface = {
   &ReadImageData,
   &RunMessageLoop,
   &QuitMessageLoop,
-  &GetLiveObjectCount,
-  &GetInaccessibleFileRef,
-  &GetNonexistentFileRef
+  &GetLiveObjectCount
 };
 
 // GetInterface ----------------------------------------------------------------
@@ -215,6 +209,8 @@ const void* GetInterface(const char* name) {
     return &core_interface;
   if (strcmp(name, PPB_VAR_DEPRECATED_INTERFACE) == 0)
     return Var::GetDeprecatedInterface();
+  if (strcmp(name, PPB_VAR_INTERFACE) == 0)
+    return Var::GetInterface();
   if (strcmp(name, PPB_INSTANCE_INTERFACE) == 0)
     return PluginInstance::GetInterface();
   if (strcmp(name, PPB_IMAGEDATA_INTERFACE) == 0)
@@ -237,13 +233,13 @@ const void* GetInterface(const char* name) {
 #endif  // ENABLE_GPU
   if (strcmp(name, PPB_TRANSPORT_DEV_INTERFACE) == 0)
     return Transport::GetInterface();
-  if (strcmp(name, PPB_URLLOADER_DEV_INTERFACE) == 0)
+  if (strcmp(name, PPB_URLLOADER_INTERFACE) == 0)
     return URLLoader::GetInterface();
-  if (strcmp(name, PPB_URLLOADERTRUSTED_DEV_INTERFACE) == 0)
+  if (strcmp(name, PPB_URLLOADERTRUSTED_INTERFACE) == 0)
     return URLLoader::GetTrustedInterface();
-  if (strcmp(name, PPB_URLREQUESTINFO_DEV_INTERFACE) == 0)
+  if (strcmp(name, PPB_URLREQUESTINFO_INTERFACE) == 0)
     return URLRequestInfo::GetInterface();
-  if (strcmp(name, PPB_URLRESPONSEINFO_DEV_INTERFACE) == 0)
+  if (strcmp(name, PPB_URLRESPONSEINFO_INTERFACE) == 0)
     return URLResponseInfo::GetInterface();
   if (strcmp(name, PPB_BUFFER_DEV_INTERFACE) == 0)
     return Buffer::GetInterface();
@@ -283,6 +279,8 @@ const void* GetInterface(const char* name) {
     return GetCursorControlInterface();
   if (strcmp(name, PPB_ZOOM_DEV_INTERFACE) == 0)
     return PluginInstance::GetZoomInterface();
+  if (strcmp(name, PPB_CLASS_INTERFACE) == 0)
+    return VarObjectClass::GetInterface();
 
   // Only support the testing interface when the command line switch is
   // specified. This allows us to prevent people from (ab)using this interface
@@ -343,12 +341,24 @@ scoped_refptr<PluginModule> PluginModule::CreateModule(
   return lib;
 }
 
+// static
 scoped_refptr<PluginModule> PluginModule::CreateInternalModule(
     EntryPoints entry_points) {
   scoped_refptr<PluginModule> lib(new PluginModule());
   if (!lib->InitFromEntryPoints(entry_points))
     return NULL;
 
+  return lib;
+}
+
+// static
+scoped_refptr<PluginModule> PluginModule::CreateOutOfProcessModule(
+    MessageLoop* ipc_message_loop,
+    const IPC::ChannelHandle& handle,
+    base::WaitableEvent* shutdown_event) {
+  scoped_refptr<PluginModule> lib(new PluginModule);
+  if (!lib->InitForOutOfProcess(ipc_message_loop, handle, shutdown_event))
+    return NULL;
   return lib;
 }
 
@@ -394,10 +404,41 @@ bool PluginModule::InitFromFile(const FilePath& path) {
   return true;
 }
 
+bool PluginModule::InitForOutOfProcess(MessageLoop* ipc_message_loop,
+                                       const IPC::ChannelHandle& handle,
+                                       base::WaitableEvent* shutdown_event) {
+  const PPB_Var_Deprecated* var_interface =
+      reinterpret_cast<const PPB_Var_Deprecated*>(
+          GetInterface(PPB_VAR_DEPRECATED_INTERFACE));
+  dispatcher_.reset(new pp::proxy::HostDispatcher(var_interface,
+                                                  pp_module(), &GetInterface));
+
+#if defined(OS_POSIX)
+  // If we received a ChannelHandle, register it now.
+  if (handle.socket.fd >= 0)
+    IPC::AddChannelSocket(handle.name, handle.socket.fd);
+#endif
+
+  if (!dispatcher_->InitWithChannel(ipc_message_loop, handle.name, true,
+                                    shutdown_event)) {
+    dispatcher_.reset();
+    return false;
+  }
+
+  bool init_result = false;
+  dispatcher_->Send(new PpapiMsg_InitializeModule(pp_module(), &init_result));
+
+  if (!init_result) {
+    // TODO(brettw) does the module get unloaded in this case?
+    dispatcher_.reset();
+    return false;
+  }
+  return true;
+}
+
 // static
 bool PluginModule::LoadEntryPoints(const base::NativeLibrary& library,
                                    EntryPoints* entry_points) {
-
   entry_points->get_interface =
       reinterpret_cast<PPP_GetInterfaceFunc>(
           base::GetFunctionPointerFromNativeLibrary(library,
@@ -434,7 +475,13 @@ PluginInstance* PluginModule::CreateInstance(PluginDelegate* delegate) {
     LOG(WARNING) << "Plugin doesn't support instance interface, failing.";
     return NULL;
   }
-  return new PluginInstance(delegate, this, plugin_instance_interface);
+  PluginInstance* instance = new PluginInstance(delegate, this,
+                                                plugin_instance_interface);
+  if (dispatcher_.get()) {
+    pp::proxy::HostDispatcher::SetForInstance(instance->pp_instance(),
+                                              dispatcher_.get());
+  }
+  return instance;
 }
 
 PluginInstance* PluginModule::GetSomeInstance() const {
@@ -445,6 +492,10 @@ PluginInstance* PluginModule::GetSomeInstance() const {
 }
 
 const void* PluginModule::GetPluginInterface(const char* name) const {
+  if (dispatcher_.get())
+    return dispatcher_->GetProxiedInterface(name);
+
+  // In-process plugins.
   if (!entry_points_.get_interface)
     return NULL;
   return entry_points_.get_interface(name);
@@ -455,6 +506,7 @@ void PluginModule::InstanceCreated(PluginInstance* instance) {
 }
 
 void PluginModule::InstanceDeleted(PluginInstance* instance) {
+  pp::proxy::HostDispatcher::RemoveForInstance(instance->pp_instance());
   instances_.erase(instance);
 }
 

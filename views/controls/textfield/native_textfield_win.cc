@@ -15,7 +15,7 @@
 #include "base/i18n/rtl.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
+#include "base/win/windows_version.h"
 #include "gfx/native_theme_win.h"
 #include "grit/app_strings.h"
 #include "skia/ext/skia_utils_win.h"
@@ -155,13 +155,11 @@ void NativeTextfieldWin::UpdateText() {
   std::wstring text = textfield_->text();
   // Adjusting the string direction before setting the text in order to make
   // sure both RTL and LTR strings are displayed properly.
-  std::wstring text_to_set;
-  if (!base::i18n::AdjustStringForLocaleDirection(text, &text_to_set))
-    text_to_set = text;
+  base::i18n::AdjustStringForLocaleDirection(&text);
   if (textfield_->style() & Textfield::STYLE_LOWERCASE)
-    text_to_set = l10n_util::ToLower(text_to_set);
-  SetWindowText(text_to_set.c_str());
-  UpdateAccessibleValue(text_to_set);
+    text = l10n_util::ToLower(text);
+  SetWindowText(text.c_str());
+  UpdateAccessibleValue(text);
 }
 
 void NativeTextfieldWin::AppendText(const string16& text) {
@@ -251,12 +249,29 @@ gfx::Insets NativeTextfieldWin::CalculateInsets() {
   return gfx::Insets(3, 3, 3, 3);
 }
 
-void NativeTextfieldWin::SetHorizontalMargins(int left, int right) {
+void NativeTextfieldWin::UpdateHorizontalMargins() {
+  int left, right;
+  if (!textfield_->GetHorizontalMargins(&left, &right))
+    return;
+
   // SendMessage expects the two values to be packed into one using MAKELONG
   // so we truncate to 16 bits if necessary.
   SendMessage(m_hWnd, EM_SETMARGINS,
               EC_LEFTMARGIN | EC_RIGHTMARGIN,
               MAKELONG(left  & 0xFFFF, right & 0xFFFF));
+}
+
+void NativeTextfieldWin::UpdateVerticalMargins() {
+  int top, bottom;
+  if (!textfield_->GetVerticalMargins(&top, &bottom))
+    return;
+
+  if (top == 0 && bottom == 0) {
+    // Do nothing, default margins are 0 already.
+    return;
+  }
+  // Non-zero margins case.
+  NOTIMPLEMENTED();
 }
 
 void NativeTextfieldWin::SetFocus() {
@@ -761,7 +776,7 @@ void NativeTextfieldWin::OnNCPaint(HRGN region) {
   int part;
   int state;
 
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA) {
+  if (base::win::GetVersion() < base::win::VERSION_VISTA) {
     part = EP_EDITTEXT;
 
     if (!textfield_->IsEnabled())

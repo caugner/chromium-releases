@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,9 @@
 #include <algorithm>
 #include <string>
 
-#include "base/field_trial.h"
 #include "base/format_macros.h"
-#include "base/histogram.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 
 using base::Time;
@@ -31,6 +30,17 @@ void EnablePredictorDetailedLog(bool enable) {
 // static
 int UrlInfo::sequence_counter = 1;
 
+UrlInfo::UrlInfo()
+    : state_(PENDING),
+      old_prequeue_state_(state_),
+      resolve_duration_(kNullDuration),
+      queue_duration_(kNullDuration),
+      sequence_number_(0),
+      motivation_(NO_PREFETCH_MOTIVATION),
+      was_linked_(false) {
+}
+
+UrlInfo::~UrlInfo() {}
 
 bool UrlInfo::NeedsDnsUpdate() {
   switch (state_) {
@@ -110,9 +120,10 @@ void UrlInfo::RemoveFromQueue() {
   }
   // Make a custom linear histogram for the region from 0 to boundary.
   const size_t kBucketCount = 52;
-  static scoped_refptr<Histogram> histogram = LinearHistogram::FactoryTimeGet(
-      "DNS.QueueRecycledUnder2", TimeDelta(), kBoundary, kBucketCount,
-      Histogram::kUmaTargetedHistogramFlag);
+  static scoped_refptr<base::Histogram> histogram =
+      base::LinearHistogram::FactoryTimeGet(
+          "DNS.QueueRecycledUnder2", TimeDelta(), kBoundary, kBucketCount,
+          base::Histogram::kUmaTargetedHistogramFlag);
   histogram->AddTime(queue_duration_);
 }
 
@@ -172,11 +183,9 @@ bool UrlInfo::IsStillCached() const {
 void UrlInfo::DLogResultsStats(const char* message) const {
   if (!detailed_logging_enabled)
     return;
-  DLOG(INFO) << "\t" << message <<  "\tq="
-      << queue_duration().InMilliseconds() << "ms,\tr="
-      << resolve_duration().InMilliseconds() << "ms\tp="
-      << sequence_number_
-      << "\t" << url_.spec();
+  DVLOG(1) << "\t" << message << "\tq=" << queue_duration().InMilliseconds()
+           << "ms,\tr=" << resolve_duration().InMilliseconds()
+           << "ms,\tp=" << sequence_number_ << "\t" << url_.spec();
 }
 
 //------------------------------------------------------------------------------
@@ -242,10 +251,10 @@ static std::string HoursMinutesSeconds(int seconds) {
   int print_minutes = minutes % 60;
   int print_hours = minutes/60;
   if (print_hours)
-    StringAppendF(&result, "%.2d:",  print_hours);
+    base::StringAppendF(&result, "%.2d:",  print_hours);
   if (print_hours || print_minutes)
-    StringAppendF(&result, "%2.2d:",  print_minutes);
-  StringAppendF(&result, "%2.2d",  print_seconds);
+    base::StringAppendF(&result, "%2.2d:",  print_minutes);
+  base::StringAppendF(&result, "%2.2d",  print_seconds);
   return result;
 }
 
@@ -257,8 +266,8 @@ void UrlInfo::GetHtmlTable(const UrlInfoTable host_infos,
   if (0 == host_infos.size())
     return;
   output->append(description);
-  StringAppendF(output, "%" PRIuS " %s", host_infos.size(),
-                (1 == host_infos.size()) ? "hostname" : "hostnames");
+  base::StringAppendF(output, "%" PRIuS " %s", host_infos.size(),
+                      (1 == host_infos.size()) ? "hostname" : "hostnames");
 
   if (brief) {
     output->append("<br><br>");
@@ -282,18 +291,21 @@ void UrlInfo::GetHtmlTable(const UrlInfoTable host_infos,
   for (UrlInfoTable::const_iterator it(host_infos.begin());
        it != host_infos.end(); it++) {
     queue.sample((it->queue_duration_.InMilliseconds()));
-    StringAppendF(output, row_format,
-                  RemoveJs(it->url_.spec()).c_str(),
-                  HoursMinutesSeconds(when.sample(
-                      (current_time - it->time_).InSeconds())).c_str(),
-                  it->GetAsciiMotivation().c_str());
+    base::StringAppendF(
+        output,
+        row_format,
+        RemoveJs(it->url_.spec()).c_str(),
+                 HoursMinutesSeconds(when.sample(
+                     (current_time - it->time_).InSeconds())).c_str(),
+        it->GetAsciiMotivation().c_str());
   }
   output->append("</table>");
 
 #ifndef NDEBUG
-  StringAppendF(output,
-                "Prefetch Queue Durations: min=%d, avg=%d, max=%d<br><br>",
-                queue.minimum(), queue.average(), queue.maximum());
+  base::StringAppendF(
+      output,
+      "Prefetch Queue Durations: min=%d, avg=%d, max=%d<br><br>",
+      queue.minimum(), queue.average(), queue.maximum());
 #endif
 
   output->append("<br>");

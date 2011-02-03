@@ -11,11 +11,12 @@
 #include "app/menus/button_menu_item_model.h"
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
+#include "base/i18n/number_formatting.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/browser.h"
+#include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/background_page_tracker.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/encoding_menu_controller.h"
@@ -25,7 +26,9 @@
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/upgrade_detector.h"
+#include "chrome/common/badge_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_source.h"
@@ -43,6 +46,31 @@
 #if defined(OS_MACOSX)
 #include "chrome/browser/browser_window.h"
 #endif
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/update_library.h"
+#endif
+
+#if defined(OS_WIN)
+#include "chrome/browser/enumerate_modules_model_win.h"
+#endif
+
+// The size of the font used for dynamic text overlays on menu items.
+const float kMenuBadgeFontSize = 12.0;
+
+namespace {
+SkBitmap GetBackgroundPageIcon() {
+  string16 pages = base::FormatNumber(
+      BackgroundPageTracker::GetSingleton()->GetBackgroundPageCount());
+  return badge_util::DrawBadgeIconOverlay(
+      *ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_BACKGROUND_MENU),
+      kMenuBadgeFontSize,
+      pages,
+      l10n_util::GetStringUTF16(IDS_BACKGROUND_PAGE_BADGE_OVERFLOW));
+}
+
+}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // EncodingMenuModel
@@ -160,8 +188,8 @@ void ToolsMenuModel::Build(Browser* browser) {
   AddItemWithStringId(IDC_CLEAR_BROWSING_DATA, IDS_CLEAR_BROWSING_DATA);
 
   AddSeparator();
-#if defined(OS_CHROMEOS)
-  AddItemWithStringId(IDC_REPORT_BUG, IDS_REPORT_BUG);
+#if defined(OS_CHROMEOS) || defined(OS_WIN) || defined(OS_LINUX)
+  AddItemWithStringId(IDC_FEEDBACK, IDS_FEEDBACK);
   AddSeparator();
 #endif
 
@@ -193,6 +221,9 @@ WrenchMenuModel::WrenchMenuModel(menus::AcceleratorProvider* provider,
                  Source<Profile>(browser_->profile()));
   registrar_.Add(this, NotificationType::NAV_ENTRY_COMMITTED,
                  NotificationService::AllSources());
+  registrar_.Add(this,
+                 NotificationType::BACKGROUND_PAGE_TRACKER_CHANGED,
+                 NotificationService::AllSources());
 }
 
 WrenchMenuModel::~WrenchMenuModel() {
@@ -209,7 +240,8 @@ bool WrenchMenuModel::IsLabelForCommandIdDynamic(int command_id) const {
 #if defined(OS_MACOSX)
          command_id == IDC_FULLSCREEN ||
 #endif
-         command_id == IDC_SYNC_BOOKMARKS;
+         command_id == IDC_SYNC_BOOKMARKS ||
+         command_id == IDC_VIEW_BACKGROUND_PAGES;
 }
 
 string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
@@ -227,6 +259,12 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
       return l10n_util::GetStringUTF16(string_id);
     }
 #endif
+    case IDC_VIEW_BACKGROUND_PAGES: {
+      string16 num_background_pages = base::FormatNumber(
+          BackgroundPageTracker::GetSingleton()->GetBackgroundPageCount());
+      return l10n_util::GetStringFUTF16(IDS_VIEW_BACKGROUND_PAGES,
+                                        num_background_pages);
+    }
     default:
       NOTREACHED();
       return string16();
@@ -250,7 +288,7 @@ bool WrenchMenuModel::IsCommandIdEnabled(int command_id) const {
   // Special case because IDC_NEW_WINDOW item should be disabled in BWSI mode,
   // but accelerator should work.
   if (command_id == IDC_NEW_WINDOW &&
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kBWSI))
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession))
     return false;
 #endif
 
@@ -258,8 +296,25 @@ bool WrenchMenuModel::IsCommandIdEnabled(int command_id) const {
 }
 
 bool WrenchMenuModel::IsCommandIdVisible(int command_id) const {
-  if (command_id == IDC_UPGRADE_DIALOG)
+  if (command_id == IDC_UPGRADE_DIALOG) {
+#if defined(OS_CHROMEOS)
+    return (chromeos::CrosLibrary::Get()->GetUpdateLibrary()->status().status
+            == chromeos::UPDATE_STATUS_UPDATED_NEED_REBOOT);
+#else
     return Singleton<UpgradeDetector>::get()->notify_upgrade();
+#endif
+  } else if (command_id == IDC_VIEW_INCOMPATIBILITIES) {
+#if defined(OS_WIN)
+    EnumerateModulesModel* loaded_modules =
+        EnumerateModulesModel::GetSingleton();
+    return loaded_modules->confirmed_bad_modules_detected() > 0;
+#else
+    return false;
+#endif
+  } else if (command_id == IDC_VIEW_BACKGROUND_PAGES) {
+    BackgroundPageTracker* tracker = BackgroundPageTracker::GetSingleton();
+    return tracker->GetBackgroundPageCount() > 0;
+  }
   return true;
 }
 
@@ -269,8 +324,8 @@ bool WrenchMenuModel::GetAcceleratorForCommandId(
   return provider_->GetAcceleratorForCommandId(command_id, accelerator);
 }
 
-void WrenchMenuModel::TabSelectedAt(TabContents* old_contents,
-                                    TabContents* new_contents,
+void WrenchMenuModel::TabSelectedAt(TabContentsWrapper* old_contents,
+                                    TabContentsWrapper* new_contents,
                                     int index,
                                     bool user_gesture) {
   // The user has switched between tabs and the new tab may have a different
@@ -278,8 +333,9 @@ void WrenchMenuModel::TabSelectedAt(TabContents* old_contents,
   UpdateZoomControls();
 }
 
-void WrenchMenuModel::TabReplacedAt(TabContents* old_contents,
-                                    TabContents* new_contents, int index) {
+void WrenchMenuModel::TabReplacedAt(TabContentsWrapper* old_contents,
+                                    TabContentsWrapper* new_contents,
+                                    int index) {
   UpdateZoomControls();
 }
 
@@ -293,7 +349,26 @@ void WrenchMenuModel::TabStripModelDeleted() {
 void WrenchMenuModel::Observe(NotificationType type,
                               const NotificationSource& source,
                               const NotificationDetails& details) {
-  UpdateZoomControls();
+  switch (type.value) {
+    case NotificationType::BACKGROUND_PAGE_TRACKER_CHANGED: {
+      int num_pages = BackgroundPageTracker::GetSingleton()->
+          GetUnacknowledgedBackgroundPageCount();
+      if (num_pages > 0) {
+        SetIcon(GetIndexOfCommandId(IDC_VIEW_BACKGROUND_PAGES),
+                GetBackgroundPageIcon());
+      } else {
+        // Just set a blank icon (no icon).
+        SetIcon(GetIndexOfCommandId(IDC_VIEW_BACKGROUND_PAGES), SkBitmap());
+      }
+      break;
+    }
+    case NotificationType::ZOOM_LEVEL_CHANGED:
+    case NotificationType::NAV_ENTRY_COMMITTED:
+      UpdateZoomControls();
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 // For testing.
@@ -366,40 +441,60 @@ void WrenchMenuModel::Build() {
   AddItemWithStringId(IDC_SHOW_DOWNLOADS, IDS_SHOW_DOWNLOADS);
   AddSeparator();
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableTabbedOptions)) {
-    AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
-  } else {
-#if defined(OS_MACOSX)
-    AddItemWithStringId(IDC_OPTIONS, IDS_PREFERENCES_MAC);
+#if defined(OS_CHROMEOS)
+  AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
+#elif defined(OS_MACOSX)
+  AddItemWithStringId(IDC_OPTIONS, IDS_PREFERENCES);
 #elif defined(OS_LINUX)
-    string16 preferences = gtk_util::GetStockPreferencesMenuLabel();
-    if (!preferences.empty())
-      AddItem(IDC_OPTIONS, preferences);
-    else
-      AddItemWithStringId(IDC_OPTIONS, IDS_OPTIONS);
+  string16 preferences = gtk_util::GetStockPreferencesMenuLabel();
+  if (!preferences.empty())
+    AddItem(IDC_OPTIONS, preferences);
+  else
+    AddItemWithStringId(IDC_OPTIONS, IDS_PREFERENCES);
 #else
-    AddItemWithStringId(IDC_OPTIONS, IDS_OPTIONS);
+  AddItemWithStringId(IDC_OPTIONS, IDS_OPTIONS);
 #endif
-  }
 
+#if defined(OS_CHROMEOS)
+  const string16 product_name = l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME);
+#else
+  const string16 product_name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+#endif
   // On Mac, there is no About item.
   if (browser_defaults::kShowAboutMenuItem) {
     AddItem(IDC_ABOUT, l10n_util::GetStringFUTF16(
-        IDS_ABOUT, l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+        IDS_ABOUT, product_name));
   }
-
+  string16 num_background_pages = base::FormatNumber(
+      BackgroundPageTracker::GetSingleton()->GetBackgroundPageCount());
+  AddItem(IDC_VIEW_BACKGROUND_PAGES, l10n_util::GetStringFUTF16(
+      IDS_VIEW_BACKGROUND_PAGES, num_background_pages));
   AddItem(IDC_UPGRADE_DIALOG, l10n_util::GetStringFUTF16(
-      IDS_UPDATE_NOW, l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+      IDS_UPDATE_NOW, product_name));
+  AddItem(IDC_VIEW_INCOMPATIBILITIES, l10n_util::GetStringUTF16(
+      IDS_VIEW_INCOMPATIBILITIES));
+
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   SetIcon(GetIndexOfCommandId(IDC_UPGRADE_DIALOG),
-          *rb.GetBitmapNamed(IDR_UPDATE_AVAILABLE));
+          *rb.GetBitmapNamed(IDR_UPDATE_MENU));
+#if defined(OS_WIN)
+  SetIcon(GetIndexOfCommandId(IDC_VIEW_INCOMPATIBILITIES),
+          *rb.GetBitmapNamed(IDR_CONFLICT_MENU));
+#endif
+
+  // Add an icon to the View Background Pages item if there are unacknowledged
+  // pages.
+  if (BackgroundPageTracker::GetSingleton()->
+      GetUnacknowledgedBackgroundPageCount() > 0) {
+    SetIcon(GetIndexOfCommandId(IDC_VIEW_BACKGROUND_PAGES),
+            GetBackgroundPageIcon());
+  }
 
   AddItemWithStringId(IDC_HELP_PAGE, IDS_HELP_PAGE);
   if (browser_defaults::kShowExitMenuItem) {
     AddSeparator();
 #if defined(OS_CHROMEOS)
-    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kBWSI)) {
+    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession)) {
       AddItemWithStringId(IDC_EXIT, IDS_EXIT_GUEST_MODE);
     } else {
       AddItemWithStringId(IDC_EXIT, IDS_SIGN_OUT);

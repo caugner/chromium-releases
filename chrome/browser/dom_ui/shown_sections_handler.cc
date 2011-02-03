@@ -47,10 +47,19 @@ int ShownSectionsHandler::GetShownSections(PrefService* prefs) {
   return prefs->GetInteger(prefs::kNTPShownSections);
 }
 
+// static
+void ShownSectionsHandler::SetShownSection(PrefService* prefs,
+                                           Section section) {
+  int shown_sections = GetShownSections(prefs);
+  shown_sections &= ~ALL_SECTIONS_MASK;
+  shown_sections |= section;
+  prefs->SetInteger(prefs::kNTPShownSections, shown_sections);
+}
+
 ShownSectionsHandler::ShownSectionsHandler(PrefService* pref_service)
     : pref_service_(pref_service) {
-  registrar_.Init(pref_service);
-  registrar_.Add(prefs::kNTPShownSections, this);
+  pref_registrar_.Init(pref_service);
+  pref_registrar_.Add(prefs::kNTPShownSections, this);
 }
 
 void ShownSectionsHandler::RegisterMessages() {
@@ -63,13 +72,15 @@ void ShownSectionsHandler::RegisterMessages() {
 void ShownSectionsHandler::Observe(NotificationType type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
-  DCHECK(NotificationType::PREF_CHANGED == type);
-  std::string* pref_name = Details<std::string>(details).ptr();
-  DCHECK(*pref_name == prefs::kNTPShownSections);
-
-  int sections = pref_service_->GetInteger(prefs::kNTPShownSections);
-  FundamentalValue sections_value(sections);
-  dom_ui_->CallJavascriptFunction(L"setShownSections", sections_value);
+  if (type == NotificationType::PREF_CHANGED) {
+    std::string* pref_name = Details<std::string>(details).ptr();
+    DCHECK(*pref_name == prefs::kNTPShownSections);
+    int sections = pref_service_->GetInteger(prefs::kNTPShownSections);
+    FundamentalValue sections_value(sections);
+    dom_ui_->CallJavascriptFunction(L"setShownSections", sections_value);
+  } else {
+    NOTREACHED();
+  }
 }
 
 void ShownSectionsHandler::HandleGetShownSections(const ListValue* args) {
@@ -91,7 +102,13 @@ void ShownSectionsHandler::HandleSetShownSections(const ListValue* args) {
 
 // static
 void ShownSectionsHandler::RegisterUserPrefs(PrefService* pref_service) {
+#if defined(OS_CHROMEOS)
+  // Default to have expanded APPS and all other secions are minimized.
+  pref_service->RegisterIntegerPref(prefs::kNTPShownSections,
+                                    APPS | MINIMIZED_THUMB | MINIMIZED_RECENT);
+#else
   pref_service->RegisterIntegerPref(prefs::kNTPShownSections, THUMB);
+#endif
 }
 
 // static
@@ -115,4 +132,23 @@ void ShownSectionsHandler::MigrateUserPrefs(PrefService* pref_service,
 
   if (changed)
     pref_service->SetInteger(prefs::kNTPShownSections, shown_sections);
+}
+
+// static
+void ShownSectionsHandler::OnExtensionInstalled(PrefService* prefs,
+                                                const Extension* extension) {
+  if (extension->is_app()) {
+    int mode = prefs->GetInteger(prefs::kNTPShownSections);
+
+    // De-minimize the apps section.
+    mode &= ~MINIMIZED_APPS;
+
+    // Hide any open sections.
+    mode &= ~ALL_SECTIONS_MASK;
+
+    // Show the apps section.
+    mode |= APPS;
+
+    prefs->SetInteger(prefs::kNTPShownSections, mode);
+  }
 }

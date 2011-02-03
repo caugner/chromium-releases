@@ -10,22 +10,32 @@
 namespace policy {
 
 ConfigurationPolicyProvider::ConfigurationPolicyProvider(
-    const StaticPolicyValueMap& policy_map) {
-  for (size_t i = 0; i < policy_map.entry_count; ++i) {
-    PolicyValueMapEntry entry = {
-      policy_map.entries[i].policy_type,
-      policy_map.entries[i].value_type,
-      std::string(policy_map.entries[i].name)
-    };
-    policy_value_map_.push_back(entry);
-  }
+    const PolicyDefinitionList* policy_list)
+    : policy_definition_list_(policy_list) {
 }
+
+ConfigurationPolicyProvider::~ConfigurationPolicyProvider() {}
 
 void ConfigurationPolicyProvider::NotifyStoreOfPolicyChange() {
   NotificationService::current()->Notify(
       NotificationType::POLICY_CHANGED,
       Source<ConfigurationPolicyProvider>(this),
       NotificationService::NoDetails());
+}
+
+void ConfigurationPolicyProvider::DecodePolicyValueTree(
+    DictionaryValue* policies,
+    ConfigurationPolicyStoreInterface* store) {
+  const PolicyDefinitionList* policy_list(policy_definition_list());
+  for (const PolicyDefinitionList::Entry* i = policy_list->begin;
+       i != policy_list->end; ++i) {
+    Value* value;
+    if (policies->Get(i->name, &value) && value->IsType(i->value_type))
+      store->Apply(i->policy_type, value->DeepCopy());
+  }
+
+  // TODO(mnissler): Handle preference overrides once |ConfigurationPolicyStore|
+  // supports it.
 }
 
 }  // namespace policy

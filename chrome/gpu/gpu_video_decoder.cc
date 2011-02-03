@@ -20,6 +20,15 @@
 #include <d3d9.h>
 #endif
 
+struct GpuVideoDecoder::PendingAllocation {
+  size_t n;
+  size_t width;
+  size_t height;
+  media::VideoFrame::Format format;
+  std::vector<scoped_refptr<media::VideoFrame> >* frames;
+  Task* task;
+};
+
 void GpuVideoDecoder::OnChannelConnected(int32 peer_pid) {
 }
 
@@ -53,10 +62,7 @@ bool GpuVideoDecoder::CreateInputTransferBuffer(
   if (!input_transfer_buffer_.get())
     return false;
 
-  if (!input_transfer_buffer_->Create(std::string(), false, false, size))
-    return false;
-
-  if (!input_transfer_buffer_->Map(size))
+  if (!input_transfer_buffer_->CreateAndMapAnonymous(size))
     return false;
 
   if (!input_transfer_buffer_->ShareToProcess(renderer_handle_, handle))
@@ -193,9 +199,10 @@ void GpuVideoDecoder::ReleaseAllVideoFrames() {
   SendReleaseAllVideoFrames();
 }
 
-void GpuVideoDecoder::UploadToVideoFrame(void* buffer,
-                                         scoped_refptr<media::VideoFrame> frame,
-                                         Task* task) {
+void GpuVideoDecoder::ConvertToVideoFrame(
+    void* buffer,
+    scoped_refptr<media::VideoFrame> frame,
+    Task* task) {
   // This method is called by VideoDecodeEngine to upload a buffer to a
   // VideoFrame. We should just delegate this to GpuVideoDevice which contains
   // the actual implementation.
@@ -203,7 +210,7 @@ void GpuVideoDecoder::UploadToVideoFrame(void* buffer,
   DCHECK(ret) << "Failed to switch context";
 
   // Actually doing the upload on the main thread.
-  ret = video_device_->UploadToVideoFrame(buffer, frame);
+  ret = video_device_->ConvertToVideoFrame(buffer, frame);
   DCHECK(ret) << "Failed to upload video content to a VideoFrame.";
   task->Run();
   delete task;
@@ -250,6 +257,8 @@ GpuVideoDecoder::GpuVideoDecoder(
   video_device_.reset(new FakeGlVideoDevice());
 #endif
 }
+
+GpuVideoDecoder::~GpuVideoDecoder() {}
 
 void GpuVideoDecoder::OnInitialize(const GpuVideoDecoderInitParam& param) {
   // TODO(jiesun): codec id should come from |param|.

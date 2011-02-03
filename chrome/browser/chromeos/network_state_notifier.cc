@@ -34,24 +34,30 @@ NetworkStateNotifier::NetworkStateNotifier()
     : ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)),
       state_(RetrieveState()),
       offline_start_time_(Time::Now()) {
+  // Note that this gets added as a NetworkManagerObserver
+  // in browser_init.cc
 }
 
-void NetworkStateNotifier::NetworkChanged(NetworkLibrary* cros) {
+NetworkStateNotifier::~NetworkStateNotifier() {
+  // Let the NetworkManagerObserver leak to avoid a DCHECK
+  // failure in CommandLine::ForCurrentProcess.
+//  if (CrosLibrary::Get()->EnsureLoaded())
+//    CrosLibrary::Get()->GetNetworkLibrary()->
+//        RemoveNetworkManagerObserver(this);
+}
+
+void NetworkStateNotifier::OnNetworkManagerChanged(NetworkLibrary* cros) {
   DCHECK(CrosLibrary::Get()->EnsureLoaded());
-  // Update the state 2 seconds later using UI thread.
-  // See http://crosbug.com/4558
-  BrowserThread::PostDelayedTask(
+  BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       task_factory_.NewRunnableMethod(
           &NetworkStateNotifier::UpdateNetworkState,
-          RetrieveState()),
-      2000);
+          RetrieveState()));
 }
 
 void NetworkStateNotifier::UpdateNetworkState(
     NetworkStateDetails::State new_state) {
-  DLOG(INFO) << "UpdateNetworkState: new="
-             << new_state << ", old=" << state_;
+  DVLOG(1) << "UpdateNetworkState: new=" << new_state << ", old=" << state_;
   if (state_ == NetworkStateDetails::CONNECTED &&
       new_state != NetworkStateDetails::CONNECTED) {
     offline_start_time_ = Time::Now();

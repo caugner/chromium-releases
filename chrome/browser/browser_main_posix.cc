@@ -108,7 +108,7 @@ void ShutdownDetector::ThreadMain() {
     bytes_read += ret;
   } while (bytes_read < sizeof(signal));
 
-  LOG(INFO) << "Handling shutdown for signal " << signal << ".";
+  VLOG(1) << "Handling shutdown for signal " << signal << ".";
 
   if (!BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -218,12 +218,3 @@ void BrowserMainPartsPosix::PostMainMessageLoopStart() {
     }
   }
 }
-
-// Mac and Chromeos further subclass BrowserMainPartsPosix.
-#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
-// static
-BrowserMainParts* BrowserMainParts::CreateBrowserMainParts(
-    const MainFunctionParams& parameters) {
-  return new BrowserMainPartsPosix(parameters);
-}
-#endif  // !defined(OS_MACOSX)

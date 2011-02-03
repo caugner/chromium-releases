@@ -6,35 +6,29 @@
 #define GFX_GTK_UTIL_H_
 #pragma once
 
-#include <stdint.h>
-#include <vector>
-
 #include <glib-object.h>
+#include <stdint.h>
+
+#include <string>
+#include <vector>
 
 #include "base/scoped_ptr.h"
 
-typedef struct _GdkColor GdkColor;
 typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GdkRegion GdkRegion;
+typedef struct _GdkCursor GdkCursor;
 
+class CommandLine;
 class SkBitmap;
-
-const int kSkiaToGDKMultiplier = 257;
-
-// Define a macro for creating GdkColors from RGB values.  This is a macro to
-// allow static construction of literals, etc.  Use this like:
-//   GdkColor white = GDK_COLOR_RGB(0xff, 0xff, 0xff);
-#define GDK_COLOR_RGB(r, g, b) {0, r * kSkiaToGDKMultiplier, \
-        g * kSkiaToGDKMultiplier, b * kSkiaToGDKMultiplier}
 
 namespace gfx {
 
 class Rect;
 
-extern const GdkColor kGdkWhite;
-extern const GdkColor kGdkGray;
-extern const GdkColor kGdkBlack;
-extern const GdkColor kGdkGreen;
+// Call gtk_init() using the argc and argv from command_line.
+// gtk_init() wants an argc and argv that it can mutate; we provide those,
+// but leave the original CommandLine unaltered.
+void GtkInitFromCommandLine(const CommandLine& command_line);
 
 // Convert and copy a SkBitmap to a GdkPixbuf. NOTE: this uses BGRAToRGBA, so
 // it is an expensive operation.  The returned GdkPixbuf will have a refcount of
@@ -48,6 +42,22 @@ void SubtractRectanglesFromRegion(GdkRegion* region,
 // Returns the resolution (DPI) used by pango. A negative values means the
 // resolution hasn't been set.
 double GetPangoResolution();
+
+// Returns a static instance of a GdkCursor* object, sharable across the
+// process. Caller must gdk_cursor_ref() it if they want to assume ownership.
+GdkCursor* GetCursor(int type);
+
+// Change windows accelerator style to GTK style. (GTK uses _ for
+// accelerators.  Windows uses & with && as an escape for &.)
+std::string ConvertAcceleratorsFromWindowsStyle(const std::string& label);
+
+// Removes the "&" accelerators from a Windows label.
+std::string RemoveWindowsStyleAccelerators(const std::string& label);
+
+// Makes a copy of |pixels| with the ordering changed from BGRA to RGBA.
+// The caller is responsible for free()ing the data. If |stride| is 0, it's
+// assumed to be 4 * |width|.
+uint8_t* BGRAToRGBA(const uint8_t* pixels, int width, int height, int stride);
 
 }  // namespace gfx
 

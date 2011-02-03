@@ -6,11 +6,18 @@
 
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "chrome/browser/browser.h"
+#include "chrome/browser/extensions/extension_test_api.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/test/ui_test_utils.h"
+
+namespace {
+
+const char kTestServerPort[] = "testServer.port";
+
+};  // namespace
 
 ExtensionApiTest::ResultCatcher::ResultCatcher()
     : profile_restriction_(NULL),
@@ -43,7 +50,6 @@ bool ExtensionApiTest::ResultCatcher::GetNextResult() {
     return ret;
   }
 
-  LOG(INFO) << "DEBUG: results aren't empty";
   NOTREACHED();
   return false;
 }
@@ -58,7 +64,7 @@ void ExtensionApiTest::ResultCatcher::Observe(
 
   switch (type.value) {
     case NotificationType::EXTENSION_TEST_PASSED:
-      LOG(INFO) << "Got EXTENSION_TEST_PASSED notification (" << this << ").";
+      VLOG(1) << "Got EXTENSION_TEST_PASSED notification.";
       results_.push_back(true);
       messages_.push_back("");
       if (waiting_)
@@ -66,7 +72,7 @@ void ExtensionApiTest::ResultCatcher::Observe(
       break;
 
     case NotificationType::EXTENSION_TEST_FAILED:
-      LOG(INFO) << "Got EXTENSION_TEST_FAILED notification (" << this << ").";
+      VLOG(1) << "Got EXTENSION_TEST_FAILED notification.";
       results_.push_back(false);
       messages_.push_back(*(Details<std::string>(details).ptr()));
       if (waiting_)
@@ -76,6 +82,17 @@ void ExtensionApiTest::ResultCatcher::Observe(
     default:
       NOTREACHED();
   }
+}
+
+void ExtensionApiTest::SetUpInProcessBrowserTestFixture() {
+  DCHECK(!test_config_.get()) << "Previous test did not clear config state.";
+  test_config_.reset(new DictionaryValue());
+  ExtensionTestGetConfigFunction::set_test_config_state(test_config_.get());
+}
+
+void ExtensionApiTest::TearDownInProcessBrowserTestFixture() {
+  ExtensionTestGetConfigFunction::set_test_config_state(NULL);
+  test_config_.reset(NULL);
 }
 
 bool ExtensionApiTest::RunExtensionTest(const char* extension_name) {
@@ -127,7 +144,7 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
           "Relative page_url given with no extension_name";
 
       ExtensionsService* service = browser()->profile()->GetExtensionsService();
-      Extension* extension =
+      const Extension* extension =
           service->GetExtensionById(last_loaded_extension_id_, false);
       if (!extension)
         return false;
@@ -148,7 +165,7 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
 }
 
 // Test that exactly one extension loaded.
-Extension* ExtensionApiTest::GetSingleLoadedExtension() {
+const Extension* ExtensionApiTest::GetSingleLoadedExtension() {
   ExtensionsService* service = browser()->profile()->GetExtensionsService();
 
   int found_extension_index = -1;
@@ -168,12 +185,25 @@ Extension* ExtensionApiTest::GetSingleLoadedExtension() {
     found_extension_index = static_cast<int>(i);
   }
 
-  Extension* extension = service->extensions()->at(found_extension_index);
+  const Extension* extension = service->extensions()->at(found_extension_index);
   if (!extension) {
     message_ = "extension pointer is NULL.";
     return NULL;
   }
   return extension;
+}
+
+bool ExtensionApiTest::StartTestServer() {
+  if (!test_server()->Start())
+    return false;
+
+  // Build a dictionary of values that tests can use to build URLs that
+  // access the test server.  Tests can see these values using the extension
+  // API function chrome.test.getConfig().
+  test_config_->SetInteger(kTestServerPort,
+                           test_server()->host_port_pair().port());
+
+  return true;
 }
 
 void ExtensionApiTest::SetUpCommandLine(CommandLine* command_line) {

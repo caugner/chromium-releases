@@ -28,8 +28,6 @@ const char kPrinterCapsHashValue[] = "capsHash";
 const char kPrinterTagsValue[] = "tags";
 const char kProxyTagPrefix[] = "__cp__";
 const char kTagsHashTagName[] = "__cp__tagshash";
-const char kLocationTagName[] = "location";
-const char kDriverNameTagName[] = "drivername";
 
 
 const char kDefaultCloudPrintServerUrl[] = "https://www.google.com/cloudprint";
@@ -39,5 +37,18 @@ const char kSyncGaiaServiceId[] = "chromiumsync";
 const char kCloudPrintPushNotificationsSource[] = "cloudprint.google.com";
 // The cloud print server expects the X-Google-CloudPrint-Proxy header for
 // certain requests.
-const char kChromeCloudPrintProxyHeader[] = "X-Google-CloudPrint-Proxy: Chrome";
+const char kChromeCloudPrintProxyHeader[] = "X-CloudPrint-Proxy: Chrome";
+
+// The string to be appended to the user-agent for cloudprint requests.
+const char kCloudPrintUserAgent[] = "GoogleCloudPrintProxy";
+
+// Reasons for fetching print jobs.
+// Job fetch on proxy startup.
+const char kJobFetchReasonStartup[] = "startup";
+// Job fetch because we are polling.
+const char kJobFetchReasonPoll[] = "poll";
+// Job fetch on being notified by the server.
+const char kJobFetchReasonNotified[] = "notified";
+// Job fetch after a successful print to query for more jobs.
+const char kJobFetchReasonQueryMore[] = "querymore";
 

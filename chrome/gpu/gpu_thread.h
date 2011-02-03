@@ -8,28 +8,25 @@
 
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
+#include "base/time.h"
 #include "build/build_config.h"
 #include "chrome/common/child_thread.h"
-#include "chrome/common/gpu_native_window_handle.h"
+#include "chrome/common/gpu_info.h"
 #include "chrome/gpu/gpu_channel.h"
 #include "chrome/gpu/gpu_config.h"
 #include "chrome/gpu/x_util.h"
 #include "gfx/native_widget_types.h"
 
-#if defined(GPU_USE_GLX)
-class GpuBackingStoreGLXContext;
-#endif
+namespace IPC {
+struct ChannelHandle;
+}
 
 class GpuThread : public ChildThread {
  public:
   GpuThread();
   ~GpuThread();
 
-#if defined(GPU_USE_GLX)
-  GpuBackingStoreGLXContext* GetGLXContext();
-
-  Display* display() const { return display_; }
-#endif
+  void Init(const base::Time& process_start_time);
 
   // Remove the channel for a particular renderer.
   void RemoveChannel(int renderer_id);
@@ -40,20 +37,27 @@ class GpuThread : public ChildThread {
 
   // Message handlers.
   void OnEstablishChannel(int renderer_id);
+  void OnCloseChannel(const IPC::ChannelHandle& channel_handle);
   void OnSynchronize();
   void OnCollectGraphicsInfo();
+#if defined(OS_MACOSX)
+  void OnAcceleratedSurfaceBuffersSwappedACK(
+      int renderer_id, int32 route_id, uint64 swap_buffers_count);
+  void OnDidDestroyAcceleratedSurface(int renderer_id, int32 renderer_route_id);
+#endif
   void OnCrash();
   void OnHang();
-  void OnNewRenderWidgetHostView(GpuNativeWindowHandle parent_window,
-                                 int32 routing_id);
+
+#if defined(OS_WIN)
+  static void CollectDxDiagnostics(GpuThread* thread);
+  static void SetDxDiagnostics(GpuThread* thread, const DxDiagNode& node);
+#endif
 
   typedef base::hash_map<int, scoped_refptr<GpuChannel> > GpuChannelMap;
   GpuChannelMap gpu_channels_;
 
-#if defined(GPU_USE_GLX)
-  Display* display_;
-  scoped_ptr<GpuBackingStoreGLXContext> glx_context_;
-#endif
+  // Information about the GPU, such as device and vendor ID.
+  GPUInfo gpu_info_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuThread);
 };

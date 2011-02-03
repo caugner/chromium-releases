@@ -6,25 +6,26 @@
 #define VIEWS_CONTROLS_NATIVE_CONTROL_WIN_H_
 #pragma once
 
+#include "base/scoped_ptr.h"
+#include "base/scoped_vector.h"
 #include "views/controls/combobox/combobox.h"
 #include "views/controls/native/native_view_host.h"
+#include "views/widget/child_window_message_processor.h"
+
+namespace app {
+class ViewProp;
+}
 
 namespace views {
 
 // A View that hosts a native Windows control.
-class NativeControlWin : public NativeViewHost {
+class NativeControlWin : public ChildWindowMessageProcessor,
+                         public NativeViewHost {
  public:
-  static const wchar_t* kNativeControlWinKey;
-
   NativeControlWin();
   virtual ~NativeControlWin();
 
-  // Called by the containing WidgetWin when a message is received from the HWND
-  // created by an object derived from NativeControlWin. Derived classes MUST
-  // call _this_ version of the function if they override it and do not handle
-  // all of the messages listed in widget_win.cc ProcessNativeControlWinMessage.
-  // Returns true if the message was handled, with a valid result in |result|.
-  // Returns false if the message was not handled.
+  // Overridden from ChildWindowMessageProcessor:
   virtual bool ProcessMessage(UINT message,
                               WPARAM w_param,
                               LPARAM l_param,
@@ -72,6 +73,8 @@ class NativeControlWin : public NativeViewHost {
   DWORD GetAdditionalRTLStyle() const;
 
  private:
+  typedef ScopedVector<app::ViewProp> ViewProps;
+
   // Called by the containing WidgetWin when a message of type WM_CTLCOLORBTN or
   // WM_CTLCOLORSTATIC is sent from the HWND created by an object dreived from
   // NativeControlWin.
@@ -85,6 +88,8 @@ class NativeControlWin : public NativeViewHost {
 
   // The window procedure before we subclassed.
   WNDPROC original_wndproc_;
+
+  ViewProps props_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeControlWin);
 };

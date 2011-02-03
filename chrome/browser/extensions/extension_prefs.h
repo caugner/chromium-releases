@@ -35,7 +35,8 @@ class ExtensionPrefs {
   enum LaunchType {
     LAUNCH_PINNED,
     LAUNCH_REGULAR,
-    LAUNCH_FULLSCREEN
+    LAUNCH_FULLSCREEN,
+    LAUNCH_WINDOW
   };
 
   explicit ExtensionPrefs(PrefService* prefs, const FilePath& root_dir_);
@@ -63,7 +64,7 @@ class ExtensionPrefs {
   void SetToolbarOrder(const std::vector<std::string>& extension_ids);
 
   // Called when an extension is installed, so that prefs get created.
-  void OnExtensionInstalled(Extension* extension,
+  void OnExtensionInstalled(const Extension* extension,
                             Extension::State initial_state,
                             bool initial_incognito_enabled);
 
@@ -76,14 +77,18 @@ class ExtensionPrefs {
   Extension::State GetExtensionState(const std::string& extension_id);
 
   // Called to change the extension's state when it is enabled/disabled.
-  void SetExtensionState(Extension* extension, Extension::State);
+  void SetExtensionState(const Extension* extension, Extension::State);
+
+  // Getter and setter for browser action visibility.
+  bool GetBrowserActionVisibility(const Extension* extension);
+  void SetBrowserActionVisibility(const Extension* extension, bool visible);
 
   // Did the extension ask to escalate its permission during an upgrade?
   bool DidExtensionEscalatePermissions(const std::string& id);
 
   // If |did_escalate| is true, the preferences for |extension| will be set to
   // require the install warning when the user tries to enable.
-  void SetDidExtensionEscalatePermissions(Extension* extension,
+  void SetDidExtensionEscalatePermissions(const Extension* extension,
                                           bool did_escalate);
 
   // Returns the version string for the currently installed extension, or
@@ -92,7 +97,7 @@ class ExtensionPrefs {
 
   // Re-writes the extension manifest into the prefs.
   // Called to change the extension's manifest when it's re-localized.
-  void UpdateManifest(Extension* extension);
+  void UpdateManifest(const Extension* extension);
 
   // Returns extension path based on extension ID, or empty FilePath on error.
   FilePath GetExtensionPath(const std::string& extension_id);
@@ -118,6 +123,27 @@ class ExtensionPrefs {
   // the client's.
   void SetLastPingDay(const std::string& extension_id, const base::Time& time);
 
+  // Gets the permissions (|api_permissions|, |host_extent| and |full_access|)
+  // granted to the extension with |extension_id|. |full_access| will be true
+  // if the extension has all effective permissions (like from an NPAPI plugin).
+  // Returns false if the granted permissions haven't been initialized yet.
+  // TODO(jstritar): Refractor the permissions into a class that encapsulates
+  // all granted permissions, can be initialized from preferences or
+  // a manifest file, and can be compared to each other.
+  bool GetGrantedPermissions(const std::string& extension_id,
+                             bool* full_access,
+                             std::set<std::string>* api_permissions,
+                             ExtensionExtent* host_extent);
+
+  // Adds the specified |api_permissions|, |host_extent| and |full_access|
+  // to the granted permissions for extension with |extension_id|.
+  // |full_access| should be set to true if the extension effectively has all
+  // permissions (such as by having an NPAPI plugin).
+  void AddGrantedPermissions(const std::string& extension_id,
+                             const bool full_access,
+                             const std::set<std::string>& api_permissions,
+                             const ExtensionExtent& host_extent);
+
   // Similar to the 2 above, but for the extensions blacklist.
   base::Time BlacklistLastPingDay() const;
   void SetBlacklistLastPingDay(const base::Time& time);
@@ -132,8 +158,20 @@ class ExtensionPrefs {
   bool AllowFileAccess(const std::string& extension_id);
   void SetAllowFileAccess(const std::string& extension_id, bool allow);
 
-  ExtensionPrefs::LaunchType GetLaunchType(const std::string& extension_id);
+  // Get the launch type preference.  If no preference is set, return
+  // |default_pref_value|.
+  LaunchType GetLaunchType(const std::string& extension_id,
+                           LaunchType default_pref_value);
+
   void SetLaunchType(const std::string& extension_id, LaunchType launch_type);
+
+  // Find the right launch container based on the launch type.
+  // If |extension|'s prefs do not have a launch type set, then
+  // use |default_pref_value|.
+  extension_misc::LaunchContainer GetLaunchContainer(
+      const Extension* extension,
+      LaunchType default_pref_value);
+
 
   // Saves ExtensionInfo for each installed extension with the path to the
   // version directory and the location. Blacklisted extensions won't be saved
@@ -187,6 +225,13 @@ class ExtensionPrefs {
   // highest current application launch index found.
   int GetNextAppLaunchIndex();
 
+  // The extension's update URL data.  If not empty, the ExtensionUpdater
+  // will append a ap= parameter to the URL when checking if a new version
+  // of the extension is available.
+  void SetUpdateUrlData(const std::string& extension_id,
+                        const std::string& data);
+  std::string GetUpdateUrlData(const std::string& extension_id);
+
   static void RegisterUserPrefs(PrefService* prefs);
 
   // The underlying PrefService.
@@ -210,7 +255,7 @@ class ExtensionPrefs {
   void DeleteExtensionPrefs(const std::string& id);
 
   // Reads a boolean pref from |ext| with key |pref_key|.
-  // Return false if the value is false or kPrefBlacklist does not exist.
+  // Return false if the value is false or |pref_key| does not exist.
   bool ReadBooleanFromPref(DictionaryValue* ext, const std::string& pref_key);
 
   // Reads a boolean pref |pref_key| from extension with id |extension_id|.
@@ -226,6 +271,24 @@ class ExtensionPrefs {
   bool ReadExtensionPrefInteger(const std::string& extension_id,
                                 const std::string& pref_key,
                                 int* out_value);
+
+  // Reads a list pref |pref_key| from extension with id | extension_id|.
+  bool ReadExtensionPrefList(const std::string& extension_id,
+                             const std::string& pref_key,
+                             ListValue** out_value);
+
+  // Reads a list pref |pref_key| as a string set from the extension with
+  // id |extension_id|.
+  bool ReadExtensionPrefStringSet(const std::string& extension_id,
+                                  const std::string& pref_key,
+                                  std::set<std::string>* result);
+
+  // Adds the |added_values| to the value of |pref_key| for the extension
+  // with id |extension_id| (the new value will be the union of the existing
+  // value and |added_values|).
+  void AddToExtensionPrefStringSet(const std::string& extension_id,
+                                   const std::string& pref_key,
+                                   const std::set<std::string>& added_values);
 
   // Ensures and returns a mutable dictionary for extension |id|'s prefs.
   DictionaryValue* GetOrCreateExtensionPref(const std::string& id);

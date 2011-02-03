@@ -1,13 +1,15 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/base/ssl_config_service_win.h"
 
-#include "base/registry.h"
+#include "base/thread_restrictions.h"
+#include "base/win/registry.h"
 
 using base::TimeDelta;
 using base::TimeTicks;
+using base::win::RegKey;
 
 namespace net {
 
@@ -58,6 +60,9 @@ void SSLConfigServiceWin::GetSSLConfigAt(SSLConfig* config, TimeTicks now) {
 
 // static
 bool SSLConfigServiceWin::GetSSLConfigNow(SSLConfig* config) {
+  // This registry access goes to disk and will slow down the IO thread.
+  // http://crbug.com/61455
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   RegKey internet_settings;
   if (!internet_settings.Open(HKEY_CURRENT_USER, kInternetSettingsSubKeyName,
                               KEY_READ))
@@ -77,11 +82,20 @@ bool SSLConfigServiceWin::GetSSLConfigNow(SSLConfig* config) {
   config->tls1_enabled = ((protocols & TLS1) != 0);
   SSLConfigService::SetSSLConfigFlags(config);
 
+  // TODO(rsleevi): Possibly respect the registry keys defined in
+  // http://support.microsoft.com/kb/245030 (pre-Vista) or
+  // http://msdn.microsoft.com/en-us/library/bb870930(VS.85).aspx (post-Vista).
+  // Currently, these values are respected implicitly when using
+  // SSLClientSocketWin, but they do not propogate to SSLClientSocketNSS
+  // because we're not currently translating the keys.
+
   return true;
 }
 
 // static
 void SSLConfigServiceWin::SetRevCheckingEnabled(bool enabled) {
+  // This registry access goes to disk and will slow down the IO thread.
+  // http://crbug.com/61455
   DWORD value = enabled;
   RegKey internet_settings(HKEY_CURRENT_USER, kInternetSettingsSubKeyName,
                            KEY_WRITE);
@@ -92,15 +106,32 @@ void SSLConfigServiceWin::SetRevCheckingEnabled(bool enabled) {
 
 // static
 void SSLConfigServiceWin::SetSSL2Enabled(bool enabled) {
+  SetSSLVersionEnabled(SSL2, enabled);
+}
+
+// static
+void SSLConfigServiceWin::SetSSL3Enabled(bool enabled) {
+  SetSSLVersionEnabled(SSL3, enabled);
+}
+
+// static
+void SSLConfigServiceWin::SetTLS1Enabled(bool enabled) {
+  SetSSLVersionEnabled(TLS1, enabled);
+}
+
+// static
+void SSLConfigServiceWin::SetSSLVersionEnabled(int version, bool enabled) {
+  // This registry access goes to disk and will slow down the IO thread.
+  // http://crbug.com/61455
   RegKey internet_settings(HKEY_CURRENT_USER, kInternetSettingsSubKeyName,
                            KEY_READ | KEY_WRITE);
   DWORD value;
   if (!internet_settings.ReadValueDW(kProtocolsValueName, &value))
     value = PROTOCOLS_DEFAULT;
   if (enabled)
-    value |= SSL2;
+    value |= version;
   else
-    value &= ~SSL2;
+    value &= ~version;
   internet_settings.WriteValue(kProtocolsValueName, value);
   // TODO(mattm): We should call UpdateConfig after updating settings, but these
   // methods are static.

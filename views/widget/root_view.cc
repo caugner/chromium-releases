@@ -285,6 +285,12 @@ void RootView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
       default_keyboard_handler_ = NULL;
     }
 
+#if defined(TOUCH_UI)
+    if (touch_pressed_handler_) {
+      touch_pressed_handler_ = NULL;
+    }
+#endif
+
     FocusManager* focus_manager = widget_->GetFocusManager();
     // An unparanted RootView does not have a FocusManager.
     if (focus_manager)
@@ -779,8 +785,6 @@ void RootView::SetActiveCursor(gfx::NativeCursor cursor) {
   if (!native_view)
     return;
   gdk_window_set_cursor(native_view->window, cursor);
-  if (cursor)
-    gdk_cursor_destroy(cursor);
 #endif
 }
 

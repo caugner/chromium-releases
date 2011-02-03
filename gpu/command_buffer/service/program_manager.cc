@@ -27,10 +27,27 @@ static int ShaderTypeToIndex(GLenum shader_type) {
   }
 }
 
+ProgramManager::ProgramInfo::UniformInfo::UniformInfo(GLsizei _size,
+                                                      GLenum _type,
+                                                      const std::string& _name)
+    : size(_size),
+      type(_type),
+      name(_name) {
+}
+
+ProgramManager::ProgramInfo::UniformInfo::~UniformInfo() {}
+
 bool ProgramManager::IsInvalidPrefix(const char* name, size_t length) {
   static const char kInvalidPrefix[] = { 'g', 'l', '_' };
   return (length >= sizeof(kInvalidPrefix) &&
       memcmp(name, kInvalidPrefix, sizeof(kInvalidPrefix)) == 0);
+}
+
+ProgramManager::ProgramInfo::ProgramInfo(GLuint service_id)
+    : max_attrib_name_length_(0),
+      max_uniform_name_length_(0),
+      service_id_(service_id),
+      valid_(false) {
 }
 
 void ProgramManager::ProgramInfo::Reset() {
@@ -46,10 +63,13 @@ void ProgramManager::ProgramInfo::Reset() {
 }
 
 void ProgramManager::ProgramInfo::UpdateLogInfo() {
+  GLint max_len = 0;
+  glGetProgramiv(service_id_, GL_INFO_LOG_LENGTH, &max_len);
+  scoped_array<char> temp(new char[max_len]);
   GLint len = 0;
-  glGetProgramiv(service_id_, GL_INFO_LOG_LENGTH, &len);
-  scoped_array<char> temp(new char[len]);
-  glGetProgramInfoLog(service_id_, len, &len, temp.get());
+  glGetProgramInfoLog(service_id_, max_len, &len, temp.get());
+  DCHECK(max_len == 0 || len < max_len);
+  DCHECK(len == 0 || temp[len] == '\0');
   set_log_info(std::string(temp.get(), len));
 }
 
@@ -63,19 +83,22 @@ void ProgramManager::ProgramInfo::Update() {
   // TODO(gman): Should we check for error?
   scoped_array<char> name_buffer(new char[max_len]);
   for (GLint ii = 0; ii < num_attribs; ++ii) {
-    GLsizei length;
-    GLsizei size;
-    GLenum type;
+    GLsizei length = 0;
+    GLsizei size = 0;
+    GLenum type = 0;
     glGetActiveAttrib(
         service_id_, ii, max_len, &length, &size, &type, name_buffer.get());
+    DCHECK(max_len == 0 || length < max_len);
+    DCHECK(length == 0 || name_buffer[length] == '\0');
     if (!IsInvalidPrefix(name_buffer.get(), length)) {
+      std::string name;
+      GetCorrectedVariableInfo(false, name_buffer.get(), &name, &size, &type);
       // TODO(gman): Should we check for error?
       GLint location = glGetAttribLocation(service_id_, name_buffer.get());
       if (location > max_location) {
         max_location = location;
       }
-      attrib_infos_.push_back(
-          VertexAttribInfo(size, type, name_buffer.get(), location));
+      attrib_infos_.push_back(VertexAttribInfo(size, type, name, location));
       max_attrib_name_length_ = std::max(max_attrib_name_length_, length);
     }
   }
@@ -98,16 +121,19 @@ void ProgramManager::ProgramInfo::Update() {
   max_location = -1;
   int index = 0;  // this index tracks valid uniforms.
   for (GLint ii = 0; ii < num_uniforms; ++ii) {
-    GLsizei length;
-    GLsizei size;
-    GLenum type;
+    GLsizei length = 0;
+    GLsizei size = 0;
+    GLenum type = 0;
     glGetActiveUniform(
         service_id_, ii, max_len, &length, &size, &type, name_buffer.get());
+    DCHECK(max_len == 0 || length < max_len);
+    DCHECK(length == 0 || name_buffer[length] == '\0');
     // TODO(gman): Should we check for error?
     if (!IsInvalidPrefix(name_buffer.get(), length)) {
       GLint location =  glGetUniformLocation(service_id_, name_buffer.get());
-      const UniformInfo* info =
-          AddUniformInfo(size, type, location, name_buffer.get());
+      std::string name;
+      GetCorrectedVariableInfo(true, name_buffer.get(), &name, &size, &type);
+      const UniformInfo* info = AddUniformInfo(size, type, location, name);
       for (size_t jj = 0; jj < info->element_locations.size(); ++jj) {
         if (info->element_locations[jj] > max_location) {
           max_location = info->element_locations[jj];
@@ -194,6 +220,39 @@ bool ProgramManager::ProgramInfo::GetUniformTypeByLocation(
     }
   }
   return false;
+}
+
+// Note: This is only valid to call right after a program has been linked
+// successfully.
+void ProgramManager::ProgramInfo::GetCorrectedVariableInfo(
+    bool use_uniforms,
+    const std::string& name, std::string* corrected_name,
+    GLsizei* size, GLenum* type) const {
+  DCHECK(corrected_name);
+  DCHECK(size);
+  DCHECK(type);
+  const char* kArraySpec = "[0]";
+  for (int jj = 0; jj < 2; ++jj) {
+    std::string test_name(name + ((jj == 1) ? kArraySpec : ""));
+    for (int ii = 0; ii < kMaxAttachedShaders; ++ii) {
+      ShaderManager::ShaderInfo* shader_info = attached_shaders_[ii].get();
+      if (shader_info) {
+        const ShaderManager::ShaderInfo::VariableInfo* variable_info =
+            use_uniforms ? shader_info->GetUniformInfo(test_name) :
+                           shader_info->GetAttribInfo(test_name);
+        // Note: There is an assuption here that if an attrib is defined in more
+        // than 1 attached shader their types and sizes match. Should we check
+        // for that case?
+        if (variable_info) {
+          *corrected_name = test_name;
+          *type = variable_info->type;
+          *size = variable_info->size;
+          return;
+        }
+      }
+    }
+  }
+  *corrected_name = name;
 }
 
 const ProgramManager::ProgramInfo::UniformInfo*
@@ -319,6 +378,10 @@ bool ProgramManager::ProgramInfo::CanLink() const {
   }
   return true;
 }
+
+ProgramManager::ProgramInfo::~ProgramInfo() {}
+
+ProgramManager::ProgramManager() {}
 
 ProgramManager::~ProgramManager() {
   DCHECK(program_infos_.empty());

@@ -126,7 +126,7 @@ class TestURLRequestContext : public URLRequestContext {
   TestURLRequestContext() {
     host_resolver_ =
         net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
-                                      NULL);
+                                      NULL, NULL);
     proxy_service_ = net::ProxyService::CreateDirect();
     Init();
   }
@@ -134,7 +134,7 @@ class TestURLRequestContext : public URLRequestContext {
   explicit TestURLRequestContext(const std::string& proxy) {
     host_resolver_  =
         net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
-                                      NULL);
+                                      NULL, NULL);
     net::ProxyConfig proxy_config;
     proxy_config.proxy_rules().ParseFromString(proxy);
     proxy_service_ = net::ProxyService::CreateFixed(proxy_config);
@@ -161,7 +161,9 @@ class TestURLRequestContext : public URLRequestContext {
         host_resolver_);
     http_transaction_factory_ = new net::HttpCache(
         net::HttpNetworkLayer::CreateFactory(host_resolver_,
-                                             NULL,
+                                             NULL /* dnsrr_resolver */,
+                                             NULL /* dns_cert_checker */,
+                                             NULL /* ssl_host_info_factory */,
                                              proxy_service_,
                                              ssl_config_service_,
                                              http_auth_handler_factory_,
@@ -317,6 +319,7 @@ class TestDelegate : public URLRequest::Delegate {
 
   virtual void OnSetCookie(URLRequest* request,
                            const std::string& cookie_line,
+                           const net::CookieOptions& options,
                            bool blocked_by_policy) {
     if (blocked_by_policy) {
       blocked_set_cookie_count_++;

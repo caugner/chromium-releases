@@ -4,6 +4,7 @@
 
 #import "chrome/browser/cocoa/cocoa_test_helper.h"
 
+#include "base/debug/debugger.h"
 #include "base/logging.h"
 #include "base/test/test_timeouts.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
@@ -49,9 +50,19 @@
 
 CocoaTest::CocoaTest() : called_tear_down_(false), test_window_(nil) {
   BootstrapCocoa();
+
   // Set the duration of AppKit-evaluated animations (such as frame changes)
   // to zero for testing purposes. That way they take effect immediately.
   [[NSAnimationContext currentContext] setDuration:0.0];
+
+  // The above does not affect window-resize time, such as for an
+  // attached sheet dropping in.  Set that duration for the current
+  // process (this is not persisted).  Empirically, the value of 0.0
+  // is ignored.
+  NSDictionary* dict =
+      [NSDictionary dictionaryWithObject:@"0.01" forKey:@"NSWindowResizeTime"];
+  [[NSUserDefaults standardUserDefaults] registerDefaults:dict];
+
   // Collect the list of windows that were open when the test started so
   // that we don't wait for them to close in TearDown. Has to be done
   // after BootstrapCocoa is called.
@@ -124,7 +135,7 @@ void CocoaTest::TearDown() {
 
       // Autorelease anything thrown up by the event loop.
       {
-        base::ScopedNSAutoreleasePool pool;
+        base::mac::ScopedNSAutoreleasePool pool;
         ++spins;
         NSEvent *next_event = [NSApp nextEventMatchingMask:NSAnyEventMask
                                                  untilDate:nil
@@ -164,7 +175,7 @@ std::set<NSWindow*> CocoaTest::ApplicationWindows() {
 
   // Must create a pool here because [NSApp windows] has created an array
   // with retains on all the windows in it.
-  base::ScopedNSAutoreleasePool pool;
+  base::mac::ScopedNSAutoreleasePool pool;
   NSArray *appWindows = [NSApp windows];
   for (NSWindow *window in appWindows) {
     windows.insert(window);
@@ -184,7 +195,7 @@ std::set<NSWindow*> CocoaTest::WindowsLeft() {
 CocoaTestHelperWindow* CocoaTest::test_window() {
   if (!test_window_) {
     test_window_ = [[CocoaTestHelperWindow alloc] init];
-    if (DebugUtil::BeingDebugged()) {
+    if (base::debug::BeingDebugged()) {
       [test_window_ orderFront:nil];
     } else {
       [test_window_ orderBack:nil];

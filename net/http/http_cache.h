@@ -41,6 +41,7 @@ class Entry;
 
 namespace net {
 
+class DnsCertProvenanceChecker;
 class DnsRRResolver;
 class HostResolver;
 class HttpAuthHandlerFactory;
@@ -96,13 +97,11 @@ class HttpCache : public HttpTransactionFactory,
     // |cache_thread| is the thread where disk operations should take place. If
     // |max_bytes| is  zero, a default value will be calculated automatically.
     DefaultBackend(CacheType type, const FilePath& path, int max_bytes,
-                   base::MessageLoopProxy* thread)
-        : type_(type), path_(path), max_bytes_(max_bytes), thread_(thread) {}
+                   base::MessageLoopProxy* thread);
+    virtual ~DefaultBackend();
 
     // Returns a factory for an in-memory cache.
-    static BackendFactory* InMemory(int max_bytes)  {
-      return new DefaultBackend(MEMORY_CACHE, FilePath(), max_bytes, NULL);
-    }
+    static BackendFactory* InMemory(int max_bytes);
 
     // BackendFactory implementation.
     virtual int CreateBackend(disk_cache::Backend** backend,
@@ -116,9 +115,10 @@ class HttpCache : public HttpTransactionFactory,
   };
 
   // The disk cache is initialized lazily (by CreateTransaction) in this case.
-  // The  HttpCache takes ownership of the |backend_factory|.
+  // The HttpCache takes ownership of the |backend_factory|.
   HttpCache(HostResolver* host_resolver,
             DnsRRResolver* dnsrr_resolver,
+            DnsCertProvenanceChecker* dns_cert_checker,
             ProxyService* proxy_service,
             SSLConfigService* ssl_config_service,
             HttpAuthHandlerFactory* http_auth_handler_factory,
@@ -200,6 +200,7 @@ class HttpCache : public HttpTransactionFactory,
 
   class BackendCallback;
   class MetadataWriter;
+  class SSLHostInfoFactoryAdaptor;
   class Transaction;
   class WorkItem;
   friend class Transaction;
@@ -258,10 +259,8 @@ class HttpCache : public HttpTransactionFactory,
   ActiveEntry* FindActiveEntry(const std::string& key);
 
   // Creates a new ActiveEntry and starts tracking it. |disk_entry| is the disk
-  // cache entry that corresponds to the desired |key|.
-  // TODO(rvargas): remove the |key| argument.
-  ActiveEntry* ActivateEntry(const std::string& key,
-                             disk_cache::Entry* disk_entry);
+  // cache entry.
+  ActiveEntry* ActivateEntry(disk_cache::Entry* disk_entry);
 
   // Deletes an ActiveEntry.
   void DeactivateEntry(ActiveEntry* entry);
@@ -352,6 +351,8 @@ class HttpCache : public HttpTransactionFactory,
   bool building_backend_;
 
   Mode mode_;
+
+  scoped_ptr<SSLHostInfoFactoryAdaptor> ssl_host_info_factory_;
 
   scoped_ptr<HttpTransactionFactory> network_layer_;
   scoped_ptr<disk_cache::Backend> disk_cache_;

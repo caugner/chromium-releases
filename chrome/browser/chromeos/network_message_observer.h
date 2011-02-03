@@ -23,20 +23,23 @@ namespace chromeos {
 // The network message observer displays a system notification for network
 // messages.
 
-class NetworkMessageObserver : public NetworkLibrary::Observer {
+class NetworkMessageObserver : public NetworkLibrary::NetworkManagerObserver,
+                               public NetworkLibrary::CellularDataPlanObserver {
  public:
   explicit NetworkMessageObserver(Profile* profile);
   virtual ~NetworkMessageObserver();
 
-  typedef std::map<std::string, WifiNetwork> ServicePathWifiMap;
-  typedef std::map<std::string, CellularNetwork> ServicePathCellularMap;
+  typedef std::map<std::string, WifiNetwork*> ServicePathWifiMap;
+  typedef std::map<std::string, CellularNetwork*> ServicePathCellularMap;
  private:
   virtual void CreateModalPopup(views::WindowDelegate* view);
-  virtual void MobileSetup(const ListValue* args);
+  virtual void OpenMobileSetupPage(const ListValue* args);
+  virtual void OpenMoreInfoPage(const ListValue* args);
 
-  // NetworkLibrary::Observer implementation.
-  virtual void NetworkChanged(NetworkLibrary* obj);
-  virtual void CellularDataPlanChanged(NetworkLibrary* obj);
+  // NetworkLibrary::NetworkManagerObserver implementation.
+  virtual void OnNetworkManagerChanged(NetworkLibrary* obj);
+  // NetworkLibrary::CellularDataPlanObserver implementation.
+  virtual void OnCellularDataPlanChanged(NetworkLibrary* obj);
 
   bool initialized_;
   // Wifi networks by service path.
@@ -46,8 +49,9 @@ class NetworkMessageObserver : public NetworkLibrary::Observer {
 
   // Current connect celluar service path.
   std::string cellular_service_path_;
-  // Last cellular data plan data.
-  CellularDataPlan cellular_data_plan_;
+  // Last cellular data plan name and type.
+  std::string cellular_data_plan_name_;
+  CellularDataPlanType cellular_data_plan_type_;
 
   // Notification for connection errors
   SystemNotification notification_connection_error_;
@@ -62,4 +66,3 @@ class NetworkMessageObserver : public NetworkLibrary::Observer {
 }  // namespace chromeos
 
 #endif  // CHROME_BROWSER_CHROMEOS_NETWORK_MESSAGE_OBSERVER_H_
-

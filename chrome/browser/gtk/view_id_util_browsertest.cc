@@ -4,9 +4,9 @@
 
 #include <gtk/gtk.h>
 
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/gtk/view_id_util.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
 
@@ -40,7 +40,8 @@ IN_PROC_BROWSER_TEST_F(ViewIDTest, Basic) {
         i == VIEW_ID_BOOKMARK_BAR_ELEMENT ||
         i == VIEW_ID_TAB ||
         i == VIEW_ID_SIDE_BAR_CONTAINER ||
-        i == VIEW_ID_SIDE_BAR_SPLIT) {
+        i == VIEW_ID_SIDE_BAR_SPLIT ||
+        i == VIEW_ID_FEEDBACK_BUTTON) {
       continue;
     }
 

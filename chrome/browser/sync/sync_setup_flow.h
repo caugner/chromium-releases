@@ -58,6 +58,11 @@ class SyncSetupFlow : public HtmlDialogUIDelegate {
       ProfileSyncService* service,
       DictionaryValue* args);
 
+  // Fills |args| for the enter passphrase screen.
+  static void GetArgsForEnterPassphrase(
+      const ProfileSyncService* service,
+      DictionaryValue* args);
+
   // Triggers a state machine transition to advance_state.
   void Advance(SyncSetupWizard::State advance_state);
 
@@ -101,6 +106,7 @@ class SyncSetupFlow : public HtmlDialogUIDelegate {
   virtual bool IsDialogModal() const {
     return false;
   }
+  virtual bool ShouldShowDialogTitle() const { return true; }
 
   void OnUserSubmittedAuth(const std::string& username,
                            const std::string& password,
@@ -109,7 +115,8 @@ class SyncSetupFlow : public HtmlDialogUIDelegate {
 
   void OnUserConfigured(const SyncConfiguration& configuration);
 
-  void OnPassphraseEntry(const std::string& passphrase);
+  void OnPassphraseEntry(const std::string& passphrase,
+                         const std::string& mode);
 
   void OnConfigurationComplete();
 

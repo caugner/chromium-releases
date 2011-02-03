@@ -8,7 +8,9 @@
 
 #include "base/string_util.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view.h"
+#include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -53,7 +55,7 @@ void AutocompletePopupModel::StartAutocomplete(
   manually_selected_match_.Clear();
 
   controller_->Start(text, desired_tld, prevent_inline_autocomplete,
-                     prefer_keyword, false);
+                     prefer_keyword, true, false);
 }
 
 void AutocompletePopupModel::StopAutocomplete() {
@@ -220,8 +222,27 @@ bool AutocompletePopupModel::GetKeywordForMatch(const AutocompleteMatch& match,
   if (!TemplateURL::SupportsReplacement(template_url))
     return false;
 
+  // Don't provide a hint for inactive/disabled extension keywords.
+  if (template_url->IsExtensionKeyword()) {
+    const Extension* extension = profile_->GetExtensionsService()->
+        GetExtensionById(template_url->GetExtensionId(), false);
+    if (!extension ||
+        (profile_->IsOffTheRecord() &&
+         !profile_->GetExtensionsService()->IsIncognitoEnabled(extension)))
+      return false;
+  }
+
   keyword->assign(keyword_hint);
   return true;
+}
+
+void AutocompletePopupModel::FinalizeInstantQuery(
+    const std::wstring& input_text,
+    const std::wstring& suggest_text) {
+  if (IsOpen()) {
+    SearchProvider* search_provider = controller_->search_provider();
+    search_provider->FinalizeInstantQuery(input_text, suggest_text);
+  }
 }
 
 AutocompleteLog* AutocompletePopupModel::GetAutocompleteLog() {
@@ -292,12 +313,8 @@ void AutocompletePopupModel::Observe(NotificationType type,
     SetHoveredLine(kNoMatch);
 
   view_->UpdatePopupAppearance();
-
-#if defined(TOOLKIT_VIEWS)
+  edit_model_->ResultsUpdated();
   edit_model_->PopupBoundsChangedTo(view_->GetTargetBounds());
-#else
-  // TODO: port
-#endif
 }
 
 const SkBitmap* AutocompletePopupModel::GetSpecialIconForMatch(

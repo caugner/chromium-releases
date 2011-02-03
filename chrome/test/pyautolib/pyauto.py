@@ -52,7 +52,9 @@ def _LocateBinDirs():
       'darwin': [ os.path.join(chrome_src, 'xcodebuild', 'Debug'),
                   os.path.join(chrome_src, 'xcodebuild', 'Release')],
       'win32':  [ os.path.join(chrome_src, 'chrome', 'Debug'),
-                  os.path.join(chrome_src, 'chrome', 'Release')],
+                  os.path.join(chrome_src, 'build', 'Debug'),
+                  os.path.join(chrome_src, 'chrome', 'Release'),
+                  os.path.join(chrome_src, 'build', 'Release')],
       'cygwin': [ os.path.join(chrome_src, 'chrome', 'Debug'),
                   os.path.join(chrome_src, 'chrome', 'Release')],
   }
@@ -84,6 +86,7 @@ import omnibox_info
 import plugins_info
 import prefs_info
 from pyauto_errors import JSONInterfaceError
+from pyauto_errors import NTPThumbnailNotShownError
 import simplejson as json  # found in third_party
 
 
@@ -166,7 +169,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
   @staticmethod
   def DataDir():
     """Returns the path to the data dir chrome/test/data."""
-    return os.path.join(os.path.dirname(__file__), os.pardir, "data")
+    return os.path.normpath(
+        os.path.join(os.path.dirname(__file__), os.pardir, "data"))
 
   @staticmethod
   def GetFileURLForPath(path):
@@ -184,6 +188,15 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     else:
       quoted_path = urllib.quote(abs_path)
       return 'file://' + quoted_path
+
+  @staticmethod
+  def GetFileURLForDataPath(relative_path):
+    """Get file:// url for the given path relative to the chrome test data dir.
+
+    Also quotes the url using urllib.quote().
+    """
+    return PyUITest.GetFileURLForPath(
+        os.path.join(PyUITest.DataDir(), relative_path))
 
   @staticmethod
   def IsMac():
@@ -248,11 +261,23 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     else:
       os.kill(pid, signal.SIGTERM)
 
-  def WaitUntil(self, function, timeout=-1, retry_sleep=0.25, args=[]):
+  def GetPrivateInfo(self):
+    """Fetch info from private_tests_info.txt in private dir.
+
+    Returns:
+      a dictionary of items from private_tests_info.txt
+    """
+    private_file = os.path.join(
+        self.DataDir(), 'pyauto_private', 'private_tests_info.txt')
+    assert os.path.exists(private_file), '%s missing' % private_file
+    return self.EvalDataFrom(private_file)
+
+  def WaitUntil(self, function, timeout=-1, retry_sleep=0.25, args=[],
+                expect_retval=None):
     """Poll on a condition until timeout.
 
-    Waits until the |function| evalues to True or until |timeout| secs,
-    whichever occurs earlier.
+    Waits until the |function| evalues to |expect_retval| or until |timeout|
+    secs, whichever occurs earlier.
 
     This is better than using a sleep, since it waits (almost) only as much
     as needed.
@@ -277,18 +302,26 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       retry_sleep: the sleep interval (in secs) before retrying |function|.
                    Defaults to 0.25 secs.
       args: the args to pass to |function|
+      expect_retval: the expected return value for |function|. This forms the
+                     exit criteria. In case this is None (the default),
+                     |function|'s return value is checked for truth,
+                     so 'non-empty-string' should match with True
 
     Returns:
       True, if returning when |function| evaluated to True
       False, when returning due to timeout
     """
     if timeout == -1:  # Default
-      timeout = self.action_max_timeout_ms()/1000.0
+      timeout = self.action_max_timeout_ms() / 1000.0
     assert callable(function), "function should be a callable"
     begin = time.time()
     while timeout is None or time.time() - begin <= timeout:
-      if function(*args):
+      retval = function(*args)
+      if (expect_retval is None and retval) or expect_retval == retval:
         return True
+      logging.debug('WaitUntil(%s) still waiting. '
+                    'Expecting %s. Last returned %s.' % (
+                    function, expect_retval, retval))
       time.sleep(retry_sleep)
     return False
 
@@ -406,6 +439,22 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'text': text,
     }
     self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+
+  # TODO(ace): Remove this hack, update bug 62783.
+  def WaitUntilOmniboxReadyHack(self, windex=0):
+    """Wait until the omnibox is ready for input.
+
+    This is a hack workaround for linux platform, which returns from
+    synchronous window creation methods before the omnibox is fully functional.
+
+    No-op on non-linux platforms.
+
+    Args:
+      windex: the index of the browser to work on.
+    """
+    if self.IsLinux():
+      return self.WaitUntil(
+          lambda : self.GetOmniboxInfo(windex).Properties('has_focus'))
 
   def WaitUntilOmniboxQueryDone(self, windex=0):
     """Wait until omnibox has finished populating results.
@@ -713,17 +762,18 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
-    cmd_dict = {
-      'command': 'WaitForInfobarCount',
-      'count': count,
-      'tab_index': tab_index,
-    }
     # TODO(phajdan.jr): We need a solid automation infrastructure to handle
     # these cases. See crbug.com/53647.
-    return self.WaitUntil(
-        lambda(count): len(self.GetBrowserInfo()\
-            ['windows'][windex]['tabs'][tab_index]['infobars']) == count,
-        args=[count])
+    def _InfobarCount():
+      windows = self.GetBrowserInfo()['windows']
+      if windex >= len(windows):  # not enough windows
+        return -1
+      tabs = windows[windex]['tabs']
+      if tab_index >= len(tabs):  # not enough tabs
+        return -1
+      return len(tabs[tab_index]['infobars'])
+
+    return self.WaitUntil(_InfobarCount, expect_retval=count)
 
   def PerformActionOnInfobar(
       self, action, infobar_index, windex=0, tab_index=0):
@@ -759,6 +809,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     This includes things like the version number, the executable name,
     executable path, pid info about the renderer/plugin/extension processes,
     window dimensions. (See sample below)
+
+    For notification pid info, see 'GetActiveNotifications'.
 
     Returns:
       a dictionary
@@ -1485,6 +1537,63 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     return self._GetResultFromJSONRequest(cmd_dict)
 
+  def GetActiveNotifications(self):
+    """Gets a list of the currently active/shown HTML5 notifications.
+
+    Returns:
+      a list containing info about each active notification, with the
+      first item in the list being the notification on the bottom of the
+      notification stack. The 'content_url' key can refer to a URL or a data
+      URI. The 'pid' key-value pair may be omitted or invalid if the
+      notification is closing.
+
+    SAMPLE:
+    [ { u'content_url': u'data:text/html;charset=utf-8,%3C!DOCTYPE%l%3E%0Atm...'
+        u'display_source': 'www.corp.google.com',
+        u'origin_url': 'http://www.corp.google.com/',
+        u'pid': 8505},
+      { u'content_url': 'http://www.gmail.com/special_notification.html',
+        u'display_source': 'www.gmail.com',
+        u'origin_url': 'http://www.gmail.com/',
+        u'pid': 9291}]
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'GetActiveNotifications',
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['notifications']
+
+  def CloseNotification(self, index):
+    """Closes the active HTML5 notification at the given index.
+
+    Args:
+      index: the index of the notification to close. 0 refers to the
+             notification on the bottom of the notification stack.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'CloseNotification',
+      'index': index,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
+
+  def WaitForNotificationCount(self, count):
+    """Waits for the number of active HTML5 notifications to reach the given
+    count.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'WaitForNotificationCount',
+      'count': count,
+    }
+    self._GetResultFromJSONRequest(cmd_dict)
+
   def FindInPage(self, search_string, forward=True,
                  match_case=False, find_next=False,
                  tab_index=0, windex=0):
@@ -1520,6 +1629,342 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'find_next' : find_next,
     }
     return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+
+  def CallJavascriptFunc(self, function, args=[], tab_index=0, windex=0):
+    """Executes a script which calls a given javascript function.
+
+    The invoked javascript function must send a result back via the
+    domAutomationController.send function, or this function will never return.
+
+    Defaults to first tab in first window.
+
+    Args:
+      function: name of the function
+      args: list of all the arguments to pass into the called function. These
+            should be able to be converted to a string using the |str| function.
+      tab_index: index of the tab within the given window
+      windex: index of the window
+
+    Returns:
+      a string that was sent back via the domAutomationController.send method
+    """
+    # Convert the given arguments for evaluation in a javascript statement.
+    converted_args = []
+    for arg in args:
+      # If it is a string argument, we need to quote and escape it properly.
+      if type(arg) == type('string') or type(arg) == type(u'unicode'):
+        # We must convert all " in the string to \", so that we don't try
+        # to evaluate invalid javascript like ""arg"".
+        converted_arg = '"' + arg.replace('"', '\\"') + '"'
+      else:
+        # Convert it to a string so that we can use |join| later.
+        converted_arg = str(arg)
+      converted_args += [converted_arg]
+    js = '%s(%s)' % (function, ', '.join(converted_args))
+    logging.debug('Executing javascript: %s', js)
+    return self.ExecuteJavascript(js, windex, tab_index)
+
+  def SignInToSync(self, username, password):
+    """Signs in to sync using the given username and password.
+
+    Args:
+      username: The account with which to sign in. Example: "user@gmail.com".
+      password: Password for the above account. Example: "pa$$w0rd".
+
+    Returns:
+      True, on success.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'SignInToSync',
+      'username': username,
+      'password': password,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['success']
+
+  def GetSyncInfo(self):
+    """Returns info about sync.
+
+    Returns:
+      A dictionary of info about sync.
+      Example dictionaries:
+        {u'summary': u'SYNC DISABLED'}
+
+        { u'authenticated': True,
+          u'last synced': u'Just now',
+          u'summary': u'READY',
+          u'sync url': u'clients4.google.com',
+          u'synced datatypes': [ u'Bookmarks',
+                                 u'Preferences',
+                                 u'Passwords',
+                                 u'Autofill',
+                                 u'Themes',
+                                 u'Extensions',
+                                 u'Apps']}
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'GetSyncInfo',
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['sync_info']
+
+  def AwaitSyncCycleCompletion(self):
+    """Waits for the ongoing sync cycle to complete. Must be signed in to sync
+       before calling this method.
+
+    Returns:
+      True, on success.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'AwaitSyncCycleCompletion',
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['success']
+
+  def EnableSyncForDatatypes(self, datatypes):
+    """Enables sync for a given list of sync datatypes. Must be signed in to
+       sync before calling this method.
+
+    Args:
+      datatypes: A list of strings indicating the datatypes for which to enable
+                 sync. Strings that can be in the list are:
+                 Bookmarks, Preferences, Passwords, Autofill, Themes,
+                 Typed URLs, Extensions, Encryption keys, Sessions, Apps, All.
+                 For an updated list of valid sync datatypes, refer to the
+                 function ModelTypeToString() in the file
+                 chrome/browser/sync/syncable/model_type.cc.
+                 Examples:
+                   ['Bookmarks', 'Preferences', 'Passwords']
+                   ['All']
+
+    Returns:
+      True, on success.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'EnableSyncForDatatypes',
+      'datatypes': datatypes,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['success']
+
+  def DisableSyncForDatatypes(self, datatypes):
+    """Disables sync for a given list of sync datatypes. Must be signed in to
+       sync before calling this method.
+
+    Args:
+      datatypes: A list of strings indicating the datatypes for which to
+                 disable sync. Strings that can be in the list are:
+                 Bookmarks, Preferences, Passwords, Autofill, Themes,
+                 Typed URLs, Extensions, Encryption keys, Sessions, Apps, All.
+                 For an updated list of valid sync datatypes, refer to the
+                 function ModelTypeToString() in the file
+                 chrome/browser/sync/syncable/model_type.cc.
+                 Examples:
+                   ['Bookmarks', 'Preferences', 'Passwords']
+                   ['All']
+
+    Returns:
+      True, on success.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'DisableSyncForDatatypes',
+      'datatypes': datatypes,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)['success']
+
+  def GetNTPThumbnails(self):
+    """Return a list of info about the sites in the NTP most visited section.
+    SAMPLE:
+      [{ u'title': u'Google',
+         u'url': u'http://www.google.com',
+         u'is_pinned': False},
+       {
+         u'title': u'Yahoo',
+         u'url': u'http://www.yahoo.com',
+         u'is_pinned': True}]
+    """
+    return self._GetNTPInfo()['most_visited']
+
+  def GetNTPThumbnailIndex(self, thumbnail):
+    """Returns the index of the given NTP thumbnail, or -1 if it is not shown.
+
+    Args:
+      thumbnail: a thumbnail dict received from |GetNTPThumbnails|
+    """
+    thumbnails = self.GetNTPThumbnails()
+    for i in range(len(thumbnails)):
+      if thumbnails[i]['url'] == thumbnail['url']:
+        return i
+    return -1
+
+  def MoveNTPThumbnail(self, thumbnail, new_index):
+    """Moves the given thumbnail to a new index. The indices in the NTP Most
+    Visited sites section look like:
+      0  1  2  3
+      4  5  6  7
+
+    When a thumbnail is moved, it is automatically pinned.
+
+    Args:
+      thumbnail: a thumbnail dict received from |GetNTPThumbnails|
+      new_index: the index to be moved to in the Most Visited sites section
+
+    Raises:
+      IndexError if there is no thumbnail at the index
+    """
+    if new_index < 0 or new_index >= len(self.GetNTPThumbnails()):
+      raise IndexError()
+    self._CheckNTPThumbnailShown(thumbnail)
+    cmd_dict = {
+      'command': 'MoveNTPMostVisitedThumbnail',
+      'url': thumbnail['url'],
+      'index': new_index,
+      'old_index': self.GetNTPThumbnailIndex(thumbnail)
+    }
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def RemoveNTPThumbnail(self, thumbnail):
+    """Removes the NTP thumbnail and returns true on success.
+
+    Args:
+      thumbnail: a thumbnail dict received from |GetNTPThumbnails|
+    """
+    self._CheckNTPThumbnailShown(thumbnail)
+    cmd_dict = {
+      'command': 'RemoveNTPMostVisitedThumbnail',
+      'url': thumbnail['url']
+    }
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def PinNTPThumbnail(self, thumbnail):
+    """Pins the NTP thumbnail.
+
+    Args:
+      thumbnail: a thumbnail dict received from |GetNTPThumbnails|
+    """
+    self._CheckNTPThumbnailShown(thumbnail)
+    self.MoveNTPThumbnail(thumbnail, self.GetNTPThumbnailIndex(thumbnail))
+
+  def UnpinNTPThumbnail(self, thumbnail):
+    """Unpins the NTP thumbnail and returns true on success.
+
+    Args:
+      thumbnail: a thumbnail dict received from |GetNTPThumbnails|
+    """
+    self._CheckNTPThumbnailShown(thumbnail)
+    cmd_dict = {
+      'command': 'UnpinNTPMostVisitedThumbnail',
+      'url': thumbnail['url']
+    }
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def IsNTPThumbnailPinned(self, thumbnail):
+    """Returns whether the NTP thumbnail is pinned.
+
+    Args:
+      thumbnail: a thumbnail dict received from |GetNTPThumbnails|
+    """
+    self._CheckNTPThumbnailShown(thumbnail)
+    index = self.GetNTPThumbnailIndex(thumbnail)
+    return self.GetNTPThumbnails()[index]['is_pinned']
+
+  def RestoreAllNTPThumbnails(self):
+    """Restores all the removed NTP thumbnails.
+    Note:
+      the default thumbnails may come back into the Most Visited sites
+      section after doing this
+    """
+    cmd_dict = {
+      'command': 'RestoreAllNTPMostVisitedThumbnails'
+    }
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def GetNTPDefaultSites(self):
+    """Returns a list of URLs for all the default NTP sites, regardless of
+    whether they are showing or not.
+
+    These sites are the ones present in the NTP on a fresh install of Chrome.
+    """
+    return self._GetNTPInfo()['default_sites']
+
+  def RemoveNTPDefaultThumbnails(self):
+    """Removes all thumbnails for default NTP sites, regardless of whether they
+    are showing or not."""
+    cmd_dict = { 'command': 'RemoveNTPMostVisitedThumbnail' }
+    for site in self.GetNTPDefaultSites():
+      cmd_dict['url'] = site
+      self._GetResultFromJSONRequest(cmd_dict)
+
+  def GetNTPRecentlyClosed(self):
+    """Return a list of info about the items in the NTP recently closed section.
+    SAMPLE:
+      [{
+         u'type': u'tab',
+         u'url': u'http://www.bing.com',
+         u'title': u'Bing',
+         u'timestamp': 2139082.03912,  # Seconds since epoch (Jan 1, 1970)
+         u'direction': u'ltr'},
+       {
+         u'type': u'window',
+         u'timestamp': 2130821.90812,
+         u'tabs': [
+         {
+           u'type': u'tab',
+           u'url': u'http://www.cnn.com',
+           u'title': u'CNN',
+           u'timestamp': 2129082.12098,
+           u'direction': u'ltr'}]},
+       {
+         u'type': u'tab',
+         u'url': u'http://www.altavista.com',
+         u'title': u'Altavista',
+         u'timestamp': 21390820.12903,
+         u'direction': u'rtl'}]
+    """
+    return self._GetNTPInfo()['recently_closed']
+
+  def _GetNTPInfo(self):
+    """Get info about the NTP. This does not retrieve the actual info shown
+    in a particular NTP, but the current data that would be used to display
+    a NTP.
+
+    This includes info about the most visited sites, the recently closed
+    tabs and windows, and the default NTP sites.
+
+    TODO(kkania): Add info about apps.
+
+    Returns:
+      a dictionary containing info about NTP info. See details about the
+      sections in their respective methods.
+
+    SAMPLE:
+    { u'most_visited': [ ... ],
+      u'recently_closed': [ ... ]
+      u'default_sites': [ ... ]
+    }
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'GetNTPInfo',
+    }
+    return self._GetResultFromJSONRequest(cmd_dict)
+
+  def _CheckNTPThumbnailShown(self, thumbnail):
+    if self.GetNTPThumbnailIndex(thumbnail) == -1:
+      raise NTPThumbnailNotShownError()
 
 
 class PyUITestSuite(pyautolib.PyUITestSuiteBase, unittest.TestSuite):
@@ -1641,6 +2086,9 @@ class Main(object):
         '', '--repeat', type='int', default=1,
         help='Number of times to repeat the tests. Useful to determine '
              'flakiness. Defaults to 1.')
+    parser.add_option(
+        '-S', '--suite', type='string', default='FULL',
+        help='Temporary flag ignored on beta/stable branch.')
 
     self._options, self._args = parser.parse_args()
 

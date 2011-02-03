@@ -16,12 +16,12 @@
 #include "base/file_path.h"
 #include "base/path_service.h"
 #include "base/rand_util.h"
-#include "base/registry.h"
 #include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
+#include "base/win/registry.h"
+#include "base/win/windows_version.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/common/pref_names.h"
@@ -39,20 +39,21 @@
 #pragma comment(lib, "wtsapi32.lib")
 
 namespace {
+
 const wchar_t kChromeGuid[] = L"{8A69D345-D564-463c-AFF1-A69D9E530F96}";
 const wchar_t kBrowserAppId[] = L"Chrome";
 
 // The following strings are the possible outcomes of the toast experiment
 // as recorded in the  |client| field. Previously the groups used "TSxx" but
 // the data captured is not valid.
-const wchar_t kToastExpControlGroup[] =      L"T%lc01";
-const wchar_t kToastExpCancelGroup[] =       L"T%lc02";
-const wchar_t kToastExpUninstallGroup[] =    L"T%lc04";
-const wchar_t kToastExpTriesOkGroup[] =      L"T%lc18";
-const wchar_t kToastExpTriesErrorGroup[] =   L"T%lc28";
-const wchar_t kToastActiveGroup[] =          L"T%lc40";
-const wchar_t kToastUDDirFailure[] =         L"T%lc40";
-const wchar_t kToastExpBaseGroup[] =         L"T%lc80";
+const wchar_t kToastExpControlGroup[] =      L"S%lc01";
+const wchar_t kToastExpCancelGroup[] =       L"S%lc02";
+const wchar_t kToastExpUninstallGroup[] =    L"S%lc04";
+const wchar_t kToastExpTriesOkGroup[] =      L"S%lc18";
+const wchar_t kToastExpTriesErrorGroup[] =   L"S%lc28";
+const wchar_t kToastActiveGroup[] =          L"S%lc40";
+const wchar_t kToastUDDirFailure[] =         L"S%lc40";
+const wchar_t kToastExpBaseGroup[] =         L"S%lc80";
 
 // Generates the actual group string that gets written in the registry.
 // |group| is one of the above kToast* strings and |flavor| is a number
@@ -61,9 +62,10 @@ const wchar_t kToastExpBaseGroup[] =         L"T%lc80";
 // The big experiment in Dec 2009 used TGxx and THxx.
 // The big experiment in Feb 2010 used TKxx and TLxx.
 // The big experiment in Apr 2010 used TMxx and TNxx.
-// The big experiment in Oct 2010 (current) uses TVxx TWxx TXxx TYxx.
+// The big experiment in Oct 2010 used TVxx TWxx TXxx TYxx.
+// The Japan experiment in Feb 2011 uses S{J,K,L,M}xx
 std::wstring GetExperimentGroup(const wchar_t* group, int flavor) {
-  wchar_t c = flavor < 4 ? L'V' + flavor : L'Z';
+  wchar_t c = flavor < 3 ? L'J' + flavor : L'M';
   return StringPrintf(group, c);
 }
 
@@ -138,15 +140,14 @@ bool RelaunchSetup(const std::string& flag, int value,
 
   // Re-add the system level toast flag.
   if (system_level_toast) {
-    new_cmd_line.AppendSwitch(
-      WideToASCII(installer_util::switches::kSystemLevelToast));
+    new_cmd_line.AppendSwitch(installer_util::switches::kSystemLevelToast);
 
     // Re-add the toast result key. We need to do this because Setup running as
     // system passes the key to Setup running as user, but that child process
     // does not perform the actual toasting, it launches another Setup (as user)
     // to do so. That is the process that needs the key.
     const CommandLine& current_cmd_line = *CommandLine::ForCurrentProcess();
-    std::string key = WideToASCII(installer_util::switches::kToastResultsKey);
+    std::string key(installer_util::switches::kToastResultsKey);
     std::string toast_key = current_cmd_line.GetSwitchValueASCII(key);
     if (!toast_key.empty()) {
       new_cmd_line.AppendSwitchASCII(key, toast_key);
@@ -216,19 +217,18 @@ bool FixDACLsForExecute(const wchar_t* exe) {
 // the computer is on but nobody has logged in locally.
 // Remote Desktop sessions do not count as interactive sessions; running this
 // method as a user logged in via remote desktop will do nothing.
-bool RelaunchSetupAsConsoleUser(const std::wstring& flag) {
+bool RelaunchSetupAsConsoleUser(const std::string& flag) {
   FilePath setup_exe = CommandLine::ForCurrentProcess()->GetProgram();
   CommandLine cmd_line(setup_exe);
-  cmd_line.AppendSwitch(WideToASCII(flag));
+  cmd_line.AppendSwitch(flag);
 
   // Get the Google Update results key, and pass it on the command line to
   // the child process.
   int key = GoogleUpdateSettings::DuplicateGoogleUpdateSystemClientKey();
-  cmd_line.AppendSwitchASCII(
-      WideToASCII(installer_util::switches::kToastResultsKey),
-      base::IntToString(key));
+  cmd_line.AppendSwitchASCII(installer_util::switches::kToastResultsKey,
+                             base::IntToString(key));
 
-  if (win_util::GetWinVersion() > win_util::WINVERSION_XP) {
+  if (base::win::GetVersion() > base::win::VERSION_XP) {
     // Make sure that in Vista and Above we have the proper DACLs so
     // the interactive user can launch it.
     if (!FixDACLsForExecute(setup_exe.ToWStringHack().c_str()))
@@ -437,13 +437,14 @@ std::wstring GoogleChromeDistribution::GetStatsServerURL() {
   return L"https://clients4.google.com/firefox/metrics/collect";
 }
 
-std::wstring GoogleChromeDistribution::GetDistributionData(RegKey* key) {
+std::wstring GoogleChromeDistribution::GetDistributionData(
+    base::win::RegKey* key) {
   DCHECK(NULL != key);
   std::wstring sub_key(google_update::kRegPathClientState);
   sub_key.append(L"\\");
   sub_key.append(product_guid());
 
-  RegKey client_state_key(key->Handle(), sub_key.c_str(), KEY_READ);
+  base::win::RegKey client_state_key(key->Handle(), sub_key.c_str(), KEY_READ);
   std::wstring result;
   std::wstring brand_value;
   if (client_state_key.ReadValue(google_update::kRegRLZBrandField,
@@ -528,7 +529,7 @@ void SetClient(std::wstring experiment_group, bool last_write) {
     if (cmd_line.HasSwitch(installer_util::switches::kToastResultsKey)) {
       // Get the handle to the key under HKLM.
       base::StringToInt(cmd_line.GetSwitchValueASCII(
-          WideToASCII(installer_util::switches::kToastResultsKey)).c_str(),
+          installer_util::switches::kToastResultsKey).c_str(),
           &reg_key_handle);
     } else {
       reg_key_handle = 0;
@@ -573,24 +574,30 @@ void GoogleChromeDistribution::LaunchUserExperiment(
   }
 
   // This ends up being processed by ShowTryChromeDialog to show different
-  // experiments.  Only run the experiment in en-US.
-  int flavor = 0;
+  // experiments.  Use flavor 2 for everyone but Japanese.
+  int flavor = 2;
   std::wstring language;
-  if (GoogleUpdateSettings::GetLanguage(&language) && (language == L"en-US"))
-    flavor = base::RandInt(0, 3);
+  if (GoogleUpdateSettings::GetLanguage(&language) &&
+      language == L"ja") {
+      flavor = base::RandInt(0, 2);
+  }
 
   std::wstring brand;
   if (GoogleUpdateSettings::GetBrand(&brand) && (brand == L"CHXX")) {
     // Testing only: the user automatically qualifies for the experiment.
-    LOG(INFO) << "Experiment qualification bypass";
+    VLOG(1) << "Experiment qualification bypass";
   } else {
     // Check browser usage inactivity by the age of the last-write time of the
     // chrome user data directory.
     std::wstring user_data_dir = installer::GetChromeUserDataPath();
-    // TODO(cpu): re-enable experiment.
-    const int kThirtyDays = 3000 * 24;
+    const bool experiment_enabled = false;
+    const int kThirtyDays = 30 * 24;
+
     int dir_age_hours = GetDirectoryWriteAgeInHours(user_data_dir.c_str());
-    if (dir_age_hours < 0) {
+    if (!experiment_enabled) {
+      VLOG(1) << "Toast experiment is disabled.";
+      return;
+    } else if (dir_age_hours < 0) {
       // This means that we failed to find the user data dir. The most likely
       // cause is that this user has not ever used chrome at all which can
       // happen in a system-level install.
@@ -598,19 +605,19 @@ void GoogleChromeDistribution::LaunchUserExperiment(
       return;
     } else if (dir_age_hours < kThirtyDays) {
       // An active user, so it does not qualify.
-      LOG(INFO) << "Chrome used in last " << dir_age_hours << " hours";
+      VLOG(1) << "Chrome used in last " << dir_age_hours << " hours";
       SetClient(GetExperimentGroup(kToastActiveGroup, flavor), true);
       return;
     }
     // 1% are in the control group that qualifies but does not get drafted.
     if (base::RandDouble() > 0.99) {
       SetClient(GetExperimentGroup(kToastExpControlGroup, flavor), true);
-      LOG(INFO) << "User is control group";
+      VLOG(1) << "User is control group";
       return;
     }
   }
 
-  LOG(INFO) << "User drafted for toast experiment " << flavor;
+  VLOG(1) << "User drafted for toast experiment " << flavor;
   SetClient(GetExperimentGroup(kToastExpBaseGroup, flavor), false);
   // User level: The experiment needs to be performed in a different process
   // because google_update expects the upgrade process to be quick and nimble.

@@ -7,7 +7,7 @@
 #include "base/file_path.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/renderer_host/test/test_render_view_host.h"
 #include "chrome/browser/tab_contents/test_tab_contents.h"
 #include "chrome/common/render_messages.h"
@@ -43,7 +43,7 @@ TEST_F(WebApplicationTest, GetShortcutInfoForTab) {
   const string16 title = ASCIIToUTF16("TEST_TITLE");
   const string16 description = ASCIIToUTF16("TEST_DESCRIPTION");
   const GURL url("http://www.foo.com/bar");
-  webkit_glue::WebApplicationInfo web_app_info;
+  WebApplicationInfo web_app_info;
   web_app_info.title = title;
   web_app_info.description = description;
   web_app_info.app_url = url;

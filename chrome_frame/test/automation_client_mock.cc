@@ -70,13 +70,15 @@ MATCHER_P(EqNavigationInfoUrl, url, "IPC::NavigationInfo matcher") {
 }
 
 // Could be implemented as MockAutomationProxy member (we have WithArgs<>!)
-ACTION_P3(HandleCreateTab, tab_handle, external_tab_container, tab_wnd) {
+ACTION_P4(HandleCreateTab, tab_handle, external_tab_container, tab_wnd,
+          session_id) {
   // arg0 - message
   // arg1 - callback
   // arg2 - key
   CreateExternalTabContext::output_type input_args(tab_wnd,
                                                    external_tab_container,
-                                                   tab_handle);
+                                                   tab_handle,
+                                                   session_id);
   CreateExternalTabContext* context =
       reinterpret_cast<CreateExternalTabContext*>(arg1);
   DispatchToMethod(context, &CreateExternalTabContext::Completed, input_args);
@@ -104,7 +106,7 @@ TEST(CFACWithChrome, CreateTooFast) {
 
   GURL empty;
   scoped_refptr<ChromeFrameLaunchParams> clp(new ChromeFrameLaunchParams(
-      empty, empty, profile_path, profile_path.BaseName().value(), L"",
+      empty, empty, profile_path, profile_path.BaseName().value(), L"", L"",
       false, false, false));
   clp->set_launch_timeout(timeout);
   clp->set_version_check(false);
@@ -136,7 +138,7 @@ TEST(CFACWithChrome, CreateNotSoFast) {
 
   GURL empty;
   scoped_refptr<ChromeFrameLaunchParams> clp(new ChromeFrameLaunchParams(
-      empty, empty, profile_path, profile_path.BaseName().value(), L"",
+      empty, empty, profile_path, profile_path.BaseName().value(), L"", L"",
       false, false, false));
   clp->set_launch_timeout(timeout);
   clp->set_version_check(false);
@@ -182,7 +184,7 @@ TEST(CFACWithChrome, NavigateOk) {
 
   GURL empty;
   scoped_refptr<ChromeFrameLaunchParams> clp(new ChromeFrameLaunchParams(
-      empty, empty, profile_path, profile_path.BaseName().value(), L"",
+      empty, empty, profile_path, profile_path.BaseName().value(), L"", L"",
       false, false, false));
   clp->set_launch_timeout(timeout);
   clp->set_version_check(false);
@@ -228,7 +230,7 @@ TEST(CFACWithChrome, NavigateFailed) {
 
   GURL empty;
   scoped_refptr<ChromeFrameLaunchParams> clp(new ChromeFrameLaunchParams(
-      empty, empty, profile_path, profile_path.BaseName().value(), L"",
+      empty, empty, profile_path, profile_path.BaseName().value(), L"", L"",
       false, false, false));
   clp->set_launch_timeout(10000);
   clp->set_version_check(false);
@@ -253,7 +255,7 @@ TEST_F(CFACMockTest, MockedCreateTabOk) {
   EXPECT_CALL(mock_proxy_, SendAsAsync(testing::Property(
       &IPC::SyncMessage::type, AutomationMsg_CreateExternalTab__ID),
       testing::NotNull(), _))
-          .Times(1).WillOnce(HandleCreateTab(tab_handle_, h1, h2));
+          .Times(1).WillOnce(HandleCreateTab(tab_handle_, h1, h2, 99));
 
   EXPECT_CALL(mock_proxy_, CreateTabProxy(testing::Eq(tab_handle_)))
       .WillOnce(Return(tab_));
@@ -266,7 +268,7 @@ TEST_F(CFACMockTest, MockedCreateTabOk) {
   // Here we go!
   GURL empty;
   scoped_refptr<ChromeFrameLaunchParams> clp(new ChromeFrameLaunchParams(
-      empty, empty, profile_path_, profile_path_.BaseName().value(), L"",
+      empty, empty, profile_path_, profile_path_.BaseName().value(), L"", L"",
       false, false, false));
   clp->set_launch_timeout(timeout);
   clp->set_version_check(false);
@@ -287,7 +289,8 @@ TEST_F(CFACMockTest, MockedCreateTabFailed) {
   EXPECT_CALL(mock_proxy_, SendAsAsync(testing::Property(
       &IPC::SyncMessage::type, AutomationMsg_CreateExternalTab__ID),
       testing::NotNull(), _))
-          .Times(1).WillOnce(HandleCreateTab(tab_handle_, null_wnd, null_wnd));
+          .Times(1).WillOnce(HandleCreateTab(tab_handle_, null_wnd, null_wnd,
+                                             99));
 
   EXPECT_CALL(mock_proxy_, CreateTabProxy(_)).Times(0);
 
@@ -298,7 +301,7 @@ TEST_F(CFACMockTest, MockedCreateTabFailed) {
   // Here we go!
   GURL empty;
   scoped_refptr<ChromeFrameLaunchParams> clp(new ChromeFrameLaunchParams(
-      empty, empty, profile_path_, profile_path_.BaseName().value(), L"",
+      empty, empty, profile_path_, profile_path_.BaseName().value(), L"", L"",
       false, false, false));
   clp->set_launch_timeout(timeout_);
   clp->set_version_check(false);
@@ -312,7 +315,8 @@ class TestChromeFrameAutomationProxyImpl
  public:
   TestChromeFrameAutomationProxyImpl()
         // 1 is an unneeded timeout.
-      : ChromeFrameAutomationProxyImpl(NULL, 1) {
+      : ChromeFrameAutomationProxyImpl(
+          NULL, AutomationProxy::GenerateChannelID(), 1) {
   }
   MOCK_METHOD3(
       SendAsAsync,
@@ -338,7 +342,7 @@ TEST_F(CFACMockTest, OnChannelError) {
 
   GURL empty;
   scoped_refptr<ChromeFrameLaunchParams> clp(new ChromeFrameLaunchParams(
-      empty, empty, profile_path_, profile_path_.BaseName().value(), L"",
+      empty, empty, profile_path_, profile_path_.BaseName().value(), L"", L"",
       false, false, false));
   clp->set_launch_timeout(1);  // Unneeded timeout, but can't be 0.
   clp->set_version_check(false);
@@ -348,9 +352,9 @@ TEST_F(CFACMockTest, OnChannelError) {
   EXPECT_CALL(proxy, SendAsAsync(testing::Property(
     &IPC::SyncMessage::type, AutomationMsg_CreateExternalTab__ID),
     testing::NotNull(), _)).Times(3)
-        .WillOnce(HandleCreateTab(tab_handle_, h1, h2))
-        .WillOnce(HandleCreateTab(tab_handle_ * 2, h1, h2))
-        .WillOnce(HandleCreateTab(tab_handle_ * 3, h1, h2));
+        .WillOnce(HandleCreateTab(tab_handle_, h1, h2, 99))
+        .WillOnce(HandleCreateTab(tab_handle_ * 2, h1, h2, 100))
+        .WillOnce(HandleCreateTab(tab_handle_ * 3, h1, h2, 101));
 
   SetAutomationServerOk(3);
 
@@ -428,7 +432,7 @@ TEST_F(CFACMockTest, NavigateTwiceAfterInitToSameUrl) {
   EXPECT_CALL(mock_proxy_, SendAsAsync(testing::Property(
       &IPC::SyncMessage::type, AutomationMsg_CreateExternalTab__ID),
       testing::NotNull(), _))
-          .Times(1).WillOnce(HandleCreateTab(tab_handle_, h1, h2));
+          .Times(1).WillOnce(HandleCreateTab(tab_handle_, h1, h2, 99));
 
   EXPECT_CALL(mock_proxy_, CreateTabProxy(testing::Eq(tab_handle_)))
       .WillOnce(Return(tab_));
@@ -457,7 +461,7 @@ TEST_F(CFACMockTest, NavigateTwiceAfterInitToSameUrl) {
   scoped_refptr<ChromeFrameLaunchParams> launch_params(
       new ChromeFrameLaunchParams(
           GURL("http://www.nonexistent.com"), empty, profile_path_,
-          profile_path_.BaseName().value(), L"", false, false, false));
+          profile_path_.BaseName().value(), L"", L"", false, false, false));
   launch_params->set_launch_timeout(timeout);
   launch_params->set_version_check(false);
   EXPECT_TRUE(client_->Initialize(&cfd_, launch_params));
@@ -466,4 +470,3 @@ TEST_F(CFACMockTest, NavigateTwiceAfterInitToSameUrl) {
   EXPECT_CALL(mock_proxy_, ReleaseTabProxy(testing::Eq(tab_handle_))).Times(1);
   client_->Uninitialize();
 }
-

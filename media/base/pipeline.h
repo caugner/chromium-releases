@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // The pipeline is the public API clients use for playing back media.  Clients
-// provide a filter factory containing the filters they want the pipeline to
+// provide a filter collection containing the filters they want the pipeline to
 // use to render media.
 
 #ifndef MEDIA_BASE_PIPELINE_H_
@@ -12,7 +12,8 @@
 #include <string>
 
 #include "base/callback.h"
-#include "media/base/factory.h"
+#include "media/base/filters.h"
+#include "media/base/media_filter_collection.h"
 
 namespace base {
 class TimeDelta;
@@ -47,8 +48,17 @@ typedef Callback0::Type PipelineCallback;
 
 class Pipeline : public base::RefCountedThreadSafe<Pipeline> {
  public:
-  // Build a pipeline to render the given URL using the given filter factory to
-  // construct a filter chain.  Returns true if successful, false otherwise
+  // Initializes pipeline. Pipeline takes ownership of all callbacks passed
+  // into this method.
+  // |ended_callback| will be executed when the media reaches the end.
+  // |error_callback_| will be executed upon an error in the pipeline.
+  // |network_callback_| will be executed when there's a network event.
+  virtual void Init(PipelineCallback* ended_callback,
+                    PipelineCallback* error_callback,
+                    PipelineCallback* network_callback) = 0;
+
+  // Build a pipeline to render the given URL using the given filter collection
+  // to construct a filter chain.  Returns true if successful, false otherwise
   // (i.e., pipeline already started).  Note that a return value of true
   // only indicates that the initialization process has started successfully.
   // Pipeline initialization is an inherently asynchronous process.  Clients can
@@ -59,7 +69,7 @@ class Pipeline : public base::RefCountedThreadSafe<Pipeline> {
   // If the caller provides a |start_callback|, it will be called when the
   // pipeline initialization completes.  Clients are expected to call GetError()
   // to check whether initialization succeeded.
-  virtual bool Start(FilterFactory* filter_factory,
+  virtual bool Start(MediaFilterCollection* filter_collection,
                      const std::string& url,
                      PipelineCallback* start_callback) = 0;
 
@@ -91,6 +101,9 @@ class Pipeline : public base::RefCountedThreadSafe<Pipeline> {
   // point where playback controls will be respected.  Note that it is possible
   // for a pipeline to be started but not initialized (i.e., an error occurred).
   virtual bool IsInitialized() const = 0;
+
+  // Returns true if there has been network activity.
+  virtual bool IsNetworkActive() const = 0;
 
   // If the |major_mime_type| exists in the pipeline and is being rendered, this
   // method will return true.  Types are defined in media/base/media_foramt.h.

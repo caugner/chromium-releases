@@ -26,12 +26,16 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 
+RenderViewHostDelegateViewHelper::RenderViewHostDelegateViewHelper() {}
+
+RenderViewHostDelegateViewHelper::~RenderViewHostDelegateViewHelper() {}
+
 BackgroundContents*
 RenderViewHostDelegateViewHelper::MaybeCreateBackgroundContents(
     int route_id,
     Profile* profile,
     SiteInstance* site,
-    GURL opener_url,
+    const GURL& opener_url,
     const string16& frame_name) {
   ExtensionsService* extensions_service = profile->GetExtensionsService();
 
@@ -41,7 +45,8 @@ RenderViewHostDelegateViewHelper::MaybeCreateBackgroundContents(
       !extensions_service->is_ready())
     return NULL;
 
-  Extension* extension = extensions_service->GetExtensionByURL(opener_url);
+  const Extension* extension =
+      extensions_service->GetExtensionByURL(opener_url);
   if (!extension)
     extension = extensions_service->GetExtensionByWebExtent(opener_url);
   if (!extension ||
@@ -62,18 +67,8 @@ RenderViewHostDelegateViewHelper::MaybeCreateBackgroundContents(
     return NULL;
 
   // Passed all the checks, so this should be created as a BackgroundContents.
-  BackgroundContents* contents = new BackgroundContents(
-      site,
-      route_id,
-      profile->GetBackgroundContentsService());
-  string16 appid = ASCIIToUTF16(extension->id());
-  BackgroundContentsOpenedDetails details = { contents, frame_name, appid };
-  NotificationService::current()->Notify(
-      NotificationType::BACKGROUND_CONTENTS_OPENED,
-      Source<Profile>(profile),
-      Details<BackgroundContentsOpenedDetails>(&details));
-
-  return contents;
+  return profile->GetBackgroundContentsService()->CreateBackgroundContents(
+      site, route_id, profile, frame_name, ASCIIToUTF16(extension->id()));
 }
 
 TabContents* RenderViewHostDelegateViewHelper::CreateNewWindow(
@@ -193,6 +188,8 @@ void RenderViewHostDelegateViewHelper::RenderWidgetHostDestroyed(
   }
 }
 
+bool RenderViewHostDelegateHelper::gpu_enabled_ = true;
+
 // static
 WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
     Profile* profile, bool is_dom_ui) {
@@ -276,6 +273,8 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
     web_prefs.databases_enabled =
         !command_line.HasSwitch(switches::kDisableDatabases);
     web_prefs.experimental_webgl_enabled =
+        gpu_enabled() &&
+        !command_line.HasSwitch(switches::kDisable3DAPIs) &&
         !command_line.HasSwitch(switches::kDisableExperimentalWebGL);
     web_prefs.site_specific_quirks_enabled =
         !command_line.HasSwitch(switches::kDisableSiteSpecificQuirks);
@@ -284,9 +283,13 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
     web_prefs.show_composited_layer_borders =
         command_line.HasSwitch(switches::kShowCompositedLayerBorders);
     web_prefs.accelerated_compositing_enabled =
+        gpu_enabled() &&
         !command_line.HasSwitch(switches::kDisableAcceleratedCompositing);
     web_prefs.accelerated_2d_canvas_enabled =
+        gpu_enabled() &&
         command_line.HasSwitch(switches::kEnableAccelerated2dCanvas);
+    web_prefs.accelerated_layers_enabled =
+        command_line.HasSwitch(switches::kEnableAcceleratedLayers);
     web_prefs.memory_info_enabled =
         command_line.HasSwitch(switches::kEnableMemoryInfo);
     web_prefs.hyperlink_auditing_enabled =
@@ -322,4 +325,20 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
   }
 
   return web_prefs;
+}
+
+void RenderViewHostDelegateHelper::UpdateInspectorSetting(
+    Profile* profile, const std::string& key, const std::string& value) {
+  DictionaryValue* inspector_settings =
+      profile->GetPrefs()->GetMutableDictionary(
+          prefs::kWebKitInspectorSettings);
+  inspector_settings->SetWithoutPathExpansion(key,
+                                              Value::CreateStringValue(value));
+}
+
+void RenderViewHostDelegateHelper::ClearInspectorSettings(Profile* profile) {
+  DictionaryValue* inspector_settings =
+      profile->GetPrefs()->GetMutableDictionary(
+          prefs::kWebKitInspectorSettings);
+  inspector_settings->Clear();
 }

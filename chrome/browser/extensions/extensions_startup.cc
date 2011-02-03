@@ -20,7 +20,7 @@ namespace extensions_startup {
 
 class PackExtensionLogger : public PackExtensionJob::Client {
  public:
-  PackExtensionLogger() {}
+  PackExtensionLogger() : process_startup_(false) {}
   virtual void OnPackSuccess(const FilePath& crx_path,
                              const FilePath& output_private_key_path);
   virtual void OnPackFailure(const std::string& error_message);
@@ -83,8 +83,8 @@ bool HandlePackExtension(const CommandLine& cmd_line) {
 
     // Launch a job to perform the packing on the file thread.
     PackExtensionLogger pack_client;
-    scoped_refptr<PackExtensionJob> pack_job =
-        new PackExtensionJob(&pack_client, src_dir, private_key_path);
+    scoped_refptr<PackExtensionJob> pack_job(
+        new PackExtensionJob(&pack_client, src_dir, private_key_path));
     pack_job->Start();
 
     // The job will post a notification task to the current thread's message

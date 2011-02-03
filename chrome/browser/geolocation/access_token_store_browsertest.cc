@@ -6,7 +6,7 @@
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 
@@ -57,7 +57,7 @@ struct TokenLoadClientForTest {
 
 void RunCancelTestInClientTread() {
   ASSERT_TRUE(BrowserThread::CurrentlyOn(kExpectedClientThreadId));
-  scoped_refptr<AccessTokenStore> store = NewChromePrefsAccessTokenStore();
+  scoped_refptr<AccessTokenStore> store(NewChromePrefsAccessTokenStore());
   CancelableRequestConsumer consumer;
   TokenLoadClientForTest load_client;
 
@@ -117,8 +117,8 @@ void GeolocationAccessTokenStoreTest::OnAccessTokenStoresLoaded(
   }
 
   if (token_to_set_) {
-    scoped_refptr<AccessTokenStore> store =
-        NewChromePrefsAccessTokenStore();
+    scoped_refptr<AccessTokenStore> store(
+        NewChromePrefsAccessTokenStore());
     store->SaveAccessToken(ref_url_, *token_to_set_);
   }
   BrowserThread::PostTask(

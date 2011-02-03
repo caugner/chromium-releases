@@ -9,17 +9,18 @@
 
 #include "webkit/tools/test_shell/test_shell.h"
 
+#include "base/base_paths.h"
 #include "base/basictypes.h"
 #include "base/data_pack.h"
 #include "base/debug_on_start.h"
-#include "base/debug_util.h"
+#include "base/debug/debugger.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/mac_util.h"
 #include "base/memory_debug.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/stats_table.h"
 #include "base/string16.h"
 #include "base/string_piece.h"
 #include "base/utf_string_conversions.h"
@@ -195,7 +196,7 @@ void TestShell::PlatformShutdown() {
 }
 
 // static
-void TestShell::InitializeTestShell(bool layout_test_mode, 
+void TestShell::InitializeTestShell(bool layout_test_mode,
                                     bool allow_external_pages) {
   // This should move to a per-process platform-specific initialization function
   // when one exists.
@@ -203,7 +204,7 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
   window_list_ = new WindowList;
   layout_test_mode_ = layout_test_mode;
   allow_external_pages_ = allow_external_pages;
-  
+
   web_prefs_ = new WebPreferences;
 
   // mmap the data pack which holds strings used by WebCore. This is only
@@ -241,6 +242,17 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
       DLOG(FATAL) << "ATSFontActivateFromFileReference " << ahem_path_c;
     }
   }
+
+  // Add <app bundle's parent dir>/plugins to the plugin path so we can load
+  // test plugins.
+  FilePath plugins_dir;
+  PathService::Get(base::DIR_EXE, &plugins_dir);
+  if (mac_util::AmIBundled()) {
+    plugins_dir = plugins_dir.AppendASCII("../../../plugins");
+  } else {
+    plugins_dir = plugins_dir.AppendASCII("plugins");
+  }
+  NPAPI::PluginList::Singleton()->AddExtraPluginDir(plugins_dir);
 }
 
 NSButton* MakeTestButton(NSRect* rect, NSString* title, NSView* parent) {
@@ -359,10 +371,12 @@ void TestShell::TestFinished() {
     return;  // reached when running under test_shell_tests
 
   test_is_pending_ = false;
-  NSWindow* window = *(TestShell::windowList()->begin());
-  WindowMap::iterator it = window_map_.Get().find(window);
-  if (it != window_map_.Get().end())
-    TestShell::Dump(it->second);
+  if (dump_when_finished_) {
+    NSWindow* window = *(TestShell::windowList()->begin());
+    WindowMap::iterator it = window_map_.Get().find(window);
+    if (it != window_map_.Get().end())
+      TestShell::Dump(it->second);
+  }
   MessageLoop::current()->Quit();
 }
 
@@ -392,7 +406,7 @@ void TestShell::TestFinished() {
 
   // check for debugger, just bail if so. We don't want the timeouts hitting
   // when we're trying to track down an issue.
-  if (DebugUtil::BeingDebugged())
+  if (base::debug::BeingDebugged())
     return;
 
   NSThread* currentThread = [NSThread currentThread];
@@ -715,10 +729,6 @@ base::StringPiece GetDataResource(int resource_id) {
   }
 
   return base::StringPiece();
-}
-
-void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
-  NPAPI::PluginList::Singleton()->GetPlugins(refresh, plugins);
 }
 
 bool DownloadUrl(const std::string& url, NSWindow* caller_window) {

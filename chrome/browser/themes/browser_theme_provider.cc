@@ -5,6 +5,7 @@
 #include "chrome/browser/themes/browser_theme_provider.h"
 
 #include "app/resource_bundle.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extensions_service.h"
@@ -195,8 +196,6 @@ BrowserThemeProvider::BrowserThemeProvider()
 
 BrowserThemeProvider::~BrowserThemeProvider() {
   FreePlatformCaches();
-
-  RemoveUnusedThemes();
 }
 
 void BrowserThemeProvider::Init(Profile* profile) {
@@ -288,7 +287,7 @@ RefCountedMemory* BrowserThemeProvider::GetRawData(int id) const {
   return data;
 }
 
-void BrowserThemeProvider::SetTheme(Extension* extension) {
+void BrowserThemeProvider::SetTheme(const Extension* extension) {
   // Clear our image cache.
   FreePlatformCaches();
 
@@ -361,7 +360,7 @@ std::string BrowserThemeProvider::AlignmentToString(int alignment) {
 // static
 int BrowserThemeProvider::StringToAlignment(const std::string& alignment) {
   std::vector<std::wstring> split;
-  SplitStringAlongWhitespace(UTF8ToWide(alignment), &split);
+  base::SplitStringAlongWhitespace(UTF8ToWide(alignment), &split);
 
   int alignment_mask = 0;
   for (std::vector<std::wstring>::iterator alignments(split.begin());
@@ -557,7 +556,8 @@ void BrowserThemeProvider::LoadThemePrefs() {
       // theme is being migrated.
       ExtensionsService* service = profile_->GetExtensionsService();
       if (service) {
-        Extension* extension = service->GetExtensionById(current_id, false);
+        const Extension* extension =
+            service->GetExtensionById(current_id, false);
         if (extension) {
           DLOG(ERROR) << "Migrating theme";
           BuildFromExtension(extension);
@@ -573,13 +573,13 @@ void BrowserThemeProvider::LoadThemePrefs() {
   }
 }
 
-void BrowserThemeProvider::NotifyThemeChanged(Extension* extension) {
-  LOG(INFO) << "Sending BROWSER_THEME_CHANGED";
+void BrowserThemeProvider::NotifyThemeChanged(const Extension* extension) {
+  VLOG(1) << "Sending BROWSER_THEME_CHANGED";
   // Redraw!
   NotificationService* service = NotificationService::current();
   service->Notify(NotificationType::BROWSER_THEME_CHANGED,
                   Source<BrowserThemeProvider>(this),
-                  Details<Extension>(extension));
+                  Details<const Extension>(extension));
 #if defined(OS_MACOSX)
   NotifyPlatformThemeChanged();
 #endif  // OS_MACOSX
@@ -600,9 +600,9 @@ void BrowserThemeProvider::SaveThemeID(const std::string& id) {
   profile_->GetPrefs()->SetString(prefs::kCurrentThemeID, id);
 }
 
-void BrowserThemeProvider::BuildFromExtension(Extension* extension) {
-  scoped_refptr<BrowserThemePack> pack =
-      BrowserThemePack::BuildFromExtension(extension);
+void BrowserThemeProvider::BuildFromExtension(const Extension* extension) {
+  scoped_refptr<BrowserThemePack> pack(
+      BrowserThemePack::BuildFromExtension(extension));
   if (!pack.get()) {
     // TODO(erg): We've failed to install the theme; perhaps we should tell the
     // user? http://crbug.com/34780

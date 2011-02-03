@@ -9,19 +9,23 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
+#include "chrome/common/url_constants.h"
+#include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 
-CoreOptionsHandler::CoreOptionsHandler() {
-}
+CoreOptionsHandler::CoreOptionsHandler() {}
+
+CoreOptionsHandler::~CoreOptionsHandler() {}
 
 void CoreOptionsHandler::GetLocalizedValues(
     DictionaryValue* localized_strings) {
@@ -54,6 +58,24 @@ void CoreOptionsHandler::GetLocalizedValues(
   localized_strings->SetString("managedPrefsBannerText",
       l10n_util::GetStringUTF16(IDS_OPTIONS_MANAGED_PREFS));
 
+  // Search
+  localized_strings->SetString("searchPageTitle",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_SEARCH_PAGE_TITLE));
+  localized_strings->SetString("searchPageInfo",
+      l10n_util::GetStringFUTF16(IDS_OPTIONS_SEARCH_PAGE_INFO,
+          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+  localized_strings->SetString("searchPageNoMatches",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_SEARCH_PAGE_NO_MATCHES));
+  localized_strings->SetString("searchPageHelpLabel",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_SEARCH_PAGE_HELP_LABEL));
+  localized_strings->SetString("searchPageHelpTitle",
+      l10n_util::GetStringFUTF16(IDS_OPTIONS_SEARCH_PAGE_HELP_TITLE,
+          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+  localized_strings->SetString("searchPageHelpURL",
+      google_util::AppendGoogleLocaleParam(
+          GURL(chrome::kChromeHelpURL)).spec());
+
+  // Common
   localized_strings->SetString("ok",
       l10n_util::GetStringUTF16(IDS_OK));
   localized_strings->SetString("cancel",
@@ -117,6 +139,8 @@ void CoreOptionsHandler::RegisterMessages() {
       NewCallback(this, &CoreOptionsHandler::HandleSetStringPref));
   dom_ui_->RegisterMessageCallback("setObjectPref",
       NewCallback(this, &CoreOptionsHandler::HandleSetObjectPref));
+  dom_ui_->RegisterMessageCallback("clearPref",
+      NewCallback(this, &CoreOptionsHandler::HandleClearPref));
   dom_ui_->RegisterMessageCallback("coreOptionsUserMetricsAction",
       NewCallback(this, &CoreOptionsHandler::HandleUserMetricsAction));
 }
@@ -126,7 +150,6 @@ void CoreOptionsHandler::HandleInitialize(const ListValue* args) {
 }
 
 Value* CoreOptionsHandler::FetchPref(const std::string& pref_name) {
-  DCHECK(dom_ui_);
   PrefService* pref_service = dom_ui_->GetProfile()->GetPrefs();
 
   const PrefService::Preference* pref =
@@ -152,7 +175,6 @@ void CoreOptionsHandler::SetPref(const std::string& pref_name,
                                  Value::ValueType pref_type,
                                  const std::string& value_string,
                                  const std::string& metric) {
-  DCHECK(dom_ui_);
   PrefService* pref_service = dom_ui_->GetProfile()->GetPrefs();
 
   switch (pref_type) {
@@ -176,6 +198,16 @@ void CoreOptionsHandler::SetPref(const std::string& pref_name,
   ProcessUserMetric(pref_type, value_string, metric);
 }
 
+void CoreOptionsHandler::ClearPref(const std::string& pref_name,
+                                   const std::string& metric) {
+  PrefService* pref_service = dom_ui_->GetProfile()->GetPrefs();
+  pref_service->ClearPref(pref_name.c_str());
+  pref_service->ScheduleSavePersistentPrefs();
+
+  if (!metric.empty())
+    UserMetricsRecordAction(UserMetricsAction(metric.c_str()));
+}
+
 void CoreOptionsHandler::ProcessUserMetric(Value::ValueType pref_type,
                                            const std::string& value_string,
                                            const std::string& metric) {
@@ -196,9 +228,7 @@ void CoreOptionsHandler::StopObservingPref(const std::string& path) {
 void CoreOptionsHandler::HandleFetchPrefs(const ListValue* args) {
   // First param is name of callback function, so, there needs to be at least
   // one more element for the actual preference identifier.
-  const size_t kMinFetchPrefsParamCount = 2;
-  if (args->GetSize() < kMinFetchPrefsParamCount)
-    return;
+  DCHECK_GE(static_cast<int>(args->GetSize()), 2);
 
   // Get callback JS function name.
   Value* callback;
@@ -233,9 +263,7 @@ void CoreOptionsHandler::HandleFetchPrefs(const ListValue* args) {
 void CoreOptionsHandler::HandleObservePrefs(const ListValue* args) {
   // First param is name is JS callback function name, the rest are pref
   // identifiers that we are observing.
-  const size_t kMinObservePrefsParamCount = 2;
-  if (args->GetSize() < kMinObservePrefsParamCount)
-    return;
+  DCHECK_GE(static_cast<int>(args->GetSize()), 2);
 
   // Get preference change callback function name.
   string16 callback_func_name;
@@ -281,8 +309,7 @@ void CoreOptionsHandler::HandleSetObjectPref(const ListValue* args) {
 
 void CoreOptionsHandler::HandleSetPref(const ListValue* args,
                                        Value::ValueType type) {
-  if (args->GetSize() < 2)
-    return;
+  DCHECK_GT(static_cast<int>(args->GetSize()), 1);
 
   std::string pref_name;
   if (!args->GetString(0, &pref_name))
@@ -299,6 +326,20 @@ void CoreOptionsHandler::HandleSetPref(const ListValue* args,
   SetPref(pref_name, type, value_string, metric);
 }
 
+void CoreOptionsHandler::HandleClearPref(const ListValue* args) {
+  DCHECK_GT(static_cast<int>(args->GetSize()), 0);
+
+  std::string pref_name;
+  if (!args->GetString(0, &pref_name))
+    return;
+
+  std::string metric;
+  if (args->GetSize() > 1)
+    args->GetString(1, &metric);
+
+  ClearPref(pref_name, metric);
+}
+
 void CoreOptionsHandler::HandleUserMetricsAction(const ListValue* args) {
   std::string metric = WideToUTF8(ExtractStringValue(args));
   if (!metric.empty())
@@ -306,8 +347,6 @@ void CoreOptionsHandler::HandleUserMetricsAction(const ListValue* args) {
 }
 
 void CoreOptionsHandler::NotifyPrefChanged(const std::string* pref_name) {
-  DCHECK(pref_name);
-  DCHECK(dom_ui_);
   PrefService* pref_service = dom_ui_->GetProfile()->GetPrefs();
   const PrefService::Preference* pref =
       pref_service->FindPreference(pref_name->c_str());

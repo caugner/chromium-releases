@@ -215,8 +215,8 @@
         '<(DEPTH)/net/net.gyp:net_test_support',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
+        '<(DEPTH)/third_party/WebKit/WebKit/chromium/WebKit.gyp:copy_TestNetscapePlugIn',
         '<(DEPTH)/tools/imagediff/image_diff.gyp:image_diff',
-        '<(DEPTH)/webkit/support/webkit_support.gyp:copy_npapi_layout_test_plugin',
       ],
       'defines': [
         # Technically not a unit test but require functions available only to
@@ -263,6 +263,15 @@
             '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.rc',
             '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_en-US.rc',
           ],
+          'configurations': {
+            'Debug_Base': {
+              'msvs_settings': {
+                'VCLinkerTool': {
+                  'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
+                },
+              },
+            },
+          },
         }],
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
           'conditions': [
@@ -319,13 +328,6 @@
                 '<(PRODUCT_DIR)/libffmpegsumo.dylib',
               ],
             },
-            {
-              # TODO(tony): We should have TestShell.app load plugins from
-              # <(PRODUCT_DIR)/plugins so we don't have this extra copy of
-              # the plugin.
-              'destination': '<(PRODUCT_DIR)/TestShell.app/Contents/PlugIns/',
-              'files': ['<(PRODUCT_DIR)/TestNetscapePlugIn.plugin/'],
-            },
           ],
         }, { # OS != "mac"
           'dependencies': [
@@ -345,6 +347,7 @@
       'msvs_guid': 'E6766F81-1FCD-4CD7-BC16-E36964A14867',
       'dependencies': [
         'test_shell_common',
+        '<(DEPTH)/base/base.gyp:test_support_base',
         '<(DEPTH)/net/net.gyp:net_test_support',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/testing/gmock.gyp:gmock',
@@ -367,6 +370,8 @@
         '../../appcache/appcache_update_job_unittest.cc',
         '../../appcache/appcache_url_request_job_unittest.cc',
         '../../appcache/mock_appcache_service.h',
+        '../../appcache/mock_appcache_storage.cc',
+        '../../appcache/mock_appcache_storage.h',
         '../../appcache/mock_appcache_storage_unittest.cc',
         '../../blob/blob_storage_controller_unittest.cc',
         '../../blob/blob_url_request_job_unittest.cc',
@@ -377,7 +382,8 @@
         '../../database/quota_table_unittest.cc',
         '../../fileapi/file_system_operation_unittest.cc',
         '../../fileapi/file_system_path_manager_unittest.cc',
-        '../../fileapi/file_system_quota_unittest.cc',
+        '../../fileapi/file_system_quota_manager_unittest.cc',
+        '../../fileapi/webfilewriter_base_unittest.cc',
         '../../glue/bookmarklet_unittest.cc',
         '../../glue/context_menu_unittest.cc',
         '../../glue/cpp_bound_class_unittest.cc',
@@ -543,6 +549,8 @@
             '../../glue/plugins/test/plugin_npobject_proxy_test.h',
             '../../glue/plugins/test/plugin_schedule_timer_test.cc',
             '../../glue/plugins/test/plugin_schedule_timer_test.h',
+            '../../glue/plugins/test/plugin_setup_test.cc',
+            '../../glue/plugins/test/plugin_setup_test.h',
             '../../glue/plugins/test/plugin_thread_async_call_test.cc',
             '../../glue/plugins/test/plugin_thread_async_call_test.h',
             '../../glue/plugins/test/plugin_windowed_test.cc',

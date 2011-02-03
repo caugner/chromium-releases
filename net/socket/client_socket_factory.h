@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "base/basictypes.h"
 #include "net/base/net_log.h"
 
 namespace net {
@@ -15,14 +16,19 @@ namespace net {
 class AddressList;
 class ClientSocket;
 class ClientSocketHandle;
+class DnsCertProvenanceChecker;
+class HostPortPair;
 class SSLClientSocket;
 struct SSLConfig;
+class SSLHostInfo;
 
 // Callback function to create new SSLClientSocket objects.
 typedef SSLClientSocket* (*SSLClientSocketFactory)(
     ClientSocketHandle* transport_socket,
-    const std::string& hostname,
-    const SSLConfig& ssl_config);
+    const HostPortPair& host_and_port,
+    const SSLConfig& ssl_config,
+    SSLHostInfo* ssl_host_info,
+    DnsCertProvenanceChecker* dns_cert_checker);
 
 // An interface used to instantiate ClientSocket objects.  Used to facilitate
 // testing code with mock socket implementations.
@@ -39,14 +45,17 @@ class ClientSocketFactory {
 
   virtual SSLClientSocket* CreateSSLClientSocket(
       ClientSocketHandle* transport_socket,
-      const std::string& hostname,
-      const SSLConfig& ssl_config) = 0;
-
+      const HostPortPair& host_and_port,
+      const SSLConfig& ssl_config,
+      SSLHostInfo* ssl_host_info,
+      DnsCertProvenanceChecker* dns_cert_checker) = 0;
 
   // Deprecated function (http://crbug.com/37810) that takes a ClientSocket.
-  virtual SSLClientSocket* CreateSSLClientSocket(ClientSocket* transport_socket,
-                                                 const std::string& hostname,
-                                                 const SSLConfig& ssl_config);
+  virtual SSLClientSocket* CreateSSLClientSocket(
+      ClientSocket* transport_socket,
+      const HostPortPair& host_and_port,
+      const SSLConfig& ssl_config,
+      SSLHostInfo* ssl_host_info);
 
   // Returns the default ClientSocketFactory.
   static ClientSocketFactory* GetDefaultFactory();

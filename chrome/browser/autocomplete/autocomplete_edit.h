@@ -6,7 +6,8 @@
 #define CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_EDIT_H_
 #pragma once
 
-#include "chrome/browser/autocomplete/autocomplete.h"
+#include "base/string16.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/page_transition_types.h"
@@ -21,6 +22,7 @@ class SkBitmap;
 class AutocompleteEditController;
 class AutocompleteEditModel;
 class AutocompleteEditView;
+class AutocompleteResult;
 
 namespace gfx {
 class Rect;
@@ -48,6 +50,13 @@ class AutocompleteEditController {
   // autocomplete. Returns true if the text was committed.
   virtual bool OnCommitSuggestedText(const std::wstring& typed_text) = 0;
 
+  // Accepts the currently showing instant preview, if any, and returns true.
+  // Returns false if there is no instant preview showing.
+  virtual bool AcceptCurrentInstantPreview() { return false; }
+
+  // Sets the suggested search text to |suggested_text|.
+  virtual void OnSetSuggestedSearchText(const string16& suggested_text) = 0;
+
   // Invoked when the popup is going to change its bounds to |bounds|.
   virtual void OnPopupBoundsChanged(const gfx::Rect& bounds) = 0;
 
@@ -67,6 +76,9 @@ class AutocompleteEditController {
   // of the views around the edit, including the text of the edit and the
   // status of any keyword- or hint-related state.
   virtual void OnChanged() = 0;
+
+  // Called when the selection of the AutocompleteEditView changes.
+  virtual void OnSelectionBoundsChanged() = 0;
 
   // Called whenever the user starts or stops an input session (typing,
   // interacting with the edit, etc.).  When user input is not in progress,
@@ -149,6 +161,11 @@ class AutocompleteEditModel : public NotificationObserver {
   // Sets the url, and if known, the title and favicon.
   void GetDataForURLExport(GURL* url, std::wstring* title, SkBitmap* favicon);
 
+  // Returns true if a verbatim query should be used for instant. A verbatim
+  // query is forced in certain situations, such as pressing delete at the end
+  // of the edit.
+  bool UseVerbatimInstant();
+
   // If the user presses ctrl-enter, it means "add .com to the the end".  The
   // desired TLD is the TLD the user desires to add to the end of the current
   // input, if any, based on their control key state and any other actions
@@ -195,6 +212,10 @@ class AutocompleteEditModel : public NotificationObserver {
 
   // Sets the user_text_ to |text|.  Only the View should call this.
   void SetUserText(const std::wstring& text);
+
+  // Calls through to SearchProvider::FinalizeInstantQuery.
+  void FinalizeInstantQuery(const std::wstring& input_text,
+                            const std::wstring& suggest_text);
 
   // Reverts the edit model back to its unedited state (permanent text showing,
   // no user input in progress).
@@ -295,7 +316,7 @@ class AutocompleteEditModel : public NotificationObserver {
   //     a different match, or the inline autocomplete text.  We distinguish by
   //     checking if |destination_for_temporary_text_change| is NULL.
   //   |destination_for_temporary_text_change| is NULL (if temporary text should
-  //     not change) or the pre-change desitnation URL (if temporary text should
+  //     not change) or the pre-change destination URL (if temporary text should
   //     change) so we can save it off to restore later.
   //   |keyword| is the keyword to show a hint for if |is_keyword_hint| is true,
   //     or the currently selected keyword if |is_keyword_hint| is false (see
@@ -317,6 +338,9 @@ class AutocompleteEditModel : public NotificationObserver {
 
   // Invoked when the popup is going to change its bounds to |bounds|.
   void PopupBoundsChangedTo(const gfx::Rect& bounds);
+
+  // Invoked when the autocomplete results may have changed in some way.
+  void ResultsUpdated();
 
  private:
   enum PasteState {
@@ -366,6 +390,10 @@ class AutocompleteEditModel : public NotificationObserver {
   // nav URL, if |alternate_nav_url| is non-NULL and there is such a URL.
   void GetInfoForCurrentText(AutocompleteMatch* match,
                              GURL* alternate_nav_url) const;
+
+  // Determines the suggested search text and invokes OnSetSuggestedSearchText
+  // on the controller.
+  void UpdateSuggestedSearchText();
 
   AutocompleteEditView* view_;
 

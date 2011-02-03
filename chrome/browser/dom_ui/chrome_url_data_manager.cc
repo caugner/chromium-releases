@@ -15,7 +15,7 @@
 #include "base/thread.h"
 #include "base/values.h"
 #if defined(OS_WIN)
-#include "base/win_util.h"
+#include "base/win/windows_version.h"
 #endif
 #include "chrome/browser/appcache/view_appcache_internals_job_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -39,7 +39,7 @@
 // resource requests asynchronously.
 // It hands off URL requests to ChromeURLDataManager, which asynchronously
 // calls back once the data is available.
-class URLRequestChromeJob : public URLRequestJob {
+class URLRequestChromeJob : public net::URLRequestJob {
  public:
   explicit URLRequestChromeJob(URLRequest* request);
 
@@ -102,6 +102,8 @@ void RegisterURLRequestChromeJob() {
   }
 
   SharedResourcesDataSource::Register();
+  URLRequest::RegisterProtocolFactory(chrome::kChromeDevToolsScheme,
+                                      &ChromeURLDataManager::Factory);
   URLRequest::RegisterProtocolFactory(chrome::kChromeUIScheme,
                                       &ChromeURLDataManager::Factory);
 }
@@ -118,7 +120,8 @@ void UnregisterURLRequestChromeJob() {
 void ChromeURLDataManager::URLToRequest(const GURL& url,
                                         std::string* source_name,
                                         std::string* path) {
-  DCHECK(url.SchemeIs(chrome::kChromeUIScheme));
+  DCHECK(url.SchemeIs(chrome::kChromeDevToolsScheme) ||
+         url.SchemeIs(chrome::kChromeUIScheme));
 
   if (!url.is_valid()) {
     NOTREACHED();
@@ -266,7 +269,7 @@ void ChromeURLDataManager::DataAvailable(
   if (i != pending_requests_.end()) {
     // We acquire a reference to the job so that it doesn't disappear under the
     // feet of any method invoked here (we could trigger a callback).
-    scoped_refptr<URLRequestChromeJob> job = i->second;
+    scoped_refptr<URLRequestChromeJob> job(i->second);
     pending_requests_.erase(i);
     job->DataAvailable(bytes);
   }
@@ -305,7 +308,7 @@ void ChromeURLDataManager::DataSource::SetFontAndTextDirection(
 #if defined(OS_WIN)
   // Some fonts used for some languages changed a lot in terms of the font
   // metric in Vista. So, we need to use different size before Vista.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
+  if (base::win::GetVersion() < base::win::VERSION_VISTA)
     web_font_size_id = IDS_WEB_FONT_SIZE_XP;
 #endif
   localized_strings->SetString("fontsize",

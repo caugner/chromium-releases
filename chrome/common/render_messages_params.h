@@ -27,6 +27,8 @@
 #include "chrome/common/renderer_preferences.h"
 #include "chrome/common/serialized_script_value.h"
 #include "chrome/common/window_container_type.h"
+#include "gfx/rect.h"
+#include "gfx/size.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_param_traits.h"
 #include "media/audio/audio_parameters.h"
@@ -90,6 +92,7 @@ struct ViewMsg_Navigate_Params {
 
   // The URL to send in the "Referer" header field. Can be empty if there is
   // no referrer.
+  // TODO: consider folding this into extra_headers.
   GURL referrer;
 
   // The type of transition.
@@ -103,6 +106,9 @@ struct ViewMsg_Navigate_Params {
 
   // The time the request was created
   base::Time request_time;
+
+  // Extra headers (separated by \n) to send during the request.
+  std::string extra_headers;
 };
 
 // Current status of the audio output stream in the browser process. Browser
@@ -347,6 +353,10 @@ struct ViewHostMsg_UpdateRect_Params {
   // progress.
   gfx::Size view_size;
 
+  // The area of the RenderView reserved for resize corner when this message
+  // was generated.  Reported for the same reason as view_size is.
+  gfx::Rect resizer_rect;
+
   // New window locations for plugin child windows.
   std::vector<webkit_glue::WebPluginGeometry> plugin_window_moves;
 
@@ -577,14 +587,10 @@ struct ViewHostMsg_Audio_CreateStream_Params {
   ViewHostMsg_Audio_CreateStream_Params();
   ~ViewHostMsg_Audio_CreateStream_Params();
 
-  // Format request for the stream.
+  // Parameters for the new audio stream.
+  // If |samples_per_packet| is set 0, the audio packet size is selected
+  // automatically by the browser process.
   AudioParameters params;
-
-  // Number of bytes per packet. Determines the maximum number of bytes
-  // transported for each audio packet request.
-  // A value of 0 means that the audio packet size is selected automatically
-  // by the browser process.
-  uint32 packet_size;
 };
 
 // This message is used for supporting popup menus on Mac OS X using native
@@ -703,14 +709,17 @@ struct ViewHostMsg_IDBIndexOpenCursor_Params {
   // The response should have this id.
   int32 response_id_;
 
-  // The serialized left key.
-  IndexedDBKey left_key_;
+  // The serialized lower key.
+  IndexedDBKey lower_key_;
 
-  // The serialized right key.
-  IndexedDBKey right_key_;
+  // The serialized upper key.
+  IndexedDBKey upper_key_;
 
-  // The key flags.
-  int32 key_flags_;
+  // Is the lower bound open?
+  bool lower_open_;
+
+  // Is the upper bound open?
+  bool upper_open_;
 
   // The direction of this cursor.
   int32 direction_;
@@ -775,14 +784,17 @@ struct ViewHostMsg_IDBObjectStoreOpenCursor_Params {
   // The response should have this id.
   int32 response_id_;
 
-  // The serialized left key.
-  IndexedDBKey left_key_;
+  // The serialized lower key.
+  IndexedDBKey lower_key_;
 
-  // The serialized right key.
-  IndexedDBKey right_key_;
+  // The serialized upper key.
+  IndexedDBKey upper_key_;
 
-  // The key flags.
-  int32 flags_;
+  // Is the lower bound open?
+  bool lower_open_;
+
+  // Is the upper bound open?
+  bool upper_open_;
 
   // The direction of this cursor.
   int32 direction_;
@@ -1315,8 +1327,8 @@ struct ParamTraits<ViewHostMsg_DomMessage_Params> {
 };
 
 template <>
-struct ParamTraits<base::file_util_proxy::Entry> {
-  typedef base::file_util_proxy::Entry param_type;
+struct ParamTraits<base::FileUtilProxy::Entry> {
+  typedef base::FileUtilProxy::Entry param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* p);
   static void Log(const param_type& p, std::string* l);

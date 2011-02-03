@@ -44,8 +44,8 @@ SpdyStream::SpdyStream(SpdySession* session,
       stream_id_(stream_id),
       priority_(0),
       stalled_by_flow_control_(false),
-      send_window_size_(spdy::kInitialWindowSize),
-      recv_window_size_(spdy::kInitialWindowSize),
+      send_window_size_(spdy::kSpdyStreamInitialWindowSize),
+      recv_window_size_(spdy::kSpdyStreamInitialWindowSize),
       pushed_(pushed),
       metrics_(Singleton<BandwidthMetrics>::get()),
       response_received_(false),
@@ -60,13 +60,10 @@ SpdyStream::SpdyStream(SpdySession* session,
       net_log_(net_log),
       send_bytes_(0),
       recv_bytes_(0) {
-  net_log_.BeginEvent(NetLog::TYPE_SPDY_STREAM,
-                      new NetLogIntegerParameter("stream_id", stream_id_));
 }
 
 SpdyStream::~SpdyStream() {
   UpdateHistograms();
-  net_log_.EndEvent(NetLog::TYPE_SPDY_STREAM, NULL);
 }
 
 void SpdyStream::SetDelegate(Delegate* delegate) {
@@ -87,9 +84,17 @@ void SpdyStream::PushedStreamReplayData() {
   if (cancelled_ || !delegate_)
     return;
 
-  delegate_->OnResponseReceived(*response_, response_time_, OK);
-
   continue_buffering_data_ = false;
+
+  int rv = delegate_->OnResponseReceived(*response_, response_time_, OK);
+  if (rv == ERR_INCOMPLETE_SPDY_HEADERS) {
+    // We don't have complete headers.  Assume we're waiting for another
+    // HEADERS frame.  Since we don't have headers, we had better not have
+    // any pending data frames.
+    DCHECK_EQ(0U, pending_buffers_.size());
+    return;
+  }
+
   std::vector<scoped_refptr<IOBufferWithSize> > buffers;
   buffers.swap(pending_buffers_);
   for (size_t i = 0; i < buffers.size(); ++i) {
@@ -148,9 +153,10 @@ void SpdyStream::IncreaseSendWindowSize(int delta_window_size) {
 
   send_window_size_ = new_window_size;
 
-  net_log_.AddEvent(NetLog::TYPE_SPDY_STREAM_SEND_WINDOW_UPDATE,
-                    new NetLogSpdyStreamWindowUpdateParameter(stream_id_,
-                        delta_window_size, send_window_size_));
+  net_log_.AddEvent(
+      NetLog::TYPE_SPDY_STREAM_SEND_WINDOW_UPDATE,
+      make_scoped_refptr(new NetLogSpdyStreamWindowUpdateParameter(
+          stream_id_, delta_window_size, send_window_size_)));
   if (stalled_by_flow_control_) {
     stalled_by_flow_control_ = false;
     io_state_ = STATE_SEND_BODY;
@@ -170,9 +176,10 @@ void SpdyStream::DecreaseSendWindowSize(int delta_window_size) {
 
   send_window_size_ -= delta_window_size;
 
-  net_log_.AddEvent(NetLog::TYPE_SPDY_STREAM_SEND_WINDOW_UPDATE,
-                    new NetLogSpdyStreamWindowUpdateParameter(stream_id_,
-                        -delta_window_size, send_window_size_));
+  net_log_.AddEvent(
+      NetLog::TYPE_SPDY_STREAM_SEND_WINDOW_UPDATE,
+      make_scoped_refptr(new NetLogSpdyStreamWindowUpdateParameter(
+          stream_id_, -delta_window_size, send_window_size_)));
 }
 
 void SpdyStream::IncreaseRecvWindowSize(int delta_window_size) {
@@ -185,9 +192,10 @@ void SpdyStream::IncreaseRecvWindowSize(int delta_window_size) {
     DCHECK(new_window_size > 0);
 
   recv_window_size_ = new_window_size;
-  net_log_.AddEvent(NetLog::TYPE_SPDY_STREAM_RECV_WINDOW_UPDATE,
-                    new NetLogSpdyStreamWindowUpdateParameter(stream_id_,
-                        delta_window_size, recv_window_size_));
+  net_log_.AddEvent(
+      NetLog::TYPE_SPDY_STREAM_RECV_WINDOW_UPDATE,
+      make_scoped_refptr(new NetLogSpdyStreamWindowUpdateParameter(
+          stream_id_, delta_window_size, recv_window_size_)));
   session_->SendWindowUpdate(stream_id_, delta_window_size);
 }
 
@@ -195,9 +203,10 @@ void SpdyStream::DecreaseRecvWindowSize(int delta_window_size) {
   DCHECK_GE(delta_window_size, 1);
 
   recv_window_size_ -= delta_window_size;
-  net_log_.AddEvent(NetLog::TYPE_SPDY_STREAM_RECV_WINDOW_UPDATE,
-                    new NetLogSpdyStreamWindowUpdateParameter(stream_id_,
-                        -delta_window_size, recv_window_size_));
+  net_log_.AddEvent(
+      NetLog::TYPE_SPDY_STREAM_RECV_WINDOW_UPDATE,
+      make_scoped_refptr(new NetLogSpdyStreamWindowUpdateParameter(
+          stream_id_, -delta_window_size, recv_window_size_)));
 
   // Since we never decrease the initial window size, we should never hit
   // a negative |recv_window_size_|, if we do, it's a flow-control violation.
@@ -248,8 +257,43 @@ int SpdyStream::OnResponseReceived(const spdy::SpdyHeaderBlock& response) {
   return rv;
 }
 
+int SpdyStream::OnHeaders(const spdy::SpdyHeaderBlock& headers) {
+  DCHECK(!response_->empty());
+
+  // Append all the headers into the response header block.
+  for (spdy::SpdyHeaderBlock::const_iterator it = headers.begin();
+      it != headers.end(); ++it) {
+    // Disallow duplicate headers.  This is just to be conservative.
+    if ((*response_).find(it->first) != (*response_).end()) {
+      LOG(WARNING) << "HEADERS duplicate header";
+      response_status_ = ERR_SPDY_PROTOCOL_ERROR;
+      return ERR_SPDY_PROTOCOL_ERROR;
+    }
+
+    (*response_)[it->first] = it->second;
+  }
+
+  int rv = OK;
+  if (delegate_) {
+    rv = delegate_->OnResponseReceived(*response_, response_time_, rv);
+    // ERR_INCOMPLETE_SPDY_HEADERS means that we are waiting for more
+    // headers before the response header block is complete.
+    if (rv == ERR_INCOMPLETE_SPDY_HEADERS)
+      rv = OK;
+  }
+  return rv;
+}
+
 void SpdyStream::OnDataReceived(const char* data, int length) {
   DCHECK_GE(length, 0);
+
+  // If we don't have a response, then the SYN_REPLY did not come through.
+  // We cannot pass data up to the caller unless the reply headers have been
+  // received.
+  if (!response_received()) {
+    session_->CloseStream(stream_id_, ERR_SYN_REPLY_NOT_RECEIVED);
+    return;
+  }
 
   if (!delegate_ || continue_buffering_data_) {
     // It should be valid for this to happen in the server push case.
@@ -257,7 +301,7 @@ void SpdyStream::OnDataReceived(const char* data, int length) {
     if (length > 0) {
       IOBufferWithSize* buf = new IOBufferWithSize(length);
       memcpy(buf->data(), data, length);
-      pending_buffers_.push_back(buf);
+      pending_buffers_.push_back(make_scoped_refptr(buf));
     } else {
       pending_buffers_.push_back(NULL);
       metrics_.StopStream();
@@ -267,15 +311,7 @@ void SpdyStream::OnDataReceived(const char* data, int length) {
     return;
   }
 
- CHECK(!closed());
-
-  // If we don't have a response, then the SYN_REPLY did not come through.
-  // We cannot pass data up to the caller unless the reply headers have been
-  // received.
-  if (!response_received()) {
-    session_->CloseStream(stream_id_, ERR_SYN_REPLY_NOT_RECEIVED);
-    return;
-  }
+  CHECK(!closed());
 
   // A zero-length read means that the stream is being closed.
   if (!length) {
@@ -298,7 +334,7 @@ void SpdyStream::OnDataReceived(const char* data, int length) {
     // We'll return received data when delegate gets attached to the stream.
     IOBufferWithSize* buf = new IOBufferWithSize(length);
     memcpy(buf->data(), data, length);
-    pending_buffers_.push_back(buf);
+    pending_buffers_.push_back(make_scoped_refptr(buf));
     return;
   }
 
@@ -359,6 +395,43 @@ bool SpdyStream::GetSSLInfo(SSLInfo* ssl_info, bool* was_npn_negotiated) {
 
 bool SpdyStream::GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) {
   return session_->GetSSLCertRequestInfo(cert_request_info);
+}
+
+bool SpdyStream::HasUrl() const {
+  if (pushed_)
+    return response_received();
+  return request_.get() != NULL;
+}
+
+GURL SpdyStream::GetUrl() const {
+  DCHECK(HasUrl());
+
+  if (pushed_) {
+    // assemble from the response
+    std::string url;
+    spdy::SpdyHeaderBlock::const_iterator it;
+    it = response_->find("url");
+    if (it != (*response_).end())
+      url = it->second;
+    return GURL(url);
+  }
+
+  // assemble from the request
+  std::string scheme;
+  std::string host_port;
+  std::string path;
+  spdy::SpdyHeaderBlock::const_iterator it;
+  it = request_->find("scheme");
+  if (it != (*request_).end())
+    scheme = it->second;
+  it = request_->find("host");
+  if (it != (*request_).end())
+    host_port = it->second;
+  it = request_->find("path");
+  if (it != (*request_).end())
+    path = it->second;
+  std::string url = scheme + "://" + host_port + path;
+  return GURL(url);
 }
 
 int SpdyStream::DoLoop(int result) {

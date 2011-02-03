@@ -22,6 +22,12 @@ enum GLImplementation {
   kGLImplementationMockGL
 };
 
+// The GL implementation names that can be passed to --use-gl.
+extern const char kGLImplementationDesktopName[];
+extern const char kGLImplementationOSMesaName[];
+extern const char kGLImplementationEGLName[];
+extern const char kGLImplementationMockName[];
+
 #if defined(OS_WIN)
 typedef void* (WINAPI *GLGetProcAddressProc)(const char* name);
 #else
@@ -30,6 +36,9 @@ typedef void* (*GLGetProcAddressProc)(const char* name);
 
 // Initialize a particular GL implementation.
 bool InitializeGLBindings(GLImplementation implementation);
+
+// Initialize Debug logging wrappers for GL bindings.
+void InitializeDebugGLBindings();
 
 // Set the current GL implementation.
 void SetGLImplementation(GLImplementation implementation);

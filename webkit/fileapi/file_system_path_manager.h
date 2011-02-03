@@ -9,10 +9,14 @@
 
 #include "base/callback.h"
 #include "base/file_path.h"
-#include "base/message_loop_proxy.h"
 #include "base/scoped_ptr.h"
-#include "googleurl/src/gurl.h"
 #include "webkit/fileapi/file_system_types.h"
+
+class GURL;
+
+namespace base {
+class MessageLoopProxy;
+}
 
 namespace fileapi {
 
@@ -22,6 +26,9 @@ class FileSystemPathManager {
                         const FilePath& profile_path,
                         bool is_incognito,
                         bool allow_file_access_from_files);
+  ~FileSystemPathManager();
+
+  static FilePath GetFileSystemCommonRootDirectory(const FilePath& root_path);
 
   // Callback for GetFileSystemRootPath.
   // If the request is accepted and the root filesystem for the origin exists
@@ -64,6 +71,10 @@ class FileSystemPathManager {
 
   static const char kPersistentName[];
   static const char kTemporaryName[];
+
+  const FilePath& base_path() const {
+    return base_path_;
+  }
 
  private:
   class GetFileSystemRootPathTask;

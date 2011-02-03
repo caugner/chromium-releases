@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/login/login_utils.h"
 
+#include <vector>
+
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -12,32 +14,44 @@
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_init.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
+#include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
-#include "chrome/browser/chromeos/external_cookie_handler.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/cookie_fetcher.h"
 #include "chrome/browser/chromeos/login/google_authenticator.h"
+#include "chrome/browser/chromeos/login/language_switch_menu.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/login/parallel_authenticator.h"
 #include "chrome/browser/chromeos/login/user_image_downloader.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/proxy_config_service.h"
+#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/gaia/token_service.h"
+#include "chrome/browser/net/preconnect.h"
+#include "chrome/browser/net/pref_proxy_config_service.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
+#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/ui/browser_init.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/cookie_store.h"
+#include "net/proxy/proxy_config_service.h"
 #include "net/url_request/url_request_context.h"
 #include "views/widget/widget_gtk.h"
 
@@ -45,11 +59,40 @@ namespace chromeos {
 
 namespace {
 
-
-// Prefix for Auth token received from ClientLogin request.
+// Affixes for Auth token received from ClientLogin request.
 const char kAuthPrefix[] = "Auth=";
-// Suffix for Auth token received from ClientLogin request.
 const char kAuthSuffix[] = "\n";
+
+// Increase logging level for Guest mode to avoid LOG(INFO) messages in logs.
+const char kGuestModeLoggingLevel[] = "1";
+
+// Format of command line switch.
+const char kSwitchFormatString[] = " --%s=\"%s\"";
+
+// Resets the proxy configuration service for the default request context.
+class ResetDefaultProxyConfigServiceTask : public Task {
+ public:
+  ResetDefaultProxyConfigServiceTask(
+      net::ProxyConfigService* proxy_config_service)
+      : proxy_config_service_(proxy_config_service) {}
+  virtual ~ResetDefaultProxyConfigServiceTask() {}
+
+  // Task override.
+  virtual void Run() {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    URLRequestContextGetter* getter = Profile::GetDefaultRequestContext();
+    DCHECK(getter);
+    if (getter) {
+      getter->GetURLRequestContext()->proxy_service()->ResetConfigService(
+          proxy_config_service_.release());
+    }
+  }
+
+ private:
+  scoped_ptr<net::ProxyConfigService> proxy_config_service_;
+
+  DISALLOW_COPY_AND_ASSIGN(ResetDefaultProxyConfigServiceTask);
+};
 
 }  // namespace
 
@@ -61,7 +104,9 @@ class LoginUtilsImpl : public LoginUtils {
 
   // Invoked after the user has successfully logged in. This launches a browser
   // and does other bookkeeping after logging in.
-  virtual void CompleteLogin(const std::string& username,
+  virtual void CompleteLogin(
+      const std::string& username,
+      const std::string& password,
       const GaiaAuthConsumer::ClientLoginResult& credentials);
 
   // Invoked after the tmpfs is successfully mounted.
@@ -79,16 +124,15 @@ class LoginUtilsImpl : public LoginUtils {
   // Returns if browser launch enabled now or not.
   virtual bool IsBrowserLaunchEnabled() const;
 
-  // Returns auth token for 'cp' Contacts service.
-  virtual const std::string& GetAuthToken() const { return auth_token_; }
+  // Warms the url used by authentication.
+  virtual void PrewarmAuthentication();
 
  private:
+  // Check user's profile for kApplicationLocale setting.
+  void RespectLocalePreference(PrefService* pref);
+
   // Indicates if DoBrowserLaunch will actually launch the browser or not.
   bool browser_launch_enabled_;
-
-  // Auth token for Contacts service. Received by GoogleAuthenticator as
-  // part of ClientLogin response.
-  std::string auth_token_;
 
   DISALLOW_COPY_AND_ASSIGN(LoginUtilsImpl);
 };
@@ -115,29 +159,78 @@ class LoginUtilsWrapper {
   DISALLOW_COPY_AND_ASSIGN(LoginUtilsWrapper);
 };
 
-void LoginUtilsImpl::CompleteLogin(const std::string& username,
+void LoginUtilsImpl::CompleteLogin(
+    const std::string& username,
+    const std::string& password,
     const GaiaAuthConsumer::ClientLoginResult& credentials) {
+  BootTimesLoader* btl = BootTimesLoader::Get();
 
-  LOG(INFO) << "Completing login for " << username;
+  VLOG(1) << "Completing login for " << username;
+  btl->AddLoginTimeMarker("CompletingLogin", false);
 
-  if (CrosLibrary::Get()->EnsureLoaded())
+  if (CrosLibrary::Get()->EnsureLoaded()) {
     CrosLibrary::Get()->GetLoginLibrary()->StartSession(username, "");
+    btl->AddLoginTimeMarker("StartedSession", false);
+  }
 
   bool first_login = !UserManager::Get()->IsKnownUser(username);
   UserManager::Get()->UserLoggedIn(username);
+  btl->AddLoginTimeMarker("UserLoggedIn", false);
 
-  // Now launch the initial browser window.
+  // Now get the new profile.
   FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   ProfileManager* profile_manager = g_browser_process->profile_manager();
+
+  // Switch log file as soon as possible.
+  logging::RedirectChromeLogging(*(CommandLine::ForCurrentProcess()));
+  btl->AddLoginTimeMarker("LoggingRedirected", false);
+
   // The default profile will have been changed because the ProfileManager
   // will process the notification that the UserManager sends out.
   Profile* profile = profile_manager->GetDefaultProfile(user_data_dir);
+  btl->AddLoginTimeMarker("UserProfileGotten", false);
 
-  logging::RedirectChromeLogging(
-      user_data_dir.Append(profile_manager->GetCurrentProfileDir()),
-      *(CommandLine::ForCurrentProcess()),
-      logging::DELETE_OLD_LOG_FILE);
+  // Change the proxy configuration service of the default request context to
+  // use the preference configuration from the logged-in profile. This ensures
+  // that requests done through the default context use the proxy configuration
+  // provided by configuration policy.
+  //
+  // Note: Many of the clients of the default request context should probably be
+  // fixed to use the request context of the profile they are associated with.
+  // This includes preconnect, autofill, metrics service to only name a few;
+  // see http://code.google.com/p/chromium/issues/detail?id=64339 for details.
+  //
+  // TODO(mnissler) Revisit when support for device-specific policy arrives, at
+  // which point the default request context can directly be managed through
+  // device policy.
+  net::ProxyConfigService* proxy_config_service =
+      new PrefProxyConfigService(
+          profile->GetProxyConfigTracker(),
+          new chromeos::ProxyConfigService(
+              profile->GetChromeOSProxyConfigServiceImpl()));
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          new ResetDefaultProxyConfigServiceTask(
+                              proxy_config_service));
+
+  // Take the credentials passed in and try to exchange them for
+  // full-fledged Google authentication cookies.  This is
+  // best-effort; it's possible that we'll fail due to network
+  // troubles or some such.  Either way, |cf| will call
+  // DoBrowserLaunch on the UI thread when it's done, and then
+  // delete itself.
+  CookieFetcher* cf = new CookieFetcher(profile);
+  cf->AttemptFetch(credentials.data);
+  btl->AddLoginTimeMarker("CookieFetchStarted", false);
+
+  // Init extension event routers; this normally happens in browser_main
+  // but on Chrome OS it has to be deferred until the user finishes
+  // logging in and the profile is not OTR.
+  if (profile->GetExtensionsService() &&
+      profile->GetExtensionsService()->extensions_enabled()) {
+    profile->GetExtensionsService()->InitEventRouters();
+  }
+  btl->AddLoginTimeMarker("ExtensionsServiceStarted", false);
 
   // Supply credentials for sync and others to use. Load tokens from disk.
   TokenService* token_service = profile->GetTokenService();
@@ -148,35 +241,31 @@ void LoginUtilsImpl::CompleteLogin(const std::string& username,
   if (token_service->AreCredentialsValid()) {
     token_service->StartFetchingTokens();
   }
+  btl->AddLoginTimeMarker("TokensGotten", false);
 
   // Set the CrOS user by getting this constructor run with the
   // user's email on first retrieval.
-  profile->GetProfileSyncService(username);
+  profile->GetProfileSyncService(username)->SetPassphrase(password, false);
+  btl->AddLoginTimeMarker("SyncStarted", false);
 
   // Attempt to take ownership; this will fail if device is already owned.
   OwnershipService::GetSharedInstance()->StartTakeOwnershipAttempt(
       UserManager::Get()->logged_in_user().email());
-
   // Own TPM device if, for any reason, it has not been done in EULA
   // wizard screen.
-  if (chromeos::CryptohomeTpmIsEnabled() &&
-      !chromeos::CryptohomeTpmIsBeingOwned()) {
-    if (chromeos::CryptohomeTpmIsOwned()) {
-      chromeos::CryptohomeTpmClearStoredPassword();
-    } else {
-      chromeos::CryptohomeTpmCanAttemptOwnership();
+  if (CrosLibrary::Get()->EnsureLoaded()) {
+    CryptohomeLibrary* cryptohome = CrosLibrary::Get()->GetCryptohomeLibrary();
+    if (cryptohome->TpmIsEnabled() && !cryptohome->TpmIsBeingOwned()) {
+      if (cryptohome->TpmIsOwned()) {
+        cryptohome->TpmClearStoredPassword();
+      } else {
+        cryptohome->TpmCanAttemptOwnership();
+      }
     }
   }
+  btl->AddLoginTimeMarker("TPMOwned", false);
 
-  // Take the credentials passed in and try to exchange them for
-  // full-fledged Google authentication cookies.  This is
-  // best-effort; it's possible that we'll fail due to network
-  // troubles or some such.  Either way, |cf| will call
-  // DoBrowserLaunch on the UI thread when it's done, and then
-  // delete itself.
-  CookieFetcher* cf = new CookieFetcher(profile);
-  cf->AttemptFetch(credentials.data);
-  auth_token_ = credentials.token;
+  RespectLocalePreference(profile->GetPrefs());
 
   static const char kFallbackInputMethodLocale[] = "en-US";
   if (first_login) {
@@ -209,26 +298,55 @@ void LoginUtilsImpl::CompleteLogin(const std::string& username,
       preferred_languages += ",";
       preferred_languages += kFallbackInputMethodLocale;
       language_preferred_languages.SetValue(preferred_languages);
+      btl->AddLoginTimeMarker("IMESTarted", false);
     }
+  }
+
+  // We suck. This is a hack since we do not have the enterprise feature
+  // done yet to pull down policies from the domain admin. We'll take this
+  // out when we get that done properly.
+  // TODO(xiyuan): Remove this once enterprise feature is ready.
+  if (EndsWith(username, "@google.com", true)) {
+    PrefService* pref_service = profile->GetPrefs();
+    pref_service->SetBoolean(prefs::kEnableScreenLock, true);
+  }
+
+  DoBrowserLaunch(profile);
+}
+
+void LoginUtilsImpl::RespectLocalePreference(PrefService* pref) {
+  std::string pref_locale = pref->GetString(prefs::kApplicationLocale);
+  if (pref_locale.empty()) {
+    // TODO(dilmah): current code will clobber existing setting in case
+    // language preference was set via another device
+    // but still not synced yet.  Profile is not synced at this point yet.
+    pref->SetString(prefs::kApplicationLocale,
+                    g_browser_process->GetApplicationLocale());
+  } else {
+    LanguageSwitchMenu::SwitchLanguage(pref_locale);
   }
 }
 
 void LoginUtilsImpl::CompleteOffTheRecordLogin(const GURL& start_url) {
-  LOG(INFO) << "Completing off the record login";
+  VLOG(1) << "Completing off the record login";
 
   UserManager::Get()->OffTheRecordUserLoggedIn();
 
   if (CrosLibrary::Get()->EnsureLoaded()) {
-    // For BWSI we ask session manager to restart Chrome with --bwsi flag.
-    // We keep only some of the arguments of this process.
+    // For guest session we ask session manager to restart Chrome with --bwsi
+    // flag. We keep only some of the arguments of this process.
     static const char* kForwardSwitches[] = {
-        switches::kLoggingLevel,
         switches::kEnableLogging,
         switches::kUserDataDir,
         switches::kScrollPixels,
         switches::kEnableGView,
         switches::kNoFirstRun,
-        switches::kLoginProfile
+        switches::kLoginProfile,
+        switches::kEnableTabbedOptions,
+        switches::kCompressSystemFeedback,
+#if defined(USE_SECCOMP_SANDBOX)
+        switches::kDisableSeccompSandbox,
+#endif
     };
     const CommandLine& browser_command_line =
         *CommandLine::ForCurrentProcess();
@@ -236,17 +354,36 @@ void LoginUtilsImpl::CompleteOffTheRecordLogin(const GURL& start_url) {
     command_line.CopySwitchesFrom(browser_command_line,
                                   kForwardSwitches,
                                   arraysize(kForwardSwitches));
-    command_line.AppendSwitch(switches::kBWSI);
+    command_line.AppendSwitch(switches::kGuestSession);
     command_line.AppendSwitch(switches::kIncognito);
-    command_line.AppendSwitch(switches::kEnableTabbedOptions);
+    command_line.AppendSwitchASCII(switches::kLoggingLevel,
+                                   kGuestModeLoggingLevel);
     command_line.AppendSwitchASCII(
         switches::kLoginUser,
         UserManager::Get()->logged_in_user().email());
+
     if (start_url.is_valid())
       command_line.AppendArg(start_url.spec());
-    CrosLibrary::Get()->GetLoginLibrary()->RestartJob(
-        getpid(),
-        command_line.command_line_string());
+
+    // Override the value of the homepage that is set in first run mode.
+    // TODO(altimofeev): extend action of the |kNoFirstRun| to cover this case.
+    command_line.AppendSwitchASCII(
+        switches::kHomePage,
+        GURL(chrome::kChromeUINewTabURL).spec());
+
+    std::string cmd_line_str = command_line.command_line_string();
+    // Special workaround for the arguments that should be quoted.
+    // Copying switches won't be needed when Guest mode won't need restart
+    // http://crosbug.com/6924
+    if (browser_command_line.HasSwitch(switches::kRegisterPepperPlugins)) {
+      cmd_line_str += base::StringPrintf(
+          kSwitchFormatString,
+          switches::kRegisterPepperPlugins,
+          browser_command_line.GetSwitchValueNative(
+              switches::kRegisterPepperPlugins).c_str());
+    }
+
+    CrosLibrary::Get()->GetLoginLibrary()->RestartJob(getpid(), cmd_line_str);
   }
 }
 
@@ -266,6 +403,45 @@ bool LoginUtilsImpl::IsBrowserLaunchEnabled() const {
   return browser_launch_enabled_;
 }
 
+// We use a special class for this so that it can be safely leaked if we
+// never connect. At shutdown the order is not well defined, and it's possible
+// for the infrastructure needed to unregister might be unstable and crash.
+class WarmingObserver : public NetworkLibrary::NetworkManagerObserver {
+ public:
+  WarmingObserver() {
+    NetworkLibrary *netlib = CrosLibrary::Get()->GetNetworkLibrary();
+    netlib->AddNetworkManagerObserver(this);
+  }
+
+  // If we're now connected, prewarm the auth url.
+  void OnNetworkManagerChanged(NetworkLibrary* netlib) {
+    if (netlib->Connected()) {
+      const int kConnectionsNeeded = 1;
+      chrome_browser_net::Preconnect::PreconnectOnUIThread(
+          GURL(GaiaAuthFetcher::kClientLoginUrl),
+          chrome_browser_net::UrlInfo::EARLY_LOAD_MOTIVATED,
+          kConnectionsNeeded);
+      netlib->RemoveNetworkManagerObserver(this);
+      delete this;
+    }
+  }
+};
+
+void LoginUtilsImpl::PrewarmAuthentication() {
+  if (CrosLibrary::Get()->EnsureLoaded()) {
+    NetworkLibrary *network = CrosLibrary::Get()->GetNetworkLibrary();
+    if (network->Connected()) {
+      const int kConnectionsNeeded = 1;
+      chrome_browser_net::Preconnect::PreconnectOnUIThread(
+          GURL(GaiaAuthFetcher::kClientLoginUrl),
+          chrome_browser_net::UrlInfo::EARLY_LOAD_MOTIVATED,
+          kConnectionsNeeded);
+    } else {
+      new WarmingObserver();
+    }
+  }
+}
+
 LoginUtils* LoginUtils::Get() {
   return Singleton<LoginUtilsWrapper>::get()->get();
 }
@@ -275,6 +451,7 @@ void LoginUtils::Set(LoginUtils* mock) {
 }
 
 void LoginUtils::DoBrowserLaunch(Profile* profile) {
+  BootTimesLoader::Get()->AddLoginTimeMarker("BrowserLaunched", false);
   // Browser launch was disabled due to some post login screen.
   if (!LoginUtils::Get()->IsBrowserLaunchEnabled())
     return;
@@ -283,7 +460,7 @@ void LoginUtils::DoBrowserLaunch(Profile* profile) {
   CommandLine::ForCurrentProcess()->InitFromArgv(
       CommandLine::ForCurrentProcess()->argv());
 
-  LOG(INFO) << "Launching browser...";
+  VLOG(1) << "Launching browser...";
   BrowserInit browser_init;
   int return_code;
   browser_init.LaunchBrowser(*CommandLine::ForCurrentProcess(),

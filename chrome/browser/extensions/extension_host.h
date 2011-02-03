@@ -7,7 +7,7 @@
 #pragma once
 
 #include <string>
-#include <list>
+#include <vector>
 
 #include "base/perftimer.h"
 #include "base/scoped_ptr.h"
@@ -47,10 +47,7 @@ class ExtensionHost : public RenderViewHostDelegate,
   // Enable DOM automation in created render view hosts.
   static void EnableDOMAutomation() { enable_dom_automation_ = true; }
 
-  typedef std::list<ExtensionHost*> HostPointerList;
-  static HostPointerList* recently_deleted();
-
-  ExtensionHost(Extension* extension, SiteInstance* site_instance,
+  ExtensionHost(const Extension* extension, SiteInstance* site_instance,
                 const GURL& url, ViewType::Type host_type);
   ~ExtensionHost();
 
@@ -72,7 +69,7 @@ class ExtensionHost : public RenderViewHostDelegate,
   // instantiate Browser objects.
   void CreateView(Browser* browser);
 
-  Extension* extension() { return extension_; }
+  const Extension* extension() { return extension_; }
   RenderViewHost* render_view_host() const { return render_view_host_; }
   RenderProcessHost* render_process_host() const;
   SiteInstance* site_instance() const;
@@ -155,6 +152,12 @@ class ExtensionHost : public RenderViewHostDelegate,
                                  const gfx::Rect& initial_pos);
   virtual void ShowCreatedFullscreenWidget(int route_id);
   virtual void ShowContextMenu(const ContextMenuParams& params);
+  virtual void ShowPopupMenu(const gfx::Rect& bounds,
+                             int item_height,
+                             double item_font_size,
+                             int selected_item,
+                             const std::vector<WebMenuItem>& items,
+                             bool right_aligned);
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask allowed_operations,
                              const SkBitmap& image,
@@ -174,6 +177,9 @@ class ExtensionHost : public RenderViewHostDelegate,
   virtual void HandleMouseUp();
   virtual void HandleMouseActivate();
   virtual void UpdatePreferredSize(const gfx::Size& new_size);
+  virtual void UpdateInspectorSetting(const std::string& key,
+                                      const std::string& value);
+  virtual void ClearInspectorSettings();
 
   // NotificationObserver
   virtual void Observe(NotificationType type,
@@ -228,7 +234,7 @@ class ExtensionHost : public RenderViewHostDelegate,
   bool is_background_page() const { return !view(); }
 
   // The extension that we're hosting in this view.
-  Extension* extension_;
+  const Extension* extension_;
 
   // The profile that this host is tied to.
   Profile* profile_;

@@ -6,7 +6,7 @@
 // sure that this is really the proper solution for what you're trying to
 // achieve.  Don't prematurely optimize, most likely you can just use a Lock.
 //
-// These classes implement a warpper around the platform's TLS storage
+// These classes implement a wrapper around the platform's TLS storage
 // mechanism.  On construction, they will allocate a TLS slot, and free the
 // TLS slot on destruction.  No memory management (creation or destruction) is
 // handled.  This means for uses of ThreadLocalPointer, you must correctly
@@ -57,6 +57,8 @@
 
 namespace base {
 
+namespace internal {
+
 // Helper functions that abstract the cross-platform APIs.  Do not use directly.
 struct ThreadLocalPlatform {
 #if defined(OS_WIN)
@@ -71,27 +73,30 @@ struct ThreadLocalPlatform {
   static void SetValueInSlot(SlotType& slot, void* value);
 };
 
+}  // namespace internal
+
 template <typename Type>
 class ThreadLocalPointer {
  public:
   ThreadLocalPointer() : slot_() {
-    ThreadLocalPlatform::AllocateSlot(slot_);
+    internal::ThreadLocalPlatform::AllocateSlot(slot_);
   }
 
   ~ThreadLocalPointer() {
-    ThreadLocalPlatform::FreeSlot(slot_);
+    internal::ThreadLocalPlatform::FreeSlot(slot_);
   }
 
   Type* Get() {
-    return static_cast<Type*>(ThreadLocalPlatform::GetValueFromSlot(slot_));
+    return static_cast<Type*>(
+        internal::ThreadLocalPlatform::GetValueFromSlot(slot_));
   }
 
   void Set(Type* ptr) {
-    ThreadLocalPlatform::SetValueInSlot(slot_, ptr);
+    internal::ThreadLocalPlatform::SetValueInSlot(slot_, ptr);
   }
 
  private:
-  typedef ThreadLocalPlatform::SlotType SlotType;
+  typedef internal::ThreadLocalPlatform::SlotType SlotType;
 
   SlotType slot_;
 

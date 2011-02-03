@@ -34,7 +34,7 @@ TEST(AppCacheTest, CleanupUnusedCache) {
 
 TEST(AppCacheTest, AddModifyRemoveEntry) {
   MockAppCacheService service;
-  scoped_refptr<AppCache> cache = new AppCache(&service, 111);
+  scoped_refptr<AppCache> cache(new AppCache(&service, 111));
 
   EXPECT_TRUE(cache->entries().empty());
   EXPECT_EQ(0L, cache->cache_size());
@@ -79,7 +79,7 @@ TEST(AppCacheTest, AddModifyRemoveEntry) {
 TEST(AppCacheTest, InitializeWithManifest) {
   MockAppCacheService service;
 
-  scoped_refptr<AppCache> cache = new AppCache(&service, 1234);
+  scoped_refptr<AppCache> cache(new AppCache(&service, 1234));
   EXPECT_TRUE(cache->fallback_namespaces_.empty());
   EXPECT_TRUE(cache->online_whitelist_namespaces_.empty());
   EXPECT_FALSE(cache->online_whitelist_all_);
@@ -129,6 +129,8 @@ TEST(AppCacheTest, FindResponseForRequest) {
       "http://blah/online_namespace/explicit");
   const GURL kFallbackTestUrl1("http://blah/fallback_namespace/1");
   const GURL kFallbackTestUrl2("http://blah/fallback_namespace/longer2");
+  const GURL kOnlineNamespaceWithinFallback(
+      "http://blah/fallback_namespace/1/online");
 
   const int64 kFallbackResponseId1 = 1;
   const int64 kFallbackResponseId2 = 2;
@@ -138,13 +140,15 @@ TEST(AppCacheTest, FindResponseForRequest) {
 
   Manifest manifest;
   manifest.online_whitelist_namespaces.push_back(kOnlineNamespaceUrl);
+  manifest.online_whitelist_namespaces.push_back(
+      kOnlineNamespaceWithinFallback);
   manifest.fallback_namespaces.push_back(
       FallbackNamespace(kFallbackNamespaceUrl1, kFallbackEntryUrl1));
   manifest.fallback_namespaces.push_back(
       FallbackNamespace(kFallbackNamespaceUrl2, kFallbackEntryUrl2));
 
   // Create a cache with some namespaces and entries.
-  scoped_refptr<AppCache> cache = new AppCache(&service, 1234);
+  scoped_refptr<AppCache> cache(new AppCache(&service, 1234));
   cache->InitializeWithManifest(&manifest);
   cache->AddEntry(
       kFallbackEntryUrl1,
@@ -218,6 +222,8 @@ TEST(AppCacheTest, FindResponseForRequest) {
   EXPECT_TRUE(found);
   EXPECT_FALSE(entry.has_response_id());
   EXPECT_EQ(kFallbackResponseId1, fallback_entry.response_id());
+  EXPECT_EQ(kFallbackEntryUrl1,
+            cache->GetFallbackEntryUrl(fallback_namespace));
   EXPECT_FALSE(network_namespace);
 
   fallback_entry = AppCacheEntry();  // reset
@@ -227,7 +233,28 @@ TEST(AppCacheTest, FindResponseForRequest) {
   EXPECT_TRUE(found);
   EXPECT_FALSE(entry.has_response_id());
   EXPECT_EQ(kFallbackResponseId2, fallback_entry.response_id());
+  EXPECT_EQ(kFallbackEntryUrl2,
+            cache->GetFallbackEntryUrl(fallback_namespace));
   EXPECT_FALSE(network_namespace);
+
+  fallback_entry = AppCacheEntry();  // reset
+
+  found = cache->FindResponseForRequest(kOnlineNamespaceWithinFallback,
+      &entry, &fallback_entry, &fallback_namespace, &network_namespace);
+  EXPECT_TRUE(found);
+  EXPECT_FALSE(entry.has_response_id());
+  EXPECT_FALSE(fallback_entry.has_response_id());
+  EXPECT_TRUE(network_namespace);
+
+  fallback_entry = AppCacheEntry();  // reset
+
+  found = cache->FindResponseForRequest(
+      kOnlineNamespaceWithinFallback.Resolve("online_resource"),
+      &entry, &fallback_entry, &fallback_namespace, &network_namespace);
+  EXPECT_TRUE(found);
+  EXPECT_FALSE(entry.has_response_id());
+  EXPECT_FALSE(fallback_entry.has_response_id());
+  EXPECT_TRUE(network_namespace);
 }
 
 }  // namespace appacache

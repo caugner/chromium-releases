@@ -38,6 +38,7 @@ class BrowserProxy;
 class DictionaryValue;
 class FilePath;
 class GURL;
+class ProxyLauncher;
 class ScopedTempDir;
 class TabProxy;
 
@@ -68,14 +69,21 @@ class UITestBase {
  public:
   // ********* Utility functions *********
 
-  // Launches the browser and IPC testing server.
+  // Launches the browser only.
+  void LaunchBrowser();
+
+  // Launches the browser and IPC testing connection in server mode.
   void LaunchBrowserAndServer();
+
+  // Launches the IPC testing connection in client mode,
+  // which then attempts to connect to a browser.
+  void ConnectToRunningBrowser();
 
   // Only for pyauto.
   void set_command_execution_timeout_ms(int timeout);
 
-  // Overridable so that derived classes can provide their own AutomationProxy.
-  virtual AutomationProxy* CreateAutomationProxy(int execution_timeout);
+  // Overridable so that derived classes can provide their own ProxyLauncher.
+  virtual ProxyLauncher* CreateProxyLauncher();
 
   // Closes the browser and IPC testing server.
   void CloseBrowserAndServer();
@@ -102,7 +110,7 @@ class UITestBase {
   // Terminates the browser, simulates end of session.
   void TerminateBrowser();
 
-  // Tells the browser to navigato to the givne URL in the active tab
+  // Tells the browser to navigate to the given URL in the active tab
   // of the first app window.
   // Does not wait for the navigation to complete to return.
   void NavigateToURLAsync(const GURL& url);
@@ -169,32 +177,9 @@ class UITestBase {
   // assert that the tab count is valid at the end of the wait.
   void WaitUntilTabCount(int tab_count);
 
-  // Checks whether the download shelf is visible in the current browser, giving
-  // it a chance to appear (we don't know the exact timing) while finishing as
-  // soon as possible.
-  bool WaitForDownloadShelfVisible(BrowserProxy* browser);
-
-  // Checks whether the download shelf is invisible in the current browser,
-  // giving it a chance to appear (we don't know the exact timing) while
-  // finishing as soon as possible.
-  bool WaitForDownloadShelfInvisible(BrowserProxy* browser);
-
   // Wait for the browser process to shut down on its own (i.e. as a result of
   // some action that your test has taken).
   bool WaitForBrowserProcessToQuit();
-
- private:
-  // Waits for download shelf visibility or invisibility.
-  bool WaitForDownloadShelfVisibilityChange(BrowserProxy* browser,
-                                            bool wait_for_open);
-
- public:
-
-  // Waits until the Find window has become fully visible (if |wait_for_open| is
-  // true) or fully hidden (if |wait_for_open| is false). This function can time
-  // out (return false) if the window doesn't appear within a specific time.
-  bool WaitForFindWindowVisibilityChange(BrowserProxy* browser,
-                                         bool wait_for_open);
 
   // Waits until the Bookmark bar has stopped animating and become fully visible
   // (if |wait_for_open| is true) or fully hidden (if |wait_for_open| is false).
@@ -384,8 +369,8 @@ class UITestBase {
 
  protected:
   AutomationProxy* automation() {
-    EXPECT_TRUE(server_.get());
-    return server_.get();
+    EXPECT_TRUE(automation_proxy_.get());
+    return automation_proxy_.get();
   }
 
   virtual bool ShouldFilterInet() {
@@ -435,6 +420,7 @@ class UITestBase {
                                         // id on the command line? Default is
                                         // true.
   bool enable_file_cookies_;            // Enable file cookies, default is true.
+  scoped_ptr<ProxyLauncher> launcher_;  // Launches browser and AutomationProxy.
   ProfileType profile_type_;            // Are we using a profile with a
                                         // complex theme?
   FilePath websocket_pid_file_;         // PID file for websocket server.
@@ -442,9 +428,15 @@ class UITestBase {
                                         // the browser. Used in ShutdownTest.
 
  private:
+  void WaitForBrowserLaunch();
+
   bool LaunchBrowserHelper(const CommandLine& arguments,
                            bool wait,
                            base::ProcessHandle* process);
+
+  // Prepare command line that will be used to launch the child browser process
+  // with an UI test.
+  void PrepareTestCommandline(CommandLine* arguments);
 
   // We want to have a current history database when we start the browser so
   // things like the NTP will have thumbnails.  This method updates the dates
@@ -469,7 +461,7 @@ class UITestBase {
   static std::string js_flags_;         // Flags passed to the JS engine.
   static std::string log_level_;        // Logging level.
 
-  scoped_ptr<AutomationProxy> server_;
+  scoped_ptr<AutomationProxy> automation_proxy_;
 
   std::string ui_test_name_;
 
@@ -487,7 +479,7 @@ class UITest : public UITestBase, public PlatformTest {
   virtual void SetUp();
   virtual void TearDown();
 
-  virtual AutomationProxy* CreateAutomationProxy(int execution_timeout);
+  virtual ProxyLauncher* CreateProxyLauncher();
 
   // Synchronously launches local http server normally used to run LayoutTests.
   void StartHttpServer(const FilePath& root_directory);
@@ -569,7 +561,27 @@ class UITest : public UITestBase, public PlatformTest {
                                       const char* cookie_name,
                                       int time_out_ms);
 
+  // Checks whether the download shelf is visible in the current browser, giving
+  // it a chance to appear (we don't know the exact timing) while finishing as
+  // soon as possible.
+  bool WaitForDownloadShelfVisible(BrowserProxy* browser);
+
+  // Checks whether the download shelf is invisible in the current browser,
+  // giving it a chance to appear (we don't know the exact timing) while
+  // finishing as soon as possible.
+  bool WaitForDownloadShelfInvisible(BrowserProxy* browser);
+
+  // Waits until the Find window has become fully visible (if |wait_for_open| is
+  // true) or fully hidden (if |wait_for_open| is false). This function can time
+  // out (return false) if the window doesn't appear within a specific time.
+  bool WaitForFindWindowVisibilityChange(BrowserProxy* browser,
+                                         bool wait_for_open);
+
  private:
+  // Waits for download shelf visibility or invisibility.
+  bool WaitForDownloadShelfVisibilityChange(BrowserProxy* browser,
+                                            bool wait_for_open);
+
   MessageLoop message_loop_;  // Enables PostTask to main thread.
 };
 

@@ -7,130 +7,74 @@
 #include <cups/cups.h>
 #include <dlfcn.h>
 #include <errno.h>
-#include <gcrypt.h>
 #include <pthread.h>
 
+#include <algorithm>
 #include <list>
 #include <map>
 
 #include "base/file_path.h"
-#include "base/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/lock.h"
 #include "base/logging.h"
+#include "base/md5.h"
 #include "base/message_loop.h"
 #include "base/rand_util.h"
+#include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/values.h"
 #include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
+#include "printing/backend/cups_helper.h"
+#include "printing/backend/print_backend.h"
 
 namespace {
+static const char kCUPSPrinterInfoOpt[] = "printer-info";
+static const char kCUPSPrinterStateOpt[] = "printer-state";
+static const char kCUPSPrintServerURLs[] = "print_server_urls";
+static const char kCUPSUpdateTimeoutMs[] = "update_timeout_ms";
+static const char kCUPSPrintBackendServerURL[] = "print_server_url";
 
-// Init GCrypt library (needed for CUPS) using pthreads.
-// I've hit a bug in CUPS library, when it crashed with: "ath.c:184:
-// _gcry_ath_mutex_lock: Assertion `*lock == ((ath_mutex_t) 0)' failed."
-// It happened whe multiple threads tried printing simultaneously.
-// Google search for 'gnutls thread safety' provided with following solution
-// where we initialize gcrypt by initializing gnutls.
-//
-// Initially, we linked with -lgnutls and simply called gnutls_global_init(),
-// but this did not work well since we build one binary on Ubuntu Hardy and
-// expect it to run on many Linux distros. (See http://crbug.com/46954)
-// So instead we use dlopen() and dlsym() to dynamically load and call
-// gnutls_global_init().
+// Default port for IPP print servers.
+static const int kDefaultIPPServerPort = 631;
 
-GCRY_THREAD_OPTION_PTHREAD_IMPL;
+// Time interval to check for printer's updates.
+const int kCheckForPrinterUpdatesMs = 6*60*60*1000;
 
-bool init_gnutls() {
-  const char* kGnuTlsFile = "libgnutls.so";
-  void* gnutls_lib = dlopen(kGnuTlsFile, RTLD_NOW);
-  if (!gnutls_lib) {
-    LOG(ERROR) << "Cannot load " << kGnuTlsFile;
-    return false;
-  }
-  const char* kGnuTlsInitFuncName = "gnutls_global_init";
-  int (*pgnutls_global_init)(void) = reinterpret_cast<int(*)()>(
-      dlsym(gnutls_lib, kGnuTlsInitFuncName));
-  if (!pgnutls_global_init) {
-    LOG(ERROR) << "Could not find " << kGnuTlsInitFuncName
-               << " in " << kGnuTlsFile;
-    return false;
-  }
-  return ((*pgnutls_global_init)() == 0);
-}
-
-void init_gcrypt() {
-  // The gnutls_global_init() man page warns it's not thread safe. Locking this
-  // entire function just to be on the safe side.
-  static Lock init_gcrypt_lock;
-  AutoLock init_gcrypt_autolock(init_gcrypt_lock);
-  static bool gcrypt_initialized = false;
-  if (!gcrypt_initialized) {
-    gcry_control(GCRYCTL_SET_THREAD_CBS, &gcry_threads_pthread);
-    gcrypt_initialized = init_gnutls();
-    if (!gcrypt_initialized) {
-      LOG(ERROR) << "Gcrypt initialization failed";
-    }
-  }
-}
+// Job update timeput
+const int kJobUpdateTimeoutMs = 5000;
 
 }  // namespace
 
 namespace cloud_print {
 
-static const char kCUPSPrinterInfoOpt[] = "printer-info";
-static const char kCUPSPrinterStateOpt[] = "printer-state";
-static const char kCUPSPrintServerURL[] = "print_server_url";
-
-// Default port for IPP print servers.
-static const int kDefaultIPPServerPort = 631;
-
-// Helper wrapper around http_t structure, with connection and cleanup
-// functionality.
-class HttpConnectionCUPS {
- public:
-  explicit HttpConnectionCUPS(const GURL& print_server_url) : http_(NULL) {
-    // If we have an empty url, use default print server.
-    if (print_server_url.is_empty())
-      return;
-
-    int port = print_server_url.IntPort();
-    if (port == url_parse::PORT_UNSPECIFIED)
-      port = kDefaultIPPServerPort;
-
-    http_ = httpConnectEncrypt(print_server_url.host().c_str(), port,
-                               HTTP_ENCRYPT_NEVER);
-    if (http_ == NULL) {
-      LOG(ERROR) << "CP_CUPS: Failed connecting to print server: " <<
-                 print_server_url;
-    }
-  }
-
-  ~HttpConnectionCUPS() {
-    if (http_ != NULL)
-      httpClose(http_);
-  }
-
-  http_t* http() {
-    return http_;
-  }
-
- private:
-  http_t* http_;
+struct PrintServerInfoCUPS {
+  GURL url;
+  scoped_refptr<printing::PrintBackend> backend;
+  printing::PrinterList printers;
+  // CapsMap cache PPD until the next update and give a fast access to it by
+  // printer name. PPD request is relatively expensive and this should minimize
+  // the number of requests.
+  typedef std::map<std::string, printing::PrinterCapsAndDefaults> CapsMap;
+  CapsMap caps_cache;
 };
 
 class PrintSystemCUPS : public PrintSystem {
  public:
-  explicit PrintSystemCUPS(const GURL& print_server_url);
+  explicit PrintSystemCUPS(const DictionaryValue* print_system_settings);
 
   // PrintSystem implementation.
-  virtual void EnumeratePrinters(PrinterList* printer_list);
+  virtual void Init();
 
-  virtual bool GetPrinterCapsAndDefaults(const std::string& printer_name,
-                                         PrinterCapsAndDefaults* printer_info);
+  virtual void EnumeratePrinters(printing::PrinterList* printer_list);
+
+  virtual bool GetPrinterCapsAndDefaults(
+      const std::string& printer_name,
+      printing::PrinterCapsAndDefaults* printer_info);
+
+  virtual bool IsValidPrinter(const std::string& printer_name);
 
   virtual bool ValidatePrintTicket(const std::string& printer_name,
                                    const std::string& print_ticket_data);
@@ -138,112 +82,6 @@ class PrintSystemCUPS : public PrintSystem {
   virtual bool GetJobDetails(const std::string& printer_name,
                              PlatformJobId job_id,
                              PrintJobDetails *job_details);
-
-  virtual bool IsValidPrinter(const std::string& printer_name);
-
-
-  // TODO(gene): Add implementation for CUPS print server watcher.
-  class PrintServerWatcherCUPS
-    : public PrintSystem::PrintServerWatcher {
-   public:
-    PrintServerWatcherCUPS() {}
-
-    // PrintSystem::PrintServerWatcher interface
-    virtual bool StartWatching(
-        PrintSystem::PrintServerWatcher::Delegate* delegate) {
-      NOTIMPLEMENTED();
-      return true;
-    }
-    virtual bool StopWatching() {
-      NOTIMPLEMENTED();
-      return true;
-    }
-  };
-
-  class PrinterWatcherCUPS
-      : public PrintSystem::PrinterWatcher {
-   public:
-     explicit PrinterWatcherCUPS(PrintSystemCUPS* print_system,
-                                 const std::string& printer_name)
-         : printer_name_(printer_name), print_system_(print_system) {
-     }
-
-    // PrintSystem::PrinterWatcher interface
-    virtual bool StartWatching(
-        PrintSystem::PrinterWatcher::Delegate* delegate) {
-      if (delegate_ != NULL)
-        StopWatching();
-      delegate_ = delegate;
-      MessageLoop::current()->PostDelayedTask(FROM_HERE,
-          NewRunnableMethod(this,
-              &PrintSystemCUPS::PrinterWatcherCUPS::Update), 5000);
-      return true;
-    }
-    virtual bool StopWatching() {
-      delegate_ = NULL;
-      return true;
-    }
-    bool GetCurrentPrinterInfo(PrinterBasicInfo* printer_info) {
-      DCHECK(printer_info);
-      return print_system_->GetPrinterInfo(printer_name_, printer_info);
-    }
-
-    void Update() {
-      if (delegate_ == NULL)
-        return;  // Orphan call. We have been stopped already.
-      // For CUPS proxy, we are going to fire OnJobChanged notification
-      // periodically. Higher level will check if there are any outstanding
-      // jobs for this printer and check their status. If printer has no
-      // outstanding jobs, OnJobChanged() will do nothing.
-      delegate_->OnJobChanged();
-      MessageLoop::current()->PostDelayedTask(FROM_HERE,
-          NewRunnableMethod(this,
-              &PrintSystemCUPS::PrinterWatcherCUPS::Update),
-          kNotificationTimeout);
-    }
-   private:
-    static const int kNotificationTimeout = 5000;  // in ms
-    std::string printer_name_;
-    PrintSystem::PrinterWatcher::Delegate* delegate_;
-    scoped_refptr<PrintSystemCUPS> print_system_;
-    DISALLOW_COPY_AND_ASSIGN(PrinterWatcherCUPS);
-  };
-
-  class JobSpoolerCUPS : public PrintSystem::JobSpooler {
-   public:
-    explicit JobSpoolerCUPS(PrintSystemCUPS* print_system)
-        : print_system_(print_system) {
-      DCHECK(print_system_.get());
-    }
-    // PrintSystem::JobSpooler implementation.
-    virtual bool Spool(const std::string& print_ticket,
-                       const FilePath& print_data_file_path,
-                       const std::string& print_data_mime_type,
-                       const std::string& printer_name,
-                       const std::string& job_title,
-                       JobSpooler::Delegate* delegate) {
-      DCHECK(delegate);
-      int job_id = print_system_->SpoolPrintJob(
-          print_ticket, print_data_file_path, print_data_mime_type,
-          printer_name, job_title);
-      MessageLoop::current()->PostTask(FROM_HERE,
-                                       NewRunnableFunction(
-                                           &JobSpoolerCUPS::NotifyDelegate,
-                                           delegate,
-                                           job_id));
-      return true;
-    }
-
-    static void NotifyDelegate(JobSpooler::Delegate* delegate, int job_id) {
-      if (job_id)
-        delegate->OnJobSpoolSucceeded(job_id);
-      else
-        delegate->OnJobSpoolFailed();
-    }
-   private:
-    scoped_refptr<PrintSystemCUPS> print_system_;
-    DISALLOW_COPY_AND_ASSIGN(JobSpoolerCUPS);
-  };
 
   virtual PrintSystem::PrintServerWatcher* CreatePrintServerWatcher();
   virtual PrintSystem::PrinterWatcher* CreatePrinterWatcher(
@@ -256,97 +94,361 @@ class PrintSystemCUPS : public PrintSystem {
                               const std::string& print_data_mime_type,
                               const std::string& printer_name,
                               const std::string& job_title);
-  bool GetPrinterInfo(const std::string& printer_name, PrinterBasicInfo* info);
+  bool GetPrinterInfo(const std::string& printer_name,
+                      printing::PrinterBasicInfo* info);
   bool ParsePrintTicket(const std::string& print_ticket,
                         std::map<std::string, std::string>* options);
+
+  int GetUpdateTimeoutMs() const {
+    return update_timeout_;
+  }
 
  private:
   // Following functions are wrappers around corresponding CUPS functions.
   // <functions>2()  are called when print server is specified, and plain
   // version in another case. There is an issue specifing CUPS_HTTP_DEFAULT
   // in the <functions>2(), it does not work in CUPS prior to 1.4.
-  int GetDests(cups_dest_t** dests);
-  FilePath GetPPD(const char* name);
-  int GetJobs(cups_job_t** jobs, const char* name,
+  int GetJobs(cups_job_t** jobs, const GURL& url, const char* name,
               int myjobs, int whichjobs);
-  int PrintFile(const char* name, const char* filename, const char* title,
-                int num_options, cups_option_t* options);
+  int PrintFile(const GURL& url, const char* name, const char* filename,
+                const char* title, int num_options, cups_option_t* options);
 
-  GURL print_server_url_;
+  void InitPrintBackends(const DictionaryValue* print_system_settings);
+  void AddPrintServer(const std::string& url);
+
+  void UpdatePrinters();
+
+  // Full name contains print server url:port and printer name. Short name
+  // is the name of the printer in the CUPS server.
+  std::string MakeFullPrinterName(const GURL& url,
+                                  const std::string& short_printer_name);
+  PrintServerInfoCUPS* FindServerByFullName(
+      const std::string& full_printer_name, std::string* short_printer_name);
+
+  // PrintServerList contains information about all print servers and backends
+  // this proxy is connected to.
+  typedef std::list<PrintServerInfoCUPS> PrintServerList;
+  PrintServerList print_servers_;
+
+  int update_timeout_;
+  bool initialized_;
 };
 
-PrintSystemCUPS::PrintSystemCUPS(const GURL& print_server_url)
-    : print_server_url_(print_server_url) {
-}
-
-void PrintSystemCUPS::EnumeratePrinters(PrinterList* printer_list) {
-  DCHECK(printer_list);
-  printer_list->clear();
-
-  cups_dest_t* destinations = NULL;
-  int num_dests = GetDests(&destinations);
-
-  for (int printer_index = 0; printer_index < num_dests; printer_index++) {
-    const cups_dest_t& printer = destinations[printer_index];
-
-    PrinterBasicInfo printer_info;
-    printer_info.printer_name = printer.name;
-
-    const char* info = cupsGetOption(kCUPSPrinterInfoOpt,
-        printer.num_options, printer.options);
-    if (info != NULL)
-      printer_info.printer_description = info;
-
-    const char* state = cupsGetOption(kCUPSPrinterStateOpt,
-        printer.num_options, printer.options);
-    if (state != NULL)
-      base::StringToInt(state, &printer_info.printer_status);
-
-    // Store printer options.
-    for (int opt_index = 0; opt_index < printer.num_options; opt_index++) {
-      printer_info.options[printer.options[opt_index].name] =
-          printer.options[opt_index].value;
-    }
-
-    printer_list->push_back(printer_info);
+class PrintServerWatcherCUPS
+  : public PrintSystem::PrintServerWatcher {
+ public:
+  explicit PrintServerWatcherCUPS(PrintSystemCUPS* print_system)
+      : print_system_(print_system),
+        delegate_(NULL) {
+  }
+  ~PrintServerWatcherCUPS() {
+    StopWatching();
   }
 
-  cupsFreeDests(num_dests, destinations);
+  // PrintSystem::PrintServerWatcher interface
+  virtual bool StartWatching(
+      PrintSystem::PrintServerWatcher::Delegate* delegate) {
+    delegate_ = delegate;
+    printers_hash_ = GetPrintersHash();
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        NewRunnableMethod(this, &PrintServerWatcherCUPS::CheckForUpdates),
+        print_system_->GetUpdateTimeoutMs());
+    return true;
+  }
+  virtual bool StopWatching() {
+    delegate_ = NULL;
+    return true;
+  }
 
-  LOG(INFO) << "CP_CUPS: Enumerated " << printer_list->size() << " printers.";
+  void CheckForUpdates() {
+    if (delegate_ == NULL)
+      return;  // Orphan call. We have been stopped already.
+    VLOG(1) << "CP_CUPS: Checking for new printers";
+    std::string new_hash = GetPrintersHash();
+    if (printers_hash_ != new_hash) {
+      printers_hash_ = new_hash;
+      delegate_->OnPrinterAdded();
+    }
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        NewRunnableMethod(this, &PrintServerWatcherCUPS::CheckForUpdates),
+        print_system_->GetUpdateTimeoutMs());
+  }
+ private:
+  std::string GetPrintersHash() {
+    printing::PrinterList printer_list;
+    print_system_->EnumeratePrinters(&printer_list);
+
+    // Sort printer names.
+    std::vector<std::string> printers;
+    printing::PrinterList::iterator it;
+    for (it = printer_list.begin(); it != printer_list.end(); ++it)
+      printers.push_back(it->printer_name);
+    std::sort(printers.begin(), printers.end());
+
+    std::string to_hash;
+    for (size_t i = 0; i < printers.size(); i++)
+      to_hash += printers[i];
+
+    return MD5String(to_hash);
+  }
+
+  scoped_refptr<PrintSystemCUPS> print_system_;
+  PrintSystem::PrintServerWatcher::Delegate* delegate_;
+  std::string printers_hash_;
+  DISALLOW_COPY_AND_ASSIGN(PrintServerWatcherCUPS);
+};
+
+class PrinterWatcherCUPS
+    : public PrintSystem::PrinterWatcher {
+ public:
+  explicit PrinterWatcherCUPS(PrintSystemCUPS* print_system,
+                             const std::string& printer_name)
+      : printer_name_(printer_name),
+    delegate_(NULL),
+    print_system_(print_system) {
+  }
+  ~PrinterWatcherCUPS() {
+    StopWatching();
+  }
+
+  // PrintSystem::PrinterWatcher interface
+  virtual bool StartWatching(
+      PrintSystem::PrinterWatcher::Delegate* delegate) {
+    if (delegate_ != NULL)
+      StopWatching();
+    delegate_ = delegate;
+    settings_hash_ = GetSettingsHash();
+    // Schedule next job status update.
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        NewRunnableMethod(this, &PrinterWatcherCUPS::JobStatusUpdate),
+        kJobUpdateTimeoutMs);
+    // Schedule next printer check.
+    // TODO(gene): Randomize time for the next printer update.
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        NewRunnableMethod(this, &PrinterWatcherCUPS::PrinterUpdate),
+        print_system_->GetUpdateTimeoutMs());
+    return true;
+  }
+  virtual bool StopWatching() {
+    delegate_ = NULL;
+    return true;
+  }
+  bool GetCurrentPrinterInfo(printing::PrinterBasicInfo* printer_info) {
+    DCHECK(printer_info);
+    return print_system_->GetPrinterInfo(printer_name_, printer_info);
+  }
+
+  void JobStatusUpdate() {
+    if (delegate_ == NULL)
+      return;  // Orphan call. We have been stopped already.
+    // For CUPS proxy, we are going to fire OnJobChanged notification
+    // periodically. Higher level will check if there are any outstanding
+    // jobs for this printer and check their status. If printer has no
+    // outstanding jobs, OnJobChanged() will do nothing.
+    delegate_->OnJobChanged();
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        NewRunnableMethod(this, &PrinterWatcherCUPS::JobStatusUpdate),
+        kJobUpdateTimeoutMs);
+  }
+
+  void PrinterUpdate() {
+    if (delegate_ == NULL)
+      return;  // Orphan call. We have been stopped already.
+    VLOG(1) << "CP_CUPS: Checking for printer updates: " << printer_name_;
+    std::string new_hash = GetSettingsHash();
+    if (settings_hash_ != new_hash) {
+      settings_hash_ = new_hash;
+      delegate_->OnPrinterChanged();
+      VLOG(1) << "CP_CUPS: Printer update detected for: " << printer_name_;
+    }
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        NewRunnableMethod(this, &PrinterWatcherCUPS::PrinterUpdate),
+        print_system_->GetUpdateTimeoutMs());
+  }
+ private:
+  std::string GetSettingsHash() {
+    printing::PrinterBasicInfo info;
+    if (!print_system_->GetPrinterInfo(printer_name_, &info))
+      return std::string();
+
+    printing::PrinterCapsAndDefaults caps;
+    if (!print_system_->GetPrinterCapsAndDefaults(printer_name_, &caps))
+      return std::string();
+
+    std::string to_hash(info.printer_name);
+    to_hash += info.printer_description;
+    std::map<std::string, std::string>::const_iterator it;
+    for (it = info.options.begin(); it != info.options.end(); ++it) {
+      to_hash += it->first;
+      to_hash += it->second;
+    }
+
+    to_hash += caps.printer_capabilities;
+    to_hash += caps.caps_mime_type;
+    to_hash += caps.printer_defaults;
+    to_hash += caps.defaults_mime_type;
+
+    return MD5String(to_hash);
+  }
+
+  std::string printer_name_;
+  PrintSystem::PrinterWatcher::Delegate* delegate_;
+  scoped_refptr<PrintSystemCUPS> print_system_;
+  std::string settings_hash_;
+  DISALLOW_COPY_AND_ASSIGN(PrinterWatcherCUPS);
+};
+
+class JobSpoolerCUPS : public PrintSystem::JobSpooler {
+ public:
+  explicit JobSpoolerCUPS(PrintSystemCUPS* print_system)
+      : print_system_(print_system) {
+    DCHECK(print_system_.get());
+  }
+  // PrintSystem::JobSpooler implementation.
+  virtual bool Spool(const std::string& print_ticket,
+                     const FilePath& print_data_file_path,
+                     const std::string& print_data_mime_type,
+                     const std::string& printer_name,
+                     const std::string& job_title,
+                     JobSpooler::Delegate* delegate) {
+    DCHECK(delegate);
+    int job_id = print_system_->SpoolPrintJob(
+        print_ticket, print_data_file_path, print_data_mime_type,
+        printer_name, job_title);
+    MessageLoop::current()->PostTask(FROM_HERE,
+                                     NewRunnableFunction(
+                                         &JobSpoolerCUPS::NotifyDelegate,
+                                         delegate,
+                                         job_id));
+    return true;
+  }
+
+  static void NotifyDelegate(JobSpooler::Delegate* delegate, int job_id) {
+    if (job_id)
+      delegate->OnJobSpoolSucceeded(job_id);
+    else
+      delegate->OnJobSpoolFailed();
+  }
+ private:
+  scoped_refptr<PrintSystemCUPS> print_system_;
+  DISALLOW_COPY_AND_ASSIGN(JobSpoolerCUPS);
+};
+
+PrintSystemCUPS::PrintSystemCUPS(const DictionaryValue* print_system_settings)
+    : update_timeout_(kCheckForPrinterUpdatesMs), initialized_(false) {
+  if (print_system_settings) {
+    int timeout;
+    if (print_system_settings->GetInteger(kCUPSUpdateTimeoutMs, &timeout))
+      update_timeout_ = timeout;
+  }
+
+  InitPrintBackends(print_system_settings);
 }
 
-bool PrintSystemCUPS::GetPrinterCapsAndDefaults(const std::string& printer_name,
-                                         PrinterCapsAndDefaults* printer_info) {
-  DCHECK(printer_info);
+void PrintSystemCUPS::InitPrintBackends(
+    const DictionaryValue* print_system_settings) {
+  ListValue* url_list;
+  if (print_system_settings &&
+      print_system_settings->GetList(kCUPSPrintServerURLs, &url_list)) {
+    for (size_t i = 0; i < url_list->GetSize(); i++) {
+      std::string print_server_url;
+      if (url_list->GetString(i, &print_server_url))
+        AddPrintServer(print_server_url);
+    }
+  }
 
-  LOG(INFO) << "CP_CUPS: Getting Caps and Defaults for: " << printer_name;
+  // If server list is empty, use default print server.
+  if (print_servers_.empty())
+    AddPrintServer(std::string());
+}
 
-  FilePath ppd_path(GetPPD(printer_name.c_str()));
-  // In some cases CUPS failed to get ppd file.
-  if (ppd_path.empty()) {
-    LOG(ERROR) << "CP_CUPS: Failed to get PPD for: " << printer_name;
+void PrintSystemCUPS::AddPrintServer(const std::string& url) {
+  if (url.empty())
+    LOG(WARNING) << "No print server specified. Using default print server.";
+
+  // Get Print backend for the specific print server.
+  DictionaryValue backend_settings;
+  backend_settings.SetString(kCUPSPrintBackendServerURL, url);
+
+  PrintServerInfoCUPS print_server;
+  print_server.backend =
+    printing::PrintBackend::CreateInstance(&backend_settings);
+  print_server.url = GURL(url.c_str());
+
+  print_servers_.push_back(print_server);
+}
+
+void PrintSystemCUPS::Init() {
+  UpdatePrinters();
+  initialized_ = true;
+}
+
+void PrintSystemCUPS::UpdatePrinters() {
+  PrintServerList::iterator it;
+  for (it = print_servers_.begin(); it != print_servers_.end(); ++it) {
+    it->backend->EnumeratePrinters(&it->printers);
+    it->caps_cache.clear();
+    printing::PrinterList::iterator printer_it;
+    for (printer_it = it->printers.begin();
+        printer_it != it->printers.end(); ++printer_it) {
+      printer_it->printer_name = MakeFullPrinterName(it->url,
+                                                     printer_it->printer_name);
+    }
+    VLOG(1) << "CUPS: Updated printer list for url: " << it->url
+            << " Number of printers: " << it->printers.size();
+  }
+
+  // Schedule next update.
+  MessageLoop::current()->PostDelayedTask(FROM_HERE,
+      NewRunnableMethod(this, &PrintSystemCUPS::UpdatePrinters),
+      GetUpdateTimeoutMs());
+}
+
+void PrintSystemCUPS::EnumeratePrinters(printing::PrinterList* printer_list) {
+  DCHECK(initialized_);
+  printer_list->clear();
+  PrintServerList::iterator it;
+  for (it = print_servers_.begin(); it != print_servers_.end(); ++it) {
+    printer_list->insert(printer_list->end(),
+        it->printers.begin(), it->printers.end());
+  }
+  VLOG(1) << "CUPS: Total " << printer_list->size() << " printers enumerated.";
+}
+
+bool PrintSystemCUPS::GetPrinterCapsAndDefaults(
+    const std::string& printer_name,
+    printing::PrinterCapsAndDefaults* printer_info) {
+  DCHECK(initialized_);
+  std::string short_printer_name;
+  PrintServerInfoCUPS* server_info =
+      FindServerByFullName(printer_name, &short_printer_name);
+  if (!server_info)
+    return false;
+
+  PrintServerInfoCUPS::CapsMap::iterator caps_it =
+      server_info->caps_cache.find(printer_name);
+  if (caps_it != server_info->caps_cache.end()) {
+    *printer_info = caps_it->second;
+    return true;
+  }
+
+  // TODO(gene): Retry multiple times in case of error.
+  if (!server_info->backend->GetPrinterCapsAndDefaults(short_printer_name,
+                                                       printer_info) ) {
     return false;
   }
 
-  std::string content;
-  bool res = file_util::ReadFileToString(ppd_path, &content);
+  server_info->caps_cache[printer_name] = *printer_info;
+  return true;
+}
 
-  file_util::Delete(ppd_path, false);
-
-  if (res) {
-    printer_info->printer_capabilities.swap(content);
-    printer_info->caps_mime_type = "application/pagemaker";
-    // In CUPS, printer defaults is a part of PPD file. Nothing to upload here.
-    printer_info->printer_defaults.clear();
-    printer_info->defaults_mime_type.clear();
-  }
-
-  return res;
+bool PrintSystemCUPS::IsValidPrinter(const std::string& printer_name) {
+  return GetPrinterInfo(printer_name, NULL);
 }
 
 bool PrintSystemCUPS::ValidatePrintTicket(const std::string& printer_name,
                                         const std::string& print_ticket_data) {
+  DCHECK(initialized_);
   scoped_ptr<Value> ticket_value(base::JSONReader::Read(print_ticket_data,
       false));
   return ticket_value != NULL && ticket_value->IsType(Value::TYPE_DICTIONARY);
@@ -378,10 +480,18 @@ bool PrintSystemCUPS::ParsePrintTicket(const std::string& print_ticket,
 bool PrintSystemCUPS::GetJobDetails(const std::string& printer_name,
                                     PlatformJobId job_id,
                                     PrintJobDetails *job_details) {
+  DCHECK(initialized_);
   DCHECK(job_details);
 
+  std::string short_printer_name;
+  PrintServerInfoCUPS* server_info =
+      FindServerByFullName(printer_name, &short_printer_name);
+  if (!server_info)
+    return false;
+
   cups_job_t* jobs = NULL;
-  int num_jobs = GetJobs(&jobs, printer_name.c_str(), 1, -1);
+  int num_jobs = GetJobs(&jobs, server_info->url,
+                         short_printer_name.c_str(), 1, -1);
 
   bool found = false;
   for (int i = 0; i < num_jobs; i++) {
@@ -412,55 +522,55 @@ bool PrintSystemCUPS::GetJobDetails(const std::string& printer_name,
   }
 
   if (found)
-    LOG(INFO) << "CP_CUPS: Job details for: " << printer_name <<
-        " job_id: " << job_id << " job status: " << job_details->status;
+    VLOG(1) << "CP_CUPS: Job details for: " << printer_name
+            << " job_id: " << job_id << " job status: " << job_details->status;
   else
-    LOG(WARNING) << "CP_CUPS: Job not found for: " << printer_name <<
-        " job_id: " << job_id;
+    LOG(WARNING) << "CP_CUPS: Job not found for: " << printer_name
+                 << " job_id: " << job_id;
 
   cupsFreeJobs(num_jobs, jobs);
   return found;
 }
 
 bool PrintSystemCUPS::GetPrinterInfo(const std::string& printer_name,
-                                     PrinterBasicInfo* info) {
-  DCHECK(info);
+                                     printing::PrinterBasicInfo* info) {
+  DCHECK(initialized_);
+  if (info)
+    VLOG(1) << "CP_CUPS: Getting printer info for: " << printer_name;
 
-  LOG(INFO) << "CP_CUPS: Getting printer info for: " << printer_name;
+  std::string short_printer_name;
+  PrintServerInfoCUPS* server_info =
+      FindServerByFullName(printer_name, &short_printer_name);
+  if (!server_info)
+    return false;
 
-  // This is not very efficient way to get specific printer info. CUPS 1.4
-  // supports cupsGetNamedDest() function. However, CUPS 1.4 is not available
-  // everywhere (for example, it supported from Mac OS 10.6 only).
-  PrinterList printer_list;
-  EnumeratePrinters(&printer_list);
-
-  PrinterList::iterator it;
-  for (it = printer_list.begin(); it != printer_list.end(); ++it) {
+  printing::PrinterList::iterator it;
+  for (it = server_info->printers.begin();
+      it != server_info->printers.end(); ++it) {
     if (it->printer_name == printer_name) {
-      *info = *it;
+      if (info)
+        *info = *it;
       return true;
     }
   }
   return false;
 }
 
-bool PrintSystemCUPS::IsValidPrinter(const std::string& printer_name) {
-  PrinterBasicInfo info;
-  return GetPrinterInfo(printer_name, &info);
-}
-
 PrintSystem::PrintServerWatcher*
 PrintSystemCUPS::CreatePrintServerWatcher() {
-  return new PrintServerWatcherCUPS();
+  DCHECK(initialized_);
+  return new PrintServerWatcherCUPS(this);
 }
 
 PrintSystem::PrinterWatcher* PrintSystemCUPS::CreatePrinterWatcher(
     const std::string& printer_name) {
+  DCHECK(initialized_);
   DCHECK(!printer_name.empty());
   return new PrinterWatcherCUPS(this, printer_name);
 }
 
 PrintSystem::JobSpooler* PrintSystemCUPS::CreateJobSpooler() {
+  DCHECK(initialized_);
   return new JobSpoolerCUPS(this);
 }
 
@@ -475,63 +585,27 @@ std::string PrintSystem::GenerateProxyId() {
 
 scoped_refptr<PrintSystem> PrintSystem::CreateInstance(
     const DictionaryValue* print_system_settings) {
-  // Initialize gcrypt library.
-  init_gcrypt();
-
-  std::string print_server_url_str;
-  if (print_system_settings) {
-    print_system_settings->GetString(
-        kCUPSPrintServerURL, &print_server_url_str);
-  }
-  GURL print_server_url(print_server_url_str.c_str());
-  return new PrintSystemCUPS(print_server_url);
+  return new PrintSystemCUPS(print_system_settings);
 }
 
-int PrintSystemCUPS::GetDests(cups_dest_t** dests) {
-  if (print_server_url_.is_empty()) {  // Use default (local) print server.
-    return cupsGetDests(dests);
-  } else {
-    HttpConnectionCUPS http(print_server_url_);
-    return cupsGetDests2(http.http(), dests);
-  }
-}
-
-FilePath PrintSystemCUPS::GetPPD(const char* name) {
-  // cupsGetPPD returns a filename stored in a static buffer in CUPS.
-  // Protect this code with lock.
-  static Lock ppd_lock;
-  AutoLock ppd_autolock(ppd_lock);
-  FilePath ppd_path;
-  const char* ppd_file_path = NULL;
-  if (print_server_url_.is_empty()) {  // Use default (local) print server.
-    ppd_file_path = cupsGetPPD(name);
-  } else {
-    HttpConnectionCUPS http(print_server_url_);
-    ppd_file_path = cupsGetPPD2(http.http(), name);
-  }
-  if (ppd_file_path)
-    ppd_path = FilePath(ppd_file_path);
-  return ppd_path;
-}
-
-int PrintSystemCUPS::PrintFile(const char* name, const char* filename,
-                               const char* title, int num_options,
-                               cups_option_t* options) {
-  if (print_server_url_.is_empty()) {  // Use default (local) print server.
+int PrintSystemCUPS::PrintFile(const GURL& url, const char* name,
+                               const char* filename, const char* title,
+                               int num_options, cups_option_t* options) {
+  if (url.is_empty()) {  // Use default (local) print server.
     return cupsPrintFile(name, filename, title, num_options, options);
   } else {
-    HttpConnectionCUPS http(print_server_url_);
+    printing::HttpConnectionCUPS http(url);
     return cupsPrintFile2(http.http(), name, filename,
                           title, num_options, options);
   }
 }
 
-int PrintSystemCUPS::GetJobs(cups_job_t** jobs, const char* name,
-                             int myjobs, int whichjobs) {
-  if (print_server_url_.is_empty()) {  // Use default (local) print server.
+int PrintSystemCUPS::GetJobs(cups_job_t** jobs, const GURL& url,
+                             const char* name, int myjobs, int whichjobs) {
+  if (url.is_empty()) {  // Use default (local) print server.
     return cupsGetJobs(jobs, name, myjobs, whichjobs);
   } else {
-    HttpConnectionCUPS http(print_server_url_);
+    printing::HttpConnectionCUPS http(url);
     return cupsGetJobs2(http.http(), jobs, name, myjobs, whichjobs);
   }
 }
@@ -542,7 +616,14 @@ PlatformJobId PrintSystemCUPS::SpoolPrintJob(
     const std::string& print_data_mime_type,
     const std::string& printer_name,
     const std::string& job_title) {
-  LOG(INFO) << "CP_CUPS: Spooling print job for: " << printer_name;
+  DCHECK(initialized_);
+  VLOG(1) << "CP_CUPS: Spooling print job for: " << printer_name;
+
+  std::string short_printer_name;
+  PrintServerInfoCUPS* server_info =
+      FindServerByFullName(printer_name, &short_printer_name);
+  if (!server_info)
+    return false;
 
   // We need to store options as char* string for the duration of the
   // cupsPrintFile2 call. We'll use map here to store options, since
@@ -560,15 +641,58 @@ PlatformJobId PrintSystemCUPS::SpoolPrintJob(
     cups_options.push_back(opt);
   }
 
-  int job_id = PrintFile(printer_name.c_str(),
+  int job_id = PrintFile(server_info->url,
+                         short_printer_name.c_str(),
                          print_data_file_path.value().c_str(),
                          job_title.c_str(),
                          cups_options.size(),
                          &(cups_options[0]));
 
-  LOG(INFO) << "CP_CUPS: Job spooled, id: " << job_id;
+  VLOG(1) << "CP_CUPS: Job spooled, id: " << job_id;
 
   return job_id;
+}
+
+std::string PrintSystemCUPS::MakeFullPrinterName(
+    const GURL& url, const std::string& short_printer_name) {
+  std::string full_name;
+  full_name += "\\\\";
+  full_name += url.host();
+  if (!url.port().empty()) {
+    full_name += ":";
+    full_name += url.port();
+  }
+  full_name += "\\";
+  full_name += short_printer_name;
+  return full_name;
+}
+
+PrintServerInfoCUPS* PrintSystemCUPS::FindServerByFullName(
+    const std::string& full_printer_name, std::string* short_printer_name) {
+  size_t front = full_printer_name.find("\\\\");
+  size_t separator = full_printer_name.find("\\", 2);
+  if (front == std::string::npos || separator == std::string::npos) {
+    LOG(WARNING) << "Invalid UNC printer name: " << full_printer_name;
+    return NULL;
+  }
+  std::string server = full_printer_name.substr(2, separator - 2);
+
+  PrintServerList::iterator it;
+  for (it = print_servers_.begin(); it != print_servers_.end(); ++it) {
+    std::string cur_server;
+    cur_server += it->url.host();
+    if (!it->url.port().empty()) {
+      cur_server += ":";
+      cur_server += it->url.port();
+    }
+    if (cur_server == server) {
+      *short_printer_name = full_printer_name.substr(separator + 1);
+      return &(*it);
+    }
+  }
+
+  LOG(WARNING) << "Server not found for printer: " << full_printer_name;
+  return NULL;
 }
 
 }  // namespace cloud_print

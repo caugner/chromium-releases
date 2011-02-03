@@ -48,6 +48,7 @@ class Profile;
  @private
   IBOutlet NSTabView* tabView_;
   IBOutlet TabViewPickerTable* tabViewPicker_;
+  IBOutlet NSMatrix* pluginDefaultSettingMatrix_;
   Profile* profile_;  // weak
   IntegerPrefMember lastSelectedTab_;
   BooleanPrefMember clearSiteDataOnExit_;
@@ -91,4 +92,11 @@ class Profile;
 @property(nonatomic) NSInteger pluginsEnabledIndex;
 @property(nonatomic) NSInteger geolocationSettingIndex;
 @property(nonatomic) NSInteger notificationsSettingIndex;
+
+@property(nonatomic, readonly) BOOL blockThirdPartyCookiesManaged;
+@property(nonatomic, readonly) BOOL cookieSettingsManaged;
+@property(nonatomic, readonly) BOOL imagesSettingsManaged;
+@property(nonatomic, readonly) BOOL javaScriptSettingsManaged;
+@property(nonatomic, readonly) BOOL pluginsSettingsManaged;
+@property(nonatomic, readonly) BOOL popupsSettingsManaged;
 @end

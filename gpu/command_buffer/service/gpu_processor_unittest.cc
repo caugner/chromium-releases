@@ -1,11 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/message_loop.h"
-#include "base/scoped_nsautorelease_pool.h"
 #include "gpu/command_buffer/common/command_buffer_mock.h"
-#include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gpu_processor.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_mock.h"
@@ -30,8 +29,7 @@ class GPUProcessorTest : public testing::Test {
  protected:
   virtual void SetUp() {
     shared_memory_.reset(new ::base::SharedMemory);
-    shared_memory_->Create(std::string(), false, false, kRingBufferSize);
-    shared_memory_->Map(kRingBufferSize);
+    shared_memory_->CreateAndMapAnonymous(kRingBufferSize);
     buffer_ = static_cast<int32*>(shared_memory_->memory());
     shared_memory_buffer_.ptr = buffer_;
     shared_memory_buffer_.size = kRingBufferSize;
@@ -48,7 +46,7 @@ class GPUProcessorTest : public testing::Test {
 
     async_api_.reset(new StrictMock<AsyncAPIMock>);
 
-    decoder_ = new gles2::MockGLES2Decoder(&group_);
+    decoder_ = new gles2::MockGLES2Decoder();
 
     parser_ = new CommandParser(buffer_,
                                 kRingBufferEntries,
@@ -77,13 +75,12 @@ class GPUProcessorTest : public testing::Test {
     return command_buffer_->GetState().error;
   }
 
-  base::ScopedNSAutoreleasePool autorelease_pool_;
+  base::mac::ScopedNSAutoreleasePool autorelease_pool_;
   MessageLoop message_loop;
   scoped_ptr<MockCommandBuffer> command_buffer_;
   scoped_ptr<base::SharedMemory> shared_memory_;
   Buffer shared_memory_buffer_;
   int32* buffer_;
-  gles2::ContextGroup group_;
   gles2::MockGLES2Decoder* decoder_;
   CommandParser* parser_;
   scoped_ptr<AsyncAPIMock> async_api_;

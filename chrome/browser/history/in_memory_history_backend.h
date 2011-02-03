@@ -14,6 +14,8 @@
 #define CHROME_BROWSER_HISTORY_IN_MEMORY_HISTORY_BACKEND_H_
 #pragma once
 
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/scoped_ptr.h"
@@ -28,6 +30,7 @@ namespace history {
 
 class InMemoryDatabase;
 class InMemoryURLIndex;
+struct KeywordSearchTermDetails;
 class URLDatabase;
 struct URLsDeletedDetails;
 struct URLsModifiedDetails;
@@ -38,7 +41,9 @@ class InMemoryHistoryBackend : public NotificationObserver {
   ~InMemoryHistoryBackend();
 
   // Initializes with data from the given history database.
-  bool Init(const FilePath& history_filename, URLDatabase* db);
+  bool Init(const FilePath& history_filename,
+            URLDatabase* db,
+            const std::string& languages);
 
   // Does initialization work when this object is attached to the history
   // system on the main thread. The argument is the profile with which the
@@ -52,16 +57,13 @@ class InMemoryHistoryBackend : public NotificationObserver {
     return db_.get();
   }
 
-  // Returns the in memory index owned by this backend.  This index is only
-  // loaded when the --enable-in-memory-url-index flag is used.
-  InMemoryURLIndex* index() const {
-    return index_.get();
-  }
-
   // Notification callback.
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
+
+  // Return the quick history index.
+  history::InMemoryURLIndex* InMemoryIndex() const { return index_.get(); }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAll);
@@ -72,15 +74,19 @@ class InMemoryHistoryBackend : public NotificationObserver {
   // Handler for NOTIFY_HISTORY_URLS_DELETED.
   void OnURLsDeleted(const URLsDeletedDetails& details);
 
+  // Handler for HISTORY_KEYWORD_SEARCH_TERM_UPDATED.
+  void OnKeywordSearchTermUpdated(const KeywordSearchTermDetails& details);
+
   NotificationRegistrar registrar_;
 
   scoped_ptr<InMemoryDatabase> db_;
 
-  scoped_ptr<InMemoryURLIndex> index_;
-
   // The profile that this object is attached. May be NULL before
   // initialization.
   Profile* profile_;
+
+  // The index used for quick history lookups.
+  scoped_ptr<history::InMemoryURLIndex> index_;
 
   DISALLOW_COPY_AND_ASSIGN(InMemoryHistoryBackend);
 };

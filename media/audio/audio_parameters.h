@@ -8,6 +8,12 @@
 #include "base/basictypes.h"
 
 struct AudioParameters {
+  // Compare is useful when AudioParameters is used as a key in std::map.
+  class Compare {
+   public:
+    bool operator()(const AudioParameters& a, const AudioParameters& b) const;
+  };
+
   enum Format {
     AUDIO_PCM_LINEAR = 0,     // PCM is 'raw' amplitude samples.
     AUDIO_PCM_LOW_LATENCY,    // Linear PCM, low latency requested.
@@ -24,15 +30,21 @@ struct AudioParameters {
 
   AudioParameters();
 
-  AudioParameters(Format format, int channels,
-                  int sample_rate, int bits_per_sample);
+  AudioParameters(Format format, int channels, int sample_rate,
+                  int bits_per_sample, int samples_per_packet);
 
+  // Checks that all values are in the expected range. All limits are specified
+  // in media::Limits.
   bool IsValid() const;
 
-  Format format;        // Format of the stream.
-  int channels;         // Number of channels.
-  int sample_rate;      // Sampling frequency/rate.
-  int bits_per_sample;  // Number of bits per sample.
+  // Returns size of audio packets in bytes.
+  int GetPacketSize() const;
+
+  Format format;           // Format of the stream.
+  int channels;            // Number of channels.
+  int sample_rate;         // Sampling frequency/rate.
+  int bits_per_sample;     // Number of bits per sample.
+  int samples_per_packet;  // Size of a packet in frames.
 };
 
 #endif  // MEDIA_AUDIO_AUDIO_PARAMETERS_H_

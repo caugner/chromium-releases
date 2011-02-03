@@ -46,6 +46,8 @@
         'src/google/protobuf/generated_message_util.h',
         'src/google/protobuf/message_lite.h',
         'src/google/protobuf/repeated_field.h',
+        'src/google/protobuf/unknown_field_set.cc',
+        'src/google/protobuf/unknown_field_set.h',
         'src/google/protobuf/wire_format_lite.h',
         'src/google/protobuf/wire_format_lite_inl.h',
         'src/google/protobuf/io/coded_stream.h',
@@ -92,8 +94,10 @@
     # This is the full, heavy protobuf lib that's needed for c++ .proto's
     # that don't specify the LITE_RUNTIME option.  The protocol
     # compiler itself (protoc) falls into that category.
+    #
+    # DO NOT LINK AGAINST THIS TARGET IN CHROME CODE  --agl
     {
-      'target_name': 'protobuf',
+      'target_name': 'protobuf_full_do_not_use',
       'type': '<(library)',
       'toolsets': ['host','target'],
       'sources': [
@@ -212,7 +216,7 @@
         'src/google/protobuf/compiler/main.cc',
       ],
       'dependencies': [
-        'protobuf',
+        'protobuf_full_do_not_use',
       ],
       'include_dirs': [
         '<(config_h_dir)',

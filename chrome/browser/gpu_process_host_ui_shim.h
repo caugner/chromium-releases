@@ -11,23 +11,21 @@
 // portion of this class, the GpuProcessHost, is responsible for
 // shuttling messages between the browser and GPU processes.
 
+#include "base/non_thread_safe.h"
 #include "base/singleton.h"
-#include "chrome/common/gpu_native_window_handle.h"
+#include "chrome/common/gpu_info.h"
 #include "chrome/common/message_router.h"
 #include "ipc/ipc_channel.h"
 #include "gfx/native_widget_types.h"
 
 class GpuProcessHostUIShim : public IPC::Channel::Sender,
-                             public IPC::Channel::Listener {
+                             public IPC::Channel::Listener,
+                             public NonThreadSafe {
  public:
   // Getter for the singleton. This will return NULL on failure.
   static GpuProcessHostUIShim* Get();
 
   int32 GetNextRoutingId();
-
-  // Creates the new remote view and returns the routing ID for the view, or 0
-  // on failure.
-  int32 NewRenderWidgetHostView(GpuNativeWindowHandle parent);
 
   // IPC::Channel::Sender implementation.
   virtual bool Send(IPC::Message* msg);
@@ -46,13 +44,30 @@ class GpuProcessHostUIShim : public IPC::Channel::Sender,
   // graphics card.
   void CollectGraphicsInfoAsynchronously();
 
+  // Tells the GPU process to crash. Useful for testing.
+  void SendAboutGpuCrash();
+
+  // Tells the GPU process to let its main thread enter an infinite loop.
+  // Useful for testing.
+  void SendAboutGpuHang();
+
+  // Return all known information about the GPU.
+  const GPUInfo& gpu_info() const;
+
  private:
   friend struct DefaultSingletonTraits<GpuProcessHostUIShim>;
 
   GpuProcessHostUIShim();
   virtual ~GpuProcessHostUIShim();
 
+  // Message handlers.
+  void OnGraphicsInfoCollected(const GPUInfo& gpu_info);
+  void OnScheduleComposite(int32 renderer_id, int32 render_view_id);
+  void OnControlMessageReceived(const IPC::Message& message);
+
   int last_routing_id_;
+
+  GPUInfo gpu_info_;
 
   MessageRouter router_;
 };

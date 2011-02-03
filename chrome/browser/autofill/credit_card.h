@@ -14,11 +14,12 @@
 // A form group that stores credit card information.
 class CreditCard : public FormGroup {
  public:
-  CreditCard();
-  CreditCard(const string16& label, int unique_id);
+  explicit CreditCard(const std::string& guid);
+
   // For use in STL containers.
-  CreditCard(const CreditCard& card);
-  ~CreditCard();
+  CreditCard();
+  CreditCard(const CreditCard& credit_card);
+  virtual ~CreditCard();
 
   // FormGroup implementation:
   FormGroup* Clone() const;
@@ -31,7 +32,7 @@ class CreditCard : public FormGroup {
   virtual string16 GetFieldText(const AutoFillType& type) const;
   virtual string16 GetPreviewText(const AutoFillType& type) const;
   virtual void SetInfo(const AutoFillType& type, const string16& value);
-  const string16& Label() const { return label_; }
+  virtual const string16 Label() const { return label_; }
 
   // The number altered for display, for example: ******1234
   string16 ObfuscatedNumber() const;
@@ -41,21 +42,25 @@ class CreditCard : public FormGroup {
   string16 LastFourDigits() const;
 
   const string16& type() const { return type_; }
-  int billing_address_id() const { return billing_address_id_; }
-  int unique_id() const { return unique_id_; }
 
-  // The caller should verify that the corresponding AutoFillProfile exists.
-  void set_billing_address_id(int address_id) {
-    billing_address_id_ = address_id;
-  }
-  void set_unique_id(int id) { unique_id_ = id; }
+  // The guid is the primary identifier for |CreditCard| objects.
+  const std::string guid() const { return guid_; }
+  void set_guid(const std::string& guid) { guid_ = guid; }
 
   // For use in STL containers.
-  void operator=(const CreditCard&);
+  void operator=(const CreditCard& credit_card);
+
+  // Comparison for Sync.  Returns 0 if the credit card is the same as |this|,
+  // or < 0, or > 0 if it is different.  The implied ordering can be used for
+  // culling duplicates.  The ordering is based on collation order of the
+  // textual contents of the fields.
+  // GUIDs, labels, and unique IDs are not compared, only the values of the
+  // credit cards themselves.
+  int Compare(const CreditCard& credit_card) const;
 
   // Used by tests.
-  bool operator==(const CreditCard& creditcard) const;
-  bool operator!=(const CreditCard& creditcard) const;
+  bool operator==(const CreditCard& credit_card) const;
+  bool operator!=(const CreditCard& credit_card) const;
   void set_label(const string16& label) { label_ = label; }
 
   // Returns true if |value| is a credit card number.  Uses the Luhn formula to
@@ -64,6 +69,9 @@ class CreditCard : public FormGroup {
 
   // Returns true if there are no values (field types) set.
   bool IsEmpty() const;
+
+  // Returns the credit card number.
+  const string16& number() const { return number_; }
 
  private:
   // The month and year are zero if not present.
@@ -79,13 +87,12 @@ class CreditCard : public FormGroup {
   // Sets |expiration_year_| to the integer conversion of |text|.
   void SetExpirationYearFromString(const string16& text);
 
-  const string16& number() const { return number_; }
   const string16& name_on_card() const { return name_on_card_; }
   const string16& last_four_digits() const { return last_four_digits_; }
   int expiration_month() const { return expiration_month_; }
   int expiration_year() const { return expiration_year_; }
 
-  void set_number(const string16& number) { number_ = number; }
+  void set_number(const string16& number);
   void set_name_on_card(const string16& name_on_card) {
     name_on_card_ = name_on_card;
   }
@@ -138,15 +145,11 @@ class CreditCard : public FormGroup {
   // This is the display name of the card set by the user, e.g., Amazon Visa.
   string16 label_;
 
-  // The billing address. This is the unique ID of the AutoFillProfile that
-  // contains the corresponding billing address.
-  int billing_address_id_;
-
-  // The unique ID of this credit card.
-  int unique_id_;
+  // The guid of this credit card.
+  std::string guid_;
 };
 
 // So we can compare CreditCards with EXPECT_EQ().
-std::ostream& operator<<(std::ostream& os, const CreditCard& creditcard);
+std::ostream& operator<<(std::ostream& os, const CreditCard& credit_card);
 
 #endif  // CHROME_BROWSER_AUTOFILL_CREDIT_CARD_H_

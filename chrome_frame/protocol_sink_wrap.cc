@@ -8,11 +8,11 @@
 #include "chrome_frame/protocol_sink_wrap.h"
 
 #include "base/logging.h"
-#include "base/scoped_bstr_win.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/scoped_bstr.h"
 #include "chrome_frame/bho.h"
 #include "chrome_frame/bind_context_info.h"
 #include "chrome_frame/exception_barrier.h"
@@ -86,11 +86,11 @@ ProtData::ProtocolDataMap ProtData::datamap_;
 Lock ProtData::datamap_lock_;
 
 ProtocolSinkWrap::ProtocolSinkWrap() {
-  DLOG(INFO) << __FUNCTION__ << base::StringPrintf(" 0x%08X", this);
+  DVLOG(1) << __FUNCTION__ << base::StringPrintf(" 0x%08X", this);
 }
 
 ProtocolSinkWrap::~ProtocolSinkWrap() {
-  DLOG(INFO) << __FUNCTION__ << base::StringPrintf(" 0x%08X", this);
+  DVLOG(1) << __FUNCTION__ << base::StringPrintf(" 0x%08X", this);
 }
 
 ScopedComPtr<IInternetProtocolSink> ProtocolSinkWrap::CreateNewSink(
@@ -104,48 +104,6 @@ ScopedComPtr<IInternetProtocolSink> ProtocolSinkWrap::CreateNewSink(
   return ScopedComPtr<IInternetProtocolSink>(new_sink);
 }
 
-HRESULT ProtocolSinkWrap::ObtainServiceProvider() {
-  HRESULT hr = S_OK;
-  if (!delegate_service_provider_) {
-    hr = delegate_service_provider_.QueryFrom(delegate_);
-  }
-  return hr;
-}
-
-HRESULT ProtocolSinkWrap::ObtainHttpNegotiate() {
-  if (UserAgentAddOn::has_delegate())
-    return S_OK;
-
-  HRESULT hr = ObtainServiceProvider();
-  if (hr == S_OK) {
-    ScopedComPtr<IHttpNegotiate> http_negotiate;
-    hr = delegate_service_provider_->QueryService(
-        IID_IHttpNegotiate,
-        IID_IHttpNegotiate,
-        reinterpret_cast<void**>(http_negotiate.Receive()));
-    UserAgentAddOn::set_delegate(http_negotiate);
-  }
-  return hr;
-}
-
-STDMETHODIMP ProtocolSinkWrap::QueryService(REFGUID guidService, REFIID riid,
-                                            void** ppvObject) {
-  // We really insist to append "chromeframe" user-agent header, even in the
-  // very unlikely case when delegate does not support IServiceProvider and/or
-  // IHttpNegotiate.
-  if (guidService == IID_IHttpNegotiate && riid == IID_IHttpNegotiate) {
-    ObtainHttpNegotiate();
-    AddRef();
-    *ppvObject = reinterpret_cast<void**>(static_cast<IHttpNegotiate*>(this));
-    return S_OK;
-  }
-
-  HRESULT hr = ObtainServiceProvider();
-  if (hr == S_OK)
-    hr = delegate_service_provider_->QueryService(guidService, riid, ppvObject);
-  return hr;
-}
-
 // IInternetProtocolSink methods
 STDMETHODIMP ProtocolSinkWrap::Switch(PROTOCOLDATA* protocol_data) {
   HRESULT hr = E_FAIL;
@@ -156,9 +114,9 @@ STDMETHODIMP ProtocolSinkWrap::Switch(PROTOCOLDATA* protocol_data) {
 
 STDMETHODIMP ProtocolSinkWrap::ReportProgress(ULONG status_code,
                                               LPCWSTR status_text) {
-  DLOG(INFO) << "ProtocolSinkWrap::ReportProgress: "
-      <<  BindStatus2Str(status_code)
-      << " Status: " << (status_text ? status_text : L"");
+  DVLOG(1) << "ProtocolSinkWrap::ReportProgress: "
+           << BindStatus2Str(status_code)
+           << " Status: " << (status_text ? status_text : L"");
 
   HRESULT hr = prot_data_->ReportProgress(delegate_, status_code, status_text);
   return hr;
@@ -167,8 +125,8 @@ STDMETHODIMP ProtocolSinkWrap::ReportProgress(ULONG status_code,
 STDMETHODIMP ProtocolSinkWrap::ReportData(DWORD flags, ULONG progress,
     ULONG max_progress) {
   DCHECK(delegate_);
-  DLOG(INFO) << "ProtocolSinkWrap::ReportData: " << Bscf2Str(flags) <<
-      " progress: " << progress << " progress_max: " << max_progress;
+  DVLOG(1) << "ProtocolSinkWrap::ReportData: " << Bscf2Str(flags)
+           << " progress: " << progress << " progress_max: " << max_progress;
 
   HRESULT hr = prot_data_->ReportData(delegate_, flags, progress, max_progress);
   return hr;
@@ -176,8 +134,9 @@ STDMETHODIMP ProtocolSinkWrap::ReportData(DWORD flags, ULONG progress,
 
 STDMETHODIMP ProtocolSinkWrap::ReportResult(HRESULT result, DWORD error,
     LPCWSTR result_text) {
-  DLOG(INFO) << "ProtocolSinkWrap::ReportResult: result: " << result <<
-      " error: " << error << " Text: " << (result_text ? result_text : L"");
+  DVLOG(1) << "ProtocolSinkWrap::ReportResult: result: " << result
+           << " error: " << error
+           << " Text: " << (result_text ? result_text : L"");
   ExceptionBarrier barrier;
   HRESULT hr = prot_data_->ReportResult(delegate_, result, error, result_text);
   return hr;
@@ -311,12 +270,13 @@ RendererType DetermineRendererTypeFromMetaData(
   }
 
   if (info) {
-    char buffer[32] = "x-ua-compatible";
+    char buffer[512] = "x-ua-compatible";
     DWORD len = sizeof(buffer);
     DWORD flags = 0;
     HRESULT hr = info->QueryInfo(HTTP_QUERY_CUSTOM, buffer, &len, &flags, NULL);
+
     if (hr == S_OK && len > 0) {
-      if (StrStrIA(buffer, "chrome=1")) {
+      if (CheckXUaCompatibleDirective(buffer, GetIEMajorVersion())) {
         return RENDERER_TYPE_CHROME_RESPONSE_HEADER;
       }
     }
@@ -344,9 +304,12 @@ RendererType DetermineRendererType(void* buffer, DWORD size, bool last_chance) {
   // browsers may handle this properly, we don't and will stop scanning
   // for the XUACompat content value if we encounter one.
   std::wstring xua_compat_content;
-  UtilGetXUACompatContentValue(html_contents, &xua_compat_content);
-  if (StrStrI(xua_compat_content.c_str(), kChromeContentPrefix)) {
-    renderer_type = RENDERER_TYPE_CHROME_HTTP_EQUIV;
+  if (SUCCEEDED(UtilGetXUACompatContentValue(html_contents,
+                                             &xua_compat_content))) {
+    if (CheckXUaCompatibleDirective(WideToASCII(xua_compat_content),
+                                    GetIEMajorVersion())) {
+      renderer_type = RENDERER_TYPE_CHROME_HTTP_EQUIV;
+    }
   }
 
   return renderer_type;
@@ -360,7 +323,7 @@ ProtData::ProtData(IInternetProtocol* protocol,
       renderer_type_(RENDERER_TYPE_UNDETERMINED), protocol_(protocol),
       read_fun_(read_fun), url_(url) {
   memset(buffer_, 0, arraysize(buffer_));
-  DLOG(INFO) << __FUNCTION__ << " " << this;
+  DVLOG(1) << __FUNCTION__ << " " << this;
 
   // Add to map.
   AutoLock lock(datamap_lock_);
@@ -369,7 +332,7 @@ ProtData::ProtData(IInternetProtocol* protocol,
 }
 
 ProtData::~ProtData() {
-  DLOG(INFO) << __FUNCTION__ << " " << this;
+  DVLOG(1) << __FUNCTION__ << " " << this;
   Invalidate();
 }
 
@@ -459,8 +422,8 @@ HRESULT ProtData::ReportProgress(IInternetProtocolSink* delegate,
       if (IsChrome(renderer_type_)) {
         // Suggested mime type is "text/html" and we have DEFAULT_RENDERER,
         // OPT_IN_URL, or RESPONSE_HEADER.
-        DLOG(INFO) << "Forwarding BINDSTATUS_MIMETYPEAVAILABLE "
-                   << kChromeMimeType;
+        DVLOG(1) << "Forwarding BINDSTATUS_MIMETYPEAVAILABLE "
+                 << kChromeMimeType;
         SaveReferrer(delegate);
         delegate->ReportProgress(BINDSTATUS_MIMETYPEAVAILABLE, kChromeMimeType);
       } else if (renderer_type_ == RENDERER_TYPE_OTHER) {
@@ -503,8 +466,7 @@ HRESULT ProtData::ReportData(IInternetProtocolSink* delegate,
   }
 
   if (IsChrome(renderer_type_)) {
-    DLOG(INFO) << "Forwarding BINDSTATUS_MIMETYPEAVAILABLE "
-        << kChromeMimeType;
+    DVLOG(1) << "Forwarding BINDSTATUS_MIMETYPEAVAILABLE " << kChromeMimeType;
     SaveReferrer(delegate);
     delegate->ReportProgress(BINDSTATUS_MIMETYPEAVAILABLE, kChromeMimeType);
   }
@@ -529,7 +491,7 @@ HRESULT ProtData::ReportResult(IInternetProtocolSink* delegate, HRESULT result,
   // We may receive ReportResult without ReportData, if the connection fails
   // for example.
   if (renderer_type_ == RENDERER_TYPE_UNDETERMINED) {
-    DLOG(INFO) << "ReportResult received but renderer type is yet unknown.";
+    DVLOG(1) << "ReportResult received but renderer type is yet unknown.";
     renderer_type_ = RENDERER_TYPE_OTHER;
     FireSuggestedMimeType(delegate);
   }
@@ -569,15 +531,15 @@ void ProtData::SaveSuggestedMimeType(LPCWSTR status_text) {
 
 void ProtData::FireSuggestedMimeType(IInternetProtocolSink* delegate) {
   if (has_server_mime_type_) {
-    DLOG(INFO) << "Forwarding BINDSTATUS_SERVER_MIMETYPEAVAILABLE "
-        << suggested_mime_type_;
+    DVLOG(1) << "Forwarding BINDSTATUS_SERVER_MIMETYPEAVAILABLE "
+             << suggested_mime_type_;
     delegate->ReportProgress(BINDSTATUS_SERVER_MIMETYPEAVAILABLE,
                              suggested_mime_type_);
   }
 
   if (has_suggested_mime_type_) {
-    DLOG(INFO) << "Forwarding BINDSTATUS_MIMETYPEAVAILABLE "
-        << suggested_mime_type_;
+    DVLOG(1) << "Forwarding BINDSTATUS_MIMETYPEAVAILABLE "
+             << suggested_mime_type_;
     delegate->ReportProgress(BINDSTATUS_MIMETYPEAVAILABLE,
                              suggested_mime_type_);
   }
@@ -675,13 +637,13 @@ STDMETHODIMP Hook_Start(InternetProtocol_Start_Fn orig_start,
   DCHECK(orig_start);
   if (!url || !prot_sink || !bind_info)
     return E_INVALIDARG;
-  DLOG_IF(INFO, url != NULL) << "OnStart: " << url << PiFlags2Str(flags);
+  DVLOG_IF(1, url != NULL) << "OnStart: " << url << PiFlags2Str(flags);
 
   ScopedComPtr<IBindCtx> bind_ctx = BindCtxFromIBindInfo(bind_info);
   if (!bind_ctx) {
     // MSHTML sometimes takes a short path, skips the creation of
     // moniker and binding, by directly grabbing protocol from InternetSession
-    DLOG(INFO) << "DirectBind for " << url;
+    DVLOG(1) << "DirectBind for " << url;
     return ForwardHookStart(orig_start, protocol, url, prot_sink, bind_info,
                             flags, reserved);
   }
@@ -697,12 +659,18 @@ STDMETHODIMP Hook_Start(InternetProtocol_Start_Fn orig_start,
   }
 
   if (IsCFRequest(bind_ctx)) {
+    ScopedComPtr<BindContextInfo> info;
+    BindContextInfo::FromBindContext(bind_ctx, info.Receive());
+    DCHECK(info);
+    if (info) {
+      info->set_protocol(protocol);
+    }
     return ForwardHookStart(orig_start, protocol, url, prot_sink, bind_info,
                             flags, reserved);
   }
 
   if (prot_data) {
-    DLOG(INFO) << "Found existing ProtData!";
+    DVLOG(1) << "Found existing ProtData!";
     prot_data->UpdateUrl(url);
     ScopedComPtr<IInternetProtocolSink> new_sink =
         ProtocolSinkWrap::CreateNewSink(prot_sink, prot_data);
@@ -748,15 +716,15 @@ STDMETHODIMP Hook_StartEx(InternetProtocol_StartEx_Fn orig_start_ex,
   if (!uri || !prot_sink || !bind_info)
     return E_INVALIDARG;
 
-  ScopedBstr url;
+  base::win::ScopedBstr url;
   uri->GetPropertyBSTR(Uri_PROPERTY_ABSOLUTE_URI, url.Receive(), 0);
-  DLOG_IF(INFO, url != NULL) << "OnStartEx: " << url << PiFlags2Str(flags);
+  DVLOG_IF(1, url != NULL) << "OnStartEx: " << url << PiFlags2Str(flags);
 
   ScopedComPtr<IBindCtx> bind_ctx = BindCtxFromIBindInfo(bind_info);
   if (!bind_ctx) {
     // MSHTML sometimes takes a short path, skips the creation of
     // moniker and binding, by directly grabbing protocol from InternetSession.
-    DLOG(INFO) << "DirectBind for " << url;
+    DVLOG(1) << "DirectBind for " << url;
     return ForwardHookStartEx(orig_start_ex, protocol, uri, prot_sink,
                               bind_info, flags, reserved);
   }
@@ -772,12 +740,18 @@ STDMETHODIMP Hook_StartEx(InternetProtocol_StartEx_Fn orig_start_ex,
   }
 
   if (IsCFRequest(bind_ctx)) {
+    ScopedComPtr<BindContextInfo> info;
+    BindContextInfo::FromBindContext(bind_ctx, info.Receive());
+    DCHECK(info);
+    if (info) {
+      info->set_protocol(protocol);
+    }
     return ForwardHookStartEx(orig_start_ex, protocol, uri, prot_sink,
                               bind_info, flags, reserved);
   }
 
   if (prot_data) {
-    DLOG(INFO) << "Found existing ProtData!";
+    DVLOG(1) << "Found existing ProtData!";
     prot_data->UpdateUrl(url);
     ScopedComPtr<IInternetProtocolSink> new_sink =
         ProtocolSinkWrap::CreateNewSink(prot_sink, prot_data);

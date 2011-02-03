@@ -26,6 +26,9 @@
 WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl()
     : context_(NULL),
       web_view_(NULL),
+#if defined(OS_MACOSX)
+      plugin_handle_(NULL),
+#endif  // defined(OS_MACOSX)
       cached_width_(0),
       cached_height_(0),
       bound_fbo_(0) {
@@ -51,6 +54,11 @@ WebGraphicsContext3DCommandBufferImpl::
   }
 }
 
+static const char* kWebGraphicsContext3DPerferredGLExtensions =
+    "GL_OES_packed_depth_stencil "
+    "GL_OES_depth24 "
+    "GL_CHROMIUM_webglsl";
+
 bool WebGraphicsContext3DCommandBufferImpl::initialize(
     WebGraphicsContext3D::Attributes attributes,
     WebKit::WebView* web_view,
@@ -61,7 +69,7 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
   GpuChannelHost* host = render_thread->EstablishGpuChannelSync();
   if (!host)
     return false;
-  DCHECK(host->state() == GpuChannelHost::CONNECTED);
+  DCHECK(host->state() == GpuChannelHost::kConnected);
 
   // Convert WebGL context creation attributes into GGL/EGL size requests.
   const int alpha_size = attributes.alpha ? 8 : 0;
@@ -77,6 +85,12 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
     ggl::GGL_SAMPLE_BUFFERS, sample_buffers,
     ggl::GGL_NONE,
   };
+
+  if (attributes.canRecoverFromContextLoss == false) {
+    GPUInfo gpu_info = host->gpu_info();
+    if (gpu_info.can_lose_context())
+        return false;
+  }
 
   if (render_directly_to_web_view) {
     RenderView* renderview = RenderView::FromWebView(web_view);
@@ -95,6 +109,7 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
         host,
         view_id,
         renderview->routing_id(),
+        kWebGraphicsContext3DPerferredGLExtensions,
         attribs);
   } else {
     bool compositing_enabled = !CommandLine::ForCurrentProcess()->HasSwitch(
@@ -114,10 +129,12 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
         parent_context = context_impl->context_;
       }
     }
-    context_ = ggl::CreateOffscreenContext(host,
-                                           parent_context,
-                                           gfx::Size(1, 1),
-                                           attribs);
+    context_ = ggl::CreateOffscreenContext(
+        host,
+        parent_context,
+        gfx::Size(1, 1),
+        kWebGraphicsContext3DPerferredGLExtensions,
+        attribs);
     web_view_ = NULL;
   }
   if (!context_)
@@ -184,17 +201,13 @@ bool WebGraphicsContext3DCommandBufferImpl::isGLES2Compliant() {
   return true;
 }
 
-bool WebGraphicsContext3DCommandBufferImpl::isGLES2ParameterStrict() {
-  return false;
-}
-
 bool WebGraphicsContext3DCommandBufferImpl::isGLES2NPOTStrict() {
-  return false;
+  return true;
 }
 
 bool WebGraphicsContext3DCommandBufferImpl::
     isErrorGeneratedOnOutOfBoundsAccesses() {
-  return false;
+  return true;
 }
 
 unsigned int WebGraphicsContext3DCommandBufferImpl::getPlatformTextureId() {
@@ -216,6 +229,8 @@ void WebGraphicsContext3DCommandBufferImpl::reshape(int width, int height) {
   if (web_view_) {
 #if defined(OS_MACOSX)
     ggl::ResizeOnscreenContext(context_, gfx::Size(width, height));
+#else
+    glResizeCHROMIUM(width, height);
 #endif
   } else {
     ggl::ResizeOffscreenContext(context_, gfx::Size(width, height));
@@ -314,40 +329,17 @@ void WebGraphicsContext3DCommandBufferImpl::synthesizeGLError(
   }
 }
 
-static bool supports_extension(const char *ext_name) {
-  const char* extensions = (const char *) glGetString(GL_EXTENSIONS);
-  CStringTokenizer t(extensions, extensions + strlen(extensions), " ");
-  while (t.GetNext()) {
-    if (t.token() == ext_name) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool WebGraphicsContext3DCommandBufferImpl::supportsBGRA() {
-  static bool is_supported =
-    supports_extension("GL_EXT_texture_format_BGRA8888") &&
-    supports_extension("GL_EXT_read_format_bgra");
-  return is_supported;
-}
-
-bool WebGraphicsContext3DCommandBufferImpl::supportsMapSubCHROMIUM() {
-  static bool is_supported = supports_extension("GL_CHROMIUM_map_sub");
-  return is_supported;
-}
-
 void* WebGraphicsContext3DCommandBufferImpl::mapBufferSubDataCHROMIUM(
     unsigned target,
     int offset,
     int size,
     unsigned access) {
-  return glMapBufferSubData(target, offset, size, access);
+  return glMapBufferSubDataCHROMIUM(target, offset, size, access);
 }
 
 void WebGraphicsContext3DCommandBufferImpl::unmapBufferSubDataCHROMIUM(
     const void* mem) {
-  return glUnmapBufferSubData(mem);
+  return glUnmapBufferSubDataCHROMIUM(mem);
 }
 
 void* WebGraphicsContext3DCommandBufferImpl::mapTexSubImage2DCHROMIUM(
@@ -360,18 +352,13 @@ void* WebGraphicsContext3DCommandBufferImpl::mapTexSubImage2DCHROMIUM(
     unsigned format,
     unsigned type,
     unsigned access) {
-  return glMapTexSubImage2D(
+  return glMapTexSubImage2DCHROMIUM(
       target, level, xoffset, yoffset, width, height, format, type, access);
 }
 
 void WebGraphicsContext3DCommandBufferImpl::unmapTexSubImage2DCHROMIUM(
     const void* mem) {
-  glUnmapTexSubImage2D(mem);
-}
-
-bool WebGraphicsContext3DCommandBufferImpl::
-    supportsCopyTextureToParentTextureCHROMIUM() {
-  return true;
+  glUnmapTexSubImage2DCHROMIUM(mem);
 }
 
 void WebGraphicsContext3DCommandBufferImpl::copyTextureToParentTextureCHROMIUM(
@@ -682,6 +669,10 @@ unsigned long WebGraphicsContext3DCommandBufferImpl::getError() {
   return glGetError();
 }
 
+bool WebGraphicsContext3DCommandBufferImpl::isContextLost() {
+  return ggl::IsCommandBufferContextLost(context_);
+}
+
 DELEGATE_TO_GL_2(getFloatv, GetFloatv, unsigned long, float*)
 
 DELEGATE_TO_GL_4(getFramebufferAttachmentParameteriv,
@@ -779,9 +770,12 @@ DELEGATE_TO_GL_3(getVertexAttribiv, GetVertexAttribiv,
 
 long WebGraphicsContext3DCommandBufferImpl::getVertexAttribOffset(
     unsigned long index, unsigned long pname) {
-  // TODO(kbr): implement.
-  NOTIMPLEMENTED();
-  return 0;
+  makeContextCurrent();
+  GLvoid* value = NULL;
+  // NOTE: If pname is ever a value that returns more then 1 element
+  // this will corrupt memory.
+  glGetVertexAttribPointerv(index, pname, &value);
+  return reinterpret_cast<intptr_t>(value);
 }
 
 DELEGATE_TO_GL_2(hint, Hint, unsigned long, unsigned long)
@@ -1015,7 +1009,7 @@ void WebGraphicsContext3DCommandBufferImpl::deleteTexture(unsigned texture) {
 void WebGraphicsContext3DCommandBufferImpl::copyTextureToCompositor(
     unsigned texture, unsigned parentTexture) {
   makeContextCurrent();
-  glCopyTextureToParentTexture(texture, parentTexture);
+  glCopyTextureToParentTextureCHROMIUM(texture, parentTexture);
   glFlush();
 }
 

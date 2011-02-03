@@ -2,15 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/histogram.h"
+#include "chrome/browser/sync/glue/typed_url_data_type_controller.h"
+
+#include "base/metrics/histogram.h"
 #include "base/logging.h"
 #include "base/task.h"
 #include "base/time.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sync/glue/typed_url_change_processor.h"
-#include "chrome/browser/sync/glue/typed_url_data_type_controller.h"
 #include "chrome/browser/sync/glue/typed_url_model_associator.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
@@ -63,7 +64,7 @@ TypedUrlDataTypeController::~TypedUrlDataTypeController() {
 }
 
 void TypedUrlDataTypeController::Start(StartCallback* start_callback) {
-  LOG(INFO) << "Starting typed_url data controller.";
+  VLOG(1) << "Starting typed_url data controller.";
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(start_callback);
   if (state_ != NOT_RUNNING || start_callback_.get()) {
@@ -89,7 +90,7 @@ void TypedUrlDataTypeController::Start(StartCallback* start_callback) {
 void TypedUrlDataTypeController::Observe(NotificationType type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
-  LOG(INFO) << "History loaded observed.";
+  VLOG(1) << "History loaded observed.";
   notification_registrar_.Remove(this,
                                  NotificationType::HISTORY_LOADED,
                                  NotificationService::AllSources());
@@ -100,7 +101,7 @@ void TypedUrlDataTypeController::Observe(NotificationType type,
 }
 
 void TypedUrlDataTypeController::Stop() {
-  LOG(INFO) << "Stopping typed_url data type controller.";
+  VLOG(1) << "Stopping typed_url data type controller.";
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (change_processor_ != NULL)
@@ -115,7 +116,7 @@ void TypedUrlDataTypeController::Stop() {
 }
 
 void TypedUrlDataTypeController::StartImpl(history::HistoryBackend* backend) {
-  LOG(INFO) << "TypedUrl data type controller StartImpl called.";
+  VLOG(1) << "TypedUrl data type controller StartImpl called.";
   // No additional services need to be started before we can proceed
   // with model association.
   ProfileSyncFactory::SyncComponents sync_components =
@@ -148,7 +149,7 @@ void TypedUrlDataTypeController::StartImpl(history::HistoryBackend* backend) {
 void TypedUrlDataTypeController::StartDone(
     DataTypeController::StartResult result,
     DataTypeController::State new_state) {
-  LOG(INFO) << "TypedUrl data type controller StartDone called.";
+  VLOG(1) << "TypedUrl data type controller StartDone called.";
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                          NewRunnableMethod(
                              this,
@@ -160,7 +161,7 @@ void TypedUrlDataTypeController::StartDone(
 void TypedUrlDataTypeController::StartDoneImpl(
     DataTypeController::StartResult result,
     DataTypeController::State new_state) {
-  LOG(INFO) << "TypedUrl data type controller StartDoneImpl called.";
+  VLOG(1) << "TypedUrl data type controller StartDoneImpl called.";
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   set_state(new_state);
   start_callback_->Run(result);
@@ -174,7 +175,7 @@ void TypedUrlDataTypeController::StartDoneImpl(
 }
 
 void TypedUrlDataTypeController::StopImpl() {
-  LOG(INFO) << "TypedUrl data type controller StopImpl called.";
+  VLOG(1) << "TypedUrl data type controller StopImpl called.";
 
   change_processor_.reset();
   model_associator_.reset();

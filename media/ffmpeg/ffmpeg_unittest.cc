@@ -272,7 +272,7 @@ class FFmpegTest : public testing::TestWithParam<const char*> {
       if (result > 0) {
         // TODO(scherkus): move this to ffmpeg_util.h and dedup.
         int64 denominator = av_audio_context()->channels *
-            av_get_bits_per_sample_format(av_audio_context()->sample_fmt) / 8 *
+            av_get_bits_per_sample_fmt(av_audio_context()->sample_fmt) / 8 *
             av_audio_context()->sample_rate;
         double microseconds = size_out /
             (denominator /
@@ -455,6 +455,7 @@ FFMPEG_TEST_CASE(counting, ogv);
 // The following are bugs reported by users.
 FFMPEG_TEST_CASE(crbug47761, ogg);
 FFMPEG_TEST_CASE(crbug50045, mp4);
+FFMPEG_TEST_CASE(crbug62127, webm);
 
 TEST_P(FFmpegTest, Perf) {
   {
@@ -636,17 +637,17 @@ TEST_F(FFmpegTest, VideoPlayedCollapse) {
   SeekTo(0.5);
   ReadRemainingFile();
   EXPECT_TRUE(StepDecodeVideo());
-  LOG(INFO) << decoded_video_time();
+  VLOG(1) << decoded_video_time();
 
   SeekTo(2.83);
   ReadRemainingFile();
   EXPECT_TRUE(StepDecodeVideo());
-  LOG(INFO) << decoded_video_time();
+  VLOG(1) << decoded_video_time();
 
   SeekTo(0.4);
   ReadRemainingFile();
   EXPECT_TRUE(StepDecodeVideo());
-  LOG(INFO) << decoded_video_time();
+  VLOG(1) << decoded_video_time();
 
   CloseCodecs();
   CloseFile();

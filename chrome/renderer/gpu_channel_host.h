@@ -30,12 +30,12 @@ class GpuChannelHost : public IPC::Channel::Listener,
  public:
   enum State {
     // Not yet connected.
-    UNCONNECTED,
+    kUnconnected,
     // Ready to use.
-    CONNECTED,
+    kConnected,
     // An error caused the host to become disconnected. Recreate channel to
     // reestablish connection.
-    LOST
+    kLost
   };
 
   // Called on the render thread
@@ -60,13 +60,17 @@ class GpuChannelHost : public IPC::Channel::Listener,
   virtual bool Send(IPC::Message* msg);
 
   // Create and connect to a command buffer in the GPU process.
-  CommandBufferProxy* CreateViewCommandBuffer(gfx::NativeViewId view,
-                                              int render_view_id);
+  CommandBufferProxy* CreateViewCommandBuffer(
+      gfx::NativeViewId view,
+      int render_view_id,
+      const std::string& allowed_extensions,
+      const std::vector<int32>& attribs);
 
   // Create and connect to a command buffer in the GPU process.
   CommandBufferProxy* CreateOffscreenCommandBuffer(
       CommandBufferProxy* parent,
       const gfx::Size& size,
+      const std::string& allowed_extensions,
       const std::vector<int32>& attribs,
       uint32 parent_texture_id);
 
@@ -95,7 +99,7 @@ class GpuChannelHost : public IPC::Channel::Listener,
 
   // This is a MessageFilter to intercept IPC messages and distribute them
   // to the corresponding GpuVideoDecoderHost.
-  scoped_ptr<GpuVideoServiceHost> gpu_video_service_host_;
+  scoped_refptr<GpuVideoServiceHost> gpu_video_service_host_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuChannelHost);
 };

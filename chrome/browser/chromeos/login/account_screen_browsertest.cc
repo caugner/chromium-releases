@@ -38,10 +38,19 @@ class AccountScreenTest : public WizardInProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(AccountScreenTest);
 };
 
+#if defined(OFFICIAL_BUILD)
+// Flaky on official build on autotest. Since this is not
+// used in Official build, i'm disabling it.
+// See crosbug.com/8517 .
+#define MAYBE_TestBasic DISABLED_TestBasic
+#else
+#define MAYBE_TestBasic TestBasic
+#endif
+
 // A basic test. It does not care how things evolve after the URL is
 // loaded. Thus no message loop is started. Just check that initial
 // status is expected.
-IN_PROC_BROWSER_TEST_F(AccountScreenTest, TestBasic) {
+IN_PROC_BROWSER_TEST_F(AccountScreenTest, MAYBE_TestBasic) {
   ASSERT_TRUE(controller());
   EXPECT_EQ(controller()->GetAccountScreen(), controller()->current_screen());
 }
@@ -55,7 +64,7 @@ static bool inspector_called = false;  // had to use global flag as
 
 static URLRequestJob* InspectorHook(URLRequest* request,
                                     const std::string& scheme) {
-  LOG(INFO) << "Intercepted: " << request->url() << ", scheme: " << scheme;
+  VLOG(1) << "Intercepted: " << request->url() << ", scheme: " << scheme;
 
   // Expect that the parameters are the same as new_account.html gave us.
   EXPECT_STREQ("cros://inspector/?param1=value1+param2",
@@ -68,7 +77,8 @@ static URLRequestJob* InspectorHook(URLRequest* request,
   return new URLRequestAboutJob(request);
 }
 
-IN_PROC_BROWSER_TEST_F(AccountScreenTest, TestSchemeInspector) {
+// Sometimes times out: http://crbug.com/60050.
+IN_PROC_BROWSER_TEST_F(AccountScreenTest, DISABLED_TestSchemeInspector) {
   ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
       chrome::kCrosScheme);
   URLRequestFilter::GetInstance()->AddHostnameHandler(chrome::kCrosScheme,

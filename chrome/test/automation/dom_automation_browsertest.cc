@@ -7,7 +7,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/test/automation/dom_element_proxy.h"
 #include "chrome/test/automation/javascript_execution_controller.h"
-#include "chrome/browser/browser.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 
@@ -23,15 +23,22 @@ class DOMAutomationTest : public InProcessBrowserTest {
   }
 
   GURL GetTestURL(const char* path) {
-    std::string url("http://localhost:1337/files/dom_automation/");
-    url.append(path);
-    return GURL(url);
+    std::string url_path = "files/dom_automation/";
+    url_path.append(path);
+    return test_server()->GetURL(url_path);
   }
 };
 
 typedef DOMElementProxy::By By;
 
-IN_PROC_BROWSER_TEST_F(DOMAutomationTest, FindByXPath) {
+#if defined(OS_WIN)
+// See http://crbug.com/61636
+#define MAYBE_FindByXPath FLAKY_FindByXPath
+#else
+#define MAYBE_FindByXPath FindByXPath
+#endif
+
+IN_PROC_BROWSER_TEST_F(DOMAutomationTest, MAYBE_FindByXPath) {
   ASSERT_TRUE(test_server()->Start());
   ui_test_utils::NavigateToURL(browser(),
                                GetTestURL("find_elements/test.html"));

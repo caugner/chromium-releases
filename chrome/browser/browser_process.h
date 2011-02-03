@@ -41,6 +41,7 @@ class WaitableEvent;
 
 namespace printing {
 class PrintJobManager;
+class PrintPreviewTabController;
 }
 
 class IOThread;
@@ -49,8 +50,8 @@ class IOThread;
 // These functions shouldn't return NULL unless otherwise noted.
 class BrowserProcess {
  public:
-  BrowserProcess() {}
-  virtual ~BrowserProcess() {}
+  BrowserProcess();
+  virtual ~BrowserProcess();
 
   // Invoked when the user is logging out/shutting down. When logging off we may
   // not have enough time to do a normal shutdown. This method is invoked prior
@@ -116,6 +117,8 @@ class BrowserProcess {
   virtual bool IsShuttingDown() = 0;
 
   virtual printing::PrintJobManager* print_job_manager() = 0;
+  virtual printing::PrintPreviewTabController*
+      print_preview_tab_controller() = 0;
 
   virtual GoogleURLTracker* google_url_tracker() = 0;
   virtual IntranetRedirectDetector* intranet_redirect_detector() = 0;

@@ -11,31 +11,48 @@
 #include <cstdarg>
 #include <map>
 
-#include "app/gtk_util.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "app/x11_util.h"
-#include "base/gtk_util.h"
+#include "base/environment.h"
 #include "base/i18n/rtl.h"
 #include "base/linux_util.h"
 #include "base/logging.h"
+#include "base/nix/xdg_util.h"
+#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
+#include "chrome/browser/autocomplete/autocomplete_classifier.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/gtk/cairo_cached_surface.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/renderer_preferences.h"
+#include "gfx/gtk_util.h"
 #include "googleurl/src/gurl.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/frame/browser_view.h"
 #include "chrome/browser/chromeos/native_dialog_window.h"
 #include "chrome/browser/chromeos/options/options_window_view.h"
 #include "views/window/window.h"
-#endif  // defined(OS_CHROMEOS)
+#else
+#include "chrome/browser/gtk/browser_window_gtk.h"
+#endif
+
+using WebKit::WebDragOperationsMask;
+using WebKit::WebDragOperation;
+using WebKit::WebDragOperationNone;
+using WebKit::WebDragOperationCopy;
+using WebKit::WebDragOperationLink;
+using WebKit::WebDragOperationMove;
 
 namespace {
 
@@ -73,11 +90,32 @@ gboolean OnMouseButtonReleased(GtkWidget* widget, GdkEventButton* event,
   return TRUE;
 }
 
+// Returns the approximate number of characters that can horizontally fit in
+// |pixel_width| pixels.
+int GetCharacterWidthForPixels(GtkWidget* widget, int pixel_width) {
+  DCHECK(GTK_WIDGET_REALIZED(widget))
+      << " widget must be realized to compute font metrics correctly";
+
+  PangoContext* context = gtk_widget_create_pango_context(widget);
+  PangoFontMetrics* metrics = pango_context_get_metrics(context,
+      widget->style->font_desc, pango_context_get_language(context));
+
+  // This technique (max of char and digit widths) matches the code in
+  // gtklabel.c.
+  int char_width = pixel_width * PANGO_SCALE /
+      std::max(pango_font_metrics_get_approximate_char_width(metrics),
+               pango_font_metrics_get_approximate_digit_width(metrics));
+
+  pango_font_metrics_unref(metrics);
+  g_object_unref(context);
+
+  return char_width;
+}
+
 void OnLabelRealize(GtkWidget* label, gpointer pixel_width) {
   gtk_label_set_width_chars(
       GTK_LABEL(label),
-      gtk_util::GetCharacterWidthForPixels(label,
-                                           GPOINTER_TO_INT(pixel_width)));
+      GetCharacterWidthForPixels(label,GPOINTER_TO_INT(pixel_width)));
 }
 
 // Ownership of |icon_list| is passed to the caller.
@@ -88,41 +126,6 @@ GList* GetIconList() {
   icon_list = g_list_append(icon_list, rb.GetPixbufNamed(IDR_PRODUCT_LOGO_16));
   return icon_list;
 }
-
-// A process wide singleton that manages our usage of gdk
-// cursors. gdk_cursor_new() hits the disk in several places and GdkCursor
-// instances can be reused throughout the process.
-class GdkCursorCache {
- public:
-  ~GdkCursorCache() {
-    for (std::map<GdkCursorType, GdkCursor*>::iterator it =
-             cursor_cache_.begin(); it != cursor_cache_.end(); ++it) {
-      gdk_cursor_unref(it->second);
-    }
-    cursor_cache_.clear();
-  }
-
-  GdkCursor* GetCursorImpl(GdkCursorType type) {
-    std::map<GdkCursorType, GdkCursor*>::iterator it = cursor_cache_.find(type);
-    GdkCursor* cursor = NULL;
-    if (it == cursor_cache_.end()) {
-      cursor = gdk_cursor_new(type);
-      cursor_cache_.insert(std::make_pair(type, cursor));
-    } else {
-      cursor = it->second;
-    }
-
-    // Add a reference to the returned cursor because our consumers mix us with
-    // gdk_cursor_new(). Both the normal constructor and GetCursorImpls() need
-    // to be paired with a gdk_cursor_unref() so ref it here (as we own the ref
-    // that comes from gdk_cursor_new().
-    gdk_cursor_ref(cursor);
-
-    return cursor;
-  }
-
-  std::map<GdkCursorType, GdkCursor*> cursor_cache_;
-};
 
 // Expose event handler for a container that simply suppresses the default
 // drawing and propagates the expose event to the container's children.
@@ -139,6 +142,40 @@ gboolean PaintNoBackground(GtkWidget* widget,
 
   return TRUE;
 }
+
+#if defined(OS_CHROMEOS)
+
+TabContents* GetBrowserWindowSelectedTabContents(BrowserWindow* window) {
+  chromeos::BrowserView* browser_view = static_cast<chromeos::BrowserView*>(
+      window);
+  return browser_view->GetSelectedTabContents();
+}
+
+GtkWidget* GetBrowserWindowFocusedWidget(BrowserWindow* window) {
+  gfx::NativeView widget = gtk_window_get_focus(window->GetNativeHandle());
+
+  if (widget == NULL) {
+    chromeos::BrowserView* browser_view = static_cast<chromeos::BrowserView*>(
+        window);
+    widget = browser_view->saved_focused_widget();
+  }
+
+  return widget;
+}
+
+#else
+
+TabContents* GetBrowserWindowSelectedTabContents(BrowserWindow* window) {
+  BrowserWindowGtk* browser_window = static_cast<BrowserWindowGtk*>(
+      window);
+  return browser_window->browser()->GetSelectedTabContents();
+}
+
+GtkWidget* GetBrowserWindowFocusedWidget(BrowserWindow* window) {
+  return gtk_window_get_focus(window->GetNativeHandle());
+}
+
+#endif
 
 }  // namespace
 
@@ -158,6 +195,11 @@ WindowOpenDisposition DispositionFromEventFlags(guint event_flags) {
 }  // namespace event_utils
 
 namespace gtk_util {
+
+const GdkColor kGdkWhite = GDK_COLOR_RGB(0xff, 0xff, 0xff);
+const GdkColor kGdkGray  = GDK_COLOR_RGB(0x7f, 0x7f, 0x7f);
+const GdkColor kGdkBlack = GDK_COLOR_RGB(0x00, 0x00, 0x00);
+const GdkColor kGdkGreen = GDK_COLOR_RGB(0x00, 0xff, 0x00);
 
 GtkWidget* CreateLabeledControlsGroup(std::vector<GtkWidget*>* labels,
                                       const char* text, ...) {
@@ -215,6 +257,46 @@ GtkWidget* CreateBoldLabel(const std::string& text) {
   g_free(markup);
 
   return LeftAlignMisc(label);
+}
+
+void GetWidgetSizeFromCharacters(
+    GtkWidget* widget, double width_chars, double height_lines,
+    int* width, int* height) {
+  DCHECK(GTK_WIDGET_REALIZED(widget))
+      << " widget must be realized to compute font metrics correctly";
+  PangoContext* context = gtk_widget_create_pango_context(widget);
+  PangoFontMetrics* metrics = pango_context_get_metrics(context,
+      widget->style->font_desc, pango_context_get_language(context));
+  if (width) {
+    *width = static_cast<int>(
+        pango_font_metrics_get_approximate_char_width(metrics) *
+        width_chars / PANGO_SCALE);
+  }
+  if (height) {
+    *height = static_cast<int>(
+        (pango_font_metrics_get_ascent(metrics) +
+        pango_font_metrics_get_descent(metrics)) *
+        height_lines / PANGO_SCALE);
+  }
+  pango_font_metrics_unref(metrics);
+  g_object_unref(context);
+}
+
+void GetWidgetSizeFromResources(
+    GtkWidget* widget, int width_chars, int height_lines,
+    int* width, int* height) {
+  DCHECK(GTK_WIDGET_REALIZED(widget))
+      << " widget must be realized to compute font metrics correctly";
+
+  double chars = 0;
+  if (width)
+    base::StringToDouble(l10n_util::GetStringUTF8(width_chars), &chars);
+
+  double lines = 0;
+  if (height)
+    base::StringToDouble(l10n_util::GetStringUTF8(height_lines), &lines);
+
+  GetWidgetSizeFromCharacters(widget, chars, lines, width, height);
 }
 
 void SetWindowSizeFromResources(GtkWindow* window,
@@ -549,7 +631,7 @@ GtkWidget* AddButtonToDialog(GtkWidget* dialog, const gchar* text,
 GtkWidget* BuildDialogButton(GtkWidget* dialog, int ids_id,
                              const gchar* stock_id) {
   GtkWidget* button = gtk_button_new_with_mnemonic(
-      gtk_util::ConvertAcceleratorsFromWindowsStyle(
+      gfx::ConvertAcceleratorsFromWindowsStyle(
           l10n_util::GetStringUTF8(ids_id)).c_str());
   gtk_button_set_image(GTK_BUTTON(button),
                        gtk_image_new_from_stock(stock_id,
@@ -698,6 +780,7 @@ void DrawTextEntryBackground(GtkWidget* offscreen_entry,
                      rec->width - 2 * xborder,
                      rec->height - 2 * yborder);
 
+  gtk_style_detach(our_style);
   g_object_unref(our_style);
 }
 
@@ -756,11 +839,6 @@ void SetAlwaysShowImage(GtkWidget* image_menu_item) {
                           &true_value);
   }
 #endif
-}
-
-GdkCursor* GetCursor(GdkCursorType type) {
-  static GdkCursorCache impl;
-  return impl.GetCursorImpl(type);
 }
 
 void StackPopupWindow(GtkWidget* popup, GtkWidget* toplevel) {
@@ -883,22 +961,14 @@ bool URLFromPrimarySelection(Profile* profile, GURL* url) {
 
   // Use autocomplete to clean up the text, going so far as to turn it into
   // a search query if necessary.
-  AutocompleteController controller(profile);
-  controller.Start(UTF8ToWide(selection_text),
-                   std::wstring(),  // desired_tld
-                   true,            // prevent_inline_autocomplete
-                   false,           // prefer_keyword
-                   true);           // synchronous_only
+  AutocompleteMatch match;
+  profile->GetAutocompleteClassifier()->Classify(UTF8ToWide(selection_text),
+      std::wstring(), false, &match, NULL);
   g_free(selection_text);
-  const AutocompleteResult& result = controller.result();
-  AutocompleteResult::const_iterator it = result.default_match();
-  if (it == result.end())
+  if (!match.destination_url.is_valid())
     return false;
 
-  if (!it->destination_url.is_valid())
-    return false;
-
-  *url = it->destination_url;
+  *url = match.destination_url;
   return true;
 }
 
@@ -1055,6 +1125,7 @@ gfx::Rect GetDialogBounds(GtkWidget* dialog) {
 
   return gfx::Rect(x, y, width, height);
 }
+
 #endif
 
 string16 GetStockPreferencesMenuLabel() {
@@ -1107,25 +1178,70 @@ void InitLabelSizeRequestAndEllipsizeMode(GtkWidget* label) {
   gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
 }
 
-void DrawTopDropShadowForRenderView(cairo_t* cr, const gfx::Point& origin,
-    const gfx::Rect& paint_rect) {
-  gfx::Rect shadow_rect(paint_rect.x(), origin.y(),
-                        paint_rect.width(), kInfoBarDropShadowHeight);
+GdkDragAction WebDragOpToGdkDragAction(WebDragOperationsMask op) {
+  GdkDragAction action = static_cast<GdkDragAction>(0);
+  if (op & WebDragOperationCopy)
+    action = static_cast<GdkDragAction>(action | GDK_ACTION_COPY);
+  if (op & WebDragOperationLink)
+    action = static_cast<GdkDragAction>(action | GDK_ACTION_LINK);
+  if (op & WebDragOperationMove)
+    action = static_cast<GdkDragAction>(action | GDK_ACTION_MOVE);
+  return action;
+}
 
-  // Avoid this extra work if we can.
-  if (!shadow_rect.Intersects(paint_rect))
-    return;
+WebDragOperationsMask GdkDragActionToWebDragOp(GdkDragAction action) {
+  WebDragOperationsMask op = WebDragOperationNone;
+  if (action & GDK_ACTION_COPY)
+    op = static_cast<WebDragOperationsMask>(op | WebDragOperationCopy);
+  if (action & GDK_ACTION_LINK)
+    op = static_cast<WebDragOperationsMask>(op | WebDragOperationLink);
+  if (action & GDK_ACTION_MOVE)
+    op = static_cast<WebDragOperationsMask>(op | WebDragOperationMove);
+  return op;
+}
 
-  cairo_pattern_t* shadow =
-      cairo_pattern_create_linear(0.0, shadow_rect.y(),
-                                  0.0, shadow_rect.bottom());
-  cairo_pattern_add_color_stop_rgba(shadow, 0, 0, 0, 0, 0.6);
-  cairo_pattern_add_color_stop_rgba(shadow, 1, 0, 0, 0, 0.1);
-  cairo_rectangle(cr, shadow_rect.x(), shadow_rect.y(),
-                  shadow_rect.width(), shadow_rect.height());
-  cairo_set_source(cr, shadow);
-  cairo_fill(cr);
-  cairo_pattern_destroy(shadow);
+void ApplyMessageDialogQuirks(GtkWidget* dialog) {
+  if (gtk_window_get_modal(GTK_WINDOW(dialog))) {
+    // Work around a KDE 3 window manager bug.
+    scoped_ptr<base::Environment> env(base::Environment::Create());
+    if (base::nix::DESKTOP_ENVIRONMENT_KDE3 ==
+        base::nix::GetDesktopEnvironment(env.get()))
+      gtk_window_set_skip_taskbar_hint(GTK_WINDOW(dialog), FALSE);
+  }
+}
+
+// Performs Cut/Copy/Paste operation on the |window|.
+// If the current render view is focused, then just call the specified |method|
+// against the current render view host, otherwise emit the specified |signal|
+// against the focused widget.
+// TODO(suzhe): This approach does not work for plugins.
+void DoCutCopyPaste(BrowserWindow* window,
+                    void (RenderViewHost::*method)(),
+                    const char* signal) {
+  GtkWidget* widget = GetBrowserWindowFocusedWidget(window);
+  if (widget == NULL)
+    return;  // Do nothing if no focused widget.
+
+  TabContents* current_tab = GetBrowserWindowSelectedTabContents(window);
+  if (current_tab && widget == current_tab->GetContentNativeView()) {
+    (current_tab->render_view_host()->*method)();
+  } else {
+    guint id;
+    if ((id = g_signal_lookup(signal, G_OBJECT_TYPE(widget))) != 0)
+      g_signal_emit(widget, id, 0);
+  }
+}
+
+void DoCut(BrowserWindow* window) {
+  DoCutCopyPaste(window, &RenderViewHost::Cut, "cut-clipboard");
+}
+
+void DoCopy(BrowserWindow* window) {
+  DoCutCopyPaste(window, &RenderViewHost::Copy, "copy-clipboard");
+}
+
+void DoPaste(BrowserWindow* window) {
+  DoCutCopyPaste(window, &RenderViewHost::Paste, "paste-clipboard");
 }
 
 }  // namespace gtk_util

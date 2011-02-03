@@ -35,6 +35,8 @@ GpuChannel::GpuChannel(int renderer_id)
 
 GpuChannel::~GpuChannel() {
 #if defined(OS_POSIX)
+  IPC::RemoveAndCloseChannelSocket(GetChannelName());
+
   // If we still have the renderer FD, close it.
   if (renderer_fd_ != -1) {
     close(renderer_fd_);
@@ -50,8 +52,8 @@ void GpuChannel::OnChannelConnected(int32 peer_pid) {
 
 void GpuChannel::OnMessageReceived(const IPC::Message& message) {
   if (log_messages_) {
-    LOG(INFO) << "received message @" << &message << " on channel @" << this
-              << " with type " << message.type();
+    VLOG(1) << "received message @" << &message << " on channel @" << this
+            << " with type " << message.type();
   }
 
   if (message.routing_id() == MSG_ROUTING_CONTROL) {
@@ -69,8 +71,8 @@ void GpuChannel::OnChannelError() {
 
 bool GpuChannel::Send(IPC::Message* message) {
   if (log_messages_) {
-    LOG(INFO) << "sending message @" << message << " on channel @" << this
-              << " with type " << message->type();
+    VLOG(1) << "sending message @" << message << " on channel @" << this
+            << " with type " << message->type();
   }
 
   if (!channel_.get()) {
@@ -80,6 +82,29 @@ bool GpuChannel::Send(IPC::Message* message) {
 
   return channel_->Send(message);
 }
+
+#if defined(OS_MACOSX)
+void GpuChannel::AcceleratedSurfaceBuffersSwapped(
+    int32 route_id, uint64 swap_buffers_count) {
+  GpuCommandBufferStub* stub = stubs_.Lookup(route_id);
+  if (stub == NULL)
+    return;
+  stub->AcceleratedSurfaceBuffersSwapped(swap_buffers_count);
+}
+
+void GpuChannel::DidDestroySurface(int32 renderer_route_id) {
+  // Since acclerated views are created in the renderer process and then sent
+  // to the browser process during GPU channel construction, it is possible that
+  // this is called before a GpuCommandBufferStub for |renderer_route_id| was
+  // put into |stubs_|. Hence, do not walk |stubs_| here but instead remember
+  // all |renderer_route_id|s this was called for and use them later.
+  destroyed_renderer_routes_.insert(renderer_route_id);
+}
+
+bool GpuChannel::IsRenderViewGone(int32 renderer_route_id) {
+  return destroyed_renderer_routes_.count(renderer_route_id) > 0;
+}
+#endif
 
 void GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(GpuChannel, msg)
@@ -102,24 +127,27 @@ int GpuChannel::GenerateRouteID() {
   return ++last_id;
 }
 
-void GpuChannel::OnCreateViewCommandBuffer(gfx::NativeViewId view_id,
-                                           int32 render_view_id,
-                                           int32* route_id) {
-  *route_id = 0;
+void GpuChannel::OnCreateViewCommandBuffer(
+    gfx::NativeViewId view_id,
+    int32 render_view_id,
+    const GPUCreateCommandBufferConfig& init_params,
+    int32* route_id) {
+  *route_id = MSG_ROUTING_NONE;
 
 #if defined(ENABLE_GPU)
 
   gfx::PluginWindowHandle handle = gfx::kNullPluginWindow;
 #if defined(OS_WIN)
-  gfx::NativeView view = gfx::NativeViewFromId(view_id);
-
-  // Check that the calling renderer is allowed to render to this window.
-  // TODO(apatrick): consider killing the renderer process rather than failing.
-  int view_renderer_id = reinterpret_cast<int>(
-      GetProp(view, chrome::kChromiumRendererIdProperty));
-  if (view_renderer_id != renderer_id_)
-    return;
-  handle = view;
+  // TODO(apatrick): We don't actually need the window handle on the Windows
+  // platform. At this point, it only indicates to the GpuCommandBufferStub
+  // whether onscreen or offscreen rendering is requested. The window handle
+  // that will be rendered to is the child compositor window and that window
+  // handle is provided by the browser process. Looking at what we are doing on
+  // this and other platforms, I think a redesign is in order here. Perhaps
+  // on all platforms the renderer just indicates whether it wants onscreen or
+  // offscreen rendering and the browser provides whichever platform specific
+  // "render target" the GpuCommandBufferStub targets.
+  handle = gfx::NativeViewFromId(view_id);
 #elif defined(OS_LINUX)
   ChildThread* gpu_thread = ChildThread::current();
   // Ask the browser for the view's XID.
@@ -143,11 +171,9 @@ void GpuChannel::OnCreateViewCommandBuffer(gfx::NativeViewId view_id,
 #endif
 
   *route_id = GenerateRouteID();
-  // TODO(enne): implement context creation attributes for view buffers
-  std::vector<int32> attribs;
   scoped_ptr<GpuCommandBufferStub> stub(new GpuCommandBufferStub(
-      this, handle, NULL, gfx::Size(), attribs, 0, *route_id,
-      renderer_id_, render_view_id));
+      this, handle, NULL, gfx::Size(), init_params.allowed_extensions,
+      init_params.attribs, 0, *route_id, renderer_id_, render_view_id));
   router_.AddRoute(*route_id, stub.get());
   stubs_.AddWithID(stub.release(), *route_id);
 #endif  // ENABLE_GPU
@@ -156,7 +182,7 @@ void GpuChannel::OnCreateViewCommandBuffer(gfx::NativeViewId view_id,
 void GpuChannel::OnCreateOffscreenCommandBuffer(
     int32 parent_route_id,
     const gfx::Size& size,
-    const std::vector<int32>& attribs,
+    const GPUCreateCommandBufferConfig& init_params,
     uint32 parent_texture_id,
     int32* route_id) {
 #if defined(ENABLE_GPU)
@@ -170,14 +196,15 @@ void GpuChannel::OnCreateOffscreenCommandBuffer(
       gfx::kNullPluginWindow,
       parent_stub,
       size,
-      attribs,
+      init_params.allowed_extensions,
+      init_params.attribs,
       parent_texture_id,
       *route_id,
       0, 0));
   router_.AddRoute(*route_id, stub.get());
   stubs_.AddWithID(stub.release(), *route_id);
 #else
-  *route_id = 0;
+  *route_id = MSG_ROUTING_NONE;
 #endif
 }
 
@@ -191,7 +218,7 @@ void GpuChannel::OnDestroyCommandBuffer(int32 route_id) {
 void GpuChannel::OnCreateVideoDecoder(int32 context_route_id,
                                       int32 decoder_host_id) {
 #if defined(ENABLE_GPU)
-  LOG(INFO) << "GpuChannel::OnCreateVideoDecoder";
+  VLOG(1) << "GpuChannel::OnCreateVideoDecoder";
   GpuVideoService* service = GpuVideoService::get();
   if (service == NULL) {
     // TODO(hclam): Need to send a failure message.

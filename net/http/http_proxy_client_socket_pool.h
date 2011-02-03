@@ -14,6 +14,7 @@
 #include "base/time.h"
 #include "net/base/host_port_pair.h"
 #include "net/http/http_auth.h"
+#include "net/http/http_response_info.h"
 #include "net/socket/client_socket_pool_base.h"
 #include "net/socket/client_socket_pool_histograms.h"
 #include "net/socket/client_socket_pool.h"
@@ -25,6 +26,9 @@ class HttpAuthCache;
 class HttpAuthHandlerFactory;
 class SSLClientSocketPool;
 class SSLSocketParams;
+class SpdySessionPool;
+class SpdySettingsStorage;
+class SpdyStream;
 class TCPClientSocketPool;
 class TCPSocketParams;
 
@@ -41,6 +45,8 @@ class HttpProxySocketParams : public base::RefCounted<HttpProxySocketParams> {
                         HostPortPair endpoint,
                         HttpAuthCache* http_auth_cache,
                         HttpAuthHandlerFactory* http_auth_handler_factory,
+                        SpdySessionPool* spdy_session_pool,
+                        SpdySettingsStorage* spdy_settings,
                         bool tunnel);
 
   const scoped_refptr<TCPSocketParams>& tcp_params() const {
@@ -56,6 +62,12 @@ class HttpProxySocketParams : public base::RefCounted<HttpProxySocketParams> {
   HttpAuthHandlerFactory* http_auth_handler_factory() const {
     return http_auth_handler_factory_;
   }
+  SpdySessionPool* spdy_session_pool() {
+    return spdy_session_pool_;
+  }
+  SpdySettingsStorage* spdy_settings() {
+    return spdy_settings_;
+  }
   const HostResolver::RequestInfo& destination() const;
   bool tunnel() const { return tunnel_; }
 
@@ -65,6 +77,8 @@ class HttpProxySocketParams : public base::RefCounted<HttpProxySocketParams> {
 
   const scoped_refptr<TCPSocketParams> tcp_params_;
   const scoped_refptr<SSLSocketParams> ssl_params_;
+  SpdySessionPool* spdy_session_pool_;
+  SpdySettingsStorage* spdy_settings_;
   const GURL request_url_;
   const std::string user_agent_;
   const HostPortPair endpoint_;
@@ -92,6 +106,8 @@ class HttpProxyConnectJob : public ConnectJob {
   // ConnectJob methods.
   virtual LoadState GetLoadState() const;
 
+  virtual void GetAdditionalErrorState(ClientSocketHandle* handle);
+
  private:
   enum State {
     STATE_TCP_CONNECT,
@@ -100,6 +116,9 @@ class HttpProxyConnectJob : public ConnectJob {
     STATE_SSL_CONNECT_COMPLETE,
     STATE_HTTP_PROXY_CONNECT,
     STATE_HTTP_PROXY_CONNECT_COMPLETE,
+    STATE_SPDY_PROXY_CREATE_STREAM,
+    STATE_SPDY_PROXY_CREATE_STREAM_COMPLETE,
+    STATE_SPDY_PROXY_CONNECT_COMPLETE,
     STATE_NONE,
   };
 
@@ -127,6 +146,9 @@ class HttpProxyConnectJob : public ConnectJob {
   int DoHttpProxyConnect();
   int DoHttpProxyConnectComplete(int result);
 
+  int DoSpdyProxyCreateStream();
+  int DoSpdyProxyCreateStreamComplete(int result);
+
   scoped_refptr<HttpProxySocketParams> params_;
   TCPClientSocketPool* const tcp_pool_;
   SSLClientSocketPool* const ssl_pool_;
@@ -137,6 +159,10 @@ class HttpProxyConnectJob : public ConnectJob {
   scoped_ptr<ClientSocketHandle> transport_socket_handle_;
   scoped_ptr<ClientSocket> transport_socket_;
   bool using_spdy_;
+
+  HttpResponseInfo error_response_info_;
+
+  scoped_refptr<SpdyStream> spdy_stream_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpProxyConnectJob);
 };
@@ -161,6 +187,11 @@ class HttpProxyClientSocketPool : public ClientSocketPool {
                             ClientSocketHandle* handle,
                             CompletionCallback* callback,
                             const BoundNetLog& net_log);
+
+  virtual void RequestSockets(const std::string& group_name,
+                              const void* params,
+                              int num_sockets,
+                              const BoundNetLog& net_log);
 
   virtual void CancelRequest(const std::string& group_name,
                              ClientSocketHandle* handle);

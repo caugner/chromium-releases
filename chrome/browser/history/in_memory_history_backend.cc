@@ -5,7 +5,7 @@
 #include "chrome/browser/history/in_memory_history_backend.h"
 
 #include "base/command_line.h"
-#include "base/histogram.h"
+#include "base/metrics/histogram.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -33,20 +33,22 @@ InMemoryHistoryBackend::~InMemoryHistoryBackend() {
 }
 
 bool InMemoryHistoryBackend::Init(const FilePath& history_filename,
-                                  URLDatabase* db) {
+                                  URLDatabase* db,
+                                  const std::string& languages) {
   db_.reset(new InMemoryDatabase);
   bool success = db_->InitFromDisk(history_filename);
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableInMemoryURLIndex)) {
+#if 0
+  // TODO(mrossetti): Temporary removal to help determine if the
+  // InMemoryURLIndex is contributing to a startup slowdown.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableHistoryQuickProvider)) {
     index_.reset(new InMemoryURLIndex());
     base::TimeTicks beginning_time = base::TimeTicks::Now();
-    // TODO(mrossetti): Provide languages when profile is available.
-    index_->Init(db, std::string());
+    index_->Init(db, languages);
     UMA_HISTOGRAM_TIMES("Autocomplete.HistoryDatabaseIndexingTime",
                         base::TimeTicks::Now() - beginning_time);
   }
-
+#endif
   return success;
 }
 
@@ -70,6 +72,9 @@ void InMemoryHistoryBackend::AttachToHistoryService(Profile* profile) {
   registrar_.Add(this, NotificationType::HISTORY_URL_VISITED, source);
   registrar_.Add(this, NotificationType::HISTORY_TYPED_URLS_MODIFIED, source);
   registrar_.Add(this, NotificationType::HISTORY_URLS_DELETED, source);
+  registrar_.Add(this, NotificationType::HISTORY_KEYWORD_SEARCH_TERM_UPDATED,
+                 source);
+  registrar_.Add(this, NotificationType::TEMPLATE_URL_REMOVED, source);
 }
 
 void InMemoryHistoryBackend::Observe(NotificationType type,
@@ -78,19 +83,30 @@ void InMemoryHistoryBackend::Observe(NotificationType type,
   switch (type.value) {
     case NotificationType::HISTORY_URL_VISITED: {
       Details<history::URLVisitedDetails> visited_details(details);
-      if (visited_details->row.typed_count() > 0) {
+      PageTransition::Type primary_type =
+          PageTransition::StripQualifier(visited_details->transition);
+      if (visited_details->row.typed_count() > 0 ||
+          primary_type == PageTransition::KEYWORD) {
         URLsModifiedDetails modified_details;
         modified_details.changed_urls.push_back(visited_details->row);
         OnTypedURLsModified(modified_details);
       }
       break;
     }
+    case NotificationType::HISTORY_KEYWORD_SEARCH_TERM_UPDATED:
+      OnKeywordSearchTermUpdated(
+          *Details<history::KeywordSearchTermDetails>(details).ptr());
+      break;
     case NotificationType::HISTORY_TYPED_URLS_MODIFIED:
       OnTypedURLsModified(
           *Details<history::URLsModifiedDetails>(details).ptr());
       break;
     case NotificationType::HISTORY_URLS_DELETED:
       OnURLsDeleted(*Details<history::URLsDeletedDetails>(details).ptr());
+      break;
+    case NotificationType::TEMPLATE_URL_REMOVED:
+      db_->DeleteAllSearchTermsForKeyword(
+          *(Details<TemplateURLID>(details).ptr()));
       break;
     default:
       // For simplicity, the unit tests send us all notifications, even when
@@ -141,6 +157,29 @@ void InMemoryHistoryBackend::OnURLsDeleted(const URLsDeletedDetails& details) {
       db_->DeleteURLRow(id);
     }
   }
+}
+
+void InMemoryHistoryBackend::OnKeywordSearchTermUpdated(
+    const KeywordSearchTermDetails& details) {
+  // The url won't exist for new search terms (as the user hasn't typed it), so
+  // we force it to be added. If we end up adding a URL it won't be
+  // autocompleted as the typed count is 0.
+  URLRow url_row;
+  URLID url_id;
+  if (!db_->GetRowForURL(details.url, &url_row)) {
+    // Because this row won't have a typed count the title and other stuff
+    // doesn't matter. If the user ends up typing the url we'll update the title
+    // in OnTypedURLsModified.
+    URLRow new_row(details.url);
+    new_row.set_last_visit(base::Time::Now());
+    url_id = db_->AddURL(new_row);
+    if (!url_id)
+      return;  // Error adding.
+  } else {
+    url_id = url_row.id();
+  }
+
+  db_->SetKeywordSearchTermsForURL(url_id, details.keyword_id, details.term);
 }
 
 }  // namespace history

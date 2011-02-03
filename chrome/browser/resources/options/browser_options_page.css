@@ -3,12 +3,30 @@
   height: 100px;
 }
 
+#customHomePageGroup {
+  display: -webkit-box;
+  -webkit-box-orient: horizontal;
+}
+
+#customHomePageGroup > div {
+  -webkit-padding-start: 1ex;
+  -webkit-box-flex: 1;
+}
+
 #homepageURL {
+  box-sizing: border-box;
+  padding-top: 3px;
   width: 100%;
 }
 
 #defaultSearchEngineGroup {
   display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
+#defaultSearchEngineGroup > div {
+  display: -webkit-box;
+  -webkit-box-orient: horizontal;
 }
 
 #defaultSearchEngine {
@@ -22,9 +40,20 @@
 }
 
 #defaultBrowserState {
-  color: #880000;
+  margin-top: 6px;
 }
 
-#defaultBrowserState.current {
-  color: #008800;
+#instantOption {
+  margin-bottom: 0px;
+}
+
+#instantConfirmText {
+  font-family: inherit;
+  white-space: pre-wrap;
+  width: 500px;
+}
+
+#instantConfirmLearnMore {
+  position: absolute;
+  bottom: 18px;
 }

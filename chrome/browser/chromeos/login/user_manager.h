@@ -17,6 +17,7 @@
 #include "chrome/common/notification_registrar.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
+class FilePath;
 class PrefService;
 
 namespace chromeos {
@@ -57,23 +58,23 @@ class UserManager : public UserImageLoader::Delegate,
 
   // Returns a list of the users who have logged into this device previously.
   // It is sorted in order of recency, with most recent at the beginning.
-  std::vector<User> GetUsers() const;
+  virtual std::vector<User> GetUsers() const;
 
   // Indicates that user just started off the record session.
-  void OffTheRecordUserLoggedIn();
+  virtual void OffTheRecordUserLoggedIn();
 
   // Indicates that a user with the given email has just logged in.
   // The persistent list will be updated accordingly.
-  void UserLoggedIn(const std::string& email);
+  virtual void UserLoggedIn(const std::string& email);
 
   // Remove user from persistent list. NOTE: user's data won't be removed.
-  void RemoveUser(const std::string& email);
+  virtual void RemoveUser(const std::string& email);
 
   // Returns true if given user has logged into the device before.
-  bool IsKnownUser(const std::string& email);
+  virtual bool IsKnownUser(const std::string& email);
 
   // Returns the logged-in user.
-  const User& logged_in_user() {
+  virtual const User& logged_in_user() {
     return logged_in_user_;
   }
 
@@ -99,17 +100,28 @@ class UserManager : public UserImageLoader::Delegate,
                        const NotificationDetails& details);
 
   // Accessor for current_user_is_owner_
-  bool current_user_is_owner() const {
+  virtual bool current_user_is_owner() const {
     return current_user_is_owner_;
   }
-  void set_current_user_is_owner(bool current_user_is_owner) {
+  virtual void set_current_user_is_owner(bool current_user_is_owner) {
     current_user_is_owner_ = current_user_is_owner;
   }
 
- private:
-  UserManager();
-  ~UserManager();
+  // Accessor for current_user_is_new_.
+  bool current_user_is_new() const {
+    return current_user_is_new_;
+  }
 
+  bool user_is_logged_in() const { return user_is_logged_in_; }
+
+ protected:
+  UserManager();
+  virtual ~UserManager();
+
+  // Returns image filepath for the given user.
+  FilePath GetImagePathForUser(const std::string& username);
+
+ private:
   // Notifies on new user session.
   void NotifyOnLogin();
 
@@ -125,6 +137,13 @@ class UserManager : public UserImageLoader::Delegate,
 
   // Cached flag of whether currently logged-in user is owner or not.
   bool current_user_is_owner_;
+
+  // Cached flag of whether the currently logged-in user existed before this
+  // login.
+  bool current_user_is_new_;
+
+  // Cached flag of whether any user is logged in at the moment.
+  bool user_is_logged_in_;
 
   NotificationRegistrar registrar_;
 

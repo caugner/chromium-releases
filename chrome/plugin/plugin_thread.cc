@@ -33,12 +33,16 @@
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
 
+#if defined(TOOLKIT_USES_GTK)
+#include "gfx/gtk_util.h"
+#endif
+
 #if defined(USE_X11)
 #include "app/x11_util.h"
 #elif defined(OS_MACOSX)
 #include "app/l10n_util.h"
 #include "base/mac_util.h"
-#include "base/scoped_cftyperef.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "base/sys_string_conversions.h"
 #include "grit/chromium_strings.h"
 #endif
@@ -58,33 +62,18 @@ PluginThread::PluginThread()
     // XEmbed plugins assume they are hosted in a Gtk application, so we need
     // to initialize Gtk in the plugin process.
     g_thread_init(NULL);
-    const std::vector<std::string>& args =
-        CommandLine::ForCurrentProcess()->argv();
-    int argc = args.size();
-    scoped_array<char *> argv(new char *[argc + 1]);
-    for (size_t i = 0; i < args.size(); ++i) {
-      // TODO(piman@google.com): can gtk_init modify argv? Just being safe
-      // here.
-      argv[i] = strdup(args[i].c_str());
-    }
-    argv[argc] = NULL;
-    char **argv_pointer = argv.get();
 
     // Flash has problems receiving clicks with newer GTKs due to the
     // client-side windows change.  To be safe, we just always set the
     // backwards-compat environment variable.
     setenv("GDK_NATIVE_WINDOWS", "1", 1);
 
-    gtk_init(&argc, &argv_pointer);
+    gfx::GtkInitFromCommandLine(*CommandLine::ForCurrentProcess());
 
     // GTK after 2.18 resets the environment variable.  But if we're using
     // nspluginwrapper, that means it'll spawn its subprocess without the
     // environment variable!  So set it again.
     setenv("GDK_NATIVE_WINDOWS", "1", 1);
-
-    for (size_t i = 0; i < args.size(); ++i) {
-      free(argv[i]);
-    }
   }
 
   x11_util::SetDefaultX11ErrorHandlers();
@@ -97,19 +86,20 @@ PluginThread::PluginThread()
 
   ChromePluginLib::Create(plugin_path_, GetCPBrowserFuncsForPlugin());
 
-  scoped_refptr<NPAPI::PluginLib> plugin =
-      NPAPI::PluginLib::CreatePluginLib(plugin_path_);
+  scoped_refptr<NPAPI::PluginLib> plugin(
+      NPAPI::PluginLib::CreatePluginLib(plugin_path_));
   if (plugin.get()) {
     plugin->NP_Initialize();
 
 #if defined(OS_MACOSX)
-    scoped_cftyperef<CFStringRef> plugin_name(base::SysUTF16ToCFStringRef(
-        plugin->plugin_info().name));
-    scoped_cftyperef<CFStringRef> app_name(base::SysUTF16ToCFStringRef(
-        l10n_util::GetStringUTF16(IDS_SHORT_PLUGIN_APP_NAME)));
-    scoped_cftyperef<CFStringRef> process_name(CFStringCreateWithFormat(
-        kCFAllocatorDefault, NULL, CFSTR("%@ (%@)"),
-        plugin_name.get(), app_name.get()));
+    base::mac::ScopedCFTypeRef<CFStringRef> plugin_name(
+        base::SysUTF16ToCFStringRef(plugin->plugin_info().name));
+    base::mac::ScopedCFTypeRef<CFStringRef> app_name(
+        base::SysUTF16ToCFStringRef(
+            l10n_util::GetStringUTF16(IDS_SHORT_PLUGIN_APP_NAME)));
+    base::mac::ScopedCFTypeRef<CFStringRef> process_name(
+        CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("%@ (%@)"),
+                                 plugin_name.get(), app_name.get()));
     mac_util::SetProcessName(process_name);
 #endif
   }
@@ -149,8 +139,8 @@ void PluginThread::OnControlMessageReceived(const IPC::Message& msg) {
 
 void PluginThread::OnCreateChannel(int renderer_id,
                                    bool off_the_record) {
-  scoped_refptr<PluginChannel> channel = PluginChannel::GetPluginChannel(
-      renderer_id, ChildProcess::current()->io_message_loop());
+  scoped_refptr<PluginChannel> channel(PluginChannel::GetPluginChannel(
+      renderer_id, ChildProcess::current()->io_message_loop()));
   IPC::ChannelHandle channel_handle;
   if (channel.get()) {
     channel_handle.name = channel->channel_name();

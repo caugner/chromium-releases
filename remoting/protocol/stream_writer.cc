@@ -5,10 +5,11 @@
 #include "remoting/protocol/stream_writer.h"
 
 #include "base/message_loop.h"
-#include "remoting/protocol/chromoting_connection.h"
+#include "remoting/protocol/buffered_socket_writer.h"
 #include "remoting/protocol/util.h"
 
 namespace remoting {
+namespace protocol {
 
 StreamWriterBase::StreamWriterBase()
     : socket_(NULL),
@@ -34,14 +35,13 @@ void StreamWriterBase::Close() {
   buffered_writer_->Close();
 }
 
-bool EventsStreamWriter::SendMessage(
-    const ChromotingClientMessage& message) {
+bool EventStreamWriter::SendMessage(const EventMessage& message) {
   return buffered_writer_->Write(SerializeAndFrameMessage(message));
 }
 
-bool VideoStreamWriter::SendMessage(
-    const ChromotingHostMessage& message) {
+bool ControlStreamWriter::SendMessage(const ControlMessage& message) {
   return buffered_writer_->Write(SerializeAndFrameMessage(message));
 }
 
+}  // namespace protocol
 }  // namespace remoting

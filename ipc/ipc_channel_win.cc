@@ -1,23 +1,88 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ipc/ipc_channel_win.h"
 
 #include <windows.h>
+#include <sddl.h>
 #include <sstream>
 
 #include "base/auto_reset.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/non_thread_safe.h"
-#include "base/stats_counters.h"
 #include "base/utf_string_conversions.h"
 #include "base/win_util.h"
 #include "ipc/ipc_logging.h"
 #include "ipc/ipc_message_utils.h"
 
 namespace IPC {
+
+namespace {
+
+// Creates a security descriptor with a DACL that has one ace giving full
+// access to the current logon session.
+// The security descriptor returned must be freed using LocalFree.
+// The function returns true if it succeeds, false otherwise.
+bool GetLogonSessionOnlyDACL(SECURITY_DESCRIPTOR** security_descriptor) {
+  // Get the current token.
+  HANDLE token = NULL;
+  if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token))
+    return false;
+  ScopedHandle token_scoped(token);
+
+  // Get the size of the TokenGroups structure.
+  DWORD size = 0;
+  BOOL result = GetTokenInformation(token, TokenGroups, NULL,  0, &size);
+  if (result != FALSE && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+    return false;
+
+  // Get the data.
+  scoped_array<char> token_groups_chars(new char[size]);
+  TOKEN_GROUPS* token_groups =
+      reinterpret_cast<TOKEN_GROUPS*>(token_groups_chars.get());
+
+  if (!GetTokenInformation(token, TokenGroups, token_groups, size, &size))
+    return false;
+
+  // Look for the logon sid.
+  SID* logon_sid = NULL;
+  for (unsigned int i = 0; i < token_groups->GroupCount ; ++i) {
+    if ((token_groups->Groups[i].Attributes & SE_GROUP_LOGON_ID) != 0) {
+        logon_sid = static_cast<SID*>(token_groups->Groups[i].Sid);
+        break;
+    }
+  }
+
+  if (!logon_sid)
+    return false;
+
+  // Convert the data to a string.
+  wchar_t* sid_string;
+  if (!ConvertSidToStringSid(logon_sid, &sid_string))
+    return false;
+
+  static const wchar_t dacl_format[] = L"D:(A;OICI;GA;;;%ls)";
+  wchar_t dacl[SECURITY_MAX_SID_SIZE + arraysize(dacl_format) + 1] = {0};
+  wsprintf(dacl, dacl_format, sid_string);
+
+  LocalFree(sid_string);
+
+  // Convert the string to a security descriptor
+  if (!ConvertStringSecurityDescriptorToSecurityDescriptor(
+      dacl,
+      SDDL_REVISION_1,
+      reinterpret_cast<PSECURITY_DESCRIPTOR*>(security_descriptor),
+      NULL)) {
+    return false;
+  }
+
+  return true;
+}
+
+}  // namespace
+
 //------------------------------------------------------------------------------
 
 Channel::ChannelImpl::State::State(ChannelImpl* channel) : is_pending(false) {
@@ -82,11 +147,9 @@ void Channel::ChannelImpl::Close() {
 
 bool Channel::ChannelImpl::Send(Message* message) {
   DCHECK(thread_check_->CalledOnValidThread());
-#ifdef IPC_MESSAGE_DEBUG_EXTRA
-  DLOG(INFO) << "sending message @" << message << " on channel @" << this
-             << " with type " << message->type()
-             << " (" << output_queue_.size() << " in queue)";
-#endif
+  DVLOG(2) << "sending message @" << message << " on channel @" << this
+           << " with type " << message->type()
+           << " (" << output_queue_.size() << " in queue)";
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
   Logging::current()->OnSendMessage(message, "");
@@ -120,7 +183,7 @@ bool Channel::ChannelImpl::CreatePipe(const std::string& channel_id,
     SECURITY_ATTRIBUTES security_attributes = {0};
     security_attributes.bInheritHandle = FALSE;
     security_attributes.nLength = sizeof(SECURITY_ATTRIBUTES);
-    if (!win_util::GetLogonSessionOnlyDACL(
+    if (!GetLogonSessionOnlyDACL(
         reinterpret_cast<SECURITY_DESCRIPTOR**>(
             &security_attributes.lpSecurityDescriptor))) {
       NOTREACHED();
@@ -295,10 +358,8 @@ bool Channel::ChannelImpl::ProcessIncomingMessages(
       if (message_tail) {
         int len = static_cast<int>(message_tail - p);
         const Message m(p, len);
-#ifdef IPC_MESSAGE_DEBUG_EXTRA
-        DLOG(INFO) << "received message on channel @" << this <<
-                      " with type " << m.type();
-#endif
+        DVLOG(2) << "received message on channel @" << this
+                 << " with type " << m.type();
         if (m.routing_id() == MSG_ROUTING_NONE &&
             m.type() == HELLO_MESSAGE_TYPE) {
           // The Hello message contains only the process id.
@@ -360,10 +421,8 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages(
     if (err == ERROR_IO_PENDING) {
       output_state_.is_pending = true;
 
-#ifdef IPC_MESSAGE_DEBUG_EXTRA
-      DLOG(INFO) << "sent pending message @" << m << " on channel @" <<
-                    this << " with type " << m->type();
-#endif
+      DVLOG(2) << "sent pending message @" << m << " on channel @" << this
+               << " with type " << m->type();
 
       return true;
     }
@@ -371,10 +430,8 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages(
     return false;
   }
 
-#ifdef IPC_MESSAGE_DEBUG_EXTRA
-  DLOG(INFO) << "sent message @" << m << " on channel @" << this <<
-                " with type " << m->type();
-#endif
+  DVLOG(2) << "sent message @" << m << " on channel @" << this
+           << " with type " << m->type();
 
   output_state_.is_pending = true;
   return true;

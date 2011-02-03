@@ -7,7 +7,7 @@
 #include "base/scoped_nsobject.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
-#include "chrome/app/chrome_dll_resource.h"  // IDC_*
+#include "chrome/app/chrome_command_ids.h"  // IDC_*
 #import "chrome/browser/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/cocoa/location_bar/autocomplete_text_field_unittest_helper.h"
 #import "chrome/browser/cocoa/test_event_utils.h"
@@ -19,6 +19,7 @@
 #import "third_party/ocmock/OCMock/OCMock.h"
 
 using ::testing::Return;
+using ::testing::ReturnArg;
 using ::testing::StrictMock;
 using ::testing::A;
 
@@ -206,6 +207,8 @@ TEST_F(AutocompleteTextFieldEditorObserverTest, Cut) {
   NSString* test_string = @"astring";
   EXPECT_CALL(field_observer_, OnDidBeginEditing());
   EXPECT_CALL(field_observer_, OnDidChange());
+  EXPECT_CALL(field_observer_, SelectionRangeForProposedRange(A<NSRange>()))
+      .WillRepeatedly(ReturnArg<0>());
   [editor_ setString:test_string];
   [editor_ selectAll:nil];
 

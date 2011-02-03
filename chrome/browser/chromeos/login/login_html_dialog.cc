@@ -4,10 +4,12 @@
 
 #include "chrome/browser/chromeos/login/login_html_dialog.h"
 
+#include "chrome/browser/chromeos/frame/bubble_frame_view.h"
 #include "chrome/browser/chromeos/frame/bubble_window.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/views/html_dialog_view.h"
+#include "chrome/common/notification_service.h"
 #include "gfx/native_widget_types.h"
 #include "gfx/rect.h"
 #include "gfx/size.h"
@@ -17,8 +19,8 @@ namespace chromeos {
 
 namespace {
 // Default width/height ratio of screen size.
-const float kDefaultWidthRatio = 0.8;
-const float kDefaultHeightRatio = 0.8;
+const double kDefaultWidthRatio = 0.6;
+const double kDefaultHeightRatio = 0.6;
 
 // Custom HtmlDialogView with disabled context menu.
 class HtmlDialogWithoutContextMenuView : public HtmlDialogView {
@@ -45,11 +47,13 @@ LoginHtmlDialog::LoginHtmlDialog(Delegate* delegate,
                                  const std::wstring& title,
                                  const GURL& url,
                                  Style style)
-    : style_(style),
-      delegate_(delegate),
+    : delegate_(delegate),
       parent_window_(parent_window),
       title_(title),
-      url_(url) {
+      url_(url),
+      style_(style),
+      bubble_frame_view_(NULL),
+      is_open_(false) {
   gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(gfx::Size()));
   width_ = static_cast<int>(kDefaultWidthRatio * screen_bounds.width());
   height_ = static_cast<int>(kDefaultHeightRatio * screen_bounds.height());
@@ -63,17 +67,26 @@ void LoginHtmlDialog::Show() {
   HtmlDialogWithoutContextMenuView* html_view =
       new HtmlDialogWithoutContextMenuView(ProfileManager::GetDefaultProfile(),
                                            this);
-  switch (style_) {
-    case STYLE_BUBBLE:
-      chromeos::BubbleWindow::Create(parent_window_, gfx::Rect(), html_view);
-      break;
-    case STYLE_GENERIC:
-    default:
-      views::Window::CreateChromeWindow(parent_window_, gfx::Rect(), html_view);
-      break;
+  if (style_ & STYLE_BUBBLE) {
+    views::Window* bubble_window = BubbleWindow::Create(
+        parent_window_, gfx::Rect(),
+        static_cast<BubbleWindow::Style>(
+            BubbleWindow::STYLE_XBAR | BubbleWindow::STYLE_THROBBER),
+        html_view);
+    bubble_frame_view_ = static_cast<BubbleFrameView*>(
+        bubble_window->GetNonClientView()->frame_view());
+  } else {
+    views::Window::CreateChromeWindow(parent_window_, gfx::Rect(), html_view);
+  }
+  if (bubble_frame_view_) {
+    bubble_frame_view_->StartThrobber();
+    notification_registrar_.Add(this,
+                                NotificationType::LOAD_COMPLETED_MAIN_FRAME,
+                                NotificationService::AllSources());
   }
   html_view->InitDialog();
   html_view->window()->Show();
+  is_open_ = true;
 }
 
 void LoginHtmlDialog::SetDialogSize(int width, int height) {
@@ -82,10 +95,20 @@ void LoginHtmlDialog::SetDialogSize(int width, int height) {
   height_ = height;
 }
 
+void LoginHtmlDialog::Observe(NotificationType type,
+                              const NotificationSource& source,
+                              const NotificationDetails& details) {
+  DCHECK(type.value == NotificationType::LOAD_COMPLETED_MAIN_FRAME);
+  if (bubble_frame_view_)
+    bubble_frame_view_->StopThrobber();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // LoginHtmlDialog, protected:
 
 void LoginHtmlDialog::OnDialogClosed(const std::string& json_retval) {
+  is_open_ = false;
+  notification_registrar_.RemoveAll();
   if (delegate_)
     delegate_->OnDialogClosed();
 }

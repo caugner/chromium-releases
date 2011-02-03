@@ -15,6 +15,7 @@
 #define CHROME_BROWSER_SYNC_SESSIONS_SYNC_SESSION_H_
 #pragma once
 
+#include <utility>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -34,6 +35,8 @@ namespace browser_sync {
 class ModelSafeWorker;
 
 namespace sessions {
+typedef std::pair<sync_pb::GetUpdatesCallerInfo::GetUpdatesSource,
+    syncable::ModelTypeBitSet> SyncSourceInfo;
 
 class SyncSession {
  public:
@@ -75,8 +78,11 @@ class SyncSession {
     virtual ~Delegate() {}
   };
 
-  // Creates a new SyncSession with mandatory context and delegate.
-  SyncSession(SyncSessionContext* context, Delegate* delegate);
+  SyncSession(SyncSessionContext* context,
+              Delegate* delegate,
+              SyncSourceInfo source,
+              const ModelSafeRoutingInfo& routing_info,
+              const std::vector<ModelSafeWorker*>& workers);
   ~SyncSession();
 
   // Builds a thread-safe and read-only copy of the current session state.
@@ -101,13 +107,11 @@ class SyncSession {
   // Volatile reader for the source member of the sync session object.  The
   // value is set to the SYNC_CYCLE_CONTINUATION value to signal that it has
   // been read.
-  sync_pb::GetUpdatesCallerInfo::GetUpdatesSource TestAndSetSource();
-  void set_source(sync_pb::GetUpdatesCallerInfo::GetUpdatesSource source) {
-    source_ = source;
-  }
+  SyncSourceInfo TestAndSetSource();
 
   const std::vector<ModelSafeWorker*>& workers() const { return workers_; }
   const ModelSafeRoutingInfo& routing_info() const { return routing_info_; }
+  const SyncSourceInfo& source() const { return source_; }
 
  private:
   // Extend the encapsulation boundary to utilities for internal member
@@ -119,7 +123,7 @@ class SyncSession {
   SyncSessionContext* const context_;
 
   // The source for initiating this sync session.
-  sync_pb::GetUpdatesCallerInfo::GetUpdatesSource source_;
+  SyncSourceInfo source_;
 
   // Information about extensions activity since the last successful commit.
   ExtensionsActivityMonitor::Records extensions_activity_;

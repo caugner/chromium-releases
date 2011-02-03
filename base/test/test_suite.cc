@@ -10,13 +10,15 @@
 #include "base/command_line.h"
 #include "base/debug_on_start.h"
 #include "base/debug_util.h"
+#include "base/debug/debugger.h"
+#include "base/debug/debugger.h"
 #include "base/file_path.h"
 #include "base/i18n/icu_util.h"
 #include "base/logging.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/nss_util.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/scoped_nsautorelease_pool.h"
 #include "base/scoped_ptr.h"
 #include "base/test/multiprocess_test.h"
 #include "base/test/test_timeouts.h"
@@ -113,7 +115,7 @@ void TestSuite::CatchMaybeTests() {
 // Don't add additional code to this method.  Instead add it to
 // Initialize().  See bug 6436.
 int TestSuite::Run() {
-  base::ScopedNSAutoreleasePool scoped_pool;
+  base::mac::ScopedNSAutoreleasePool scoped_pool;
 
   Initialize();
   std::string client_func =
@@ -191,7 +193,7 @@ void TestSuite::Initialize() {
 #endif  // defined(OS_WIN)
 
   // In some cases, we do not want to see standard error dialogs.
-  if (!DebugUtil::BeingDebugged() &&
+  if (!base::debug::BeingDebugged() &&
       !CommandLine::ForCurrentProcess()->HasSwitch("show-error-dialogs")) {
     SuppressErrorDialogs();
     DebugUtil::SuppressDialogs();

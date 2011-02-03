@@ -19,18 +19,19 @@
 #include "app/os_exchange_data.h"
 #include "app/os_exchange_data_provider_win.h"
 #include "app/win_util.h"
+#include "app/win/drag_source.h"
+#include "app/win/drop_target.h"
+#include "app/win/iat_patch_function.h"
 #include "base/auto_reset.h"
-#include "base/base_drag_source.h"
-#include "base/base_drop_target.h"
 #include "base/basictypes.h"
 #include "base/i18n/rtl.h"
-#include "base/iat_patch.h"
 #include "base/lazy_instance.h"
 #include "base/ref_counted.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_accessibility.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/browser_process.h"
@@ -67,7 +68,7 @@ namespace {
 // URL. A drop of plain text from the same edit either copies or moves the
 // selected text, and a drop of plain text from a source other than the edit
 // does a paste and go.
-class EditDropTarget : public BaseDropTarget {
+class EditDropTarget : public app::win::DropTarget {
  public:
   explicit EditDropTarget(AutocompleteEditViewWin* edit);
 
@@ -118,7 +119,7 @@ DWORD CopyOrLinkDropEffect(DWORD effect) {
 }
 
 EditDropTarget::EditDropTarget(AutocompleteEditViewWin* edit)
-    : BaseDropTarget(edit->m_hWnd),
+    : app::win::DropTarget(edit->m_hWnd),
       edit_(edit),
       drag_has_url_(false),
       drag_has_string_(false) {
@@ -371,8 +372,8 @@ class PaintPatcher {
 
  private:
   size_t refcount_;
-  iat_patch::IATPatchFunction begin_paint_;
-  iat_patch::IATPatchFunction end_paint_;
+  app::win::IATPatchFunction begin_paint_;
+  app::win::IATPatchFunction end_paint_;
 
   DISALLOW_COPY_AND_ASSIGN(PaintPatcher);
 };
@@ -409,6 +410,7 @@ AutocompleteEditViewWin::AutocompleteEditViewWin(
       double_click_time_(0),
       can_discard_mousemove_(false),
       ignore_ime_messages_(false),
+      delete_at_end_pressed_(false),
       font_(font),
       possible_drag_(false),
       in_drag_(false),
@@ -666,6 +668,10 @@ bool AutocompleteEditViewWin::IsSelectAll() {
   return IsSelectAllForRange(selection);
 }
 
+bool AutocompleteEditViewWin::DeleteAtEndPressed() {
+  return delete_at_end_pressed_;
+}
+
 void AutocompleteEditViewWin::GetSelectionBounds(std::wstring::size_type* start,
                                                  std::wstring::size_type* end) {
   CHARRANGE selection;
@@ -885,8 +891,24 @@ bool AutocompleteEditViewWin::OnAfterPossibleChange() {
   const bool something_changed = model_->OnAfterPossibleChange(new_text,
       selection_differs, text_differs, just_deleted_text, at_end_of_edit);
 
+  if (selection_differs)
+    controller_->OnSelectionBoundsChanged();
+
   if (something_changed && text_differs)
     TextChanged();
+
+  if (text_differs) {
+    // Note that a TEXT_CHANGED event implies that the cursor/selection
+    // probably changed too, so we don't need to send both.
+    parent_view_->NotifyAccessibilityEvent(
+        AccessibilityTypes::EVENT_TEXT_CHANGED);
+  } else if (selection_differs) {
+    // Notify assistive technology that the cursor or selection changed.
+    parent_view_->NotifyAccessibilityEvent(
+        AccessibilityTypes::EVENT_SELECTION_CHANGED);
+  } else if (delete_at_end_pressed_) {
+    controller_->OnChanged();
+  }
 
   return something_changed;
 }
@@ -1334,6 +1356,8 @@ LRESULT AutocompleteEditViewWin::OnImeNotify(UINT message,
 void AutocompleteEditViewWin::OnKeyDown(TCHAR key,
                                         UINT repeat_count,
                                         UINT flags) {
+  delete_at_end_pressed_ = false;
+
   if (OnKeyDownAllModes(key, repeat_count, flags))
     return;
 
@@ -1883,7 +1907,8 @@ bool AutocompleteEditViewWin::OnKeyDownOnlyWritable(TCHAR key,
     //
     // Cut:   Shift-Delete and Ctrl-x are treated as cut.  Ctrl-Shift-Delete and
     //        Ctrl-Shift-x are not treated as cut even though the underlying
-    //        CRichTextEdit would treat them as such.
+    //        CRichTextEdit would treat them as such.  Also note that we bring
+    //        up 'clear browsing data' on control-shift-delete.
     // Copy:  Ctrl-Insert and Ctrl-c is treated as copy.  Shift-Ctrl-c is not.
     //        (This is handled in OnKeyDownAllModes().)
     // Paste: Shift-Insert and Ctrl-v are treated as paste.  Ctrl-Shift-Insert
@@ -1893,8 +1918,17 @@ bool AutocompleteEditViewWin::OnKeyDownOnlyWritable(TCHAR key,
     // conforms to what users expect.
 
     case VK_DELETE:
-      if ((flags & KF_ALTDOWN) || GetKeyState(VK_SHIFT) >= 0)
+      if (flags & KF_ALTDOWN)
         return false;
+      if (GetKeyState(VK_SHIFT) >= 0) {
+        if (GetKeyState(VK_CONTROL) >= 0) {
+          CHARRANGE selection;
+          GetSel(selection);
+          delete_at_end_pressed_ = ((selection.cpMin == selection.cpMax) &&
+                                    (selection.cpMin == GetTextLength()));
+        }
+        return false;
+      }
       if (GetKeyState(VK_CONTROL) >= 0) {
         // Cut text if possible.
         CHARRANGE selection;
@@ -1970,6 +2004,8 @@ bool AutocompleteEditViewWin::OnKeyDownOnlyWritable(TCHAR key,
         // Accept the keyword.
         ScopedFreeze freeze(this, GetTextObjectModel());
         model_->AcceptKeyword();
+      } else {
+        controller_->OnCommitSuggestedText(GetText());
       }
       return true;
     }
@@ -2419,7 +2455,7 @@ void AutocompleteEditViewWin::StartDragIfNecessary(const CPoint& point) {
 
   data.SetString(text_to_write);
 
-  scoped_refptr<BaseDragSource> drag_source(new BaseDragSource);
+  scoped_refptr<app::win::DragSource> drag_source(new app::win::DragSource);
   DWORD dropped_mode;
   AutoReset<bool> auto_reset_in_drag(&in_drag_, true);
   if (DoDragDrop(OSExchangeDataProviderWin::GetIDataObject(data), drag_source,

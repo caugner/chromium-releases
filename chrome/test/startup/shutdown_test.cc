@@ -75,13 +75,12 @@ class ShutdownTest : public UIPerfTest {
     if (env->GetVar(env_vars::kStartupTestsNumCycles, &numCyclesEnv) &&
         base::StringToInt(numCyclesEnv, &numCycles)) {
       if (numCycles <= kNumCyclesMax) {
-        LOG(INFO) << env_vars::kStartupTestsNumCycles
-                  << " set in environment, so setting numCycles to "
-                  << numCycles;
+        VLOG(1) << env_vars::kStartupTestsNumCycles
+                << " set in environment, so setting numCycles to " << numCycles;
       } else {
-        LOG(INFO) << env_vars::kStartupTestsNumCycles
-                  << " is higher than the max, setting numCycles to "
-                  << kNumCyclesMax;
+        VLOG(1) << env_vars::kStartupTestsNumCycles
+                << " is higher than the max, setting numCycles to "
+                << kNumCyclesMax;
         numCycles = kNumCyclesMax;
       }
     }
@@ -108,7 +107,7 @@ class ShutdownTest : public UIPerfTest {
 
     std::string times;
     for (int i = 0; i < numCycles; ++i)
-      StringAppendF(&times, "%.2f,", timings[i].InMillisecondsF());
+      base::StringAppendF(&times, "%.2f,", timings[i].InMillisecondsF());
     PrintResultList(graph, "", trace, times, "ms", important);
   }
 };
@@ -123,28 +122,17 @@ TEST_F(ShutdownTest, SimpleUserQuit) {
                   true, /* important */ SIMPLE, UITest::USER_QUIT);
 }
 
-// http://crbug.com/52858
-#if defined(OS_MACOSX)
-#define MAYBE_SimpleSessionEnding FLAKY_SimpleSessionEnding
-#define MAYBE_TwentyTabsWindowClose FLAKY_TwentyTabsWindowClose
-#define MAYBE_TwentyTabsUserQuit FLAKY_TwentyTabsUserQuit
-#else
-#define MAYBE_SimpleSessionEnding SimpleSessionEnding
-#define MAYBE_TwentyTabsWindowClose TwentyTabsWindowClose
-#define MAYBE_TwentyTabsUserQuit TwentyTabsUserQuit
-#endif
-
-TEST_F(ShutdownTest, MAYBE_SimpleSessionEnding) {
+TEST_F(ShutdownTest, SimpleSessionEnding) {
   RunShutdownTest("shutdown", "simple-session-ending",
                   true, /* important */ SIMPLE, UITest::SESSION_ENDING);
 }
 
-TEST_F(ShutdownTest, MAYBE_TwentyTabsWindowClose) {
+TEST_F(ShutdownTest, TwentyTabsWindowClose) {
   RunShutdownTest("shutdown", "twentytabs-window-close",
                   true, /* important */ TWENTY_TABS, UITest::WINDOW_CLOSE);
 }
 
-TEST_F(ShutdownTest, MAYBE_TwentyTabsUserQuit) {
+TEST_F(ShutdownTest, TwentyTabsUserQuit) {
   RunShutdownTest("shutdown", "twentytabs-user-quit",
                   true, /* important */ TWENTY_TABS, UITest::USER_QUIT);
 }

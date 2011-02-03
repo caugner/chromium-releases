@@ -222,7 +222,7 @@ void RegisterPageHandler::HandleGetRegistrationUrl(const ListValue* args) {
       WizardController::default_controller()->GetCustomization()) {
     const std::string& url = WizardController::default_controller()->
         GetCustomization()->registration_url();
-    LOG(INFO) << "Loading registration form with URL: " << url;
+    VLOG(1) << "Loading registration form with URL: " << url;
     GURL register_url(url);
     if (!register_url.is_valid()) {
       SkipRegistration("Registration URL defined in manifest is invalid.");
@@ -240,8 +240,10 @@ void RegisterPageHandler::HandleGetUserInfo(const ListValue* args) {
 #if defined(OS_CHROMEOS)
   if (chromeos::CrosLibrary::Get()->EnsureLoaded()) {
      version_loader_.GetVersion(
-         &version_consumer_, NewCallback(this,
-                                         &RegisterPageHandler::OnVersion));
+         &version_consumer_,
+         NewCallback(this,
+                     &RegisterPageHandler::OnVersion),
+         chromeos::VersionLoader::VERSION_FULL);
   } else {
     SkipRegistration("CrosLibrary is not loaded.");
   }

@@ -19,6 +19,7 @@
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
 #include "chrome/browser/gtk/gtk_tree.h"
@@ -426,6 +427,12 @@ void TaskManagerGtk::Init() {
         kTaskManagerPurgeMemory);
   }
 
+  if (browser_defaults::kShowCancelButtonInTaskManager) {
+    gtk_dialog_add_button(GTK_DIALOG(dialog_),
+        l10n_util::GetStringUTF8(IDS_CLOSE).c_str(),
+        GTK_RESPONSE_DELETE_EVENT);
+  }
+
   gtk_dialog_add_button(GTK_DIALOG(dialog_),
       l10n_util::GetStringUTF8(IDS_TASK_MANAGER_KILL).c_str(),
       kTaskManagerResponseKill);
@@ -485,6 +492,11 @@ void TaskManagerGtk::Init() {
 
   SetInitialDialogSize();
   gtk_util::ShowDialog(dialog_);
+
+  // If the model already has resources, we need to add them before we start
+  // observing events.
+  if (model_->ResourceCount() > 0)
+    OnItemsAdded(0, model_->ResourceCount());
 
   model_->AddObserver(this);
 }

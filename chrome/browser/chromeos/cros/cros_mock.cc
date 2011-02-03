@@ -7,7 +7,6 @@
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/time.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/mock_input_method_library.h"
@@ -21,6 +20,7 @@
 #include "chrome/browser/chromeos/cros/mock_touchpad_library.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_screen.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -29,6 +29,8 @@
 namespace chromeos {
 
 using ::testing::AnyNumber;
+using ::testing::AtMost;
+using ::testing::InSequence;
 using ::testing::InvokeWithoutArgs;
 using ::testing::Return;
 using ::testing::ReturnRef;
@@ -268,71 +270,76 @@ void CrosMock::SetInputMethodLibraryStatusAreaExpectations() {
 }
 
 void CrosMock::SetNetworkLibraryStatusAreaExpectations() {
-  EXPECT_CALL(*mock_network_library_, AddObserver(_))
+  EXPECT_CALL(*mock_network_library_, AddNetworkManagerObserver(_))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_network_library_, AddCellularDataPlanObserver(_))
       .Times(1)
       .RetiresOnSaturation();
 
-  // NetworkDropdownButton::NetworkChanged() calls:
-  EXPECT_CALL(*mock_network_library_, ethernet_connected())
-      .Times(2)  // also called by NetworkMenu::InitMenuItems()
-      .WillRepeatedly((Return(false)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_network_library_, wifi_connected())
-      .Times(1)
-      .WillRepeatedly((Return(false)))
+  // NetworkMenuButton::OnNetworkManagerChanged() calls:
+  EXPECT_CALL(*mock_network_library_, active_network())
+      .Times(AnyNumber())
+      .WillRepeatedly((Return((const Network*)(NULL))))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_network_library_, wifi_connecting())
-      .Times(1)
-      .WillRepeatedly((Return(false)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_network_library_, cellular_connected())
-      .Times(1)
+      .Times(AnyNumber())
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_network_library_, cellular_connecting())
-      .Times(1)
+      .Times(AnyNumber())
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_network_library_, Connected())
-      .Times(2)  // also called by NetworkMenu::InitMenuItems()
+      .Times(AnyNumber())
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_network_library_, Connecting())
-      .Times(1)
+      .Times(AnyNumber())
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
 
   // NetworkMenu::InitMenuItems() calls:
-  EXPECT_CALL(*mock_network_library_, ethernet_connecting())
+  EXPECT_CALL(*mock_network_library_, ethernet_available())
+      .Times(1)
+      .WillRepeatedly((Return(true)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_network_library_, ethernet_enabled())
+      .Times(1)
+      .WillRepeatedly((Return(true)))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_network_library_, ethernet_connected())
       .Times(1)
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
-  EXPECT_CALL(*mock_network_library_, wifi_networks())
+  EXPECT_CALL(*mock_network_library_, ethernet_connecting())
       .Times(1)
-      .WillRepeatedly((ReturnRef(wifi_networks_)))
+      .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_network_library_, wifi_available())
       .Times(1)
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
-  EXPECT_CALL(*mock_network_library_, wifi_network())
+  EXPECT_CALL(*mock_network_library_, wifi_enabled())
       .Times(1)
-      .WillRepeatedly((ReturnRef(wifi_network_)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_network_library_, cellular_networks())
-      .Times(1)
-      .WillRepeatedly((ReturnRef(cellular_networks_)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_network_library_, cellular_network())
-      .Times(1)
-      .WillRepeatedly((ReturnRef(cellular_network_)))
+      .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_network_library_, cellular_available())
       .Times(1)
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
+  EXPECT_CALL(*mock_network_library_, cellular_enabled())
+      .Times(1)
+      .WillRepeatedly((Return(false)))
+      .RetiresOnSaturation();
 
-  EXPECT_CALL(*mock_network_library_, RemoveObserver(_))
+  EXPECT_CALL(*mock_network_library_, RemoveNetworkManagerObserver(_))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_network_library_, RemoveObserverForAllNetworks(_))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_network_library_, RemoveCellularDataPlanObserver(_))
       .Times(1)
       .RetiresOnSaturation();
 }
@@ -378,17 +385,20 @@ void CrosMock::SetPowerLibraryExpectations() {
 }
 
 void CrosMock::SetSpeechSynthesisLibraryExpectations() {
+  InSequence s;
+  EXPECT_CALL(*mock_speech_synthesis_library_, StopSpeaking())
+      .WillOnce(Return(true))
+      .RetiresOnSaturation();
   EXPECT_CALL(*mock_speech_synthesis_library_, Speak(_))
-      .Times(1)
       .WillOnce(Return(true))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_speech_synthesis_library_, StopSpeaking())
-      .Times(1)
+      .WillOnce(Return(true))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*mock_speech_synthesis_library_, Speak(_))
       .WillOnce(Return(true))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_speech_synthesis_library_, IsSpeaking())
-      .Times(4)
-      .WillOnce(Return(true))
       .WillOnce(Return(true))
       .WillOnce(Return(true))
       .WillOnce(Return(false))

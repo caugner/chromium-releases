@@ -4,36 +4,54 @@
 
 #include "chrome/browser/automation/automation_provider_observers.h"
 
+#include <deque>
+
 #include "base/basictypes.h"
+#include "base/callback.h"
+#include "base/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
+#include "base/thread_restrictions.h"
 #include "base/values.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/automation_provider_json.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/dom_operation_notification_details.h"
+#include "chrome/browser/dom_ui/most_visited_handler.h"
+#include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/save_package.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_updater.h"
+#include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/login_prompt.h"
 #include "chrome/browser/metrics/metric_event_duration_details.h"
+#include "chrome/browser/notifications/balloon.h"
+#include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/translate/page_translated_details.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/common/automation_constants.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/test/automation/automation_constants.h"
+#include "gfx/codec/png_codec.h"
 #include "gfx/rect.h"
+#include "googleurl/src/gurl.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/authentication_notification_details.h"
@@ -122,7 +140,7 @@ DictionaryValue* InitialLoadObserver::GetTimingInformation() const {
 
 void InitialLoadObserver::ConditionMet() {
   registrar_.RemoveAll();
-  automation_->Send(new AutomationMsg_InitialLoadsComplete(0));
+  automation_->OnInitialLoadsComplete();
 }
 
 NewTabUILoadObserver::NewTabUILoadObserver(AutomationProvider* automation)
@@ -362,13 +380,14 @@ TabCountChangeObserver::~TabCountChangeObserver() {
   tab_strip_model_->RemoveObserver(this);
 }
 
-void TabCountChangeObserver::TabInsertedAt(TabContents* contents,
+void TabCountChangeObserver::TabInsertedAt(TabContentsWrapper* contents,
                                            int index,
                                            bool foreground) {
   CheckTabCount();
 }
 
-void TabCountChangeObserver::TabDetachedAt(TabContents* contents, int index) {
+void TabCountChangeObserver::TabDetachedAt(TabContentsWrapper* contents,
+                                           int index) {
   CheckTabCount();
 }
 
@@ -489,7 +508,7 @@ void ExtensionReadyNotificationObserver::Observe(
       success = true;
       break;
     case NotificationType::EXTENSION_LOADED:
-      extension_ = Details<Extension>(details).ptr();
+      extension_ = Details<const Extension>(details).ptr();
       if (!DidExtensionHostsStopLoading(manager_))
         return;
       success = true;
@@ -854,7 +873,7 @@ void FindInPageNotificationObserver::Observe(
     const NotificationDetails& details) {
   Details<FindNotificationDetails> find_details(details);
   if (!(find_details->final_update() && reply_message_ != NULL)) {
-    DLOG(INFO) << "Ignoring, since we only care about the final message";
+    DVLOG(1) << "Ignoring, since we only care about the final message";
     return;
   }
   // We get multiple responses and one of those will contain the ordinal.
@@ -892,28 +911,28 @@ void FindInPageNotificationObserver::Observe(
 // static
 const int FindInPageNotificationObserver::kFindInPageRequestId = -1;
 
-DomOperationNotificationObserver::DomOperationNotificationObserver(
-    AutomationProvider* automation)
-    : automation_(automation) {
+DomOperationObserver::DomOperationObserver() {
   registrar_.Add(this, NotificationType::DOM_OPERATION_RESPONSE,
                  NotificationService::AllSources());
 }
 
-DomOperationNotificationObserver::~DomOperationNotificationObserver() {
-}
-
-void DomOperationNotificationObserver::Observe(
+void DomOperationObserver::Observe(
     NotificationType type, const NotificationSource& source,
     const NotificationDetails& details) {
   if (NotificationType::DOM_OPERATION_RESPONSE == type) {
     Details<DomOperationNotificationDetails> dom_op_details(details);
+    OnDomOperationCompleted(dom_op_details->json());
+  }
+}
 
-    IPC::Message* reply_message = automation_->reply_message_release();
-    if (reply_message) {
-      AutomationMsg_DomOperation::WriteReplyParams(reply_message,
-                                                   dom_op_details->json());
-      automation_->Send(reply_message);
-    }
+void DomOperationMessageSender::OnDomOperationCompleted(
+    const std::string& json) {
+  IPC::Message* reply_message = automation_->reply_message_release();
+  if (reply_message) {
+    AutomationMsg_DomOperation::WriteReplyParams(reply_message, json);
+    automation_->Send(reply_message);
+  } else {
+    LOG(ERROR) << "DOM operation completed, but no reply message";
   }
 }
 
@@ -973,6 +992,8 @@ MetricEventDurationObserver::MetricEventDurationObserver() {
                  NotificationService::AllSources());
 }
 
+MetricEventDurationObserver::~MetricEventDurationObserver() {}
+
 int MetricEventDurationObserver::GetEventDurationMs(
     const std::string& event_name) {
   EventDurationMap::const_iterator it = durations_.find(event_name);
@@ -1001,6 +1022,8 @@ PageTranslatedObserver::PageTranslatedObserver(AutomationProvider* automation,
   registrar_.Add(this, NotificationType::PAGE_TRANSLATED,
                  Source<TabContents>(tab_contents));
 }
+
+PageTranslatedObserver::~PageTranslatedObserver() {}
 
 void PageTranslatedObserver::Observe(NotificationType type,
                                      const NotificationSource& source,
@@ -1320,6 +1343,157 @@ void SavePackageNotificationObserver::Observe(
   }
 }
 
+PageSnapshotTaker::PageSnapshotTaker(AutomationProvider* automation,
+                                     IPC::Message* reply_message,
+                                     RenderViewHost* render_view,
+                                     const FilePath& path)
+    : automation_(automation),
+      reply_message_(reply_message),
+      render_view_(render_view),
+      image_path_(path),
+      received_width_(false) {}
+
+void PageSnapshotTaker::Start() {
+  ExecuteScript(L"window.domAutomationController.send(document.width);");
+}
+
+void PageSnapshotTaker::OnDomOperationCompleted(const std::string& json) {
+  int dimension;
+  if (!base::StringToInt(json, &dimension)) {
+    LOG(ERROR) << "Could not parse received dimensions: " << json;
+    SendMessage(false);
+  } else if (!received_width_) {
+    received_width_ = true;
+    entire_page_size_.set_width(dimension);
+
+    ExecuteScript(L"window.domAutomationController.send(document.height);");
+  } else {
+    entire_page_size_.set_height(dimension);
+
+    ThumbnailGenerator* generator =
+        g_browser_process->GetThumbnailGenerator();
+    ThumbnailGenerator::ThumbnailReadyCallback* callback =
+        NewCallback(this, &PageSnapshotTaker::OnSnapshotTaken);
+    // Don't actually start the thumbnail generator, this leads to crashes on
+    // Mac, crbug.com/62986. Instead, just hook the generator to the
+    // RenderViewHost manually.
+    render_view_->set_painting_observer(generator);
+    generator->AskForSnapshot(render_view_, false, callback,
+                              entire_page_size_, entire_page_size_);
+  }
+}
+
+void PageSnapshotTaker::OnSnapshotTaken(const SkBitmap& bitmap) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  std::vector<unsigned char> png_data;
+  gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, true, &png_data);
+  int bytes_written = file_util::WriteFile(image_path_,
+      reinterpret_cast<char*>(&png_data[0]), png_data.size());
+  SendMessage(bytes_written == static_cast<int>(png_data.size()));
+}
+
+void PageSnapshotTaker::ExecuteScript(const std::wstring& javascript) {
+  std::wstring set_automation_id;
+  base::SStringPrintf(
+      &set_automation_id,
+      L"window.domAutomationController.setAutomationId(%d);",
+      reply_message_->routing_id());
+
+  render_view_->ExecuteJavascriptInWebFrame(L"", set_automation_id);
+  render_view_->ExecuteJavascriptInWebFrame(L"", javascript);
+}
+
+void PageSnapshotTaker::SendMessage(bool success) {
+  AutomationMsg_CaptureEntirePageAsPNG::WriteReplyParams(reply_message_,
+                                                         success);
+  automation_->Send(reply_message_);
+  delete this;
+}
+
+NTPInfoObserver::NTPInfoObserver(
+    AutomationProvider* automation,
+    IPC::Message* reply_message,
+    CancelableRequestConsumer* consumer)
+        : automation_(automation),
+          reply_message_(reply_message),
+          consumer_(consumer),
+          request_(NULL),
+          ntp_info_(new DictionaryValue) {
+  top_sites_ = automation_->profile()->GetTopSites();
+  if (!top_sites_) {
+    AutomationJSONReply(automation_, reply_message_)
+        .SendError("Profile does not have service for querying the top sites.");
+    return;
+  }
+  TabRestoreService* service = automation_->profile()->GetTabRestoreService();
+  if (!service) {
+    AutomationJSONReply(automation_, reply_message_)
+        .SendError("No TabRestoreService.");
+    return;
+  }
+
+  // Get the info that would be displayed in the recently closed section.
+  ListValue* recently_closed_list = new ListValue;
+  NewTabUI::AddRecentlyClosedEntries(service->entries(),
+                                     recently_closed_list);
+  ntp_info_->Set("recently_closed", recently_closed_list);
+
+  // Add default site URLs.
+  ListValue* default_sites_list = new ListValue;
+  std::vector<GURL> urls = MostVisitedHandler::GetPrePopulatedUrls();
+  for (size_t i = 0; i < urls.size(); ++i) {
+    default_sites_list->Append(Value::CreateStringValue(
+        urls[i].possibly_invalid_spec()));
+  }
+  ntp_info_->Set("default_sites", default_sites_list);
+
+  registrar_.Add(this, NotificationType::TOP_SITES_UPDATED,
+                 Source<history::TopSites>(top_sites_));
+  if (top_sites_->loaded()) {
+    OnTopSitesLoaded();
+  } else {
+    registrar_.Add(this, NotificationType::TOP_SITES_LOADED,
+                   Source<Profile>(automation_->profile()));
+  }
+}
+
+void NTPInfoObserver::Observe(NotificationType type,
+                              const NotificationSource& source,
+                              const NotificationDetails& details) {
+  if (type == NotificationType::TOP_SITES_LOADED) {
+    OnTopSitesLoaded();
+  } else if (type == NotificationType::TOP_SITES_UPDATED) {
+    Details<CancelableRequestProvider::Handle> request_details(details);
+    if (request_ == *request_details.ptr()) {
+      top_sites_->GetMostVisitedURLs(
+          consumer_,
+          NewCallback(this, &NTPInfoObserver::OnTopSitesReceived));
+    }
+  }
+}
+
+void NTPInfoObserver::OnTopSitesLoaded() {
+  request_ = top_sites_->StartQueryForMostVisited();
+}
+
+void NTPInfoObserver::OnTopSitesReceived(
+    const history::MostVisitedURLList& visited_list) {
+  ListValue* list_value = new ListValue;
+  for (size_t i = 0; i < visited_list.size(); ++i) {
+    const history::MostVisitedURL& visited = visited_list[i];
+    if (visited.url.spec().empty())
+      break;  // This is the signal that there are no more real visited sites.
+    DictionaryValue* dict = new DictionaryValue;
+    dict->SetString("url", visited.url.spec());
+    dict->SetString("title", visited.title);
+    dict->SetBoolean("is_pinned", top_sites_->IsURLPinned(visited.url));
+    list_value->Append(dict);
+  }
+  ntp_info_->Set("most_visited", list_value);
+  AutomationJSONReply(automation_, reply_message_).SendSuccess(ntp_info_.get());
+  delete this;
+}
+
 AutocompleteEditFocusedObserver::AutocompleteEditFocusedObserver(
     AutomationProvider* automation,
     AutocompleteEditModel* autocomplete_edit,
@@ -1342,3 +1516,22 @@ void AutocompleteEditFocusedObserver::Observe(
   delete this;
 }
 
+OnNotificationBalloonCountObserver::OnNotificationBalloonCountObserver(
+    AutomationProvider* provider,
+    IPC::Message* reply_message,
+    BalloonCollection* collection,
+    int count)
+    : reply_(provider, reply_message),
+      collection_(collection),
+      count_(count) {
+  collection->set_on_collection_changed_callback(NewCallback(
+      this, &OnNotificationBalloonCountObserver::OnBalloonCollectionChanged));
+}
+
+void OnNotificationBalloonCountObserver::OnBalloonCollectionChanged() {
+  if (static_cast<int>(collection_->GetActiveBalloons().size()) == count_) {
+    collection_->set_on_collection_changed_callback(NULL);
+    reply_.SendSuccess(NULL);
+    delete this;
+  }
+}

@@ -11,7 +11,7 @@
 #include "app/gfx/gl/gl_context.h"
 #include "app/surface/transport_dib.h"
 #include "base/callback.h"
-#include "base/scoped_cftyperef.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "base/scoped_ptr.h"
 #include "gfx/rect.h"
 #include "gfx/size.h"
@@ -57,6 +57,10 @@ class AcceleratedSurface {
   // which the surface is bound, or 0 if no changes were made or an error
   // occurred. MakeCurrent() will have been called on the new surface.
   uint64 SetSurfaceSize(const gfx::Size& size);
+
+  // Returns the id of this surface's IOSruface, or 0 for
+  // transport DIB surfaces.
+  uint64 GetSurfaceId();
 
   // Sets the GL context to be the current one for drawing. Returns true if
   // it succeeded.
@@ -130,7 +134,11 @@ class AcceleratedSurface {
   // 10.6 and later).
   // TODO(dspringer,kbr): Should the GPU backing store be encapsulated in its
   // own class so all this implementation detail is hidden?
-  scoped_cftyperef<CFTypeRef> io_surface_;
+  base::mac::ScopedCFTypeRef<CFTypeRef> io_surface_;
+
+  // The id of |io_surface_| or 0 if that's NULL.
+  uint64 io_surface_id_;
+
   // TODO(dspringer): If we end up keeping this TransportDIB mechanism, this
   // should really be a scoped_ptr_malloc<>, with a deallocate functor that
   // runs |dib_free_callback_|.  I was not able to figure out how to

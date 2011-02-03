@@ -78,7 +78,7 @@ class MockHttpStream : public HttpStream {
                                CompletionCallback* callback) {
     return ERR_UNEXPECTED;
   }
-  virtual int SendRequest(const std::string& request_headers,
+  virtual int SendRequest(const HttpRequestHeaders& request_headers,
                           UploadDataStream* request_body,
                           HttpResponseInfo* response,
                           CompletionCallback* callback) {
@@ -94,8 +94,6 @@ class MockHttpStream : public HttpStream {
   virtual bool IsMoreDataBuffered() const { return false; }
   virtual bool IsConnectionReused() const { return false; }
   virtual void SetConnectionReused() {}
-  virtual ClientSocketHandle* DetachConnection() { return NULL; }
-
   virtual void GetSSLInfo(SSLInfo* ssl_info) {}
   virtual void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) {}
 
@@ -107,6 +105,11 @@ class MockHttpStream : public HttpStream {
     closed_ = true;
     result_waiter_->set_result(not_reusable);
   }
+
+  virtual HttpStream* RenewStreamForAuth() {
+    return NULL;
+  }
+
   virtual bool IsResponseBodyComplete() const { return is_complete_; }
 
   // Methods to tweak/observer mock behavior:
@@ -172,8 +175,10 @@ class HttpResponseBodyDrainerTest : public testing::Test {
  protected:
   HttpResponseBodyDrainerTest()
       : session_(new HttpNetworkSession(
-          NULL,
-          NULL,
+          NULL /* host_resolver */,
+          NULL /* dnsrr_resolver */,
+          NULL /* dns_cert_checker */,
+          NULL /* ssl_host_info_factory */,
           ProxyService::CreateDirect(),
           NULL,
           new SSLConfigServiceDefaults,

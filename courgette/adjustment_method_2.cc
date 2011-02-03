@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,6 @@
 #include <set>
 #include <string>
 #include <vector>
-
-#include <iostream>
 
 #include "base/basictypes.h"
 #include "base/format_macros.h"
@@ -153,31 +151,6 @@ low-scoring assignments in the approximation for large equivalence classes.
 namespace courgette {
 namespace adjustment_method_2 {
 
-// We have three discretionary information logging levels for algorithm
-// development.  For now just configure with #defines.
-// TODO(sra): make dependent of some configurable setting.
-struct LogToCout {
-  LogToCout() {}
-  ~LogToCout() { std::cout << std::endl; }
-  std::ostream& stream() { return std::cout; }
-};
-#define LOG_TO_COUT (LogToCout().stream())
-#define NO_LOG DLOG_IF(INFO, false)
-
-#if 0   // Log to log file.
-#define ALOG1 LOG(INFO)
-#define ALOG2 LOG(INFO)
-#define ALOG3 LOG(INFO)
-#elif 0  // Log to stdout.
-#define ALOG1 LOG_TO_COUT
-#define ALOG2 LOG_TO_COUT
-#define ALOG3 LOG_TO_COUT
-#else   // Log to nowhere.
-#define ALOG1 NO_LOG
-#define ALOG2 NO_LOG
-#define ALOG3 NO_LOG
-#endif
-
 ////////////////////////////////////////////////////////////////////////////////
 
 class AssignmentCandidates;
@@ -229,11 +202,11 @@ typedef std::vector<LabelInfo*> Trace;
 
 std::string ToString(const LabelInfo* info) {
   std::string s;
-  StringAppendF(&s, "%c%d", "pm"[info->is_model_], info->debug_index_);
+  base::StringAppendF(&s, "%c%d", "pm"[info->is_model_], info->debug_index_);
   if (info->label_->index_ != Label::kNoIndex)
-    StringAppendF(&s, " (%d)", info->label_->index_);
+    base::StringAppendF(&s, " (%d)", info->label_->index_);
 
-  StringAppendF(&s, " #%u", info->refs_);
+  base::StringAppendF(&s, " #%u", info->refs_);
   return s;
 }
 
@@ -348,14 +321,14 @@ class AssignmentCandidates {
   }
 
   void Print(int max) {
-    ALOG1 << "score "  << TopScore() << "  " << ToString(program_info_)
-          << " := ?";
+    VLOG(2) << "score "  << TopScore() << "  " << ToString(program_info_)
+            << " := ?";
     if (!pending_updates_.empty())
-      ALOG1 << pending_updates_.size() << " pending";
+      VLOG(2) << pending_updates_.size() << " pending";
     int count = 0;
     for (Queue::iterator q = queue_.begin();  q != queue_.end();  ++q) {
       if (++count > max) break;
-      ALOG1 << "   " << q->first << "  " << ToString(q->second);
+      VLOG(2) << "   " << q->first << "  " << ToString(q->second);
     }
   }
 
@@ -458,13 +431,14 @@ std::string ToString(const Shingle* instance) {
   std::string s;
   const char* sep = "<";
   for (size_t i = 0; i < Shingle::kWidth; ++i) {
-    // StringAppendF(&s, "%s%x ", sep, instance.at(i)->label_->rva_);
+    // base::StringAppendF(&s, "%s%x ", sep, instance.at(i)->label_->rva_);
     s += sep;
     s += ToString(instance->at(i));
     sep = ", ";
   }
-  StringAppendF(&s, ">(%" PRIuS ")@{%" PRIuS "}", instance->exemplar_position_,
-                instance->position_count());
+  base::StringAppendF(&s, ">(%" PRIuS ")@{%" PRIuS "}",
+                      instance->exemplar_position_,
+                      instance->position_count());
   return s;
 }
 
@@ -550,7 +524,7 @@ std::string ToString(const ShinglePattern::Index* index) {
   if (index == NULL) {
     s = "<null>";
   } else {
-    StringAppendF(&s, "<%d: ", index->variables_);
+    base::StringAppendF(&s, "<%d: ", index->variables_);
     const char* sep = "";
     for (size_t i = 0;  i < Shingle::kWidth;  ++i) {
       s += sep;
@@ -558,11 +532,11 @@ std::string ToString(const ShinglePattern::Index* index) {
       uint32 kind = index->kinds_[i];
       int offset = kind & ShinglePattern::kOffsetMask;
       if (kind & ShinglePattern::kVariable)
-        StringAppendF(&s, "V%d", offset);
+        base::StringAppendF(&s, "V%d", offset);
       else
-        StringAppendF(&s, "%d", index->assigned_indexes_[offset]);
+        base::StringAppendF(&s, "%d", index->assigned_indexes_[offset]);
      }
-    StringAppendF(&s, " %x", index->hash_);
+    base::StringAppendF(&s, " %x", index->hash_);
     s += ">";
   }
   return s;
@@ -580,7 +554,7 @@ std::string HistogramToString(const ShinglePattern::Histogram& histogram,
       s += " ...";
       break;
     }
-    StringAppendF(&s, " %" PRIuS, p->count());
+    base::StringAppendF(&s, " %" PRIuS, p->count());
   }
   return s;
 }
@@ -600,7 +574,7 @@ std::string HistogramToStringFull(const ShinglePattern::Histogram& histogram,
       s += "...\n";
       break;
     }
-    StringAppendF(&s, "(%" PRIuS ") ", p->count());
+    base::StringAppendF(&s, "(%" PRIuS ") ", p->count());
     s += ToString(&(*p->instance()));
     s += "\n";
   }
@@ -614,14 +588,14 @@ std::string ToString(const ShinglePattern* pattern, size_t snippet_max = 3) {
   } else {
     s = "{";
     s += ToString(pattern->index_);
-    StringAppendF(&s, ";  %d(%d):",
-                  static_cast<int>(pattern->model_histogram_.size()),
-                  pattern->model_coverage_);
+    base::StringAppendF(&s, ";  %d(%d):",
+                        static_cast<int>(pattern->model_histogram_.size()),
+                        pattern->model_coverage_);
 
     s += HistogramToString(pattern->model_histogram_, snippet_max);
-    StringAppendF(&s, ";  %d(%d):",
-                  static_cast<int>(pattern->program_histogram_.size()),
-                  pattern->program_coverage_);
+    base::StringAppendF(&s, ";  %d(%d):",
+                        static_cast<int>(pattern->program_histogram_.size()),
+                        pattern->program_coverage_);
     s += HistogramToString(pattern->program_histogram_, snippet_max);
     s += "}";
   }
@@ -635,9 +609,9 @@ std::string ShinglePatternToStringFull(const ShinglePattern* pattern,
   s += "\n";
   size_t model_size = pattern->model_histogram_.size();
   size_t program_size = pattern->program_histogram_.size();
-  StringAppendF(&s, "  model shingles %" PRIuS "\n", model_size);
+  base::StringAppendF(&s, "  model shingles %" PRIuS "\n", model_size);
   s += HistogramToStringFull(pattern->model_histogram_, "    ", max);
-  StringAppendF(&s, "  program shingles %" PRIuS "\n", program_size);
+  base::StringAppendF(&s, "  program shingles %" PRIuS "\n", program_size);
   s += HistogramToStringFull(pattern->program_histogram_, "    ", max);
   return s;
 }
@@ -828,8 +802,8 @@ class AssignmentProblem {
   AssignmentProblem(const Trace& trace, size_t model_end)
       : trace_(trace),
         model_end_(model_end) {
-    ALOG1 << "AssignmentProblem::AssignmentProblem  " << model_end << ", "
-          << trace.size();
+    VLOG(2) << "AssignmentProblem::AssignmentProblem  " << model_end << ", "
+            << trace.size();
   }
 
   bool Solve() {
@@ -845,10 +819,8 @@ class AssignmentProblem {
     AddPatternsNeedingUpdatesToQueues();
 
     patterns_needing_updates_.clear();
-    while (FindAndAssignBestLeader()) {
-      NO_LOG << "Updated " << patterns_needing_updates_.size() << " patterns";
+    while (FindAndAssignBestLeader())
       patterns_needing_updates_.clear();
-    }
     PrintActivePatterns();
 
     return true;
@@ -874,11 +846,11 @@ class AssignmentProblem {
       SingleUsePatternQueue;
 
   void PrintPatternsHeader() const {
-    ALOG1 << shingle_instances_.size() << " instances  "
-          << trace_.size() << " trace length  "
-          << patterns_.size() << " shingle indexes  "
-          << single_use_pattern_queue_.size() << " single use patterns  "
-          << active_non_single_use_patterns_.size() << " active patterns";
+    VLOG(2) << shingle_instances_.size() << " instances  "
+            << trace_.size() << " trace length  "
+            << patterns_.size() << " shingle indexes  "
+            << single_use_pattern_queue_.size() << " single use patterns  "
+            << active_non_single_use_patterns_.size() << " active patterns";
   }
 
   void PrintActivePatterns() const {
@@ -887,7 +859,7 @@ class AssignmentProblem {
          p != active_non_single_use_patterns_.end();
          ++p) {
       const ShinglePattern* pattern = *p;
-      ALOG1 << ToString(pattern, 10);
+      VLOG(2) << ToString(pattern, 10);
     }
   }
 
@@ -902,7 +874,7 @@ class AssignmentProblem {
          p != patterns_.end();
          ++p) {
       const ShinglePattern& pattern = p->second;
-      ALOG1 << ToString(&pattern, 10);
+      VLOG(2) << ToString(&pattern, 10);
     }
   }
 
@@ -911,7 +883,7 @@ class AssignmentProblem {
          p != shingle_instances_.end();
          ++p) {
       const Shingle& instance = *p;
-      ALOG1 << ToString(&instance) << "   " << ToString(instance.pattern());
+      VLOG(2) << ToString(&instance) << "   " << ToString(instance.pattern());
     }
   }
 
@@ -1093,10 +1065,10 @@ class AssignmentProblem {
           LabelInfo* model_info = model_instance->at(i);
           if ((model_info->assignment_ == NULL) !=
               (program_info->assignment_ == NULL)) {
-            ALOG1 << "ERROR " << i
-                  << "\n\t"  << ToString(pattern, 10)
-                  << "\n\t" << ToString(program_instance)
-                  << "\n\t" << ToString(model_instance);
+            VLOG(2) << "ERROR " << i
+                    << "\n\t"  << ToString(pattern, 10)
+                    << "\n\t" << ToString(program_instance)
+                    << "\n\t" << ToString(model_instance);
           }
           if (!program_info->assignment_ && !model_info->assignment_) {
             sums[program_info][model_info] += score;
@@ -1139,8 +1111,8 @@ class AssignmentProblem {
     LOG_ASSERT(model_info->is_model_);
     LOG_ASSERT(!program_info->is_model_);
 
-    ALOG2 << "Assign " << ToString(program_info)
-          << " := " << ToString(model_info);
+    VLOG(3) << "Assign " << ToString(program_info)
+            << " := " << ToString(model_info);
 
     ShingleSet affected_shingles;
     AddAffectedPositions(model_info, &affected_shingles);
@@ -1254,7 +1226,7 @@ class Adjuster : public AdjustmentMethod {
   ~Adjuster() {}
 
   bool Adjust(const AssemblyProgram& model, AssemblyProgram* program) {
-    LOG(INFO) << "Adjuster::Adjust";
+    VLOG(1) << "Adjuster::Adjust";
     prog_ = program;
     model_ = &model;
     return Finish();
@@ -1297,8 +1269,8 @@ class Adjuster : public AdjustmentMethod {
     base::Time start_time = base::Time::Now();
     AssignmentProblem a(model, model_end);
     a.Solve();
-    LOG(INFO) << " Adjuster::Solve "
-              << (base::Time::Now() - start_time).InSecondsF();
+    VLOG(1) << " Adjuster::Solve "
+            << (base::Time::Now() - start_time).InSecondsF();
   }
 
   void ReferenceLabel(Trace* trace, Label* label, bool is_model) {

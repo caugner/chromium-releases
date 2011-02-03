@@ -9,10 +9,6 @@
 #include "chrome/common/notification_type.h"
 #include "chrome/test/ui_test_utils.h"
 
-// TODO(finnur): Remove after capturing debug info.
-#include <iostream>
-#include "chrome/common/extensions/extension.h"
-
 ExtensionTestMessageListener::ExtensionTestMessageListener(
     const std::string& expected_message,
     bool will_reply)
@@ -47,14 +43,8 @@ void ExtensionTestMessageListener::Observe(
     const NotificationSource& source,
     const NotificationDetails& details) {
   const std::string& content = *Details<std::string>(details).ptr();
-  function_ = Source<ExtensionTestSendMessageFunction>(source).ptr();
-  // TODO(finnur): Remove after capturing debug info.
-  if (Extension::emit_traces_for_whitelist_extension_test_) {
-    std::cout << "-*-*- Got     : " << content.c_str() << "\n" << std::flush;
-    std::cout << "-*-*- Expected: " << expected_message_.c_str() << "\n" << std::flush;
-  }
-
   if (!satisfied_ && content == expected_message_) {
+    function_ = Source<ExtensionTestSendMessageFunction>(source).ptr();
     satisfied_ = true;
     registrar_.RemoveAll();  // Stop listening for more messages.
     if (!will_reply_) {

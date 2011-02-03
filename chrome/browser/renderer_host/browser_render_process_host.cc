@@ -17,16 +17,19 @@
 
 #include "app/app_switches.h"
 #include "base/command_line.h"
-#include "base/field_trial.h"
-#include "base/histogram.h"
 #include "base/logging.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/histogram.h"
+#include "base/path_service.h"
 #include "base/platform_file.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/thread.h"
+#include "base/thread_restrictions.h"
 #include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/child_process_security_policy.h"
+#include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extensions_service.h"
@@ -34,17 +37,22 @@
 #include "chrome/browser/gpu_process_host.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/plugin_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/audio_renderer_host.h"
+#include "chrome/browser/renderer_host/pepper_file_message_filter.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/renderer_host/render_widget_helper.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/browser/renderer_host/resource_message_filter.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
+#include "chrome/browser/speech/speech_input_manager.h"
 #include "chrome/browser/spellcheck_host.h"
+#include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/visitedlink_master.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/child_process_info.h"
 #include "chrome/common/extensions/extension.h"
@@ -77,8 +85,9 @@ using WebKit::WebCache;
 
 #include "third_party/skia/include/core/SkBitmap.h"
 
-// TODO(finnur): Remove after capturing debug info.
-#include <iostream>
+// TODO(mpcomplete): Remove this after fixing
+// http://code.google.com/p/chromium/issues/detail?id=53991
+bool g_log_bug53991 = false;
 
 // This class creates the IO thread for the renderer when running in
 // single-process mode.  It's not used in multi-process mode.
@@ -232,8 +241,9 @@ BrowserRenderProcessHost::BrowserRenderProcessHost(Profile* profile)
   // PLATFORM_FILE_DELETE_ON_CLOSE are not granted, because no existing API
   // requests them.
   ChildProcessSecurityPolicy::GetInstance()->GrantPermissionsForFile(
-      id(), profile->GetPath().Append(
-          fileapi::FileSystemPathManager::kFileSystemDirectory),
+      id(),
+      fileapi::FileSystemPathManager::GetFileSystemCommonRootDirectory(
+          profile->GetPath()),
       base::PLATFORM_FILE_OPEN |
       base::PLATFORM_FILE_CREATE |
       base::PLATFORM_FILE_OPEN_ALWAYS |
@@ -253,6 +263,8 @@ BrowserRenderProcessHost::BrowserRenderProcessHost(Profile* profile)
 }
 
 BrowserRenderProcessHost::~BrowserRenderProcessHost() {
+  VLOG_IF(1, g_log_bug53991) << "~BrowserRenderProcessHost: " << this;
+
   WebCacheManager::GetInstance()->Remove(id());
   ChildProcessSecurityPolicy::GetInstance()->Remove(id());
 
@@ -289,14 +301,14 @@ bool BrowserRenderProcessHost::Init(
   // Construct the AudioRendererHost with the IO thread.
   audio_renderer_host_ = new AudioRendererHost();
 
-  scoped_refptr<ResourceMessageFilter> resource_message_filter =
+  scoped_refptr<ResourceMessageFilter> resource_message_filter(
       new ResourceMessageFilter(g_browser_process->resource_dispatcher_host(),
                                 id(),
                                 audio_renderer_host_.get(),
                                 PluginService::GetInstance(),
                                 g_browser_process->print_job_manager(),
                                 profile(),
-                                widget_helper_);
+                                widget_helper_));
 
   CommandLine::StringType renderer_prefix;
 #if defined(OS_POSIX)
@@ -326,6 +338,10 @@ bool BrowserRenderProcessHost::Init(
   // with no time-out, which in the context of the browser process we should not
   // be doing.
   channel_->set_sync_messages_with_no_timeout_allowed(false);
+
+  scoped_refptr<PepperFileMessageFilter> pepper_file_message_filter(
+      new PepperFileMessageFilter(id(), profile()));
+  channel_->AddFilter(pepper_file_message_filter);
 
   if (run_renderer_in_process()) {
     // Crank up a thread and run the initialization there.  With the way that
@@ -487,11 +503,11 @@ void BrowserRenderProcessHost::AppendRendererCommandLine(
   const std::string locale = g_browser_process->GetApplicationLocale();
   command_line->AppendSwitchASCII(switches::kLang, locale);
 
-  // If we run FieldTrials, we want to pass to their state to the renderer so
-  // that it can act in accordance with each state, or record histograms
-  // relating to the FieldTrial states.
+  // If we run base::FieldTrials, we want to pass to their state to the
+  // renderer so that it can act in accordance with each state, or record
+  // histograms relating to the base::FieldTrial states.
   std::string field_trial_states;
-  FieldTrialList::StatesToString(&field_trial_states);
+  base::FieldTrialList::StatesToString(&field_trial_states);
   if (!field_trial_states.empty()) {
     command_line->AppendSwitchASCII(switches::kForceFieldTestNameAndValue,
                                     field_trial_states);
@@ -504,11 +520,19 @@ void BrowserRenderProcessHost::AppendRendererCommandLine(
   if (!user_data_dir.empty())
     command_line->AppendSwitchPath(switches::kUserDataDir, user_data_dir);
 #if defined(OS_CHROMEOS)
-  const std::string& profile =
+  const std::string& login_profile =
       browser_command_line.GetSwitchValueASCII(switches::kLoginProfile);
-  if (!profile.empty())
-    command_line->AppendSwitchASCII(switches::kLoginProfile, profile);
+  if (!login_profile.empty())
+    command_line->AppendSwitchASCII(switches::kLoginProfile, login_profile);
 #endif
+
+  PrefService* prefs = profile()->GetPrefs();
+  // Currently this pref is only registered if applied via a policy.
+  if (prefs->HasPrefPath(prefs::kDisable3DAPIs) &&
+      prefs->GetBoolean(prefs::kDisable3DAPIs)) {
+    // Turn this policy into a command line switch.
+    command_line->AppendSwitch(switches::kDisable3DAPIs);
+  }
 }
 
 void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
@@ -567,7 +591,6 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kInternalNaCl,
     switches::kInternalPepper,
     switches::kRegisterPepperPlugins,
-    switches::kDisableByteRangeSupport,
     switches::kDisableDatabases,
     switches::kDisableDesktopNotifications,
     switches::kDisableWebSockets,
@@ -576,14 +599,13 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kDisableSharedWorkers,
     switches::kDisableApplicationCache,
     switches::kDisableDeviceOrientation,
-    switches::kDisableIndexedDatabase,
+    switches::kEnableIndexedDatabase,
     switches::kDisableSpeechInput,
     switches::kDisableGeolocation,
     switches::kShowPaintRects,
     switches::kEnableOpenMax,
     switches::kVideoThreads,
     switches::kEnableVideoFullscreen,
-    switches::kEnableVideoLayering,
     switches::kEnableVideoLogging,
     switches::kEnableTouch,
     // We propagate the Chrome Frame command line here as well in case the
@@ -596,23 +618,29 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kDisableExperimentalWebGL,
     switches::kDisableGLSLTranslator,
     switches::kInProcessWebGL,
+    // This flag needs to be propagated to the renderer process for
+    // --in-process-webgl.
+    switches::kUseGL,
     switches::kDisableAcceleratedCompositing,
 #if defined(OS_MACOSX)
     // Allow this to be set when invoking the browser and relayed along.
     switches::kEnableSandboxLogging,
-    switches::kDisableFlashCoreAnimation,
 #endif
     switches::kRemoteShellPort,
     switches::kEnablePepperTesting,
     switches::kBlockNonSandboxedPlugins,
     switches::kDisableOutdatedPlugins,
     switches::kEnableRemoting,
-    switches::kDisableClickToPlay,
+    switches::kEnableClickToPlay,
     switches::kEnableResourceContentSettings,
     switches::kPrelaunchGpuProcess,
     switches::kEnableAcceleratedDecoding,
-    switches::kEnableMatchPreview,
-    switches::kDisableFileSystem
+    switches::kDisableFileSystem,
+    switches::kPpapiOutOfProcess,
+    switches::kEnablePrintPreview,
+    switches::kEnableClientSidePhishingDetection,
+    switches::kEnableCrxlessWebApps,
+    switches::kDisable3DAPIs
   };
   renderer_cmd->CopySwitchesFrom(browser_cmd, kSwitchNames,
                                  arraysize(kSwitchNames));
@@ -668,6 +696,11 @@ void BrowserRenderProcessHost::InitExtensions() {
   Send(new ViewMsg_Extension_SetFunctionNames(function_names));
 }
 
+void BrowserRenderProcessHost::InitSpeechInput() {
+  Send(new ViewMsg_SpeechInput_SetFeatureEnabled(
+          speech_input::SpeechInputManager::IsFeatureEnabled()));
+}
+
 void BrowserRenderProcessHost::SendUserScriptsUpdate(
     base::SharedMemory *shared_memory) {
   // Process is being started asynchronously.  We'll end up calling
@@ -699,7 +732,7 @@ void BrowserRenderProcessHost::SendExtensionInfo() {
     return;
   ViewMsg_ExtensionsUpdated_Params params;
   for (size_t i = 0; i < service->extensions()->size(); ++i) {
-    Extension* extension = service->extensions()->at(i);
+    const Extension* extension = service->extensions()->at(i);
     ViewMsg_ExtensionRendererInfo info;
     info.id = extension->id();
     info.web_extent = extension->web_extent();
@@ -708,10 +741,6 @@ void BrowserRenderProcessHost::SendExtensionInfo() {
     info.allowed_to_execute_script_everywhere =
         extension->CanExecuteScriptEverywhere();
     info.host_permissions = extension->host_permissions();
-
-    // TODO(finnur): Remove after capturing debug info.
-    if (Extension::emit_traces_for_whitelist_extension_test_)
-      std::cout << "*-*-* Sending down: " << info.allowed_to_execute_script_everywhere << " for CanExecuteEverywhere \n" << std::flush;
 
     // The icon in the page is 96px.  We'd rather not scale up, so use 128.
     info.icon_url = extension->GetIconURL(Extension::EXTENSION_ICON_LARGE,
@@ -844,6 +873,17 @@ bool BrowserRenderProcessHost::Send(IPC::Message* msg) {
 }
 
 void BrowserRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
+  // If we're about to be deleted, we can no longer trust that our profile is
+  // valid, so we ignore incoming messages.
+  if (deleting_soon_)
+    return;
+
+#if defined(OS_CHROMEOS)
+  // To troubleshoot crosbug.com/7327.
+  CHECK(this);
+  CHECK(&msg);
+#endif
+
   mark_child_process_activity_time();
   if (msg.routing_id() == MSG_ROUTING_CONTROL) {
     // Dispatch control messages.
@@ -859,6 +899,8 @@ void BrowserRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
                           OnExtensionRemoveListener)
       IPC_MESSAGE_HANDLER(ViewHostMsg_ExtensionCloseChannel,
                           OnExtensionCloseChannel)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_UserMetricsRecordAction,
+                          OnUserMetricsRecordAction)
       IPC_MESSAGE_HANDLER(ViewHostMsg_SpellChecker_RequestDictionary,
                           OnSpellCheckerRequestDictionary)
       IPC_MESSAGE_UNHANDLED_ERROR()
@@ -1030,6 +1072,7 @@ void BrowserRenderProcessHost::OnProcessLaunched() {
 
   Send(new ViewMsg_SetIsIncognitoProcess(profile()->IsOffTheRecord()));
 
+  InitSpeechInput();
   InitVisitedLinks();
   InitUserScripts();
   InitExtensions();
@@ -1056,18 +1099,20 @@ void BrowserRenderProcessHost::OnProcessLaunched() {
 }
 
 void BrowserRenderProcessHost::OnExtensionAddListener(
+    const std::string& extension_id,
     const std::string& event_name) {
-  if (profile()->GetExtensionMessageService()) {
-    profile()->GetExtensionMessageService()->AddEventListener(
-        event_name, id());
+  if (profile()->GetExtensionEventRouter()) {
+    profile()->GetExtensionEventRouter()->AddEventListener(
+        event_name, this, extension_id);
   }
 }
 
 void BrowserRenderProcessHost::OnExtensionRemoveListener(
+    const std::string& extension_id,
     const std::string& event_name) {
-  if (profile()->GetExtensionMessageService()) {
-    profile()->GetExtensionMessageService()->RemoveEventListener(
-        event_name, id());
+  if (profile()->GetExtensionEventRouter()) {
+    profile()->GetExtensionEventRouter()->RemoveEventListener(
+        event_name, this, extension_id);
   }
 }
 
@@ -1075,6 +1120,11 @@ void BrowserRenderProcessHost::OnExtensionCloseChannel(int port_id) {
   if (profile()->GetExtensionMessageService()) {
     profile()->GetExtensionMessageService()->CloseChannel(port_id);
   }
+}
+
+void BrowserRenderProcessHost::OnUserMetricsRecordAction(
+    const std::string& action) {
+  UserMetrics::RecordComputedAction(action, profile());
 }
 
 void BrowserRenderProcessHost::OnSpellCheckerRequestDictionary() {

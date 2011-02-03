@@ -7,7 +7,7 @@
 #include "app/l10n_util.h"
 #include "app/l10n_util_mac.h"
 #include "base/nsimage_cache_mac.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/cocoa/gradient_button_cell.h"
 #import "chrome/browser/cocoa/view_id_util.h"
 #include "grit/generated_resources.h"
@@ -16,6 +16,9 @@ namespace {
 
 NSString* const kReloadImageName = @"reload_Template.pdf";
 NSString* const kStopImageName = @"stop_Template.pdf";
+
+// Constant matches Windows.
+NSTimeInterval kPendingReloadTimeout = 1.35;
 
 }  // namespace
 
@@ -57,21 +60,36 @@ NSString* const kStopImageName = @"stop_Template.pdf";
   [self setIgnoresMultiClick:YES];
 }
 
-- (void)setIsLoading:(BOOL)isLoading force:(BOOL)force {
-  pendingReloadMode_ = NO;
+- (void)updateTag:(NSInteger)anInt {
+  if ([self tag] == anInt)
+    return;
 
+  // Forcibly remove any stale tooltip which is being displayed.
+  [self removeAllToolTips];
+
+  [self setTag:anInt];
+  if (anInt == IDC_RELOAD) {
+    [self setImage:nsimage_cache::ImageNamed(kReloadImageName)];
+    [self setToolTip:l10n_util::GetNSStringWithFixup(IDS_TOOLTIP_RELOAD)];
+  } else if (anInt == IDC_STOP) {
+    [self setImage:nsimage_cache::ImageNamed(kStopImageName)];
+    [self setToolTip:l10n_util::GetNSStringWithFixup(IDS_TOOLTIP_STOP)];
+  } else {
+    NOTREACHED();
+  }
+}
+
+- (void)setIsLoading:(BOOL)isLoading force:(BOOL)force {
   // Can always transition to stop mode.  Only transition to reload
   // mode if forced or if the mouse isn't hovering.  Otherwise, note
   // that reload mode is desired and disable the button.
   if (isLoading) {
-    [self setImage:nsimage_cache::ImageNamed(kStopImageName)];
-    [self setTag:IDC_STOP];
-    [self setToolTip:l10n_util::GetNSStringWithFixup(IDS_TOOLTIP_STOP)];
+    pendingReloadTimer_.reset();
+    [self updateTag:IDC_STOP];
     [self setEnabled:YES];
   } else if (force || ![self isMouseInside]) {
-    [self setImage:nsimage_cache::ImageNamed(kReloadImageName)];
-    [self setTag:IDC_RELOAD];
-    [self setToolTip:l10n_util::GetNSStringWithFixup(IDS_TOOLTIP_RELOAD)];
+    pendingReloadTimer_.reset();
+    [self updateTag:IDC_RELOAD];
 
     // This button's cell may not have received a mouseExited event, and
     // therefore it could still think that the mouse is inside the button.  Make
@@ -81,26 +99,34 @@ NSString* const kStopImageName = @"stop_Template.pdf";
     if ([cell respondsToSelector:@selector(setMouseInside:animate:)])
       [cell setMouseInside:[self isMouseInside] animate:NO];
     [self setEnabled:YES];
-  } else if ([self tag] == IDC_STOP) {
-    pendingReloadMode_ = YES;
+  } else if ([self tag] == IDC_STOP && !pendingReloadTimer_) {
     [self setEnabled:NO];
+    pendingReloadTimer_.reset(
+        [[NSTimer scheduledTimerWithTimeInterval:kPendingReloadTimeout
+                                          target:self
+                                        selector:@selector(forceReloadState)
+                                        userInfo:nil
+                                         repeats:NO] retain]);
   }
+}
+
+- (void)forceReloadState {
+  [self setIsLoading:NO force:YES];
 }
 
 - (BOOL)sendAction:(SEL)theAction to:(id)theTarget {
   if ([self tag] == IDC_STOP) {
-    // The stop command won't be valid after the attempt to change
-    // back to reload.  But it "worked", so short-circuit it.
-    const BOOL ret =
-        pendingReloadMode_ ? YES : [super sendAction:theAction to:theTarget];
+    // When the timer is started, the button is disabled, so this
+    // should not be possible.
+    DCHECK(!pendingReloadTimer_.get());
 
     // When the stop is processed, immediately change to reload mode,
     // even though the IPC still has to bounce off the renderer and
     // back before the regular |-setIsLoaded:force:| will be called.
     // [This is how views and gtk do it.]
+    const BOOL ret = [super sendAction:theAction to:theTarget];
     if (ret)
-      [self setIsLoading:NO force:YES];
-
+      [self forceReloadState];
     return ret;
   }
 
@@ -115,12 +141,12 @@ NSString* const kStopImageName = @"stop_Template.pdf";
   isMouseInside_ = NO;
 
   // Reload mode was requested during the hover.
-  if (pendingReloadMode_)
-    [self setIsLoading:NO force:YES];
+  if (pendingReloadTimer_)
+    [self forceReloadState];
 }
 
 - (BOOL)isMouseInside {
-  return trackingArea_ && isMouseInside_;
+  return isMouseInside_;
 }
 
 - (ViewID)viewID {
@@ -130,6 +156,10 @@ NSString* const kStopImageName = @"stop_Template.pdf";
 @end  // ReloadButton
 
 @implementation ReloadButton (Testing)
+
++ (void)setPendingReloadTimeout:(NSTimeInterval)seconds {
+  kPendingReloadTimeout = seconds;
+}
 
 - (NSTrackingArea*)trackingArea {
   return trackingArea_;

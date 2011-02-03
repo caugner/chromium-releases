@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "app/app_switches.h"
 #include "base/command_line.h"
 #include "base/environment.h"
+#include "base/logging.h"
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
 #include "chrome/common/chrome_paths.h"
@@ -17,7 +19,7 @@ void PrepareBrowserCommandLineForTests(CommandLine* command_line) {
   command_line->AppendSwitch(switches::kDisableWebResources);
 
   // Turn off preconnects because they break the brittle python webserver;
-  // see http://crbug.com/57491.
+  // see http://crbug.com/60035.
   command_line->AppendSwitch(switches::kDisablePreconnect);
 
   // Don't show the first run ui.
@@ -30,6 +32,9 @@ void PrepareBrowserCommandLineForTests(CommandLine* command_line) {
   // Enable warning level logging so that we can see when bad stuff happens.
   command_line->AppendSwitch(switches::kEnableLogging);
   command_line->AppendSwitchASCII(switches::kLoggingLevel, "1");  // warning
+
+  // Disable safebrowsing autoupdate.
+  command_line->AppendSwitch(switches::kSbDisableAutoUpdate);
 }
 
 bool OverrideUserDataDir(const FilePath& user_data_dir) {
@@ -51,6 +56,16 @@ bool OverrideUserDataDir(const FilePath& user_data_dir) {
 #endif
 
   return success;
+}
+
+bool OverrideGLImplementation(CommandLine* command_line,
+                              const std::string& implementation_name) {
+  if (command_line->HasSwitch(switches::kUseGL))
+    return false;
+
+  command_line->AppendSwitchASCII(switches::kUseGL, implementation_name);
+
+  return true;
 }
 
 }  // namespace test_launcher_utils

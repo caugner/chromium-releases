@@ -252,8 +252,8 @@ class MockWindowObserver : public WindowObserver {
   MOCK_METHOD1(OnWindowOpen, void (HWND hwnd));  // NOLINT
   MOCK_METHOD1(OnWindowClose, void (HWND hwnd));  // NOLINT
 
-  void WatchWindow(std::string caption_pattern) {
-    window_watcher_.AddObserver(this, caption_pattern);
+  void WatchWindow(std::string caption_pattern, std::string class_pattern) {
+    window_watcher_.AddObserver(this, caption_pattern, class_pattern);
   }
 
  private:
@@ -275,6 +275,8 @@ class MockAccEventObserver : public AccEventObserver {
 class MockIEEventSinkTest {
  public:
   MockIEEventSinkTest();
+  MockIEEventSinkTest(int port, const std::wstring& address,
+                      const FilePath& root_dir);
 
   ~MockIEEventSinkTest() {
     // Detach manually here so that it occurs before |last_resort_close_ie_|

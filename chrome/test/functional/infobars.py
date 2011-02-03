@@ -9,7 +9,7 @@ import re
 
 import pyauto_functional  # Must be imported before pyauto
 import pyauto
-
+import test_utils
 
 class InfobarTest(pyauto.PyUITest):
   """TestCase for Infobars."""
@@ -113,16 +113,15 @@ class InfobarTest(pyauto.PyUITest):
 
   def testMultipleDownloadsInfobar(self):
     """Verify the mutiple downloads infobar."""
+    zip_file = 'a_zip_file.zip'
+    html_file = 'download-a_zip_file.html'
     assert pyauto.PyUITest.IsEnUS()
     file_url = self.GetFileURLForPath(
-        os.path.join(self.DataDir(), 'downloads', 'download-a_zip_file.html'))
+        os.path.join(self.DataDir(), 'downloads', html_file))
     match_text = 'This site is attempting to download multiple files. ' \
                  'Do you want to allow this?'
     self.NavigateToURL('chrome://downloads')  # trigger download manager
-    # Clear existing files of the same name in the downloads folder
-    downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
-                                  'a_zip_file.zip')
-    os.path.exists(downloaded_pkg) and os.remove(downloaded_pkg)
+    test_utils.RemoveDownloadedTestFile(self, zip_file)
     self.DownloadAndWaitForStart(file_url)
     # trigger page reload, which triggers the download infobar
     self.GetBrowserWindow(0).GetTab(0).Reload()
@@ -135,12 +134,40 @@ class InfobarTest(pyauto.PyUITest):
     self.assertEqual(2, len(infobars[0]['buttons']))
     self.assertEqual('Allow', infobars[0]['buttons'][0])
     self.assertEqual('Deny', infobars[0]['buttons'][1])
-    # Ensure we quit only after all downloads have completed
     self.WaitForAllDownloadsToComplete()
-    downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
-                                  'a_zip_file.zip')
-    os.path.exists(downloaded_pkg) and os.remove(downloaded_pkg)
+    test_utils.RemoveDownloadedTestFile(self, zip_file)
 
+  def testPluginCrashForMultiTabs(self):
+    """Verify that plugin crash infobar only shows up on the tabs using the
+       plugin"""
+    non_flash_url = self.GetFileURLForDataPath('english_page.html')
+    flash_url = self.GetFileURLForPath(
+        os.path.join(self.DataDir(), 'plugin', 'FlashSpin.swf'))
+    # False = Non flash url, True = Flash url
+    # We have set of these values to compare a flash page and a non-flash page
+    urls_type = [False, True, False, True, False]
+    for count in range(2):
+      self.AppendTab(pyauto.GURL(flash_url))
+      self.AppendTab(pyauto.GURL(non_flash_url))
+    # Killing flash process
+    child_processes = self.GetBrowserInfo()['child_processes']
+    flash = [x for x in child_processes if
+             x['type'] == 'Plug-in' and x['name'] == 'Shockwave Flash'][0]
+    self.assertTrue(flash)
+    self.Kill(flash['pid'])
+    # Crash plugin infobar should show up in the second tab of this window
+    # so passing window and tab argument in the wait for an infobar.
+    self.assertTrue(self.WaitForInfobarCount(1, windex=0, tab_index=1))
+    info = self.GetBrowserInfo()
+    for i in range(len(urls_type)):
+      infobar = info['windows'][0]['tabs'][i]['infobars']
+      # Verify that if page doesn't have flash plugin,
+      # it should not have infobar popped-up
+      if not urls_type[i]:
+        self.assertFalse(infobar)
+      elif urls_type[i]:
+        self.assertEqual(infobar[0]['type'], 'alert_infobar')
+        self.assertEqual(len(infobar), 1)
 
 if __name__ == '__main__':
   pyauto_functional.Main()

@@ -16,7 +16,9 @@
 #include "webkit/appcache/appcache_storage.h"
 #include "webkit/glue/resource_type.h"
 
+namespace net {
 class URLRequest;
+}  // namespace net
 
 namespace appcache {
 
@@ -72,7 +74,7 @@ class AppCacheHost : public AppCacheStorage::Delegate,
   // Support for loading resources out of the appcache.
   // May return NULL if the request isn't subject to retrieval from an appache.
   AppCacheRequestHandler* CreateRequestHandler(
-      URLRequest* request, ResourceType::Type resource_type);
+      net::URLRequest* request, ResourceType::Type resource_type);
 
   // Support for devtools inspecting appcache resources.
   void GetResourceList(std::vector<AppCacheResourceInfo>* resource_infos);
@@ -89,6 +91,10 @@ class AppCacheHost : public AppCacheStorage::Delegate,
 
   // Used to ensure that a loaded appcache survives a frame navigation.
   void LoadMainResourceCache(int64 cache_id);
+
+  // Used to notify the host that a fallback resource is being delivered as
+  // the main resource of the page and to provide its url.
+  void NotifyMainResourceFallback(const GURL& fallback_url);
 
   // Used to notify the host that the main resource was blocked by a policy. To
   // work properly, this method needs to by invoked prior to cache selection.
@@ -197,6 +203,10 @@ class AppCacheHost : public AppCacheStorage::Delegate,
   StartUpdateCallback* pending_start_update_callback_;
   SwapCacheCallback* pending_swap_cache_callback_;
   void* pending_callback_param_;
+
+  // True if a fallback resource was delivered as the main resource.
+  bool main_resource_was_fallback_;
+  GURL fallback_url_;
 
   // True if requests for this host were blocked by a policy.
   bool main_resource_blocked_;

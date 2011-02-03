@@ -1152,45 +1152,55 @@
     c.Init();
   }
 
-  void GetMaxValueInBuffer(
+  void GetMaxValueInBufferCHROMIUM(
       GLuint buffer_id, GLsizei count, GLenum type, GLuint offset,
       uint32 result_shm_id, uint32 result_shm_offset) {
-    gles2::GetMaxValueInBuffer& c = GetCmdSpace<gles2::GetMaxValueInBuffer>();
+    gles2::GetMaxValueInBufferCHROMIUM& c =
+        GetCmdSpace<gles2::GetMaxValueInBufferCHROMIUM>();
     c.Init(buffer_id, count, type, offset, result_shm_id, result_shm_offset);
   }
 
-  void GenSharedIds(
+  void GenSharedIdsCHROMIUM(
       GLuint namespace_id, GLuint id_offset, GLsizei n, uint32 ids_shm_id,
       uint32 ids_shm_offset) {
-    gles2::GenSharedIds& c = GetCmdSpace<gles2::GenSharedIds>();
+    gles2::GenSharedIdsCHROMIUM& c =
+        GetCmdSpace<gles2::GenSharedIdsCHROMIUM>();
     c.Init(namespace_id, id_offset, n, ids_shm_id, ids_shm_offset);
   }
 
-  void DeleteSharedIds(
+  void DeleteSharedIdsCHROMIUM(
       GLuint namespace_id, GLsizei n, uint32 ids_shm_id,
       uint32 ids_shm_offset) {
-    gles2::DeleteSharedIds& c = GetCmdSpace<gles2::DeleteSharedIds>();
+    gles2::DeleteSharedIdsCHROMIUM& c =
+        GetCmdSpace<gles2::DeleteSharedIdsCHROMIUM>();
     c.Init(namespace_id, n, ids_shm_id, ids_shm_offset);
   }
 
-  void RegisterSharedIds(
+  void RegisterSharedIdsCHROMIUM(
       GLuint namespace_id, GLsizei n, uint32 ids_shm_id,
       uint32 ids_shm_offset) {
-    gles2::RegisterSharedIds& c = GetCmdSpace<gles2::RegisterSharedIds>();
+    gles2::RegisterSharedIdsCHROMIUM& c =
+        GetCmdSpace<gles2::RegisterSharedIdsCHROMIUM>();
     c.Init(namespace_id, n, ids_shm_id, ids_shm_offset);
   }
 
-  void CommandBufferEnable(
+  void CommandBufferEnableCHROMIUM(
       GLuint bucket_id, uint32 result_shm_id, uint32 result_shm_offset) {
-    gles2::CommandBufferEnable& c = GetCmdSpace<gles2::CommandBufferEnable>();
+    gles2::CommandBufferEnableCHROMIUM& c =
+        GetCmdSpace<gles2::CommandBufferEnableCHROMIUM>();
     c.Init(bucket_id, result_shm_id, result_shm_offset);
   }
 
-  void CopyTextureToParentTexture(
+  void CopyTextureToParentTextureCHROMIUM(
       GLuint client_child_id, GLuint client_parent_id) {
-    gles2::CopyTextureToParentTexture& c =
-        GetCmdSpace<gles2::CopyTextureToParentTexture>();
+    gles2::CopyTextureToParentTextureCHROMIUM& c =
+        GetCmdSpace<gles2::CopyTextureToParentTextureCHROMIUM>();
     c.Init(client_child_id, client_parent_id);
+  }
+
+  void ResizeCHROMIUM(GLuint width, GLuint height) {
+    gles2::ResizeCHROMIUM& c = GetCmdSpace<gles2::ResizeCHROMIUM>();
+    c.Init(width, height);
   }
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_CMD_HELPER_AUTOGEN_H_

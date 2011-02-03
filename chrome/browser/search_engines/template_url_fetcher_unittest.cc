@@ -47,15 +47,15 @@ class TemplateURLFetcherTest : public testing::Test {
   TemplateURLFetcherTest();
 
   virtual void SetUp() {
-    ASSERT_TRUE(test_server_.Start());
-
     test_util_.SetUp();
     test_util_.StartIOThread();
+    ASSERT_TRUE(test_util_.profile());
     test_util_.profile()->CreateTemplateURLFetcher();
     ASSERT_TRUE(test_util_.profile()->GetTemplateURLFetcher());
 
     test_util_.profile()->CreateRequestContext();
     ASSERT_TRUE(test_util_.profile()->GetRequestContext());
+    ASSERT_TRUE(test_server_.Start());
   }
 
   virtual void TearDown() {
@@ -205,7 +205,7 @@ TEST_F(TemplateURLFetcherTest, BasicAutodetectedTest) {
   ASSERT_TRUE(t_url);
   EXPECT_STREQ(L"http://example.com/%s/other_stuff",
                t_url->url()->DisplayURL().c_str());
-  EXPECT_EQ(true, t_url->safe_for_autoreplace());
+  EXPECT_TRUE(t_url->safe_for_autoreplace());
 }
 
 TEST_F(TemplateURLFetcherTest, DuplicatesThrownAway) {
@@ -275,7 +275,7 @@ TEST_F(TemplateURLFetcherTest, BasicExplicitTest) {
   ASSERT_TRUE(last_callback_template_url_.get());
   EXPECT_STREQ(L"http://example.com/%s/other_stuff",
                last_callback_template_url_->url()->DisplayURL().c_str());
-  EXPECT_EQ(false, last_callback_template_url_->safe_for_autoreplace());
+  EXPECT_FALSE(last_callback_template_url_->safe_for_autoreplace());
 }
 
 TEST_F(TemplateURLFetcherTest, BasicExplicitDefaultTest) {
@@ -299,7 +299,7 @@ TEST_F(TemplateURLFetcherTest, BasicExplicitDefaultTest) {
   ASSERT_TRUE(last_callback_template_url_.get());
   EXPECT_STREQ(L"http://example.com/%s/other_stuff",
                last_callback_template_url_->url()->DisplayURL().c_str());
-  EXPECT_EQ(false, last_callback_template_url_->safe_for_autoreplace());
+  EXPECT_FALSE(last_callback_template_url_->safe_for_autoreplace());
 }
 
 TEST_F(TemplateURLFetcherTest, AutodetectedBeforeLoadTest) {
@@ -345,7 +345,7 @@ TEST_F(TemplateURLFetcherTest, ExplicitDefaultBeforeLoadTest) {
   ASSERT_TRUE(last_callback_template_url_.get());
   EXPECT_STREQ(L"http://example.com/%s/other_stuff",
                last_callback_template_url_->url()->DisplayURL().c_str());
-  EXPECT_EQ(false, last_callback_template_url_->safe_for_autoreplace());
+  EXPECT_FALSE(last_callback_template_url_->safe_for_autoreplace());
 }
 
 TEST_F(TemplateURLFetcherTest, DuplicateKeywordsTest) {

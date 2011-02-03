@@ -11,7 +11,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"  // IDC_HISTORY_MENU
+#include "chrome/app/chrome_command_ids.h"  // IDC_HISTORY_MENU
 #import "chrome/browser/app_controller_mac.h"
 #import "chrome/browser/cocoa/history_menu_cocoa_controller.h"
 #include "chrome/browser/history/page_usage_data.h"
@@ -91,11 +91,11 @@ HistoryMenuBridge::HistoryMenuBridge(Profile* profile)
   }
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  default_favicon_.reset([rb.GetNSImageNamed(IDR_DEFAULT_FAVICON) retain]);
+  default_favicon_.reset([rb.GetNativeImageNamed(IDR_DEFAULT_FAVICON) retain]);
 
   // Set the static icons in the menu.
   NSMenuItem* item = [HistoryMenu() itemWithTag:IDC_SHOW_HISTORY];
-  [item setImage:rb.GetNSImageNamed(IDR_HISTORY_FAVICON)];
+  [item setImage:rb.GetNativeImageNamed(IDR_HISTORY_FAVICON)];
 
   // The service is not ready for use yet, so become notified when it does.
   if (!history_service_) {

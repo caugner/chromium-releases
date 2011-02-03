@@ -8,11 +8,12 @@
 
 #include "app/resource_bundle.h"
 #include "base/mac_util.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "base/scoped_callback_factory.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
-#import "chrome/browser/cocoa/bookmark_bar_constants.h"
+#import "chrome/browser/cocoa/bookmarks/bookmark_bar_constants.h"
 #import "chrome/browser/cocoa/browser_window_controller.h"
 #import "chrome/browser/cocoa/tab_strip_controller.h"
 #import "chrome/browser/cocoa/tab_strip_model_observer_bridge.h"
@@ -22,7 +23,9 @@
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_mac.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/common/pref_names.h"
 #include "grit/app_resources.h"
 #include "skia/ext/skia_utils_mac.h"
@@ -45,12 +48,13 @@ const CGFloat kObserverChangeAnimationDuration = 0.75;  // In seconds.
 
 @implementation DarkGradientLayer
 - (void)drawInContext:(CGContextRef)context {
-  scoped_cftyperef<CGColorSpaceRef> grayColorSpace(
+  base::mac::ScopedCFTypeRef<CGColorSpaceRef> grayColorSpace(
       CGColorSpaceCreateWithName(kCGColorSpaceGenericGray));
   CGFloat grays[] = { 0.277, 1.0, 0.39, 1.0 };
   CGFloat locations[] = { 0, 1 };
-  scoped_cftyperef<CGGradientRef> gradient(CGGradientCreateWithColorComponents(
-      grayColorSpace.get(), grays, locations, arraysize(locations)));
+  base::mac::ScopedCFTypeRef<CGGradientRef> gradient(
+      CGGradientCreateWithColorComponents(
+          grayColorSpace.get(), grays, locations, arraysize(locations)));
   CGPoint topLeft = CGPointMake(0.0, kTopGradientHeight);
   CGContextDrawLinearGradient(context, gradient.get(), topLeft, CGPointZero, 0);
 }
@@ -75,7 +79,7 @@ class ThumbnailLoader;
 
   // If the backing store couldn't be used and a thumbnail was returned from a
   // renderer process, it's stored in |thumbnail_|.
-  scoped_cftyperef<CGImageRef> thumbnail_;
+  base::mac::ScopedCFTypeRef<CGImageRef> thumbnail_;
 
   // True if the layer already sent a thumbnail request to a renderer.
   BOOL didSendLoad_;
@@ -222,7 +226,7 @@ void ThumbnailLoader::LoadThumbnail() {
   if (backing_store->cg_layer()) {
     CGContextDrawLayerInRect(context, destRect, backing_store->cg_layer());
   } else {
-    scoped_cftyperef<CGImageRef> image(
+    base::mac::ScopedCFTypeRef<CGImageRef> image(
         CGBitmapContextCreateImage(backing_store->cg_bitmap()));
     CGContextDrawImage(context, destRect, image);
   }
@@ -520,7 +524,7 @@ void TileSet::Build(TabStripModel* source_model) {
   tiles_.resize(source_model->count());
   for (size_t i = 0; i < tiles_.size(); ++i) {
     tiles_[i] = new Tile;
-    tiles_[i]->contents_ = source_model->GetTabContentsAt(i);
+    tiles_[i]->contents_ = source_model->GetTabContentsAt(i)->tab_contents();
   }
 }
 
@@ -944,11 +948,11 @@ void AnimateCALayerFrameFromTo(
   // it from an SkBitmap. Either way, just show the default.
   if (!nsFavicon) {
     NSImage* defaultFavIcon =
-        ResourceBundle::GetSharedInstance().GetNSImageNamed(
+        ResourceBundle::GetSharedInstance().GetNativeImageNamed(
             IDR_DEFAULT_FAVICON);
     nsFavicon = defaultFavIcon;
   }
-  scoped_cftyperef<CGImageRef> favicon(
+  base::mac::ScopedCFTypeRef<CGImageRef> favicon(
       mac_util::CopyNSImageToCGImage(nsFavicon));
 
   CALayer* faviconLayer = [CALayer layer];
@@ -1124,7 +1128,7 @@ void AnimateCALayerFrameFromTo(
   return NO;
 }
 
-- (void)mouseMoved:(NSEvent*)event {
+-(void)selectTileFromMouseEvent:(NSEvent*)event {
   int newIndex = -1;
   CGPoint p = NSPointToCGPoint([event locationInWindow]);
   for (NSUInteger i = 0; i < [allThumbnailLayers_ count]; ++i) {
@@ -1137,7 +1141,14 @@ void AnimateCALayerFrameFromTo(
     [self selectTileAtIndexWithoutAnimation:newIndex];
 }
 
+- (void)mouseMoved:(NSEvent*)event {
+  [self selectTileFromMouseEvent:event];
+}
+
 - (void)mouseDown:(NSEvent*)event {
+  // Just in case the user clicked without ever moving the mouse.
+  [self selectTileFromMouseEvent:event];
+
   [self fadeAway:([event modifierFlags] & NSShiftKeyMask) != 0];
 }
 
@@ -1279,7 +1290,7 @@ void AnimateCALayerFrameFromTo(
   thumbLayer.frame = NSRectToCGRect(tile.thumb_rect());
 }
 
-- (void)insertTabWithContents:(TabContents*)contents
+- (void)insertTabWithContents:(TabContentsWrapper*)contents
                       atIndex:(NSInteger)index
                  inForeground:(bool)inForeground {
   // This happens if you cmd-click a link and then immediately open tabpose
@@ -1287,7 +1298,7 @@ void AnimateCALayerFrameFromTo(
   ScopedCAActionSetDuration durationSetter(kObserverChangeAnimationDuration);
 
   // Insert new layer and relayout.
-  tileSet_->InsertTileAt(index, contents);
+  tileSet_->InsertTileAt(index, contents->tab_contents());
   tileSet_->Layout(containingRect_);
   [self  addLayersForTile:tileSet_->tile_at(index)
                  showZoom:NO
@@ -1315,13 +1326,13 @@ void AnimateCALayerFrameFromTo(
   [self selectTileAtIndex:selectedIndex];
 }
 
-- (void)tabClosingWithContents:(TabContents*)contents
+- (void)tabClosingWithContents:(TabContentsWrapper*)contents
                        atIndex:(NSInteger)index {
   // We will also get a -tabDetachedWithContents:atIndex: notification for
   // closing tabs, so do nothing here.
 }
 
-- (void)tabDetachedWithContents:(TabContents*)contents
+- (void)tabDetachedWithContents:(TabContentsWrapper*)contents
                         atIndex:(NSInteger)index {
   ScopedCAActionSetDuration durationSetter(kObserverChangeAnimationDuration);
 
@@ -1358,7 +1369,7 @@ void AnimateCALayerFrameFromTo(
     [self selectTileAtIndex:selectedIndex];
 }
 
-- (void)tabMovedWithContents:(TabContents*)contents
+- (void)tabMovedWithContents:(TabContentsWrapper*)contents
                     fromIndex:(NSInteger)from
                       toIndex:(NSInteger)to {
   ScopedCAActionSetDuration durationSetter(kObserverChangeAnimationDuration);
@@ -1395,7 +1406,7 @@ void AnimateCALayerFrameFromTo(
   [self selectTileAtIndex:selectedIndex];
 }
 
-- (void)tabChangedWithContents:(TabContents*)contents
+- (void)tabChangedWithContents:(TabContentsWrapper*)contents
                        atIndex:(NSInteger)index
                     changeType:(TabStripModelObserver::TabChangeType)change {
   // Tell the window to update text, title, and thumb layers at |index| to get
@@ -1407,16 +1418,16 @@ void AnimateCALayerFrameFromTo(
   // For now, just make sure that we don't hold on to an invalid TabContents
   // object.
   tabpose::Tile& tile = tileSet_->tile_at(index);
-  if (contents == tile.tab_contents()) {
+  if (contents->tab_contents() == tile.tab_contents()) {
     // TODO(thakis): Install a timer to send a thumb request/update title/update
     // favicon after 20ms or so, and reset the timer every time this is called
     // to make sure we get an updated thumb, without requesting them all over.
     return;
   }
 
-  tile.set_tab_contents(contents);
+  tile.set_tab_contents(contents->tab_contents());
   ThumbnailLayer* thumbLayer = [allThumbnailLayers_ objectAtIndex:index];
-  [thumbLayer setTabContents:contents];
+  [thumbLayer setTabContents:contents->tab_contents()];
 }
 
 - (void)tabStripModelDeleted {

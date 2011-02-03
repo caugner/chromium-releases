@@ -16,6 +16,7 @@ function DataView(mainBoxId,
                   outputTextBoxId,
                   exportTextButtonId,
                   securityStrippingCheckboxId,
+                  byteLoggingCheckboxId,
                   passivelyCapturedCountId,
                   activelyCapturedCountId,
                   deleteAllId) {
@@ -24,6 +25,10 @@ function DataView(mainBoxId,
   this.textPre_ = document.getElementById(outputTextBoxId);
   this.securityStrippingCheckbox_ =
       document.getElementById(securityStrippingCheckboxId);
+
+  var byteLoggingCheckbox = document.getElementById(byteLoggingCheckboxId);
+  byteLoggingCheckbox.onclick =
+      this.onSetByteLogging_.bind(this, byteLoggingCheckbox);
 
   var exportTextButton = document.getElementById(exportTextButtonId);
   exportTextButton.onclick = this.onExportToText_.bind(this);
@@ -76,6 +81,18 @@ DataView.prototype.updateEventCounts_ = function() {
 };
 
 /**
+ * Depending on the value of the checkbox, enables or disables logging of
+ * actual bytes transferred.
+ */
+DataView.prototype.onSetByteLogging_ = function(byteLoggingCheckbox) {
+  if (byteLoggingCheckbox.checked) {
+    g_browser.setLogLevel(LogLevelType.LOG_ALL);
+  } else {
+    g_browser.setLogLevel(LogLevelType.LOG_ALL_BUT_BYTES);
+  }
+};
+
+/**
  * If not already waiting for results from all updates, triggers all
  * updates and starts waiting for them to complete.
  */
@@ -83,7 +100,7 @@ DataView.prototype.onExportToText_ = function() {
   if (this.waitingForUpdate_)
     return;
   this.waitingForUpdate = true;
-  this.setText_("Generating...");
+  this.setText_('Generating...');
   g_browser.updateAllInfo(this.onUpdateAllCompleted.bind(this));
 };
 
@@ -221,6 +238,20 @@ DataView.prototype.onUpdateAllCompleted = function(data) {
   text.push('');
 
   this.appendSocketPoolsAsText_(text, data.socketPoolInfo);
+
+  text.push('');
+  text.push('----------------------------------------------');
+  text.push(' SPDY Sessions');
+  text.push('----------------------------------------------');
+  text.push('');
+
+  if (data.spdySessionInfo == null || data.spdySessionInfo.length == 0) {
+    text.push('None');
+  } else {
+    var spdyTablePrinter =
+      SpdyView.createSessionTablePrinter(data.spdySessionInfo);
+    text.push(spdyTablePrinter.toText(2));
+  }
 
   if (g_browser.isPlatformWindows()) {
     text.push('');

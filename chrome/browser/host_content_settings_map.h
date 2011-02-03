@@ -17,7 +17,7 @@
 #include "base/basictypes.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/notification_observer.h"
@@ -62,6 +62,10 @@ class HostContentSettingsMap
     bool operator==(const Pattern& other) const {
       return pattern_ == other.pattern_;
     }
+
+    // Canonicalizes the pattern so that it's ASCII only, either
+    // in original or punycode form.
+    std::string CanonicalizePattern() const;
 
    private:
     std::string pattern_;
@@ -212,6 +216,9 @@ class HostContentSettingsMap
 
   // This setting trumps any host-specific settings.
   bool BlockThirdPartyCookies() const { return block_third_party_cookies_; }
+  bool IsBlockThirdPartyCookiesManaged() const {
+    return is_block_third_party_cookies_managed_;
+  }
 
   // Sets whether we block all third-party cookies. This method must not be
   // invoked on an off-the-record map.
@@ -230,6 +237,9 @@ class HostContentSettingsMap
   // This should only be called on the UI thread.
   void ResetToDefaults();
 
+  // Returns true if the default setting for the |content_type| is managed.
+  bool IsDefaultContentSettingManaged(ContentSettingsType content_type) const;
+
   // NotificationObserver implementation.
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
@@ -243,11 +253,7 @@ class HostContentSettingsMap
   typedef std::map<ContentSettingsTypeResourceIdentifierPair, ContentSetting>
       ResourceContentSettings;
 
-  struct ExtendedContentSettings {
-    ContentSettings content_settings;
-    ResourceContentSettings content_settings_for_resources;
-  };
-
+  struct ExtendedContentSettings;
   typedef std::map<std::string, ExtendedContentSettings> HostContentSettings;
 
   // Sets the fields of |settings| based on the values in |dictionary|.
@@ -269,6 +275,19 @@ class HostContentSettingsMap
   // true and the preference is missing, the local copy will be cleared as well.
   void ReadDefaultSettings(bool overwrite);
 
+  // Reads managed default content settings from the preference service |prefs|.
+  // |settings| is set to the respective content setting for managed settings,
+  // and to CONTENT_SETTING_DEFAULT for other settings.
+  void ReadManagedDefaultSettings(const PrefService* prefs,
+                                  ContentSettings* settings);
+
+  // Updates the managed setting of the default-content-settings-type |type|.
+  // The updated setting is read from the preference service |prefs| and written
+  // to |settings|.
+  void UpdateManagedDefaultSetting(ContentSettingsType type,
+                                   const PrefService* prefs,
+                                   ContentSettings* settings);
+
   // Reads the host exceptions from the prefereces service. If |overwrite| is
   // true and the preference is missing, the local copy will be cleared as well.
   void ReadExceptions(bool overwrite);
@@ -281,6 +300,17 @@ class HostContentSettingsMap
 
   void UnregisterObservers();
 
+  // Various migration methods (old cookie, popup and per-host data gets
+  // migrated to the new format).
+  void MigrateObsoleteCookiePref(PrefService* prefs);
+  void MigrateObsoletePopupsPref(PrefService* prefs);
+  void MigrateObsoletePerhostPref(PrefService* prefs);
+
+  // Converts all exceptions that have non-canonicalized pattern into
+  // canonicalized pattern. If such pattern already exists, we just remove the
+  // old exception.
+  void CanonicalizeContentSettingsExceptions(DictionaryValue* settings);
+
   // The profile we're associated with.
   Profile* profile_;
 
@@ -289,6 +319,7 @@ class HostContentSettingsMap
 
   // Copies of the pref data, so that we can read it on the IO thread.
   ContentSettings default_content_settings_;
+  ContentSettings managed_default_content_settings_;
   HostContentSettings host_content_settings_;
 
   // Differences to the preference-stored host content settings for
@@ -297,6 +328,7 @@ class HostContentSettingsMap
 
   // Misc global settings.
   bool block_third_party_cookies_;
+  bool is_block_third_party_cookies_managed_;
   bool block_nonsandboxed_plugins_;
 
   // Used around accesses to the settings objects to guarantee thread safety.

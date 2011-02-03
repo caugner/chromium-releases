@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,36 +9,72 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/i18n/rtl.h"
+#include "base/scoped_temp_dir.h"
+#include "base/scoped_ptr.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/net/url_request_slow_http_job.h"
 #include "chrome/browser/view_ids.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/json_value_serializer.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/automation/autocomplete_edit_proxy.h"
-#include "chrome/test/automation/automation_messages.h"
 #include "chrome/test/automation/automation_proxy_uitest.h"
 #include "chrome/test/automation/browser_proxy.h"
+#include "chrome/test/automation/proxy_launcher.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui_test_utils.h"
 #include "chrome/test/ui/ui_test.h"
+#include "gfx/codec/png_codec.h"
 #include "gfx/rect.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
 #define GMOCK_MUTANT_INCLUDE_LATE_OBJECT_BINDING
 #include "testing/gmock_mutant.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "views/event.h"
 
 using ui_test_utils::TimedMessageLoopRunner;
 using testing::CreateFunctor;
 using testing::StrEq;
 using testing::_;
+
+
+// Replace the default automation proxy with our mock client.
+class ExternalTabUITestMockLauncher : public ProxyLauncher {
+ public:
+  explicit ExternalTabUITestMockLauncher(ExternalTabUITestMockClient **mock)
+      : mock_(mock) {
+    channel_id_ = AutomationProxy::GenerateChannelID();
+  }
+
+  AutomationProxy* CreateAutomationProxy(int execution_timeout) {
+    *mock_ = new ExternalTabUITestMockClient(execution_timeout);
+    (*mock_)->InitializeChannel(channel_id_, false);
+    return *mock_;
+  }
+
+  void InitializeConnection(UITestBase* ui_test_base) const {
+    ui_test_base->LaunchBrowserAndServer();
+  }
+
+  std::string PrefixedChannelID() const {
+    return channel_id_;
+  }
+
+ private:
+  ExternalTabUITestMockClient **mock_;
+  std::string channel_id_;      // Channel id of automation proxy.
+};
 
 class AutomationProxyTest : public UITest {
  protected:
@@ -343,7 +379,7 @@ class AutomationProxyTest2 : public AutomationProxyVisibleTest {
     document1_= test_data_directory_.AppendASCII("title1.html");
 
     document2_ = test_data_directory_.AppendASCII("title2.html");
-    launch_arguments_ = CommandLine(CommandLine::ARGUMENTS_ONLY);
+    launch_arguments_ = CommandLine(CommandLine::NO_PROGRAM);
     launch_arguments_.AppendArgPath(document1_);
     launch_arguments_.AppendArgPath(document2_);
   }
@@ -491,7 +527,7 @@ class AutomationProxyTest4 : public UITest {
 
 std::wstring CreateJSString(const std::wstring& value) {
   std::wstring jscript;
-  SStringPrintf(&jscript,
+  base::SStringPrintf(&jscript,
       L"window.domAutomationController.send(%ls);",
       value.c_str());
   return jscript;
@@ -543,7 +579,7 @@ TEST_F(AutomationProxyTest4, NumberValueIsEchoedByDomAutomationController) {
   int expected = 1;
   int actual = 0;
   std::wstring expected_string;
-  SStringPrintf(&expected_string, L"%d", expected);
+  base::SStringPrintf(&expected_string, L"%d", expected);
   std::wstring jscript = CreateJSString(expected_string);
   ASSERT_TRUE(tab->ExecuteAndExtractInt(L"", jscript, &actual));
   ASSERT_EQ(expected, actual);
@@ -560,7 +596,7 @@ class AutomationProxyTest3 : public UITest {
     document1_ = document1_.AppendASCII("frame_dom_access.html");
 
     dom_automation_enabled_ = true;
-    launch_arguments_ = CommandLine(CommandLine::ARGUMENTS_ONLY);
+    launch_arguments_ = CommandLine(CommandLine::NO_PROGRAM);
     launch_arguments_.AppendArgPath(document1_);
   }
 
@@ -569,8 +605,9 @@ class AutomationProxyTest3 : public UITest {
 
 std::wstring CreateJSStringForDOMQuery(const std::wstring& id) {
   std::wstring jscript(L"window.domAutomationController");
-  StringAppendF(&jscript, L".send(document.getElementById('%ls').nodeName);",
-                id.c_str());
+  base::StringAppendF(&jscript,
+                      L".send(document.getElementById('%ls').nodeName);",
+                      id.c_str());
   return jscript;
 }
 
@@ -774,10 +811,11 @@ void ExternalTabUITestMockClient::ConnectToExternalTab(gfx::NativeWindow parent,
   gfx::NativeWindow tab_container = NULL;
   gfx::NativeWindow tab_window = NULL;
   int tab_handle = 0;
+  int session_id = -1;
 
   IPC::SyncMessage* message = new AutomationMsg_ConnectExternalTab(0,
       attach_params.cookie, true, NULL, &tab_container, &tab_window,
-      &tab_handle);
+      &tab_handle, &session_id);
   channel_->Send(message);
 
   RECT rect;
@@ -832,13 +870,13 @@ template <typename T> T** ReceivePointer(scoped_refptr<T>& p) {  // NOLINT
   return reinterpret_cast<T**>(&p);
 }
 
-AutomationProxy* ExternalTabUITest::CreateAutomationProxy(int exec_timeout) {
-  mock_ = new ExternalTabUITestMockClient(exec_timeout);
-  return mock_;
+// Replace the default automation proxy with our mock client.
+ProxyLauncher* ExternalTabUITest::CreateProxyLauncher() {
+  return new ExternalTabUITestMockLauncher(&mock_);
 }
 
 // Create with specifying a url
-// Flaky, http://crbug.com/32293.
+// Flaky, http://crbug.com/32293
 TEST_F(ExternalTabUITest, FLAKY_CreateExternalTab1) {
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());
@@ -861,6 +899,7 @@ TEST_F(ExternalTabUITest, FLAKY_CreateExternalTab1) {
 }
 
 // Create with empty url and then navigate
+// Flaky, http://crbug.com/32293
 TEST_F(ExternalTabUITest, FLAKY_CreateExternalTab2) {
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());
@@ -883,7 +922,8 @@ TEST_F(ExternalTabUITest, FLAKY_CreateExternalTab2) {
   loop.RunFor(action_max_timeout_ms());
 }
 
-TEST_F(ExternalTabUITest, IncognitoMode) {
+// FLAKY: http://crbug.com/60409
+TEST_F(ExternalTabUITest, FLAKY_IncognitoMode) {
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
@@ -968,6 +1008,7 @@ TEST_F(ExternalTabUITest, FLAKY_TabPostMessage) {
   loop.RunFor(action_max_timeout_ms());
 }
 
+// Flaky: http://crbug.com/62143
 TEST_F(ExternalTabUITest, FLAKY_PostMessageTarget)  {
   net::TestServer test_server(
       net::TestServer::TYPE_HTTP,
@@ -1081,7 +1122,8 @@ TEST_F(ExternalTabUITest, FLAKY_HostNetworkStack) {
   loop.RunFor(action_max_timeout_ms());
 }
 
-TEST_F(ExternalTabUITest, HostNetworkStackAbortRequest) {
+// Flaky, http://crbug.com/61023.
+TEST_F(ExternalTabUITest, FLAKY_HostNetworkStackAbortRequest) {
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
@@ -1122,7 +1164,8 @@ TEST_F(ExternalTabUITest, HostNetworkStackAbortRequest) {
   loop.RunFor(action_max_timeout_ms());
 }
 
-TEST_F(ExternalTabUITest, HostNetworkStackUnresponsiveRenderer) {
+// Flaky, http://crbug.com/61023.
+TEST_F(ExternalTabUITest, FLAKY_HostNetworkStackUnresponsiveRenderer) {
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
@@ -1198,10 +1241,19 @@ class ExternalTabUITestPopupEnabled : public ExternalTabUITest {
   }
 };
 
+#if defined(OS_WIN)
+// http://crbug.com/61023 - Fails on one popular operating system.
+#define MAYBE_WindowDotOpen FLAKY_WindowDotOpen
+#define MAYBE_UserGestureTargetBlank FLAKY_UserGestureTargetBlank
+#else
+#define MAYBE_WindowDotOpen WindowDotOpen
+#define MAYBE_UserGestureTargetBlank UserGestureTargetBlank
+#endif
+
 // Testing AutomationMsg_AttachExternalTab callback from Chrome.
 // Open a popup window with window.open() call. The created popup window opens
 // another popup window (again using window.open() call).
-TEST_F(ExternalTabUITestPopupEnabled, WindowDotOpen) {
+TEST_F(ExternalTabUITestPopupEnabled, MAYBE_WindowDotOpen) {
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
   mock_->IgnoreFavIconNetworkRequest();
@@ -1266,7 +1318,7 @@ TEST_F(ExternalTabUITestPopupEnabled, WindowDotOpen) {
 }
 
 // Open a new window by simulating a user gesture through keyboard.
-TEST_F(ExternalTabUITestPopupEnabled, UserGestureTargetBlank) {
+TEST_F(ExternalTabUITestPopupEnabled, MAYBE_UserGestureTargetBlank) {
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
   mock_->IgnoreFavIconNetworkRequest();
@@ -1351,8 +1403,11 @@ TEST_F(AutomationProxyTest, AutocompleteParallelProxy) {
 #endif  // defined(OS_WIN) || defined(OS_LINUX)
 
 #if defined(OS_MACOSX)
-// TODO(port): Implement AutocompleteEditProxy on Mac.
+// Disabled, http://crbug.com/48601.
 #define AutocompleteMatchesTest DISABLED_AutocompleteMatchesTest
+#else
+// Flaky, http://crbug.com/19876.
+#define AutocompleteMatchesTest FLAKY_AutocompleteMatchesTest
 #endif
 TEST_F(AutomationProxyVisibleTest, AutocompleteMatchesTest) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
@@ -1373,7 +1428,7 @@ TEST_F(AutomationProxyVisibleTest, AutocompleteMatchesTest) {
   EXPECT_FALSE(matches.empty());
 }
 
-// Flaky, see http://crbug.com/25039.
+// Flaky especially on Windows. See crbug.com/25039.
 TEST_F(AutomationProxyTest, FLAKY_AppModalDialogTest) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
@@ -1493,4 +1548,188 @@ TEST_F(AutomationProxyTest5, TestLifetimeOfDomAutomationController) {
   std::wstring actual;
   ASSERT_TRUE(tab->ExecuteAndExtractString(L"", jscript, &actual));
   ASSERT_EQ(expected, actual);
+}
+
+class AutomationProxySnapshotTest : public UITest {
+ protected:
+  AutomationProxySnapshotTest() {
+    dom_automation_enabled_ = true;
+    snapshot_dir_.CreateUniqueTempDir();
+    snapshot_path_ = snapshot_dir_.path().AppendASCII("snapshot.png");
+  }
+
+  // Asserts that the given png file can be read and decoded into the given
+  // bitmap.
+  void AssertReadPNG(const FilePath& filename, SkBitmap* bitmap) {
+    DCHECK(bitmap);
+    ASSERT_TRUE(file_util::PathExists(filename));
+
+    int64 size64;
+    ASSERT_TRUE(file_util::GetFileSize(filename, &size64));
+    // Check that the file is not too big to read in (less than 100 MB).
+    ASSERT_LT(size64, 1024 * 1024 * 100);
+
+    // Read and decode image.
+    int size = static_cast<int>(size64);
+    scoped_array<char> data(new char[size]);
+    int bytes_read = file_util::ReadFile(filename, &data[0], size);
+    ASSERT_EQ(size, bytes_read);
+    ASSERT_TRUE(gfx::PNGCodec::Decode(
+        reinterpret_cast<unsigned char*>(&data[0]),
+        bytes_read,
+        bitmap));
+  }
+
+  // Returns the file path for the directory for these tests appended with
+  // the given relative path.
+  FilePath GetTestFilePath(const char* relative_path) {
+    FilePath filename(test_data_directory_);
+    return filename.AppendASCII("automation_proxy_snapshot")
+        .AppendASCII(relative_path);
+  }
+
+  FilePath snapshot_path_;
+  ScopedTempDir snapshot_dir_;
+};
+
+// See http://crbug.com/63022.
+#if defined(OS_LINUX)
+#define MAYBE_ContentSmallerThanView FAILS_ContentSmallerThanView
+#else
+#define MAYBE_ContentSmallerThanView ContentSmallerThanView
+#endif
+// Tests that taking a snapshot when the content is smaller than the view
+// produces a snapshot equal to the view size.
+TEST_F(AutomationProxySnapshotTest, MAYBE_ContentSmallerThanView) {
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+
+  scoped_refptr<WindowProxy> window(browser->GetWindow());
+  ASSERT_TRUE(window.get());
+  ASSERT_TRUE(window->SetBounds(gfx::Rect(300, 400)));
+
+  scoped_refptr<TabProxy> tab(browser->GetTab(0));
+  ASSERT_TRUE(tab.get());
+
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
+            tab->NavigateToURL(GURL(chrome::kAboutBlankURL)));
+
+  gfx::Rect view_bounds;
+  ASSERT_TRUE(window->GetViewBounds(VIEW_ID_TAB_CONTAINER, &view_bounds,
+                                    false));
+
+  ASSERT_TRUE(tab->CaptureEntirePageAsPNG(snapshot_path_));
+
+  SkBitmap bitmap;
+  ASSERT_NO_FATAL_FAILURE(AssertReadPNG(snapshot_path_, &bitmap));
+  ASSERT_EQ(view_bounds.width(), bitmap.width());
+  ASSERT_EQ(view_bounds.height(), bitmap.height());
+}
+
+// See http://crbug.com/63022.
+#if defined(OS_LINUX)
+#define MAYBE_ContentLargerThanView FAILS_ContentLargerThanView
+#else
+#define MAYBE_ContentLargerThanView ContentLargerThanView
+#endif
+// Tests that taking a snapshot when the content is larger than the view
+// produces a snapshot equal to the content size.
+TEST_F(AutomationProxySnapshotTest, MAYBE_ContentLargerThanView) {
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+
+  // Resize the window to guarantee that the content is larger than the view.
+  scoped_refptr<WindowProxy> window(browser->GetWindow());
+  ASSERT_TRUE(window.get());
+  ASSERT_TRUE(window->SetBounds(gfx::Rect(300, 400)));
+
+  scoped_refptr<TabProxy> tab(browser->GetTab(0));
+  ASSERT_TRUE(tab.get());
+
+  FilePath set_size_page = GetTestFilePath("set_size.html?600,800");
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
+            tab->NavigateToURL(net::FilePathToFileURL(set_size_page)));
+
+  ASSERT_TRUE(tab->CaptureEntirePageAsPNG(snapshot_path_));
+
+  SkBitmap bitmap;
+  ASSERT_NO_FATAL_FAILURE(AssertReadPNG(snapshot_path_, &bitmap));
+  ASSERT_EQ(600, bitmap.width());
+  ASSERT_EQ(800, bitmap.height());
+}
+
+// Tests taking a large snapshot works.
+TEST_F(AutomationProxySnapshotTest, LargeSnapshot) {
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+
+  scoped_refptr<TabProxy> tab(browser->GetTab(0));
+  ASSERT_TRUE(tab.get());
+
+  // 2000x2000 creates an approximately 15 MB bitmap.
+  // Don't increase this too much. At least my linux box has SHMMAX set at
+  // 32 MB.
+  FilePath set_size_page = GetTestFilePath("set_size.html?2000,2000");
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
+            tab->NavigateToURL(net::FilePathToFileURL(set_size_page)));
+
+  ASSERT_TRUE(tab->CaptureEntirePageAsPNG(snapshot_path_));
+
+  SkBitmap bitmap;
+  ASSERT_NO_FATAL_FAILURE(AssertReadPNG(snapshot_path_, &bitmap));
+  ASSERT_EQ(2000, bitmap.width());
+  ASSERT_EQ(2000, bitmap.height());
+}
+
+#if defined(OS_MACOSX)
+// Most pixels on mac are slightly off.
+#define MAYBE_ContentsCorrect DISABLED_ContentsCorrect
+#elif defined(OS_LINUX)
+// See http://crbug.com/63022.
+#define MAYBE_ContentsCorrect FAILS_ContentsCorrect
+#else
+#define MAYBE_ContentsCorrect ContentsCorrect
+#endif
+
+// Tests that the snapshot contents are correct.
+TEST_F(AutomationProxySnapshotTest, MAYBE_ContentsCorrect) {
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+
+  const gfx::Size img_size(400, 300);
+  scoped_refptr<WindowProxy> window(browser->GetWindow());
+  ASSERT_TRUE(window.get());
+  ASSERT_TRUE(window->SetBounds(gfx::Rect(img_size)));
+
+  scoped_refptr<TabProxy> tab(browser->GetTab(0));
+  ASSERT_TRUE(tab.get());
+
+  FilePath set_size_page = GetTestFilePath("just_image.html");
+  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
+            tab->NavigateToURL(net::FilePathToFileURL(set_size_page)));
+
+  ASSERT_TRUE(tab->CaptureEntirePageAsPNG(snapshot_path_));
+
+  SkBitmap snapshot_bmp;
+  ASSERT_NO_FATAL_FAILURE(AssertReadPNG(snapshot_path_, &snapshot_bmp));
+  ASSERT_EQ(img_size.width(), snapshot_bmp.width());
+  ASSERT_EQ(img_size.height(), snapshot_bmp.height());
+
+  SkBitmap reference_bmp;
+  ASSERT_NO_FATAL_FAILURE(AssertReadPNG(GetTestFilePath("image.png"),
+                                        &reference_bmp));
+  ASSERT_EQ(img_size.width(), reference_bmp.width());
+  ASSERT_EQ(img_size.height(), reference_bmp.height());
+
+  SkAutoLockPixels lock_snapshot(snapshot_bmp);
+  SkAutoLockPixels lock_reference(reference_bmp);
+  int diff_pixels_count = 0;
+  for (int x = 0; x < img_size.width(); ++x) {
+    for (int y = 0; y < img_size.height(); ++y) {
+      if (*snapshot_bmp.getAddr32(x, y) != *reference_bmp.getAddr32(x, y)) {
+        ++diff_pixels_count;
+      }
+    }
+  }
+  ASSERT_EQ(diff_pixels_count, 0);
 }

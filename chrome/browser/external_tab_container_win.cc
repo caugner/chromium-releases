@@ -6,16 +6,20 @@
 
 #include <string>
 
+#include "app/l10n_util.h"
+#include "app/view_prop.h"
+#include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/trace_event.h"
 #include "base/win_util.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/automation_extension_function.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/debugger/devtools_toggle_action.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/load_notification_details.h"
 #include "chrome/browser/page_info_window.h"
@@ -24,9 +28,11 @@
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "chrome/browser/tab_contents/provisional_load_details.h"
-#include "chrome/browser/views/tab_contents/render_view_context_menu_views.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/views/page_info_bubble_view.h"
+#include "chrome/browser/views/tab_contents/render_view_context_menu_views.h"
 #include "chrome/browser/views/tab_contents/tab_contents_container.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/bindings_policy.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/render_messages.h"
@@ -34,13 +40,44 @@
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/page_transition_types.h"
-#include "chrome/test/automation/automation_messages.h"
+#include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
 #include "views/grid_layout.h"
 #include "views/widget/root_view.h"
 #include "views/window/window.h"
 
-static const wchar_t kWindowObjectKey[] = L"ChromeWindowObject";
+using app::ViewProp;
+
+static const char kWindowObjectKey[] = "ChromeWindowObject";
+
+// This class overrides the LinkActivated function in the PageInfoBubbleView
+// class and routes the help center link navigation to the host browser.
+class ExternalTabPageInfoBubbleView : public PageInfoBubbleView {
+ public:
+  ExternalTabPageInfoBubbleView(ExternalTabContainer* container,
+                                gfx::NativeWindow parent_window,
+                                Profile* profile,
+                                const GURL& url,
+                                const NavigationEntry::SSLStatus& ssl,
+                                bool show_history)
+      : PageInfoBubbleView(parent_window, profile, url, ssl, show_history),
+        container_(container) {
+    DVLOG(1) << __FUNCTION__;
+  }
+  virtual ~ExternalTabPageInfoBubbleView() {
+    DVLOG(1) << __FUNCTION__;
+  }
+  // LinkController methods:
+  virtual void LinkActivated(views::Link* source, int event_flags) {
+    GURL url = google_util::AppendGoogleLocaleParam(
+        GURL(chrome::kPageInfoHelpCenterURL));
+    container_->OpenURLFromTab(container_->tab_contents(), url, GURL(),
+                               NEW_FOREGROUND_TAB, PageTransition::LINK);
+  }
+ private:
+  scoped_refptr<ExternalTabContainer> container_;
+};
 
 base::LazyInstance<ExternalTabContainer::PendingTabs>
     ExternalTabContainer::pending_tabs_(base::LINKER_INITIALIZED);
@@ -99,9 +136,7 @@ bool ExternalTabContainer::Init(Profile* profile,
 
   // TODO(jcampan): limit focus traversal to contents.
 
-  // We don't ever remove the prop because the lifetime of this object
-  // is the same as the lifetime of the window
-  SetProp(GetNativeView(), kWindowObjectKey, this);
+  prop_.reset(new ViewProp(GetNativeView(), kWindowObjectKey, this));
 
   if (existing_contents) {
     tab_contents_ = existing_contents;
@@ -250,10 +285,7 @@ void ExternalTabContainer::FocusThroughTabTraversal(
 
 // static
 bool ExternalTabContainer::IsExternalTabContainer(HWND window) {
-  if (::GetProp(window, kWindowObjectKey) != NULL)
-    return true;
-
-  return false;
+  return ViewProp::GetValue(window, kWindowObjectKey) != NULL;
 }
 
 // static
@@ -267,7 +299,7 @@ ExternalTabContainer* ExternalTabContainer::GetContainerForTab(
     return NULL;
   }
   ExternalTabContainer* container = reinterpret_cast<ExternalTabContainer*>(
-      GetProp(parent_window, kWindowObjectKey));
+      ViewProp::GetValue(parent_window, kWindowObjectKey));
   return container;
 }
 
@@ -277,8 +309,8 @@ ExternalTabContainer*
         gfx::NativeView native_window) {
   ExternalTabContainer* tab_container = NULL;
   if (native_window) {
-    HANDLE handle = ::GetProp(native_window, kWindowObjectKey);
-    tab_container = reinterpret_cast<ExternalTabContainer*>(handle);
+    tab_container = reinterpret_cast<ExternalTabContainer*>(
+        ViewProp::GetValue(native_window, kWindowObjectKey));
   }
   return tab_container;
 }
@@ -524,7 +556,20 @@ void ExternalTabContainer::ShowPageInfo(Profile* profile,
                                         const GURL& url,
                                         const NavigationEntry::SSLStatus& ssl,
                                         bool show_history) {
-  browser::ShowPageInfo(GetNativeView(), profile, url, ssl, show_history);
+  POINT cursor_pos = {0};
+  GetCursorPos(&cursor_pos);
+
+  gfx::Rect bounds;
+  bounds.set_origin(gfx::Point(cursor_pos));
+
+  PageInfoBubbleView* page_info_bubble =
+      new ExternalTabPageInfoBubbleView(this, NULL, profile, url,
+                                        ssl, show_history);
+  InfoBubble* info_bubble =
+      InfoBubble::Show(this, bounds,
+                       BubbleBorder::TOP_LEFT,
+                       page_info_bubble, page_info_bubble);
+  page_info_bubble->set_info_bubble(info_bubble);
 }
 
 void ExternalTabContainer::RegisterRenderViewHostForAutomation(
@@ -575,7 +620,7 @@ bool ExternalTabContainer::HandleContextMenu(const ContextMenuParams& params) {
   POINT screen_pt = { params.x, params.y };
   MapWindowPoints(GetNativeView(), HWND_DESKTOP, &screen_pt, 1);
 
-  IPC::ContextMenuParams ipc_params;
+  IPC::MiniContextMenuParams ipc_params;
   ipc_params.screen_x = screen_pt.x;
   ipc_params.screen_y = screen_pt.y;
   ipc_params.link_url = params.link_url;
@@ -639,7 +684,6 @@ void ExternalTabContainer::ShowHtmlDialog(HtmlDialogUIDelegate* delegate,
 void ExternalTabContainer::BeforeUnloadFired(TabContents* tab,
                                              bool proceed,
                                              bool* proceed_to_fire_unload) {
-  DCHECK(unload_reply_message_);
   *proceed_to_fire_unload = true;
 
   if (!automation_) {
@@ -649,6 +693,7 @@ void ExternalTabContainer::BeforeUnloadFired(TabContents* tab,
   }
 
   if (!proceed) {
+    DCHECK(unload_reply_message_);
     AutomationMsg_RunUnloadHandlers::WriteReplyParams(unload_reply_message_,
                                                       false);
     automation_->Send(unload_reply_message_);
@@ -750,6 +795,7 @@ LRESULT ExternalTabContainer::OnCreate(LPCREATESTRUCT create_struct) {
 }
 
 void ExternalTabContainer::OnDestroy() {
+  prop_.reset();
   Uninitialize();
   WidgetWin::OnDestroy();
   if (browser_.get()) {
@@ -1049,7 +1095,7 @@ TemporaryPopupExternalTabContainer::TemporaryPopupExternalTabContainer(
 }
 
 TemporaryPopupExternalTabContainer::~TemporaryPopupExternalTabContainer() {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
 }
 
 void TemporaryPopupExternalTabContainer::OpenURLFromTab(

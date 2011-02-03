@@ -10,31 +10,14 @@
 #include "chrome/browser/bookmarks/bookmark_folder_editor_controller.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/page_navigator.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
-
-namespace {
-
-// Returns true if the specified node is of type URL, or has a descendant
-// of type URL.
-bool NodeHasURLs(const BookmarkNode* node) {
-  if (node->is_url())
-    return true;
-
-  for (int i = 0; i < node->GetChildCount(); ++i) {
-    if (NodeHasURLs(node->GetChild(i)))
-      return true;
-  }
-  return false;
-}
-
-}  // namespace
 
 BookmarkContextMenuController::BookmarkContextMenuController(
     gfx::NativeWindow parent_window,
@@ -164,7 +147,8 @@ void BookmarkContextMenuController::ExecuteCommand(int id) {
                              BookmarkEditor::SHOW_TREE);
       } else {
         BookmarkFolderEditorController::Show(profile_, parent_window_,
-            selection_[0], -1, BookmarkFolderEditorController::NONE);
+            selection_[0], -1,
+            BookmarkFolderEditorController::EXISTING_BOOKMARK);
       }
       break;
 
@@ -202,7 +186,7 @@ void BookmarkContextMenuController::ExecuteCommand(int id) {
       const BookmarkNode* parent =
           bookmark_utils::GetParentForNewNodes(parent_, selection_, &index);
       BookmarkFolderEditorController::Show(profile_, parent_window_, parent,
-          index, BookmarkFolderEditorController::IS_NEW);
+          index, BookmarkFolderEditorController::NEW_BOOKMARK);
       break;
     }
 
@@ -301,7 +285,7 @@ void BookmarkContextMenuController::BookmarkModelChanged() {
 
 bool BookmarkContextMenuController::HasURLs() const {
   for (size_t i = 0; i < selection_.size(); ++i) {
-    if (NodeHasURLs(selection_[i]))
+    if (bookmark_utils::NodeHasURLs(selection_[i]))
       return true;
   }
   return false;

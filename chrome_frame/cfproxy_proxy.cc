@@ -6,7 +6,7 @@
 
 #include "base/tuple.h"
 #include "ipc/ipc_sync_message.h"
-#include "chrome/test/automation/automation_messages.h"
+#include "chrome/common/automation_messages.h"
 
 CFProxy::CFProxy(CFProxyTraits* api) : ipc_thread_("ipc"),
                                        sync_dispatcher_(&tab2delegate_),
@@ -30,30 +30,32 @@ void CFProxy::Init(const ProxyParams& params) {
       &CFProxy::InitInIoThread, params));
 }
 
-int CFProxy::AddDelegate(ChromeProxyDelegate* proxy) {
+int CFProxy::AddDelegate(ChromeProxyDelegate* delegate) {
   ipc_thread_.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &CFProxy::AddDelegateOnIoThread, proxy));
+      &CFProxy::AddDelegateOnIoThread, delegate));
   return ++delegate_count_;
 }
 
-int CFProxy::RemoveDelegate(ChromeProxyDelegate* proxy) {
+int CFProxy::RemoveDelegate(ChromeProxyDelegate* delegate) {
   ipc_thread_.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &CFProxy::RemoveDelegateOnIoThread, proxy));
+      &CFProxy::RemoveDelegateOnIoThread, delegate));
   return --delegate_count_;
 }
 
-void CFProxy::AddDelegateOnIoThread(ChromeProxyDelegate* proxy) {
+void CFProxy::AddDelegateOnIoThread(ChromeProxyDelegate* delegate) {
   DCHECK(CalledOnIpcThread());
-  DelegateHolder::AddDelegate(proxy);
+  DelegateHolder::AddDelegate(delegate);
   if (is_connected_) {
-    proxy->Connected(this);
+    delegate->Connected(this);
   }
 }
 
-void CFProxy::RemoveDelegateOnIoThread(ChromeProxyDelegate* proxy) {
+void CFProxy::RemoveDelegateOnIoThread(ChromeProxyDelegate* delegate) {
   DCHECK(CalledOnIpcThread());
-  DelegateHolder::RemoveDelegate(proxy);
-  proxy->Disconnected();
+  // Cancel any calls in progress.
+  sync_dispatcher_.Cancel(delegate);
+  DelegateHolder::RemoveDelegate(delegate);
+  delegate->Disconnected();
 }
 
 void CFProxy::InitInIoThread(const ProxyParams& params) {
@@ -179,7 +181,7 @@ void CFProxy::Tab_Navigate(int tab, const GURL& url, const GURL& referrer) {
 
 void CFProxy::CreateTab(ChromeProxyDelegate* delegate,
                         const IPC::ExternalTabSettings& p) {
-  IPC::SyncMessage* m = new AutomationMsg_CreateExternalTab(0, p, 0, 0, 0);
+  IPC::SyncMessage* m = new AutomationMsg_CreateExternalTab(0, p, 0, 0, 0, 0);
   sync_dispatcher_.QueueSyncMessage(m, delegate, NULL);
   SendIpcMessage(m);
 }
@@ -187,14 +189,14 @@ void CFProxy::CreateTab(ChromeProxyDelegate* delegate,
 void CFProxy::ConnectTab(ChromeProxyDelegate* delegate, HWND hwnd,
                          uint64 cookie) {
   IPC::SyncMessage* m = new AutomationMsg_ConnectExternalTab(0, cookie, true,
-      hwnd, NULL, NULL, NULL);
+      hwnd, NULL, NULL, NULL, 0);
   sync_dispatcher_.QueueSyncMessage(m, delegate, NULL);
   SendIpcMessage(m);
 }
 
 void CFProxy::BlockTab(uint64 cookie) {
   IPC::SyncMessage* m = new AutomationMsg_ConnectExternalTab(0, cookie, false,
-      NULL, NULL, NULL, NULL);
+      NULL, NULL, NULL, NULL, 0);
   sync_dispatcher_.QueueSyncMessage(m, NULL, NULL);
   SendIpcMessage(m);
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/callback.h"
+#include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -19,10 +21,7 @@
 #include "base/values.h"
 #include "base/weak_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_thread.h"
-#include "chrome/browser/browser_window.h"
 #include "chrome/browser/dom_ui/dom_ui_favicon_source.h"
 #include "chrome/browser/dom_ui/mediaplayer_ui.h"
 #include "chrome/browser/download/download_item.h"
@@ -30,14 +29,17 @@
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/net/url_fetcher.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "grit/browser_resources.h"
@@ -45,6 +47,7 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/escape.h"
+#include "net/url_request/url_request_file_job.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -181,6 +184,16 @@ class FilebrowseHandler : public net::DirectoryLister::DirectoryListerDelegate,
   void FireUploadComplete();
 
   void SendPicasawebRequest();
+
+  // Callback for the "validateSavePath" message.
+  void HandleValidateSavePath(const ListValue* args);
+
+  // Validate a save path on file thread.
+  void ValidateSavePathOnFileThread(const FilePath& save_path);
+
+  // Fire save path validation result to JS onValidatedSavePath.
+  void FireOnValidatedSavePathOnUIThread(bool valid, const FilePath& save_path);
+
  private:
 
   void OpenNewWindow(const ListValue* args, bool popup);
@@ -265,6 +278,17 @@ class TaskProxy : public base::RefCountedThreadSafe<TaskProxy> {
       handler_->FireCopyComplete(src_, dest_);
     }
   }
+
+  void ValidateSavePathOnFileThread() {
+    if (handler_)
+      handler_->ValidateSavePathOnFileThread(src_);
+  }
+  void FireOnValidatedSavePathOnUIThread(bool valid,
+                                         const FilePath& save_path) {
+    if (handler_)
+      handler_->FireOnValidatedSavePathOnUIThread(valid, save_path);
+  }
+
  private:
   base::WeakPtr<FilebrowseHandler> handler_;
   FilePath src_;
@@ -459,6 +483,8 @@ void FilebrowseHandler::RegisterMessages() {
       NewCallback(this, &FilebrowseHandler::HandleRefreshDirectory));
   dom_ui_->RegisterMessageCallback("isAdvancedEnabled",
       NewCallback(this, &FilebrowseHandler::HandleIsAdvancedEnabled));
+  dom_ui_->RegisterMessageCallback("validateSavePath",
+      NewCallback(this, &FilebrowseHandler::HandleValidateSavePath));
 }
 
 
@@ -521,8 +547,8 @@ void FilebrowseHandler::OnURLFetchComplete(const URLFetcher* source,
                                            const ResponseCookies& cookies,
                                            const std::string& data) {
   upload_response_code_ = response_code;
-  LOG(INFO) << "Response code:" << response_code;
-  LOG(INFO) << "request url" << url;
+  VLOG(1) << "Response code: " << response_code;
+  VLOG(1) << "Request url: " << url;
   if (StartsWithASCII(url.spec(), kPicasawebUserPrefix, true)) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
@@ -615,16 +641,10 @@ void FilebrowseHandler::EnqueueMediaFile(const ListValue* args) {
 
 void FilebrowseHandler::HandleIsAdvancedEnabled(const ListValue* args) {
 #if defined(OS_CHROMEOS)
-  Browser* browser = BrowserList::GetLastActive();
-  bool is_enabled = false;
-  bool mp_enabled = false;
-  if (browser) {
-    Profile* profile = browser->profile();
-    PrefService* pref_service = profile->GetPrefs();
-    is_enabled = pref_service->GetBoolean(
-        prefs::kLabsAdvancedFilesystemEnabled);
-    mp_enabled = pref_service->GetBoolean(prefs::kLabsMediaplayerEnabled);
-  }
+  bool is_enabled = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableAdvancedFileSystem);
+  bool mp_enabled = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableMediaPlayer);
   DictionaryValue info_value;
   info_value.SetBoolean("enabled", is_enabled);
   info_value.SetBoolean("mpEnabled", mp_enabled);
@@ -696,14 +716,16 @@ void FilebrowseHandler::OpenNewWindow(const ListValue* args, bool popup) {
   Browser* browser = popup ?
       Browser::CreateForType(Browser::TYPE_APP_PANEL, profile_) :
       BrowserList::GetLastActive();
-  Browser::AddTabWithURLParams params(GURL(url), PageTransition::LINK);
-  browser->AddTabWithURL(&params);
+  browser::NavigateParams params(browser, GURL(url), PageTransition::LINK);
+  params.disposition = NEW_FOREGROUND_TAB;
+  browser::Navigate(&params);
+  // TODO(beng): The following two calls should be automatic by Navigate().
   if (popup) {
     // TODO(dhg): Remove these from being hardcoded. Allow javascript
     // to specify.
-    params.target->window()->SetBounds(gfx::Rect(0, 0, 400, 300));
+    params.browser->window()->SetBounds(gfx::Rect(0, 0, 400, 300));
   }
-  params.target->window()->Show();
+  params.browser->window()->Show();
 }
 
 void FilebrowseHandler::SendPicasawebRequest() {
@@ -798,6 +820,13 @@ void FilebrowseHandler::GetChildrenForPath(FilePath& path, bool is_refresh) {
   }
 
   is_refresh_ = is_refresh;
+
+#if defined(OS_CHROMEOS)
+  // Don't allow listing files in inaccessible dirs.
+  if (URLRequestFileJob::AccessDisabled(path))
+    return;
+#endif  // OS_CHROMEOS
+
   FilePath default_download_path;
   if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS,
                         &default_download_path)) {
@@ -940,6 +969,11 @@ void FilebrowseHandler::HandleDeleteFile(const ListValue* args) {
 #if defined(OS_CHROMEOS)
   std::string path = WideToUTF8(ExtractStringValue(args));
   FilePath currentpath(path);
+
+  // Don't allow file deletion in inaccessible dirs.
+  if (URLRequestFileJob::AccessDisabled(currentpath))
+    return;
+
   for (unsigned int x = 0; x < active_download_items_.size(); x++) {
     FilePath item = active_download_items_[x]->full_path();
     if (item == currentpath) {
@@ -973,6 +1007,10 @@ void FilebrowseHandler::HandleCopyFile(const ListValue* value) {
       FilePath SrcPath = FilePath(src);
       FilePath DestPath = FilePath(dest);
 
+      // Don't allow file copy to inaccessible dirs.
+      if (URLRequestFileJob::AccessDisabled(DestPath))
+        return;
+
       TaskProxy* task = new TaskProxy(AsWeakPtr(), SrcPath, DestPath);
       task->AddRef();
       current_task_ = task;
@@ -988,6 +1026,60 @@ void FilebrowseHandler::HandleCopyFile(const ListValue* value) {
 #endif
 }
 
+void FilebrowseHandler::HandleValidateSavePath(const ListValue* args) {
+  std::string string_path;
+  if (!args || !args->GetString(0, &string_path)) {
+    FireOnValidatedSavePathOnUIThread(false, FilePath());  // Invalid save path.
+    return;
+  }
+
+  FilePath save_path(string_path);
+
+#if defined(OS_CHROMEOS)
+  scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr(), save_path);
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+      NewRunnableMethod(task.get(), &TaskProxy::ValidateSavePathOnFileThread));
+#else
+  // No save path checking for non-ChromeOS platforms.
+  FireOnValidatedSavePathOnUIThread(true, save_path);
+#endif
+}
+
+void FilebrowseHandler::ValidateSavePathOnFileThread(
+    const FilePath& save_path) {
+#if defined(OS_CHROMEOS)
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  FilePath default_download_path;
+  if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS,
+                        &default_download_path)) {
+    NOTREACHED();
+  }
+
+  // Get containing folder of save_path.
+  FilePath save_dir = save_path.DirName();
+
+  // Valid save path must be inside default download dir.
+  bool valid = default_download_path == save_dir ||
+               file_util::ContainsPath(default_download_path, save_dir);
+
+  scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr(), save_path);
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+      NewRunnableMethod(task.get(),
+                        &TaskProxy::FireOnValidatedSavePathOnUIThread,
+                        valid, save_path));
+#endif
+}
+
+void FilebrowseHandler::FireOnValidatedSavePathOnUIThread(bool valid,
+    const FilePath& save_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  FundamentalValue valid_value(valid);
+  StringValue path_value(save_path.value());
+  dom_ui_->CallJavascriptFunction(L"onValidatedSavePath",
+      valid_value, path_value);
+}
 
 void FilebrowseHandler::OnDownloadUpdated(DownloadItem* download) {
   DownloadList::iterator it = find(active_download_items_.begin(),
@@ -997,9 +1089,9 @@ void FilebrowseHandler::OnDownloadUpdated(DownloadItem* download) {
     return;
   const int id = static_cast<int>(it - active_download_items_.begin());
 
-  ListValue results_value;
-  results_value.Append(download_util::CreateDownloadItemValue(download, id));
-  dom_ui_->CallJavascriptFunction(L"downloadUpdated", results_value);
+  scoped_ptr<DictionaryValue> download_item(
+      download_util::CreateDownloadItemValue(download, id));
+  dom_ui_->CallJavascriptFunction(L"downloadUpdated", *download_item.get());
 }
 
 void FilebrowseHandler::ClearDownloadItems() {
@@ -1061,14 +1153,16 @@ Browser* FileBrowseUI::OpenPopup(Profile* profile,
       url.append(hashArgument);
     }
 
-    Browser::AddTabWithURLParams params(GURL(url), PageTransition::LINK);
-    browser->AddTabWithURL(&params);
-    params.target->window()->SetBounds(gfx::Rect(kPopupLeft,
-                                                 kPopupTop,
-                                                 width,
-                                                 height));
+    browser::NavigateParams params(browser, GURL(url), PageTransition::LINK);
+    params.disposition = NEW_FOREGROUND_TAB;
+    browser::Navigate(&params);
+    // TODO(beng): The following two calls should be automatic by Navigate().
+    params.browser->window()->SetBounds(gfx::Rect(kPopupLeft,
+                                                  kPopupTop,
+                                                  width,
+                                                  height));
 
-    params.target->window()->Show();
+    params.browser->window()->Show();
   } else {
     browser->window()->Show();
   }
@@ -1080,14 +1174,8 @@ Browser* FileBrowseUI::GetPopupForPath(const std::string& path,
                                        Profile* profile) {
   std::string current_path = path;
   if (current_path.empty()) {
-    Browser* browser = BrowserList::GetLastActive();
-    if (browser == NULL) {
-      return NULL;
-    }
-    Profile* profile = browser->profile();
-    PrefService* pref_service = profile->GetPrefs();
-    bool is_enabled = pref_service->GetBoolean(
-        prefs::kLabsAdvancedFilesystemEnabled);
+    bool is_enabled = CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableAdvancedFileSystem);
     if (!is_enabled) {
       FilePath default_download_path;
       if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS,

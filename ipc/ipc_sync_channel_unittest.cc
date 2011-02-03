@@ -708,10 +708,8 @@ class QueuedReplyServer : public Worker {
   }
 
   virtual void OnNestedTestMsg(Message* reply_msg) {
-    LOG(INFO) << __FUNCTION__ << " Sending reply: "
-              << reply_text_.c_str();
-    SyncChannelNestedTestMsg_String::WriteReplyParams(
-        reply_msg, reply_text_);
+    VLOG(1) << __FUNCTION__ << " Sending reply: " << reply_text_;
+    SyncChannelNestedTestMsg_String::WriteReplyParams(reply_msg, reply_text_);
     Send(reply_msg);
     Done();
   }
@@ -747,8 +745,7 @@ class QueuedReplyClient : public Worker {
     DCHECK(result);
     DCHECK_EQ(response, expected_text_);
 
-    LOG(INFO) << __FUNCTION__ << " Received reply: "
-              << response.c_str();
+    VLOG(1) << __FUNCTION__ << " Received reply: " << response;
     Done();
   }
 
@@ -811,6 +808,8 @@ TEST_F(IPCSyncChannelTest, QueuedReply) {
 
 namespace {
 
+void DropAssert(const std::string&) {}
+
 class BadServer : public Worker {
  public:
   explicit BadServer(bool pump_during_send)
@@ -825,12 +824,11 @@ class BadServer : public Worker {
     if (pump_during_send_)
       msg->EnableMessagePumping();
 
-    // Temporarily set the minimum logging very high so that the assertion
-    // in ipc_message_utils doesn't fire.
-    int log_level = logging::GetMinLogLevel();
-    logging::SetMinLogLevel(kint32max);
+    // Temporarily ignore asserts so that the assertion in
+    // ipc_message_utils doesn't cause termination.
+    logging::SetLogAssertHandler(&DropAssert);
     bool result = Send(msg);
-    logging::SetMinLogLevel(log_level);
+    logging::SetLogAssertHandler(NULL);
     DCHECK(!result);
 
     // Need to send another message to get the client to call Done().

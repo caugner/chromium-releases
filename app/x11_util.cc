@@ -56,14 +56,14 @@ CachedPictFormats* get_cached_pict_formats() {
 const size_t kMaxCacheSize = 5;
 
 int DefaultX11ErrorHandler(Display* d, XErrorEvent* e) {
-  LOG(FATAL) << GetErrorEventDescription(d, e);
+  LOG(ERROR) << GetErrorEventDescription(d, e);
   return 0;
 }
 
 int DefaultX11IOErrorHandler(Display* d) {
   // If there's an IO error it likely means the X server has gone away
-  LOG(FATAL) << "X IO Error detected";
-  return 0;
+  LOG(ERROR) << "X IO Error detected";
+  _exit(1);
 }
 
 }  // namespace

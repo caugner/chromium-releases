@@ -9,7 +9,7 @@
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/chromeos/login/login_html_dialog.h"
-#include "views/controls/button/menu_button.h"
+#include "chrome/browser/chromeos/views/dropdown_button.h"
 #include "views/controls/link.h"
 #include "views/view.h"
 #include "views/widget/widget_gtk.h"
@@ -68,6 +68,11 @@ class NetworkSelectionView : public views::View,
   // views::LinkController implementation.
   virtual void LinkActivated(views::Link* source, int);
 
+  // Returns true if any dialog box is currently open?
+  bool is_dialog_open() const {
+    return proxy_settings_dialog_.get() && proxy_settings_dialog_->is_open();
+  }
+
  protected:
   // Overridden from views::View.
   virtual bool OnKeyPressed(const views::KeyEvent& e);
@@ -105,8 +110,8 @@ class NetworkSelectionView : public views::View,
   views::View* contents_view_;
 
   // Screen controls.
-  views::MenuButton* languages_menubutton_;
-  views::MenuButton* keyboards_menubutton_;
+  DropDownButton* languages_menubutton_;
+  DropDownButton* keyboards_menubutton_;
   views::Label* welcome_label_;
   views::Label* select_language_label_;
   views::Label* select_keyboard_label_;

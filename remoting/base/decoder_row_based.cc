@@ -11,20 +11,26 @@
 
 namespace remoting {
 
+namespace {
+// Both input and output data are assumed to be RGBA32.
+const int kBytesPerPixel = 4;
+}
+
 DecoderRowBased* DecoderRowBased::CreateZlibDecoder() {
-  return new DecoderRowBased(new DecompressorZlib(), EncodingZlib);
+  return new DecoderRowBased(new DecompressorZlib(),
+                             VideoPacketFormat::ENCODING_ZLIB);
 }
 
 DecoderRowBased* DecoderRowBased::CreateVerbatimDecoder() {
-  return new DecoderRowBased(new DecompressorVerbatim(), EncodingNone);
+  return new DecoderRowBased(new DecompressorVerbatim(),
+                             VideoPacketFormat::ENCODING_VERBATIM);
 }
 
 DecoderRowBased::DecoderRowBased(Decompressor* decompressor,
-                                 UpdateStreamEncoding encoding)
+                                 VideoPacketFormat::Encoding encoding)
     : state_(kUninitialized),
       decompressor_(decompressor),
       encoding_(encoding),
-      bytes_per_src_pixel_(0),
       row_pos_(0),
       row_y_(0),
       // TODO(hclam): We should use the information from the update stream
@@ -43,38 +49,35 @@ void DecoderRowBased::Reset() {
 }
 
 bool DecoderRowBased::IsReadyForData() {
-  return state_ == kReady;
+  return state_ == kReady || state_ == kProcessing || state_ == kDone;
 }
 
-void DecoderRowBased::Initialize(scoped_refptr<media::VideoFrame> frame,
-                                 const gfx::Rect& clip,
-                                 int bytes_per_src_pixel) {
+void DecoderRowBased::Initialize(scoped_refptr<media::VideoFrame> frame) {
   // Make sure we are not currently initialized.
   CHECK_EQ(kUninitialized, state_);
 
-  if (static_cast<PixelFormat>(frame->format()) != PixelFormatRgb32) {
+  if (frame->format() != media::VideoFrame::RGB32) {
     LOG(WARNING) << "DecoderRowBased only supports RGB32.";
     state_ = kError;
     return;
   }
 
   frame_ = frame;
-
-  // Reset the buffer location status variables.
-  clip_ = clip;
-  row_pos_ = 0;
-  row_y_ = 0;
-  bytes_per_src_pixel_ = bytes_per_src_pixel;
-
   state_ = kReady;
 }
 
-void DecoderRowBased::DecodeBytes(const std::string& encoded_bytes) {
-  DCHECK_EQ(kReady, state_);
+Decoder::DecodeResult DecoderRowBased::DecodePacket(
+    const VideoPacket* packet) {
+  UpdateStateForPacket(packet);
 
-  const uint8* in = reinterpret_cast<const uint8*>(encoded_bytes.data());
-  const int in_size = encoded_bytes.size();
-  const int row_size = clip_.width() * bytes_per_src_pixel_;
+  if (state_ == kError) {
+    return DECODE_ERROR;
+  }
+
+  const uint8* in = reinterpret_cast<const uint8*>(packet->data().data());
+  const int in_size = packet->data().size();
+
+  const int row_size = clip_.width() * kBytesPerPixel;
   int stride = frame_->stride(media::VideoFrame::kRGBPlane);
   uint8* rect_begin = frame_->data(media::VideoFrame::kRGBPlane);
 
@@ -86,15 +89,19 @@ void DecoderRowBased::DecodeBytes(const std::string& encoded_bytes) {
     stride = -stride;
   }
 
-  // TODO(ajwong): This should be bytes_per_dst_pixel shouldn't this.?
-  uint8* out = rect_begin +
-      stride * (clip_.y() + row_y_) +
-      bytes_per_src_pixel_ * clip_.x();
+  uint8* out = rect_begin + stride * (clip_.y() + row_y_) +
+      kBytesPerPixel * clip_.x();
 
   // Consume all the data in the message.
   bool decompress_again = true;
   int used = 0;
   while (decompress_again && used < in_size) {
+    if (row_y_ >= clip_.height()) {
+      state_ = kError;
+      LOG(WARNING) << "Too much data is received for the given rectangle.";
+      return DECODE_ERROR;
+    }
+
     int written = 0;
     int consumed = 0;
     // TODO(ajwong): This assume source and dest stride are the same, which is
@@ -112,6 +119,65 @@ void DecoderRowBased::DecodeBytes(const std::string& encoded_bytes) {
       out += stride;
     }
   }
+
+  if (state_ == kDone) {
+    if (row_y_ < clip_.height()) {
+      state_ = kError;
+      LOG(WARNING) << "Received LAST_PACKET, but didn't get enough data.";
+      return DECODE_ERROR;
+    }
+
+    decompressor_->Reset();
+    return DECODE_DONE;
+  } else {
+    return DECODE_IN_PROGRESS;
+  }
+}
+
+void DecoderRowBased::UpdateStateForPacket(const VideoPacket* packet) {
+  if (state_ == kError) {
+    return;
+  }
+
+  if (packet->flags() & VideoPacket::FIRST_PACKET) {
+    if (state_ != kReady && state_ != kDone) {
+      state_ = kError;
+      LOG(WARNING) << "Received unexpected FIRST_PACKET.";
+      return;
+    }
+    state_ = kProcessing;
+
+    // Reset the buffer location status variables on the first packet.
+    clip_.SetRect(packet->format().x(), packet->format().y(),
+                  packet->format().width(), packet->format().height());
+    row_pos_ = 0;
+    row_y_ = 0;
+  }
+
+  if (state_ != kProcessing) {
+    state_ = kError;
+    LOG(WARNING) << "Received unexpected packet.";
+    return;
+  }
+
+  if (packet->flags() & VideoPacket::LAST_PACKET) {
+    if (state_ != kProcessing) {
+      state_ = kError;
+      LOG(WARNING) << "Received unexpected LAST_PACKET.";
+      return;
+    }
+    state_ = kDone;
+  }
+
+  return;
+}
+
+void DecoderRowBased::GetUpdatedRects(UpdatedRects* rects) {
+  rects->push_back(clip_);
+}
+
+VideoPacketFormat::Encoding DecoderRowBased::Encoding() {
+  return encoding_;
 }
 
 }  // namespace remoting

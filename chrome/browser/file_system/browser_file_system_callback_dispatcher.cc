@@ -14,6 +14,8 @@ BrowserFileSystemCallbackDispatcher::BrowserFileSystemCallbackDispatcher(
   DCHECK(dispatcher_host_);
 }
 
+BrowserFileSystemCallbackDispatcher::~BrowserFileSystemCallbackDispatcher() {}
+
 void BrowserFileSystemCallbackDispatcher::DidSucceed() {
   dispatcher_host_->Send(new ViewMsg_FileSystem_DidSucceed(request_id_));
   dispatcher_host_->RemoveCompletedOperation(request_id_);
@@ -27,15 +29,18 @@ void BrowserFileSystemCallbackDispatcher::DidReadMetadata(
 }
 
 void BrowserFileSystemCallbackDispatcher::DidReadDirectory(
-    const std::vector<base::file_util_proxy::Entry>& entries, bool has_more) {
+    const std::vector<base::FileUtilProxy::Entry>& entries, bool has_more) {
   dispatcher_host_->Send(new ViewMsg_FileSystem_DidReadDirectory(
       request_id_, entries, has_more));
   dispatcher_host_->RemoveCompletedOperation(request_id_);
 }
 
 void BrowserFileSystemCallbackDispatcher::DidOpenFileSystem(
-    const std::string&, const FilePath&) {
-  NOTREACHED();
+    const std::string& name, const FilePath& path) {
+  dispatcher_host_->Send(
+      new ViewMsg_OpenFileSystemRequest_Complete(
+          request_id_, !path.empty(), name, path));
+  dispatcher_host_->RemoveCompletedOperation(request_id_);
 }
 
 void BrowserFileSystemCallbackDispatcher::DidFail(

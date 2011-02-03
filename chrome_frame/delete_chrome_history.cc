@@ -7,6 +7,7 @@
 
 #include "chrome/browser/browsing_data_remover.h"
 
+#include "base/win/windows_version.h"
 #include "chrome_frame/chrome_frame_activex.h"
 #include "chrome_frame/utils.h"
 
@@ -16,7 +17,7 @@
 
 DeleteChromeHistory::DeleteChromeHistory()
   : remove_mask_(0) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
 }
 
 DeleteChromeHistory::~DeleteChromeHistory() {
@@ -24,13 +25,13 @@ DeleteChromeHistory::~DeleteChromeHistory() {
 
 
 HRESULT DeleteChromeHistory::FinalConstruct() {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   Initialize();
   return S_OK;
 }
 
 void DeleteChromeHistory::OnAutomationServerReady() {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   automation_client_->RemoveBrowsingData(remove_mask_);
   loop_.Quit();
 }
@@ -47,7 +48,7 @@ void DeleteChromeHistory::GetProfilePath(const std::wstring& profile_name,
 }
 
 STDMETHODIMP DeleteChromeHistory::DeleteBrowsingHistory(DWORD flags) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   // Usually called inside a quick startup/tear-down routine by RunDLL32. You
   // can simulate the process by calling:
   //    RunDll32.exe InetCpl.cpl,ClearMyTracksByProcess 255
@@ -65,7 +66,7 @@ STDMETHODIMP DeleteChromeHistory::DeleteBrowsingHistory(DWORD flags) {
   // effort to connect. Thus, we detect if we are in that circumstance and exit
   // silently.
   base::IntegrityLevel integrity_level;
-  if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA &&
+  if (base::win::GetVersion() >= base::win::VERSION_VISTA &&
       !base::GetProcessIntegrityLevel(base::GetCurrentProcessHandle(),
                                       &integrity_level)) {
     return E_UNEXPECTED;

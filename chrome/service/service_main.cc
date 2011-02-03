@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/debug_util.h"
+#include "base/debug/debugger.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/singleton.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/main_function_params.h"
@@ -16,12 +17,12 @@
 // Mainline routine for running as the service process.
 int ServiceProcessMain(const MainFunctionParams& parameters) {
   // If there is already a service process running, quit now.
-  if (!TakeServiceProcessSingletonLock())
+  if (!Singleton<ServiceProcessState>::get()->Initialize())
     return 0;
 
   MessageLoopForUI main_message_loop;
   if (parameters.command_line_.HasSwitch(switches::kWaitForDebugger)) {
-    DebugUtil::WaitForDebugger(60, true);
+    base::debug::WaitForDebugger(60, true);
   }
 
   PlatformThread::SetName("CrServiceMain");

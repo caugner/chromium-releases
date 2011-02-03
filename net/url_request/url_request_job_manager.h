@@ -7,6 +7,7 @@
 #pragma once
 
 #include <map>
+#include <string>
 #include <vector>
 
 #include "base/lock.h"
@@ -27,22 +28,23 @@
 class URLRequestJobManager {
  public:
   URLRequestJobManager();
+  ~URLRequestJobManager();
 
   // Instantiate an URLRequestJob implementation based on the registered
   // interceptors and protocol factories.  This will always succeed in
   // returning a job unless we are--in the extreme case--out of memory.
-  URLRequestJob* CreateJob(URLRequest* request) const;
+  net::URLRequestJob* CreateJob(net::URLRequest* request) const;
 
   // Allows interceptors to hijack the request after examining the new location
   // of a redirect. Returns NULL if no interceptor intervenes.
-  URLRequestJob* MaybeInterceptRedirect(URLRequest* request,
-                                        const GURL& location) const;
+  net::URLRequestJob* MaybeInterceptRedirect(net::URLRequest* request,
+                                             const GURL& location) const;
 
   // Allows interceptors to hijack the request after examining the response
   // status and headers. This is also called when there is no server response
   // at all to allow interception of failed requests due to network errors.
   // Returns NULL if no interceptor intervenes.
-  URLRequestJob* MaybeInterceptResponse(URLRequest* request) const;
+  net::URLRequestJob* MaybeInterceptResponse(net::URLRequest* request) const;
 
   // Returns true if there is a protocol factory registered for the given
   // scheme.  Note: also returns true if there is a built-in handler for the
@@ -59,13 +61,17 @@ class URLRequestJobManager {
   void RegisterRequestInterceptor(URLRequest::Interceptor* interceptor);
   void UnregisterRequestInterceptor(URLRequest::Interceptor* interceptor);
 
+  void set_enable_file_access(bool enable) { enable_file_access_ = enable; }
+  bool enable_file_access() const { return enable_file_access_; }
+
  private:
-  typedef std::map<std::string,URLRequest::ProtocolFactory*> FactoryMap;
+  typedef std::map<std::string, URLRequest::ProtocolFactory*> FactoryMap;
   typedef std::vector<URLRequest::Interceptor*> InterceptorList;
 
   mutable Lock lock_;
   FactoryMap factories_;
   InterceptorList interceptors_;
+  bool enable_file_access_;
 
 #ifndef NDEBUG
   // We use this to assert that CreateJob and the registration functions all

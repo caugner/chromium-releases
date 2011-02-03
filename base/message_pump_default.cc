@@ -5,7 +5,7 @@
 #include "base/message_pump_default.h"
 
 #include "base/logging.h"
-#include "base/scoped_nsautorelease_pool.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
 
 namespace base {
 
@@ -18,7 +18,7 @@ void MessagePumpDefault::Run(Delegate* delegate) {
   DCHECK(keep_running_) << "Quit must have been called outside of Run!";
 
   for (;;) {
-    ScopedNSAutoreleasePool autorelease_pool;
+    mac::ScopedNSAutoreleasePool autorelease_pool;
 
     bool did_work = delegate->DoWork();
     if (!keep_running_)
@@ -41,13 +41,13 @@ void MessagePumpDefault::Run(Delegate* delegate) {
     if (delayed_work_time_.is_null()) {
       event_.Wait();
     } else {
-      TimeDelta delay = delayed_work_time_ - Time::Now();
+      TimeDelta delay = delayed_work_time_ - TimeTicks::Now();
       if (delay > TimeDelta()) {
         event_.TimedWait(delay);
       } else {
         // It looks like delayed_work_time_ indicates a time in the past, so we
         // need to call DoDelayedWork now.
-        delayed_work_time_ = Time();
+        delayed_work_time_ = TimeTicks();
       }
     }
     // Since event_ is auto-reset, we don't need to do anything special here
@@ -67,7 +67,8 @@ void MessagePumpDefault::ScheduleWork() {
   event_.Signal();
 }
 
-void MessagePumpDefault::ScheduleDelayedWork(const Time& delayed_work_time) {
+void MessagePumpDefault::ScheduleDelayedWork(
+    const TimeTicks& delayed_work_time) {
   // We know that we can't be blocked on Wait right now since this method can
   // only be called on the same thread as Run, so we only need to update our
   // record of how long to sleep when we do sleep.

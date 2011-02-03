@@ -14,7 +14,9 @@
 #include "chrome/common/render_messages_params.h"
 #include "chrome/common/resource_response.h"
 #include "chrome/common/serialized_script_value.h"
+#include "chrome/common/speech_input_result.h"
 #include "chrome/common/thumbnail_score.h"
+#include "chrome/common/web_apps.h"
 #include "gfx/rect.h"
 #include "ipc/ipc_channel_handle.h"
 #include "media/audio/audio_buffers_state.h"
@@ -28,7 +30,6 @@
 #include "webkit/appcache/appcache_interfaces.h"
 #include "webkit/blob/blob_data.h"
 #include "webkit/glue/context_menu.h"
-#include "webkit/glue/dom_operations.h"
 #include "webkit/glue/form_data.h"
 #include "webkit/glue/form_field.h"
 #include "webkit/glue/password_form.h"
@@ -93,20 +94,23 @@ void ParamTraits<webkit_glue::FormField>::Write(Message* m,
   WriteParam(m, p.name());
   WriteParam(m, p.value());
   WriteParam(m, p.form_control_type());
-  WriteParam(m, p.size());
+  WriteParam(m, p.max_length());
+  WriteParam(m, p.is_autofilled());
   WriteParam(m, p.option_strings());
 }
 
 bool ParamTraits<webkit_glue::FormField>::Read(const Message* m, void** iter,
                                                param_type* p) {
   string16 label, name, value, form_control_type;
-  int size = 0;
+  int max_length = 0;
+  bool is_autofilled;
   std::vector<string16> options;
   bool result = ReadParam(m, iter, &label);
   result = result && ReadParam(m, iter, &name);
   result = result && ReadParam(m, iter, &value);
   result = result && ReadParam(m, iter, &form_control_type);
-  result = result && ReadParam(m, iter, &size);
+  result = result && ReadParam(m, iter, &max_length);
+  result = result && ReadParam(m, iter, &is_autofilled);
   result = result && ReadParam(m, iter, &options);
   if (!result)
     return false;
@@ -115,7 +119,8 @@ bool ParamTraits<webkit_glue::FormField>::Read(const Message* m, void** iter,
   p->set_name(name);
   p->set_value(value);
   p->set_form_control_type(form_control_type);
-  p->set_size(size);
+  p->set_max_length(max_length);
+  p->set_autofilled(is_autofilled);
   p->set_option_strings(options);
   return true;
 }
@@ -427,6 +432,8 @@ void ParamTraits<scoped_refptr<webkit_glue::ResourceDevToolsInfo> >::Write(
     Message* m, const param_type& p) {
   WriteParam(m, p.get() != NULL);
   if (p.get()) {
+    WriteParam(m, p->http_status_code);
+    WriteParam(m, p->http_status_text);
     WriteParam(m, p->request_headers);
     WriteParam(m, p->response_headers);
   }
@@ -441,6 +448,8 @@ bool ParamTraits<scoped_refptr<webkit_glue::ResourceDevToolsInfo> >::Read(
     return true;
   *r = new webkit_glue::ResourceDevToolsInfo();
   return
+      ReadParam(m, iter, &(*r)->http_status_code) &&
+      ReadParam(m, iter, &(*r)->http_status_text) &&
       ReadParam(m, iter, &(*r)->request_headers) &&
       ReadParam(m, iter, &(*r)->response_headers);
 }
@@ -720,12 +729,14 @@ void ParamTraits<WebPreferences>::Write(Message* m, const param_type& p) {
   WriteParam(m, p.user_style_sheet_enabled);
   WriteParam(m, p.user_style_sheet_location);
   WriteParam(m, p.author_and_user_styles_enabled);
+  WriteParam(m, p.frame_flattening_enabled);
   WriteParam(m, p.allow_universal_access_from_file_urls);
   WriteParam(m, p.allow_file_access_from_file_urls);
   WriteParam(m, p.experimental_webgl_enabled);
   WriteParam(m, p.show_composited_layer_borders);
   WriteParam(m, p.accelerated_compositing_enabled);
   WriteParam(m, p.accelerated_2d_canvas_enabled);
+  WriteParam(m, p.accelerated_layers_enabled);
   WriteParam(m, p.memory_info_enabled);
 }
 
@@ -769,12 +780,14 @@ bool ParamTraits<WebPreferences>::Read(const Message* m, void** iter,
       ReadParam(m, iter, &p->user_style_sheet_enabled) &&
       ReadParam(m, iter, &p->user_style_sheet_location) &&
       ReadParam(m, iter, &p->author_and_user_styles_enabled) &&
+      ReadParam(m, iter, &p->frame_flattening_enabled) &&
       ReadParam(m, iter, &p->allow_universal_access_from_file_urls) &&
       ReadParam(m, iter, &p->allow_file_access_from_file_urls) &&
       ReadParam(m, iter, &p->experimental_webgl_enabled) &&
       ReadParam(m, iter, &p->show_composited_layer_borders) &&
       ReadParam(m, iter, &p->accelerated_compositing_enabled) &&
       ReadParam(m, iter, &p->accelerated_2d_canvas_enabled) &&
+      ReadParam(m, iter, &p->accelerated_layers_enabled) &&
       ReadParam(m, iter, &p->memory_info_enabled);
 }
 
@@ -863,7 +876,7 @@ bool ParamTraits<URLPattern>::Read(const Message* m, void** iter,
     return false;
 
   p->set_valid_schemes(valid_schemes);
-  return p->Parse(spec);
+  return URLPattern::PARSE_SUCCESS == p->Parse(spec);
 }
 
 void ParamTraits<URLPattern>::Log(const param_type& p, std::string* l) {
@@ -1084,6 +1097,106 @@ void ParamTraits<webkit_glue::WebAccessibility>::Log(const param_type& p,
   l->append(")");
 }
 
+// Only the webkit_blob::BlobData ParamTraits<> definition needs this
+// definition, so keep this in the implementation file so we can forward declare
+// BlobData in the header.
+template <>
+struct ParamTraits<webkit_blob::BlobData::Item> {
+  typedef webkit_blob::BlobData::Item param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, static_cast<int>(p.type()));
+    if (p.type() == webkit_blob::BlobData::TYPE_DATA) {
+      WriteParam(m, p.data());
+    } else if (p.type() == webkit_blob::BlobData::TYPE_FILE) {
+      WriteParam(m, p.file_path());
+      WriteParam(m, p.offset());
+      WriteParam(m, p.length());
+      WriteParam(m, p.expected_modification_time());
+    } else {
+      WriteParam(m, p.blob_url());
+      WriteParam(m, p.offset());
+      WriteParam(m, p.length());
+    }
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    int type;
+    if (!ReadParam(m, iter, &type))
+      return false;
+    if (type == webkit_blob::BlobData::TYPE_DATA) {
+      std::string data;
+      if (!ReadParam(m, iter, &data))
+        return false;
+      r->SetToData(data);
+    } else if (type == webkit_blob::BlobData::TYPE_FILE) {
+      FilePath file_path;
+      uint64 offset, length;
+      base::Time expected_modification_time;
+      if (!ReadParam(m, iter, &file_path))
+        return false;
+      if (!ReadParam(m, iter, &offset))
+        return false;
+      if (!ReadParam(m, iter, &length))
+        return false;
+      if (!ReadParam(m, iter, &expected_modification_time))
+        return false;
+      r->SetToFile(file_path, offset, length, expected_modification_time);
+    } else {
+      DCHECK(type == webkit_blob::BlobData::TYPE_BLOB);
+      GURL blob_url;
+      uint64 offset, length;
+      if (!ReadParam(m, iter, &blob_url))
+        return false;
+      if (!ReadParam(m, iter, &offset))
+        return false;
+      if (!ReadParam(m, iter, &length))
+        return false;
+      r->SetToBlob(blob_url, offset, length);
+    }
+    return true;
+  }
+  static void Log(const param_type& p, std::string* l) {
+    l->append("<BlobData::Item>");
+  }
+};
+
+void ParamTraits<scoped_refptr<webkit_blob::BlobData> >::Write(
+    Message* m, const param_type& p) {
+  WriteParam(m, p.get() != NULL);
+  if (p) {
+    WriteParam(m, p->items());
+    WriteParam(m, p->content_type());
+    WriteParam(m, p->content_disposition());
+  }
+}
+
+bool ParamTraits<scoped_refptr<webkit_blob::BlobData> >::Read(
+    const Message* m, void** iter, param_type* r) {
+  bool has_object;
+  if (!ReadParam(m, iter, &has_object))
+    return false;
+  if (!has_object)
+    return true;
+  std::vector<webkit_blob::BlobData::Item> items;
+  if (!ReadParam(m, iter, &items))
+    return false;
+  std::string content_type;
+  if (!ReadParam(m, iter, &content_type))
+    return false;
+  std::string content_disposition;
+  if (!ReadParam(m, iter, &content_disposition))
+    return false;
+  *r = new webkit_blob::BlobData;
+  (*r)->swap_items(&items);
+  (*r)->set_content_type(content_type);
+  (*r)->set_content_disposition(content_disposition);
+  return true;
+}
+
+void ParamTraits<scoped_refptr<webkit_blob::BlobData> >::Log(
+    const param_type& p, std::string* l) {
+  l->append("<webkit_blob::BlobData>");
+}
+
 void ParamTraits<AudioBuffersState>::Write(Message* m, const param_type& p) {
   WriteParam(m, p.pending_bytes);
   WriteParam(m, p.hardware_delay_bytes);
@@ -1106,6 +1219,48 @@ void ParamTraits<AudioBuffersState>::Log(const param_type& p, std::string* l) {
   LogParam(p.hardware_delay_bytes, l);
   l->append(", ");
   LogParam(p.timestamp, l);
+  l->append(")");
+}
+
+void ParamTraits<PepperDirEntry>::Write(Message* m, const param_type& p) {
+  WriteParam(m, p.name);
+  WriteParam(m, p.is_dir);
+}
+
+bool ParamTraits<PepperDirEntry>::Read(const Message* m,
+                                    void** iter,
+                                    param_type* p) {
+  return ReadParam(m, iter, &p->name) &&
+      ReadParam(m, iter, &p->is_dir);
+}
+
+void ParamTraits<PepperDirEntry>::Log(const param_type& p, std::string* l) {
+  l->append("(");
+  LogParam(p.name, l);
+  l->append(", ");
+  LogParam(p.is_dir, l);
+  l->append(")");
+}
+
+void ParamTraits<speech_input::SpeechInputResultItem>::Write(
+    Message* m, const param_type& p) {
+  WriteParam(m, p.utterance);
+  WriteParam(m, p.confidence);
+}
+
+bool ParamTraits<speech_input::SpeechInputResultItem>::Read(const Message* m,
+                                                            void** iter,
+                                                            param_type* p) {
+  return ReadParam(m, iter, &p->utterance) &&
+         ReadParam(m, iter, &p->confidence);
+}
+
+void ParamTraits<speech_input::SpeechInputResultItem>::Log(const param_type& p,
+                                                           std::string* l) {
+  l->append("(");
+  LogParam(p.utterance, l);
+  l->append(":");
+  LogParam(p.confidence, l);
   l->append(")");
 }
 

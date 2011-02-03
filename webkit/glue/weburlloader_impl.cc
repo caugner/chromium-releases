@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@
 #include "net/base/net_util.h"
 #include "net/http/http_response_headers.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebHTTPHeaderVisitor.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebResourceRawHeaders.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebHTTPLoadInfo.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSecurityPolicy.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLError.h"
@@ -37,7 +37,7 @@ using base::TimeDelta;
 using WebKit::WebData;
 using WebKit::WebHTTPBody;
 using WebKit::WebHTTPHeaderVisitor;
-using WebKit::WebResourceRawHeaders;
+using WebKit::WebHTTPLoadInfo;
 using WebKit::WebSecurityPolicy;
 using WebKit::WebString;
 using WebKit::WebURL;
@@ -208,22 +208,26 @@ void PopulateURLResponse(
   response->setLoadTiming(timing);
 
   if (info.devtools_info.get()) {
-    WebResourceRawHeaders rawHeaders;
+    WebHTTPLoadInfo load_info;
+
+    load_info.setHTTPStatusCode(info.devtools_info->http_status_code);
+    load_info.setHTTPStatusText(WebString::fromUTF8(
+        info.devtools_info->http_status_text));
 
     const HeadersVector& request_headers = info.devtools_info->request_headers;
-    for (HeadersVector::const_iterator it = request_headers .begin();
+    for (HeadersVector::const_iterator it = request_headers.begin();
          it != request_headers.end(); ++it) {
-      rawHeaders.addRequestHeader(WebString::fromUTF8(it->first),
+      load_info.addRequestHeader(WebString::fromUTF8(it->first),
           WebString::fromUTF8(it->second));
     }
     const HeadersVector& response_headers =
         info.devtools_info->response_headers;
     for (HeadersVector::const_iterator it = response_headers.begin();
          it != response_headers.end(); ++it) {
-      rawHeaders.addResponseHeader(WebString::fromUTF8(it->first),
+      load_info.addResponseHeader(WebString::fromUTF8(it->first),
           WebString::fromUTF8(it->second));
     }
-    response->setResourceRawHeaders(rawHeaders);
+    response->setHTTPLoadInfo(load_info);
   }
 
   const net::HttpResponseHeaders* headers = info.headers;
@@ -293,7 +297,6 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
       const URLRequestStatus& status,
       const std::string& security_info,
       const base::Time& completion_time);
-  virtual GURL GetURLForDebugging() const;
 
  private:
   friend class base::RefCounted<Context>;
@@ -563,7 +566,8 @@ void WebURLLoaderImpl::Context::OnReceivedResponse(
     std::string content_type;
     info.headers->EnumerateHeader(NULL, "content-type", &content_type);
 
-    std::string boundary = net::GetHeaderParamValue(content_type, "boundary");
+    std::string boundary = net::GetHeaderParamValue(
+        content_type, "boundary", net::QuoteRule::REMOVE_OUTER_QUOTES);
     TrimString(boundary, " \"", &boundary);
 
     // If there's no boundary, just handle the request normally.  In the gecko
@@ -656,10 +660,6 @@ void WebURLLoaderImpl::Context::OnCompletedRequest(
   // to ourselves that we took on behalf of the bridge.  This may cause our
   // destruction.
   Release();
-}
-
-GURL WebURLLoaderImpl::Context::GetURLForDebugging() const {
-  return request_.url();
 }
 
 void WebURLLoaderImpl::Context::HandleDataURL() {

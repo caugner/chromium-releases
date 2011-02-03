@@ -5,7 +5,7 @@
 #include "chrome/browser/tab_contents/web_drag_source_win.h"
 
 #include "base/task.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/web_drag_utils_win.h"
@@ -32,7 +32,7 @@ static void GetCursorPositions(gfx::NativeWindow wnd, gfx::Point* client,
 
 WebDragSource::WebDragSource(gfx::NativeWindow source_wnd,
                              TabContents* tab_contents)
-    : BaseDragSource(),
+    : app::win::DragSource(),
       source_wnd_(source_wnd),
       render_view_host_(tab_contents->render_view_host()),
       effect_(DROPEFFECT_NONE) {
@@ -40,6 +40,9 @@ WebDragSource::WebDragSource(gfx::NativeWindow source_wnd,
                  Source<TabContents>(tab_contents));
   registrar_.Add(this, NotificationType::TAB_CONTENTS_DISCONNECTED,
                  Source<TabContents>(tab_contents));
+}
+
+WebDragSource::~WebDragSource() {
 }
 
 void WebDragSource::OnDragSourceCancel() {

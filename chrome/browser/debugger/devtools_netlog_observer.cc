@@ -9,6 +9,8 @@
 #include "chrome/common/resource_response.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_net_log_params.h"
+#include "net/http/http_response_headers.h"
+#include "net/url_request/url_request.h"
 #include "net/url_request/url_request_netlog_params.h"
 #include "webkit/glue/resource_loader_bridge.h"
 
@@ -17,7 +19,7 @@ const size_t kMaxNumEntries = 1000;
 DevToolsNetLogObserver* DevToolsNetLogObserver::instance_ = NULL;
 
 DevToolsNetLogObserver::DevToolsNetLogObserver(ChromeNetLog* chrome_net_log)
-    : ChromeNetLog::Observer(net::NetLog::LOG_ALL),
+    : ChromeNetLog::Observer(net::NetLog::LOG_ALL_BUT_BYTES),
       chrome_net_log_(chrome_net_log) {
   chrome_net_log_->AddObserver(this);
 }
@@ -51,8 +53,14 @@ void DevToolsNetLogObserver::OnAddEntry(net::NetLog::EventType type,
                       "larger than expected, resetting";
       request_to_info_.clear();
     }
-    scoped_refptr<ResourceInfo> new_record = new ResourceInfo();
-    request_to_info_.insert(std::make_pair(source.id, new_record));
+    scoped_refptr<ResourceInfo> new_record(new ResourceInfo());
+    // We may encounter multiple PHASE_BEGIN for same resource in case of
+    // redirect -- if so, replace the old record to avoid keeping headers
+    // from different requests.
+    std::pair<RequestToInfoMap::iterator, bool> inserted =
+        request_to_info_.insert(std::make_pair(source.id, new_record));
+    if (!inserted.second)
+      inserted.first->second = new_record;
     return;
   }
   if (type == net::NetLog::TYPE_REQUEST_ALIVE &&
@@ -82,6 +90,8 @@ void DevToolsNetLogObserver::OnAddEntry(net::NetLog::EventType type,
     case net::NetLog::TYPE_HTTP_TRANSACTION_READ_RESPONSE_HEADERS: {
       const net::HttpResponseHeaders& response_headers =
           static_cast<net::NetLogHttpResponseParameter*>(params)->GetHeaders();
+      info->http_status_code = response_headers.response_code();
+      info->http_status_text = response_headers.GetStatusText();
       std::string name, value;
       for (void* it = NULL;
            response_headers.EnumerateHeaderLines(&it, &name, &value); ) {

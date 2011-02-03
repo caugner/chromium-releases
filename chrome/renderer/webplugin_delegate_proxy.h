@@ -176,8 +176,11 @@ class WebPluginDelegateProxy
   void OnAcceleratedSurfaceAllocTransportDIB(size_t size,
                                              TransportDIB::Handle* dib_handle);
   void OnAcceleratedSurfaceFreeTransportDIB(TransportDIB::Id dib_id);
-  void OnAcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window);
+  void OnAcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window,
+                                          uint64 surface_id);
 #endif
+
+  void OnURLRedirectResponse(bool allow, int resource_id);
 
   // Draw a graphic indicating a crashed plugin.
   void PaintSadPlugin(WebKit::WebCanvas* canvas, const gfx::Rect& rect);
@@ -237,6 +240,7 @@ class WebPluginDelegateProxy
   WebPluginInfo info_;
 
   gfx::Rect plugin_rect_;
+  gfx::Rect clip_rect_;
 
   NPObject* npobject_;
   base::WeakPtr<NPObjectStub> window_script_object_;

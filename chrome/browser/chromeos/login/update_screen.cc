@@ -4,10 +4,12 @@
 
 #include "chrome/browser/chromeos/login/update_screen.h"
 
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "chrome/browser/chromeos/login/update_view.h"
+#include "chrome/browser/chromeos/login/wizard_controller.h"
 
 namespace {
 
@@ -28,6 +30,8 @@ const int kDownloadProgressIncrement = 60;
 const int kUpdateScreenWidth = 580;
 const int kUpdateScreenHeight = 305;
 
+const char kUpdateDeadlineFile[] = "/tmp/update-check-response-deadline";
+
 }  // anonymous namespace
 
 namespace chromeos {
@@ -37,8 +41,9 @@ UpdateScreen::UpdateScreen(WizardScreenDelegate* delegate)
                                               kUpdateScreenWidth,
                                               kUpdateScreenHeight),
       checking_for_update_(true),
-      maximal_curtain_time_(0),
-      reboot_check_delay_(0) {
+      reboot_check_delay_(0),
+      is_downloading_update_(false),
+      is_all_updates_critical_(false) {
 }
 
 UpdateScreen::~UpdateScreen() {
@@ -61,10 +66,30 @@ void UpdateScreen::UpdateStatusChanged(UpdateLibrary* library) {
       break;
     case UPDATE_STATUS_UPDATE_AVAILABLE:
       view()->SetProgress(kBeforeDownloadProgress);
-      LOG(INFO) << "Update available: " << library->status().new_version;
+      if (!HasCriticalUpdate()) {
+        LOG(INFO) << "Noncritical update available: "
+                  << library->status().new_version;
+        ExitUpdate(false);
+      } else {
+        LOG(INFO) << "Critical update available: "
+                  << library->status().new_version;
+      }
       break;
     case UPDATE_STATUS_DOWNLOADING:
       {
+        if (!is_downloading_update_) {
+          // Because update engine doesn't send UPDATE_STATUS_UPDATE_AVAILABLE
+          // we need to is update critical on first downloading notification.
+          is_downloading_update_ = true;
+          if (!HasCriticalUpdate()) {
+            LOG(INFO) << "Non-critical update available: "
+                      << library->status().new_version;
+            ExitUpdate(false);
+          } else {
+            LOG(INFO) << "Critical update available: "
+                      << library->status().new_version;
+          }
+        }
         view()->ShowCurtain(false);
         int download_progress = static_cast<int>(
             library->status().download_progress * kDownloadProgressIncrement);
@@ -78,18 +103,24 @@ void UpdateScreen::UpdateStatusChanged(UpdateLibrary* library) {
       view()->SetProgress(kBeforeFinalizingProgress);
       break;
     case UPDATE_STATUS_UPDATED_NEED_REBOOT:
+      // Make sure that first OOBE stage won't be shown after reboot.
+      WizardController::MarkOobeCompleted();
       view()->SetProgress(kProgressComplete);
-      view()->ShowCurtain(false);
-      CrosLibrary::Get()->GetUpdateLibrary()->RebootAfterUpdate();
-      LOG(INFO) << "Reboot API was called. Waiting for reboot.";
-      reboot_timer_.Start(base::TimeDelta::FromSeconds(reboot_check_delay_),
-                          this,
-                          &UpdateScreen::OnWaitForRebootTimeElapsed);
+      if (HasCriticalUpdate()) {
+        view()->ShowCurtain(false);
+        VLOG(1) << "Initiate reboot after update";
+        CrosLibrary::Get()->GetUpdateLibrary()->RebootAfterUpdate();
+        reboot_timer_.Start(base::TimeDelta::FromSeconds(reboot_check_delay_),
+                            this,
+                            &UpdateScreen::OnWaitForRebootTimeElapsed);
+      } else {
+        ExitUpdate(false);
+      }
       break;
     case UPDATE_STATUS_IDLE:
     case UPDATE_STATUS_ERROR:
     case UPDATE_STATUS_REPORTING_ERROR_EVENT:
-      ExitUpdate();
+      ExitUpdate(false);
       break;
     default:
       NOTREACHED();
@@ -101,47 +132,51 @@ void UpdateScreen::StartUpdate() {
   // Reset view.
   view()->Reset();
   view()->set_controller(this);
-
-  // Start the maximal curtain time timer.
-  if (maximal_curtain_time_ > 0) {
-    maximal_curtain_time_timer_.Start(
-        base::TimeDelta::FromSeconds(maximal_curtain_time_),
-        this,
-        &UpdateScreen::OnMaximalCurtainTimeElapsed);
-  } else {
-    view()->ShowCurtain(false);
-  }
-
+  is_downloading_update_ = false;
   view()->SetProgress(kBeforeUpdateCheckProgress);
 
   if (!CrosLibrary::Get()->EnsureLoaded()) {
     LOG(ERROR) << "Error loading CrosLibrary";
   } else {
     CrosLibrary::Get()->GetUpdateLibrary()->AddObserver(this);
-    LOG(INFO) << "Checking for update";
+    VLOG(1) << "Initiate update check";
     if (!CrosLibrary::Get()->GetUpdateLibrary()->CheckForUpdate()) {
-      ExitUpdate();
+      ExitUpdate(true);
     }
   }
 }
 
 void UpdateScreen::CancelUpdate() {
-#if !defined(OFFICIAL_BUILD)
-  ExitUpdate();
-#endif
+  // Screen has longer lifetime than it's view.
+  // View is deleted after wizard proceeds to the next screen.
+  if (view())
+    ExitUpdate(true);
 }
 
-void UpdateScreen::ExitUpdate() {
-  maximal_curtain_time_timer_.Stop();
+void UpdateScreen::ExitUpdate(bool forced) {
   ScreenObserver* observer = delegate()->GetObserver(this);
 
   if (!CrosLibrary::Get()->EnsureLoaded()) {
     observer->OnExit(ScreenObserver::UPDATE_ERROR_CHECKING_FOR_UPDATE);
+    return;
+  }
+
+  if (forced) {
+    observer->OnExit(ScreenObserver::UPDATE_NOUPDATE);
+    return;
   }
 
   UpdateLibrary* update_library = CrosLibrary::Get()->GetUpdateLibrary();
   update_library->RemoveObserver(this);
   switch (update_library->status().status) {
+    case UPDATE_STATUS_UPDATE_AVAILABLE:
+    case UPDATE_STATUS_UPDATED_NEED_REBOOT:
+    case UPDATE_STATUS_DOWNLOADING:
+    case UPDATE_STATUS_FINALIZING:
+    case UPDATE_STATUS_VERIFYING:
+      DCHECK(!HasCriticalUpdate());
+      // Noncritical update, just exit screen as if there is no update.
+      // no break
     case UPDATE_STATUS_IDLE:
       observer->OnExit(ScreenObserver::UPDATE_NOUPDATE);
       break;
@@ -156,20 +191,9 @@ void UpdateScreen::ExitUpdate() {
   }
 }
 
-void UpdateScreen::OnMaximalCurtainTimeElapsed() {
-  view()->ShowCurtain(false);
-}
-
 void UpdateScreen::OnWaitForRebootTimeElapsed() {
   LOG(ERROR) << "Unable to reboot - asking user for a manual reboot.";
   view()->ShowManualRebootInfo();
-}
-
-void UpdateScreen::SetMaximalCurtainTime(int seconds) {
-  if (seconds <= 0)
-    maximal_curtain_time_timer_.Stop();
-  DCHECK(!maximal_curtain_time_timer_.IsRunning());
-  maximal_curtain_time_ = seconds;
 }
 
 void UpdateScreen::SetRebootCheckDelay(int seconds) {
@@ -177,6 +201,26 @@ void UpdateScreen::SetRebootCheckDelay(int seconds) {
     reboot_timer_.Stop();
   DCHECK(!reboot_timer_.IsRunning());
   reboot_check_delay_ = seconds;
+}
+
+bool UpdateScreen::HasCriticalUpdate() {
+  if (is_all_updates_critical_)
+    return true;
+
+  std::string deadline;
+  FilePath update_deadline_file_path(kUpdateDeadlineFile);
+  if (!file_util::ReadFileToString(update_deadline_file_path, &deadline) ||
+      deadline.empty()) {
+    return false;
+  }
+
+  // TODO(dpolukhin): Analyze file content. Now we can just assume that
+  // if the file exists and not empty, there is critical update.
+  return true;
+}
+
+void UpdateScreen::SetAllUpdatesCritical(bool is_critical) {
+  is_all_updates_critical_ = is_critical;
 }
 
 }  // namespace chromeos

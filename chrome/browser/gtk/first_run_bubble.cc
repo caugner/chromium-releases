@@ -6,18 +6,16 @@
 
 #include <gtk/gtk.h>
 
-#include "app/gtk_util.h"
 #include "app/l10n_util.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/search_engines/util.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/notification_service.h"
-#include "gfx/gtk_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -63,7 +61,7 @@ void FirstRunBubble::Observe(NotificationType type,
   } else {
     for (std::vector<GtkWidget*>::iterator it = labels_.begin();
          it != labels_.end(); ++it) {
-      gtk_widget_modify_fg(*it, GTK_STATE_NORMAL, &gfx::kGdkBlack);
+      gtk_widget_modify_fg(*it, GTK_STATE_NORMAL, &gtk_util::kGdkBlack);
     }
   }
 }

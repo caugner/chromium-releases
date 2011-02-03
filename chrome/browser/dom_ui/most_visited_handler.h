@@ -63,6 +63,10 @@ class MostVisitedHandler : public DOMMessageHandler,
 
   static void RegisterUserPrefs(PrefService* prefs);
 
+  // Returns a vector containing the urls for the prepopulated pages.
+  // Used only in testing.
+  static std::vector<GURL> GetPrePopulatedUrls();
+
  private:
   struct MostVisitedPage;
 
@@ -80,7 +84,7 @@ class MostVisitedHandler : public DOMMessageHandler,
   void SetPagesValueFromTopSites(const history::MostVisitedURLList& data);
 
   // Callback for TopSites.
-  void OnMostVisitedURLsAvailable(history::MostVisitedURLList data);
+  void OnMostVisitedURLsAvailable(const history::MostVisitedURLList& data);
 
   // Puts the passed URL in the blacklist (so it does not show as a thumbnail).
   void BlacklistURL(const GURL& url);

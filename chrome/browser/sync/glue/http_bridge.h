@@ -60,7 +60,7 @@ class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
           URLRequestContext::GetUserAgent(url) : user_agent_;
     }
 
-    virtual bool AllowSendingCookies(const URLRequest* request) const {
+    virtual bool AllowSendingCookies(const net::URLRequest* request) const {
       return false;
     }
 
@@ -85,7 +85,7 @@ class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
 
     // URLRequestContextGetter implementation.
     virtual URLRequestContext* GetURLRequestContext();
-    virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy();
+    virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const;
 
    private:
     ~RequestContextGetter() {}

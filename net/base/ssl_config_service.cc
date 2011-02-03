@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,13 +15,14 @@
 
 namespace net {
 
-SSLConfig::CertAndStatus::CertAndStatus() {}
+SSLConfig::CertAndStatus::CertAndStatus() : cert_status(0) {}
 
 SSLConfig::CertAndStatus::~CertAndStatus() {}
 
 SSLConfig::SSLConfig()
     : rev_checking_enabled(true),  ssl2_enabled(false), ssl3_enabled(true),
       tls1_enabled(true), dnssec_enabled(false), snap_start_enabled(false),
+      dns_cert_provenance_checking_enabled(false),
       mitm_proxies_allowed(false), false_start_enabled(true),
       send_client_cert(false), verify_ev_cert(false), ssl3_fallback(false) {
 }
@@ -31,7 +32,7 @@ SSLConfig::~SSLConfig() {
 
 bool SSLConfig::IsAllowedBadCert(X509Certificate* cert) const {
   for (size_t i = 0; i < allowed_bad_certs.size(); ++i) {
-    if (cert == allowed_bad_certs[i].cert)
+    if (cert->Equals(allowed_bad_certs[i].cert))
       return true;
   }
   return false;
@@ -95,6 +96,7 @@ static bool g_dnssec_enabled = false;
 static bool g_false_start_enabled = true;
 static bool g_mitm_proxies_allowed = false;
 static bool g_snap_start_enabled = false;
+static bool g_dns_cert_provenance_checking = false;
 
 // static
 void SSLConfigService::SetSSLConfigFlags(SSLConfig* ssl_config) {
@@ -102,6 +104,8 @@ void SSLConfigService::SetSSLConfigFlags(SSLConfig* ssl_config) {
   ssl_config->false_start_enabled = g_false_start_enabled;
   ssl_config->mitm_proxies_allowed = g_mitm_proxies_allowed;
   ssl_config->snap_start_enabled = g_snap_start_enabled;
+  ssl_config->dns_cert_provenance_checking_enabled =
+      g_dns_cert_provenance_checking;
 }
 
 // static
@@ -142,6 +146,16 @@ void SSLConfigService::AllowMITMProxies() {
 // static
 bool SSLConfigService::mitm_proxies_allowed() {
   return g_mitm_proxies_allowed;
+}
+
+// static
+void SSLConfigService::EnableDNSCertProvenanceChecking() {
+  g_dns_cert_provenance_checking = true;
+}
+
+// static
+bool SSLConfigService::dns_cert_provenance_checking_enabled() {
+  return g_dns_cert_provenance_checking;
 }
 
 void SSLConfigService::AddObserver(Observer* observer) {

@@ -9,7 +9,6 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/values.h"
-#include "base/histogram.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "googleurl/src/gurl.h"
@@ -193,21 +192,29 @@ class ProxyResolverFactoryForV8 : public ProxyResolverFactory {
   scoped_ptr<ForwardingNetLog> forwarding_net_log_;
 };
 
-// Creates ProxyResolvers using a non-V8 implementation.
-class ProxyResolverFactoryForNonV8 : public ProxyResolverFactory {
+// Creates ProxyResolvers using a platform-specific implementation.
+class ProxyResolverFactoryForSystem : public ProxyResolverFactory {
  public:
-  ProxyResolverFactoryForNonV8()
+  ProxyResolverFactoryForSystem()
       : ProxyResolverFactory(false /*expects_pac_bytes*/) {}
 
   virtual ProxyResolver* CreateProxyResolver() {
+    DCHECK(IsSupported());
 #if defined(OS_WIN)
     return new ProxyResolverWinHttp();
 #elif defined(OS_MACOSX)
     return new ProxyResolverMac();
 #else
-    LOG(WARNING) << "PAC support disabled because there is no fallback "
-                    "non-V8 implementation";
-    return new ProxyResolverNull();
+    NOTREACHED();
+    return NULL;
+#endif
+  }
+
+  static bool IsSupported() {
+#if defined(OS_WIN) || defined(OS_MACOSX)
+    return true;
+#else
+    return false;
 #endif
   }
 };
@@ -381,26 +388,24 @@ ProxyService::ProxyService(ProxyConfigService* config_service,
 }
 
 // static
-ProxyService* ProxyService::Create(
+ProxyService* ProxyService::CreateUsingV8ProxyResolver(
     ProxyConfigService* proxy_config_service,
-    bool use_v8_resolver,
     size_t num_pac_threads,
-    URLRequestContext* url_request_context,
-    NetLog* net_log,
-    MessageLoop* io_loop) {
+    ProxyScriptFetcher* proxy_script_fetcher,
+    HostResolver* host_resolver,
+    NetLog* net_log) {
+  DCHECK(proxy_config_service);
+  DCHECK(proxy_script_fetcher);
+  DCHECK(host_resolver);
+
   if (num_pac_threads == 0)
     num_pac_threads = kDefaultNumPacThreads;
 
-  ProxyResolverFactory* sync_resolver_factory;
-  if (use_v8_resolver) {
-    sync_resolver_factory =
-        new ProxyResolverFactoryForV8(
-            url_request_context->host_resolver(),
-            io_loop,
-            net_log);
-  } else {
-    sync_resolver_factory = new ProxyResolverFactoryForNonV8();
-  }
+  ProxyResolverFactory* sync_resolver_factory =
+      new ProxyResolverFactoryForV8(
+          host_resolver,
+          MessageLoop::current(),
+          net_log);
 
   ProxyResolver* proxy_resolver =
       new MultiThreadedProxyResolver(sync_resolver_factory, num_pac_threads);
@@ -408,21 +413,56 @@ ProxyService* ProxyService::Create(
   ProxyService* proxy_service =
       new ProxyService(proxy_config_service, proxy_resolver, net_log);
 
-  if (proxy_resolver->expects_pac_bytes()) {
-    // Configure PAC script downloads to be issued using |url_request_context|.
-    DCHECK(url_request_context);
-    proxy_service->SetProxyScriptFetcher(
-        ProxyScriptFetcher::Create(url_request_context));
-  }
+  // Configure PAC script downloads to be issued using |proxy_script_fetcher|.
+  proxy_service->SetProxyScriptFetcher(proxy_script_fetcher);
 
   return proxy_service;
+}
+
+// static
+ProxyService* ProxyService::CreateUsingSystemProxyResolver(
+    ProxyConfigService* proxy_config_service,
+    size_t num_pac_threads,
+    NetLog* net_log) {
+  DCHECK(proxy_config_service);
+
+  if (!ProxyResolverFactoryForSystem::IsSupported()) {
+    LOG(WARNING) << "PAC support disabled because there is no "
+                    "system implementation";
+    return CreateWithoutProxyResolver(proxy_config_service, net_log);
+  }
+
+  if (num_pac_threads == 0)
+    num_pac_threads = kDefaultNumPacThreads;
+
+  ProxyResolver* proxy_resolver = new MultiThreadedProxyResolver(
+      new ProxyResolverFactoryForSystem(), num_pac_threads);
+
+  return new ProxyService(proxy_config_service, proxy_resolver, net_log);
+}
+
+// static
+ProxyService* ProxyService::CreateWithoutProxyResolver(
+    ProxyConfigService* proxy_config_service,
+    NetLog* net_log) {
+  return new ProxyService(proxy_config_service,
+                          new ProxyResolverNull(),
+                          net_log);
 }
 
 // static
 ProxyService* ProxyService::CreateFixed(const ProxyConfig& pc) {
   // TODO(eroman): This isn't quite right, won't work if |pc| specifies
   //               a PAC script.
-  return Create(new ProxyConfigServiceFixed(pc), false, 0, NULL, NULL, NULL);
+  return CreateUsingSystemProxyResolver(new ProxyConfigServiceFixed(pc),
+                                        0, NULL);
+}
+
+// static
+ProxyService* ProxyService::CreateFixed(const std::string& proxy) {
+  net::ProxyConfig proxy_config;
+  proxy_config.proxy_rules().ParseFromString(proxy);
+  return ProxyService::CreateFixed(proxy_config);
 }
 
 // static
@@ -472,8 +512,8 @@ int ProxyService::ResolveProxy(const GURL& raw_url,
   if (rv != ERR_IO_PENDING)
     return DidFinishResolvingProxy(result, rv, net_log);
 
-  scoped_refptr<PacRequest> req =
-      new PacRequest(this, url, result, callback, net_log);
+  scoped_refptr<PacRequest> req(
+      new PacRequest(this, url, result, callback, net_log));
 
   if (current_state_ == STATE_READY) {
     // Start the resolve request.
@@ -594,8 +634,8 @@ void ProxyService::OnInitProxyResolverComplete(int result) {
   init_proxy_resolver_.reset();
 
   if (result != OK) {
-    LOG(INFO) << "Failed configuring with PAC script, falling-back to manual "
-                 "proxy servers.";
+    VLOG(1) << "Failed configuring with PAC script, falling-back to manual "
+               "proxy servers.";
     config_ = fetched_config_;
     config_.ClearAutomaticSettings();
   }
@@ -658,17 +698,19 @@ int ProxyService::DidFinishResolvingProxy(ProxyInfo* result,
                                           const BoundNetLog& net_log) {
   // Log the result of the proxy resolution.
   if (result_code == OK) {
-    // When full logging is enabled, dump the proxy list.
-    if (net_log.IsLoggingAll()) {
+    // When logging all events is enabled, dump the proxy list.
+    if (net_log.IsLoggingAllEvents()) {
       net_log.AddEvent(
           NetLog::TYPE_PROXY_SERVICE_RESOLVED_PROXY_LIST,
-          new NetLogStringParameter("pac_string", result->ToPacString()));
+          make_scoped_refptr(new NetLogStringParameter(
+              "pac_string", result->ToPacString())));
     }
     result->DeprioritizeBadProxies(proxy_retry_info_);
   } else {
     net_log.AddEvent(
         NetLog::TYPE_PROXY_SERVICE_RESOLVED_PROXY_LIST,
-        new NetLogIntegerParameter("net_error", result_code));
+        make_scoped_refptr(new NetLogIntegerParameter(
+            "net_error", result_code)));
 
     // Fall-back to direct when the proxy resolver fails. This corresponds
     // with a javascript runtime error in the PAC script.
@@ -778,8 +820,8 @@ ProxyConfigService* ProxyService::CreateSystemProxyConfigService(
 void ProxyService::OnProxyConfigChanged(const ProxyConfig& config) {
   // Emit the proxy settings change to the NetLog stream.
   if (net_log_) {
-    scoped_refptr<NetLog::EventParameters> params =
-        new ProxyConfigChangedNetLogParam(fetched_config_, config);
+    scoped_refptr<NetLog::EventParameters> params(
+        new ProxyConfigChangedNetLogParam(fetched_config_, config));
     net_log_->AddEntry(net::NetLog::TYPE_PROXY_CONFIG_CHANGED,
                        base::TimeTicks::Now(),
                        NetLog::Source(),

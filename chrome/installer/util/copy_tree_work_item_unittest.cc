@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -344,8 +344,8 @@ TEST_F(CopyTreeWorkItemTest, CopyFileInUse) {
   file_util::CopyFile(exe_full_path, file_name_to);
   ASSERT_TRUE(file_util::PathExists(file_name_to));
 
-  LOG(INFO) << "copy ourself from "
-            << exe_full_path.value() << " to " << file_name_to.value();
+  VLOG(1) << "copy ourself from " << exe_full_path.value()
+          << " to " << file_name_to.value();
 
   // Run the executable in destination path
   STARTUPINFOW si = {sizeof(si)};
@@ -422,8 +422,8 @@ TEST_F(CopyTreeWorkItemTest, NewNameAndCopyTest) {
   file_util::CopyFile(exe_full_path, file_name_to);
   ASSERT_TRUE(file_util::PathExists(file_name_to));
 
-  LOG(INFO) << "copy ourself from "
-            << exe_full_path.value() << " to " << file_name_to.value();
+  VLOG(1) << "copy ourself from " << exe_full_path.value()
+          << " to " << file_name_to.value();
 
   // Run the executable in destination path
   STARTUPINFOW si = {sizeof(si)};
@@ -508,7 +508,8 @@ TEST_F(CopyTreeWorkItemTest, NewNameAndCopyTest) {
 // 2. If destination file/directory do not exist, the source should be copied
 //    in the destination folder after Do() and should be rolled back after
 //    Rollback().
-TEST_F(CopyTreeWorkItemTest, IfNotPresentTest) {
+// Flaky, http://crbug.com/59785.
+TEST_F(CopyTreeWorkItemTest, FLAKY_IfNotPresentTest) {
   // Create source file
   FilePath file_name_from(test_dir_);
   file_name_from = file_name_from.AppendASCII("File_From");
@@ -586,7 +587,8 @@ TEST_F(CopyTreeWorkItemTest, IfNotPresentTest) {
 
 // Copy one file without rollback. The existing one in destination is in use.
 // Verify it is moved to backup location and stays there.
-TEST_F(CopyTreeWorkItemTest, CopyFileInUseAndCleanup) {
+// Flaky, http://crbug.com/59783.
+TEST_F(CopyTreeWorkItemTest, FLAKY_CopyFileInUseAndCleanup) {
   // Create source file
   FilePath file_name_from(test_dir_);
   file_name_from = file_name_from.AppendASCII("File_From");
@@ -608,8 +610,8 @@ TEST_F(CopyTreeWorkItemTest, CopyFileInUseAndCleanup) {
   file_util::CopyFile(exe_full_path, file_name_to);
   ASSERT_TRUE(file_util::PathExists(file_name_to));
 
-  LOG(INFO) << "copy ourself from "
-            << exe_full_path.value() << " to " << file_name_to.value();
+  VLOG(1) << "copy ourself from " << exe_full_path.value()
+          << " to " << file_name_to.value();
 
   // Run the executable in destination path
   STARTUPINFOW si = {sizeof(si)};
@@ -654,7 +656,8 @@ TEST_F(CopyTreeWorkItemTest, CopyFileInUseAndCleanup) {
 }
 
 // Copy a tree from source to destination.
-TEST_F(CopyTreeWorkItemTest, CopyTree) {
+// Flaky, http://crbug.com/59784.
+TEST_F(CopyTreeWorkItemTest, FLAKY_CopyTree) {
   // Create source tree
   FilePath dir_name_from(test_dir_);
   dir_name_from = dir_name_from.AppendASCII("from");
@@ -699,15 +702,15 @@ TEST_F(CopyTreeWorkItemTest, CopyTree) {
   file_name_to_1 = file_name_to_1.AppendASCII("1");
   file_name_to_1 = file_name_to_1.AppendASCII("File_1.txt");
   EXPECT_TRUE(file_util::PathExists(file_name_to_1));
-  LOG(INFO) << "compare "
-            << file_name_from_1.value() << " and " << file_name_to_1.value();
+  VLOG(1) << "compare " << file_name_from_1.value()
+          << " and " << file_name_to_1.value();
   EXPECT_TRUE(file_util::ContentsEqual(file_name_from_1, file_name_to_1));
 
   FilePath file_name_to_2(dir_name_to);
   file_name_to_2 = file_name_to_2.AppendASCII("2");
   file_name_to_2 = file_name_to_2.AppendASCII("File_2.txt");
   EXPECT_TRUE(file_util::PathExists(file_name_to_2));
-  LOG(INFO) << "compare "
-            << file_name_from_2.value() << " and " << file_name_to_2.value();
+  VLOG(1) << "compare " << file_name_from_2.value()
+          << " and " << file_name_to_2.value();
   EXPECT_TRUE(file_util::ContentsEqual(file_name_from_2, file_name_to_2));
 }

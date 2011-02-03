@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,7 @@
 #include "base/scoped_handle_win.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
+#include "base/win/windows_version.h"
 #include "gfx/codec/png_codec.h"
 #include "gfx/gdi_util.h"
 
@@ -99,7 +100,7 @@ bool IsDrag(const POINT& origin, const POINT& current) {
 }
 
 bool ShouldUseVistaFrame() {
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
+  if (base::win::GetVersion() < base::win::VERSION_VISTA)
     return false;
   // If composition is not enabled, we behave like on XP.
   BOOL f;
@@ -264,6 +265,16 @@ HANDLE GetSectionFromProcess(HANDLE section, HANDLE process, bool read_only) {
   if (!read_only)
     access |= FILE_MAP_WRITE;
   DuplicateHandle(process, section, GetCurrentProcess(), &valid_section, access,
+                  FALSE, 0);
+  return valid_section;
+}
+
+HANDLE GetSectionForProcess(HANDLE section, HANDLE process, bool read_only) {
+  HANDLE valid_section = NULL;
+  DWORD access = STANDARD_RIGHTS_REQUIRED | FILE_MAP_READ;
+  if (!read_only)
+    access |= FILE_MAP_WRITE;
+  DuplicateHandle(GetCurrentProcess(), section, process, &valid_section, access,
                   FALSE, 0);
   return valid_section;
 }
@@ -522,15 +533,13 @@ int MessageBox(HWND hwnd,
   if (base::i18n::IsRTL())
     actual_flags |= MB_RIGHT | MB_RTLREADING;
 
-  std::wstring localized_text;
-  const wchar_t* text_ptr = text.c_str();
-  if (base::i18n::AdjustStringForLocaleDirection(text, &localized_text))
-    text_ptr = localized_text.c_str();
+  std::wstring localized_text = text;
+  base::i18n::AdjustStringForLocaleDirection(&localized_text);
+  const wchar_t* text_ptr = localized_text.c_str();
 
-  std::wstring localized_caption;
-  const wchar_t* caption_ptr = caption.c_str();
-  if (base::i18n::AdjustStringForLocaleDirection(caption, &localized_caption))
-    caption_ptr = localized_caption.c_str();
+  std::wstring localized_caption = caption;
+  base::i18n::AdjustStringForLocaleDirection(&localized_caption);
+  const wchar_t* caption_ptr = localized_caption.c_str();
 
   return ::MessageBox(hwnd, text_ptr, caption_ptr, actual_flags);
 }
@@ -545,7 +554,7 @@ gfx::Font GetWindowTitleFont() {
 
 void SetAppIdForWindow(const std::wstring& app_id, HWND hwnd) {
   // This functionality is only available on Win7+.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_WIN7)
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
     return;
 
   // Load Shell32.dll into memory.

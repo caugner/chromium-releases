@@ -38,9 +38,7 @@ class FormGroup {
   virtual string16 GetFieldText(const AutoFillType& type) const = 0;
 
   // Returns the text for preview.
-  virtual string16 GetPreviewText(const AutoFillType& type) const {
-    return GetFieldText(type);
-  }
+  virtual string16 GetPreviewText(const AutoFillType& type) const;
 
   // Used to determine if the text being typed into a field matches the
   // information in this FormGroup object. This is used by the preview
@@ -55,7 +53,7 @@ class FormGroup {
 
   // Returns the label for this FormGroup item. This should be overridden for
   // form group items that implement a label.
-  virtual const string16& Label() const { return EmptyString16(); }
+  virtual const string16 Label() const;
 
   // Returns true if the field data in |form_group| does not match the field
   // data in this FormGroup.
@@ -71,6 +69,9 @@ class FormGroup {
 
   // Merges the field data in |form_group| with this FormGroup.
   void MergeWith(const FormGroup& form_group);
+
+  // Overwrites the field data in |form_group| with this FormGroup.
+  void OverwriteWith(const FormGroup& form_group);
 };
 
 #endif  // CHROME_BROWSER_AUTOFILL_FORM_GROUP_H_

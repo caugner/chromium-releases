@@ -14,15 +14,26 @@
 #include "base/string16.h"
 #include "gfx/point.h"
 #include "gfx/rect.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDragOperation.h"
 #include "webkit/glue/window_open_disposition.h"
 
 typedef struct _cairo cairo_t;
+typedef struct _GdkColor GdkColor;
 typedef struct _GtkWidget GtkWidget;
 
+class BrowserWindow;
 class GtkThemeProvider;
 class GURL;
 class Profile;
 struct RendererPreferences;  // from common/renderer_preferences.h
+
+const int kSkiaToGDKMultiplier = 257;
+
+// Define a macro for creating GdkColors from RGB values.  This is a macro to
+// allow static construction of literals, etc.  Use this like:
+//   GdkColor white = GDK_COLOR_RGB(0xff, 0xff, 0xff);
+#define GDK_COLOR_RGB(r, g, b) {0, r * kSkiaToGDKMultiplier, \
+        g * kSkiaToGDKMultiplier, b * kSkiaToGDKMultiplier}
 
 namespace event_utils {
 
@@ -34,6 +45,11 @@ WindowOpenDisposition DispositionFromEventFlags(guint state);
 }  // namespace event_utils
 
 namespace gtk_util {
+
+extern const GdkColor kGdkWhite;
+extern const GdkColor kGdkGray;
+extern const GdkColor kGdkBlack;
+extern const GdkColor kGdkGreen;
 
 // Constants relating to the layout of dialog windows:
 // (See http://library.gnome.org/devel/hig-book/stable/design-window.html.en)
@@ -55,9 +71,6 @@ const int kContentAreaSpacing = 18;
 
 // Horizontal Spacing between controls in a form.
 const int kFormControlSpacing = 10;
-
-// Height for the infobar drop shadow.
-const int kInfoBarDropShadowHeight = 6;
 
 // Create a table of labeled controls, using proper spacing and alignment.
 // Arguments should be pairs of const char*, GtkWidget*, concluding with a
@@ -85,6 +98,20 @@ GtkWidget* LeftAlignMisc(GtkWidget* misc);
 
 // Create a left-aligned label with the given text in bold.
 GtkWidget* CreateBoldLabel(const std::string& text);
+
+// As above, but uses number of characters/lines directly rather than looking up
+// a resource.
+void GetWidgetSizeFromCharacters(GtkWidget* widget,
+                                 double width_chars, double height_lines,
+                                 int* width, int* height);
+
+// Calculates the size of given widget based on the size specified in number of
+// characters/lines (in locale specific resource file) and font metrics.
+// NOTE: Make sure to realize |widget| before using this method, or a default
+// font size will be used instead of the actual font size.
+void GetWidgetSizeFromResources(GtkWidget* widget,
+                                int width_chars, int height_lines,
+                                int* width, int* height);
 
 // As above, but a convenience method for configuring dialog size.
 // |width_id| and |height_id| are resource IDs for the size.  If either of these
@@ -233,11 +260,6 @@ GdkColor AverageColors(GdkColor color_one, GdkColor color_two);
 // crucial to its functionality.
 void SetAlwaysShowImage(GtkWidget* image_menu_item);
 
-// Returns a static instance of a GdkCursor* object, sharable across the
-// process.  Returns a GdkCursor with a +1 refcount, as if it was just created
-// with gdk_cursor_new(); owner must gdk_cursor_unref() it when done with it.
-GdkCursor* GetCursor(GdkCursorType type);
-
 // Stacks a |popup| window directly on top of a |toplevel| window.
 void StackPopupWindow(GtkWidget* popup, GtkWidget* toplevel);
 
@@ -338,10 +360,20 @@ void SetLabelWidth(GtkWidget* label, int pixel_width);
 // to make sure the pango can get correct font information for the calculation.
 void InitLabelSizeRequestAndEllipsizeMode(GtkWidget* label);
 
-// Code to draw the drop shadow below an infobar (at the top of the render
-// view).
-void DrawTopDropShadowForRenderView(cairo_t* cr, const gfx::Point& origin,
-                                    const gfx::Rect& paint_rect);
+// Convenience methods for converting between web drag operations and the GDK
+// equivalent.
+GdkDragAction WebDragOpToGdkDragAction(WebKit::WebDragOperationsMask op);
+WebKit::WebDragOperationsMask GdkDragActionToWebDragOp(GdkDragAction action);
+
+// A helper function for gtk_message_dialog_new() to work around a few KDE 3
+// window manager bugs. You should always call it after creating a dialog with
+// gtk_message_dialog_new.
+void ApplyMessageDialogQuirks(GtkWidget* dialog);
+
+// Performs Cut/Copy/Paste operation on the |window|.
+void DoCut(BrowserWindow* window);
+void DoCopy(BrowserWindow* window);
+void DoPaste(BrowserWindow* window);
 
 }  // namespace gtk_util
 

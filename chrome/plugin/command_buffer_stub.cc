@@ -92,8 +92,8 @@ void CommandBufferStub::OnInitialize(int32 size,
   }
 
   // Initialize the GPUProcessor.
-  processor_.reset(new gpu::GPUProcessor(command_buffer_.get()));
-  if (!processor_->Initialize(window_, gfx::Size(), std::vector<int32>(),
+  processor_.reset(new gpu::GPUProcessor(command_buffer_.get(), NULL));
+  if (!processor_->Initialize(window_, gfx::Size(), NULL, std::vector<int32>(),
                               NULL, 0)) {
     Destroy();
     return;
@@ -169,7 +169,7 @@ void CommandBufferStub::OnGetTransferBuffer(
   Buffer buffer = command_buffer_->GetTransferBuffer(id);
   if (buffer.shared_memory) {
     buffer.shared_memory->ShareToProcess(peer_handle, transfer_buffer);
-    *size = buffer.shared_memory->max_size();
+    *size = buffer.shared_memory->created_size();
   }
 
   base::CloseProcessHandle(peer_handle);
@@ -226,8 +226,8 @@ void CommandBufferStub::OnSetWindowSize(const gfx::Size& size) {
 }
 
 void CommandBufferStub::SwapBuffersCallback() {
-  Send(new PluginHostMsg_AcceleratedSurfaceBuffersSwapped(plugin_host_route_id_,
-                                                          window_));
+  Send(new PluginHostMsg_AcceleratedSurfaceBuffersSwapped(
+      plugin_host_route_id_, window_, processor_->GetSurfaceId()));
 }
 
 void CommandBufferStub::AllocTransportDIB(const size_t size,

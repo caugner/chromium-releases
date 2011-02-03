@@ -37,19 +37,22 @@ SessionModelAssociator::~SessionModelAssociator() {
   DCHECK(CalledOnValidThread());
 }
 
-// Sends a notification to ForeignSessionHandler to update the UI, because
-// the session corresponding to the id given has changed state.
-void SessionModelAssociator::Associate(
-    const sync_pb::SessionSpecifics* specifics, int64 sync_id) {
-  DCHECK(CalledOnValidThread());
-  NotificationService::current()->Notify(
-      NotificationType::FOREIGN_SESSION_UPDATED,
-      NotificationService::AllSources(),
-      Details<int64>(&sync_id));
-}
-
 bool SessionModelAssociator::AssociateModels() {
   DCHECK(CalledOnValidThread());
+
+  // Make sure we have a machine tag.
+  if (current_machine_tag_.empty())
+    InitializeCurrentMachineTag();  // Creates a syncable::BaseTransaction.
+
+  {
+    // Do an initial update from sync model (in case we just re-enabled and
+    // already had data).
+    sync_api::ReadTransaction trans(
+        sync_service_->backend()->GetUserShareHandle());
+    UpdateFromSyncModel(&trans);
+  }
+
+  // Check if anything has changed on the client side.
   UpdateSyncModelDataFromClient();
   return true;
 }
@@ -63,13 +66,16 @@ bool SessionModelAssociator::ChromeModelHasUserCreatedNodes(
   return true;
 }
 
-// Sends a notification to ForeignSessionHandler to update the UI, because
-// the session corresponding to the id given has been deleted.
-void SessionModelAssociator::Disassociate(int64 sync_id) {
+bool SessionModelAssociator::DisassociateModels() {
+  specifics_.clear();
+
+  // There is no local model stored with which to disassociate, just notify
+  // foreign session handlers.
   NotificationService::current()->Notify(
-      NotificationType::FOREIGN_SESSION_DELETED,
+      NotificationType::FOREIGN_SESSION_DISABLED,
       NotificationService::AllSources(),
-      Details<int64>(&sync_id));
+      NotificationService::NoDetails());
+  return true;
 }
 
 const sync_pb::SessionSpecifics* SessionModelAssociator::
@@ -120,17 +126,85 @@ bool SessionModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
 }
 
 std::string SessionModelAssociator::GetCurrentMachineTag() {
-  if (current_machine_tag_.empty())
-    InitializeCurrentMachineTag();
   DCHECK(!current_machine_tag_.empty());
   return current_machine_tag_;
+}
+
+void SessionModelAssociator::UpdateSyncModelDataFromClient() {
+  DCHECK(CalledOnValidThread());
+  SessionService::SessionCallback* callback =
+      NewCallback(this, &SessionModelAssociator::OnGotSession);
+  // TODO(jerrica): Stop current race condition, possibly make new method in
+  // session service, which only grabs the windows from memory.
+  GetSessionService()->GetCurrentSession(&consumer_, callback);
+}
+
+// TODO(zea): Don't recreate sessions_ vector from scratch each time. This
+// will involve knowing which sessions have been changed (a different data
+// structure will probably be better too).
+bool SessionModelAssociator::UpdateFromSyncModel(
+    const sync_api::BaseTransaction* trans) {
+  DCHECK(CalledOnValidThread());
+
+  // Rebuild specifics_ vector
+  specifics_.clear();
+  if (!QuerySyncModel(trans, specifics_)) {
+    LOG(ERROR) << "SessionModelAssociator failed to updated from sync model";
+    return false;
+  }
+
+  return true;
+}
+
+bool SessionModelAssociator::QuerySyncModel(
+    const sync_api::BaseTransaction* trans,
+    std::vector<const sync_pb::SessionSpecifics*>& specifics) {
+  DCHECK(CalledOnValidThread());
+  sync_api::ReadNode root(trans);
+  if (!root.InitByTagLookup(kSessionsTag)) {
+    LOG(ERROR) << kNoSessionsFolderError;
+    return false;
+  }
+  sync_api::ReadNode current_machine(trans);
+  int64 current_id = (current_machine.InitByClientTagLookup(syncable::SESSIONS,
+    GetCurrentMachineTag())) ? current_machine.GetId() : sync_api::kInvalidId;
+
+  // Iterate through the nodes and populate the session model.
+  int64 id = root.GetFirstChildId();
+  while (id != sync_api::kInvalidId) {
+    sync_api::ReadNode sync_node(trans);
+    if (!sync_node.InitByIdLookup(id)) {
+      LOG(ERROR) << "Failed to fetch sync node for id " << id;
+      return false;
+    }
+    if (id != current_id) {
+      specifics.insert(specifics.end(), &sync_node.GetSessionSpecifics());
+    }
+    id = sync_node.GetSuccessorId();
+  }
+  return true;
+}
+
+bool SessionModelAssociator::GetSessionData(
+    std::vector<ForeignSession*>* sessions) {
+  DCHECK(CalledOnValidThread());
+
+  // Build vector of sessions from specifics data
+  for (std::vector<const sync_pb::SessionSpecifics*>::const_iterator i =
+    specifics_.begin(); i != specifics_.end(); ++i) {
+    // Only include sessions with open windows.
+    if ((*i)->session_window_size() > 0)
+      AppendForeignSessionFromSpecifics(*i, sessions);
+  }
+
+  return true;
 }
 
 void SessionModelAssociator::AppendForeignSessionFromSpecifics(
     const sync_pb::SessionSpecifics* specifics,
     std::vector<ForeignSession*>* session) {
   ForeignSession* foreign_session = new ForeignSession();
-  foreign_session->foreign_tession_tag = specifics->session_tag();
+  foreign_session->foreign_session_tag = specifics->session_tag();
   session->insert(session->end(), foreign_session);
   for (int i = 0; i < specifics->session_window_size(); i++) {
     const sync_pb::SessionWindow* window = &specifics->session_window(i);
@@ -153,49 +227,6 @@ void SessionModelAssociator::AppendForeignSessionWithID(int64 id,
   AppendForeignSessionFromSpecifics(ref, session);
 }
 
-void SessionModelAssociator::UpdateSyncModelDataFromClient() {
-  DCHECK(CalledOnValidThread());
-  SessionService::SessionCallback* callback =
-      NewCallback(this, &SessionModelAssociator::OnGotSession);
-  // TODO(jerrica): Stop current race condition, possibly make new method in
-  // session service, which only grabs the windows from memory.
-  GetSessionService()->GetCurrentSession(&consumer_, callback);
-}
-
-bool SessionModelAssociator::GetSessionDataFromSyncModel(
-    std::vector<ForeignSession*>* sessions) {
-  std::vector<const sync_pb::SessionSpecifics*> specifics;
-  DCHECK(CalledOnValidThread());
-  sync_api::ReadTransaction trans(
-      sync_service_->backend()->GetUserShareHandle());
-  sync_api::ReadNode root(&trans);
-  if (!root.InitByTagLookup(kSessionsTag)) {
-    LOG(ERROR) << kNoSessionsFolderError;
-    return false;
-  }
-  sync_api::ReadNode current_machine(&trans);
-  int64 current_id = (current_machine.InitByClientTagLookup(syncable::SESSIONS,
-    GetCurrentMachineTag())) ? current_machine.GetId() : sync_api::kInvalidId;
-  // Iterate through the nodes and populate the session model.
-  int64 id = root.GetFirstChildId();
-  while (id != sync_api::kInvalidId) {
-    sync_api::ReadNode sync_node(&trans);
-    if (!sync_node.InitByIdLookup(id)) {
-      LOG(ERROR) << "Failed to fetch sync node for id " << id;
-      return false;
-    }
-    if (id != current_id) {
-      specifics.insert(specifics.end(), &sync_node.GetSessionSpecifics());
-    }
-    id = sync_node.GetSuccessorId();
-  }
-  for (std::vector<const sync_pb::SessionSpecifics*>::const_iterator i =
-    specifics.begin(); i != specifics.end(); ++i) {
-    AppendForeignSessionFromSpecifics(*i, sessions);
-  }
-  return true;
-}
-
 SessionService* SessionModelAssociator::GetSessionService() {
   DCHECK(sync_service_);
   Profile* profile = sync_service_->profile();
@@ -210,8 +241,16 @@ void SessionModelAssociator::InitializeCurrentMachineTag() {
       GetUserShareHandle());
   syncable::Directory* dir =
       trans.GetWrappedWriteTrans()->directory();
+
+  // TODO(zea): We need a better way of creating a machine tag. The directory
+  // kernel's cache_guid changes every time syncing is turned on and off. This
+  // will result in session's associated with stale machine tags persisting on
+  // the server since that tag will not be reused. Eventually this should
+  // become some string identifiable to the user. (Home, Work, Laptop, etc.)
+  // See issue 59672
   current_machine_tag_ = "session_sync";
   current_machine_tag_.append(dir->cache_guid());
+  VLOG(1) << "Creating machine tag: " << current_machine_tag_;
 }
 
 // See PopulateSessionSpecificsTab for use.  May add functionality that includes
@@ -349,24 +388,16 @@ bool SessionModelAssociator::WindowHasNoTabsToSync(
 
 void SessionModelAssociator::OnGotSession(int handle,
     std::vector<SessionWindow*>* windows) {
-  sync_pb::SessionSpecifics session;
+  sync_pb::SessionSpecifics specifics;
   // Set the tag, then iterate through the vector of windows, extracting the
   // window data, along with the tabs data and tab navigation data to populate
   // the session specifics.
-  session.set_session_tag(GetCurrentMachineTag());
-  for (std::vector<SessionWindow*>::const_iterator i = windows->begin();
-      i != windows->end(); ++i) {
-    const SessionWindow* window = *i;
-    if (WindowHasNoTabsToSync(window)) {
-       continue;
-    }
-    sync_pb::SessionWindow* session_window = session.add_session_window();
-    PopulateSessionSpecificsWindow(window, session_window);
-  }
+  specifics.set_session_tag(GetCurrentMachineTag());
+  FillSpecificsFromSessions(windows, &specifics);
   bool has_nodes = false;
   if (!SyncModelHasUserCreatedNodes(&has_nodes))
     return;
-  if (session.session_window_size() == 0 && has_nodes)
+  if (specifics.session_window_size() == 0 && has_nodes)
     return;
   sync_api::WriteTransaction trans(
       sync_service_->backend()->GetUserShareHandle());
@@ -375,7 +406,21 @@ void SessionModelAssociator::OnGotSession(int handle,
     LOG(ERROR) << kNoSessionsFolderError;
     return;
   }
-  UpdateSyncModel(&session, &trans, &root);
+  UpdateSyncModel(&specifics, &trans, &root);
+}
+
+void SessionModelAssociator::FillSpecificsFromSessions(
+    std::vector<SessionWindow*>* windows,
+    sync_pb::SessionSpecifics* session) {
+  for (std::vector<SessionWindow*>::const_iterator i = windows->begin();
+      i != windows->end(); ++i) {
+    const SessionWindow* window = *i;
+    if (WindowHasNoTabsToSync(window)) {
+      continue;
+    }
+    sync_pb::SessionWindow* session_window = session->add_session_window();
+    PopulateSessionSpecificsWindow(window, session_window);
+  }
 }
 
 void SessionModelAssociator::AppendSessionTabNavigation(
@@ -525,4 +570,3 @@ bool SessionModelAssociator::UpdateSyncModel(
 }
 
 }  // namespace browser_sync
-

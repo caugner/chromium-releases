@@ -12,11 +12,11 @@
 #include "base/time.h"
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
-#include "chrome/common/net/gaia/gaia_authenticator2.h"
+#include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "gfx/native_widget_types.h"
 #include "grit/generated_resources.h"
 
-class GaiaAuthenticator2;
+class GaiaAuthFetcher;
 class CloudPrintServiceProcessHelper;
 class CloudPrintSetupMessageHandler;
 class ServiceProcessControl;
@@ -70,6 +70,7 @@ class CloudPrintSetupFlow : public HtmlDialogUIDelegate,
   virtual void OnCloseContents(TabContents* source, bool* out_close_dialog);
   virtual std::wstring GetDialogTitle() const;
   virtual bool IsDialogModal() const;
+  virtual bool ShouldShowDialogTitle() const { return true; }
 
   // GaiaAuthConsumer implementation.
   virtual void OnClientLoginFailure(
@@ -83,7 +84,7 @@ class CloudPrintSetupFlow : public HtmlDialogUIDelegate,
 
   // Use static Run method to get an instance.
   CloudPrintSetupFlow(const std::string& args, Profile* profile,
-                      Delegate* delegate);
+                      Delegate* delegate, bool setup_done);
 
   // Called CloudPrintSetupMessageHandler when a DOM is attached. This method
   // is called when the HTML page is fully loaded. We then operate on this
@@ -95,6 +96,11 @@ class CloudPrintSetupFlow : public HtmlDialogUIDelegate,
   void OnUserSubmittedAuth(const std::string& user,
                            const std::string& password,
                            const std::string& captcha);
+
+  // Called by CloudPrintSetupMessageHandler when the user clicks on various
+  // pieces of UI during setup.
+  void OnUserClickedLearnMore();
+  void OnUserClickedPrintTestPage();
 
   // The following methods control which iframe is visible.
   void ShowGaiaLogin(const DictionaryValue& args);
@@ -113,9 +119,12 @@ class CloudPrintSetupFlow : public HtmlDialogUIDelegate,
   Profile* profile_;
 
   // Fetcher to obtain the Chromoting Directory token.
-  scoped_ptr<GaiaAuthenticator2> authenticator_;
+  scoped_ptr<GaiaAuthFetcher> authenticator_;
   std::string login_;
   std::string lsid_;
+
+  // Are we in the done state?
+  bool setup_done_;
 
   // Handle to the ServiceProcessControl which talks to the service process.
   ServiceProcessControl* process_control_;

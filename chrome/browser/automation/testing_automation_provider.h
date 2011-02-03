@@ -7,10 +7,13 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "base/scoped_ptr.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/common/notification_registrar.h"
+#include "chrome/common/page_type.h"
 
 class DictionaryValue;
 class TemplateURLModel;
@@ -23,10 +26,8 @@ class TestingAutomationProvider : public AutomationProvider,
   explicit TestingAutomationProvider(Profile* profile);
 
   // BrowserList::Observer implementation
-  // Called immediately after a browser is added to the list
   virtual void OnBrowserAdded(const Browser* browser);
-  // Called immediately before a browser is removed from the list
-  virtual void OnBrowserRemoving(const Browser* browser);
+  virtual void OnBrowserRemoved(const Browser* browser);
 
   // IPC implementations
   virtual void OnMessageReceived(const IPC::Message& msg);
@@ -199,8 +200,7 @@ class TestingAutomationProvider : public AutomationProvider,
                         int* insecure_content_status);
 
   // Gets the page type for the tab associated to the specified |handle|.
-  void GetPageType(int handle, bool* success,
-                   NavigationEntry::PageType* page_type);
+  void GetPageType(int handle, bool* success, PageType* page_type);
 
   // Gets the duration in ms of the last event matching |event_name|.
   // |duration_ms| is -1 if the event hasn't occurred yet.
@@ -344,6 +344,11 @@ class TestingAutomationProvider : public AutomationProvider,
 
   // Returns the number of blocked popups in the tab |handle|.
   void GetBlockedPopupCount(int handle, int* count);
+
+  // Captures the entire page for the given tab and saves it as PNG at the
+  // given path.
+  void CaptureEntirePageAsPNG(int tab_handle, const FilePath& path,
+                              IPC::Message* reply_message);
 
   // Generic pattern for pyautolib
   // Uses the JSON interface for input/output.
@@ -614,6 +619,36 @@ class TestingAutomationProvider : public AutomationProvider,
                            DictionaryValue* args,
                            IPC::Message* reply_message);
 
+  // Signs in to sync using the given username and password.
+  // Uses the JSON interface for input/output.
+  void SignInToSync(Browser* browser,
+                    DictionaryValue* args,
+                    IPC::Message* reply_message);
+
+  // Returns info about sync.
+  // Uses the JSON interface for input/output.
+  void GetSyncInfo(Browser* browser,
+                   DictionaryValue* args,
+                   IPC::Message* reply_message);
+
+  // Waits for the ongoing sync cycle to complete.
+  // Uses the JSON interface for input/output.
+  void AwaitSyncCycleCompletion(Browser* browser,
+                                DictionaryValue* args,
+                                IPC::Message* reply_message);
+
+  // Enables sync for one or more sync datatypes.
+  // Uses the JSON interface for input/output.
+  void EnableSyncForDatatypes(Browser* browser,
+                              DictionaryValue* args,
+                              IPC::Message* reply_message);
+
+  // Disables sync for one or more sync datatypes.
+  // Uses the JSON interface for input/output.
+  void DisableSyncForDatatypes(Browser* browser,
+                               DictionaryValue* args,
+                               IPC::Message* reply_message);
+
   // Translate DictionaryValues of autofill profiles and credit cards to the
   // data structure used in the browser.
   // Args:
@@ -628,9 +663,9 @@ class TestingAutomationProvider : public AutomationProvider,
   // for profiles and credit cards to a ListValue of DictionaryValues. The
   // caller owns the returned object.
   static ListValue* GetListFromAutoFillProfiles(
-      std::vector<AutoFillProfile*> autofill_profiles);
+      const std::vector<AutoFillProfile*>& autofill_profiles);
   static ListValue* GetListFromCreditCards(
-      std::vector<CreditCard*> credit_cards);
+      const std::vector<CreditCard*>& credit_cards);
 
   // Return the map from the internal data representation to the string value
   // of auto fill fields and credit card fields.
@@ -638,6 +673,56 @@ class TestingAutomationProvider : public AutomationProvider,
       GetAutoFillFieldToStringMap();
   static std::map<AutoFillFieldType, std::wstring>
       GetCreditCardFieldToStringMap();
+
+  // Get a list of active HTML5 notifications.
+  // Uses the JSON interface for input/output.
+  void GetActiveNotifications(Browser* browser,
+                              DictionaryValue* args,
+                              IPC::Message* reply_message);
+
+  // Close an active HTML5 notification.
+  // Uses the JSON interface for input/output.
+  void CloseNotification(Browser* browser,
+                         DictionaryValue* args,
+                         IPC::Message* reply_message);
+
+  // Waits for the number of active HTML5 notifications to reach a given count.
+  // Uses the JSON interface for input/output.
+  void WaitForNotificationCount(Browser* browser,
+                                DictionaryValue* args,
+                                IPC::Message* reply_message);
+
+  // Gets info about the elements in the NTP.
+  // Uses the JSON interface for input/output.
+  void GetNTPInfo(Browser* browser,
+                  DictionaryValue* args,
+                  IPC::Message* reply_message);
+
+  // Moves a thumbnail in the NTP's Most Visited sites section to a different
+  // index.
+  // Uses the JSON interface for input/output.
+  void MoveNTPMostVisitedThumbnail(Browser* browser,
+                                   DictionaryValue* args,
+                                   IPC::Message* reply_message);
+
+  // Removes a thumbnail from the NTP's Most Visited sites section.
+  // Uses the JSON interface for input/output.
+  void RemoveNTPMostVisitedThumbnail(Browser* browser,
+                                     DictionaryValue* args,
+                                     IPC::Message* reply_message);
+
+  // Unpins a thumbnail in the NTP's Most Visited sites section.
+  // Uses the JSON interface for input/output.
+  void UnpinNTPMostVisitedThumbnail(Browser* browser,
+                                    DictionaryValue* args,
+                                    IPC::Message* reply_message);
+
+  // Restores all thumbnails that have been removed (i.e., blacklisted) from the
+  // NTP's Most Visited sites section.
+  // Uses the JSON interface for input/output.
+  void RestoreAllNTPMostVisitedThumbnails(Browser* browser,
+                                          DictionaryValue* args,
+                                          IPC::Message* reply_message);
 
   void WaitForTabCountToBecome(int browser_handle,
                                int target_tab_count,
@@ -657,6 +742,9 @@ class TestingAutomationProvider : public AutomationProvider,
                          ContentSettingsType content_type,
                          ContentSetting setting,
                          bool* success);
+
+  // Load all plug-ins on the page.
+  void LoadBlockedPlugins(int tab_handle, bool* success);
 
   // Resets to the default theme.
   void ResetToDefaultTheme();
@@ -682,6 +770,9 @@ class TestingAutomationProvider : public AutomationProvider,
   // A temporary object that receives a notification when a popup menu opens.
   PopupMenuWaiter* popup_menu_waiter_;
 #endif  // defined(TOOLKIT_VIEWS)
+
+  // Used to wait on various browser sync events.
+  scoped_ptr<ProfileSyncServiceHarness> sync_waiter_;
 
   // Handle for an in-process redirect query. We expect only one redirect query
   // at a time (we should have only one caller, and it will block while waiting

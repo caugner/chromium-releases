@@ -24,6 +24,14 @@
 #include "media/filters/null_audio_renderer.h"
 #include "media/filters/omx_video_decoder.h"
 
+// TODO(jiesun): implement different video decode contexts according to
+// these flags. e.g.
+//     1.  system memory video decode context for x11
+//     2.  gl texture video decode context for OpenGL.
+//     3.  gles texture video decode context for OpenGLES.
+// TODO(jiesun): add an uniform video renderer which take the video
+//       decode context object and delegate renderer request to these
+//       objects. i.e. Seperate "painter" and "pts scheduler".
 #if defined(RENDERER_GL)
 #include "media/tools/player_x11/gl_video_renderer.h"
 typedef GlVideoRenderer Renderer;
@@ -89,28 +97,29 @@ bool InitPipeline(MessageLoop* message_loop,
   }
 
   // Create our filter factories.
-  scoped_refptr<media::FilterFactoryCollection> factories =
-      new media::FilterFactoryCollection();
-  factories->AddFactory(media::FileDataSource::CreateFactory());
-  factories->AddFactory(media::FFmpegAudioDecoder::CreateFactory());
-  factories->AddFactory(media::FFmpegDemuxer::CreateFilterFactory());
+  scoped_ptr<media::MediaFilterCollection> collection(
+      new media::MediaFilterCollection());
+  collection->AddDataSource(new media::FileDataSource());
+  collection->AddDemuxer(new media::FFmpegDemuxer());
+  collection->AddAudioDecoder(new media::FFmpegAudioDecoder());
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableOpenMax)) {
-    factories->AddFactory(media::OmxVideoDecoder::CreateFactory());
-  }
-  factories->AddFactory(media::FFmpegVideoDecoder::CreateFactory());
-  factories->AddFactory(Renderer::CreateFactory(g_display, g_window,
-                                                paint_message_loop));
-
-  if (enable_audio) {
-    factories->AddFactory(media::AudioRendererImpl::CreateFilterFactory());
+    collection->AddVideoDecoder(new media::OmxVideoDecoder(NULL));
   } else {
-    factories->AddFactory(media::NullAudioRenderer::CreateFilterFactory());
+    collection->AddVideoDecoder(new media::FFmpegVideoDecoder(NULL));
   }
+  collection->AddVideoRenderer(new Renderer(g_display,
+                                            g_window,
+                                            paint_message_loop));
+
+  if (enable_audio)
+    collection->AddAudioRenderer(new media::AudioRendererImpl());
+  else
+    collection->AddAudioRenderer(new media::NullAudioRenderer());
 
   // Creates the pipeline and start it.
   *pipeline = new media::PipelineImpl(message_loop);
-  (*pipeline)->Start(factories, filename, NULL);
+  (*pipeline)->Start(collection.release(), filename, NULL);
 
   // Wait until the pipeline is fully initialized.
   while (true) {

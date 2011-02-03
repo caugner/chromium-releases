@@ -11,22 +11,22 @@
 
 #include "chrome_tab.h"  // Generated from chrome_tab.idl.
 
-#include "base/event_trace_controller_win.h"
-#include "base/event_trace_consumer_win.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/registry.h"
 #include "base/scoped_ptr.h"
-#include "base/scoped_bstr_win.h"
-#include "base/scoped_comptr_win.h"
-#include "base/scoped_variant_win.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
-#include "base/trace_event_win.h"
+#include "base/debug/trace_event_win.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/event_trace_controller.h"
+#include "base/win/event_trace_consumer.h"
+#include "base/win/registry.h"
+#include "base/win/scoped_bstr.h"
+#include "base/win/scoped_comptr.h"
+#include "base/win/scoped_variant.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
@@ -72,19 +72,19 @@ class ChromeFrameActiveXContainer
   END_MSG_MAP()
 
   HRESULT OnMessageCallback(const VARIANT* param) {
-    DLOG(INFO) << __FUNCTION__;
+    DVLOG(1) << __FUNCTION__;
     OnMessageCallbackImpl(param);
     return S_OK;
   }
 
   HRESULT OnLoadErrorCallback(const VARIANT* param) {
-    DLOG(INFO) << __FUNCTION__ << " " << param->bstrVal;
+    DVLOG(1) << __FUNCTION__ << " " << param->bstrVal;
     OnLoadErrorCallbackImpl(param);
     return S_OK;
   }
 
   HRESULT OnLoadCallback(const VARIANT* param) {
-    DLOG(INFO) << __FUNCTION__ << " " << param->bstrVal;
+    DVLOG(1) << __FUNCTION__ << " " << param->bstrVal;
     OnLoadCallbackImpl(param);
     return S_OK;
   }
@@ -173,7 +173,7 @@ class ChromeFrameActiveXContainer
   void Navigate(const char* url) {
     BeforeNavigateImpl(url);
 
-    HRESULT hr = tab_->put_src(ScopedBstr(UTF8ToWide(url).c_str()));
+    HRESULT hr = tab_->put_src(base::win::ScopedBstr(UTF8ToWide(url).c_str()));
     DCHECK(hr == S_OK) << "Chrome frame NavigateToURL(" << url
                        << base::StringPrintf(L") failed 0x%08X", hr);
   }
@@ -183,9 +183,9 @@ class ChromeFrameActiveXContainer
                            &prop_notify_cookie_);
     DCHECK(hr == S_OK) << "AtlAdvice for IPropertyNotifySink failed " << hr;
 
-    ScopedVariant onmessage(onmsg_.ToDispatch());
-    ScopedVariant onloaderror(onloaderror_.ToDispatch());
-    ScopedVariant onload(onload_.ToDispatch());
+    base::win::ScopedVariant onmessage(onmsg_.ToDispatch());
+    base::win::ScopedVariant onloaderror(onloaderror_.ToDispatch());
+    base::win::ScopedVariant onload(onload_.ToDispatch());
     EXPECT_HRESULT_SUCCEEDED(tab_->put_onmessage(onmessage));
     EXPECT_HRESULT_SUCCEEDED(tab_->put_onloaderror(onloaderror));
     EXPECT_HRESULT_SUCCEEDED(tab_->put_onload(onload));
@@ -209,7 +209,7 @@ class ChromeFrameActiveXContainer
   virtual void BeforeNavigateImpl(const char* url) {}
 
   CAxWindow chromeview_;
-  ScopedComPtr<IChromeFrame> tab_;
+  base::win::ScopedComPtr<IChromeFrame> tab_;
   DWORD prop_notify_cookie_;
   DispCallback<ChromeFrameActiveXContainer> onmsg_;
   DispCallback<ChromeFrameActiveXContainer> onloaderror_;
@@ -348,7 +348,7 @@ class ChromeFrameStartupTest : public ChromeFramePerfTestBase {
 
     std::string times;
     for (int i = 0; i < kNumCycles; ++i)
-      StringAppendF(&times, "%.2f,", timings[i].InMillisecondsF());
+      base::StringAppendF(&times, "%.2f,", timings[i].InMillisecondsF());
 
     PrintResultList(graph, "", trace, times, "ms", important);
   }
@@ -464,7 +464,7 @@ class ChromeFrameStartupTestActiveXReference
 
     chrome_frame_dll_ = FilePath(
         chrome_frame_registrar_->GetReferenceChromeFrameDllPath());
-    DLOG(INFO) << __FUNCTION__ << ": " << chrome_frame_dll_.value();
+    DVLOG(1) << __FUNCTION__ << ": " << chrome_frame_dll_.value();
   }
 
   virtual void TearDown() {
@@ -593,7 +593,7 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
     ASSERT_TRUE(param != NULL);
     ASSERT_EQ(VT_BSTR, param->vt);
 
-    DLOG(INFO) << __FUNCTION__ << " " << param->bstrVal;
+    DVLOG(1) << __FUNCTION__ << " " << param->bstrVal;
     InitiateNextNavigation();
   }
 
@@ -601,7 +601,7 @@ class ChromeFrameMemoryTest : public ChromeFramePerfTestBase {
     ASSERT_TRUE(param != NULL);
     ASSERT_EQ(VT_BSTR, param->vt);
 
-    DLOG(INFO) << __FUNCTION__ << " " << param->bstrVal;
+    DVLOG(1) << __FUNCTION__ << " " << param->bstrVal;
     InitiateNextNavigation();
   }
 
@@ -1069,7 +1069,7 @@ TEST_F(ChromeFrameCreationTestReference, PerfWarm) {
                  NULL, true /* not important */, false);
 }
 
-TEST_F(FlashCreationTest, PerfWarm) {
+TEST_F(FlashCreationTest, DISABLED_PerfWarm) {
   RunStartupTest("creation_warm", "t_flash", "", false /* cold */, 0, NULL,
                  true /* not important */, false);
 }
@@ -1092,7 +1092,7 @@ TEST_F(ChromeFrameCreationTest, PerfCold) {
 // from the cache. This could also fail if the Flash control is in use.
 // On Vista this could fail because of UAC
 TEST_F(FlashCreationTest, PerfCold) {
-  RegKey flash_key(HKEY_CLASSES_ROOT, kFlashControlKey, KEY_READ);
+  base::win::RegKey flash_key(HKEY_CLASSES_ROOT, kFlashControlKey, KEY_READ);
 
   std::wstring plugin_path;
   ASSERT_TRUE(flash_key.ReadValue(L"", &plugin_path));
@@ -1112,7 +1112,8 @@ TEST_F(FlashCreationTest, PerfCold) {
 // correctly causing the attempt to evict the dll from the system cache to
 // fail.
 TEST_F(SilverlightCreationTest, DISABLED_PerfCold) {
-  RegKey silverlight_key(HKEY_CLASSES_ROOT, kSilverlightControlKey, KEY_READ);
+  base::win::RegKey silverlight_key(HKEY_CLASSES_ROOT, kSilverlightControlKey,
+                                    KEY_READ);
 
   std::wstring plugin_path;
   ASSERT_TRUE(silverlight_key.ReadValue(L"", &plugin_path));
@@ -1142,7 +1143,7 @@ class TracedEvents {
 // We may need to add kernel provider and pass Process Start/Exit events etc,
 // but for the time being we stick with base::kChromeTraceProviderName
 // provider only.
-class EtwConsumer : public EtwTraceConsumerBase<EtwConsumer> {
+class EtwConsumer : public base::win::EtwTraceConsumerBase<EtwConsumer> {
  public:
   EtwConsumer() {
     set_delegate(NULL);
@@ -1158,19 +1159,19 @@ class EtwConsumer : public EtwTraceConsumerBase<EtwConsumer> {
 
   static void ProcessEvent(EVENT_TRACE* event) {
     DCHECK(delegate_);
-    if (event->Header.Guid != base::kTraceEventClass32)
+    if (event->Header.Guid != base::debug::kTraceEventClass32)
       return;
     if (event->Header.Class.Version != 0)
       return;
 
     switch (event->Header.Class.Type) {
-      case base::kTraceEventTypeBegin:
+      case base::debug::kTraceEventTypeBegin:
         delegate_->OnTraceEventBegin(event);
         break;
-      case base::kTraceEventTypeEnd:
+      case base::debug::kTraceEventTypeEnd:
         delegate_->OnTraceEventEnd(event);
         break;
-      case base::kTraceEventTypeInstant:
+      case base::debug::kTraceEventTypeInstant:
         delegate_->OnTraceEventInstant(event);
         break;
       default:
@@ -1196,15 +1197,15 @@ class EtwPerfSession {
 
   void Start() {
     // To ensure there is no session leftover from crashes, previous runs, etc.
-    EtwTraceProperties ignore;
-    EtwTraceController::Stop(L"cf_perf", &ignore);
+    base::win::EtwTraceProperties ignore;
+    base::win::EtwTraceController::Stop(L"cf_perf", &ignore);
     ASSERT_TRUE(file_util::CreateTemporaryFile(&etl_log_file_));
     ASSERT_HRESULT_SUCCEEDED(controller_.StartFileSession(L"cf_perf",
         etl_log_file_.value().c_str(), false));
     ASSERT_HRESULT_SUCCEEDED(controller_.EnableProvider(
-        base::kChromeTraceProviderName,
+        base::debug::kChromeTraceProviderName,
         TRACE_LEVEL_INFORMATION,
-        ~(base::CAPTURE_STACK_TRACE)));
+        ~(base::debug::CAPTURE_STACK_TRACE)));
   }
 
   HRESULT Stop() {
@@ -1220,7 +1221,7 @@ class EtwPerfSession {
   }
 
   FilePath etl_log_file_;
-  EtwTraceController controller_;
+  base::win::EtwTraceController controller_;
 };
 
 // Base class for the tracing event helper classes.
@@ -1381,8 +1382,9 @@ void PrintPerfTestResults(const Monitor* monitor,
 
   for (int i = 0; i < num_cycles; ++i) {
     ASSERT_TRUE(monitor[i].is_valid());
-    StringAppendF(&times, "%.2f,",
-                  monitor[i].duration().InMillisecondsF());
+    base::StringAppendF(&times,
+                        "%.2f,",
+                        monitor[i].duration().InMillisecondsF());
   }
 
   PrintResultList(result_name, "", "t", times, "ms", false);
@@ -1422,7 +1424,7 @@ TEST(TestAsPerfTest, MetaTag_createproxy) {
     automation_provider_connect_monitor[i].set_start_event(
         "AutomationProvider::AutomationProvider");
     automation_provider_connect_monitor[i].set_end_event(
-        "AutomationProvider::ConnectToChannel");
+        "AutomationProvider::InitializeChannel");
 
     external_tab_navigate_monitor[i].set_interesting_event(
         "ExternalTabContainer::Navigate");

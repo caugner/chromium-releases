@@ -11,6 +11,7 @@
 #endif
 #if defined(OS_MACOSX)
 #include "base/mac_util.h"
+#include "base/mac/scoped_cftyperef.h"
 #endif
 #include "base/scoped_handle.h"
 #include "base/shared_memory.h"
@@ -218,7 +219,8 @@ NPObject* WebPluginProxy::GetPluginElement() {
 
   int npobject_route_id = channel_->GenerateRouteID();
   bool success = false;
-  Send(new PluginHostMsg_GetPluginElement(route_id_, npobject_route_id, &success));
+  Send(new PluginHostMsg_GetPluginElement(route_id_, npobject_route_id,
+                                          &success));
   if (!success)
     return NULL;
 
@@ -313,7 +315,8 @@ void WebPluginProxy::HandleURLRequest(const char* url,
                                       const char* buf,
                                       unsigned int len,
                                       int notify_id,
-                                      bool popups_allowed) {
+                                      bool popups_allowed,
+                                      bool notify_redirects) {
  if (!target && (0 == base::strcasecmp(method, "GET"))) {
     // Please refer to https://bugzilla.mozilla.org/show_bug.cgi?id=366082
     // for more details on this.
@@ -341,6 +344,7 @@ void WebPluginProxy::HandleURLRequest(const char* url,
 
   params.notify_id = notify_id;
   params.popups_allowed = popups_allowed;
+  params.notify_redirects = notify_redirects;
 
   Send(new PluginHostMsg_URLRequest(route_id_, params));
 }
@@ -416,12 +420,12 @@ void WebPluginProxy::Paint(const gfx::Rect& rect) {
   CGContextRef saved_context_weak = windowless_context_.get();
 
   if (background_context_.get()) {
-    scoped_cftyperef<CGImageRef> image(
+    base::mac::ScopedCFTypeRef<CGImageRef> image(
         CGBitmapContextCreateImage(background_context_));
     CGRect source_rect = rect.ToCGRect();
     // Flip the rect we use to pull from the canvas, since it's upside-down.
     source_rect.origin.y = CGImageGetHeight(image) - rect.y() - rect.height();
-    scoped_cftyperef<CGImageRef> sub_image(
+    base::mac::ScopedCFTypeRef<CGImageRef> sub_image(
         CGImageCreateWithImageInRect(image, source_rect));
     CGContextDrawImage(windowless_context_, rect.ToCGRect(), sub_image);
   } else if (transparent_) {
@@ -667,8 +671,9 @@ WebPluginAcceleratedSurface* WebPluginProxy::GetAcceleratedSurface() {
 }
 
 void WebPluginProxy::AcceleratedFrameBuffersDidSwap(
-    gfx::PluginWindowHandle window) {
-  Send(new PluginHostMsg_AcceleratedSurfaceBuffersSwapped(route_id_, window));
+    gfx::PluginWindowHandle window, uint64 surface_id) {
+  Send(new PluginHostMsg_AcceleratedSurfaceBuffersSwapped(
+        route_id_, window, surface_id));
 }
 
 void WebPluginProxy::SetAcceleratedSurface(
@@ -722,3 +727,8 @@ void WebPluginProxy::ResourceClientDeleted(
     }
   }
 }
+
+void WebPluginProxy::URLRedirectResponse(bool allow, int resource_id) {
+  Send(new PluginHostMsg_URLRedirectResponse(route_id_, allow, resource_id));
+}
+

@@ -10,16 +10,16 @@
 #include "app/hi_res_timer_manager.h"
 #include "app/system_monitor.h"
 #include "base/command_line.h"
-#include "base/field_trial.h"
-#include "base/histogram.h"
+#include "base/debug/trace_event.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
+#include "base/metrics/field_trial.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
+#include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/process_util.h"
-#include "base/scoped_nsautorelease_pool.h"
-#include "base/stats_counters.h"
 #include "base/string_util.h"
-#include "base/trace_event.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_counters.h"
 #include "chrome/common/chrome_switches.h"
@@ -36,6 +36,7 @@
 #if defined(OS_MACOSX)
 #include "base/eintr_wrapper.h"
 #include "chrome/app/breakpad_mac.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #endif  // OS_MACOSX
 
 #if defined(USE_LINUX_BREAKPAD)
@@ -103,16 +104,16 @@ class ShutdownDetector : public PlatformThread::Delegate {
     } while (bytes_read < sizeof(signal));
 
     if (bytes_read == sizeof(signal))
-      LOG(INFO) << "Handling shutdown for signal " << signal << ".";
+      VLOG(1) << "Handling shutdown for signal " << signal << ".";
     else
-      LOG(INFO) << "Handling shutdown for unknown signal.";
+      VLOG(1) << "Handling shutdown for unknown signal.";
 
     // Clean up Breakpad if necessary.
     if (IsCrashReporterEnabled()) {
-      LOG(INFO) << "Cleaning up Breakpad.";
+      VLOG(1) << "Cleaning up Breakpad.";
       DestructCrashReporter();
     } else {
-      LOG(INFO) << "Breakpad not enabled; no clean-up needed.";
+      VLOG(1) << "Breakpad not enabled; no clean-up needed.";
     }
 
     // Something went seriously wrong, so get out.
@@ -180,7 +181,7 @@ int RendererMain(const MainFunctionParams& parameters) {
   TRACE_EVENT_BEGIN("RendererMain", 0, "");
 
   const CommandLine& parsed_command_line = parameters.command_line_;
-  base::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool_;
+  base::mac::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool_;
 
 #if defined(OS_MACOSX)
   // TODO(viettrungluu): Code taken from browser_main.cc.
@@ -223,7 +224,7 @@ int RendererMain(const MainFunctionParams& parameters) {
 
   RendererMainPlatformDelegate platform(parameters);
 
-  StatsScope<StatsCounterTimer>
+  base::StatsScope<base::StatsCounterTimer>
       startup_timer(chrome::Counters::renderer_main());
 
 #if defined(OS_MACOSX)
@@ -249,13 +250,13 @@ int RendererMain(const MainFunctionParams& parameters) {
 
   // Initialize histogram statistics gathering system.
   // Don't create StatisticsRecorder in the single process mode.
-  scoped_ptr<StatisticsRecorder> statistics;
-  if (!StatisticsRecorder::WasStarted()) {
-    statistics.reset(new StatisticsRecorder());
+  scoped_ptr<base::StatisticsRecorder> statistics;
+  if (!base::StatisticsRecorder::WasStarted()) {
+    statistics.reset(new base::StatisticsRecorder());
   }
 
   // Initialize statistical testing infrastructure.
-  FieldTrialList field_trial;
+  base::FieldTrialList field_trial;
   // Ensure any field trials in browser are reflected into renderer.
   if (parsed_command_line.HasSwitch(switches::kForceFieldTestNameAndValue)) {
     std::string persistent = parsed_command_line.GetSwitchValueASCII(

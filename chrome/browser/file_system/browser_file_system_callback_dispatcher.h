@@ -14,12 +14,13 @@ class BrowserFileSystemCallbackDispatcher
  public:
   BrowserFileSystemCallbackDispatcher(FileSystemDispatcherHost* dispatcher_host,
                                       int request_id);
+  virtual ~BrowserFileSystemCallbackDispatcher();
 
   // FileSystemCallbackDispatcher implementation.
   virtual void DidSucceed();
   virtual void DidReadMetadata(const base::PlatformFileInfo& file_info);
   virtual void DidReadDirectory(
-      const std::vector<base::file_util_proxy::Entry>& entries,
+      const std::vector<base::FileUtilProxy::Entry>& entries,
       bool has_more);
   virtual void DidOpenFileSystem(const std::string& name,
                                  const FilePath& root_path);

@@ -43,6 +43,9 @@ cr.define('options', function() {
       userNameEdit.disabled = !AccountsOptions.currentUserIsOwner();
 
       this.addEventListener('visibleChange', this.handleVisibleChange_);
+
+      $('allowGuestCheck').addEventListener('click',
+          this.handleAllowGuestCheckClick_);
     },
 
     /**
@@ -52,7 +55,20 @@ cr.define('options', function() {
      */
     handleVisibleChange_: function(e) {
       if (this.visible) {
-        $('userList').redraw();
+        // fetchUserPictures calls back AccountsOptions.setUserPictures and
+        // triggers redraw.
+        chrome.send('fetchUserPictures', []);
+      }
+    },
+
+    /**
+     * Handler for allow guest check click.
+     * @private
+     */
+    handleAllowGuestCheckClick_: function(e) {
+      // Whitelist existing users when guest login is being disabled.
+      if (!$('allowGuestCheck').checked) {
+        chrome.send('whitelistExistingUsers', []);
       }
     },
 
@@ -62,7 +78,7 @@ cr.define('options', function() {
      * @param {Event} e Add event fired from userNameEdit.
      */
     handleAddUser_: function(e) {
-      $('userList').addUser(e.user);
+      AccountsOptions.addUsers([e.user]);
     }
   };
 
@@ -71,6 +87,23 @@ cr.define('options', function() {
    */
   AccountsOptions.currentUserIsOwner = function() {
     return localStrings.getString('current_user_is_owner') == 'true';
+  };
+
+  /**
+   * Updates user picture cache in UserList.
+   */
+  AccountsOptions.setUserPictures = function(cache) {
+    $('userList').setUserPictures(cache);
+  };
+
+  /**
+   * Adds given users to userList.
+   */
+  AccountsOptions.addUsers = function(users) {
+    var userList = $('userList');
+    for (var i = 0; i < users.length; ++i) {
+      userList.addUser(users[i]);
+    }
   };
 
   // Export

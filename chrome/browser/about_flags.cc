@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/singleton.h"
 #include "base/values.h"
+#include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -22,35 +23,37 @@ namespace about_flags {
 
 namespace {
 
-enum { kOsMac = 1 << 0, kOsWin = 1 << 1, kOsLinux = 1 << 2 };
+const unsigned kOsAll = kOsMac | kOsWin | kOsLinux | kOsCrOS;
 
-unsigned kOsAll = kOsMac | kOsWin | kOsLinux;
+// Names for former Chrome OS Labs experiments, shared with prefs migration
+// code.
+const char kMediaPlayerExperimentName[] = "media-player";
+const char kAdvancedFileSystemExperimentName[] = "advanced-file-system";
+const char kVerticalTabsExperimentName[] = "vertical-tabs";
 
-struct Experiment {
-  // The internal name of the experiment. This is never shown to the user.
-  // It _is_ however stored in the prefs file, so you shouldn't change the
-  // name of existing flags.
-  const char* internal_name;
-
-  // String id of the message containing the experiment's name.
-  int visible_name_id;
-
-  // String id of the message containing the experiment's description.
-  int visible_description_id;
-
-  // The platforms the experiment is available on
-  // Needs to be more than a compile-time #ifdef because of profile sync.
-  unsigned supported_platforms;  // bitmask
-
-  // The commandline parameter that's added when this lab is active. This is
-  // different from |internal_name| so that the commandline flag can be
-  // renamed without breaking the prefs file.
-  const char* command_line;
-};
+// RECORDING USER METRICS FOR FLAGS:
+// -----------------------------------------------------------------------------
+// The first line of the experiment is the internal name. If you'd like to
+// gather statistics about the usage of your flag, you should append a marker
+// comment to the end of the feature name, like so:
+//   "my-special-feature",  // FLAGS:RECORD_UMA
+//
+// After doing that, run //chrome/tools/extract_actions.py (see instructions at
+// the top of that file for details) to update the chromeactions.txt file, which
+// will enable UMA to record your feature flag.
+//
+// After your feature has shipped under a flag, you can locate the metrics
+// under the action name AboutFlags_internal-action-name. Actions are recorded
+// once per startup, so you should divide this number by AboutFlags_StartupTick
+// to get a sense of usage. Note that this will not be the same as number of
+// users with a given feature enabled because users can quit and relaunch
+// the application multiple times over a given time interval.
+// TODO(rsesek): See if there's a way to count per-user, rather than
+// per-startup.
 
 const Experiment kExperiments[] = {
   {
-    "expose-for-tabs",  // Do not change; see above.
+    "expose-for-tabs",  // FLAGS:RECORD_UMA
     IDS_FLAGS_TABPOSE_NAME,
     IDS_FLAGS_TABPOSE_DESCRIPTION,
     kOsMac,
@@ -62,110 +65,192 @@ const Experiment kExperiments[] = {
 #endif
   },
   {
-    "vertical-tabs",  // Do not change; see above.
+    kMediaPlayerExperimentName,
+    IDS_FLAGS_MEDIA_PLAYER_NAME,
+    IDS_FLAGS_MEDIA_PLAYER_DESCRIPTION,
+    kOsCrOS,
+#if defined(OS_CHROMEOS)
+    // The switch exists only on Chrome OS.
+    switches::kEnableMediaPlayer
+#else
+    ""
+#endif
+  },
+  {
+    kAdvancedFileSystemExperimentName,
+    IDS_FLAGS_ADVANCED_FS_NAME,
+    IDS_FLAGS_ADVANCED_FS_DESCRIPTION,
+    kOsCrOS,
+#if defined(OS_CHROMEOS)
+    // The switch exists only on Chrome OS.
+    switches::kEnableAdvancedFileSystem
+#else
+    ""
+#endif
+  },
+  {
+    "vertical-tabs",  // FLAGS:RECORD_UMA
     IDS_FLAGS_SIDE_TABS_NAME,
     IDS_FLAGS_SIDE_TABS_DESCRIPTION,
-    kOsWin,
+    kOsWin | kOsCrOS,
     switches::kEnableVerticalTabs
   },
   {
-    "tabbed-options",  // Do not change; see above.
+    "tabbed-options",  // FLAGS:RECORD_UMA
     IDS_FLAGS_TABBED_OPTIONS_NAME,
     IDS_FLAGS_TABBED_OPTIONS_DESCRIPTION,
-    kOsAll,
+    kOsWin | kOsLinux | kOsMac,  // Enabled by default on CrOS.
     switches::kEnableTabbedOptions
   },
   {
-    "match-preview",  // Do not change; see above.
-    IDS_FLAGS_INSTANT_NAME,
-    IDS_FLAGS_INSTANT_DESCRIPTION,
-    kOsWin,
-    switches::kEnableMatchPreview
-  },
-  {
-    "remoting",  // Do not change; see above.
+    "remoting",  // FLAGS:RECORD_UMA
     IDS_FLAGS_REMOTING_NAME,
 #if defined(OS_WIN)
     // Windows only supports host functionality at the moment.
     IDS_FLAGS_REMOTING_HOST_DESCRIPTION,
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX)  // Also true for CrOS.
     // Linux only supports client functionality at the moment.
     IDS_FLAGS_REMOTING_CLIENT_DESCRIPTION,
 #else
     // On other platforms, this lab isn't available at all.
     0,
 #endif
-    kOsWin | kOsLinux,
+    kOsWin | kOsLinux | kOsCrOS,
     switches::kEnableRemoting
   },
   {
-    "disable-outdated-plugins",  // Do not change; see above.
+    "disable-outdated-plugins",  // FLAGS:RECORD_UMA
     IDS_FLAGS_DISABLE_OUTDATED_PLUGINS_NAME,
     IDS_FLAGS_DISABLE_OUTDATED_PLUGINS_DESCRIPTION,
     kOsAll,
     switches::kDisableOutdatedPlugins
   },
   {
-    "xss-auditor",  // Do not change; see above.
+    "xss-auditor",  // FLAGS:RECORD_UMA
     IDS_FLAGS_XSS_AUDITOR_NAME,
     IDS_FLAGS_XSS_AUDITOR_DESCRIPTION,
     kOsAll,
     switches::kEnableXSSAuditor
   },
   {
-    "background-webapps", // Do not change; see above
+    "background-webapps",  // FLAGS:RECORD_UMA
     IDS_FLAGS_BACKGROUND_WEBAPPS_NAME,
     IDS_FLAGS_BACKGROUND_WEBAPPS_DESCRIPTION,
     kOsAll,
     switches::kEnableBackgroundMode
   },
   {
-    "cloud-print-proxy", // Do not change; see above.
+    "conflicting-modules-check",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_CONFLICTS_CHECK_NAME,
+    IDS_FLAGS_CONFLICTS_CHECK_DESCRIPTION,
+    kOsWin,
+    switches::kConflictingModulesCheck
+  },
+  {
+    "cloud-print-proxy",  // FLAGS:RECORD_UMA
     IDS_FLAGS_CLOUD_PRINT_PROXY_NAME,
     IDS_FLAGS_CLOUD_PRINT_PROXY_DESCRIPTION,
+#if defined(GOOGLE_CHROME_BUILD)
+    // For a Chrome build, we know we have a PDF plug-in, and so we'll
+    // enable by platform as we get things working.
+    0,
+#else
+    // Otherwise, where we know it could be working if a viable PDF
+    // plug-in could be supplied, we'll keep the lab enabled.
     kOsWin,
+#endif
     switches::kEnableCloudPrintProxy
   },
   {
-    "match-preview",  // Do not change; see above.
-    IDS_FLAGS_INSTANT_NAME,
-    IDS_FLAGS_INSTANT_DESCRIPTION,
-    kOsMac,
-    switches::kEnableMatchPreview
+    "crxless-web-apps",
+    IDS_FLAGS_CRXLESS_WEB_APPS_NAME,
+    IDS_FLAGS_CRXLESS_WEB_APPS_DESCRIPTION,
+    kOsAll,
+    switches::kEnableCrxlessWebApps
   },
-  // FIXME(scheib): Add Flags entry for accelerated Compositing,
-  // or pull it and the strings in generated_resources.grd by Dec 2010
-  //{
-  //  "gpu-compositing", // Do not change; see above
-  //  IDS_FLAGS_ACCELERATED_COMPOSITING_NAME,
-  //  IDS_FLAGS_ACCELERATED_COMPOSITING_DESCRIPTION,
-  //  kOsAll,
-  //  switches::kDisableAcceleratedCompositing
-  //},
   {
-    "gpu-canvas-2d", // Do not change; see above
+    "gpu-compositing",
+     IDS_FLAGS_ACCELERATED_COMPOSITING_NAME,
+     IDS_FLAGS_ACCELERATED_COMPOSITING_DESCRIPTION,
+     kOsAll,
+     switches::kEnableAcceleratedLayers
+  },
+  {
+    "gpu-canvas-2d",  // FLAGS:RECORD_UMA
     IDS_FLAGS_ACCELERATED_CANVAS_2D_NAME,
     IDS_FLAGS_ACCELERATED_CANVAS_2D_DESCRIPTION,
-    kOsWin | kOsLinux,
+    kOsWin | kOsLinux | kOsCrOS,
     switches::kEnableAccelerated2dCanvas
   },
   // FIXME(scheib): Add Flags entry for WebGL,
   // or pull it and the strings in generated_resources.grd by Dec 2010
-  //{
-  //  "webgl", // Do not change; see above
-  //  IDS_FLAGS_WEBGL_NAME,
-  //  IDS_FLAGS_WEBGL_DESCRIPTION,
-  //  kOsAll,
-  //  switches::kDisableExperimentalWebGL
-  //}
-  //{
-  //  "print-preview",  // Do not change; see above
-  //  IDS_FLAGS_PRINT_PREVIEW_NAME,
-  //  IDS_FLAGS_PRINT_PREVIEW_DESCRIPTION,
-  //  kOsAll,
-  //  switches::kEnablePrintPreview
-  //}
+  // {
+  //   "webgl",
+  //   IDS_FLAGS_WEBGL_NAME,
+  //   IDS_FLAGS_WEBGL_DESCRIPTION,
+  //   kOsAll,
+  //   switches::kDisableExperimentalWebGL
+  // }
+  {
+    "print-preview",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_PRINT_PREVIEW_NAME,
+    IDS_FLAGS_PRINT_PREVIEW_DESCRIPTION,
+    kOsAll,
+    switches::kEnablePrintPreview
+  },
+  {
+    "enable-nacl",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_ENABLE_NACL_NAME,
+    IDS_FLAGS_ENABLE_NACL_DESCRIPTION,
+    kOsAll,
+    switches::kEnableNaCl
+  },
+  {
+    "dns-server",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_DNS_SERVER_NAME,
+    IDS_FLAGS_DNS_SERVER_DESCRIPTION,
+    kOsLinux,
+    switches::kDnsServer
+  },
+  {
+    "page-prerender",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_PAGE_PRERENDER_NAME,
+    IDS_FLAGS_PAGE_PRERENDER_DESCRIPTION,
+    kOsAll,
+    switches::kEnablePagePrerender
+  },
+  {
+    "confirm-to-quit",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_CONFIRM_TO_QUIT_NAME,
+    IDS_FLAGS_CONFIRM_TO_QUIT_DESCRIPTION,
+    kOsMac,
+    switches::kEnableConfirmToQuit
+  },
+  {
+    "extension-apis",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_EXPERIMENTAL_EXTENSION_APIS_NAME,
+    IDS_FLAGS_EXPERIMENTAL_EXTENSION_APIS_DESCRIPTION,
+    kOsAll,
+    switches::kEnableExperimentalExtensionApis
+  },
+  {
+    "click-to-play",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_CLICK_TO_PLAY_NAME,
+    IDS_FLAGS_CLICK_TO_PLAY_DESCRIPTION,
+    kOsAll,
+    switches::kEnableClickToPlay
+  },
+  {
+    "disable-hyperlink-auditing",
+    IDS_FLAGS_DISABLE_HYPERLINK_AUDITING_NAME,
+    IDS_FLAGS_DISABLE_HYPERLINK_AUDITING_DESCRIPTION,
+    kOsAll,
+    switches::kNoPings
+  }
 };
+
+const Experiment* experiments = kExperiments;
+size_t num_experiments = arraysize(kExperiments);
 
 // Stores and encapsulates the little state that about:flags has.
 class FlagsState {
@@ -174,7 +259,7 @@ class FlagsState {
   void ConvertFlagsToSwitches(PrefService* prefs, CommandLine* command_line);
   bool IsRestartNeededToCommitChanges();
   void SetExperimentEnabled(
-    PrefService* prefs, const std::string& internal_name, bool enable);
+      PrefService* prefs, const std::string& internal_name, bool enable);
   void RemoveFlagsSwitches(
       std::map<std::string, CommandLine::StringType>* switch_list);
   void reset();
@@ -190,6 +275,25 @@ class FlagsState {
 
   DISALLOW_COPY_AND_ASSIGN(FlagsState);
 };
+
+#if defined(OS_CHROMEOS)
+// Migrates Chrome OS Labs settings to experiments adding flags to enabled
+// experiment list if the corresponding pref is on.
+void MigrateChromeOSLabsPrefs(PrefService* prefs,
+                              std::set<std::string>* result) {
+  DCHECK(prefs);
+  DCHECK(result);
+  if (prefs->GetBoolean(prefs::kLabsMediaplayerEnabled))
+    result->insert(kMediaPlayerExperimentName);
+  if (prefs->GetBoolean(prefs::kLabsAdvancedFilesystemEnabled))
+    result->insert(kAdvancedFileSystemExperimentName);
+  if (prefs->GetBoolean(prefs::kUseVerticalTabs))
+    result->insert(kVerticalTabsExperimentName);
+  prefs->SetBoolean(prefs::kLabsMediaplayerEnabled, false);
+  prefs->SetBoolean(prefs::kLabsAdvancedFilesystemEnabled, false);
+  prefs->SetBoolean(prefs::kUseVerticalTabs, false);
+}
+#endif
 
 // Extracts the list of enabled lab experiments from preferences and stores them
 // in a set.
@@ -232,8 +336,8 @@ void SetEnabledFlags(
 // and removed.
 void SanitizeList(PrefService* prefs) {
   std::set<std::string> known_experiments;
-  for (size_t i = 0; i < arraysize(kExperiments); ++i)
-    known_experiments.insert(kExperiments[i].internal_name);
+  for (size_t i = 0; i < num_experiments; ++i)
+    known_experiments.insert(experiments[i].internal_name);
 
   std::set<std::string> enabled_experiments;
   GetEnabledFlags(prefs, &enabled_experiments);
@@ -253,28 +357,32 @@ void GetSanitizedEnabledFlags(
   GetEnabledFlags(prefs, result);
 }
 
-int GetCurrentPlatform() {
-#if defined(OS_MACOSX)
-  return kOsMac;
-#elif defined(OS_WIN)
-  return kOsWin;
-#elif defined(OS_LINUX)
-  return kOsLinux;
-#else
-#error Unknown platform
-#endif
+// Variant of GetSanitizedEnabledFlags that also removes any flags that aren't
+// enabled on the current platform.
+void GetSanitizedEnabledFlagsForCurrentPlatform(
+    PrefService* prefs, std::set<std::string>* result) {
+  GetSanitizedEnabledFlags(prefs, result);
+
+  // Filter out any experiments that aren't enabled on the current platform.  We
+  // don't remove these from prefs else syncing to a platform with a different
+  // set of experiments would be lossy.
+  std::set<std::string> platform_experiments;
+  int current_platform = GetCurrentPlatform();
+  for (size_t i = 0; i < num_experiments; ++i) {
+    if (experiments[i].supported_platforms & current_platform)
+      platform_experiments.insert(experiments[i].internal_name);
+  }
+
+  std::set<std::string> new_enabled_experiments;
+  std::set_intersection(
+      platform_experiments.begin(), platform_experiments.end(),
+      result->begin(), result->end(),
+      std::inserter(new_enabled_experiments, new_enabled_experiments.begin()));
+
+  result->swap(new_enabled_experiments);
 }
 
 }  // namespace
-
-bool IsEnabled() {
-#if defined(OS_CHROMEOS)
-  // TODO(thakis): Port about:flags to chromeos -- http://crbug.com/57634
-  return false;
-#else
-  return true;
-#endif
-}
 
 void ConvertFlagsToSwitches(PrefService* prefs, CommandLine* command_line) {
   FlagsState::instance()->ConvertFlagsToSwitches(prefs, command_line);
@@ -287,8 +395,8 @@ ListValue* GetFlagsExperimentsData(PrefService* prefs) {
   int current_platform = GetCurrentPlatform();
 
   ListValue* experiments_data = new ListValue();
-  for (size_t i = 0; i < arraysize(kExperiments); ++i) {
-    const Experiment& experiment = kExperiments[i];
+  for (size_t i = 0; i < num_experiments; ++i) {
+    const Experiment& experiment = experiments[i];
     if (!(experiment.supported_platforms & current_platform))
       continue;
 
@@ -321,6 +429,35 @@ void RemoveFlagsSwitches(
   FlagsState::instance()->RemoveFlagsSwitches(switch_list);
 }
 
+int GetCurrentPlatform() {
+#if defined(OS_MACOSX)
+  return kOsMac;
+#elif defined(OS_WIN)
+  return kOsWin;
+#elif defined(OS_CHROMEOS)  // Needs to be before the OS_LINUX check.
+  return kOsCrOS;
+#elif defined(OS_LINUX)
+  return kOsLinux;
+#else
+#error Unknown platform
+#endif
+}
+
+void RecordUMAStatistics(const PrefService* prefs) {
+  std::set<std::string> flags;
+  GetEnabledFlags(prefs, &flags);
+  for (std::set<std::string>::iterator it = flags.begin(); it != flags.end();
+       ++it) {
+    std::string action("AboutFlags_");
+    action += *it;
+    UserMetrics::RecordComputedAction(action);
+  }
+  // Since flag metrics are recorded every startup, add a tick so that the
+  // stats can be made meaningful.
+  if (flags.size())
+    UserMetrics::RecordAction(UserMetricsAction("AboutFlags_StartupTick"));
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // FlagsState implementation.
 
@@ -328,18 +465,22 @@ namespace {
 
 void FlagsState::ConvertFlagsToSwitches(
     PrefService* prefs, CommandLine* command_line) {
-  if (!IsEnabled())
-    return;
-
   if (command_line->HasSwitch(switches::kNoExperiments))
     return;
 
   std::set<std::string> enabled_experiments;
-  GetSanitizedEnabledFlags(prefs, &enabled_experiments);
 
-  std::map<std::string, const Experiment*> experiments;
-  for (size_t i = 0; i < arraysize(kExperiments); ++i)
-    experiments[kExperiments[i].internal_name] = &kExperiments[i];
+#if defined(OS_CHROMEOS)
+  // Some experiments were implemented via prefs on Chrome OS and we want to
+  // seamlessly migrate these prefs to about:flags for updated users.
+  MigrateChromeOSLabsPrefs(prefs, &enabled_experiments);
+#endif
+
+  GetSanitizedEnabledFlagsForCurrentPlatform(prefs, &enabled_experiments);
+
+  std::map<std::string, const Experiment*> experiment_map;
+  for (size_t i = 0; i < num_experiments; ++i)
+    experiment_map[experiments[i].internal_name] = &experiments[i];
 
   command_line->AppendSwitch(switches::kFlagSwitchesBegin);
   flags_switches_.insert(switches::kFlagSwitchesBegin);
@@ -348,9 +489,9 @@ void FlagsState::ConvertFlagsToSwitches(
        ++it) {
     const std::string& experiment_name = *it;
     std::map<std::string, const Experiment*>::iterator experiment =
-        experiments.find(experiment_name);
-    DCHECK(experiment != experiments.end());
-    if (experiment == experiments.end())
+        experiment_map.find(experiment_name);
+    DCHECK(experiment != experiment_map.end());
+    if (experiment == experiment_map.end())
       continue;
 
     command_line->AppendSwitch(experiment->second->command_line);
@@ -399,6 +540,17 @@ namespace testing {
 void ClearState() {
   FlagsState::instance()->reset();
 }
+
+void SetExperiments(const Experiment* e, size_t count) {
+  if (!e) {
+    experiments = kExperiments;
+    num_experiments = arraysize(kExperiments);
+  } else {
+    experiments = e;
+    num_experiments = count;
+  }
+}
+
 }  // namespace testing
 
 }  // namespace about_flags

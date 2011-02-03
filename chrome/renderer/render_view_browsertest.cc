@@ -38,6 +38,13 @@ using WebKit::WebURLError;
 using webkit_glue::FormData;
 using webkit_glue::FormField;
 
+namespace {
+
+// TODO(isherman): Pull this as a named constant from WebKit
+const int kDefaultMaxLength = 0x80000;
+
+}  // namespace
+
 // Test that we get form state change notifications when input fields change.
 TEST_F(RenderViewTest, OnNavStateChanged) {
   // Don't want any delay for form state sync changes. This will still post a
@@ -58,6 +65,95 @@ TEST_F(RenderViewTest, OnNavStateChanged) {
   ProcessPendingMessages();
   EXPECT_TRUE(render_thread_.sink().GetUniqueMessageMatching(
       ViewHostMsg_UpdateState::ID));
+}
+
+// Test that we get the correct UpdateState message when we go back twice
+// quickly without committing.  Regression test for http://crbug.com/58082.
+TEST_F(RenderViewTest, LastCommittedUpdateState) {
+  // Load page A.
+  LoadHTML("<div>Page A</div>");
+
+  // Load page B, which will trigger an UpdateState message for page A.
+  LoadHTML("<div>Page B</div>");
+
+  // Check for a valid UpdateState message for page A.
+  const IPC::Message* msg_A = render_thread_.sink().GetUniqueMessageMatching(
+      ViewHostMsg_UpdateState::ID);
+  ASSERT_TRUE(msg_A);
+  int page_id_A;
+  std::string state_A;
+  ViewHostMsg_UpdateState::Read(msg_A, &page_id_A, &state_A);
+  EXPECT_EQ(1, page_id_A);
+  render_thread_.sink().ClearMessages();
+
+  // Load page C, which will trigger an UpdateState message for page B.
+  LoadHTML("<div>Page C</div>");
+
+  // Check for a valid UpdateState for page B.
+  const IPC::Message* msg_B = render_thread_.sink().GetUniqueMessageMatching(
+      ViewHostMsg_UpdateState::ID);
+  ASSERT_TRUE(msg_B);
+  int page_id_B;
+  std::string state_B;
+  ViewHostMsg_UpdateState::Read(msg_B, &page_id_B, &state_B);
+  EXPECT_EQ(2, page_id_B);
+  EXPECT_NE(state_A, state_B);
+  render_thread_.sink().ClearMessages();
+
+  // Load page D, which will trigger an UpdateState message for page C.
+  LoadHTML("<div>Page D</div>");
+
+  // Check for a valid UpdateState for page C.
+  const IPC::Message* msg_C = render_thread_.sink().GetUniqueMessageMatching(
+      ViewHostMsg_UpdateState::ID);
+  ASSERT_TRUE(msg_C);
+  int page_id_C;
+  std::string state_C;
+  ViewHostMsg_UpdateState::Read(msg_C, &page_id_C, &state_C);
+  EXPECT_EQ(3, page_id_C);
+  EXPECT_NE(state_B, state_C);
+  render_thread_.sink().ClearMessages();
+
+  // Go back to C and commit, preparing for our real test.
+  ViewMsg_Navigate_Params params_C;
+  params_C.transition = PageTransition::FORWARD_BACK;
+  params_C.page_id = 3;
+  params_C.state = state_C;
+  view_->OnNavigate(params_C);
+  ProcessPendingMessages();
+  render_thread_.sink().ClearMessages();
+
+  // Go back twice quickly, such that page B does not have a chance to commit.
+  // This leads to two changes to the back/forward list but only one change to
+  // the RenderView's page ID.
+
+  // Back to page B (page_id 2), without committing.
+  ViewMsg_Navigate_Params params_B;
+  params_B.transition = PageTransition::FORWARD_BACK;
+  params_B.page_id = 2;
+  params_B.state = state_B;
+  view_->OnNavigate(params_B);
+
+  // Back to page A (page_id 1) and commit.
+  ViewMsg_Navigate_Params params;
+  params.transition = PageTransition::FORWARD_BACK;
+  params.page_id = 1;
+  params.state = state_A;
+  view_->OnNavigate(params);
+  ProcessPendingMessages();
+
+  // Now ensure that the UpdateState message we receive is consistent
+  // and represents page C in both page_id and state.
+  const IPC::Message* msg = render_thread_.sink().GetUniqueMessageMatching(
+      ViewHostMsg_UpdateState::ID);
+  ASSERT_TRUE(msg);
+  int page_id;
+  std::string state;
+  ViewHostMsg_UpdateState::Read(msg, &page_id, &state);
+  EXPECT_EQ(page_id_C, page_id);
+  EXPECT_NE(state_A, state);
+  EXPECT_NE(state_B, state);
+  EXPECT_EQ(state_C, state);
 }
 
 // Test that our IME backend sends a notification message when the input focus
@@ -942,19 +1038,22 @@ TEST_F(RenderViewTest, SendForms) {
                 ASCIIToUTF16("firstname"),
                 string16(),
                 ASCIIToUTF16("text"),
-                20))) << forms[0].fields[0];
+                kDefaultMaxLength,
+                false))) << forms[0].fields[0];
   EXPECT_TRUE(forms[0].fields[1].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("middlename"),
                 string16(),
                 ASCIIToUTF16("text"),
-                20))) << forms[0].fields[1];
+                kDefaultMaxLength,
+                false))) << forms[0].fields[1];
   EXPECT_TRUE(forms[0].fields[2].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("lastname"),
                 string16(),
                 ASCIIToUTF16("hidden"),
-                0))) << forms[0].fields[2];
+                0,
+                false))) << forms[0].fields[2];
 
   // Verify that |didAcceptAutoFillSuggestion()| sends the expected number of
   // fields.
@@ -985,19 +1084,22 @@ TEST_F(RenderViewTest, SendForms) {
                 ASCIIToUTF16("firstname"),
                 string16(),
                 ASCIIToUTF16("text"),
-                20))) << form2.fields[0];
+                kDefaultMaxLength,
+                false))) << form2.fields[0];
   EXPECT_TRUE(form2.fields[1].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("middlename"),
                 string16(),
                 ASCIIToUTF16("text"),
-                20))) << form2.fields[1];
+                kDefaultMaxLength,
+                false))) << form2.fields[1];
   EXPECT_TRUE(form2.fields[2].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("lastname"),
                 string16(),
                 ASCIIToUTF16("hidden"),
-                0))) << form2.fields[2];
+                0,
+                false))) << form2.fields[2];
 }
 
 TEST_F(RenderViewTest, FillFormElement) {
@@ -1026,13 +1128,15 @@ TEST_F(RenderViewTest, FillFormElement) {
                 ASCIIToUTF16("firstname"),
                 string16(),
                 ASCIIToUTF16("text"),
-                20))) << forms[0].fields[0];
+                kDefaultMaxLength,
+                false))) << forms[0].fields[0];
   EXPECT_TRUE(forms[0].fields[1].StrictlyEqualsHack(
       FormField(string16(),
                 ASCIIToUTF16("middlename"),
                 string16(),
                 ASCIIToUTF16("text"),
-                20))) << forms[0].fields[1];
+                kDefaultMaxLength,
+                false))) << forms[0].fields[1];
 
   // Verify that |didAcceptAutoFillSuggestion()| sets the value of the expected
   // field.

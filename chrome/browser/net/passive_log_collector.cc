@@ -9,7 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/string_util.h"
 #include "base/format_macros.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "net/url_request/url_request_netlog_params.h"
 
 namespace {
@@ -36,6 +36,31 @@ bool SortByOrderComparator(const PassiveLogCollector::Entry& a,
 }
 
 }  // namespace
+
+PassiveLogCollector::Entry::Entry(uint32 order,
+                                  net::NetLog::EventType type,
+                                  const base::TimeTicks& time,
+                                  net::NetLog::Source source,
+                                  net::NetLog::EventPhase phase,
+                                  net::NetLog::EventParameters* params)
+    : order(order),
+      type(type),
+      time(time),
+      source(source),
+      phase(phase),
+      params(params) {
+}
+
+PassiveLogCollector::Entry::~Entry() {}
+
+PassiveLogCollector::SourceInfo::SourceInfo()
+    : source_id(net::NetLog::Source::kInvalidId),
+      num_entries_truncated(0),
+      reference_count(0),
+      is_alive(true) {
+}
+
+PassiveLogCollector::SourceInfo::~SourceInfo() {}
 
 //----------------------------------------------------------------------------
 // PassiveLogCollector
@@ -264,6 +289,15 @@ void PassiveLogCollector::SourceTracker::AddToDeletionQueue(
   }
 }
 
+void PassiveLogCollector::SourceTracker::EraseFromDeletionQueue(
+    uint32 source_id) {
+  DeletionQueue::iterator it =
+      std::remove(deletion_queue_.begin(), deletion_queue_.end(),
+                  source_id);
+  DCHECK(it != deletion_queue_.end());
+  deletion_queue_.erase(it);
+}
+
 void PassiveLogCollector::SourceTracker::AdjustReferenceCountForSource(
     int offset, uint32 source_id) {
   DCHECK(offset == -1 || offset == 1) << "invalid offset: " << offset;
@@ -281,7 +315,8 @@ void PassiveLogCollector::SourceTracker::AdjustReferenceCountForSource(
   DCHECK_GE(info.reference_count, 0);
   info.reference_count += offset;
 
-  if (info.reference_count < 0) {
+  bool released_unmatched_reference = info.reference_count < 0;
+  if (released_unmatched_reference) {
     // In general this shouldn't happen, however it is possible to reach this
     // state if SourceTracker::Clear() was called earlier.
     LOG(WARNING) << "Released unmatched reference count.";
@@ -292,12 +327,10 @@ void PassiveLogCollector::SourceTracker::AdjustReferenceCountForSource(
     if (info.reference_count == 1 && offset == 1) {
       // If we just added a reference to a dead source that had no references,
       // it must have been in the deletion queue, so remove it from the queue.
-      DeletionQueue::iterator it =
-          std::remove(deletion_queue_.begin(), deletion_queue_.end(),
-                      source_id);
-      DCHECK(it != deletion_queue_.end());
-      deletion_queue_.erase(it);
+      EraseFromDeletionQueue(source_id);
     } else if (info.reference_count == 0) {
+      if (released_unmatched_reference)
+        EraseFromDeletionQueue(source_id);
       // If we just released the final reference to a dead source, go ahead
       // and delete it right away.
       DeleteSourceInfo(source_id);

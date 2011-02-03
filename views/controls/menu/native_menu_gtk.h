@@ -21,6 +21,8 @@ class MenuModel;
 
 namespace views {
 
+class NestedDispatcherGtk;
+
 // A Gtk implementation of MenuWrapper.
 //
 // NOTE: On windows the activate message is not sent immediately when an item
@@ -49,6 +51,9 @@ class NativeMenuGtk : public MenuWrapper,
 
   // Overriden from MessageLoopForUI::Dispatcher:
   virtual bool Dispatch(GdkEvent* event);
+#if defined(TOUCH_UI)
+  virtual bool Dispatch(XEvent* xevent);
+#endif
 
  private:
   CHROMEGTK_CALLBACK_0(NativeMenuGtk, void, OnMenuHidden);
@@ -62,7 +67,7 @@ class NativeMenuGtk : public MenuWrapper,
   void ResetMenu();
 
   // Updates the menu item's state.
-  void UpdateMenuItemState(GtkWidget* menu_item);
+  void UpdateMenuItemState(GtkWidget* menu_item, bool recurse);
 
   static void UpdateStateCallback(GtkWidget* menu_item, gpointer data);
 
@@ -135,6 +140,15 @@ class NativeMenuGtk : public MenuWrapper,
 
   // Vector of listeners to receive callbacks when the menu opens.
   std::vector<MenuListener*> listeners_;
+
+  // Nested dispatcher object that can outlive this object.
+  // This is to deal with the menu being deleted while the nested
+  // message loop is handled. see http://crosbug.com/7228 .
+  NestedDispatcherGtk* nested_dispatcher_;
+
+  // A flag used to detect a button release event without button press or move.
+  // see http://crosbug.com/8718.
+  bool ignore_button_release_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeMenuGtk);
 };

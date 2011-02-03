@@ -77,7 +77,7 @@ TEST_F(ResourceDispatcherTest, ContentDispositionInline) {
 }
 
 // Test for bug #1091358.
-// Flakey due to NavigateToURL bug: see http://crbug.com/55380
+// Flaky: http://crbug.com/62595
 TEST_F(ResourceDispatcherTest, FLAKY_SyncXMLHttpRequest) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
@@ -99,7 +99,8 @@ TEST_F(ResourceDispatcherTest, FLAKY_SyncXMLHttpRequest) {
   EXPECT_TRUE(success);
 }
 
-TEST_F(ResourceDispatcherTest, SyncXMLHttpRequest_Disallowed) {
+// http://code.google.com/p/chromium/issues/detail?id=62776
+TEST_F(ResourceDispatcherTest, FLAKY_SyncXMLHttpRequest_Disallowed) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(test_server.Start());
@@ -191,10 +192,6 @@ TEST_F(ResourceDispatcherTest, CrossSiteOnunloadCookie) {
 }
 
 #if !defined(OS_MACOSX)
-#if defined(OS_WIN)
-// http://crbug.com/32048
-#define CrossSiteAfterCrash FLAKY_CrossSiteAfterCrash
-#endif
 // Tests that the onbeforeunload and onunload logic is shortcutted if the old
 // renderer is gone.  In that case, we don't want to wait for the old renderer
 // to run the handlers.

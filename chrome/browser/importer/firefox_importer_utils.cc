@@ -18,6 +18,7 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/search_engines/template_url_parser.h"
+#include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "googleurl/src/gurl.h"
 
 namespace {
@@ -99,7 +100,7 @@ bool GetFirefoxVersionAndPathFromProfile(const FilePath& profile_path,
   file_util::ReadFileToString(compatibility_file, &content);
   ReplaceSubstringsAfterOffset(&content, 0, "\r\n", "\n");
   std::vector<std::string> lines;
-  SplitString(content, '\n', &lines);
+  base::SplitString(content, '\n', &lines);
 
   for (size_t i = 0; i < lines.size(); ++i) {
     const std::string& line = lines[i];
@@ -130,7 +131,7 @@ void ParseProfileINI(const FilePath& file, DictionaryValue* root) {
   file_util::ReadFileToString(file, &content);
   ReplaceSubstringsAfterOffset(&content, 0, "\r\n", "\n");
   std::vector<std::string> lines;
-  SplitString(content, '\n', &lines);
+  base::SplitString(content, '\n', &lines);
 
   // Parses the file.
   root->Clear();
@@ -214,8 +215,11 @@ void ParseSearchEnginesFromXMLFiles(const std::vector<FilePath>& xml_files,
         search_engine_for_url.erase(iter);
       }
       // Give this a keyword to facilitate tab-to-search, if possible.
+      GURL gurl = GURL(url);
       template_url->set_keyword(
-          TemplateURLModel::GenerateKeyword(GURL(url), false));
+          TemplateURLModel::GenerateKeyword(gurl, false));
+      template_url->set_logo_id(
+          TemplateURLPrepopulateData::GetSearchEngineLogo(gurl));
       template_url->set_show_in_default_list(true);
       search_engine_for_url[url] = template_url;
       if (!default_turl)
@@ -345,7 +349,7 @@ bool IsDefaultHomepage(const GURL& homepage, const FilePath& app_path) {
 
   // Crack the string into separate homepage urls.
   std::vector<std::string> urls;
-  SplitString(default_homepages, '|', &urls);
+  base::SplitString(default_homepages, '|', &urls);
 
   for (size_t i = 0; i < urls.size(); ++i) {
     if (homepage.spec() == GURL(urls[i]).spec())
@@ -410,7 +414,7 @@ bool ParsePrefFile(const FilePath& pref_file, DictionaryValue* prefs) {
       if (IsStringUTF8(value))
         prefs->SetString(key, value);
       else
-        LOG(INFO) << "Non UTF8 value for key " << key << ", ignored.";
+        VLOG(1) << "Non UTF8 value for key " << key << ", ignored.";
       continue;
     }
 
@@ -421,8 +425,8 @@ bool ParsePrefFile(const FilePath& pref_file, DictionaryValue* prefs) {
       continue;
     }
 
-    LOG(ERROR) << "Invalid value found in Firefox pref file '" <<
-          pref_file.value() << "' value is '" << value << "'.";
+    LOG(ERROR) << "Invalid value found in Firefox pref file '"
+               << pref_file.value() << "' value is '" << value << "'.";
   }
   return true;
 }
@@ -434,7 +438,7 @@ std::string GetPrefsJsValue(const std::string& content,
                            std::string("\", ");
   size_t prop_index = content.find(search_for);
   if (prop_index == std::string::npos)
-    return "";
+    return std::string();
 
   size_t start = prop_index + search_for.length();
   size_t stop = std::string::npos;

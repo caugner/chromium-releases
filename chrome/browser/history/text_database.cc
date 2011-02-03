@@ -11,8 +11,8 @@
 #include "app/sql/statement.h"
 #include "app/sql/transaction.h"
 #include "base/file_util.h"
-#include "base/histogram.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -58,6 +58,10 @@ const FilePath::CharType kFilePrefix[] = FILE_PATH_LITERAL("History Index ");
 
 }  // namespace
 
+TextDatabase::Match::Match() {}
+
+TextDatabase::Match::~Match() {}
+
 TextDatabase::TextDatabase(const FilePath& path,
                            DBIdent id,
                            bool allow_create)
@@ -84,8 +88,8 @@ FilePath TextDatabase::IDToFileName(DBIdent id) {
   // scheme: the caller should assign IDs as it feels fit with the knowledge
   // that they will apppear on disk in this form.
   FilePath::StringType filename(file_base());
-  StringAppendF(&filename, FILE_PATH_LITERAL("%d-%02d"),
-                id / 100, id % 100);
+  base::StringAppendF(&filename, FILE_PATH_LITERAL("%d-%02d"),
+                      id / 100, id % 100);
   return FilePath(filename);
 }
 
@@ -108,8 +112,8 @@ TextDatabase::DBIdent TextDatabase::FileNameToID(const FilePath& file_path) {
   }
 
   int year, month;
-  base::StringToInt(suffix.substr(0, 4), &year);
-  base::StringToInt(suffix.substr(5, 2), &month);
+  base::StringToInt(suffix.begin(), suffix.begin() + 4, &year);
+  base::StringToInt(suffix.begin() + 5, suffix.begin() + 7, &month);
 
   return year * 100 + month;
 }

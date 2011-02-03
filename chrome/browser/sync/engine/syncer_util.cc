@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -62,16 +62,13 @@ using syncable::WriteTransaction;
 
 namespace browser_sync {
 
-using std::string;
-using std::vector;
-
 // Returns the number of unsynced entries.
 // static
 int SyncerUtil::GetUnsyncedEntries(syncable::BaseTransaction* trans,
-                                   vector<int64> *handles) {
+                                   std::vector<int64> *handles) {
   trans->directory()->GetUnsyncedMetaHandles(trans, handles);
-  LOG_IF(INFO, handles->size() > 0)
-      << "Have " << handles->size() << " unsynced items.";
+  VLOG_IF(1, !handles->empty()) << "Have " << handles->size()
+                                << " unsynced items.";
   return handles->size();
 }
 
@@ -137,7 +134,7 @@ syncable::Id SyncerUtil::FindLocalIdToUpdate(
   // SyncEntity has NOT been applied to LOCAL fields.
   // DB has not yet been modified, no entries created for this update.
 
-  const string& client_id = trans->directory()->cache_guid();
+  const std::string& client_id = trans->directory()->cache_guid();
 
   if (update.has_client_defined_unique_tag() &&
       !update.client_defined_unique_tag().empty()) {
@@ -231,9 +228,9 @@ syncable::Id SyncerUtil::FindLocalIdToUpdate(
       // Just a quick sanity check.
       DCHECK(!local_entry.Get(ID).ServerKnows());
 
-      LOG(INFO) << "Reuniting lost commit response IDs."
-                << " server id: " << update.id() << " local id: "
-                << local_entry.Get(ID) << " new version: " << new_version;
+      VLOG(1) << "Reuniting lost commit response IDs. server id: "
+              << update.id() << " local id: " << local_entry.Get(ID)
+              << " new version: " << new_version;
 
       return local_entry.Get(ID);
     }
@@ -255,8 +252,8 @@ UpdateAttemptResponse SyncerUtil::AttemptToUpdateEntry(
   syncable::Id id = entry->Get(ID);
 
   if (entry->Get(IS_UNSYNCED)) {
-    LOG(INFO) << "Skipping update, returning conflict for: " << id
-              << " ; it's unsynced.";
+    VLOG(1) << "Skipping update, returning conflict for: " << id
+            << " ; it's unsynced.";
     return CONFLICT;
   }
   if (!entry->Get(SERVER_IS_DEL)) {
@@ -273,8 +270,8 @@ UpdateAttemptResponse SyncerUtil::AttemptToUpdateEntry(
     }
     if (entry->Get(PARENT_ID) != new_parent) {
       if (!entry->Get(IS_DEL) && !IsLegalNewParent(trans, id, new_parent)) {
-        LOG(INFO) << "Not updating item " << id << ", illegal new parent "
-          "(would cause loop).";
+        VLOG(1) << "Not updating item " << id
+                << ", illegal new parent (would cause loop).";
         return CONFLICT;
       }
     }
@@ -284,7 +281,7 @@ UpdateAttemptResponse SyncerUtil::AttemptToUpdateEntry(
     if (!handles.empty()) {
       // If we have still-existing children, then we need to deal with
       // them before we can process this change.
-      LOG(INFO) << "Not deleting directory; it's not empty " << *entry;
+      VLOG(1) << "Not deleting directory; it's not empty " << *entry;
       return CONFLICT;
     }
   }
@@ -325,9 +322,9 @@ namespace {
 // Helper to synthesize a new-style sync_pb::EntitySpecifics for use locally,
 // when the server speaks only the old sync_pb::SyncEntity_BookmarkData-based
 // protocol.
-void UpdateBookmarkSpecifics(const string& singleton_tag,
-                             const string& url,
-                             const string& favicon_bytes,
+void UpdateBookmarkSpecifics(const std::string& singleton_tag,
+                             const std::string& url,
+                             const std::string& favicon_bytes,
                              MutableEntry* local_entry) {
   // In the new-style protocol, the server no longer sends bookmark info for
   // the "google_chrome" folder.  Mimic that here.
@@ -349,7 +346,7 @@ void UpdateBookmarkSpecifics(const string& singleton_tag,
 void SyncerUtil::UpdateServerFieldsFromUpdate(
     MutableEntry* target,
     const SyncEntity& update,
-    const string& name) {
+    const std::string& name) {
   if (update.deleted()) {
     if (target->Get(SERVER_IS_DEL)) {
       // If we already think the item is server-deleted, we're done.
@@ -386,11 +383,11 @@ void SyncerUtil::UpdateServerFieldsFromUpdate(
       ServerTimeToClientTime(update.mtime()));
   target->Put(SERVER_IS_DIR, update.IsFolder());
   if (update.has_server_defined_unique_tag()) {
-    const string& tag = update.server_defined_unique_tag();
+    const std::string& tag = update.server_defined_unique_tag();
     target->Put(UNIQUE_SERVER_TAG, tag);
   }
   if (update.has_client_defined_unique_tag()) {
-    const string& tag = update.client_defined_unique_tag();
+    const std::string& tag = update.client_defined_unique_tag();
     target->Put(UNIQUE_CLIENT_TAG, tag);
   }
   // Store the datatype-specific part as a protobuf.
@@ -506,8 +503,8 @@ void SyncerUtil::SplitServerInformationIntoNewEntry(
   CopyServerFields(entry, &new_entry);
   ClearServerData(entry);
 
-  LOG(INFO) << "Splitting server information, local entry: " << *entry <<
-    " server entry: " << new_entry;
+  VLOG(1) << "Splitting server information, local entry: " << *entry
+          << " server entry: " << new_entry;
 }
 
 // This function is called on an entry when we can update the user-facing data
@@ -572,7 +569,7 @@ bool SyncerUtil::AddItemThenPredecessors(
     syncable::Entry* item,
     syncable::IndexedBitField inclusion_filter,
     syncable::MetahandleSet* inserted_items,
-    vector<syncable::Id>* commit_ids) {
+    std::vector<syncable::Id>* commit_ids) {
 
   if (!inserted_items->insert(item->Get(META_HANDLE)).second)
     return false;
@@ -600,8 +597,8 @@ void SyncerUtil::AddPredecessorsThenItem(
     syncable::Entry* item,
     syncable::IndexedBitField inclusion_filter,
     syncable::MetahandleSet* inserted_items,
-    vector<syncable::Id>* commit_ids) {
-  vector<syncable::Id>::size_type initial_size = commit_ids->size();
+    std::vector<syncable::Id>* commit_ids) {
+  size_t initial_size = commit_ids->size();
   if (!AddItemThenPredecessors(trans, item, inclusion_filter, inserted_items,
                                commit_ids))
     return;
@@ -615,9 +612,9 @@ void SyncerUtil::AddPredecessorsThenItem(
 void SyncerUtil::AddUncommittedParentsAndTheirPredecessors(
     syncable::BaseTransaction* trans,
     syncable::MetahandleSet* inserted_items,
-    vector<syncable::Id>* commit_ids,
+    std::vector<syncable::Id>* commit_ids,
     syncable::Id parent_id) {
-  vector<syncable::Id>::size_type intial_commit_ids_size = commit_ids->size();
+  size_t intial_commit_ids_size = commit_ids->size();
   // Climb the tree adding entries leaf -> root.
   while (!parent_id.ServerKnows()) {
     Entry parent(trans, GET_BY_ID, parent_id);
@@ -791,8 +788,8 @@ VerifyResult SyncerUtil::VerifyUndelete(syncable::WriteTransaction* trans,
   // (where items go to version 0 when they're deleted), or else
   // removed entirely (if this type of undeletion is indeed impossible).
   CHECK(target->good());
-  LOG(INFO) << "Server update is attempting undelete. " << *target
-            << "Update:" << SyncerProtoUtil::SyncEntityDebugString(update);
+  VLOG(1) << "Server update is attempting undelete. " << *target
+          << "Update:" << SyncerProtoUtil::SyncEntityDebugString(update);
   // Move the old one aside and start over.  It's too tricky to get the old one
   // back into a state that would pass CheckTreeInvariants().
   if (target->Get(IS_DEL)) {
@@ -805,8 +802,9 @@ VerifyResult SyncerUtil::VerifyUndelete(syncable::WriteTransaction* trans,
     return VERIFY_SUCCESS;
   }
   if (update.version() < target->Get(SERVER_VERSION)) {
-    LOG(WARNING) << "Update older than current server version for" <<
-        *target << "Update:" << SyncerProtoUtil::SyncEntityDebugString(update);
+    LOG(WARNING) << "Update older than current server version for "
+                 << *target << " Update:"
+                 << SyncerProtoUtil::SyncEntityDebugString(update);
     return VERIFY_SUCCESS;  // Expected in new sync protocol.
   }
   return VERIFY_UNDECIDED;

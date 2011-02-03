@@ -5,12 +5,15 @@
 #include "chrome/browser/download/download_item.h"
 
 #include "app/l10n_util.h"
+#include "base/basictypes.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/stringprintf.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/net_util.h"
 #include "chrome/browser/browser_thread.h"
+#include "chrome/browser/download/download_file_manager.h"
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_prefs.h"
@@ -35,6 +38,36 @@ void DeleteDownloadedFile(const FilePath& path) {
     file_util::Delete(path, false);
 }
 
+const char* DebugSafetyStateString(DownloadItem::SafetyState state) {
+  switch (state) {
+    case DownloadItem::SAFE:
+      return "SAFE";
+    case DownloadItem::DANGEROUS:
+      return "DANGEROUS";
+    case DownloadItem::DANGEROUS_BUT_VALIDATED:
+      return "DANGEROUS_BUT_VALIDATED";
+    default:
+      NOTREACHED() << "Unknown safety state " << state;
+      return "unknown";
+  };
+}
+
+const char* DebugDownloadStateString(DownloadItem::DownloadState state) {
+  switch (state) {
+    case DownloadItem::IN_PROGRESS:
+      return "IN_PROGRESS";
+    case DownloadItem::COMPLETE:
+      return "COMPLETE";
+    case DownloadItem::CANCELLED:
+      return "CANCELLED";
+    case DownloadItem::REMOVING:
+      return "REMOVING";
+    default:
+      NOTREACHED() << "Unknown download state " << state;
+      return "unknown";
+  };
+}
+
 }  // namespace
 
 // Constructor for reading from the history service.
@@ -42,6 +75,7 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
                            const DownloadCreateInfo& info)
     : id_(-1),
       full_path_(info.path),
+      path_uniquifier_(0),
       url_(info.url),
       referrer_url_(info.referrer_url),
       mime_type_(info.mime_type),
@@ -57,7 +91,7 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       open_when_complete_(false),
       safety_state_(SAFE),
       auto_opened_(false),
-      original_name_(info.original_name),
+      target_name_(info.original_name),
       render_process_id_(-1),
       request_id_(-1),
       save_as_(false),
@@ -65,7 +99,6 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       is_extension_install_(info.is_extension_install),
       name_finalized_(false),
       is_temporary_(false),
-      need_final_rename_(false),
       opened_(false) {
   if (state_ == IN_PROGRESS)
     state_ = CANCELLED;
@@ -94,7 +127,7 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       open_when_complete_(false),
       safety_state_(info.is_dangerous ? DANGEROUS : SAFE),
       auto_opened_(false),
-      original_name_(info.original_name),
+      target_name_(info.original_name),
       render_process_id_(info.child_id),
       request_id_(info.request_id),
       save_as_(info.prompt_user_for_save_location),
@@ -102,7 +135,6 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       is_extension_install_(info.is_extension_install),
       name_finalized_(false),
       is_temporary_(!info.save_info.file_path.empty()),
-      need_final_rename_(false),
       opened_(false) {
   Init(true /* start progress timer */);
 }
@@ -130,7 +162,6 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       open_when_complete_(false),
       safety_state_(SAFE),
       auto_opened_(false),
-      original_name_(FilePath()),
       render_process_id_(-1),
       request_id_(-1),
       save_as_(false),
@@ -138,7 +169,6 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       is_extension_install_(false),
       name_finalized_(false),
       is_temporary_(false),
-      need_final_rename_(false),
       opened_(false) {
   Init(true /* start progress timer */);
 }
@@ -165,24 +195,21 @@ void DownloadItem::NotifyObserversDownloadFileCompleted() {
 }
 
 bool DownloadItem::CanOpenDownload() {
-  FilePath file_to_use = full_path();
-  if (!original_name().value().empty())
-    file_to_use = original_name();
-
-  return !Extension::IsExtension(file_to_use) &&
-      !download_util::IsExecutableFile(file_to_use);
+  return !Extension::IsExtension(target_name_) &&
+      !download_util::IsExecutableFile(target_name_);
 }
 
 bool DownloadItem::ShouldOpenFileBasedOnExtension() {
-  return download_manager_->ShouldOpenFileBasedOnExtension(full_path());
+  return download_manager_->ShouldOpenFileBasedOnExtension(
+      GetUserVerifiedFilePath());
 }
 
 void DownloadItem::OpenFilesBasedOnExtension(bool open) {
   DownloadPrefs* prefs = download_manager_->download_prefs();
   if (open)
-    prefs->EnableAutoOpenBasedOnExtension(full_path());
+    prefs->EnableAutoOpenBasedOnExtension(GetUserVerifiedFilePath());
   else
-    prefs->DisableAutoOpenBasedOnExtension(full_path());
+    prefs->DisableAutoOpenBasedOnExtension(GetUserVerifiedFilePath());
 }
 
 void DownloadItem::OpenDownload() {
@@ -256,6 +283,7 @@ void DownloadItem::Update(int64 bytes_so_far) {
 
 // Triggered by a user action.
 void DownloadItem::Cancel(bool update_history) {
+  VLOG(20) << __FUNCTION__ << "()" << " download = " << DebugString(true);
   if (state_ != IN_PROGRESS) {
     // Small downloads might be complete before this method has a chance to run.
     return;
@@ -281,7 +309,8 @@ void DownloadItem::Finished() {
                                        *this);
     auto_opened_ = true;
   } else if (open_when_complete() ||
-             download_manager_->ShouldOpenFileBasedOnExtension(full_path()) ||
+             download_manager_->ShouldOpenFileBasedOnExtension(
+                 GetUserVerifiedFilePath()) ||
              is_temporary()) {
     // If the download is temporary, like in drag-and-drop, do not open it but
     // we still need to set it auto-opened so that it can be removed from the
@@ -329,6 +358,8 @@ bool DownloadItem::TimeRemaining(base::TimeDelta* remaining) const {
 }
 
 int64 DownloadItem::CurrentSpeed() const {
+  if (is_paused_)
+    return 0;
   base::TimeDelta diff = base::TimeTicks::Now() - start_tick_;
   int64 diff_ms = diff.InMilliseconds();
   return diff_ms == 0 ? 0 : received_bytes_ * 1000 / diff_ms;
@@ -344,7 +375,6 @@ int DownloadItem::PercentComplete() const {
 void DownloadItem::Rename(const FilePath& full_path) {
   DCHECK(!full_path.empty());
   full_path_ = full_path;
-  file_name_ = full_path_.BaseName();
 }
 
 void DownloadItem::TogglePause() {
@@ -363,6 +393,34 @@ void DownloadItem::OnNameFinalized() {
   // file, delay the notification.
   if (state() == DownloadItem::COMPLETE)
     NotifyObserversDownloadFileCompleted();
+}
+
+void DownloadItem::OnSafeDownloadFinished(DownloadFileManager* file_manager) {
+  DCHECK_EQ(SAFE, safety_state());
+  DCHECK(file_manager);
+  if (NeedsRename()) {
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        NewRunnableMethod(
+            file_manager, &DownloadFileManager::OnFinalDownloadName,
+            id(), GetTargetFilePath(), false, download_manager_));
+    return;
+  }
+
+  download_manager_->DownloadFinished(this);
+}
+
+void DownloadItem::OnDownloadRenamedToFinalName(const FilePath& full_path) {
+  bool needed_rename = NeedsRename();
+
+  Rename(full_path);
+  OnNameFinalized();
+
+  if (needed_rename && safety_state() == SAFE) {
+    // This was called from OnSafeDownloadFinished; continue to call
+    // DownloadFinished.
+    download_manager_->DownloadFinished(this);
+  }
 }
 
 bool DownloadItem::MatchesQuery(const string16& query) const {
@@ -386,26 +444,55 @@ bool DownloadItem::MatchesQuery(const string16& query) const {
   if (url_formatted.find(query) != string16::npos)
     return true;
 
-  string16 path(l10n_util::ToLower(WideToUTF16(full_path_.ToWStringHack())));
+  string16 path(l10n_util::ToLower(WideToUTF16(full_path().ToWStringHack())));
   if (path.find(query) != std::wstring::npos)
     return true;
 
   return false;
 }
 
-FilePath DownloadItem::GetFileName() const {
-  if (safety_state_ == DownloadItem::SAFE)
-    return file_name_;
+FilePath DownloadItem::GetTargetFilePath() const {
+  return full_path_.DirName().Append(target_name_);
+}
+
+FilePath DownloadItem::GetFileNameToReportUser() const {
   if (path_uniquifier_ > 0) {
-    FilePath name(original_name_);
+    FilePath name(target_name_);
     download_util::AppendNumberToPath(&name, path_uniquifier_);
     return name;
   }
-  return original_name_;
+  return target_name_;
+}
+
+FilePath DownloadItem::GetUserVerifiedFilePath() const {
+  if (safety_state_ == DownloadItem::SAFE)
+    return GetTargetFilePath();
+  return full_path_;
 }
 
 void DownloadItem::Init(bool start_timer) {
-  file_name_ = full_path_.BaseName();
+  if (target_name_.value().empty())
+    target_name_ = full_path_.BaseName();
   if (start_timer)
     StartProgressTimer();
+}
+
+std::string DownloadItem::DebugString(bool verbose) const {
+  std::string description =
+      base::StringPrintf("{ url = \"%s\"", url().spec().c_str());
+
+  if (verbose) {
+    description += base::StringPrintf(
+        " target_name_ = " "\"%s\""
+        " full_path = " "\"%s\""
+        " safety_state = " "%s",
+        target_name_.value().c_str(),
+        full_path().value().c_str(),
+        DebugSafetyStateString(safety_state()));
+  }
+
+  description += base::StringPrintf(" state = %s }",
+                                    DebugDownloadStateString(state()));
+
+  return description;
 }

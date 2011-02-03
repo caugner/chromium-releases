@@ -6,7 +6,7 @@
 #define APP_ANIMATION_H_
 #pragma once
 
-#include "app/animation_container.h"
+#include "app/animation_container_element.h"
 #include "base/ref_counted.h"
 #include "base/time.h"
 
@@ -14,29 +14,8 @@ namespace gfx {
 class Rect;
 }
 
-class Animation;
-
-// AnimationDelegate
-//
-//  Implement this interface when you want to receive notifications about the
-//  state of an animation.
-class AnimationDelegate {
- public:
-  // Called when an animation has completed.
-  virtual void AnimationEnded(const Animation* animation) {
-  }
-
-  // Called when an animation has progressed.
-  virtual void AnimationProgressed(const Animation* animation) {
-  }
-
-  // Called when an animation has been canceled.
-  virtual void AnimationCanceled(const Animation* animation) {
-  }
-
- protected:
-  virtual ~AnimationDelegate() {}
-};
+class AnimationContainer;
+class AnimationDelegate;
 
 // Base class used in implementing animations. You only need use this class if
 // you're implementing a new animation type, otherwise you'll likely want one of
@@ -44,7 +23,7 @@ class AnimationDelegate {
 //
 // To subclass override Step, which is invoked as the animation progresses and
 // GetCurrentValue() to return the value appropriate to the animation.
-class Animation : public AnimationContainer::Element {
+class Animation : public AnimationContainerElement {
  public:
   explicit Animation(base::TimeDelta timer_interval);
   virtual ~Animation();

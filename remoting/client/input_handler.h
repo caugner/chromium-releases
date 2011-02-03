@@ -7,18 +7,21 @@
 
 #include "base/basictypes.h"
 #include "base/task.h"
-#include "remoting/base/protocol/chromotocol.pb.h"
+#include "remoting/proto/event.pb.h"
 
 namespace remoting {
 
 class ClientContext;
 class ChromotingView;
-class HostConnection;
+
+namespace protocol {
+class ConnectionToHost;
+}  // namespace protocol
 
 class InputHandler {
  public:
   InputHandler(ClientContext* context,
-               HostConnection* connection,
+               protocol::ConnectionToHost* connection,
                ChromotingView* view);
   virtual ~InputHandler() {}
 
@@ -30,19 +33,10 @@ class InputHandler {
   void SendMouseButtonEvent(bool down, MouseButton button);
 
   ClientContext* context_;
-  HostConnection* connection_;
+  protocol::ConnectionToHost* connection_;
   ChromotingView* view_;
 
  private:
-  // True if we should send the next mouse position as an absolute value rather
-  // than a relative value. After sending a single absolute mouse position,
-  // it will automatically switch back to sending relative mouse deltas.
-  bool send_absolute_mouse_;
-
-  // Current (x,y) position of mouse pointer.
-  // This is the last value that we sent to the host.
-  int mouse_x_, mouse_y_;
-
   DISALLOW_COPY_AND_ASSIGN(InputHandler);
 };
 

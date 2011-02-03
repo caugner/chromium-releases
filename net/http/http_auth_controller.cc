@@ -4,7 +4,7 @@
 
 #include "net/http/http_auth_controller.h"
 
-#include "base/histogram.h"
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/auth.h"
@@ -196,9 +196,9 @@ int HttpAuthController::HandleAuthChallenge(
   DCHECK(CalledOnValidThread());
   DCHECK(headers);
   DCHECK(auth_origin_.is_valid());
-  LOG(INFO) << "The " << HttpAuth::GetAuthTargetString(target_) << " "
-            << auth_origin_ << " requested auth"
-            << AuthChallengeLogMessage(headers.get());
+  VLOG(1) << "The " << HttpAuth::GetAuthTargetString(target_) << " "
+          << auth_origin_ << " requested auth "
+          << AuthChallengeLogMessage(headers.get());
 
   // Give the existing auth handler first try at the authentication headers.
   // This will also evict the entry in the HttpAuthCache if the previous

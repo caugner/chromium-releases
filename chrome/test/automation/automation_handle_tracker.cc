@@ -4,7 +4,7 @@
 
 #include "chrome/test/automation/automation_handle_tracker.h"
 
-#include "chrome/test/automation/automation_messages.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/test/automation/automation_proxy.h"
 
 AutomationResourceProxy::AutomationResourceProxy(
@@ -21,6 +21,8 @@ AutomationResourceProxy::~AutomationResourceProxy() {
   if (tracker_)
     tracker_->Remove(this);
 }
+
+AutomationHandleTracker::AutomationHandleTracker() : channel_(NULL) {}
 
 AutomationHandleTracker::~AutomationHandleTracker() {
   // Tell any live objects that the tracker is going away so they don't try to

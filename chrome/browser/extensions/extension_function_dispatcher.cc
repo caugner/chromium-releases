@@ -36,6 +36,7 @@
 #include "chrome/browser/extensions/extension_management_api.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_metrics_module.h"
+#include "chrome/browser/extensions/extension_module.h"
 #include "chrome/browser/extensions/extension_omnibox_api.h"
 #include "chrome/browser/extensions/extension_page_actions_module.h"
 #include "chrome/browser/extensions/extension_popup_api.h"
@@ -193,7 +194,7 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<PopupShowFunction>();
 
   // Processes.
-  RegisterFunction<GetProcessForTabFunction>();
+  RegisterFunction<GetProcessIdForTabFunction>();
 
   // Metrics.
   RegisterFunction<MetricsRecordUserActionFunction>();
@@ -228,6 +229,7 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<ExtensionTestQuotaResetFunction>();
   RegisterFunction<ExtensionTestCreateIncognitoTabFunction>();
   RegisterFunction<ExtensionTestSendMessageFunction>();
+  RegisterFunction<ExtensionTestGetConfigFunction>();
 
   // Accessibility.
   RegisterFunction<GetFocusedControlFunction>();
@@ -251,6 +253,7 @@ void FactoryRegistry::ResetFunctions() {
 
   // Omnibox.
   RegisterFunction<OmniboxSendSuggestionsFunction>();
+  RegisterFunction<OmniboxSetDefaultSuggestionFunction>();
 
   // Proxies.
   RegisterFunction<UseCustomProxySettingsFunction>();
@@ -273,16 +276,21 @@ void FactoryRegistry::ResetFunctions() {
 
   // Management.
   RegisterFunction<GetAllExtensionsFunction>();
+  RegisterFunction<GetExtensionByIdFunction>();
   RegisterFunction<LaunchAppFunction>();
   RegisterFunction<SetEnabledFunction>();
   RegisterFunction<UninstallFunction>();
 
+  // Extension module.
+  RegisterFunction<SetUpdateUrlDataFunction>();
+
   // WebstorePrivate.
   RegisterFunction<GetBrowserLoginFunction>();
   RegisterFunction<GetStoreLoginFunction>();
-  RegisterFunction<InstallFunction>();
   RegisterFunction<SetStoreLoginFunction>();
   RegisterFunction<PromptBrowserLoginFunction>();
+  RegisterFunction<BeginInstallFunction>();
+  RegisterFunction<CompleteInstallFunction>();
 }
 
 void FactoryRegistry::GetAllNames(std::vector<std::string>* names) {
@@ -340,7 +348,7 @@ ExtensionFunctionDispatcher* ExtensionFunctionDispatcher::Create(
   if (!service->ExtensionBindingsAllowed(url))
     return NULL;
 
-  Extension* extension = service->GetExtensionByURL(url);
+  const Extension* extension = service->GetExtensionByURL(url);
   if (!extension)
     extension = service->GetExtensionByWebExtent(url);
 
@@ -354,7 +362,7 @@ ExtensionFunctionDispatcher* ExtensionFunctionDispatcher::Create(
 ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(
     RenderViewHost* render_view_host,
     Delegate* delegate,
-    Extension* extension,
+    const Extension* extension,
     const GURL& url)
   : profile_(render_view_host->process()->profile()),
     render_view_host_(render_view_host),
@@ -371,9 +379,6 @@ ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(
   ExtensionProcessManager* epm = profile()->GetExtensionProcessManager();
   epm->RegisterExtensionProcess(extension_id(),
                                 render_view_host->process()->id());
-
-  bool incognito_enabled =
-      profile()->GetExtensionsService()->IsIncognitoEnabled(extension);
 
   // If the extension has permission to load chrome://favicon/ resources we need
   // to make sure that the DOMUIFavIconSource is registered with the
@@ -394,8 +399,6 @@ ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(
       extension->id(), extension->api_permissions()));
   render_view_host->Send(new ViewMsg_Extension_SetHostPermissions(
       extension->url(), extension->host_permissions()));
-  render_view_host->Send(new ViewMsg_Extension_ExtensionSetIncognitoEnabled(
-      extension->id(), incognito_enabled, extension->incognito_split_mode()));
 
   NotificationService::current()->Notify(
       NotificationType::EXTENSION_FUNCTION_DISPATCHER_CREATED,
@@ -452,10 +455,9 @@ void ExtensionFunctionDispatcher::HandleRequest(
   function->set_user_gesture(params.user_gesture);
   ExtensionsService* service = profile()->GetExtensionsService();
   DCHECK(service);
-  Extension* extension = service->GetExtensionById(extension_id(), false);
+  const Extension* extension = service->GetExtensionById(extension_id(), false);
   DCHECK(extension);
-  function->set_include_incognito(service->IsIncognitoEnabled(extension) &&
-                                  !extension->incognito_split_mode());
+  function->set_include_incognito(service->CanCrossIncognito(extension));
 
   if (!service->ExtensionBindingsAllowed(function->source_url()) ||
       !extension->HasApiPermission(function->name())) {

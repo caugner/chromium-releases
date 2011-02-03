@@ -1,15 +1,16 @@
 // Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
 
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/path_service.h"
+#include "base/singleton.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile_manager.h"
@@ -18,7 +19,6 @@
 #include "chrome/browser/safe_browsing/safe_browsing_database.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -48,6 +48,57 @@ static Profile* GetDefaultProfile() {
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   return profile_manager->GetDefaultProfile(user_data_dir);
+}
+
+// static
+SafeBrowsingServiceFactory* SafeBrowsingService::factory_ = NULL;
+
+// The default SafeBrowsingServiceFactory.  Global, made a singleton so we
+// don't leak it.
+class SafeBrowsingServiceFactoryImpl : public SafeBrowsingServiceFactory {
+ public:
+  virtual SafeBrowsingService* CreateSafeBrowsingService() {
+    return new SafeBrowsingService();
+  }
+
+ private:
+  friend struct DefaultSingletonTraits<SafeBrowsingServiceFactoryImpl>;
+
+  SafeBrowsingServiceFactoryImpl() { }
+
+  DISALLOW_COPY_AND_ASSIGN(SafeBrowsingServiceFactoryImpl);
+};
+
+struct SafeBrowsingService::WhiteListedEntry {
+  int render_process_host_id;
+  int render_view_id;
+  std::string domain;
+  UrlCheckResult result;
+};
+
+SafeBrowsingService::UnsafeResource::UnsafeResource()
+    : resource_type(ResourceType::MAIN_FRAME),
+      threat_type(URL_SAFE),
+      client(NULL),
+      render_process_host_id(-1),
+      render_view_id(-1) {
+}
+
+SafeBrowsingService::UnsafeResource::~UnsafeResource() {}
+
+SafeBrowsingService::SafeBrowsingCheck::SafeBrowsingCheck()
+    : client(NULL),
+      need_get_hash(false),
+      result(URL_SAFE) {
+}
+
+SafeBrowsingService::SafeBrowsingCheck::~SafeBrowsingCheck() {}
+
+/* static */
+SafeBrowsingService* SafeBrowsingService::CreateSafeBrowsingService() {
+  if (!factory_)
+    factory_ = Singleton<SafeBrowsingServiceFactoryImpl>::get();
+  return factory_->CreateSafeBrowsingService();
 }
 
 SafeBrowsingService::SafeBrowsingService()
@@ -386,9 +437,6 @@ void SafeBrowsingService::OnIOInitialize(
                                                       mackey_url_prefix,
                                                       disable_auto_update);
 
-  // Balance the reference added by Start().
-  request_context_getter->Release();
-
   protocol_manager_->Initialize();
 }
 
@@ -615,7 +663,7 @@ SafeBrowsingService::UrlCheckResult SafeBrowsingService::GetResultFromListname(
     return URL_MALWARE;
   }
 
-  SB_DLOG(INFO) << "Unknown safe browsing list " << list_name;
+  DVLOG(1) << "Unknown safe browsing list " << list_name;
   return URL_SAFE;
 }
 
@@ -648,9 +696,8 @@ void SafeBrowsingService::Start() {
   }
 
   // We will issue network fetches using the default profile's request context.
-  URLRequestContextGetter* request_context_getter =
-      GetDefaultProfile()->GetRequestContext();
-  request_context_getter->AddRef();  // Balanced in OnIOInitialize.
+  scoped_refptr<URLRequestContextGetter> request_context_getter(
+      GetDefaultProfile()->GetRequestContext());
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -805,9 +852,9 @@ void SafeBrowsingService::ReportSafeBrowsingHit(
   if (!enabled_)
     return;
 
-  DLOG(INFO) << "ReportSafeBrowsingHit: " << malicious_url << " " << page_url
-             << " " << referrer_url << " " << is_subresource
-             << " " << threat_type;
+  DVLOG(1) << "ReportSafeBrowsingHit: " << malicious_url << " " << page_url
+           << " " << referrer_url << " " << is_subresource << " "
+           << threat_type;
   protocol_manager_->ReportSafeBrowsingHit(malicious_url, page_url,
                                            referrer_url, is_subresource,
                                            threat_type);

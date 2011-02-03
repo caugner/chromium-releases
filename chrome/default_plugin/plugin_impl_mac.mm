@@ -35,7 +35,7 @@ PluginInstallerImpl::~PluginInstallerImpl() {
 bool PluginInstallerImpl::Initialize(void* module_handle, NPP instance,
                                      NPMIMEType mime_type, int16 argc,
                                      char* argn[], char* argv[]) {
-  DLOG(INFO) << __FUNCTION__ << " MIME Type : " << mime_type;
+  DVLOG(1) << __FUNCTION__ << " MIME Type : " << mime_type;
   DCHECK(instance != NULL);
 
   if (mime_type == NULL || strlen(mime_type) == 0) {
@@ -51,7 +51,7 @@ bool PluginInstallerImpl::Initialize(void* module_handle, NPP instance,
       IDS_DEFAULT_PLUGIN_NO_PLUGIN_AVAILABLE_MSG)) retain];
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  image_ = [rb.GetNSImageNamed(IDR_PLUGIN_ICON) retain];
+  image_ = [rb.GetNativeImageNamed(IDR_PLUGIN_ICON) retain];
 
   return true;
 }

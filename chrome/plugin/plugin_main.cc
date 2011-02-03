@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -105,12 +105,12 @@ int PluginMain(const MainFunctionParams& parameters) {
       parameters.sandbox_info_.TargetServices();
 
   CoInitialize(NULL);
-  DLOG(INFO) << "Started plugin with " <<
-    parsed_command_line.command_line_string();
+  DVLOG(1) << "Started plugin with "
+           << parsed_command_line.command_line_string();
 
   HMODULE sandbox_test_module = NULL;
-  bool no_sandbox = parsed_command_line.HasSwitch(switches::kNoSandbox) ||
-                    !parsed_command_line.HasSwitch(switches::kSafePlugins);
+  bool no_sandbox = parsed_command_line.HasSwitch(switches::kNoSandbox);
+
   if (target_services && !no_sandbox) {
     // The command line might specify a test plugin to load.
     if (parsed_command_line.HasSwitch(switches::kTestSandbox)) {
@@ -134,10 +134,8 @@ int PluginMain(const MainFunctionParams& parameters) {
       // the sandbox right away, but if it is the built-in flash we let flash
       // start elevated and it will call DelayedLowerToken(0) when it's ready.
       if (IsPluginBuiltInFlash(parsed_command_line)) {
-        DLOG(INFO) << "Sandboxing flash";
+        DVLOG(1) << "Sandboxing flash";
         DelayedLowerToken(target_services);
-      } else {
-        target_services->LowerToken();
       }
     }
     if (sandbox_test_module) {
@@ -147,12 +145,14 @@ int PluginMain(const MainFunctionParams& parameters) {
       DCHECK(run_security_tests);
       if (run_security_tests) {
         int test_count = 0;
-        DLOG(INFO) << "Running plugin security tests";
+        DVLOG(1) << "Running plugin security tests";
         BOOL result = run_security_tests(&test_count);
         DCHECK(result) << "Test number " << test_count << " has failed.";
         // If we are in release mode, crash or debug the process.
-        if (!result)
+        if (!result) {
           __debugbreak();
+          _exit(1);
+        }
       }
 
       FreeLibrary(sandbox_test_module);

@@ -29,6 +29,7 @@ class Value;
 namespace net {
 
 class ClientSocketFactory;
+class DnsCertProvenanceChecker;
 class DnsRRResolver;
 class HttpAuthHandlerFactory;
 class HttpNetworkDelegate;
@@ -38,6 +39,7 @@ class HttpResponseBodyDrainer;
 class SpdySessionPool;
 class SOCKSClientSocketPool;
 class SSLClientSocketPool;
+class SSLHostInfoFactory;
 class TCPClientSocketPool;
 
 // This class holds session objects used by HttpNetworkTransaction objects.
@@ -47,6 +49,8 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
   HttpNetworkSession(
       HostResolver* host_resolver,
       DnsRRResolver* dnsrr_resolver,
+      DnsCertProvenanceChecker* dns_cert_checker,
+      SSLHostInfoFactory* ssl_host_info_factory,
       ProxyService* proxy_service,
       ClientSocketFactory* client_socket_factory,
       SSLConfigService* ssl_config_service,
@@ -106,6 +110,9 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
   ClientSocketFactory* socket_factory() { return socket_factory_; }
   HostResolver* host_resolver() { return host_resolver_; }
   DnsRRResolver* dnsrr_resolver() { return dnsrr_resolver_; }
+  DnsCertProvenanceChecker* dns_cert_checker() {
+    return dns_cert_checker_;
+  }
   ProxyService* proxy_service() { return proxy_service_; }
   SSLConfigService* ssl_config_service() { return ssl_config_service_; }
   SpdySessionPool* spdy_session_pool() { return spdy_session_pool_.get(); }
@@ -116,8 +123,8 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
     return network_delegate_;
   }
 
-  const scoped_refptr<HttpStreamFactory>& http_stream_factory() {
-    return http_stream_factory_;
+  HttpStreamFactory* http_stream_factory() {
+    return &http_stream_factory_;
   }
 
   // Creates a Value summary of the state of the socket pools. The caller is
@@ -125,6 +132,10 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
   Value* SocketPoolInfoToValue() const {
     return socket_pool_manager_.SocketPoolInfoToValue();
   }
+
+  // Creates a Value summary of the state of the SPDY sessions. The caller is
+  // responsible for deleting the returned value.
+  Value* SpdySessionPoolInfoToValue() const;
 
   void FlushSocketPools() {
     socket_pool_manager_.FlushSocketPools();
@@ -142,13 +153,14 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
   HttpAlternateProtocols alternate_protocols_;
   HostResolver* const host_resolver_;
   DnsRRResolver* dnsrr_resolver_;
+  DnsCertProvenanceChecker* dns_cert_checker_;
   scoped_refptr<ProxyService> proxy_service_;
   scoped_refptr<SSLConfigService> ssl_config_service_;
   ClientSocketPoolManager socket_pool_manager_;
   // TODO(willchan): Move this out to IOThread so it can be shared across
   // URLRequestContexts.
   scoped_ptr<SpdySessionPool> spdy_session_pool_;
-  scoped_refptr<HttpStreamFactory> http_stream_factory_;
+  HttpStreamFactory http_stream_factory_;
   HttpAuthHandlerFactory* http_auth_handler_factory_;
   HttpNetworkDelegate* const network_delegate_;
   NetLog* net_log_;

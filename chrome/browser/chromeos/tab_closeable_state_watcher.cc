@@ -10,6 +10,7 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
@@ -36,25 +37,26 @@ TabCloseableStateWatcher::TabStripWatcher::~TabStripWatcher() {
 //     TabStripModelObserver implementation:
 
 void TabCloseableStateWatcher::TabStripWatcher::TabInsertedAt(
-    TabContents* tab_contents, int index, bool foreground) {
+    TabContentsWrapper* tab_contents, int index, bool foreground) {
   main_watcher_->OnTabStripChanged(browser_, false);
 }
 
 void TabCloseableStateWatcher::TabStripWatcher::TabClosingAt(
-    TabContents* tab_contents, int index) {
-  TabStripModel* tabstrip = browser_->tabstrip_model();
+    TabStripModel* tab_strip_model,
+    TabContentsWrapper* tab_contents,
+    int index) {
   // Check if the last tab is closing.
-  if (tabstrip->count() == 1)
+  if (tab_strip_model->count() == 1)
     main_watcher_->OnTabStripChanged(browser_, true);
 }
 
 void TabCloseableStateWatcher::TabStripWatcher::TabDetachedAt(
-    TabContents* tab_contents, int index) {
+    TabContentsWrapper* tab_contents, int index) {
   main_watcher_->OnTabStripChanged(browser_, false);
 }
 
 void TabCloseableStateWatcher::TabStripWatcher::TabChangedAt(
-    TabContents* tab_contents, int index, TabChangeType change_type) {
+    TabContentsWrapper* tab_contents, int index, TabChangeType change_type) {
   main_watcher_->OnTabStripChanged(browser_, false);
 }
 
@@ -64,8 +66,9 @@ void TabCloseableStateWatcher::TabStripWatcher::TabChangedAt(
 TabCloseableStateWatcher::TabCloseableStateWatcher()
     : can_close_tab_(true),
       signing_off_(false),
-      bwsi_session_(
-          CommandLine::ForCurrentProcess()->HasSwitch(switches::kBWSI)) {
+      guest_session_(
+          CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kGuestSession)) {
   BrowserList::AddObserver(this);
   notification_registrar_.Add(this, NotificationType::APP_EXITING,
       NotificationService::AllSources());
@@ -118,7 +121,7 @@ void TabCloseableStateWatcher::OnBrowserAdded(const Browser* browser) {
   // TabInsertedAt notification to check for change in state.
 }
 
-void TabCloseableStateWatcher::OnBrowserRemoving(const Browser* browser) {
+void TabCloseableStateWatcher::OnBrowserRemoved(const Browser* browser) {
   // Only normal browsers may affect closeable state.
   if (browser->type() != Browser::TYPE_NORMAL)
     return;
@@ -186,13 +189,14 @@ void TabCloseableStateWatcher::CheckAndUpdateState(
   } else {  // There's only 1 normal browser.
     if (!browser_to_check)
       browser_to_check = tabstrip_watchers_[0]->browser();
-    if (browser_to_check->profile()->IsOffTheRecord() && !bwsi_session_) {
+    if (browser_to_check->profile()->IsOffTheRecord() && !guest_session_) {
       new_can_close = true;
     } else {
       TabStripModel* tabstrip_model = browser_to_check->tabstrip_model();
       if (tabstrip_model->count() == 1) {
-        new_can_close = tabstrip_model->GetTabContentsAt(0)->GetURL() !=
-            GURL(chrome::kChromeUINewTabURL);  // Tab is not NewTabPage.
+        new_can_close =
+            tabstrip_model->GetTabContentsAt(0)->tab_contents()->GetURL() !=
+                GURL(chrome::kChromeUINewTabURL);  // Tab is not NewTabPage.
       } else {
         new_can_close = true;
       }
@@ -232,8 +236,8 @@ bool TabCloseableStateWatcher::CanCloseBrowserImpl(const Browser* browser,
     return true;
 
   // If last normal browser is incognito, open a non-incognito window,
-  // and allow closing of incognito one (if not BWSI).
-  if (browser->profile()->IsOffTheRecord() && !bwsi_session_) {
+  // and allow closing of incognito one (if not guest).
+  if (browser->profile()->IsOffTheRecord() && !guest_session_) {
     *action_type = OPEN_WINDOW;
     return true;
   }

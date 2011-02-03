@@ -32,17 +32,18 @@ static int tables_ok = 0;
 
 void VP8DspInitTables() {
   if (!tables_ok) {
-    for (int i = -255; i <= 255; ++i) {
+    int i;
+    for (i = -255; i <= 255; ++i) {
       abs0[255 + i] = (i < 0) ? -i : i;
       abs1[255 + i] = abs0[255 + i] >> 1;
     }
-    for (int i = -1020; i <= 1020; ++i) {
+    for (i = -1020; i <= 1020; ++i) {
       sclip1[1020 + i] = (i < -128) ? -128 : (i > 127) ? 127 : i;
     }
-    for (int i = -112; i <= 112; ++i) {
+    for (i = -112; i <= 112; ++i) {
       sclip2[112 + i] = (i < -16) ? -16 : (i > 15) ? 15 : i;
     }
-    for (int i = -255; i <= 255 + 255; ++i) {
+    for (i = -255; i <= 255 + 255; ++i) {
       clip1[255 + i] = (i < 0) ? 0 : (i > 255) ? 255 : i;
     }
     tables_ok = 1;
@@ -50,8 +51,7 @@ void VP8DspInitTables() {
 }
 
 static inline uint8_t clip_8b(int v) {
-  assert(v >= -255 && v <= 255 + 255);
-  return clip1[255 + v];
+  return (!(v & ~0xff)) ? v : (v < 0) ? 0 : 255;
 }
 
 //-----------------------------------------------------------------------------
@@ -66,22 +66,29 @@ static const int kC2 = 35468;
 
 static void Transform(const int16_t* in, uint8_t* dst) {
   int C[4 * 4], *tmp;
+  int i;
   tmp = C;
-  for (int i = 0; i < 4; ++i) {    // vertical pass
-    const int a = in[0] + in[8];
-    const int b = in[0] - in[8];
-    const int c = MUL(in[4], kC2) - MUL(in[12], kC1);
-    const int d = MUL(in[4], kC1) + MUL(in[12], kC2);
-    tmp[0] = a + d;
-    tmp[1] = b + c;
-    tmp[2] = b - c;
-    tmp[3] = a - d;
+  for (i = 0; i < 4; ++i) {    // vertical pass
+    const int a = in[0] + in[8];    // [-4096, 4094]
+    const int b = in[0] - in[8];    // [-4095, 4095]
+    const int c = MUL(in[4], kC2) - MUL(in[12], kC1);   // [-3783, 3783]
+    const int d = MUL(in[4], kC1) + MUL(in[12], kC2);   // [-3785, 3781]
+    tmp[0] = a + d;   // [-7881, 7875]
+    tmp[1] = b + c;   // [-7878, 7878]
+    tmp[2] = b - c;   // [-7878, 7878]
+    tmp[3] = a - d;   // [-7877, 7879]
     tmp += 4;
     in++;
   }
-
+  // Each pass is expanding the dynamic range by ~3.85 (upper bound).
+  // The exact value is (2. + (kC1 + kC2) / 65536).
+  // After the second pass, maximum interval is [-3794, 3794], assuming
+  // an input in [-2048, 2047] interval. We then need to add a dst value
+  // in the [0, 255] range.
+  // In the worst case scenario, the input to clip_8b() can be as large as
+  // [-60713, 60968].
   tmp = C;
-  for (int i = 0; i < 4; ++i) {    // horizontal pass
+  for (i = 0; i < 4; ++i) {    // horizontal pass
     const int dc = tmp[0] + 4;
     const int a =  dc +  tmp[8];
     const int b =  dc -  tmp[8];
@@ -106,8 +113,9 @@ static void TransformUV(const int16_t* in, uint8_t* dst) {
 
 static void TransformDC(const int16_t *in, uint8_t* dst) {
   const int DC = in[0] + 4;
-  for (int j = 0; j < 4; ++j) {
-    for (int i = 0; i < 4; ++i) {
+  int i, j;
+  for (j = 0; j < 4; ++j) {
+    for (i = 0; i < 4; ++i) {
       STORE(i, j, DC);
     }
   }
@@ -133,7 +141,8 @@ VP8Idct VP8TransformDCUV = TransformDCUV;
 
 static void TransformWHT(const int16_t* in, int16_t* out) {
   int tmp[16];
-  for (int i = 0; i < 4; ++i) {
+  int i;
+  for (i = 0; i < 4; ++i) {
     const int a0 = in[0 + i] + in[12 + i];
     const int a1 = in[4 + i] + in[ 8 + i];
     const int a2 = in[4 + i] - in[ 8 + i];
@@ -143,7 +152,7 @@ static void TransformWHT(const int16_t* in, int16_t* out) {
     tmp[4  + i] = a3 + a2;
     tmp[12 + i] = a3 - a2;
   }
-  for (int i = 0; i < 4; ++i) {
+  for (i = 0; i < 4; ++i) {
     const int dc = tmp[0 + i * 4] + 3;    // w/ rounder
     const int a0 = dc             + tmp[3 + i * 4];
     const int a1 = tmp[1 + i * 4] + tmp[2 + i * 4];
@@ -166,44 +175,50 @@ void (*VP8TransformWHT)(const int16_t* in, int16_t* out) = TransformWHT;
 
 static inline void TrueMotion(uint8_t *dst, int size) {
   const uint8_t* top = dst - BPS;
-  const int tl = top[-1];
-  for (int y = 0; y < size; ++y) {
-    const uint8_t* const clip = clip1 + 255 + dst[-1] - tl;
-    for (int x = 0; x < size; ++x) {
+  const uint8_t* const clip0 = clip1 + 255 - top[-1];
+  int y;
+  for (y = 0; y < size; ++y) {
+    const uint8_t* const clip = clip0 + dst[-1];
+    int x;
+    for (x = 0; x < size; ++x) {
       dst[x] = clip[top[x]];
     }
     dst += BPS;
   }
 }
-static void TM4(uint8_t *dst) { TrueMotion(dst, 4); }
+static void TM4(uint8_t *dst)   { TrueMotion(dst, 4); }
 static void TM8uv(uint8_t *dst) { TrueMotion(dst, 8); }
-static void TM16(uint8_t *dst) { TrueMotion(dst, 16); }
+static void TM16(uint8_t *dst)  { TrueMotion(dst, 16); }
 
 //-----------------------------------------------------------------------------
 // 16x16
 
-static void V16(uint8_t *dst) {     // vertical
-  for (int j = 0; j < 16; ++j) {
+static void VE16(uint8_t *dst) {     // vertical
+  int j;
+  for (j = 0; j < 16; ++j) {
     memcpy(dst + j * BPS, dst - BPS, 16);
   }
 }
 
-static void H16(uint8_t *dst) {     // horizontal
-  for (int j = 16; j > 0; --j) {
+static void HE16(uint8_t *dst) {     // horizontal
+  int j;
+  for (j = 16; j > 0; --j) {
     memset(dst, dst[-1], 16);
     dst += BPS;
   }
 }
 
 static inline void Put16(int v, uint8_t* dst) {
-  for (int j = 0; j < 16; ++j) {
+  int j;
+  for (j = 0; j < 16; ++j) {
     memset(dst + j * BPS, v, 16);
   }
 }
 
 static void DC16(uint8_t *dst) {    // DC
   int DC = 16;
-  for (int j = 0; j < 16; ++j) {
+  int j;
+  for (j = 0; j < 16; ++j) {
     DC += dst[-1 + j * BPS] + dst[j - BPS];
   }
   Put16(DC >> 5, dst);
@@ -234,29 +249,24 @@ static void DC16NoTopLeft(uint8_t *dst) {  // DC with no top and left samples
 //-----------------------------------------------------------------------------
 // 4x4
 
-static inline void Put4(uint32_t v, uint8_t* dst) {
-  for (int i = 4; i > 0; --i) {
-    *(uint32_t*)dst = v;
-    dst += BPS;
-  }
-}
-
 #define AVG3(a, b, c) (((a) + 2 * (b) + (c) + 2) >> 2)
 #define AVG2(a, b) (((a) + (b) + 1) >> 1)
 
-static void V4(uint8_t *dst) {    // vertical
+static void VE4(uint8_t *dst) {    // vertical
   const uint8_t* top = dst - BPS;
   const uint8_t vals[4] = {
     AVG3(top[-1], top[0], top[1]),
-    AVG3(top[0], top[1], top[2]),
-    AVG3(top[1], top[2], top[3]),
-    AVG3(top[2], top[3], top[4])
+    AVG3(top[ 0], top[1], top[2]),
+    AVG3(top[ 1], top[2], top[3]),
+    AVG3(top[ 2], top[3], top[4])
   };
-  const uint32_t v = *(uint32_t*)vals;
-  Put4(v, dst);
+  int i;
+  for (i = 0; i < 4; ++i) {
+    memcpy(dst + i * BPS, vals, sizeof(vals));
+  }
 }
 
-static void H4(uint8_t *dst) {    // horizontal
+static void HE4(uint8_t *dst) {    // horizontal
   const int A = dst[-1 - BPS];
   const int B = dst[-1];
   const int C = dst[-1 + BPS];
@@ -270,10 +280,10 @@ static void H4(uint8_t *dst) {    // horizontal
 
 static void DC4(uint8_t *dst) {   // DC
   uint32_t dc = 4;
-  for (int i = 0; i < 4; ++i) {
-    dc += dst[i - BPS] + dst[-1 + i * BPS];
-  }
-  Put4((dc >> 3) * 0x01010101U, dst);
+  int i;
+  for (i = 0; i < 4; ++i) dc += dst[i - BPS] + dst[-1 + i * BPS];
+  dc >>= 3;
+  for (i = 0; i < 4; ++i) memset(dst + i * BPS, dc, 4);
 }
 
 static void RD4(uint8_t *dst) {   // Down-right
@@ -401,14 +411,16 @@ static void HD4(uint8_t *dst) {  // Horizontal-Down
 //-----------------------------------------------------------------------------
 // Chroma
 
-static void V8uv(uint8_t *dst) {    // vertical
-  for (int j = 0; j < 8; ++j) {
+static void VE8uv(uint8_t *dst) {    // vertical
+  int j;
+  for (j = 0; j < 8; ++j) {
     memcpy(dst + j * BPS, dst - BPS, 8);
   }
 }
 
-static void H8uv(uint8_t *dst) {    // horizontal
-  for (int j = 0; j < 8; ++j) {
+static void HE8uv(uint8_t *dst) {    // horizontal
+  int j;
+  for (j = 0; j < 8; ++j) {
     memset(dst, dst[-1], 8);
     dst += BPS;
   }
@@ -416,36 +428,37 @@ static void H8uv(uint8_t *dst) {    // horizontal
 
 // helper for chroma-DC predictions
 static inline void Put8x8uv(uint64_t v, uint8_t* dst) {
-  for (int j = 0; j < 8; ++j) {
+  int j;
+  for (j = 0; j < 8; ++j) {
     *(uint64_t*)(dst + j * BPS) = v;
   }
 }
 
 static void DC8uv(uint8_t *dst) {     // DC
   int dc0 = 8;
-  for (int i = 0; i < 8; ++i) {
+  int i;
+  for (i = 0; i < 8; ++i) {
     dc0 += dst[i - BPS] + dst[-1 + i * BPS];
   }
-  const uint64_t t = (dc0 >> 4) * 0x0101010101010101ULL;
-  Put8x8uv(t, dst);
+  Put8x8uv((uint64_t)((dc0 >> 4) * 0x0101010101010101ULL), dst);
 }
 
 static void DC8uvNoLeft(uint8_t *dst) {   // DC with no left samples
   int dc0 = 4;
-  for (int i = 0; i < 8; ++i) {
+  int i;
+  for (i = 0; i < 8; ++i) {
     dc0 += dst[i - BPS];
   }
-  const uint64_t v = (dc0 >> 3) * 0x0101010101010101ULL;
-  Put8x8uv(v, dst);
+  Put8x8uv((uint64_t)((dc0 >> 3) * 0x0101010101010101ULL), dst);
 }
 
 static void DC8uvNoTop(uint8_t *dst) {  // DC with no top samples
   int dc0 = 4;
-  for (int i = 0; i < 8; ++i) {
+  int i;
+  for (i = 0; i < 8; ++i) {
     dc0 += dst[-1 + i * BPS];
   }
-  const uint64_t v = (dc0 >> 3) * 0x0101010101010101ULL;
-  Put8x8uv(v, dst);
+  Put8x8uv((uint64_t)((dc0 >> 3) * 0x0101010101010101ULL), dst);
 }
 
 static void DC8uvNoTopLeft(uint8_t *dst) {    // DC with nothing
@@ -456,16 +469,16 @@ static void DC8uvNoTopLeft(uint8_t *dst) {    // DC with nothing
 // default C implementations
 
 VP8PredFunc VP8PredLuma4[11] = {
-  DC4, TM4, V4, H4, LD4, RD4, VR4, VL4, HD4, HU4
+  DC4, TM4, VE4, HE4, RD4, VR4, LD4, VL4, HD4, HU4
 };
 
 VP8PredFunc VP8PredLuma16[7] = {
-  DC16, TM16, V16, H16,
+  DC16, TM16, VE16, HE16,
   DC16NoTop, DC16NoLeft, DC16NoTopLeft
 };
 
 VP8PredFunc VP8PredChroma8[7] = {
-  DC8uv, TM8uv, V8uv, H8uv,
+  DC8uv, TM8uv, VE8uv, HE8uv,
   DC8uvNoTop, DC8uvNoLeft, DC8uvNoTopLeft
 };
 
@@ -535,7 +548,8 @@ static inline int needs_filter2(const uint8_t* p, int step, int t, int it) {
 // Simple In-loop filtering (Paragraph 15.2)
 
 static void SimpleVFilter16(uint8_t* p, int stride, int thresh) {
-  for (int i = 0; i < 16; ++i) {
+  int i;
+  for (i = 0; i < 16; ++i) {
     if (needs_filter(p + i, stride, thresh)) {
       do_filter2(p + i, stride);
     }
@@ -543,7 +557,8 @@ static void SimpleVFilter16(uint8_t* p, int stride, int thresh) {
 }
 
 static void SimpleHFilter16(uint8_t* p, int stride, int thresh) {
-  for (int i = 0; i < 16; ++i) {
+  int i;
+  for (i = 0; i < 16; ++i) {
     if (needs_filter(p + i * stride, 1, thresh)) {
       do_filter2(p + i * stride, 1);
     }
@@ -551,14 +566,16 @@ static void SimpleHFilter16(uint8_t* p, int stride, int thresh) {
 }
 
 static void SimpleVFilter16i(uint8_t* p, int stride, int thresh) {
-  for (int k = 3; k > 0; --k) {
+  int k;
+  for (k = 3; k > 0; --k) {
     p += 4 * stride;
     SimpleVFilter16(p, stride, thresh);
   }
 }
 
 static void SimpleHFilter16i(uint8_t* p, int stride, int thresh) {
-  for (int k = 3; k > 0; --k) {
+  int k;
+  for (k = 3; k > 0; --k) {
     p += 4;
     SimpleHFilter16(p, stride, thresh);
   }
@@ -609,7 +626,8 @@ static void HFilter16(uint8_t* p, int stride,
 // on three inner edges
 static void VFilter16i(uint8_t* p, int stride,
                        int thresh, int ithresh, int hev_thresh) {
-  for (int k = 3; k > 0; --k) {
+  int k;
+  for (k = 3; k > 0; --k) {
     p += 4 * stride;
     FilterLoop24(p, stride, 1, 16, thresh, ithresh, hev_thresh);
   }
@@ -617,7 +635,8 @@ static void VFilter16i(uint8_t* p, int stride,
 
 static void HFilter16i(uint8_t* p, int stride,
                        int thresh, int ithresh, int hev_thresh) {
-  for (int k = 3; k > 0; --k) {
+  int k;
+  for (k = 3; k > 0; --k) {
     p += 4;
     FilterLoop24(p, 1, stride, 16, thresh, ithresh, hev_thresh);
   }

@@ -9,6 +9,7 @@
 #include "base/sha1.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/autofill/autofill_metrics.h"
 #include "chrome/browser/autofill/autofill_xml_parser.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/autofill/form_field.h"
@@ -105,7 +106,9 @@ FormStructure::~FormStructure() {}
 
 bool FormStructure::EncodeUploadRequest(bool auto_fill_used,
                                         std::string* encoded_xml) const {
-  bool auto_fillable = IsAutoFillable();
+  DCHECK(encoded_xml);
+  encoded_xml->clear();
+  bool auto_fillable = IsAutoFillable(false);
   DCHECK(auto_fillable);  // Caller should've checked for search pages.
   if (!auto_fillable)
     return false;
@@ -129,7 +132,8 @@ bool FormStructure::EncodeUploadRequest(bool auto_fill_used,
   // personaldata_manager_->GetDataPresent();
   autofil_request_xml.SetAttr(buzz::QName(kAttributeDataPresent), "");
 
-  EncodeFormRequest(FormStructure::UPLOAD, &autofil_request_xml);
+  if (!EncodeFormRequest(FormStructure::UPLOAD, &autofil_request_xml))
+    return false;  // Malformed form, skip it.
 
   // Obtain the XML structure as a string.
   *encoded_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
@@ -140,7 +144,13 @@ bool FormStructure::EncodeUploadRequest(bool auto_fill_used,
 
 // static
 bool FormStructure::EncodeQueryRequest(const ScopedVector<FormStructure>& forms,
-                                       std::string* encoded_xml) {
+    std::vector<std::string>* encoded_signatures,
+    std::string* encoded_xml) {
+  DCHECK(encoded_signatures);
+  DCHECK(encoded_xml);
+  encoded_xml->clear();
+  encoded_signatures->clear();
+  encoded_signatures->reserve(forms.size());
   buzz::XmlElement autofil_request_xml(buzz::QName("autofillquery"));
   // Attributes for the <autofillquery> element.
   //
@@ -148,18 +158,31 @@ bool FormStructure::EncodeQueryRequest(const ScopedVector<FormStructure>& forms,
   // For now these values are hacked from the toolbar code.
   autofil_request_xml.SetAttr(buzz::QName(kAttributeClientVersion),
                               "6.1.1715.1442/en (GGLL)");
+  // Some badly formatted web sites repeat forms - detect that and encode only
+  // one form as returned data would be the same for all the repeated forms.
+  std::set<std::string> processed_forms;
   for (ScopedVector<FormStructure>::const_iterator it = forms.begin();
        it != forms.end();
        ++it) {
-    buzz::XmlElement* encompassing_xml_element =
-        new buzz::XmlElement(buzz::QName("form"));
+    std::string signature((*it)->FormSignature());
+    if (processed_forms.find(signature) != processed_forms.end())
+      continue;
+    processed_forms.insert(signature);
+    scoped_ptr<buzz::XmlElement> encompassing_xml_element(
+        new buzz::XmlElement(buzz::QName("form")));
     encompassing_xml_element->SetAttr(buzz::QName(kAttributeSignature),
-                                      (*it)->FormSignature());
+                                      signature);
 
-    (*it)->EncodeFormRequest(FormStructure::QUERY, encompassing_xml_element);
+    if (!(*it)->EncodeFormRequest(FormStructure::QUERY,
+                                  encompassing_xml_element.get()))
+      continue;  // Malformed form, skip it.
 
-    autofil_request_xml.AddElement(encompassing_xml_element);
+    autofil_request_xml.AddElement(encompassing_xml_element.release());
+    encoded_signatures->push_back(signature);
   }
+
+  if (!encoded_signatures->size())
+    return false;
 
   // Obtain the XML structure as a string.
   *encoded_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
@@ -172,6 +195,9 @@ bool FormStructure::EncodeQueryRequest(const ScopedVector<FormStructure>& forms,
 void FormStructure::ParseQueryResponse(const std::string& response_xml,
                                        const std::vector<FormStructure*>& forms,
                                        UploadRequired* upload_required) {
+  autofill_metrics::LogServerQueryMetric(
+      autofill_metrics::QUERY_RESPONSE_RECEIVED);
+
   // Parse the field types from the server response to the query.
   std::vector<AutoFillFieldType> field_types;
   AutoFillQueryXmlParser parse_handler(&field_types, upload_required);
@@ -180,16 +206,26 @@ void FormStructure::ParseQueryResponse(const std::string& response_xml,
   if (!parse_handler.succeeded())
     return;
 
+  autofill_metrics::LogServerQueryMetric(
+      autofill_metrics::QUERY_RESPONSE_PARSED);
+
+  bool heuristics_detected_fillable_field = false;
+  bool query_response_overrode_heuristics = false;
+
   // Copy the field types into the actual form.
   std::vector<AutoFillFieldType>::iterator current_type = field_types.begin();
   for (std::vector<FormStructure*>::const_iterator iter = forms.begin();
        iter != forms.end(); ++iter) {
     FormStructure* form = *iter;
+
+    if (form->has_autofillable_field_)
+      heuristics_detected_fillable_field = true;
+
     form->has_credit_card_field_ = false;
     form->has_autofillable_field_ = false;
 
     for (std::vector<AutoFillField*>::iterator field = form->fields_.begin();
-         field != form->fields_.end(); ++field) {
+         field != form->fields_.end(); ++field, ++current_type) {
       // The field list is terminated by a NULL AutoFillField.
       if (!*field)
         break;
@@ -199,19 +235,32 @@ void FormStructure::ParseQueryResponse(const std::string& response_xml,
       if (current_type == field_types.end())
         break;
 
+      AutoFillFieldType heuristic_type = (*field)->type();
       (*field)->set_server_type(*current_type);
+      if (heuristic_type != (*field)->type())
+        query_response_overrode_heuristics = true;
+
       AutoFillType autofill_type((*field)->type());
       if (autofill_type.group() == AutoFillType::CREDIT_CARD)
         form->has_credit_card_field_ = true;
       if (autofill_type.field_type() != UNKNOWN_TYPE)
         form->has_autofillable_field_ = true;
-      ++current_type;
     }
 
     form->UpdateAutoFillCount();
   }
 
-  return;
+  autofill_metrics::ServerQueryMetricType metric_type;
+  if (query_response_overrode_heuristics) {
+    if (heuristics_detected_fillable_field) {
+      metric_type = autofill_metrics::QUERY_RESPONSE_OVERRODE_LOCAL_HEURISTICS;
+    } else {
+      metric_type = autofill_metrics::QUERY_RESPONSE_WITH_NO_LOCAL_HEURISTICS;
+    }
+  } else {
+    metric_type = autofill_metrics::QUERY_RESPONSE_MATCHED_LOCAL_HEURISTICS;
+  }
+  autofill_metrics::LogServerQueryMetric(metric_type);
 }
 
 std::string FormStructure::FormSignature() const {
@@ -225,11 +274,11 @@ std::string FormStructure::FormSignature() const {
   return Hash64Bit(form_string);
 }
 
-bool FormStructure::IsAutoFillable() const {
+bool FormStructure::IsAutoFillable(bool require_method_post) const {
   if (autofill_count() < kRequiredFillableFields)
     return false;
 
-  return ShouldBeParsed();
+  return ShouldBeParsed(require_method_post);
 }
 
 bool FormStructure::HasAutoFillableValues() const {
@@ -246,46 +295,6 @@ bool FormStructure::HasAutoFillableValues() const {
   return false;
 }
 
-// TODO(jhawkins): Cache this result.
-bool FormStructure::HasBillingFields() const {
-  for (std::vector<AutoFillField*>::const_iterator iter = begin();
-       iter != end(); ++iter) {
-    if (!*iter)
-      return false;
-
-    AutoFillField* field = *iter;
-    if (!field)
-      continue;
-
-    AutoFillType type(field->type());
-    if (type.group() == AutoFillType::ADDRESS_BILLING ||
-        type.group() == AutoFillType::CREDIT_CARD)
-      return true;
-  }
-
-  return false;
-}
-
-// TODO(jhawkins): Cache this result.
-bool FormStructure::HasNonBillingFields() const {
-  for (std::vector<AutoFillField*>::const_iterator iter = begin();
-       iter != end(); ++iter) {
-    if (!*iter)
-      return false;
-
-    AutoFillField* field = *iter;
-    if (!field)
-      continue;
-
-    AutoFillType type(field->type());
-    if (type.group() != AutoFillType::ADDRESS_BILLING &&
-        type.group() != AutoFillType::CREDIT_CARD)
-      return true;
-  }
-
-  return false;
-}
-
 void FormStructure::UpdateAutoFillCount() {
   autofill_count_ = 0;
   for (std::vector<AutoFillField*>::const_iterator iter = begin();
@@ -296,7 +305,7 @@ void FormStructure::UpdateAutoFillCount() {
   }
 }
 
-bool FormStructure::ShouldBeParsed() const {
+bool FormStructure::ShouldBeParsed(bool require_method_post) const {
   if (field_count() < kRequiredFillableFields)
     return false;
 
@@ -306,10 +315,7 @@ bool FormStructure::ShouldBeParsed() const {
   if (target_url_.path() == "/search")
     return false;
 
-  if (method_ == GET)
-    return false;
-
-  return true;
+  return !require_method_post || (method_ == POST);
 }
 
 void FormStructure::set_possible_types(int index, const FieldTypeSet& types) {
@@ -392,8 +398,16 @@ bool FormStructure::EncodeFormRequest(
     buzz::XmlElement* encompassing_xml_element) const {
   if (!field_count())  // Nothing to add.
     return false;
+  // Some badly formatted web sites repeat fields - limit number of fields to
+  // 48, which is far larger than any valid form and XML still fits into 2K.
+  const size_t kMaxFieldsOnTheForm = 48;
+  if (field_count() > kMaxFieldsOnTheForm) {
+    // This is not a valid form, most certainly. Do not send request for the
+    // wrongly formatted forms.
+    return false;
+  }
   // Add the child nodes for the form fields.
-  for (size_t index = 0; index < field_count(); index++) {
+  for (size_t index = 0; index < field_count(); ++index) {
     const AutoFillField* field = fields_[index];
     if (request_type == FormStructure::UPLOAD) {
       FieldTypeSet types = field->possible_types();

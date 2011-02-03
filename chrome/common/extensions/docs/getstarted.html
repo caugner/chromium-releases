@@ -15,6 +15,7 @@
     </script>
     <script type="text/javascript" src="js/api_page_generator.js"></script>
     <script type="text/javascript" src="js/bootstrap.js"></script>
+    <script type="text/javascript" src="js/sidebar.js"></script>
   <title>Tutorial: Getting Started (Hello, World!) - Google Chrome Extensions - Google Code</title></head>
   <body>  <div id="gc-container" class="labs">
       <div id="devModeWarning">
@@ -94,7 +95,7 @@
               <div>
               </div>
             </div>
-          </dl>         
+          </dl>
         </div>
       </div> <!-- /SUBTEMPLATES -->
 
@@ -165,10 +166,10 @@
                   <li><a href="browserAction.html">Browser Actions</a></li>
                   <li><a href="contextMenus.html">Context Menus</a></li>
                   <li><a href="notifications.html">Desktop Notifications</a></li>
+                  <li><a href="omnibox.html">Omnibox</a></li>
                   <li><a href="options.html">Options Pages</a></li>
                   <li><a href="override.html">Override Pages</a></li>
                   <li><a href="pageAction.html">Page Actions</a></li>
-                  <li><a href="themes.html">Themes</a></li>
                 </ul>
               </li>
               <li>Browser Interaction
@@ -202,6 +203,7 @@
               </li>
             </ul>
           </li>
+          <li><h2><a href="apps.html">Packaged Apps</a></h2></li>
           <li><h2><a href="tutorials.html">Tutorials</a></h2>
             <ul>
               <li><a href="tut_debugging.html">Debugging</a></li>
@@ -215,16 +217,27 @@
                 <ul>
                   <li><a href="manifest.html">Manifest Files</a></li>
                   <li><a href="match_patterns.html">Match Patterns</a></li>
-                  <!-- <li>Packages (.crx)</li> -->
                 </ul>
               </li>
+              <li><a href="permission_warnings.html">Permission Warnings</a></li>
               <li><a href="api_index.html">chrome.* APIs</a></li>
               <li><a href="api_other.html">Other APIs</a></li>
             </ul>
           </li>
-         <li><h2><a href="samples.html">Samples</a></h2></li>
+          <li><h2><a href="samples.html">Samples</a></h2></li>
+          <div class="line"> </div>
+          <li><h2>More</h2>
+            <ul>
+              <li><a href="http://code.google.com/chrome/webstore/docs/index.html">Chrome Web Store</a></li>
+              <li><a href="http://code.google.com/chrome/apps/docs/developers_guide.html">Hosted Apps</a></li>
+              <li><a href="themes.html">Themes</a></li>
+            </ul>
+          </li>
         </ul>
       </div>
+      <script>
+        initToggles();
+      </script>
 
     <div class="g-unit" id="gc-pagecontent">
       <div id="pageTitle">
@@ -358,14 +371,11 @@ to the toolbar of Google Chrome.
   </li>
   <li id="load-ext"> Load the extension.
     <ol type="a">
-      <li>
+      <li style="margin-top:0">
       Bring up the extensions management page
-      by clicking the Tools menu
-      <img src="images/toolsmenu.gif" width="43" height="34" alt="" align="absmiddle" style="margin:0; padding:0">
-      (or the Window menu on Mac)
-      and choosing <b>Extensions</b>.
-      (If you're using version 6 or later,
-      choose <b>Tools &gt; Extensions</b>.)
+      by clicking the wrench icon
+      <img src="images/toolsmenu.gif" width="29" height="29" alt="" style="margin-top:0">
+      and choosing <b>Tools &gt; Extensions</b>.
       </li>
 
       <li>
@@ -456,8 +466,7 @@ Here are some suggestions for what to read next:
   </li>
   <li>
     The <a href="hosting.html">hosting</a> page,
-    which tells you about the gallery
-    and other options for distributing your extension
+    which tells you about options for distributing your extension
   </li>
 </ul>
 
@@ -646,7 +655,7 @@ If you don't feel like reading, try these:
   <a rel="license" href="http://code.google.com/google_bsd_license.html">BSD License</a>.
   </p>
   <p>
-  ©2010 Google
+  ©2011 Google
   </p>
 
 <!-- begin analytics -->

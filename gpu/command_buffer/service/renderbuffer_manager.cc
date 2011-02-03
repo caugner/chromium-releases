@@ -10,6 +10,10 @@
 namespace gpu {
 namespace gles2 {
 
+RenderbufferManager::RenderbufferManager(GLint max_renderbuffer_size)
+    : max_renderbuffer_size_(max_renderbuffer_size) {
+}
+
 RenderbufferManager::~RenderbufferManager() {
   DCHECK(renderbuffer_infos_.empty());
 }

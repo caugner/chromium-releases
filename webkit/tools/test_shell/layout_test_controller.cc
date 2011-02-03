@@ -168,6 +168,7 @@ LayoutTestController::LayoutTestController(TestShell* shell) :
   BindMethod("grantDesktopNotificationPermission", &LayoutTestController::grantDesktopNotificationPermission);
   BindMethod("setDomainRelaxationForbiddenForURLScheme", &LayoutTestController::setDomainRelaxationForbiddenForURLScheme);
   BindMethod("sampleSVGAnimationForElementAtTime", &LayoutTestController::sampleSVGAnimationForElementAtTime);
+  BindMethod("hasSpellingMarker", &LayoutTestController::hasSpellingMarker);
 
   // The following are stubs.
   BindMethod("dumpAsWebArchive", &LayoutTestController::dumpAsWebArchive);
@@ -177,6 +178,7 @@ LayoutTestController::LayoutTestController(TestShell* shell) :
   BindMethod("repaintSweepHorizontally", &LayoutTestController::repaintSweepHorizontally);
   BindMethod("clearBackForwardList", &LayoutTestController::clearBackForwardList);
   BindMethod("keepWebHistory", &LayoutTestController::keepWebHistory);
+  BindMethod("layerTreeAsText", &LayoutTestController::layerTreeAsText);
   BindMethod("storeWebScriptObject", &LayoutTestController::storeWebScriptObject);
   BindMethod("accessStoredWebScriptObject", &LayoutTestController::accessStoredWebScriptObject);
   BindMethod("objCClassNameOf", &LayoutTestController::objCClassNameOf);
@@ -205,7 +207,7 @@ LayoutTestController::LayoutTestController(TestShell* shell) :
   BindMethod("markerTextForListItem", &LayoutTestController::markerTextForListItem);
 
   BindMethod("setMockDeviceOrientation", &LayoutTestController::setMockDeviceOrientation);
-  BindMethod("setMockSpeechInputResult", &LayoutTestController::setMockSpeechInputResult);
+  BindMethod("addMockSpeechInputResult", &LayoutTestController::addMockSpeechInputResult);
 
   // The fallback method is called when an unknown method is invoked.
   BindFallbackMethod(&LayoutTestController::fallbackMethod);
@@ -1046,6 +1048,12 @@ void LayoutTestController::keepWebHistory(
   result->SetNull();
 }
 
+void LayoutTestController::layerTreeAsText(
+    const CppArgumentList& args,  CppVariant* result) {
+  WebString rv = shell_->webView()->mainFrame()->layerTreeAsText();
+  result->Set(rv.utf8());
+}
+
 void LayoutTestController::storeWebScriptObject(
     const CppArgumentList& args, CppVariant* result) {
   result->SetNull();
@@ -1125,11 +1133,13 @@ void LayoutTestController::setAllowFileAccessFromFileURLs(
   result->SetNull();
 }
 
-void LayoutTestController::setMockSpeechInputResult(const CppArgumentList& args,
+void LayoutTestController::addMockSpeechInputResult(const CppArgumentList& args,
                                                     CppVariant* result) {
-  if (args.size() > 0 && args[0].isString()) {
-    shell_->speech_input_controller_mock()->setMockRecognitionResult(
-        WebString::fromUTF8(args[0].ToString()));
+  if (args.size() > 0 && args[0].isString() && args[1].isNumber() &&
+      args[2].isString()) {
+    shell_->speech_input_controller_mock()->addMockRecognitionResult(
+        WebString::fromUTF8(args[0].ToString()), args[1].ToDouble(),
+        WebString::fromUTF8(args[2].ToString()));
   }
   result->SetNull();
 }
@@ -1139,7 +1149,7 @@ void LayoutTestController::setMockSpeechInputResult(const CppArgumentList& args,
 bool LayoutTestController::CppVariantToBool(const CppVariant& value) {
   if (value.isBool())
     return value.ToBoolean();
-  else if (value.isInt32())
+  else if (value.isNumber())
     return 0 != value.ToInt32();
   else if (value.isString()) {
     std::string valueString = value.ToString();
@@ -1153,7 +1163,7 @@ bool LayoutTestController::CppVariantToBool(const CppVariant& value) {
 }
 
 int32 LayoutTestController::CppVariantToInt32(const CppVariant& value) {
-  if (value.isInt32())
+  if (value.isNumber())
     return value.ToInt32();
   else if (value.isString()) {
     int number;
@@ -1306,7 +1316,7 @@ void LayoutTestController::clearAllDatabases(
 void LayoutTestController::setDatabaseQuota(
     const CppArgumentList& args, CppVariant* result) {
   result->SetNull();
-  if ((args.size() >= 1) && args[0].isInt32())
+  if ((args.size() >= 1) && args[0].isNumber())
     SimpleDatabaseSystem::GetInstance()->SetDatabaseQuota(args[0].ToInt32());
 }
 
@@ -1416,7 +1426,7 @@ void LayoutTestController::setTimelineProfilingEnabled(
 void LayoutTestController::evaluateInWebInspector(const CppArgumentList& args,
                                                   CppVariant* result) {
   result->SetNull();
-  if (args.size() < 2 || !args[0].isInt32() || !args[1].isString())
+  if (args.size() < 2 || !args[0].isNumber() || !args[1].isString())
     return;
   shell_->dev_tools_agent()->evaluateInWebInspector(args[0].ToInt32(),
                                                     args[1].ToString());
@@ -1464,16 +1474,19 @@ void LayoutTestController::setEditingBehavior(const CppArgumentList& args,
                                               CppVariant* result) {
   result->SetNull();
   WebString key = WebString::fromUTF8(args[0].ToString());
+  WebKit::WebSettings::EditingBehavior behavior;
   if (key == "mac") {
-    shell_->webView()->settings()->setEditingBehavior(
-        WebKit::WebSettings::EditingBehaviorMac);
+    behavior = WebKit::WebSettings::EditingBehaviorMac;
   } else if (key == "win") {
-    shell_->webView()->settings()->setEditingBehavior(
-        WebKit::WebSettings::EditingBehaviorWin);
+    behavior = WebKit::WebSettings::EditingBehaviorWin;
+  } else if (key == "unix") {
+    behavior = WebKit::WebSettings::EditingBehaviorUnix;
   } else {
-    LogErrorToConsole("Passed invalid editing bahavior. "
-                      "Should be 'mac' or 'win'.");
+    LogErrorToConsole("Passed invalid editing behavior. "
+                      "Should be 'mac', 'win', or 'unix'.");
+    return;
   }
+  shell_->webView()->settings()->setEditingBehavior(behavior);
 }
 
 void LayoutTestController::setGeolocationPermission(const CppArgumentList& args,
@@ -1494,8 +1507,7 @@ void LayoutTestController::setMockGeolocationPosition(
 
 void LayoutTestController::setMockGeolocationError(const CppArgumentList& args,
                                                    CppVariant* result) {
-  if (args.size() < 2 ||
-      !args[0].isInt32() || !args[1].isString())
+  if (args.size() < 2 || !args[0].isNumber() || !args[1].isString())
     return;
   WebGeolocationServiceMock::setMockGeolocationError(
       args[0].ToInt32(), WebString::fromUTF8(args[1].ToString()));
@@ -1526,4 +1538,12 @@ void LayoutTestController::setMockDeviceOrientation(const CppArgumentList& args,
                                            args[5].ToDouble());
 
   shell_->device_orientation_client_mock()->setOrientation(orientation);
+}
+
+void LayoutTestController::hasSpellingMarker(const CppArgumentList& arguments,
+                                             CppVariant* result) {
+  if (arguments.size() < 2 || !arguments[0].isNumber() || !arguments[1].isNumber())
+    return;
+  result->Set(shell_->webView()->mainFrame()->selectionStartHasSpellingMarkerFor(
+      arguments[0].ToInt32(), arguments[1].ToInt32()));
 }

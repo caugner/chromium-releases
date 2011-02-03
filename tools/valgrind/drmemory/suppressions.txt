@@ -160,7 +160,7 @@ msvcrt.dll!_RTDynamicCast
 UNINITIALIZED READ
 ADVAPI32.dll!WmiMofEnumerateResourcesA
 ADVAPI32.dll!WmiMofEnumerateResourcesA
-ADVAPI32.dll!StackTraceW
+ADVAPI32.dll!Sta*TraceW
 
 # http://code.google.com/p/drmemory/issues/detail?id=55
 UNADDRESSABLE ACCESS
@@ -202,6 +202,45 @@ UNINITIALIZED READ
 UNADDRESSABLE ACCESS
 ...
 *!MessageBoxIndirect*
+
+# http://code.google.com/p/drmemory/issues/detail?id=65
+UNINITIALIZED READ
+...
+ADVAPI32.dll!SystemFunction036
+
+UNINITIALIZED READ
+...
+*!talk_base::CreateRandomString
+
+# http://code.google.com/p/drmemory/issues/detail?id=68
+UNINITIALIZED READ
+...
+WS2_32.dll!*
+
+UNINITIALIZED READ
+...
+ADVAPI32.dll!SetSecurityDescriptorDacl
+
+UNINITIALIZED READ
+...
+ADVAPI32.dll!Reg*Value*
+
+UNINITIALIZED READ
+...
+MSWSOCK.dll!WSPStartup
+
+UNADDRESSABLE ACCESS
+...
+MSWSOCK.dll!WSPStartup
+
+UNINITIALIZED READ
+...
+ntdll.dll!RtlValidateUnicodeString
+
+UNADDRESSABLE ACCESS
+...
+ntdll.dll!RtlValidateUnicodeString
+
 
 ############################
 # TODO(timurrrr): investigate these
@@ -267,15 +306,6 @@ UNINITIALIZED READ
 *!SyncSocketClientListener::OnMsgClassResponse
 
 UNINITIALIZED READ
-WSHTCPIP.dll!WSHGetSockaddrType
-...
-WS2_32.dll!connect
-
-UNINITIALIZED READ
-...
-WS2_32.dll!socket
-
-UNINITIALIZED READ
 ...
 *!*NSPRInitSingleton*
 
@@ -284,38 +314,40 @@ UNINITIALIZED READ
 
 UNINITIALIZED READ
 ...
-*!SetSecurityDescriptorDacl
+*!NdrClientCall2
 
 UNINITIALIZED READ
-...
-MSWSOCK.dll!WSPStartup
+ntdll.dll!RtlpNtOpenKey
+ntdll.dll!RtlMakeSelfRelativeSD
+ntdll.dll!RtlAbsoluteToSelfRelativeSD
+ADVAPI32.dll!MakeSelfRelativeSD
 
 ############################
 # Intentional errors in Chromium tests (ToolsSanityTests)
 
 UNADDRESSABLE ACCESS
-base_unittests.exe!ReadValueOutOfArrayBoundsLeft
-base_unittests.exe!MakeSomeErrors
+base_unittests.exe!*ReadValueOutOfArrayBoundsLeft
+base_unittests.exe!*MakeSomeErrors
 base_unittests.exe!ToolsSanityTest_AccessesToMallocMemory_Test::TestBody
 
 UNADDRESSABLE ACCESS
-base_unittests.exe!ReadValueOutOfArrayBoundsRight
-base_unittests.exe!MakeSomeErrors
+base_unittests.exe!*ReadValueOutOfArrayBoundsRight
+base_unittests.exe!*MakeSomeErrors
 base_unittests.exe!ToolsSanityTest_AccessesToMallocMemory_Test::TestBody
 
 UNADDRESSABLE ACCESS
-base_unittests.exe!WriteValueOutOfArrayBoundsLeft
-base_unittests.exe!MakeSomeErrors
+base_unittests.exe!*WriteValueOutOfArrayBoundsLeft
+base_unittests.exe!*MakeSomeErrors
 base_unittests.exe!ToolsSanityTest_AccessesToMallocMemory_Test::TestBody
 
 UNADDRESSABLE ACCESS
-base_unittests.exe!WriteValueOutOfArrayBoundsRight
-base_unittests.exe!MakeSomeErrors
+base_unittests.exe!*WriteValueOutOfArrayBoundsRight
+base_unittests.exe!*MakeSomeErrors
 base_unittests.exe!ToolsSanityTest_AccessesToMallocMemory_Test::TestBody
 
 UNINITIALIZED READ
-base_unittests.exe!ReadUninitializedValue
-base_unittests.exe!MakeSomeErrors
+base_unittests.exe!*ReadUninitializedValue
+base_unittests.exe!*MakeSomeErrors
 base_unittests.exe!ToolsSanityTest_AccessesToMallocMemory_Test::TestBody
 
 # Write after free
@@ -323,18 +355,18 @@ UNADDRESSABLE ACCESS
 base_unittests.exe!ToolsSanityTest_AccessesToMallocMemory_Test::TestBody
 
 UNADDRESSABLE ACCESS
-base_unittests.exe!ReadValueOutOfArrayBoundsLeft
-base_unittests.exe!MakeSomeErrors
+base_unittests.exe!*ReadValueOutOfArrayBoundsLeft
+base_unittests.exe!*MakeSomeErrors
 base_unittests.exe!ToolsSanityTest_AccessesToNewMemory_Test::TestBody
 
 UNADDRESSABLE ACCESS
-base_unittests.exe!ReadValueOutOfArrayBoundsRight
-base_unittests.exe!MakeSomeErrors
+base_unittests.exe!*ReadValueOutOfArrayBoundsRight
+base_unittests.exe!*MakeSomeErrors
 base_unittests.exe!ToolsSanityTest_AccessesToNewMemory_Test::TestBody
 
 UNINITIALIZED READ
-base_unittests.exe!ReadUninitializedValue
-base_unittests.exe!MakeSomeErrors
+base_unittests.exe!*ReadUninitializedValue
+base_unittests.exe!*MakeSomeErrors
 base_unittests.exe!ToolsSanityTest_AccessesToNewMemory_Test::TestBody
 
 # Write after delete []

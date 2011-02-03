@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/scoped_temp_dir.h"
@@ -36,13 +37,14 @@ class ManifestFetchData {
  public:
   static const int kNeverPinged = -1;
 
-  explicit ManifestFetchData(GURL update_url) : base_url_(update_url),
-      full_url_(update_url) {}
+  explicit ManifestFetchData(const GURL& update_url);
+  ~ManifestFetchData();
 
   // Returns true if this extension information was successfully added. If the
   // return value is false it means the full_url would have become too long, and
   // this ManifestFetchData object remains unchanged.
-  bool AddExtension(std::string id, std::string version, int ping_days);
+  bool AddExtension(std::string id, std::string version, int ping_days,
+                    const std::string& update_url_data);
 
   const GURL& base_url() const { return base_url_; }
   const GURL& full_url() const { return full_url_; }
@@ -50,9 +52,7 @@ class ManifestFetchData {
   const std::set<std::string>& extension_ids() const { return extension_ids_; }
 
   // Returns true if the given id is included in this manifest fetch.
-  bool Includes(std::string extension_id) const {
-    return extension_ids_.find(extension_id) != extension_ids_.end();
-  }
+  bool Includes(std::string extension_id) const;
 
   // Returns true if a ping parameter was added to full_url for this extension
   // id.
@@ -84,6 +84,7 @@ class ManifestFetchData {
 class ManifestFetchesBuilder {
  public:
   explicit ManifestFetchesBuilder(ExtensionUpdateService* service);
+  ~ManifestFetchesBuilder();
 
   void AddExtension(const Extension& extension);
 
@@ -112,8 +113,8 @@ class ManifestFetchesBuilder {
                         const std::string& id,
                         const Version& version,
                         PendingExtensionInfo::ExpectedCrxType crx_type,
-                        GURL update_url);
-
+                        GURL update_url,
+                        const std::string& update_url_data);
   ExtensionUpdateService* service_;
 
   // List of data on fetches we're going to do. We limit the number of
@@ -146,7 +147,7 @@ class ExtensionUpdater
                    PrefService* prefs,
                    int frequency_seconds);
 
-  // Starts the updater running.
+  // Starts the updater running.  Should be called at most once.
   void Start();
 
   // Stops the updater running, cancelling any outstanding update manifest and
@@ -188,7 +189,6 @@ class ExtensionUpdater
   static const int kManifestFetcherId = 1;
   static const int kExtensionFetcherId = 2;
 
-  static const char* kBlacklistUpdateUrl;
   static const char* kBlacklistAppID;
 
   // Does common work from constructors.
@@ -253,6 +253,9 @@ class ExtensionUpdater
   std::vector<int> DetermineUpdates(const ManifestFetchData& fetch_data,
       const UpdateManifest::Results& possible_updates);
 
+  // Whether Start() has been called but not Stop().
+  bool alive_;
+
   // Outstanding url fetch requests for manifests and updates.
   scoped_ptr<URLFetcher> manifest_fetcher_;
   scoped_ptr<URLFetcher> extension_fetcher_;
@@ -278,6 +281,9 @@ class ExtensionUpdater
 
   scoped_refptr<ExtensionUpdaterFileHandler> file_handler_;
   bool blacklist_checks_enabled_;
+
+  FRIEND_TEST(ExtensionUpdaterTest, TestStartUpdateCheckMemory);
+  FRIEND_TEST(ExtensionUpdaterTest, TestAfterStopBehavior);
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionUpdater);
 };

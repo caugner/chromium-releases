@@ -5,37 +5,19 @@
 #ifndef REMOTING_HOST_EVENT_EXECUTOR_H_
 #define REMOTING_HOST_EVENT_EXECUTOR_H_
 
-#include <vector>
-
-#include "base/basictypes.h"
+class MessageLoop;
 
 namespace remoting {
 
 class Capturer;
-class ChromotingClientMessage;
 
-// An interface that defines the behavior of an event executor object.
-// An event executor is to perform actions on the host machine. For example
-// moving the mouse cursor, generating keyboard events and manipulating
-// clipboards.
-class EventExecutor {
- public:
-  explicit EventExecutor(Capturer* capturer)
-    : capturer_(capturer) {
-  }
-  virtual ~EventExecutor() {}
+namespace protocol {
+class InputStub;
+}  // namespace protocol
 
-  // Handles input events from ClientMessageList and removes them from the
-  // list.
-  virtual void HandleInputEvent(ChromotingClientMessage* message) = 0;
-  // TODO(hclam): Define actions for clipboards.
-
- protected:
-  Capturer* capturer_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(EventExecutor);
-};
+// Creates default event executor for the current platform.
+protocol::InputStub* CreateEventExecutor(MessageLoop* message_loop,
+                                         Capturer* capturer);
 
 }  // namespace remoting
 

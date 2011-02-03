@@ -30,6 +30,12 @@ class TCPClientSocketWin : public ClientSocket, NonThreadSafe {
 
   virtual ~TCPClientSocketWin();
 
+  // AdoptSocket causes the given, connected socket to be adopted as a TCP
+  // socket. This object must not be connected. This object takes ownership of
+  // the given socket and then acts as if Connect() had been called. This
+  // function is intended for testing only.
+  void AdoptSocket(SOCKET socket);
+
   // ClientSocket methods:
   virtual int Connect(CompletionCallback* callback);
   virtual void Disconnect();
@@ -40,6 +46,7 @@ class TCPClientSocketWin : public ClientSocket, NonThreadSafe {
   virtual void SetSubresourceSpeculation();
   virtual void SetOmniboxSpeculation();
   virtual bool WasEverUsed() const;
+  virtual bool UsingTCPFastOpen() const;
 
   // Socket methods:
   // Multiple outstanding requests are not supported.
@@ -76,6 +83,9 @@ class TCPClientSocketWin : public ClientSocket, NonThreadSafe {
 
   // Returns the OS error code (or 0 on success).
   int CreateSocket(const struct addrinfo* ai);
+
+  // Returns the OS error code (or 0 on success).
+  int SetupSocket();
 
   // Called after Connect() has completed with |net_error|.
   void LogConnectCompletion(int net_error);
@@ -116,6 +126,9 @@ class TCPClientSocketWin : public ClientSocket, NonThreadSafe {
   int connect_os_error_;
 
   BoundNetLog net_log_;
+
+  // This socket was previously disconnected and has not been re-connected.
+  bool previously_disconnected_;
 
   // Record of connectivity and transmissions, for use in speculative connection
   // histograms.

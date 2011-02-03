@@ -16,6 +16,7 @@
 #include "net/http/http_network_session.h"
 #include "net/http/http_proxy_utils.h"
 #include "net/http/http_request_info.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/http_stream_parser.h"
 #include "net/socket/client_socket_handle.h"
 
@@ -131,7 +132,8 @@ int HttpProxyClientSocket::DidDrainBodyForAuthRestart(bool keep_alive) {
   drain_buf_ = NULL;
   parser_buf_ = NULL;
   http_stream_parser_.reset();
-  request_headers_.clear();
+  request_line_.clear();
+  request_headers_.Clear();
   response_ = HttpResponseInfo();
   return OK;
 }
@@ -179,6 +181,14 @@ void HttpProxyClientSocket::SetOmniboxSpeculation() {
 bool HttpProxyClientSocket::WasEverUsed() const {
   if (transport_.get() && transport_->socket()) {
     return transport_->socket()->WasEverUsed();
+  }
+  NOTREACHED();
+  return false;
+}
+
+bool HttpProxyClientSocket::UsingTCPFastOpen() const {
+  if (transport_.get() && transport_->socket()) {
+    return transport_->socket()->UsingTCPFastOpen();
   }
   NOTREACHED();
   return false;
@@ -323,28 +333,25 @@ int HttpProxyClientSocket::DoSendRequest() {
 
   // This is constructed lazily (instead of within our Start method), so that
   // we have proxy info available.
-  if (request_headers_.empty()) {
+  if (request_line_.empty()) {
+    DCHECK(request_headers_.IsEmpty());
     HttpRequestHeaders authorization_headers;
     if (auth_->HaveAuth())
       auth_->AddAuthorizationHeader(&authorization_headers);
-    std::string request_line;
-    HttpRequestHeaders request_headers;
     BuildTunnelRequest(request_, authorization_headers, endpoint_,
-                       &request_line, &request_headers);
-    if (net_log_.IsLoggingAll()) {
+                       &request_line_, &request_headers_);
+    if (net_log_.IsLoggingAllEvents()) {
       net_log_.AddEvent(
           NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
-          new NetLogHttpRequestParameter(
-              request_line, request_headers));
+          make_scoped_refptr(new NetLogHttpRequestParameter(
+              request_line_, request_headers_)));
     }
-    request_headers_ = request_line + request_headers.ToString();
   }
-
 
   parser_buf_ = new GrowableIOBuffer();
   http_stream_parser_.reset(
       new HttpStreamParser(transport_.get(), &request_, parser_buf_, net_log_));
-  return http_stream_parser_->SendRequest(request_headers_, NULL,
+  return http_stream_parser_->SendRequest(request_line_, request_headers_, NULL,
                                           &response_, &io_callback_);
 }
 
@@ -369,10 +376,10 @@ int HttpProxyClientSocket::DoReadHeadersComplete(int result) {
   if (response_.headers->GetParsedHttpVersion() < HttpVersion(1, 0))
     return ERR_TUNNEL_CONNECTION_FAILED;
 
-  if (net_log_.IsLoggingAll()) {
+  if (net_log_.IsLoggingAllEvents()) {
     net_log_.AddEvent(
         NetLog::TYPE_HTTP_TRANSACTION_READ_TUNNEL_RESPONSE_HEADERS,
-        new NetLogHttpResponseParameter(response_.headers));
+        make_scoped_refptr(new NetLogHttpResponseParameter(response_.headers)));
   }
 
   switch (response_.headers->response_code()) {

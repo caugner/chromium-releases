@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/process_util.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/extensions/crashed_extension_infobar.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_host.h"
@@ -14,6 +13,7 @@
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/test/ui_test_utils.h"
 
 class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
@@ -51,7 +51,8 @@ class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
 
   void CrashExtension(size_t index) {
     ASSERT_LT(index, GetExtensionsService()->extensions()->size());
-    Extension* extension = GetExtensionsService()->extensions()->at(index);
+    const Extension* extension =
+        GetExtensionsService()->extensions()->at(index);
     ASSERT_TRUE(extension);
     std::string extension_id(extension->id());
     ExtensionHost* extension_host =
@@ -69,7 +70,8 @@ class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
 
   void CheckExtensionConsistency(size_t index) {
     ASSERT_LT(index, GetExtensionsService()->extensions()->size());
-    Extension* extension = GetExtensionsService()->extensions()->at(index);
+    const Extension* extension =
+        GetExtensionsService()->extensions()->at(index);
     ASSERT_TRUE(extension);
     ExtensionHost* extension_host =
         GetExtensionProcessManager()->GetBackgroundHostForExtension(extension);
@@ -85,7 +87,7 @@ class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
     const size_t size_before = GetExtensionsService()->extensions()->size();
     ASSERT_TRUE(LoadExtension(
         test_data_dir_.AppendASCII("common").AppendASCII("background_page")));
-    Extension* extension = GetExtensionsService()->extensions()->back();
+    const Extension* extension = GetExtensionsService()->extensions()->back();
     ASSERT_TRUE(extension);
     first_extension_id_ = extension->id();
     CheckExtensionConsistency(size_before);
@@ -95,7 +97,8 @@ class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
     int offset = GetExtensionsService()->extensions()->size();
     ASSERT_TRUE(LoadExtension(
         test_data_dir_.AppendASCII("install").AppendASCII("install")));
-    Extension* extension = GetExtensionsService()->extensions()->at(offset);
+    const Extension* extension =
+        GetExtensionsService()->extensions()->at(offset);
     ASSERT_TRUE(extension);
     second_extension_id_ = extension->id();
     CheckExtensionConsistency(offset);

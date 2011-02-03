@@ -5,11 +5,13 @@
 <title i18n-content="title"></title>
 <style>
 body {
-  font-size: 100%;
+  font-family: arial, sans-serif;
+  font-size: 13px;
+  line-height: 22px;
   -webkit-user-select: none;
 }
 
-iframe { 
+iframe {
   overflow-x: scroll; 
   overflow-y: scroll; 
 }
@@ -18,11 +20,11 @@ iframe {
   position: fixed;
   left: 0;
   right: 0;
-  background: rgba(0, 0, 0, .2);
+  background: rgba(0, 0, 0, .1);
   top: 0;
   bottom: 0;
   z-index: 10;
-  padding: 20px;
+  padding: 100px;
   -webkit-box-align: center;
   -webkit-box-pack: center;
 }
@@ -31,8 +33,8 @@ iframe {
   background: white;
   border-radius: 5px;
   padding: 15px;
-  border: 1px solid #666;
-  -webkit-box-shadow: 3px 3px 3px #666;
+  border:1px solid #bdbdbd;
+  -webkit-box-shadow:1px 1px 12px rgba(0, 0, 0, 0.15);
 }
 
 .startup {
@@ -42,10 +44,9 @@ iframe {
   left: 50%;
   margin-left:-250px;
   margin-top:-250px;
-  text-align: center;
 }
 
-#payment-form {
+#paymentForm {
   display: -webkit-box;
   position: absolute;
   left: 0;
@@ -58,116 +59,140 @@ iframe {
 
 .logo {
   background: url('file:///usr/share/chromeos-assets/mobile/carrier_logo.png') no-repeat;
+  background-position: 85% 50%;
   height: 58px;
-}
-
-#error-msg {
-  margin: 20px;
-}
-
-.box {
-  display: -webkit-box;
-}
-
-#final-logo {
-  position: absolute;
-  right: 30px;
-  width: 150px;
-}
-
-#activation-logo {
-  background-position: center;
   margin-bottom: 20px;
   margin-top: 20px;
 }
 
-#splitter {
+.splitter {
   margin-top: 10px;
   left: 50%;
-  margin-left: 150px;
-  width: 200px;
+  width: 600px;
   border-bottom: 1px solid #EEE;
   height: 1px;
 }
 
-body[state='connecting'] > #payment-form,
-body[state='connecting'] > #final-message,
-body[state='connecting'] > * > #error-message {
-  display: none
-}
-body[state='connecting'] > #system-status {
-  display: block
-}
-
-body[state='error'] > #payment-form,
-body[state='error'] > #final-message {
-  display: none
-}
-body[state='error'] > * > #error-message,
-body[state='error'] > #system-status {
-  display: block
-}
-
-body[state='payment'] > * > #error-message,
-body[state='payment'] > #final-message,
-body[state='payment'] > #system-status {
-  display: none
-}
-body[state='payment'] > #payment-form {
-  display: block
-}
-
-body[state='activating'] > #payment-form,
-body[state='activating'] > #final-message,
-body[state='activating'] > * > #error-message {
-  display: none
-}
-body[state='activating'] > #system-status {
-  display: block
-}
-
-body[state='connected'] > * > #error-message,
-body[state='connected'] > #system-status {
-  display: none
-}
-body[state='connected'] > #payment-form,
-body[state='connected'] > #final-message {
-  display: block
+.hidden {
+  display: none;
 }
 
 .testing-only {
+  position: absolute;
+  left: 0;
+  top: 0;
 }
 
+#finalMessage {
+  padding-bottom: 50px;
+}
+
+.action-area {
+  -webkit-box-orient: horizontal;
+  -webkit-box-align: center;
+  padding: 12px;
+  position: absolute;
+  right: 0px;
+  bottom: 0px;
+  display: -webkit-box;
+}
+
+.button-strip {
+  -webkit-box-orient: horizontal;
+  display: -webkit-box;
+}
+
+#carrierPage {
+  padding-top: 10px;
+  width: 500px;
+  height: 380px;
+  overflow-x: none; 
+  overflow-y: none; 
+}
+
+#header {
+  -webkit-padding-start: 50px;
+  position: relative;
+  top: -50%;
+}
+
+#banner {
+  background-color: #fcf6e0;
+  border: 1px solid #ccc;
+  display: -webkit-box;
+  margin-left: -22px;
+  padding: 5px;
+  width: 467px;
+  -webkit-padding-start: 70px;
+  -webkit-box-shadow:1px 1px 6px rgba(0, 0, 0, 0.2);
+}
+
+#startupMessage {
+  -webkit-padding-start: 15px;
+}
+
+#headerWrapper {
+  position: relative;
+}
+#statusHeader {
+  font-weight: bold;
+  font-size: 16px;
+}
+
+#auxHeader {
+  font-size: 16px;
+}
+
+#errorMessage {
+  width: 500px;
+  height: 380px;
+  padding-top: 20px;
+}
+.headerCell {
+  -webkit-padding-start: 10px;
+}
+.canvasCell {
+  vertical-align: middle;
+  line-height: 0px;
+}
 </style>
 <script src="chrome://resources/js/cr.js"></script>
+<script src="chrome://resources/js/local_strings.js"></script>
 <script src="chrome://resources/js/util.js"></script>
 <script src="mobile_setup.js"></script>
-<script>
-  mobile.MobileSetup.getInstance().initialize('payment-form');
-</script>
 </head>
-<body state="connecting" onload="setInterval(mobile.MobileSetup.drawProgress, 100);"
-    i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
-  <iframe id="payment-form" frameborder="0"></iframe>
-  <div id="system-status" class="startup">
-    <div class="status-header"><h3 id="header"
-      i18n-content="status_header"></h3></div>
-    <div id="error-message"></div>
-    <canvas id="canvas" width="56" height="56"></canvas>
-    <div id="splitter"></div>
-    <div id="activation-logo" class="logo"></div>
-  </div>
-  <div id="final-message" class="overlay">
-    <div class="box">
-      <div>
-        <div class="header"><h3 i18n-content="completed_header"></h3></div>
-        <div id="action" i18n-content="completed_text"></div>
+<body onload="mobile.MobileSetup.loadPage();"
+  i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
+  <iframe class="hidden" id="paymentForm" frameborder="0"></iframe>
+  <div id="systemStatus" class="overlay hidden">
+    <div class="startup">
+      <div id="banner">
+        <table border="0">
+          <tbody><tr>
+            <td class="canvasCell"><canvas id="canvas" width="56"
+                height="56"></canvas></td>
+            <td class="headerCell">
+              <div id="statusHeader"></div>
+              <div id="auxHeader"></div>
+            </td>
+          </tr>
+        </tbody></table>
       </div>
-      <div id="final-logo" class="logo"></div>
+      <div id="errorMessage" class="hidden"></div>
+      <iframe id="carrierPage" frameborder="0"></iframe>
     </div>
   </div>
-  <div class="testing-only">
-    <button id="cheat">Fake activation!</button>
+  <div id="finalMessage" class="overlay hidden">
+    <div class="startup">
+      <div class="header"><h3 i18n-content="completed_header"></h3></div>
+      <div i18n-content="completed_text"></div>
+      <div class="splitter"></div>
+      <div class="logo"></div>
+      <div class="action-area button-strip">
+        <button id="closeButton"
+                i18n-content="close_button"></button>
+      </div>
+    </div>
   </div>
 </body>
 </html>

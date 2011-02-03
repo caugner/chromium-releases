@@ -14,7 +14,7 @@
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
-#include "base/stats_counters.h"
+#include "base/metrics/stats_counters.h"
 #include "base/string_util.h"
 #include "gfx/blit.h"
 #include "skia/ext/platform_canvas.h"
@@ -55,7 +55,8 @@ WebPluginDelegateImpl::WebPluginDelegateImpl(
       first_set_window_call_(true),
       plugin_has_focus_(false),
       has_webkit_focus_(false),
-      containing_view_has_focus_(true) {
+      containing_view_has_focus_(true),
+      creation_succeeded_(false) {
   memset(&window_, 0, sizeof(window_));
   if (instance_->mime_type() == "application/x-shockwave-flash") {
     // Flash is tied to Firefox's whacky behavior with windowless plugins. See
@@ -443,8 +444,8 @@ void WebPluginDelegateImpl::WindowlessPaint(cairo_t* context,
     }
 
     // Tell the plugin to paint into the pixmap.
-    static StatsRate plugin_paint("Plugin.Paint");
-    StatsScope<StatsRate> scope(plugin_paint);
+    static base::StatsRate plugin_paint("Plugin.Paint");
+    base::StatsScope<base::StatsRate> scope(plugin_paint);
     NPError err = instance()->NPP_HandleEvent(&np_event);
     DCHECK_EQ(err, NPERR_NO_ERROR);
 
@@ -474,8 +475,8 @@ void WebPluginDelegateImpl::WindowlessPaint(cairo_t* context,
     event.drawable = GDK_PIXMAP_XID(pixmap_);
 
     // Tell the plugin to paint into the pixmap.
-    static StatsRate plugin_paint("Plugin.Paint");
-    StatsScope<StatsRate> scope(plugin_paint);
+    static base::StatsRate plugin_paint("Plugin.Paint");
+    base::StatsScope<base::StatsRate> scope(plugin_paint);
     NPError err = instance()->NPP_HandleEvent(&np_event);
     DCHECK_EQ(err, NPERR_NO_ERROR);
 

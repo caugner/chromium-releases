@@ -11,6 +11,7 @@
 #include "chrome/browser/prefs/pref_change_registrar.h"
 
 class DOMUI;
+class Extension;
 class Value;
 class PrefService;
 
@@ -22,6 +23,9 @@ enum Section {
   // else it shows only a small overview list.
   THUMB = 1 << 0,
   APPS = 1 << 6,
+
+  // We use the low 16 bits for sections, the high 16 bits for minimized state.
+  ALL_SECTIONS_MASK = 0x0000FFFF,
 
   // If one of these is set, then the corresponding section is shown minimized
   // at the bottom of the NTP and no data is directly visible on the NTP.
@@ -38,6 +42,10 @@ class ShownSectionsHandler : public DOMMessageHandler,
 
   // Helper to get the current shown sections.
   static int GetShownSections(PrefService* pref_service);
+
+  // Expands |section|, collapsing any previously expanded section. This is the
+  // same thing that happens if a user clicks on |section|.
+  static void SetShownSection(PrefService* prefs, Section section);
 
   // DOMMessageHandler implementation.
   virtual void RegisterMessages();
@@ -59,9 +67,12 @@ class ShownSectionsHandler : public DOMMessageHandler,
                                int old_pref_version,
                                int new_pref_version);
 
+  static void OnExtensionInstalled(PrefService* prefs,
+                                   const Extension* extension);
+
  private:
   PrefService* pref_service_;
-  PrefChangeRegistrar registrar_;
+  PrefChangeRegistrar pref_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ShownSectionsHandler);
 };

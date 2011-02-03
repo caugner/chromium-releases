@@ -14,11 +14,11 @@
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/accessibility_events.h"
 #include "chrome/browser/alternate_nav_url_fetcher.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view_gtk.h"
-#include "chrome/browser/browser.h"
+#include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/content_setting_bubble_model.h"
@@ -38,11 +38,13 @@
 #include "chrome/browser/gtk/nine_box.h"
 #include "chrome/browser/gtk/rounded_window.h"
 #include "chrome/browser/gtk/view_id_util.h"
+#include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/location_bar_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
@@ -143,7 +145,8 @@ LocationBarViewGtk::LocationBarViewGtk(Browser* browser)
       hbox_width_(0),
       entry_box_width_(0),
       show_selected_keyword_(false),
-      show_keyword_hint_(false) {
+      show_keyword_hint_(false),
+      update_instant_(true) {
 }
 
 LocationBarViewGtk::~LocationBarViewGtk() {
@@ -429,39 +432,92 @@ void LocationBarViewGtk::Update(const TabContents* contents) {
   }
 }
 
+void LocationBarViewGtk::OnAutocompleteWillClosePopup() {
+  if (!update_instant_)
+    return;
+
+  InstantController* instant = browser_->instant();
+  if (instant && !instant->commit_on_mouse_up())
+    instant->DestroyPreviewContents();
+}
+
+void LocationBarViewGtk::OnAutocompleteLosingFocus(
+    gfx::NativeView view_gaining_focus) {
+  SetSuggestedText(string16());
+
+  InstantController* instant = browser_->instant();
+  if (instant)
+    instant->OnAutocompleteLostFocus(view_gaining_focus);
+}
+
+void LocationBarViewGtk::OnAutocompleteWillAccept() {
+  update_instant_ = false;
+}
+
+bool LocationBarViewGtk::OnCommitSuggestedText(
+    const std::wstring& typed_text) {
+  InstantController* instant = browser_->instant();
+  if (!instant)
+    return false;
+
+  return location_entry_->CommitInstantSuggestion();
+}
+
+bool LocationBarViewGtk::AcceptCurrentInstantPreview() {
+  InstantController* instant = browser_->instant();
+  if (instant && instant->IsCurrent()) {
+    instant->CommitCurrentPreview(INSTANT_COMMIT_PRESSED_ENTER);
+    return true;
+  }
+  return false;
+}
+
+void LocationBarViewGtk::OnSetSuggestedSearchText(
+    const string16& suggested_text) {
+  SetSuggestedText(suggested_text);
+}
+
+void LocationBarViewGtk::OnPopupBoundsChanged(const gfx::Rect& bounds) {
+  InstantController* instant = browser_->instant();
+  if (instant)
+    instant->SetOmniboxBounds(bounds);
+}
+
 void LocationBarViewGtk::OnAutocompleteAccept(const GURL& url,
     WindowOpenDisposition disposition,
     PageTransition::Type transition,
     const GURL& alternate_nav_url) {
-  if (!url.is_valid())
-    return;
+  if (url.is_valid()) {
+    location_input_ = UTF8ToWide(url.spec());
+    disposition_ = disposition;
+    transition_ = transition;
 
-  location_input_ = UTF8ToWide(url.spec());
-  disposition_ = disposition;
-  transition_ = transition;
-
-  if (!command_updater_)
-    return;
-
-  if (!alternate_nav_url.is_valid()) {
-    command_updater_->ExecuteCommand(IDC_OPEN_CURRENT_URL);
-    return;
+    if (command_updater_) {
+      if (!alternate_nav_url.is_valid()) {
+        command_updater_->ExecuteCommand(IDC_OPEN_CURRENT_URL);
+      } else {
+        AlternateNavURLFetcher* fetcher =
+            new AlternateNavURLFetcher(alternate_nav_url);
+        // The AlternateNavURLFetcher will listen for the pending navigation
+        // notification that will be issued as a result of the "open URL." It
+        // will automatically install itself into that navigation controller.
+        command_updater_->ExecuteCommand(IDC_OPEN_CURRENT_URL);
+        if (fetcher->state() == AlternateNavURLFetcher::NOT_STARTED) {
+          // I'm not sure this should be reachable, but I'm not also sure enough
+          // that it shouldn't to stick in a NOTREACHED().  In any case, this is
+          // harmless.
+          delete fetcher;
+        } else {
+          // The navigation controller will delete the fetcher.
+        }
+      }
+    }
   }
 
-  AlternateNavURLFetcher* fetcher =
-      new AlternateNavURLFetcher(alternate_nav_url);
-  // The AlternateNavURLFetcher will listen for the pending navigation
-  // notification that will be issued as a result of the "open URL." It
-  // will automatically install itself into that navigation controller.
-  command_updater_->ExecuteCommand(IDC_OPEN_CURRENT_URL);
-  if (fetcher->state() == AlternateNavURLFetcher::NOT_STARTED) {
-    // I'm not sure this should be reachable, but I'm not also sure enough
-    // that it shouldn't to stick in a NOTREACHED().  In any case, this is
-    // harmless.
-    delete fetcher;
-  } else {
-    // The navigation controller will delete the fetcher.
-  }
+  if (browser_->instant())
+    browser_->instant()->DestroyPreviewContents();
+
+  update_instant_ = true;
 }
 
 void LocationBarViewGtk::OnChanged() {
@@ -479,6 +535,34 @@ void LocationBarViewGtk::OnChanged() {
     SetKeywordHintLabel(keyword);
 
   AdjustChildrenVisibility();
+
+  InstantController* instant = browser_->instant();
+  string16 suggested_text;
+  if (update_instant_ && instant && GetTabContents()) {
+    if (location_entry_->model()->user_input_in_progress() &&
+        location_entry_->model()->popup_model()->IsOpen()) {
+      instant->Update(
+          browser_->GetSelectedTabContentsWrapper(),
+          location_entry_->model()->CurrentMatch(),
+          WideToUTF16(location_entry_->GetText()),
+          location_entry_->model()->UseVerbatimInstant(),
+          &suggested_text);
+      if (!instant->MightSupportInstant()) {
+        location_entry_->model()->FinalizeInstantQuery(std::wstring(),
+                                                       std::wstring());
+      }
+    } else {
+      instant->DestroyPreviewContents();
+      location_entry_->model()->FinalizeInstantQuery(std::wstring(),
+                                                     std::wstring());
+    }
+  }
+
+  SetSuggestedText(suggested_text);
+}
+
+void LocationBarViewGtk::OnSelectionBoundsChanged() {
+  NOTIMPLEMENTED();
 }
 
 void LocationBarViewGtk::CreateStarButton() {
@@ -545,8 +629,7 @@ void LocationBarViewGtk::ShowFirstRunBubble(FirstRun::BubbleType bubble_type) {
 }
 
 void LocationBarViewGtk::SetSuggestedText(const string16& text) {
-  // TODO: implement me.
-  NOTIMPLEMENTED();
+  location_entry_->SetInstantSuggestion(UTF16ToUTF8(text));
 }
 
 std::wstring LocationBarViewGtk::GetInputString() const {
@@ -577,7 +660,7 @@ void LocationBarViewGtk::FocusSearch() {
 }
 
 void LocationBarViewGtk::UpdateContentSettingsIcons() {
-  const TabContents* tab_contents = GetTabContents();
+  TabContents* tab_contents = GetTabContents();
   bool any_visible = false;
   for (ScopedVector<ContentSettingImageViewGtk>::iterator i(
            content_setting_views_.begin());
@@ -742,8 +825,8 @@ void LocationBarViewGtk::Observe(NotificationType type,
     gtk_util::SetRoundedWindowBorderColor(tab_to_search_box_,
                                           kKeywordBorderColor);
 
-    gtk_util::SetLabelColor(tab_to_search_full_label_, &gfx::kGdkBlack);
-    gtk_util::SetLabelColor(tab_to_search_partial_label_, &gfx::kGdkBlack);
+    gtk_util::SetLabelColor(tab_to_search_full_label_, &gtk_util::kGdkBlack);
+    gtk_util::SetLabelColor(tab_to_search_partial_label_, &gtk_util::kGdkBlack);
     gtk_util::SetLabelColor(tab_to_search_hint_leading_label_,
                             &kHintTextColor);
     gtk_util::SetLabelColor(tab_to_search_hint_trailing_label_,
@@ -1192,7 +1275,7 @@ LocationBarViewGtk::ContentSettingImageViewGtk::~ContentSettingImageViewGtk() {
 }
 
 void LocationBarViewGtk::ContentSettingImageViewGtk::UpdateFromTabContents(
-    const TabContents* tab_contents) {
+    TabContents* tab_contents) {
   content_setting_image_model_->UpdateFromTabContents(tab_contents);
   if (content_setting_image_model_->is_visible()) {
     gtk_image_set_from_pixbuf(GTK_IMAGE(image_.get()),
@@ -1261,8 +1344,8 @@ LocationBarViewGtk::PageActionViewGtk::PageActionViewGtk(
   image_.Own(gtk_image_new());
   gtk_container_add(GTK_CONTAINER(event_box_.get()), image_.get());
 
-  Extension* extension = profile->GetExtensionsService()->GetExtensionById(
-      page_action->extension_id(), false);
+  const Extension* extension = profile->GetExtensionsService()->
+      GetExtensionById(page_action->extension_id(), false);
   DCHECK(extension);
 
   // Load all the icons declared in the manifest. This is the contents of the
@@ -1425,8 +1508,8 @@ gboolean LocationBarViewGtk::PageActionViewGtk::OnButtonPressed(
           event->button.button);
     }
   } else {
-    Extension* extension = profile_->GetExtensionsService()->GetExtensionById(
-        page_action()->extension_id(), false);
+    const Extension* extension = profile_->GetExtensionsService()->
+        GetExtensionById(page_action()->extension_id(), false);
 
     context_menu_model_ =
         new ExtensionContextMenuModel(extension, owner_->browser_, this);

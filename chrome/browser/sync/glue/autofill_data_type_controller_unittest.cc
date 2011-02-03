@@ -10,7 +10,7 @@
 #include "base/scoped_ptr.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sync/glue/autofill_data_type_controller.h"
 #include "chrome/browser/sync/glue/change_processor_mock.h"
@@ -191,8 +191,8 @@ TEST_F(AutofillDataTypeControllerTest, AbortWhileWDSStarting) {
       WillRepeatedly(Return(personal_data_manager_.get()));
   EXPECT_CALL(*(personal_data_manager_.get()), IsDataLoaded()).
       WillRepeatedly(Return(true));
-  scoped_refptr<WebDataServiceFake> web_data_service_not_loaded =
-      new WebDataServiceFake(false);
+  scoped_refptr<WebDataServiceFake> web_data_service_not_loaded(
+      new WebDataServiceFake(false));
   EXPECT_CALL(profile_, GetWebDataService(_)).
       WillOnce(Return(web_data_service_not_loaded.get()));
   autofill_dtc_->Start(NewCallback(&start_callback_, &StartCallback::Run));

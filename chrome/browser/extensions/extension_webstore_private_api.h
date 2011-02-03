@@ -6,19 +6,38 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_WEBSTORE_PRIVATE_API_H_
 #pragma once
 
+#include "chrome/browser/browser_signin.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "chrome/browser/sync/profile_sync_service_observer.h"
+#include "chrome/common/net/gaia/google_service_auth_error.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 
 class ProfileSyncService;
 
-class InstallFunction : public SyncExtensionFunction {
+class WebstorePrivateApi {
  public:
-  static void SetTestingInstallBaseUrl(const char* testing_install_base_url);
+  // Allows you to set the ProfileSyncService the function will use for
+  // testing purposes.
+  static void SetTestingProfileSyncService(ProfileSyncService* service);
 
+  // Allows you to set the BrowserSignin the function will use for
+  // testing purposes.
+  static void SetTestingBrowserSignin(BrowserSignin* signin);
+};
+
+class BeginInstallFunction : public SyncExtensionFunction {
+ public:
+  // For use only in tests - sets a flag that can cause this function to ignore
+  // the normal requirement that it is called during a user gesture.
+  static void SetIgnoreUserGestureForTests(bool ignore);
  protected:
-  ~InstallFunction() {}
   virtual bool RunImpl();
-  DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.install");
+  DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.beginInstall");
+};
+
+class CompleteInstallFunction : public SyncExtensionFunction {
+  virtual bool RunImpl();
+  DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.completeInstall");
 };
 
 class GetBrowserLoginFunction : public SyncExtensionFunction {
@@ -37,29 +56,34 @@ class SetStoreLoginFunction : public SyncExtensionFunction {
 };
 
 class PromptBrowserLoginFunction : public AsyncExtensionFunction,
-                                   public ProfileSyncServiceObserver {
+                                   public NotificationObserver,
+                                   public BrowserSignin::SigninDelegate {
  public:
-  // Allows you to set the ProfileSyncService the function will use for
-  // testing purposes.
-  static void SetTestingProfileSyncService(ProfileSyncService* service);
+  PromptBrowserLoginFunction();
+  // Implements BrowserSignin::SigninDelegate interface.
+  virtual void OnLoginSuccess();
+  virtual void OnLoginFailure(const GoogleServiceAuthError& error);
 
-  // Implements ProfileSyncServiceObserver interface.
-  virtual void OnStateChanged();
+  // Implements the NotificationObserver interface.
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
 
  protected:
   virtual ~PromptBrowserLoginFunction();
   virtual bool RunImpl();
 
-  // Returns either the actual ProfileSyncService or the test service if one
-  // was set.
-  ProfileSyncService* profile_sync_service();
+ private:
+  // Creates the message for signing in.
+  virtual string16 GetLoginMessage();
+
+  // Are we waiting for a token available notification?
+  bool waiting_for_token_;
+
+  // Used for listening for TokenService notifications.
+  NotificationRegistrar registrar_;
 
   DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.promptBrowserLogin");
-
- private:
-  // This indicates whether we're currently registered as an observer of the
-  // ProfileSyncService, and need to unregister ourselves at destruction.
-  bool observing_sync_state_;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_WEBSTORE_PRIVATE_API_H_

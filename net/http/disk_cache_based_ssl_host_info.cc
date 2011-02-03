@@ -13,8 +13,11 @@
 namespace net {
 
 DiskCacheBasedSSLHostInfo::DiskCacheBasedSSLHostInfo(
-    const std::string& hostname, HttpCache* http_cache)
-    : callback_(new CancelableCompletionCallback<DiskCacheBasedSSLHostInfo>(
+    const std::string& hostname,
+    const SSLConfig& ssl_config,
+    HttpCache* http_cache)
+    : SSLHostInfo(hostname, ssl_config),
+      callback_(new CancelableCompletionCallback<DiskCacheBasedSSLHostInfo>(
                         ALLOW_THIS_IN_INITIALIZER_LIST(this),
                         &DiskCacheBasedSSLHostInfo::DoLoop)),
       state_(GET_BACKEND),
@@ -34,7 +37,8 @@ void DiskCacheBasedSSLHostInfo::Start() {
 
 DiskCacheBasedSSLHostInfo::~DiskCacheBasedSSLHostInfo() {
   DCHECK(!user_callback_);
-  DCHECK(!entry_);
+  if (entry_)
+    entry_->Close();
   callback_->Cancel();
 }
 
@@ -146,11 +150,12 @@ int DiskCacheBasedSSLHostInfo::WaitForDataReadyDone() {
   ready_ = true;
   callback = user_callback_;
   user_callback_ = NULL;
-  // We close the entry because, if we shutdown before ::Set is called, then we
-  // might leak a cache reference, which causes a DCHECK on shutdown.
+  // We close the entry because, if we shutdown before ::Persist is called,
+  // then we might leak a cache reference, which causes a DCHECK on shutdown.
   if (entry_)
     entry_->Close();
   entry_ = NULL;
+  Parse(data_);
 
   if (callback)
     callback->Run(OK);
@@ -171,17 +176,14 @@ int DiskCacheBasedSSLHostInfo::WaitForDataReady(CompletionCallback* callback) {
   return ERR_IO_PENDING;
 }
 
-void DiskCacheBasedSSLHostInfo::Set(const std::string& new_data) {
+void DiskCacheBasedSSLHostInfo::Persist() {
   DCHECK(CalledOnValidThread());
   DCHECK(state_ != GET_BACKEND);
-
-  if (new_data.empty())
-    return;
 
   DCHECK(new_data_.empty());
   CHECK(ready_);
   DCHECK(user_callback_ == NULL);
-  new_data_ = new_data;
+  new_data_ = Serialize();
 
   if (!backend_)
     return;

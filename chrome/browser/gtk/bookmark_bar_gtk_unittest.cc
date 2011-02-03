@@ -4,14 +4,14 @@
 
 #include "chrome/browser/gtk/bookmark_bar_gtk.h"
 
+#include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/gtk/tabstrip_origin_provider.h"
-#include "base/task.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/test/testing_profile.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 // Dummy implementation that's good enough for the tests; we don't test
 // rendering here so all we need is a non-NULL object.
@@ -41,11 +41,12 @@ class BookmarkBarGtkUnittest : public ::testing::Test {
   }
 
   virtual void TearDown() {
+    message_loop_.RunAllPending();
+
     bookmark_bar_.reset();
     origin_provider_.reset();
     browser_.reset();
     profile_.reset();
-    message_loop_.RunAllPending();
   }
 
   MessageLoopForUI message_loop_;

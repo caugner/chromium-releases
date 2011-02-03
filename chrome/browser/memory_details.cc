@@ -5,12 +5,12 @@
 #include "chrome/browser/memory_details.h"
 
 #include "base/file_version_info.h"
-#include "base/histogram.h"
+#include "base/metrics/histogram.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_child_process_host.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/renderer_host/backing_store_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -24,6 +24,32 @@
 #include "chrome/browser/renderer_host/render_sandbox_host_linux.h"
 #endif
 
+ProcessMemoryInformation::ProcessMemoryInformation()
+    : pid(0),
+      num_processes(0),
+      is_diagnostics(false),
+      type(ChildProcessInfo::UNKNOWN_PROCESS) {
+}
+
+ProcessMemoryInformation::~ProcessMemoryInformation() {}
+
+ProcessData::ProcessData() {}
+
+ProcessData::ProcessData(const ProcessData& rhs)
+    : name(rhs.name),
+      process_name(rhs.process_name),
+      processes(rhs.processes) {
+}
+
+ProcessData::~ProcessData() {}
+
+ProcessData& ProcessData::operator=(const ProcessData& rhs) {
+  name = rhs.name;
+  process_name = rhs.process_name;
+  processes = rhs.processes;
+  return *this;
+}
+
 // About threading:
 //
 // This operation will hit no fewer than 3 threads.
@@ -36,7 +62,6 @@
 // one task run for that long on the UI or IO threads.  So, we run the
 // expensive parts of this operation over on the file thread.
 //
-
 void MemoryDetails::StartFetch() {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::FILE));
@@ -47,6 +72,8 @@ void MemoryDetails::StartFetch() {
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(this, &MemoryDetails::CollectChildInfoOnIOThread));
 }
+
+MemoryDetails::~MemoryDetails() {}
 
 void MemoryDetails::CollectChildInfoOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));

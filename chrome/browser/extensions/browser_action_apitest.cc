@@ -8,7 +8,6 @@
 #include <gtk/gtk.h>
 #endif
 
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -17,6 +16,7 @@
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/url_constants.h"
@@ -47,7 +47,7 @@ class BrowserActionApiTest : public ExtensionApiTest {
 IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, Basic) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(RunExtensionTest("browser_action/basics")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   // Test that there is a browser action in the toolbar.
@@ -68,7 +68,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, Basic) {
 
   // Simulate the browser action being clicked.
   ui_test_utils::NavigateToURL(browser(),
-      GURL("http://localhost:1337/files/extensions/test_file.txt"));
+      test_server()->GetURL("files/extensions/test_file.txt"));
 
   ExtensionBrowserEventRouter::GetInstance()->BrowserActionExecuted(
       browser()->profile(), action->extension_id(), browser());
@@ -87,7 +87,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, Basic) {
 
 IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
   ASSERT_TRUE(RunExtensionTest("browser_action/no_icon")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   // Test that there is a browser action in the toolbar and that it has no icon.
@@ -117,7 +117,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DynamicBrowserAction) {
 IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, TabSpecificBrowserActionState) {
   ASSERT_TRUE(RunExtensionTest("browser_action/tab_specific_state")) <<
       message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   // Test that there is a browser action in the toolbar and that it has an icon.
@@ -147,7 +147,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionPopup) {
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII(
       "browser_action/popup")));
   BrowserActionTestUtil actions_bar = GetBrowserActionsBar();
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   // The extension's popup's size grows by |growFactor| each click.
@@ -180,7 +180,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionPopup) {
 // a popup.
 IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionAddPopup) {
   ASSERT_TRUE(RunExtensionTest("browser_action/add_popup")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedTabContents());
@@ -235,7 +235,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionAddPopup) {
 IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionRemovePopup) {
   // Load the extension, which has a browser action with a default popup.
   ASSERT_TRUE(RunExtensionTest("browser_action/remove_popup")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedTabContents());
@@ -269,7 +269,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoBasic) {
   ASSERT_TRUE(test_server()->Start());
 
   ASSERT_TRUE(RunExtensionTest("browser_action/basics")) << message_;
-  Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   // Test that there is a browser action in the toolbar.
